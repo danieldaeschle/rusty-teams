@@ -98,6 +98,23 @@ pub fn chat_files_upload_session(file_name: &str) -> String {
     )
 }
 
+pub fn chat_files_item(file_name: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/me/drive/root:/{}/{}",
+        segment(CHAT_FILES_FOLDER),
+        segment(file_name)
+    )
+}
+
+pub fn folder_item(drive_id: &str, folder_id: &str, file_name: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}:/{}",
+        segment(drive_id),
+        segment(folder_id),
+        segment(file_name)
+    )
+}
+
 pub fn folder_upload_session(drive_id: &str, folder_id: &str, file_name: &str) -> String {
     format!(
         "{GRAPH}/v1.0/drives/{}/items/{}:/{}:/createUploadSession",

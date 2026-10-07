@@ -13,6 +13,7 @@ const FILES_SCOPE: &str = "Files.ReadWrite";
 const CHUNK_UNIT_BYTES: u64 = 327_680;
 pub const UPLOAD_CHUNK_BYTES: u64 = 4 * CHUNK_UNIT_BYTES;
 const MAX_CHUNK_RETRIES: usize = 3;
+const MAX_NAME_ATTEMPTS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriveFolder {
@@ -151,7 +152,40 @@ pub fn percent_done(sent: u64, total: u64) -> u8 {
     (sent.min(total) * 100 / total) as u8
 }
 
+pub fn numbered_name(file_name: &str, number: usize) -> String {
+    if number == 0 {
+        return file_name.to_owned();
+    }
+    match file_name.rfind('.') {
+        Some(dot) if dot > 0 => format!("{} {number}{}", &file_name[..dot], &file_name[dot..]),
+        _ => format!("{file_name} {number}"),
+    }
+}
+
 impl Graph {
+    /// conflictBehavior=rename was not honored on upload sessions: a same-named upload replaced the file.
+    async fn free_name(&self, destination: &UploadDestination, file_name: &str) -> Result<String> {
+        for number in 0..MAX_NAME_ATTEMPTS {
+            let candidate = numbered_name(file_name, number);
+            let url = match destination {
+                UploadDestination::ChatFiles => urls::chat_files_item(&candidate),
+                UploadDestination::Folder(folder) => {
+                    urls::folder_item(&folder.drive_id, &folder.item_id, &candidate)
+                }
+            };
+            match self
+                .session()
+                .request(Method::Get, &url, &Scope::graph(FILES_SCOPE), None)
+                .await
+            {
+                Ok(_) => continue,
+                Err(session::Error::Api { status: 404, .. }) => return Ok(candidate),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(Error::Upload(format!("no free name for {file_name}")))
+    }
+
     pub async fn channel_files_folder(
         &self,
         team_id: &str,
@@ -187,6 +221,8 @@ impl Graph {
             return Err(Error::EmptyUpload);
         }
         let scope = Scope::graph(FILES_SCOPE);
+        let file_name = self.free_name(destination, file_name).await?;
+        let file_name = file_name.as_str();
         let session_url = match destination {
             UploadDestination::ChatFiles => urls::chat_files_upload_session(file_name),
             UploadDestination::Folder(folder) => {
@@ -199,7 +235,7 @@ impl Graph {
                 Method::Post,
                 &session_url,
                 &scope,
-                Some(json!({"item": {"@microsoft.graph.conflictBehavior": "rename"}})),
+                Some(json!({"item": {"@microsoft.graph.conflictBehavior": "fail"}})),
             )
             .await?;
         let upload_url = created
@@ -315,6 +351,18 @@ fn finished_item(body: Value) -> Result<UploadedFile> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numbered_name_goes_before_the_extension() {
+        assert_eq!(super::numbered_name("plan.pdf", 0), "plan.pdf");
+        assert_eq!(super::numbered_name("plan.pdf", 1), "plan 1.pdf");
+        assert_eq!(
+            super::numbered_name("archive.tar.gz", 2),
+            "archive.tar 2.gz"
+        );
+        assert_eq!(super::numbered_name("README", 3), "README 3");
+        assert_eq!(super::numbered_name(".env", 1), ".env 1");
+    }
+
     use super::*;
 
     #[test]
