@@ -1,0 +1,22 @@
+[
+ {
+  "content": "{\"type\": \"AdaptiveCard\", \"body\": [{\"type\": \"TextBlock\", \"text\": \"Deploy finished\"}, {\"type\": \"FactSet\", \"facts\": [{\"title\": \"Env\", \"value\": \"prod\"}, {\"title\": \"Build\", \"value\": \"42\"}]}], \"title\": \"Header\"}",
+  "expected": "Header\nDeploy finished\nEnv\nprod\nBuild\n42"
+ },
+ {
+  "content": "{\"body\": [{\"type\": \"Container\", \"items\": [{\"type\": \"TextBlock\", \"text\": \"nested\", \"subtitle\": \"sub\"}, {\"type\": \"TextBlock\", \"text\": \"  \"}]}, {\"type\": \"ColumnSet\", \"columns\": [{\"items\": [{\"text\": \"c1\"}]}, {\"items\": [{\"text\": \"c2\"}]}]}]}",
+  "expected": "nested\nsub\nc1\nc2"
+ },
+ {
+  "content": "{\"body\": []}",
+  "expected": null
+ },
+ {
+  "content": "{\"text\": 5, \"value\": \"v\", \"title\": \"t\"}",
+  "expected": "t\nv"
+ },
+ {
+  "content": "not json",
+  "expected": null
+ }
+]

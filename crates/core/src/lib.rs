@@ -1,0 +1,46 @@
+mod actions;
+mod avatars;
+mod card;
+mod channel_sync;
+mod engine;
+mod error;
+mod events;
+mod folders;
+mod image_size;
+mod images;
+mod mapping;
+mod markdown;
+mod mentions;
+mod people;
+mod presence;
+mod preview;
+mod receipts;
+mod remote;
+mod search;
+mod sidebar_sync;
+mod spans;
+mod stored;
+
+pub use avatars::Avatar;
+pub use card::card_content_text;
+pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
+pub use error::{Error, Result};
+pub use events::CoreEvent;
+pub use folders::{BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource};
+pub use graph::MentionTarget;
+pub use images::StoredImage;
+pub use mapping::{chat_record, message_record};
+pub use markdown::{escape_html, markdown_to_html, plain_text_to_html};
+pub use mentions::MentionInput;
+pub use people::{MentionCandidate, PersonCandidate, PersonSource};
+pub use presence::{Availability, Presence};
+pub use preview::preview_text;
+pub use receipts::{ReceiptReader, ReceiptState};
+pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
+pub use spans::{Span, html_to_spans};
+pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
+pub use stored::{
+    AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, QuoteInfo, ReactionInfo,
+    attachments, can_delete, can_edit, copy_text, files, images, mentions, message_spans, quotes,
+    reactions,
+};

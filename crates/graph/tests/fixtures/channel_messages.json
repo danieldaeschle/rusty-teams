@@ -1,0 +1,17 @@
+{
+  "value": [
+    {
+      "id": "1800000000001",
+      "messageType": "message",
+      "createdDateTime": "2026-10-05T10:00:00Z",
+      "subject": "Release notes",
+      "from": {"user": {"id": "user-ada", "displayName": "Ada Example"}},
+      "body": {"contentType": "html", "content": "<p>root</p>"},
+      "replies": [
+        {"id": "1800000000002", "replyToId": "1800000000001", "createdDateTime": "2026-10-05T10:05:00Z",
+         "from": {"user": {"id": "user-bob", "displayName": "Bob Sample"}},
+         "body": {"contentType": "html", "content": "<p>reply</p>"}}
+      ]
+    }
+  ]
+}

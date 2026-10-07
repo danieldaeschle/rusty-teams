@@ -1,0 +1,13 @@
+[package]
+name = "gpui-list-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+gpui-kit = "=0.7.1"
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,94 @@
+[
+ {
+  "input": "plain text",
+  "expected": "plain text"
+ },
+ {
+  "input": "",
+  "expected": ""
+ },
+ {
+  "input": "a **bold** b",
+  "expected": "a <b>bold</b> b"
+ },
+ {
+  "input": "use `code` here",
+  "expected": "use <code>code</code> here"
+ },
+ {
+  "input": "**a\nb**",
+  "expected": "<b>a<br>b</b>"
+ },
+ {
+  "input": "`x\ny`",
+  "expected": "<code>x<br>y</code>"
+ },
+ {
+  "input": "line one\nline two\n\nline four",
+  "expected": "line one<br>line two<br><br>line four"
+ },
+ {
+  "input": "<script>alert(1)</script> & \"quotes\" 'single'",
+  "expected": "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;quotes&quot; &#x27;single&#x27;"
+ },
+ {
+  "input": "see [docs](https://example.test/a?b=1&c=2) now",
+  "expected": "see <a href=\"https://example.test/a?b=1&amp;c=2\">docs</a> now"
+ },
+ {
+  "input": "[bad](javascript:alert(1))",
+  "expected": "[bad](javascript:alert(1))"
+ },
+ {
+  "input": "[multi\nline](https://example.test)",
+  "expected": "<a href=\"https://example.test\">multi<br>line</a>"
+ },
+ {
+  "input": "```\nlet x = 1;\n```",
+  "expected": "<pre>let x = 1;</pre>"
+ },
+ {
+  "input": "intro\n```rust\nfn main() {\n    println!(\"<hi>\");\n}\n```\noutro",
+  "expected": "intro<br><pre>fn main() {\n    println!(&quot;&lt;hi&gt;&quot;);\n}</pre><br>outro"
+ },
+ {
+  "input": "```python\nprint(1)\n```\n\n```\nsecond\n```",
+  "expected": "<pre>print(1)</pre><br><br><pre>second</pre>"
+ },
+ {
+  "input": "**bold `code` bold**",
+  "expected": "<b>bold <code>code</code> bold</b>"
+ },
+ {
+  "input": "`**not bold**`",
+  "expected": "<code><b>not bold</b></code>"
+ },
+ {
+  "input": "**unterminated",
+  "expected": "**unterminated"
+ },
+ {
+  "input": "```\nno newline end```",
+  "expected": "<pre>no newline end</pre>"
+ },
+ {
+  "input": "a * b ** c",
+  "expected": "a * b ** c"
+ },
+ {
+  "input": "text **b1** and **b2** and `c1` and [l](http://x.test)",
+  "expected": "text <b>b1</b> and <b>b2</b> and <code>c1</code> and <a href=\"http://x.test\">l</a>"
+ },
+ {
+  "input": "trailing newline\n",
+  "expected": "trailing newline<br>"
+ },
+ {
+  "input": "unicode äöü 😀 **fett**",
+  "expected": "unicode äöü 😀 <b>fett</b>"
+ },
+ {
+  "input": "```\n\n\ntrailing blank lines\n\n\n```",
+  "expected": "<pre>\n\ntrailing blank lines</pre>"
+ }
+]

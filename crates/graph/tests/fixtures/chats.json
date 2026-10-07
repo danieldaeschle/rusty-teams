@@ -1,0 +1,44 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/chats?$skiptoken=abc",
+  "value": [
+    {
+      "id": "19:aaaa@unq.gbl.spaces",
+      "topic": null,
+      "chatType": "oneOnOne",
+      "lastUpdatedDateTime": "2026-10-06T08:15:00Z",
+      "viewpoint": {"lastMessageReadDateTime": "2026-10-06T08:00:00Z", "isHidden": false},
+      "members": [
+        {"userId": "user-me", "tenantId": "tenant-1", "displayName": "Test Me", "email": "me@example.test"},
+        {"userId": "user-ada", "tenantId": "tenant-1", "displayName": "Ada Example", "email": "ada@example.test"}
+      ],
+      "lastMessagePreview": {
+        "id": "1700000000001",
+        "createdDateTime": "2026-10-06T08:15:00.123Z",
+        "messageType": "message",
+        "from": {"user": {"id": "user-ada", "displayName": "Ada Example"}},
+        "body": {"contentType": "html", "content": "<p>synthetic</p>"}
+      }
+    },
+    {
+      "id": "19:bbbb@thread.v2",
+      "topic": "Project Sample",
+      "chatType": "group",
+      "members": [
+        {"userId": "user-me", "displayName": "Test Me"},
+        {"userId": "user-bob", "displayName": "Bob Sample"}
+      ],
+      "lastMessagePreview": null
+    },
+    {
+      "id": "19:cccc@thread.v2",
+      "chatType": "group",
+      "members": [
+        {"userId": "user-me", "displayName": "Test Me"},
+        {"userId": "user-cy", "displayName": null, "email": "cy@example.test"},
+        {"userId": "user-di", "displayName": "Di Sample"}
+      ]
+    },
+    {"id": "19:dddd@thread.v2", "chatType": "meeting", "members": [{"userId": "user-me"}]}
+  ]
+}

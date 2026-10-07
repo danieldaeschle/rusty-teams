@@ -1,0 +1,21 @@
+1 ICON "teams-fast.ico"
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+{
+  BLOCK "StringFileInfo"
+  {
+    BLOCK "040904B0"
+    {
+      VALUE "ProductName", "Rusty Teams"
+      VALUE "FileDescription", "Rusty Teams"
+      VALUE "FileVersion", "0.1.0.0"
+      VALUE "ProductVersion", "0.1.0.0"
+    }
+  }
+  BLOCK "VarFileInfo"
+  {
+    VALUE "Translation", 0x0409, 0x04B0
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "value": [
+    {
+      "id": "1700000000003",
+      "messageType": "message",
+      "createdDateTime": "2026-10-06T09:00:00.500Z",
+      "lastModifiedDateTime": "2026-10-06T09:01:00Z",
+      "lastEditedDateTime": "2026-10-06T09:01:00Z",
+      "deletedDateTime": null,
+      "replyToId": null,
+      "subject": null,
+      "from": {"user": {"id": "user-ada", "displayName": "Ada Example"}},
+      "body": {"contentType": "html", "content": "<p>edited <b>text</b></p>"},
+      "attachments": [{"id": "att-1", "contentType": "reference", "contentUrl": "https://files.example.test/a.pdf", "name": "a.pdf"}],
+      "reactions": [{"reactionType": "like", "createdDateTime": "2026-10-06T09:02:00Z", "user": {"user": {"id": "user-bob", "displayName": "Bob Sample"}}}]
+    },
+    {
+      "id": "1700000000002",
+      "messageType": "systemEventMessage",
+      "createdDateTime": "2026-10-06T08:30:00Z",
+      "deletedDateTime": null,
+      "from": null,
+      "body": {"contentType": "html", "content": "<systemEventMessage/>"}
+    },
+    {
+      "id": "1700000000001",
+      "messageType": "message",
+      "createdDateTime": "2026-10-06T08:00:00Z",
+      "deletedDateTime": "2026-10-06T08:05:00Z",
+      "from": {"application": {"id": "bot-1", "displayName": "Build Bot"}},
+      "body": {"contentType": "text", "content": ""}
+    }
+  ]
+}

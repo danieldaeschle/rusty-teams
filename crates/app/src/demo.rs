@@ -1,0 +1,914 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use chrono::{DateTime, Duration, Local, TimeZone, Utc};
+use gpui_kit::Image;
+use store::{
+    ChannelLayoutRecord, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store,
+    TeamLayoutRecord, TeamRecord,
+};
+use teams_core::{MentionCandidate, PersonCandidate, PersonSource};
+
+use crate::app_state::{AppState, Selection};
+use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
+
+pub const DEMO_USER_ID: &str = "demo-me";
+const DEMO_USER_NAME: &str = "Dana Demo";
+const PHOTO_SIZE: usize = 48;
+const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
+const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
+const STAGING_SIZE: (usize, usize) = (960, 540);
+const PRIORITY_CHAT: &str = "demo-chat-priya";
+const PEOPLE_DIRECTORY: [(&str, &str, &str, &str); 5] = [
+    (
+        MARA_ID,
+        "Mara Lindqvist",
+        "Product Owner",
+        "mara.lindqvist@example.com",
+    ),
+    (
+        JONAS_ID,
+        "Jonas Ortega",
+        "Backend Engineer",
+        "jonas.ortega@example.com",
+    ),
+    (
+        PRIYA_ID,
+        "Priya Nair",
+        "Engineering Manager",
+        "priya.nair@example.com",
+    ),
+    (
+        LEA_ID,
+        "Lea Schneider",
+        "Customer Success",
+        "lea.schneider@example.com",
+    ),
+    (
+        TOBIAS_ID,
+        "Tobias Klein",
+        "Support Engineer",
+        "tobias.klein@example.com",
+    ),
+];
+
+struct Palette {
+    background: [u8; 3],
+    skin: [u8; 3],
+    hair: [u8; 3],
+    shirt: [u8; 3],
+}
+
+const MARA: Palette = Palette {
+    background: [0x3f, 0x5f, 0x7a],
+    skin: [0xe0, 0xb2, 0x93],
+    hair: [0xd9, 0xa4, 0x41],
+    shirt: [0x1e, 0x29, 0x3b],
+};
+const PRIYA: Palette = Palette {
+    background: [0x4b, 0x3b, 0x5c],
+    skin: [0x9a, 0x6a, 0x4a],
+    hair: [0x1c, 0x19, 0x17],
+    shirt: [0xbe, 0x12, 0x3c],
+};
+const TOBIAS: Palette = Palette {
+    background: [0x3b, 0x4a, 0x3f],
+    skin: [0xf1, 0xc7, 0xa5],
+    hair: [0x57, 0x53, 0x4e],
+    shirt: [0x0f, 0x76, 0x6e],
+};
+
+const MARA_ID: &str = "demo-mara";
+const JONAS_ID: &str = "demo-jonas";
+const PRIYA_ID: &str = "demo-priya";
+const LEA_ID: &str = "demo-lea";
+const TOBIAS_ID: &str = "demo-tobias";
+
+const DEMO_TEAMS: [(&str, &str, [&str; 3]); 4] = [
+    (
+        "demo-team-1",
+        "Platform",
+        ["General", "Incidents", "Releases"],
+    ),
+    ("demo-team-2", "Product", ["General", "Roadmap", "Feedback"]),
+    (
+        "demo-team-3",
+        "Operations",
+        ["General", "On call", "Runbooks"],
+    ),
+    ("demo-team-4", "Archiv 2025", ["General", "Messe", "Umzug"]),
+];
+const DEMO_TEAM_ORDER: [&str; 4] = ["demo-team-2", "demo-team-1", "demo-team-3", "demo-team-4"];
+const DEMO_HIDDEN_TEAM: &str = "demo-team-4";
+const DEMO_HIDDEN_CHANNEL: &str = "demo-channel-3-3";
+
+const UNREAD_CHAT: &str = "demo-chat-atlas";
+const RELEASE_CHAT: &str = "demo-chat-release";
+const FAVORITES_ID: &str = "demo-folder-favorites";
+const CUSTOMERS_FOLDER: &str = "demo-folder-customers";
+const ATLAS_FOLDER: &str = "demo-folder-atlas";
+const TODO_FOLDER: &str = "demo-folder-todo";
+
+fn member(user_id: &str, name: &str) -> MemberRecord {
+    MemberRecord {
+        user_id: Some(user_id.to_owned()),
+        display_name: name.to_owned(),
+    }
+}
+
+fn people(extra: &[(&str, &str)]) -> Vec<MemberRecord> {
+    std::iter::once(member(DEMO_USER_ID, DEMO_USER_NAME))
+        .chain(extra.iter().map(|(id, name)| member(id, name)))
+        .collect()
+}
+
+pub fn at(days_ago: i64, hour: u32, minute: u32) -> DateTime<Utc> {
+    let day = Local::now().date_naive() - Duration::days(days_ago);
+    let local = day.and_hms_opt(hour, minute, 0).expect("valid time");
+    Local
+        .from_local_datetime(&local)
+        .earliest()
+        .map_or_else(Utc::now, |time| time.with_timezone(&Utc))
+}
+
+struct DemoChat {
+    id: &'static str,
+    kind: &'static str,
+    title: &'static str,
+    members: Vec<MemberRecord>,
+    time: DateTime<Utc>,
+    unread: bool,
+    preview: Option<(&'static str, &'static str, &'static str)>,
+    deleted: bool,
+}
+
+fn demo_chats() -> Vec<DemoChat> {
+    let group = |extra: &[(&str, &str)]| people(extra);
+    vec![
+        DemoChat {
+            id: "demo-chat-mara",
+            kind: "oneOnOne",
+            title: "Mara Lindqvist",
+            members: people(&[(MARA_ID, "Mara Lindqvist")]),
+            time: at(0, 13, 40),
+            unread: false,
+            preview: Some((MARA_ID, "Mara Lindqvist", "Klar, 14 Uhr passt")),
+            deleted: false,
+        },
+        DemoChat {
+            id: RELEASE_CHAT,
+            kind: "group",
+            title: "Release planning",
+            members: group(&[
+                (MARA_ID, "Mara Lindqvist"),
+                (JONAS_ID, "Jonas Ortega"),
+                (PRIYA_ID, "Priya Nair"),
+                (LEA_ID, "Lea Schneider"),
+            ]),
+            time: at(0, 13, 35),
+            unread: false,
+            preview: Some((
+                DEMO_USER_ID,
+                DEMO_USER_NAME,
+                "Build 42 ist grün, siehe Pipeline",
+            )),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-customer-1",
+            kind: "group",
+            title: "Kunde Nord - Betrieb",
+            members: group(&[(LEA_ID, "Lea Schneider"), (TOBIAS_ID, "Tobias Klein")]),
+            time: at(0, 12, 50),
+            unread: true,
+            preview: Some((LEA_ID, "Lea Schneider", "Der Zugang ist freigeschaltet")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-customer-2",
+            kind: "group",
+            title: "Kunde Süd - Rollout",
+            members: group(&[(JONAS_ID, "Jonas Ortega"), (PRIYA_ID, "Priya Nair")]),
+            time: at(0, 9, 5),
+            unread: true,
+            preview: Some((JONAS_ID, "Jonas Ortega", "Termin steht für Freitag")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-customer-3",
+            kind: "group",
+            title: "Kunde West - Support",
+            members: group(&[(TOBIAS_ID, "Tobias Klein"), (LEA_ID, "Lea Schneider")]),
+            time: at(1, 16, 0),
+            unread: false,
+            preview: Some((TOBIAS_ID, "Tobias Klein", "Ticket ist geschlossen")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-customer-4",
+            kind: "group",
+            title: "Kunde Ost - Pilot",
+            members: group(&[(MARA_ID, "Mara Lindqvist"), (PRIYA_ID, "Priya Nair")]),
+            time: at(3, 10, 0),
+            unread: false,
+            preview: Some((DEMO_USER_ID, DEMO_USER_NAME, "Ich schicke die Unterlagen")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-atlas",
+            kind: "group",
+            title: "Atlas core team",
+            members: group(&[
+                (PRIYA_ID, "Priya Nair"),
+                (LEA_ID, "Lea Schneider"),
+                (MARA_ID, "Mara Lindqvist"),
+            ]),
+            time: at(0, 13, 12),
+            unread: true,
+            preview: Some((PRIYA_ID, "Priya Nair", "Wer übernimmt das Review?")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-jonas",
+            kind: "oneOnOne",
+            title: "Jonas Ortega",
+            members: people(&[(JONAS_ID, "Jonas Ortega")]),
+            time: at(0, 11, 2),
+            unread: false,
+            preview: Some((DEMO_USER_ID, DEMO_USER_NAME, "Danke, ist gemergt")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-priya",
+            kind: "oneOnOne",
+            title: "Priya Nair",
+            members: people(&[(PRIYA_ID, "Priya Nair")]),
+            time: at(0, 10, 47),
+            unread: false,
+            preview: Some((PRIYA_ID, "Priya Nair", "Bild")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-tobias",
+            kind: "oneOnOne",
+            title: "Tobias Klein",
+            members: people(&[(TOBIAS_ID, "Tobias Klein")]),
+            time: at(2, 9, 30),
+            unread: false,
+            preview: Some((TOBIAS_ID, "Tobias Klein", "ok")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-allhands",
+            kind: "group",
+            title: "All-hands Ankündigungen",
+            members: group(&[(LEA_ID, "Lea Schneider"), (MARA_ID, "Mara Lindqvist")]),
+            time: at(0, 9, 0),
+            unread: true,
+            preview: Some((LEA_ID, "Lea Schneider", "Neue Urlaubsregel ab November")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-design",
+            kind: "group",
+            title: "Design review",
+            members: group(&[(MARA_ID, "Mara Lindqvist"), (TOBIAS_ID, "Tobias Klein")]),
+            time: at(2, 15, 0),
+            unread: false,
+            preview: Some((MARA_ID, "Mara Lindqvist", "alt")),
+            deleted: true,
+        },
+        DemoChat {
+            id: "demo-chat-quarterly",
+            kind: "group",
+            title: "Quarterly numbers, finance review and planning 2027",
+            members: group(&[(LEA_ID, "Lea Schneider"), (JONAS_ID, "Jonas Ortega")]),
+            time: at(4, 11, 0),
+            unread: false,
+            preview: Some((LEA_ID, "Lea Schneider", "Entwurf hängt an")),
+            deleted: false,
+        },
+    ]
+}
+
+pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCandidate> {
+    let needle = query.trim().to_lowercase();
+    let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(&needle);
+    let people = PEOPLE_DIRECTORY
+        .iter()
+        .filter(|(_, name, _, _)| matches(name))
+        .map(|(user_id, name, job_title, mail)| {
+            MentionCandidate::Person(PersonCandidate {
+                user_id: (*user_id).to_owned(),
+                display_name: (*name).to_owned(),
+                mail: Some((*mail).to_owned()),
+                job_title: Some((*job_title).to_owned()),
+                source: PersonSource::Member,
+            })
+        });
+    let scope: Vec<MentionCandidate> = if conversation_id.starts_with("demo-channel") {
+        [
+            MentionCandidate::Channel {
+                channel_id: conversation_id.to_owned(),
+                name: "General".to_owned(),
+            },
+            MentionCandidate::Team {
+                team_id: "demo-team-1".to_owned(),
+                name: "Platform".to_owned(),
+            },
+        ]
+        .into_iter()
+        .filter(|candidate| matches(candidate.display_name()))
+        .collect()
+    } else {
+        Vec::new()
+    };
+    people.chain(scope).collect()
+}
+
+fn image_directory() -> PathBuf {
+    std::env::temp_dir().join("rusty-teams-demo")
+}
+
+pub fn first_unread(conversation_id: &str) -> Option<String> {
+    (conversation_id == UNREAD_CHAT).then(|| "u3".to_owned())
+}
+
+pub fn read_message_ids(records: &[MessageRecord]) -> std::collections::HashSet<String> {
+    let newest = records.iter().max_by_key(|record| record.created_at);
+    records
+        .iter()
+        .filter(|record| Some(record.message_id.as_str()) != newest.map(|newest| newest.message_id.as_str()))
+        .map(|record| record.message_id.clone())
+        .collect()
+}
+
+pub fn first_selection() -> Selection {
+    Selection::Chat(RELEASE_CHAT.to_owned())
+}
+
+pub fn seed(store: &Store) {
+    let chats: Vec<ChatRecord> = demo_chats()
+        .into_iter()
+        .map(|demo| ChatRecord {
+            id: demo.id.to_owned(),
+            kind: demo.kind.to_owned(),
+            title: if demo.kind == "oneOnOne" {
+                String::new()
+            } else {
+                demo.title.to_owned()
+            },
+            member_summary: demo.title.to_owned(),
+            last_message_at: Some(demo.time),
+            unread: demo.unread,
+            members: demo.members,
+            last_message_preview: demo.preview.map(|(_, _, text)| text.to_owned()),
+            last_message_sender_id: demo.preview.map(|(id, _, _)| id.to_owned()),
+            last_message_sender_name: demo.preview.map(|(_, name, _)| name.to_owned()),
+            last_message_deleted: demo.deleted,
+            ..Default::default()
+        })
+        .collect();
+    let _ = store.upsert_chats(&chats);
+    let teams: Vec<TeamRecord> = DEMO_TEAMS
+        .iter()
+        .map(|(id, name, _)| TeamRecord {
+            id: (*id).to_owned(),
+            name: (*name).to_owned(),
+        })
+        .collect();
+    let _ = store.upsert_teams(&teams);
+    let mut channels = Vec::new();
+    for (team_index, (team_id, _, names)) in DEMO_TEAMS.iter().enumerate() {
+        for (channel_index, name) in names.iter().enumerate() {
+            channels.push(ChannelRecord {
+                id: format!("demo-channel-{}-{}", team_index + 1, channel_index + 1),
+                team_id: (*team_id).to_owned(),
+                name: (*name).to_owned(),
+                membership_type: None,
+                last_message_at: Some(at(channel_index as i64, 12, 10)),
+                unread: (team_index == 0 && channel_index == 1)
+                    || (team_index == 1 && channel_index == 0),
+            });
+        }
+    }
+    let _ = store.upsert_channels(&channels);
+    let _ = store.replace_team_layout(&demo_team_layout(&channels));
+    let _ = store.set_meta("me_user_id", DEMO_USER_ID);
+    let _ = store.set_meta("me_display_name", DEMO_USER_NAME);
+    let _ = store.upsert_messages(&release_messages());
+    let _ = store.upsert_messages(&unread_messages());
+    let _ = store.upsert_messages(&channel_messages());
+    let _ = store.upsert_messages(&priority_messages());
+}
+
+fn photo(palette: &Palette) -> Arc<Image> {
+    crate::data::avatar_image_from("image/png", encode_png(palette))
+}
+
+pub fn seed_directory(state: &mut AppState) {
+    let directory = &mut state.directory;
+    directory.me = Some(Person {
+        user_id: DEMO_USER_ID.to_owned(),
+        display_name: DEMO_USER_NAME.to_owned(),
+    });
+    let ids = |list: &[&str]| list.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+    directory.folders = vec![
+        FolderInfo {
+            id: FAVORITES_ID.to_owned(),
+            name: String::new(),
+            kind: FolderKind::Favorites,
+            conversation_ids: ids(&["demo-chat-mara", RELEASE_CHAT]),
+        },
+        FolderInfo {
+            id: CUSTOMERS_FOLDER.to_owned(),
+            name: "Kunden".to_owned(),
+            kind: FolderKind::UserCreated,
+            conversation_ids: ids(&[
+                "demo-chat-customer-1",
+                "demo-chat-customer-2",
+                "demo-chat-customer-3",
+                "demo-chat-customer-4",
+            ]),
+        },
+        FolderInfo {
+            id: ATLAS_FOLDER.to_owned(),
+            name: "Projekt Atlas".to_owned(),
+            kind: FolderKind::UserCreated,
+            conversation_ids: ids(&["demo-chat-atlas", "demo-chat-jonas"]),
+        },
+        FolderInfo {
+            id: TODO_FOLDER.to_owned(),
+            name: "Todo".to_owned(),
+            kind: FolderKind::UserCreated,
+            conversation_ids: Vec::new(),
+        },
+    ];
+    directory.pinned_channels = ids(&["demo-channel-1-1", "demo-channel-3-2"]);
+    directory
+        .unread_counts
+        .insert("demo-chat-atlas".to_owned(), 5);
+    directory
+        .unread_counts
+        .insert("demo-chat-customer-1".to_owned(), 2);
+    directory
+        .unread_counts
+        .insert("demo-chat-customer-2".to_owned(), 1);
+    directory
+        .unread_counts
+        .insert("demo-chat-allhands".to_owned(), 120);
+    directory.set_avatar(MARA_ID, Some(photo(&MARA)));
+    directory.set_avatar(PRIYA_ID, Some(photo(&PRIYA)));
+    directory.set_avatar(TOBIAS_ID, Some(photo(&TOBIAS)));
+    for (user_id, kind) in [
+        (MARA_ID, PresenceKind::Available),
+        (JONAS_ID, PresenceKind::DoNotDisturb),
+        (PRIYA_ID, PresenceKind::Away),
+        (TOBIAS_ID, PresenceKind::Offline),
+        (LEA_ID, PresenceKind::DoNotDisturb),
+        (DEMO_USER_ID, PresenceKind::Available),
+    ] {
+        directory.set_presence(user_id, kind);
+    }
+    let directory_path = image_directory();
+    if std::fs::create_dir_all(&directory_path).is_ok() {
+        let path = directory_path.join("staging-dashboard.png");
+        let png = encode_rgb(STAGING_SIZE.0, STAGING_SIZE.1, staging_pixel);
+        if std::fs::write(&path, png).is_ok() {
+            state.directory.set_image(STAGING_IMAGE_KEY, &path);
+        }
+    }
+    state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
+    state.last_sync = Some(Utc::now());
+}
+
+#[allow(clippy::too_many_arguments)]
+fn message(
+    conversation: &str,
+    id: &str,
+    reply_to: Option<&str>,
+    sender: (&str, &str),
+    time: DateTime<Utc>,
+    html: &str,
+    reactions_json: &str,
+    edited: bool,
+) -> MessageRecord {
+    MessageRecord {
+        conversation_id: conversation.to_owned(),
+        message_id: id.to_owned(),
+        reply_to_id: reply_to.map(str::to_owned),
+        sender_id: Some(sender.0.to_owned()),
+        sender_name: Some(sender.1.to_owned()),
+        created_at: time,
+        edited_at: edited.then_some(time + Duration::minutes(2)),
+        deleted: false,
+        body_html: html.to_owned(),
+        attachments_json: "[]".to_owned(),
+        reactions_json: reactions_json.to_owned(),
+        mentions_json: "[]".to_owned(),
+    }
+}
+
+fn with_attachments(mut record: MessageRecord, attachments_json: &str) -> MessageRecord {
+    record.attachments_json = attachments_json.to_owned();
+    record
+}
+
+fn priority_messages() -> Vec<MessageRecord> {
+    let priya = (PRIYA_ID, "Priya Nair");
+    let me = (DEMO_USER_ID, DEMO_USER_NAME);
+    vec![
+        message(
+            PRIORITY_CHAT,
+            "p1",
+            None,
+            me,
+            at(0, 10, 40),
+            "<p>Hast du den Fehler auf Staging schon gesehen?</p>",
+            "[]",
+            false,
+        ),
+        message(
+            PRIORITY_CHAT,
+            "p2",
+            None,
+            priya,
+            at(0, 10, 47),
+            &format!(
+                "<p>Ja, hier der Screenshot:</p><img src=\"{PENDING_IMAGE_KEY}\" width=\"1280\" height=\"720\">"
+            ),
+            "[]",
+            false,
+        ),
+    ]
+}
+
+fn reaction(kind: &str, users: &[&str]) -> String {
+    users
+        .iter()
+        .map(|user| format!(r#"{{"reaction_type":"{kind}","user_id":"{user}","user_name":null}}"#))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn release_messages() -> Vec<MessageRecord> {
+    let chat = RELEASE_CHAT;
+    let mara = (MARA_ID, "Mara Lindqvist");
+    let jonas = (JONAS_ID, "Jonas Ortega");
+    let me = (DEMO_USER_ID, DEMO_USER_NAME);
+    let likes = format!("[{}]", reaction("like", &[JONAS_ID, PRIYA_ID, LEA_ID]));
+    let hearts = format!("[{}]", reaction("heart", &[DEMO_USER_ID, JONAS_ID]));
+    vec![
+        message(
+            chat,
+            "m1",
+            None,
+            mara,
+            at(1, 16, 20),
+            "<p>Release candidate is on staging. Can someone run the regression suite?</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m2",
+            None,
+            mara,
+            at(1, 16, 22),
+            "<p>Checklist lives in <a href=\"https://example.com/checklist\">release checklist</a>.</p>",
+            &likes,
+            false,
+        ),
+        message(
+            chat,
+            "m2b",
+            None,
+            mara,
+            at(1, 16, 40),
+            &format!(
+                "<p>Staging dashboard right now:</p><img src=\"{STAGING_IMAGE_KEY}\" width=\"{}\" height=\"{}\">",
+                STAGING_SIZE.0, STAGING_SIZE.1
+            ),
+            "[]",
+            false,
+        ),
+        with_attachments(
+            message(
+                chat,
+                "m2c",
+                None,
+                mara,
+                at(1, 16, 41),
+                "<p>Checklist und Rollout-Plan hängen an.</p>",
+                "[]",
+                false,
+            ),
+            r#"[{"content_type":"reference","name":"Release-Checklist-Q4.xlsx","url":"https://example.com/files/checklist.xlsx","text":null,"size":48213},{"content_type":"reference","name":"Rollout-Plan.pdf","url":"https://example.com/files/plan.pdf","text":null,"size":2306867}]"#,
+        ),
+        message(
+            chat,
+            "m3",
+            None,
+            me,
+            at(0, 9, 2),
+            "<p>Ich nehme das Changelog.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m4",
+            None,
+            jonas,
+            at(0, 10, 14),
+            "<p><at id=\"0\">Mara Lindqvist</at> kannst du dir das kurz ansehen?</p><pre><code>fn freeze(branch: &amp;str) -&gt; bool {\n    branch.starts_with(\"release/\")\n}</code></pre>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m5",
+            None,
+            mara,
+            at(0, 10, 31),
+            "<blockquote><b>Jonas Ortega</b><br>kannst du dir das kurz ansehen?</blockquote><p>Passt. Kleiner Punkt: der Name könnte sagen, was er prüft.</p>",
+            &hearts,
+            true,
+        ),
+        message(
+            chat,
+            "m6",
+            None,
+            me,
+            at(0, 13, 35),
+            "<p>Danke, umbenannt. Tagge jetzt.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m7",
+            None,
+            me,
+            at(0, 13, 36),
+            "<p>Build 42 ist grün, siehe <a href=\"https://example.com/build/42\">Pipeline</a>.</p>",
+            "[]",
+            false,
+        ),
+    ]
+}
+
+fn unread_messages() -> Vec<MessageRecord> {
+    let me = (DEMO_USER_ID, DEMO_USER_NAME);
+    let lea = (LEA_ID, "Lea Schneider");
+    let tobias = (TOBIAS_ID, "Tobias Klein");
+    let rows = [
+        (
+            "u1",
+            me,
+            at(1, 17, 5),
+            "<p>Kannst du den Zugang für Nord freischalten?</p>",
+        ),
+        (
+            "u2",
+            tobias,
+            at(1, 17, 20),
+            "<p>Ich frage bei der IT nach.</p>",
+        ),
+        (
+            "u3",
+            lea,
+            at(0, 12, 40),
+            "<p>Guten Morgen, der Zugang ist da.</p>",
+        ),
+        (
+            "u4",
+            lea,
+            at(0, 12, 41),
+            "<p>Login mit der Firmen-ID, kein Passwort nötig.</p>",
+        ),
+        (
+            "u5",
+            lea,
+            at(0, 12, 50),
+            "<p>Der Zugang ist freigeschaltet</p>",
+        ),
+    ];
+    rows.into_iter()
+        .map(|(id, sender, time, html)| {
+            message(UNREAD_CHAT, id, None, sender, time, html, "[]", false)
+        })
+        .collect()
+}
+
+fn demo_team_layout(channels: &[ChannelRecord]) -> Vec<TeamLayoutRecord> {
+    DEMO_TEAM_ORDER
+        .iter()
+        .map(|team_id| TeamLayoutRecord {
+            team_id: (*team_id).to_owned(),
+            hidden: *team_id == DEMO_HIDDEN_TEAM,
+            channels: channels
+                .iter()
+                .filter(|channel| channel.team_id == *team_id)
+                .map(|channel| ChannelLayoutRecord {
+                    channel_id: channel.id.clone(),
+                    general: channel.name == "General",
+                    hidden: channel.id == DEMO_HIDDEN_CHANNEL,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn channel_messages() -> Vec<MessageRecord> {
+    let channel = "demo-channel-1-1";
+    let mara = (MARA_ID, "Mara Lindqvist");
+    let tobias = (TOBIAS_ID, "Tobias Klein");
+    vec![
+        message(
+            channel,
+            "t1",
+            None,
+            mara,
+            at(0, 8, 0),
+            "<p>Weekly sync notes are up.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            channel,
+            "t1r1",
+            Some("t1"),
+            tobias,
+            at(0, 8, 20),
+            "<p>Thanks, adding my items.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            channel,
+            "t3",
+            None,
+            tobias,
+            at(0, 11, 30),
+            "<p>Release build 42 is green, deploying to staging now.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            channel,
+            "t2",
+            None,
+            tobias,
+            at(0, 11, 0),
+            "<p>Who owns the on-call handover?</p>",
+            "[]",
+            false,
+        ),
+    ]
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn adler32(bytes: &[u8]) -> u32 {
+    let (mut low, mut high) = (1u32, 0u32);
+    for byte in bytes {
+        low = (low + u32::from(*byte)) % 65521;
+        high = (high + low) % 65521;
+    }
+    (high << 16) | low
+}
+
+fn png_chunk(output: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    output.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let mut body = kind.to_vec();
+    body.extend_from_slice(data);
+    output.extend_from_slice(&body);
+    output.extend_from_slice(&crc32(&body).to_be_bytes());
+}
+
+fn inside(x: f32, y: f32, center: (f32, f32), radius: (f32, f32)) -> bool {
+    ((x - center.0) / radius.0).powi(2) + ((y - center.1) / radius.1).powi(2) <= 1.
+}
+
+fn staging_pixel(column: usize, row: usize) -> [u8; 3] {
+    let (width, height) = (STAGING_SIZE.0 as f32, STAGING_SIZE.1 as f32);
+    let (x, y) = (column as f32, row as f32);
+    let shade = y / height;
+    let background = [
+        (30. - 14. * shade) as u8,
+        (41. - 16. * shade) as u8,
+        (59. - 14. * shade) as u8,
+    ];
+    let bar_width = width / 14.;
+    let slot = (x / bar_width) as usize;
+    let in_bar = x - slot as f32 * bar_width > bar_width * 0.18;
+    let bar_height = height * (0.25 + 0.5 * (((slot * 7 + 3) % 11) as f32 / 11.));
+    let on_bars = in_bar && y > height * 0.86 - bar_height && y < height * 0.86 && slot < 14;
+    let header = y < height * 0.1;
+    if header {
+        [22, 30, 45]
+    } else if on_bars {
+        if slot % 4 == 3 {
+            [226, 87, 47]
+        } else {
+            [88, 133, 196]
+        }
+    } else if (y - height * 0.86).abs() < 1.5 {
+        [71, 85, 105]
+    } else {
+        background
+    }
+}
+
+fn encode_png(palette: &Palette) -> Vec<u8> {
+    encode_rgb(PHOTO_SIZE, PHOTO_SIZE, |column, row| {
+        let (x, y) = (column as f32 + 0.5, row as f32 + 0.5);
+        if inside(x, y, (24., 21.), (8.5, 9.5)) {
+            palette.skin
+        } else if inside(x, y, (24., 19.), (10.5, 11.)) && y < 22. {
+            palette.hair
+        } else if inside(x, y, (24., 50.), (22., 19.)) {
+            palette.shirt
+        } else {
+            palette.background
+        }
+    })
+}
+
+fn encode_rgb(width: usize, height: usize, pixel: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(height * (width * 3 + 1));
+    for row in 0..height {
+        raw.push(0);
+        for column in 0..width {
+            raw.extend_from_slice(&pixel(column, row));
+        }
+    }
+    let mut zlib = vec![0x78, 0x01];
+    let mut blocks = raw.chunks(65535).peekable();
+    while let Some(block) = blocks.next() {
+        zlib.push(u8::from(blocks.peek().is_none()));
+        zlib.extend_from_slice(&(block.len() as u16).to_le_bytes());
+        zlib.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+        zlib.extend_from_slice(block);
+    }
+    zlib.extend_from_slice(&adler32(&raw).to_be_bytes());
+    let mut header = Vec::new();
+    header.extend_from_slice(&(width as u32).to_be_bytes());
+    header.extend_from_slice(&(height as u32).to_be_bytes());
+    header.extend_from_slice(&[8, 2, 0, 0, 0]);
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    png_chunk(&mut png, b"IHDR", &header);
+    png_chunk(&mut png, b"IDAT", &zlib);
+    png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn png_has_signature_and_ends_with_iend() {
+        let png = encode_png(&MARA);
+        assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        assert_eq!(&png[png.len() - 8..png.len() - 4], b"IEND");
+    }
+
+    #[test]
+    fn crc_and_adler_match_known_values() {
+        assert_eq!(crc32(b"IEND"), 0xae42_6082);
+        assert_eq!(adler32(b"Wikipedia"), 0x11e6_0398);
+    }
+
+    #[test]
+    fn mention_candidates_filter_by_name_and_add_scope_in_channels() {
+        let chat = mention_candidates("demo-chat-release", "ma");
+        assert_eq!(chat.len(), 1);
+        assert_eq!(chat[0].display_name(), "Mara Lindqvist");
+        let channel = mention_candidates("demo-channel-1-1", "gen");
+        assert!(matches!(channel[0], MentionCandidate::Channel { .. }));
+        assert_eq!(mention_candidates("demo-chat-release", "").len(), 5);
+    }
+
+    #[test]
+    fn demo_covers_the_sidebar_edge_cases() {
+        let chats = demo_chats();
+        assert!(chats.iter().any(|chat| chat.deleted));
+        assert!(chats.iter().any(|chat| chat.title.len() > 40));
+        assert!(chats.iter().filter(|chat| chat.unread).count() >= 3);
+    }
+}

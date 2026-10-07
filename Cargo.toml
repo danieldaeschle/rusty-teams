@@ -1,0 +1,36 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["spikes/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+percent-encoding = "2"
+regex = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+scraper = "0.23"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }
+url = "2"
+
+session = { path = "crates/session" }
+graph = { path = "crates/graph" }
+store = { path = "crates/store" }
+teams-core = { path = "crates/core" }
+gpui-kit = "=0.7.1"
+chatsvc = { path = "crates/chatsvc" }
+webview = { path = "crates/webview" }

@@ -1,0 +1,6 @@
+ALTER TABLE sync_state ADD COLUMN delta_link TEXT;
+
+CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+) WITHOUT ROWID;
