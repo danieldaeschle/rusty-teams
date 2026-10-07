@@ -21,6 +21,7 @@ const CORNER_SERIES: f32 = 4.;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReactionChip {
+    pub reaction_type: String,
     pub label: String,
     pub count: usize,
     pub mine: bool,
@@ -256,6 +257,15 @@ pub fn reaction_label(reaction_type: &str) -> String {
     }
 }
 
+/// The reaction type Teams uses for a glyph: the legacy name for the six classic ones.
+pub fn reaction_type_for(glyph: &str) -> String {
+    let bare = glyph.trim_end_matches('\u{FE0F}');
+    ["like", "heart", "laugh", "surprised", "sad", "angry"]
+        .into_iter()
+        .find(|name| reaction_label(name) == bare)
+        .map_or_else(|| bare.to_owned(), str::to_owned)
+}
+
 pub fn reaction_chips(reactions: &[ReactionInfo], my_user_id: Option<&str>) -> Vec<ReactionChip> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     let mut mine: BTreeMap<&str, bool> = BTreeMap::new();
@@ -273,6 +283,7 @@ pub fn reaction_chips(reactions: &[ReactionInfo], my_user_id: Option<&str>) -> V
     order
         .into_iter()
         .map(|reaction_type| ReactionChip {
+            reaction_type: reaction_type.to_owned(),
             label: reaction_label(reaction_type),
             count: counts[reaction_type],
             mine: mine.contains_key(reaction_type),
@@ -281,6 +292,23 @@ pub fn reaction_chips(reactions: &[ReactionInfo], my_user_id: Option<&str>) -> V
 }
 
 const REPLY_EXCERPT_CHARS: usize = 90;
+
+pub fn message_text(record: &MessageRecord) -> String {
+    let own_spans: Vec<Span> = message_spans(record)
+        .into_iter()
+        .filter(|span| !matches!(span, Span::Quote(_)))
+        .collect();
+    strip_image_placeholders(layout_blocks(&own_spans))
+        .into_iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(inline) => Some(inline.text),
+            Block::ListItem(inline) => Some(format!("- {}", inline.text)),
+            Block::Code(code) => Some(format!("```\n{code}\n```")),
+            Block::Quote(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 pub fn reply_excerpt(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
@@ -561,6 +589,13 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
         }
+    }
+
+    #[test]
+    fn reaction_type_maps_classic_glyphs_to_names() {
+        assert_eq!(reaction_type_for("\u{1F44D}"), "like");
+        assert_eq!(reaction_type_for("\u{2764}\u{FE0F}"), "heart");
+        assert_eq!(reaction_type_for("\u{1F389}"), "\u{1F389}");
     }
 
     #[test]

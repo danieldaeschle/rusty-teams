@@ -40,14 +40,22 @@ pub struct ReplyPreview {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditPreview {
+    pub message_id: String,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outgoing {
     pub text: String,
     pub mentions: Vec<MentionInput>,
     pub reply: Option<ReplyPreview>,
+    pub edit: Option<EditPreview>,
 }
 
 pub enum ComposerEvent {
     Submit(Outgoing),
+    EditLast,
 }
 
 struct MentionPopup {
@@ -69,6 +77,7 @@ pub struct Composer {
     input: Entity<TextareaState>,
     conversation_id: Option<String>,
     reply: Option<ReplyPreview>,
+    editing: Option<EditPreview>,
     mention_inputs: HashMap<String, MentionInput>,
     mention_counter: usize,
     popup: Option<MentionPopup>,
@@ -160,6 +169,7 @@ impl Composer {
             input,
             conversation_id: None,
             reply: None,
+            editing: None,
             mention_inputs: HashMap::new(),
             mention_counter: 0,
             popup: None,
@@ -447,6 +457,10 @@ impl Composer {
         if self.conversation_id.as_deref() != Some(conversation_id) {
             self.conversation_id = Some(conversation_id.to_owned());
             self.reply = None;
+            if self.editing.take().is_some() {
+                self.input
+                    .update(cx, |state, cx| state.set_value("", window, cx));
+            }
             self.mention_inputs.clear();
             self.close_popup();
             cx.notify();
@@ -455,7 +469,20 @@ impl Composer {
 
     pub fn set_reply(&mut self, reply: Option<ReplyPreview>, cx: &mut Context<Self>) {
         self.reply = reply;
+        if self.reply.is_some() {
+            self.editing = None;
+        }
         cx.notify();
+    }
+
+    pub fn begin_edit(&mut self, draft: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore(&draft, window, cx);
+        self.focus(window, cx);
+    }
+
+    fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing = None;
+        self.set_text("", window, cx);
     }
 
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
@@ -479,6 +506,7 @@ impl Composer {
             text,
             mentions,
             reply: self.reply.clone(),
+            edit: self.editing.clone(),
         })
     }
 
@@ -490,6 +518,7 @@ impl Composer {
             .update(cx, |state, cx| state.set_value("", window, cx));
         self.mention_inputs.clear();
         self.reply = None;
+        self.editing = None;
         self.close_popup();
         cx.emit(ComposerEvent::Submit(outgoing));
         cx.notify();
@@ -520,6 +549,7 @@ impl Composer {
             state.set_selected_range(end..end, cx);
         });
         self.reply = outgoing.reply.clone();
+        self.editing = outgoing.edit.clone();
         self.close_popup();
         cx.notify();
     }
@@ -658,6 +688,58 @@ impl Composer {
         ))
     }
 
+    fn render_edit_strip(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let edit = self.editing.as_ref()?;
+        Some(
+            h_flex()
+                .w_full()
+                .mb(px(6.))
+                .gap(px(10.))
+                .items_center()
+                .pl(px(10.))
+                .pr(px(4.))
+                .py(px(6.))
+                .rounded(px(8.))
+                .bg(theme::surface())
+                .border_1()
+                .border_color(theme::border())
+                .child(icon(IconName::Pencil, 14., theme::accent_text()))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(12.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme::accent_text())
+                                .child("Editing message"),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(theme::text_muted())
+                                .child(edit.excerpt.clone()),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("edit-close")
+                        .size(px(24.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .hover(|button| button.bg(theme::row_hover()))
+                        .child(icon(IconName::Close, 14., theme::text_muted()))
+                        .on_click(cx.listener(|this, _, window, cx| this.cancel_edit(window, cx))),
+                ),
+        )
+    }
+
     fn render_reply_strip(&self, cx: &mut Context<Self>) -> Option<Div> {
         let reply = self.reply.as_ref()?;
         Some(
@@ -758,6 +840,9 @@ impl Render for Composer {
                 if this.popup_is_open() {
                     this.move_highlight(-1, cx);
                     cx.stop_propagation();
+                } else if this.editing.is_none() && this.is_empty(cx) {
+                    cx.emit(ComposerEvent::EditLast);
+                    cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
@@ -783,7 +868,7 @@ impl Render for Composer {
                     cx.stop_propagation();
                 }
             }))
-            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 if let Some(popup) = &this.emoji_popup {
                     this.emoji_dismissed_at = Some(popup.range.start);
                 }
@@ -791,9 +876,13 @@ impl Render for Composer {
                     this.close_popup();
                     cx.notify();
                     cx.stop_propagation();
+                } else if this.editing.is_some() {
+                    this.cancel_edit(window, cx);
+                    cx.stop_propagation();
                 }
             }))
             .children(self.render_reply_strip(cx))
+            .children(self.render_edit_strip(cx))
             .child(
                 div()
                     .relative()

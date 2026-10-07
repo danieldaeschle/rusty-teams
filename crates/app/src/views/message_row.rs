@@ -1,5 +1,5 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::base::TextSelection;
+use gpui_kit::base::{GlobalState, TextSelection};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use super::attachments::attachments_view;
 use super::avatar::{member_stack, person_avatar};
+use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
+use super::reaction_picker::PickHandler;
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::render::{Block, render_blocks};
@@ -35,17 +37,25 @@ pub struct RowActions {
     pub open_thread: RowAction,
     pub retry: RowAction,
     pub reply: RowAction,
-    pub hovered: RowAction,
+    pub hovered: Option<HoverChange>,
+    pub menu: Option<MessageMenu>,
+    pub react: Option<PickHandler>,
     pub highlighted: bool,
 }
 
-fn reaction_chip(chip: &ReactionChip) -> Div {
+const TOOLBAR_LIFT: f32 = 22.;
+
+fn reaction_chip(chip: &ReactionChip, index: usize, react: Option<PickHandler>) -> Stateful<Div> {
     let (background, border, foreground) = if chip.mine {
         (theme::bubble_own(), theme::accent(), theme::accent_tint())
     } else {
         (theme::surface(), theme::border_strong(), theme::text_soft())
     };
+    let glyph = chip.label.clone();
     h_flex()
+        .id(ElementId::Name(
+            format!("reaction-{index}-{}", chip.reaction_type).into(),
+        ))
         .h(px(22.))
         .px(px(8.))
         .gap(px(4.))
@@ -58,6 +68,17 @@ fn reaction_chip(chip: &ReactionChip) -> Div {
         .text_color(foreground)
         .child(chip.label.clone())
         .child(chip.count.to_string())
+        .when_some(react, |chip, react| {
+            chip.cursor_pointer()
+                .hover(|chip| chip.border_color(theme::accent()))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    GlobalState::suppress_text_selection(cx)
+                })
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    react(&glyph, window, cx);
+                })
+        })
 }
 
 fn labeled_divider(label: &str, line_color: Hsla, text_color: Hsla) -> Div {
@@ -85,7 +106,14 @@ fn new_marker() -> Div {
     labeled_divider("New", theme::accent(), theme::accent_text())
 }
 
-fn bubble(row: &MessageRow, index: usize, own: bool, directory: &Directory, cx: &App) -> Div {
+fn bubble(
+    row: &MessageRow,
+    index: usize,
+    own: bool,
+    directory: &Directory,
+    extras: BubbleExtras,
+    cx: &App,
+) -> Div {
     let corners = bubble_corners(own, row.series);
     let mut element = div()
         .relative()
@@ -162,10 +190,29 @@ fn bubble(row: &MessageRow, index: usize, own: bool, directory: &Directory, cx: 
                 .when(!own, |chips| chips.left(px(11.)))
                 .bottom(px(-14.))
                 .gap(px(4.))
-                .children(row.reactions.iter().map(reaction_chip)),
+                .children(
+                    row.reactions
+                        .iter()
+                        .map(|chip| reaction_chip(chip, index, extras.react.clone())),
+                ),
+        );
+    }
+    if let Some(menu) = extras.menu {
+        element = element.child(
+            div()
+                .absolute()
+                .top(px(-TOOLBAR_LIFT))
+                .right(px(8.))
+                .child(deferred(message_toolbar(menu)).with_priority(1)),
         );
     }
     element
+}
+
+#[derive(Default)]
+struct BubbleExtras {
+    menu: Option<MessageMenu>,
+    react: Option<PickHandler>,
 }
 
 fn bubble_meta(row: &MessageRow, own: bool) -> Div {
@@ -432,10 +479,11 @@ fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) ->
         ));
         if !row.reactions.is_empty() {
             body = body.child(
-                h_flex()
-                    .gap(px(4.))
-                    .flex_wrap()
-                    .children(row.reactions.iter().map(reaction_chip)),
+                h_flex().gap(px(4.)).flex_wrap().children(
+                    row.reactions
+                        .iter()
+                        .map(|chip| reaction_chip(chip, index, None)),
+                ),
             );
         }
     }
@@ -460,6 +508,7 @@ fn others_row(
     index: usize,
     directory: &Directory,
     retry: RowAction,
+    extras: BubbleExtras,
     cx: &App,
 ) -> Div {
     let first = !row.series.has_prev;
@@ -478,7 +527,7 @@ fn others_row(
             ),
         );
     }
-    column = column.child(bubble(row, index, false, directory, cx));
+    column = column.child(bubble(row, index, false, directory, extras, cx));
     if let Some(note) = delivery_note(row, retry, index) {
         column = column.child(note);
     }
@@ -505,13 +554,14 @@ fn own_row(
     index: usize,
     directory: &Directory,
     retry: RowAction,
+    extras: BubbleExtras,
     cx: &App,
 ) -> Div {
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
         div()
             .max_w(relative(MAX_WIDTH_RATIO))
-            .child(bubble(row, index, true, directory, cx)),
+            .child(bubble(row, index, true, directory, extras, cx)),
     );
     if let Some(note) = delivery_note(row, retry, index) {
         column = column.child(note);
@@ -531,8 +581,11 @@ pub fn render_message_row(
         retry,
         reply,
         hovered,
+        menu,
+        react,
         highlighted,
     } = actions;
+    let extras = BubbleExtras { menu, react };
     let own = row.own && !row.card;
     let spacing = if row.card {
         px(CARD_GAP)
@@ -551,9 +604,9 @@ pub fn render_message_row(
     let body = if row.card {
         post_card(row, index, directory, cx)
     } else if own {
-        own_row(row, index, directory, retry, cx)
+        own_row(row, index, directory, retry, extras, cx)
     } else {
-        others_row(row, index, directory, retry, cx)
+        others_row(row, index, directory, retry, extras, cx)
     };
     container
         .child(
@@ -569,11 +622,7 @@ pub fn render_message_row(
                     })
                 })
                 .when_some(hovered, |element, hovered| {
-                    element.on_hover(move |is_hovered, _, cx| {
-                        if *is_hovered {
-                            hovered(cx);
-                        }
-                    })
+                    element.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
                 })
                 .when_some(reply, |element, reply| {
                     element.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))

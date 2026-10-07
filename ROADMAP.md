@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 52 %** (39 done, 7 partial, 35 missing of 81). Partial counts half.
+**Parity: 55 %** (42 done, 5 partial, 34 missing of 81). Partial counts half.
 
 ## By area
 
@@ -11,7 +11,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 55 % | 5 | 1 | 4 |
 | [Reading](#reading) | 70 % | 10 | 1 | 4 |
-| [Writing](#writing) | 46 % | 5 | 3 | 6 |
+| [Writing](#writing) | 61 % | 8 | 1 | 5 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
 | [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
@@ -24,16 +24,15 @@ Feature parity with the Microsoft Teams desktop client.
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | Message toolbar: react, edit, delete, Up-arrow edits the last own message | Backend is done |
-| 2 | New chat: 1:1 and group with title | Backend is done |
-| 3 | Attach a file, paste or drag an image |  |
-| 4 | Channel: new post with subject, post cards |  |
-| 5 | Sign in on Linux without Chrome on a debug port |  |
-| 6 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
-| 7 | Emoji picker for reactions and the composer |  |
-| 8 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
-| 9 | Typing indicator |  |
-| 10 | Unsent messages survive a restart |  |
+| 1 | New chat: 1:1 and group with title | Backend is done |
+| 2 | Attach a file, paste or drag an image |  |
+| 3 | Channel: new post with subject, post cards |  |
+| 4 | Sign in on Linux without Chrome on a debug port |  |
+| 5 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
+| 6 | Emoji picker in the composer | Reaction picker exists |
+| 7 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 8 | Typing indicator |  |
+| 9 | Unsent messages survive a restart |  |
 
 ## Sign-in and app
 
@@ -90,10 +89,10 @@ Feature parity with the Microsoft Teams desktop client.
 | Quote-reply (Alt+R) | Done |  |
 | @mentions with people search | Done |  |
 | Emoji by colon code, English and German aliases | Done |  |
-| Edit own message | Partial | Backend done, no UI |
-| Delete own message | Partial | Backend done, no UI |
-| React to a message | Partial | Backend done, no UI |
-| Emoji picker | Missing |  |
+| Edit own message | Done | From the menu or Up arrow in an empty composer |
+| Delete own message | Done |  |
+| React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
+| Emoji picker | Partial | For reactions; composer still uses colon codes |
 | Formatting toolbar, Ctrl+B and Ctrl+I | Missing |  |
 | Attach a file, paste or drag an image | Missing |  |
 | GIFs and stickers | Missing |  |

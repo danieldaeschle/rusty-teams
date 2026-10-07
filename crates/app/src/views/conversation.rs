@@ -14,22 +14,24 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageRecord;
-use teams_core::ImageRef;
+use teams_core::{ImageRef, MentionInput};
 
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
-use super::composer::{Composer, ComposerEvent, Outgoing, ReplyPreview};
+use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
+use super::message_actions::{Action, MessageMenu};
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
+use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::widgets::icon;
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::data::{is_one_on_one, others};
+use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::Block;
 use crate::render::blocks::Inline;
 use crate::rows::{
     Delivery, MessageRow, Receipt, Row, RowContext, Series, StartInfo, assign_series,
-    changed_indices, diff_keys, flat_rows, placeholder_rows, reply_excerpt, thread_list_rows,
-    thread_rows, trailing_skeleton,
+    changed_indices, diff_keys, flat_rows, message_text, placeholder_rows, reaction_type_for,
+    reply_excerpt, thread_list_rows, thread_rows, trailing_skeleton,
 };
-use crate::read_state::{ReadTrigger, plan_read};
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
@@ -51,6 +53,12 @@ const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
 const PROGRESS_BAR_WIDTH: f32 = 0.35;
 
 actions!(teams, [ReplyToHovered]);
+
+#[derive(Clone, Copy)]
+enum HoverSlot {
+    Row,
+    Toolbar,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ViewMode {
@@ -101,6 +109,9 @@ pub struct ConversationView {
     pending_counter: usize,
     pending_outgoing: HashMap<String, Outgoing>,
     hovered_message: Option<String>,
+    toolbar_hovered: Option<String>,
+    toolbar_pinned: Option<String>,
+    picker: Entity<ReactionPicker>,
     highlighted_message: Option<String>,
     notice: Option<String>,
     sync_generation: u64,
@@ -123,6 +134,7 @@ impl ConversationView {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
+        let picker = cx.new(|cx| ReactionPicker::new(app.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
@@ -138,6 +150,9 @@ impl ConversationView {
             pending_counter: 0,
             pending_outgoing: HashMap::new(),
             hovered_message: None,
+            toolbar_hovered: None,
+            toolbar_pinned: None,
+            picker,
             highlighted_message: None,
             notice: None,
             sync_generation: 0,
@@ -225,11 +240,18 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ComposerEvent::Submit(outgoing) = event;
-        self.send(outgoing.clone(), window, cx);
+        match event {
+            ComposerEvent::Submit(outgoing) if outgoing.edit.is_some() => {
+                self.send_edit(outgoing.clone(), window, cx)
+            }
+            ComposerEvent::Submit(outgoing) => self.send(outgoing.clone(), window, cx),
+            ComposerEvent::EditLast => self.edit_last_own(window, cx),
+        }
     }
 
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
+        self.toolbar_hovered = None;
+        self.toolbar_pinned = None;
         let title = selection_title(&self.app.read(cx).sidebar, &selection);
         let mode = match selection {
             Selection::Chat(_) => ViewMode::Flat,
@@ -1054,6 +1076,7 @@ impl ConversationView {
                 text,
                 mentions,
                 reply,
+                ..
             } = &sent;
             match (&view_mode, reply) {
                 (_, Some(reply)) => {
@@ -1087,6 +1110,323 @@ impl ConversationView {
             .ok();
         })
         .detach();
+    }
+
+    fn conversation_id(&self) -> Option<String> {
+        self.current
+            .as_ref()
+            .map(|current| current.selection.conversation_id().to_owned())
+    }
+
+    fn own_record(&self, message_id: &str, cx: &App) -> Option<MessageRecord> {
+        let conversation_id = self.conversation_id()?;
+        let my_user_id = self.row_context(cx).my_user_id?;
+        self.app
+            .read(cx)
+            .store
+            .messages_by_id(&conversation_id, &[message_id.to_owned()])
+            .ok()?
+            .remove(message_id)
+            .filter(|record| !record.deleted && record.sender_id.as_deref() == Some(&my_user_id))
+    }
+
+    fn set_hover(&mut self, slot: HoverSlot, key: &str, hovered: bool, cx: &mut Context<Self>) {
+        let target = match slot {
+            HoverSlot::Row => &mut self.hovered_message,
+            HoverSlot::Toolbar => &mut self.toolbar_hovered,
+        };
+        if hovered {
+            *target = Some(key.to_owned());
+        } else if target.as_deref() == Some(key) {
+            *target = None;
+        }
+        cx.notify();
+    }
+
+    fn set_pinned(&mut self, key: &str, open: bool, cx: &mut Context<Self>) {
+        if open {
+            self.toolbar_pinned = Some(key.to_owned());
+        } else if self.toolbar_pinned.as_deref() == Some(key) {
+            self.toolbar_pinned = None;
+        }
+        cx.notify();
+    }
+
+    fn toolbar_visible(&self, key: &str) -> bool {
+        [
+            &self.hovered_message,
+            &self.toolbar_hovered,
+            &self.toolbar_pinned,
+        ]
+        .iter()
+        .any(|slot| slot.as_deref() == Some(key))
+    }
+
+    fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {
+        let Some(conversation_id) = self.conversation_id() else {
+            return;
+        };
+        let reaction_type = reaction_type_for(glyph);
+        let state = self.app.read(cx);
+        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
+        let my_user_id = self.row_context(cx).my_user_id;
+        let Some(mut record) = store
+            .messages_by_id(&conversation_id, &[message_id.to_owned()])
+            .ok()
+            .and_then(|mut found| found.remove(message_id))
+        else {
+            return;
+        };
+        let mut reactions = teams_core::reactions(&record);
+        let mine = |reaction: &teams_core::ReactionInfo| {
+            reaction.reaction_type == reaction_type
+                && my_user_id.is_some()
+                && reaction.user_id == my_user_id
+        };
+        let remove = reactions.iter().any(mine);
+        if mode.demo {
+            if remove {
+                reactions.retain(|reaction| !mine(reaction));
+            } else {
+                reactions.push(teams_core::ReactionInfo {
+                    reaction_type: reaction_type.clone(),
+                    user_id: my_user_id.clone(),
+                    user_name: Some("You".to_owned()),
+                });
+            }
+            record.reactions_json = serde_json::to_string(&reactions).unwrap_or_default();
+            let _ = store.upsert_messages(std::slice::from_ref(&record));
+            self.rebuild(false, cx);
+            return;
+        }
+        let Some(engine) = engine.filter(|_| !mode.read_only) else {
+            self.show_notice("Read-only mode: reaction not sent", cx);
+            return;
+        };
+        let message_id = message_id.to_owned();
+        let receiver = runtime::spawn(async move {
+            if remove {
+                engine
+                    .unset_reaction(&conversation_id, &message_id, &reaction_type)
+                    .await
+            } else {
+                engine
+                    .set_reaction(&conversation_id, &message_id, &reaction_type)
+                    .await
+            }
+        });
+        self.report_failure(receiver, "Reaction failed", cx);
+    }
+
+    fn begin_edit(&mut self, message_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(record) = self.own_record(message_id, cx) else {
+            return;
+        };
+        let edit = EditPreview {
+            message_id: record.message_id.clone(),
+            excerpt: reply_excerpt(&record),
+        };
+        let in_chat = matches!(
+            self.current.as_ref().map(|current| &current.selection),
+            Some(Selection::Chat(_))
+        );
+        let mentions = if in_chat {
+            teams_core::mentions(&record)
+                .into_iter()
+                .filter_map(|mention| {
+                    let user_id = mention.user_id?;
+                    Some(MentionInput::user(&user_id, &mention.name))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let draft = Outgoing {
+            text: message_text(&record),
+            mentions,
+            reply: None,
+            edit: Some(edit),
+        };
+        self.composer
+            .update(cx, |composer, cx| composer.begin_edit(draft, window, cx));
+    }
+
+    fn edit_last_own(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let key = self.rows.borrow().iter().rev().find_map(|row| match row {
+            Row::Message(message)
+                if message.own
+                    && !message.deleted
+                    && !message.key.starts_with(PENDING_KEY_PREFIX) =>
+            {
+                Some(message.key.clone())
+            }
+            _ => None,
+        });
+        if let Some(key) = key {
+            self.begin_edit(&key, window, cx);
+        }
+    }
+
+    fn send_edit(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = outgoing.edit.clone() else {
+            return;
+        };
+        let Some(conversation_id) = self.conversation_id() else {
+            return;
+        };
+        let state = self.app.read(cx);
+        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
+        if mode.demo {
+            if let Some(mut record) = self.own_record(&edit.message_id, cx) {
+                record.body_html = teams_core::markdown_to_html(&outgoing.text);
+                record.edited_at = Some(Utc::now());
+                let _ = store.upsert_messages(std::slice::from_ref(&record));
+                self.rebuild(false, cx);
+            }
+            return;
+        }
+        let Some(engine) = engine.filter(|_| !mode.read_only) else {
+            self.notice = Some("Read-only mode: edit not saved".to_owned());
+            self.composer
+                .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+            cx.notify();
+            return;
+        };
+        let sent = outgoing.clone();
+        let receiver = runtime::spawn(async move {
+            engine
+                .edit_message_with_mentions(
+                    &conversation_id,
+                    &edit.message_id,
+                    &sent.text,
+                    &sent.mentions,
+                )
+                .await
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let failed = !matches!(receiver.await, Ok(Ok(())));
+            this.update_in(cx, |this, window, cx| {
+                if failed {
+                    this.notice = Some("Edit failed: your text is back in the composer".to_owned());
+                    this.composer
+                        .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn delete(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(mut record) = self.own_record(message_id, cx) else {
+            return;
+        };
+        let state = self.app.read(cx);
+        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
+        if mode.demo {
+            record.deleted = true;
+            let _ = store.upsert_messages(std::slice::from_ref(&record));
+            self.rebuild(false, cx);
+            return;
+        }
+        let Some(engine) = engine.filter(|_| !mode.read_only) else {
+            self.show_notice("Read-only mode: message not deleted", cx);
+            return;
+        };
+        let conversation_id = record.conversation_id.clone();
+        let receiver = runtime::spawn(async move {
+            engine
+                .soft_delete_message(&conversation_id, &record.message_id)
+                .await
+        });
+        self.report_failure(receiver, "Delete failed", cx);
+    }
+
+    fn copy_text(&self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(conversation_id) = self.conversation_id() else {
+            return;
+        };
+        let record = self
+            .app
+            .read(cx)
+            .store
+            .messages_by_id(&conversation_id, &[message_id.to_owned()])
+            .ok()
+            .and_then(|mut found| found.remove(message_id));
+        if let Some(record) = record {
+            cx.write_to_clipboard(ClipboardItem::new_string(message_text(&record)));
+        }
+    }
+
+    fn show_notice(&mut self, message: &str, cx: &mut Context<Self>) {
+        self.notice = Some(message.to_owned());
+        cx.notify();
+    }
+
+    fn report_failure(
+        &mut self,
+        receiver: tokio::sync::oneshot::Receiver<teams_core::Result<()>>,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let error = match receiver.await {
+                Ok(Ok(())) => return,
+                Ok(Err(error)) => short_error(&error),
+                Err(_) => "cancelled".to_owned(),
+            };
+            this.update(cx, |this, cx| {
+                this.show_notice(&format!("{label}: {error}"), cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn message_menu(&self, key: &str, own: bool, view: WeakEntity<Self>) -> MessageMenu {
+        let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |window, cx| {
+                view.update(cx, |this, cx| run(this, &key, window, cx)).ok();
+            })
+        };
+        let react: PickHandler = {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |glyph, _, cx| {
+                view.update(cx, |this, cx| this.toggle_reaction(&key, glyph, cx))
+                    .ok();
+            })
+        };
+        let hover = {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |hovered: bool, cx: &mut App| {
+                view.update(cx, |this, cx| {
+                    this.set_hover(HoverSlot::Toolbar, &key, hovered, cx)
+                })
+                .ok();
+            })
+        };
+        let pin = {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |open: bool, _: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| this.set_pinned(&key, open, cx))
+                    .ok();
+            })
+        };
+        MessageMenu {
+            key: key.to_owned(),
+            react,
+            reply: Some(action(|this, key, window, cx| {
+                this.begin_reply(key, window, cx)
+            })),
+            copy: action(|this, key, _, cx| this.copy_text(key, cx)),
+            edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
+            delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
+            pin,
+            hover,
+            picker: self.picker.clone(),
+        }
     }
 
     fn retry(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1324,13 +1664,26 @@ impl Render for ConversationView {
                         let is_real = !message.key.starts_with(PENDING_KEY_PREFIX);
                         let hovered = is_real.then(|| {
                             let (view, key) = (view.clone(), message.key.clone());
-                            Box::new(move |cx: &mut App| {
-                                view.update(cx, |this, _| {
-                                    this.hovered_message = Some(key.clone());
+                            Rc::new(move |hovered: bool, cx: &mut App| {
+                                view.update(cx, |this, cx| {
+                                    this.set_hover(HoverSlot::Row, &key, hovered, cx)
                                 })
                                 .ok();
-                            }) as Box<dyn Fn(&mut App)>
+                            }) as Rc<dyn Fn(bool, &mut App)>
                         });
+                        let actionable = is_real && !message.deleted && !message.card;
+                        let (menu, react) = view
+                            .upgrade()
+                            .filter(|_| actionable)
+                            .map(|entity| {
+                                let this = entity.read(cx);
+                                let menu =
+                                    this.message_menu(&message.key, message.own, view.clone());
+                                let react = menu.react.clone();
+                                let visible = this.toolbar_visible(&message.key);
+                                (visible.then_some(menu), Some(react))
+                            })
+                            .unwrap_or((None, None));
                         let reply = (is_real && !message.deleted).then(|| {
                             let (view, key, handle) =
                                 (view.clone(), message.key.clone(), window.window_handle());
@@ -1355,6 +1708,8 @@ impl Render for ConversationView {
                                 retry,
                                 reply,
                                 hovered,
+                                menu,
+                                react,
                                 highlighted: highlighted.as_deref() == Some(message.key.as_str()),
                             },
                             &state.directory,

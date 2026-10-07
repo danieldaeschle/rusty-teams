@@ -266,6 +266,7 @@ dependencies = [
  "image",
  "raw-window-handle",
  "rodio",
+ "serde_json",
  "session",
  "store",
  "teams-core",

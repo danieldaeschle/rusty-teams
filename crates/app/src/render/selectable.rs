@@ -1,9 +1,20 @@
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui_kit::base::{
     TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun, Theme,
 };
 use gpui_kit::*;
+
+const TIME_ROOM: char = '\u{2007}';
+const HIT_SLOP: f32 = 12.;
+
+#[derive(Clone)]
+pub struct Participant {
+    handle: TextSelectionHandle,
+    copied: Rc<RefCell<String>>,
+}
 
 /// Styled text that takes part in the window text selection, with clickable link ranges.
 pub struct SelectableRichText {
@@ -84,7 +95,7 @@ impl IntoElement for SelectableRichText {
 }
 
 impl Element for SelectableRichText {
-    type RequestLayoutState = TextSelectionHandle;
+    type RequestLayoutState = Participant;
     type PrepaintState = Hitbox;
 
     fn id(&self) -> Option<ElementId> {
@@ -102,18 +113,23 @@ impl Element for SelectableRichText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let handle = window.with_element_state(
+        let participant = window.with_element_state(
             global_id.expect("SelectableRichText has an element id"),
-            |retained: Option<TextSelectionHandle>, _| {
-                let handle =
-                    retained.unwrap_or_else(|| TextSelectionHandle::new(self.text.clone(), cx));
-                (handle.clone(), handle)
+            |retained: Option<Participant>, _| {
+                let participant = retained.unwrap_or_else(|| {
+                    let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                    let copied = Rc::new(RefCell::new(String::new()));
+                    let source = copied.clone();
+                    handle.copy_with(move |_| source.borrow().clone(), cx);
+                    Participant { handle, copied }
+                });
+                (participant.clone(), participant)
             },
         );
         let (layout_id, ()) = self
             .styled_text
             .request_layout(global_id, inspector_id, window, cx);
-        (layout_id, handle)
+        (layout_id, participant)
     }
 
     fn prepaint(
@@ -121,13 +137,19 @@ impl Element for SelectableRichText {
         global_id: Option<&GlobalElementId>,
         inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        handle: &mut Self::RequestLayoutState,
+        participant: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let handle = &participant.handle;
         self.styled_text
             .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
-        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let slop = Edges {
+            left: px(HIT_SLOP),
+            right: px(HIT_SLOP),
+            ..Default::default()
+        };
+        let hitbox = window.insert_hitbox(bounds.extend(slop), HitboxBehavior::Normal);
         let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
             .with_text_bounds(vec![bounds])
             .with_rendered_element(handle, window, cx);
@@ -140,14 +162,14 @@ impl Element for SelectableRichText {
         global_id: Option<&GlobalElementId>,
         inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        handle: &mut Self::RequestLayoutState,
+        participant: &mut Self::RequestLayoutState,
         hitbox: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
         let layout = self.styled_text.layout().clone();
         let selected_before = TextSelection::selected_text(window, cx);
-        let projection = handle.update_runs(
+        let projection = participant.handle.update_runs(
             &[TextSelectionRun::new(
                 self.text.clone(),
                 layout.clone(),
@@ -159,10 +181,17 @@ impl Element for SelectableRichText {
             window.refresh();
         }
         let color = Theme::global(cx).tokens.colors.selection;
+        let content_end = self.text.trim_end_matches(TIME_ROOM).len();
+        let mut copied = String::new();
         for range in projection.ranges().iter().flatten() {
+            let end_index = range.end.min(content_end);
+            if end_index <= range.start {
+                continue;
+            }
+            copied.push_str(&self.text[range.start..end_index]);
             let (Some(start), Some(end)) = (
                 layout.position_for_index(range.start),
-                layout.position_for_index(range.end),
+                layout.position_for_index(end_index),
             ) else {
                 continue;
             };
@@ -170,6 +199,7 @@ impl Element for SelectableRichText {
                 window.paint_quad(fill(quad, color));
             }
         }
+        *participant.copied.borrow_mut() = copied;
         self.styled_text.paint(
             global_id,
             inspector_id,
