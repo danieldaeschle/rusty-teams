@@ -7,10 +7,10 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` | empty `[workspace]` table at the end | `cargo test --manifest-path vendor/gpui-base/Cargo.toml` works inside the app workspace (and nested worktrees) |
-| `src/input/editor/decorations.rs` | `TextDecoration.font_family`, `with_font_family()`, `font_family_spans()`, `adjust_range_for_edit` made `pub(crate)`, doc on layering | font family per byte range; first collection / item wins |
-| `src/input/editor/display_map/text_wrapper.rs` | `font_families` on `TextWrapper`, `split_run_by_font_families()`, `set_font_families()` / `adjust_font_families()`, `measured_wrap_boundaries` measures by range, shared `changed_ranges()` / `rewrap_rows_of()` | soft wrap measures font-family ranges in their own font |
-| `src/input/editor/display_map/wrap_map.rs`, `display_map.rs`, `mod.rs` | pass-through for `set_font_families`, export `split_run_by_font_families` | plumbing |
-| `src/input/base/element.rs` | prepaint pushes font-family spans into the display map; render runs split by font family | glyphs, caret, selection and hit testing use the same shaped runs |
+| `src/input/editor/decorations.rs` | `TextDecoration.font_family`, `with_font_family()`, `FontOverride` (family, weight, style), `font_override_spans()` reading `font_family` + `style.font_weight` / `style.font_style`, `adjust_range_for_edit` made `pub(crate)`, doc on layering | font per byte range; first collection / item wins per property |
+| `src/input/editor/display_map/text_wrapper.rs` | `font_overrides` on `TextWrapper`, `split_run_by_font_overrides()`, `set_font_overrides()` / `adjust_font_overrides()`, `measured_wrap_boundaries` measures by range, shared `changed_ranges()` / `rewrap_rows_of()` | soft wrap measures mono / bold / italic ranges in their own font |
+| `src/input/editor/display_map/wrap_map.rs`, `display_map.rs`, `mod.rs` | pass-through for `set_font_overrides`, export `split_run_by_font_overrides` | plumbing |
+| `src/input/base/element.rs` | prepaint pushes font-override spans into the display map; render runs split by font override | glyphs, caret, selection and hit testing use the same shaped runs |
 | `src/input/base/state.rs` | `set_hanging_indents(markers)` on multi-line states (textarea and editor) | list lines: continuation rows start under the text after `•`, `◦`, `12.` |
 | `src/input/editor/display_map/text_wrapper.rs` | `hanging_indents` on `TextWrapper`, `hanging_indent_at()`, `measured_wrap_boundaries(.., hanging_indent, ..)`, `shift_span()` shared with inline metrics; a line with a marker always wraps as `WrappingIndent::Same` | wrap continuation rows at `wrap_width - marker width`; the existing `LineItem.indent` / `LineLayout.wrap_indent` path then shifts rendering, caret, selection, hit testing and up/down moves |
 | `src/input/editor/display_map/wrap_map.rs`, `display_map.rs` | pass-through for `set_hanging_indents`, adjust on edit | plumbing |
@@ -20,10 +20,10 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 
 ## Limits
 
-- Only the font family changes wrapping. Bold/italic `HighlightStyle` decorations still wrap with the regular-weight font.
+- Syntax-highlight (tree-sitter / LSP) bold or italic still wraps with the base font; only decorations feed wrapping.
 - Lines containing inline tokens wrap through gpui's `LineWrapper` with the base font only and ignore their hanging indent.
 - Hanging-indent markers are dropped by an edit inside them; the app sets them again on change.
-- The unwrapped longest-line width (soft wrap off) ignores font families.
+- The unwrapped longest-line width (soft wrap off) ignores font overrides.
 
 ## Re-apply on a gpui-kit upgrade
 

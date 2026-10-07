@@ -5,8 +5,8 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Font, LineFragment, Pixels, Point, ShapedLine, SharedString, Size, TextAlign, TextRun,
-    Window, point, px, size,
+    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, TextRun, Window, point,
+    px, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -15,6 +15,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::input::{
     Point as TreeSitterPoint, RopeExt,
+    decorations::FontOverride,
     layout::{LastLayout, WhitespaceIndicators},
 };
 
@@ -110,16 +111,16 @@ fn measured_wrap_boundaries(
     result
 }
 
-/// Split `run`, covering the document bytes `range`, where `font_families` override its family.
-pub(crate) fn split_run_by_font_families(
+/// Split `run`, covering the document bytes `range`, where `font_overrides` change its font.
+pub(crate) fn split_run_by_font_overrides(
     run: TextRun,
     range: Range<usize>,
-    font_families: &[(Range<usize>, SharedString)],
+    font_overrides: &[(Range<usize>, FontOverride)],
 ) -> SmallVec<[TextRun; 1]> {
-    let first = font_families.partition_point(|(span, _)| span.end <= range.start);
+    let first = font_overrides.partition_point(|(span, _)| span.end <= range.start);
     let mut runs = SmallVec::new();
     let mut offset = range.start;
-    for (span, font_family) in &font_families[first..] {
+    for (span, font_override) in &font_overrides[first..] {
         if span.start >= range.end {
             break;
         }
@@ -132,7 +133,7 @@ pub(crate) fn split_run_by_font_families(
             });
         }
         let mut font = run.font.clone();
-        font.family = font_family.clone();
+        font_override.apply(&mut font);
         runs.push(TextRun {
             len: end - start,
             font,
@@ -330,8 +331,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
-    /// Sorted, non-overlapping document byte ranges measured in another font family.
-    font_families: Rc<[(Range<usize>, SharedString)]>,
+    /// Sorted, non-overlapping document byte ranges measured in another font.
+    font_overrides: Rc<[(Range<usize>, FontOverride)]>,
     /// Sorted list marker ranges, at most one per line; continuation rows start under their end.
     hanging_indents: Rc<[Range<usize>]>,
     _initialized: bool,
@@ -348,7 +349,7 @@ impl TextWrapper {
             wrapping_indent: WrappingIndent::default(),
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
-            font_families: Rc::from([]),
+            font_overrides: Rc::from([]),
             hanging_indents: Rc::from([]),
             _initialized: false,
         }
@@ -481,7 +482,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
-        let font_families = self.font_families.clone();
+        let font_overrides = self.font_overrides.clone();
         let hanging_indents = self.hanging_indents.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
@@ -521,7 +522,7 @@ impl TextWrapper {
                         wrapping_indent,
                         hanging_indent_at(&hanging_indents, line_start, line_str.len()),
                         |range| {
-                            let runs = split_run_by_font_families(
+                            let runs = split_run_by_font_overrides(
                                 TextRun {
                                     len: range.len(),
                                     font: font.clone(),
@@ -531,7 +532,7 @@ impl TextWrapper {
                                     strikethrough: None,
                                 },
                                 line_start + range.start..line_start + range.end,
-                                &font_families,
+                                &font_overrides,
                             );
                             text_system
                                 .layout_line(&line_str[range], font_size, &runs, None)
@@ -549,30 +550,30 @@ impl TextWrapper {
         );
     }
 
-    pub(crate) fn adjust_font_families(&mut self, range: &Range<usize>, new_len: usize) {
-        if self.font_families.is_empty() {
+    pub(crate) fn adjust_font_overrides(&mut self, range: &Range<usize>, new_len: usize) {
+        if self.font_overrides.is_empty() {
             return;
         }
-        self.font_families = self
-            .font_families
+        self.font_overrides = self
+            .font_overrides
             .iter()
-            .filter_map(|(span, font_family)| {
+            .filter_map(|(span, font_override)| {
                 let span = crate::input::decorations::adjust_range_for_edit(span, range, new_len);
-                (!span.is_empty()).then(|| (span, font_family.clone()))
+                (!span.is_empty()).then(|| (span, font_override.clone()))
             })
             .collect();
     }
 
-    pub(crate) fn set_font_families(
+    pub(crate) fn set_font_overrides(
         &mut self,
-        font_families: Rc<[(Range<usize>, SharedString)]>,
+        font_overrides: Rc<[(Range<usize>, FontOverride)]>,
         cx: &mut App,
     ) {
-        if self.font_families == font_families {
+        if self.font_overrides == font_overrides {
             return;
         }
-        let affected = changed_ranges(&self.font_families, &font_families);
-        self.font_families = font_families;
+        let affected = changed_ranges(&self.font_overrides, &font_overrides);
+        self.font_overrides = font_overrides;
         self.rewrap_rows_of(&affected, cx);
     }
 
@@ -1344,35 +1345,49 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn production_wrap_measures_font_family_ranges_in_their_own_font() {
+    fn production_wrap_measures_font_override_ranges_in_their_own_font() {
         let cx = shaping_test_context();
         cx.update(|cx| {
             let font = gpui::font("DejaVu Sans");
             let mono = gpui::font("DejaVu Sans Mono");
+            let bold = gpui::Font {
+                weight: FontWeight::BOLD,
+                ..font.clone()
+            };
             let font_size = px(14.);
             let value = "iiiiiiii iiiiiiii iiiiiiii";
             let width = shaped_width("iiiiiiii iiiiiiii ", &font, font_size, cx) + px(1.);
-            assert!(
-                shaped_width("iiiiiiii", &mono, font_size, cx)
-                    > shaped_width("iiiiiiii ", &font, font_size, cx) + px(1.)
-            );
+            for wider in [&mono, &bold] {
+                assert!(
+                    shaped_width("iiiiiiii", wider, font_size, cx)
+                        > shaped_width("iiiiiiii", &font, font_size, cx) + px(1.)
+                );
+            }
             let text = Rope::from(value);
-            let wrap = |font_families: Vec<(Range<usize>, SharedString)>, cx: &mut App| {
+            let wrap = |font_override: Option<FontOverride>, cx: &mut App| {
                 let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
                 wrapper.update(&text, &(0..0), &text, cx);
-                wrapper.set_font_families(font_families.into(), cx);
+                let font_overrides: Vec<_> =
+                    font_override.into_iter().map(|o| (9..17, o)).collect();
+                wrapper.set_font_overrides(font_overrides.into(), cx);
                 wrapper.line(0).unwrap().wrapped_lines.to_vec()
             };
-            assert_eq!(wrap(vec![], cx), [0..18, 18..26]);
-            assert_eq!(
-                wrap(vec![(9..17, mono.family.clone())], cx),
-                [0..9, 9..18, 18..26]
-            );
+            assert_eq!(wrap(None, cx), [0..18, 18..26]);
+            let mono_override = FontOverride {
+                family: Some(mono.family.clone()),
+                ..Default::default()
+            };
+            assert_eq!(wrap(Some(mono_override), cx), [0..9, 9..18, 18..26]);
+            let bold_override = FontOverride {
+                weight: Some(FontWeight::BOLD),
+                ..Default::default()
+            };
+            assert_eq!(wrap(Some(bold_override), cx), [0..9, 9..18, 18..26]);
         });
     }
 
     #[test]
-    fn font_family_runs_split_at_span_edges_and_follow_edits() {
+    fn font_override_runs_split_at_span_edges_and_follow_edits() {
         let run = TextRun {
             len: 10,
             font: gpui::font("Sans"),
@@ -1381,29 +1396,37 @@ mod tests {
             underline: None,
             strikethrough: None,
         };
-        let font_families = [(2..4, SharedString::from("Mono")), (8..20, "Mono".into())];
-        let runs = split_run_by_font_families(run.clone(), 0..10, &font_families);
+        let mono = FontOverride {
+            family: Some("Mono".into()),
+            weight: Some(FontWeight::BOLD),
+            style: None,
+        };
+        let font_overrides = [(2..4, mono.clone()), (8..20, mono.clone())];
+        let runs = split_run_by_font_overrides(run.clone(), 0..10, &font_overrides);
         let runs: Vec<_> = runs
             .iter()
-            .map(|run| (run.len, run.font.family.to_string()))
+            .map(|run| (run.len, run.font.family.to_string(), run.font.weight))
             .collect();
+        let (regular, bold) = (FontWeight::NORMAL, FontWeight::BOLD);
         assert_eq!(
             runs,
-            [(2, "Sans"), (2, "Mono"), (4, "Sans"), (2, "Mono")]
-                .map(|(len, family)| (len, family.to_string()))
+            [
+                (2, "Sans", regular),
+                (2, "Mono", bold),
+                (4, "Sans", regular),
+                (2, "Mono", bold)
+            ]
+            .map(|(len, family, weight)| (len, family.to_string(), weight))
         );
-        let runs = split_run_by_font_families(TextRun { len: 3, ..run }, 4..7, &font_families);
+        let runs = split_run_by_font_overrides(TextRun { len: 3, ..run }, 4..7, &font_overrides);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].font.family, "Sans");
 
         let mut wrapper = TextWrapper::new(test_font(), px(14.), None);
-        wrapper.font_families = Rc::from(font_families);
-        wrapper.adjust_font_families(&(0..0), 1);
-        wrapper.adjust_font_families(&(9..21), 0);
-        assert_eq!(
-            &*wrapper.font_families,
-            [(3..5, SharedString::from("Mono"))]
-        );
+        wrapper.font_overrides = Rc::from(font_overrides);
+        wrapper.adjust_font_overrides(&(0..0), 1);
+        wrapper.adjust_font_overrides(&(9..21), 0);
+        assert_eq!(&*wrapper.font_overrides, [(3..5, mono)]);
     }
 
     #[test]

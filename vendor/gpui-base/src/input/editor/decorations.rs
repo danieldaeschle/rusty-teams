@@ -1,7 +1,9 @@
 use crate::input::{DecoratedMode, EditorMode};
 use std::{collections::BTreeMap, ops::Range};
 
-use gpui::{App, Context, HighlightStyle, Hsla, SharedString, WeakEntity};
+use gpui::{
+    App, Context, Font, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, WeakEntity,
+};
 use ropey::Rope;
 use sum_tree::Bias;
 
@@ -72,7 +74,7 @@ impl RangeDecoration {
 pub struct TextDecoration {
     pub range: Range<usize>,
     pub style: HighlightStyle,
-    /// Font family override; unlike `style`, it changes glyph widths and soft wrapping.
+    /// Font family override. It, `style.font_weight` and `style.font_style` change soft wrapping.
     pub font_family: Option<SharedString>,
 }
 
@@ -530,14 +532,36 @@ pub(crate) fn adjust_range_for_edit(
     start..end
 }
 
-/// Non-overlapping font family spans sorted by start; earlier layers and items win.
-pub(crate) fn font_family_spans(layers: &[&[TextDecoration]]) -> Vec<(Range<usize>, SharedString)> {
-    let mut spans: Vec<(Range<usize>, SharedString)> = Vec::new();
-    for decoration in layers.iter().flat_map(|layer| layer.iter()) {
-        let Some(font_family) = &decoration.font_family else {
-            continue;
-        };
-        let mut uncovered = vec![decoration.range.clone()];
+/// The font properties a text decoration changes, which also change glyph widths.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct FontOverride {
+    pub(crate) family: Option<SharedString>,
+    pub(crate) weight: Option<FontWeight>,
+    pub(crate) style: Option<FontStyle>,
+}
+
+impl FontOverride {
+    pub(crate) fn apply(&self, font: &mut Font) {
+        if let Some(family) = &self.family {
+            font.family = family.clone();
+        }
+        if let Some(weight) = self.weight {
+            font.weight = weight;
+        }
+        if let Some(style) = self.style {
+            font.style = style;
+        }
+    }
+}
+
+/// Non-overlapping spans sorted by start; the first item covering a byte wins.
+fn first_wins_spans<V>(items: impl Iterator<Item = (Range<usize>, V)>) -> Vec<(Range<usize>, V)>
+where
+    V: Clone,
+{
+    let mut spans: Vec<(Range<usize>, V)> = Vec::new();
+    for (range, value) in items {
+        let mut uncovered = vec![range];
         for (covered, _) in &spans {
             uncovered = uncovered
                 .into_iter()
@@ -550,14 +574,62 @@ pub(crate) fn font_family_spans(layers: &[&[TextDecoration]]) -> Vec<(Range<usiz
                 .filter(|range| !range.is_empty())
                 .collect();
         }
-        spans.extend(
-            uncovered
-                .into_iter()
-                .map(|range| (range, font_family.clone())),
-        );
+        spans.extend(uncovered.into_iter().map(|range| (range, value.clone())));
     }
     spans.sort_by_key(|(range, _)| range.start);
     spans
+}
+
+/// Font overrides per byte span; earlier layers and items win per property.
+pub(crate) fn font_override_spans(
+    layers: &[&[TextDecoration]],
+) -> Vec<(Range<usize>, FontOverride)> {
+    let decorations = || layers.iter().flat_map(|layer| layer.iter());
+    let families = first_wins_spans(decorations().filter_map(|decoration| {
+        Some((decoration.range.clone(), decoration.font_family.clone()?))
+    }));
+    let weights =
+        first_wins_spans(decorations().filter_map(|decoration| {
+            Some((decoration.range.clone(), decoration.style.font_weight?))
+        }));
+    let styles =
+        first_wins_spans(decorations().filter_map(|decoration| {
+            Some((decoration.range.clone(), decoration.style.font_style?))
+        }));
+    let mut edges: Vec<usize> = families
+        .iter()
+        .map(|(range, _)| range)
+        .chain(weights.iter().map(|(range, _)| range))
+        .chain(styles.iter().map(|(range, _)| range))
+        .flat_map(|range| [range.start, range.end])
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    fn value_at<V: Clone>(spans: &[(Range<usize>, V)], offset: usize) -> Option<V> {
+        let ix = spans.partition_point(|(range, _)| range.end <= offset);
+        spans
+            .get(ix)
+            .filter(|(range, _)| range.start <= offset)
+            .map(|(_, value)| value.clone())
+    }
+    let mut result: Vec<(Range<usize>, FontOverride)> = Vec::new();
+    for segment in edges.windows(2) {
+        let font_override = FontOverride {
+            family: value_at(&families, segment[0]),
+            weight: value_at(&weights, segment[0]),
+            style: value_at(&styles, segment[0]),
+        };
+        if font_override == FontOverride::default() {
+            continue;
+        }
+        match result.last_mut() {
+            Some((range, last)) if range.end == segment[0] && *last == font_override => {
+                range.end = segment[1];
+            }
+            _ => result.push((segment[0]..segment[1], font_override)),
+        }
+    }
+    result
 }
 
 fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
@@ -634,7 +706,7 @@ impl<M: DecoratedMode> InputBaseState<M> {
     ///
     /// Collections are layered in insertion order; the first collection wins
     /// when overlapping decorations set the same [`HighlightStyle`] property
-    /// or font family. Only the font family affects layout and soft wrapping.
+    /// or font family. Font family, weight and style also affect soft wrapping.
     /// Callers should avoid conflicting overlaps within one collection.
     pub fn create_decorations_collection(
         &mut self,
@@ -824,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn font_family_spans_let_earlier_layers_and_items_win() {
+    fn font_override_spans_let_earlier_layers_and_items_win_per_property() {
         let style = HighlightStyle::default();
         let first = [
             TextDecoration::new(4..8, style).with_font_family("Mono"),
@@ -833,13 +905,60 @@ mod tests {
         ];
         let second = [TextDecoration::new(2..12, style).with_font_family("Other")];
         assert_eq!(TextDecoration::new(0..1, style).font_family, None);
+        let family = |name: &str| FontOverride {
+            family: Some(name.into()),
+            ..Default::default()
+        };
         assert_eq!(
-            font_family_spans(&[&first[..], &second[..]]),
+            font_override_spans(&[&first[..], &second[..]]),
             vec![
-                (2..4, "Other".into()),
-                (4..8, "Mono".into()),
-                (8..10, "Serif".into()),
-                (10..12, "Other".into()),
+                (2..4, family("Other")),
+                (4..8, family("Mono")),
+                (8..10, family("Serif")),
+                (10..12, family("Other")),
+            ]
+        );
+
+        let bold = HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        };
+        let italic = HighlightStyle {
+            font_style: Some(FontStyle::Italic),
+            font_weight: Some(FontWeight::LIGHT),
+            ..Default::default()
+        };
+        let layer = [
+            TextDecoration::new(0..6, bold).with_font_family("Mono"),
+            TextDecoration::new(4..8, italic),
+        ];
+        assert_eq!(
+            font_override_spans(&[&layer[..]]),
+            vec![
+                (
+                    0..4,
+                    FontOverride {
+                        family: Some("Mono".into()),
+                        weight: Some(FontWeight::BOLD),
+                        style: None,
+                    }
+                ),
+                (
+                    4..6,
+                    FontOverride {
+                        family: Some("Mono".into()),
+                        weight: Some(FontWeight::BOLD),
+                        style: Some(FontStyle::Italic),
+                    }
+                ),
+                (
+                    6..8,
+                    FontOverride {
+                        family: None,
+                        weight: Some(FontWeight::LIGHT),
+                        style: Some(FontStyle::Italic),
+                    }
+                ),
             ]
         );
     }

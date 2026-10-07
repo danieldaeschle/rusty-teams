@@ -20,8 +20,8 @@ use crate::{
     input::{
         RopeExt as _,
         blink_cursor::CURSOR_WIDTH,
-        decorations::font_family_spans,
-        display_map::{LineLayout, split_run_by_font_families},
+        decorations::font_override_spans,
+        display_map::{LineLayout, split_run_by_font_overrides},
     },
 };
 
@@ -2530,12 +2530,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window.text_system().layout_width(font_id, text_size, ' ')
         };
 
-        let font_families: Rc<[(Range<usize>, SharedString)]> = {
+        let font_overrides: Rc<[(Range<usize>, crate::input::decorations::FontOverride)]> = {
             let state = self.state.read(cx);
             if state.masked {
                 Rc::from([])
             } else {
-                font_family_spans(&state.extras.decoration_layers()).into()
+                font_override_spans(&state.extras.decoration_layers()).into()
             }
         };
         self.state.update(cx, |state, cx| {
@@ -2543,7 +2543,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             state.display_map.ensure_text_prepared(&state.text, cx);
             state
                 .display_map
-                .set_font_families(font_families.clone(), cx);
+                .set_font_overrides(font_overrides.clone(), cx);
         });
 
         let state = self.state.read(cx);
@@ -2703,7 +2703,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 }
 
                 let mut start = range.start;
-                for run in split_run_by_font_families(run, range.clone(), &font_families) {
+                for run in split_run_by_font_overrides(run, range.clone(), &font_overrides) {
                     let run_range = start..start + run.len;
                     start = run_range.end;
                     runs.extend(split_run_for_ime_underline(

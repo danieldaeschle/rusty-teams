@@ -235,13 +235,13 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
-    /// Measure these document byte ranges in another font family when wrapping.
-    pub(crate) fn set_font_families(
+    /// Measure these document byte ranges in another font when wrapping.
+    pub(crate) fn set_font_overrides(
         &mut self,
-        font_families: std::rc::Rc<[(Range<usize>, gpui::SharedString)]>,
+        font_overrides: std::rc::Rc<[(Range<usize>, crate::input::decorations::FontOverride)]>,
         cx: &mut App,
     ) {
-        self.wrap_map.set_font_families(font_families, cx);
+        self.wrap_map.set_font_overrides(font_overrides, cx);
         self.rebuild_fold_projection();
     }
 

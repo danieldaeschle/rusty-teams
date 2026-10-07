@@ -108,7 +108,7 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
-        self.wrapper.adjust_font_families(range, new_text.len());
+        self.wrapper.adjust_font_overrides(range, new_text.len());
         self.wrapper.adjust_hanging_indents(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
@@ -122,12 +122,12 @@ impl WrapMap {
         self.wrapper.set_inline_metrics(metrics, cx);
     }
 
-    pub(super) fn set_font_families(
+    pub(super) fn set_font_overrides(
         &mut self,
-        font_families: std::rc::Rc<[(Range<usize>, gpui::SharedString)]>,
+        font_overrides: std::rc::Rc<[(Range<usize>, crate::input::decorations::FontOverride)]>,
         cx: &mut App,
     ) {
-        self.wrapper.set_font_families(font_families, cx);
+        self.wrapper.set_font_overrides(font_overrides, cx);
     }
 
     pub(super) fn set_hanging_indents(
