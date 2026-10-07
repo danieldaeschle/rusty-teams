@@ -4,13 +4,13 @@
 )]
 
 mod app_state;
+mod assets;
 mod avatar_image;
 mod backend;
 mod data;
 mod demo;
 mod emoji;
 mod format;
-mod assets;
 mod frame_log;
 mod fuzzy;
 mod notify;
@@ -111,7 +111,9 @@ fn transport(endpoint: Option<&str>) -> Arc<dyn session::Transport> {
             window_title: format!("{APP_NAME} - Sign in"),
         });
     }
-    Arc::new(session::CdpTransport::new(endpoint.unwrap_or(session::DEFAULT_ENDPOINT)))
+    Arc::new(session::CdpTransport::new(
+        endpoint.unwrap_or(session::DEFAULT_ENDPOINT),
+    ))
 }
 
 fn main() {
@@ -128,7 +130,10 @@ fn main() {
         demo::seed(&store);
         store
     } else {
-        let path = arguments.database.clone().unwrap_or_else(|| data_path(DATABASE_FILE));
+        let path = arguments
+            .database
+            .clone()
+            .unwrap_or_else(|| data_path(DATABASE_FILE));
         Store::open(&path).expect("cache database")
     };
     let store = Arc::new(store);

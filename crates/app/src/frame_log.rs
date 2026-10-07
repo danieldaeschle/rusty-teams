@@ -41,7 +41,11 @@ fn statistics() -> Option<&'static Mutex<FrameStatistics>> {
 }
 
 fn append(path: &str, line: &str) {
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = writeln!(file, "{line}");
     }
 }

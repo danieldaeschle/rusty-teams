@@ -59,38 +59,29 @@ fn reaction_chip(chip: &ReactionChip) -> Div {
         .child(chip.count.to_string())
 }
 
-fn day_separator(label: &str) -> Div {
+fn labeled_divider(label: &str, line_color: Hsla, text_color: Hsla) -> Div {
     h_flex()
         .w_full()
         .items_center()
         .gap(px(12.))
         .mt(px(14.))
         .mb(px(6.))
-        .child(div().flex_1().h(px(1.)).bg(theme::border()))
+        .child(div().flex_1().h(px(1.)).bg(line_color))
         .child(
             div()
                 .text_size(px(11.))
-                .text_color(theme::text_muted())
+                .text_color(text_color)
                 .child(label.to_owned()),
         )
-        .child(div().flex_1().h(px(1.)).bg(theme::border()))
+        .child(div().flex_1().h(px(1.)).bg(line_color))
+}
+
+fn day_separator(label: &str) -> Div {
+    labeled_divider(label, theme::border(), theme::text_muted())
 }
 
 fn new_marker() -> Div {
-    h_flex()
-        .w_full()
-        .items_center()
-        .gap(px(10.))
-        .mt(px(12.))
-        .mb(px(2.))
-        .child(div().flex_1().h(px(1.)).bg(theme::accent()))
-        .child(
-            div()
-                .text_size(px(11.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::accent_text())
-                .child("New"),
-        )
+    labeled_divider("New", theme::accent(), theme::accent_text())
 }
 
 fn bubble(row: &MessageRow, index: usize, own: bool, directory: &Directory, cx: &App) -> Div {

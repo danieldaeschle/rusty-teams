@@ -342,7 +342,9 @@ pub fn read_message_ids(records: &[MessageRecord]) -> std::collections::HashSet<
     let newest = records.iter().max_by_key(|record| record.created_at);
     records
         .iter()
-        .filter(|record| Some(record.message_id.as_str()) != newest.map(|newest| newest.message_id.as_str()))
+        .filter(|record| {
+            Some(record.message_id.as_str()) != newest.map(|newest| newest.message_id.as_str())
+        })
         .map(|record| record.message_id.clone())
         .collect()
 }

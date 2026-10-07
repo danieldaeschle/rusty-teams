@@ -87,7 +87,10 @@ pub fn live_state_for(kind: StatusKind) -> LiveState {
     }
 }
 
-pub fn start(store: Arc<Store>, transport: Arc<dyn Transport>) -> mpsc::UnboundedReceiver<BackendEvent> {
+pub fn start(
+    store: Arc<Store>,
+    transport: Arc<dyn Transport>,
+) -> mpsc::UnboundedReceiver<BackendEvent> {
     let (sender, receiver) = mpsc::unbounded_channel();
     crate::runtime::handle().spawn(supervise(store, transport, sender));
     receiver

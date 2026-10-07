@@ -4,6 +4,8 @@ use teams_core::Span;
 
 pub const MENTION_PAD: char = '\u{2009}';
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
+const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
+const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StyleFlags {
@@ -64,7 +66,11 @@ impl Inline {
 
     pub fn with_trailing_room(&self, width_in_spaces: usize) -> Inline {
         let mut padded = self.clone();
-        padded.push(&"\u{2007}".repeat(width_in_spaces), StyleFlags::default(), None);
+        padded.push(
+            &"\u{2007}".repeat(width_in_spaces),
+            StyleFlags::default(),
+            None,
+        );
         padded
     }
 
@@ -189,6 +195,9 @@ fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Bloc
 fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mut Inline) {
     for span in spans {
         match span {
+            Span::Text(text) if link.is_none() && !style.code => {
+                push_linkified(text, style, out);
+            }
             Span::Text(text) => out.push(text, style, link),
             Span::Bold(children) => append_inline(
                 children,
@@ -257,6 +266,71 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
     }
 }
 
+fn push_linkified(text: &str, style: StyleFlags, out: &mut Inline) {
+    let mut rest = text;
+    while let Some((start, end)) = find_url(rest) {
+        out.push(&rest[..start], style, None);
+        let visible = &rest[start..end];
+        let target = if visible.starts_with("www.") {
+            format!("https://{visible}")
+        } else {
+            visible.to_owned()
+        };
+        out.push(
+            visible,
+            StyleFlags {
+                link: true,
+                ..style
+            },
+            Some(&target),
+        );
+        rest = &rest[end..];
+    }
+    out.push(rest, style, None);
+}
+
+fn find_url(text: &str) -> Option<(usize, usize)> {
+    let mut previous_is_boundary = true;
+    for (start, character) in text.char_indices() {
+        if previous_is_boundary
+            && let Some(prefix) = URL_PREFIXES
+                .iter()
+                .find(|prefix| text[start..].starts_with(**prefix))
+        {
+            let length = text[start..]
+                .find(char::is_whitespace)
+                .unwrap_or(text.len() - start);
+            let end = start + trimmed_url_length(&text[start..start + length]);
+            if end > start + prefix.len() {
+                return Some((start, end));
+            }
+        }
+        previous_is_boundary = !character.is_alphanumeric();
+    }
+    None
+}
+
+fn trimmed_url_length(candidate: &str) -> usize {
+    let mut url = candidate;
+    while let Some(last) = url.chars().next_back() {
+        let opener = match last {
+            ')' => Some('('),
+            ']' => Some('['),
+            '}' => Some('{'),
+            _ => None,
+        };
+        let trimmable = match opener {
+            Some(opener) => url.matches(last).count() > url.matches(opener).count(),
+            None => TRAILING_PUNCTUATION.contains(last),
+        };
+        if !trimmable {
+            break;
+        }
+        url = &url[..url.len() - last.len_utf8()];
+    }
+    url.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,6 +376,68 @@ mod tests {
         assert_eq!(
             inline.links(),
             vec![(4..8, "https://example.com".to_owned())]
+        );
+    }
+
+    fn paragraph_inline(spans: &[Span]) -> Inline {
+        let Block::Paragraph(inline) = layout_blocks(spans).remove(0) else {
+            panic!("paragraph expected")
+        };
+        inline
+    }
+
+    #[test]
+    fn plain_url_at_end_becomes_link() {
+        let inline = paragraph_inline(&[text("see https://example.com/a")]);
+        assert_eq!(
+            inline.links(),
+            vec![(4..25, "https://example.com/a".to_owned())]
+        );
+        assert!(inline.segments[1].style.link);
+    }
+
+    #[test]
+    fn trailing_period_stays_outside_url() {
+        let inline = paragraph_inline(&[text("go to http://example.com. Then")]);
+        assert_eq!(
+            inline.links(),
+            vec![(6..24, "http://example.com".to_owned())]
+        );
+    }
+
+    #[test]
+    fn balanced_parentheses_stay_in_url() {
+        let inline = paragraph_inline(&[text("https://example.com/Rust_(language)")]);
+        assert_eq!(inline.links()[0].1, "https://example.com/Rust_(language)");
+        let wrapped = paragraph_inline(&[text("(see https://example.com)")]);
+        assert_eq!(wrapped.links()[0].1, "https://example.com");
+    }
+
+    #[test]
+    fn www_url_gets_https_target() {
+        let inline = paragraph_inline(&[text("www.example.com!")]);
+        assert_eq!(inline.text, "www.example.com!");
+        assert_eq!(
+            inline.links(),
+            vec![(0..15, "https://www.example.com".to_owned())]
+        );
+    }
+
+    #[test]
+    fn text_without_url_has_no_links() {
+        let inline = paragraph_inline(&[text("no link, just www. and https:// here")]);
+        assert!(inline.links().is_empty());
+    }
+
+    #[test]
+    fn url_inside_link_stays_one_link() {
+        let inline = paragraph_inline(&[Span::Link {
+            url: "https://target.example".into(),
+            children: vec![text("https://shown.example")],
+        }]);
+        assert_eq!(
+            inline.links(),
+            vec![(0..21, "https://target.example".to_owned())]
         );
     }
 

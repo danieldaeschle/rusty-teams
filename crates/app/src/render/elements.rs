@@ -145,10 +145,10 @@ fn render_inline_with_chips(inline: &Inline, id: &str, own: bool) -> AnyElement 
                     format!("{id}-{segment_index}-{word_index}").into(),
                 ))
                 .whitespace_nowrap()
-                .child(StyledText::new(word.to_owned()).with_highlights([(
-                    0..word.len(),
-                    highlight_for(segment.style, own),
-                )]));
+                .child(
+                    StyledText::new(word.to_owned())
+                        .with_highlights([(0..word.len(), highlight_for(segment.style, own))]),
+                );
             if let Some(url) = segment.link.clone() {
                 piece = piece
                     .cursor_pointer()

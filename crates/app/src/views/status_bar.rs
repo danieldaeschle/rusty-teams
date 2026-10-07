@@ -3,8 +3,8 @@ use gpui_kit::component::{h_flex, tooltip::Tooltip};
 use gpui_kit::*;
 
 use crate::app_state::{AppState, Mode};
-use crate::format;
 use crate::backend::{ConnectionState, LiveState};
+use crate::format;
 use crate::theme;
 use crate::updater::{self, UpdateStatus};
 

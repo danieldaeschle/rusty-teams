@@ -81,7 +81,9 @@ pub fn person_avatar(
 }
 
 pub fn presence_size(avatar_size: f32) -> f32 {
-    (avatar_size * PRESENCE_RATIO).round().clamp(PRESENCE_MIN, PRESENCE_MAX)
+    (avatar_size * PRESENCE_RATIO)
+        .round()
+        .clamp(PRESENCE_MIN, PRESENCE_MAX)
 }
 
 pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<Div> {
@@ -102,13 +104,9 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
         .items_center()
         .justify_center();
     center = match kind {
-        PresenceKind::DoNotDisturb => center.child(
-            div()
-                .w(px(inner - 4.))
-                .h(px(2.))
-                .rounded(px(1.))
-                .bg(ring),
-        ),
+        PresenceKind::DoNotDisturb => {
+            center.child(div().w(px(inner - 4.)).h(px(2.)).rounded(px(1.)).bg(ring))
+        }
         PresenceKind::Offline => center.border(px(1.5)).border_color(theme::text_muted()),
         _ => center,
     };
