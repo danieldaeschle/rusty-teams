@@ -358,6 +358,8 @@ impl AppState {
             return;
         }
         if let Some(engine) = self.engine.clone() {
+            let _ = self.store.mark_chat_read(conversation_id, chrono::Utc::now());
+            self.reload_sidebar(cx);
             let conversation_id = conversation_id.to_owned();
             drop(crate::runtime::spawn(async move {
                 engine.mark_read(&conversation_id).await

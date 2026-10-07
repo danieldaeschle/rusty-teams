@@ -737,3 +737,24 @@ fn a_team_is_found_by_id() {
     assert_eq!(store.team("t1").unwrap().unwrap().name, "Alpha");
     assert!(store.team("nope").unwrap().is_none());
 }
+
+#[test]
+fn sync_does_not_resurrect_a_locally_read_chat() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5)))])
+        .unwrap();
+    store.mark_chat_read("chat-1", at(10)).unwrap();
+
+    store
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5)))])
+        .unwrap();
+    let stale = store.chat("chat-1").unwrap().unwrap();
+    assert!(!stale.unread);
+    assert_eq!(stale.last_read_at, Some(at(10)));
+
+    store
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(12)))])
+        .unwrap();
+    assert!(store.chat("chat-1").unwrap().unwrap().unread);
+}

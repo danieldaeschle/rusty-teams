@@ -14,6 +14,7 @@ mod format;
 mod frame_log;
 mod fuzzy;
 mod notify;
+mod read_state;
 mod render;
 mod rows;
 mod runtime;

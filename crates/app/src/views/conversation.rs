@@ -29,6 +29,7 @@ use crate::rows::{
     changed_indices, diff_keys, flat_rows, placeholder_rows, reply_excerpt, thread_list_rows,
     thread_rows, trailing_skeleton,
 };
+use crate::read_state::{ReadTrigger, plan_read};
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
@@ -103,6 +104,7 @@ pub struct ConversationView {
     highlighted_message: Option<String>,
     notice: Option<String>,
     sync_generation: u64,
+    window_active: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,6 +126,7 @@ impl ConversationView {
         let subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
+            cx.observe_window_activation(window, Self::on_window_activation),
         ];
         let mut view = ConversationView {
             app,
@@ -138,6 +141,7 @@ impl ConversationView {
             highlighted_message: None,
             notice: None,
             sync_generation: 0,
+            window_active: window.is_window_active(),
             _subscriptions: subscriptions,
         };
         if let Some(selection) = view.app.read(cx).selection.clone() {
@@ -156,6 +160,11 @@ impl ConversationView {
         self.pending
             .iter()
             .any(|row| matches!(row.delivery, Delivery::Sending))
+    }
+
+    fn on_window_activation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_active = window.is_window_active();
+        self.mark_read(ReadTrigger::Activation, cx);
     }
 
     fn on_app_event(
@@ -178,7 +187,7 @@ impl ConversationView {
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
                     self.rebuild(false, cx);
-                    self.mark_read(cx);
+                    self.mark_read(ReadTrigger::Incoming, cx);
                 }
             }
             AppEvent::Images(keys) => self.remeasure_images(keys, cx),
@@ -193,6 +202,7 @@ impl ConversationView {
             }
             AppEvent::Directory => cx.notify(),
             AppEvent::Sidebar => {
+                self.mark_read(ReadTrigger::Incoming, cx);
                 if let Some(current) = self.current.as_mut() {
                     let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
                     if current.title != title {
@@ -244,7 +254,7 @@ impl ConversationView {
         self.notice = None;
         self.rebuild(true, cx);
         self.start_fetch(cx);
-        self.mark_read(cx);
+        self.mark_read(ReadTrigger::Open, cx);
         let target = self
             .current
             .as_ref()
@@ -652,7 +662,7 @@ impl ConversationView {
         }
         self.schedule_progress(generation, cx);
         self.rebuild(false, cx);
-        self.mark_read(cx);
+        self.mark_read(ReadTrigger::Incoming, cx);
         self.refresh_receipts(generation, cx);
     }
 
@@ -881,15 +891,13 @@ impl ConversationView {
         .detach();
     }
 
-    fn mark_read(&mut self, cx: &mut Context<Self>) {
+    fn mark_read(&mut self, trigger: ReadTrigger, cx: &mut Context<Self>) {
         let state = self.app.read(cx);
-        let (Some(engine), Some(Selection::Chat(chat_id))) = (
-            state.engine.clone(),
-            self.current.as_ref().map(|c| c.selection.clone()),
-        ) else {
+        let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|c| c.selection.clone())
+        else {
             return;
         };
-        if state.mode.read_only || state.mode.demo {
+        if (state.engine.is_none() && !state.mode.demo) || state.mode.read_only {
             return;
         }
         let unread = state
@@ -897,12 +905,17 @@ impl ConversationView {
             .chats
             .iter()
             .any(|chat| chat.id == chat_id && chat.unread);
-        if !unread {
+        let Some(plan) = plan_read(self.window_active, unread, trigger) else {
             return;
+        };
+        self.app
+            .update(cx, |state, cx| state.mark_chat_read(&chat_id, cx));
+        if plan.clear_divider
+            && let Some(current) = self.current.as_mut()
+            && current.first_unread.take().is_some()
+        {
+            self.rebuild(false, cx);
         }
-        drop(runtime::spawn(
-            async move { engine.mark_read(&chat_id).await },
-        ));
     }
 
     fn request_older(&mut self, cx: &mut Context<Self>) {

@@ -22,8 +22,13 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind, title = excluded.title, member_summary = excluded.member_summary,
-                    last_message_at = excluded.last_message_at, last_read_at = excluded.last_read_at,
-                    unread = excluded.unread, last_message_preview = excluded.last_message_preview,
+                    last_message_at = excluded.last_message_at,
+                    last_read_at = COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at),
+                    unread = excluded.unread AND (
+                        excluded.last_message_at IS NULL
+                        OR COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at) IS NULL
+                        OR excluded.last_message_at > COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at)
+                    ), last_message_preview = excluded.last_message_preview,
                     last_message_sender_id = excluded.last_message_sender_id,
                     last_message_sender_name = excluded.last_message_sender_name,
                     last_message_deleted = excluded.last_message_deleted",
