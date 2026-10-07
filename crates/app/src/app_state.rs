@@ -49,6 +49,7 @@ pub struct AppState {
     pub sidebar: Sidebar,
     pub favorite_ids: Vec<String>,
     pub selection: Option<Selection>,
+    pub new_chat: bool,
     pub connection: ConnectionState,
     pub live: LiveState,
     pub last_sync: Option<DateTime<Utc>>,
@@ -101,6 +102,7 @@ impl AppState {
             sidebar,
             favorite_ids: Vec::new(),
             selection: None,
+            new_chat: false,
             connection: if mode.demo {
                 ConnectionState::Online
             } else {
@@ -362,7 +364,9 @@ impl AppState {
             return;
         }
         if let Some(engine) = self.engine.clone() {
-            let _ = self.store.mark_chat_read(conversation_id, chrono::Utc::now());
+            let _ = self
+                .store
+                .mark_chat_read(conversation_id, chrono::Utc::now());
             self.reload_sidebar(cx);
             let conversation_id = conversation_id.to_owned();
             drop(crate::runtime::spawn(async move {
@@ -371,8 +375,24 @@ impl AppState {
         }
     }
 
+    pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
+        self.new_chat = true;
+        cx.emit(AppEvent::Selection);
+        cx.notify();
+    }
+
+    pub fn close_new_chat(&mut self, cx: &mut Context<Self>) {
+        if !self.new_chat {
+            return;
+        }
+        self.new_chat = false;
+        cx.emit(AppEvent::Selection);
+        cx.notify();
+    }
+
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
-        if self.selection.as_ref() == Some(&selection) {
+        let was_drafting = std::mem::take(&mut self.new_chat);
+        if !was_drafting && self.selection.as_ref() == Some(&selection) {
             return;
         }
         self.selection = Some(selection);

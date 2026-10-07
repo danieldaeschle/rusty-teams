@@ -5,6 +5,7 @@ pub mod conversation;
 pub mod emoji_popup;
 pub mod message_actions;
 pub mod message_row;
+pub mod new_chat;
 pub mod reaction_picker;
 pub mod shell;
 pub mod sidebar;

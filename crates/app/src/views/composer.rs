@@ -443,6 +443,12 @@ impl Composer {
         cx.notify();
     }
 
+    pub fn set_placeholder(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = text.to_owned();
+        self.input
+            .update(cx, |state, cx| state.set_placeholder(text, window, cx));
+    }
+
     pub fn set_conversation(
         &mut self,
         conversation_id: &str,
@@ -450,10 +456,7 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let placeholder = format!("Message {name}");
-        self.input.update(cx, |state, cx| {
-            state.set_placeholder(placeholder, window, cx)
-        });
+        self.set_placeholder(&format!("Message {name}"), window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
             self.conversation_id = Some(conversation_id.to_owned());
             self.reply = None;

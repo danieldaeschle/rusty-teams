@@ -11,14 +11,17 @@ use crate::notify::NotificationCenter;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 
-actions!(teams, [OpenSwitcher]);
+actions!(teams, [OpenSwitcher, NewChat]);
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-k", OpenSwitcher, None),
+        KeyBinding::new("ctrl-n", NewChat, None),
         KeyBinding::new("alt-r", ReplyToHovered, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-k", OpenSwitcher, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-n", NewChat, None),
     ]);
 }
 
@@ -254,6 +257,9 @@ impl Render for AppShell {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewChat, _, cx| {
+                this.state.update(cx, |state, cx| state.start_new_chat(cx));
             }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.conversation.update(cx, |conversation, cx| {

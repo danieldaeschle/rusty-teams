@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelRecord, SidebarTeam, TeamRecord};
@@ -33,6 +33,7 @@ const TEAMS_LABEL: &str = "Teams";
 const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
+const NEW_CHAT_BUTTON_SIZE: f32 = 34.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SidebarTab {
@@ -105,7 +106,10 @@ fn preview_icon(text: &str) -> Option<IconName> {
 
 impl SidebarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
-        let subscription = cx.subscribe(&state, |_, _, event: &AppEvent, cx| {
+        let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
+            if matches!(event, AppEvent::Selection) && state.read(cx).new_chat {
+                this.tab = SidebarTab::Chats;
+            }
             if matches!(
                 event,
                 AppEvent::Sidebar | AppEvent::Selection | AppEvent::Directory
@@ -174,18 +178,91 @@ impl SidebarView {
         let chat_marker =
             (unread_chats > 0).then(|| count_badge(unread_chats, false).into_any_element());
         let channel_marker = channel_dot.then(|| dot(7.).into_any_element());
-        div().w_full().px(px(12.)).pt(px(12.)).pb(px(8.)).child(
-            h_flex()
-                .w_full()
-                .gap(px(4.))
-                .p(px(3.))
-                .rounded(px(8.))
-                .bg(theme::background())
-                .border_1()
-                .border_color(theme::border())
-                .child(self.tab_button(SidebarTab::Chats, "Chats", chat_marker, cx))
-                .child(self.tab_button(SidebarTab::Channels, "Channels", channel_marker, cx)),
-        )
+        h_flex()
+            .w_full()
+            .px(px(12.))
+            .pt(px(12.))
+            .pb(px(8.))
+            .gap(px(8.))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(4.))
+                    .p(px(3.))
+                    .rounded(px(8.))
+                    .bg(theme::background())
+                    .border_1()
+                    .border_color(theme::border())
+                    .child(self.tab_button(SidebarTab::Chats, "Chats", chat_marker, cx))
+                    .child(self.tab_button(SidebarTab::Channels, "Channels", channel_marker, cx)),
+            )
+            .child(self.new_chat_button(cx))
+    }
+
+    fn new_chat_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active = self.state.read(cx).new_chat;
+        div()
+            .id("new-chat")
+            .size(px(NEW_CHAT_BUTTON_SIZE))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(theme::border())
+            .cursor_pointer()
+            .when(active, |button| button.bg(theme::surface_raised()))
+            .hover(|button| button.bg(theme::row_hover()))
+            .tooltip(|window, cx| Tooltip::new("New chat (Ctrl+N)").build(window, cx))
+            .child(icon(IconName::Pencil, 16., theme::text_soft()))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.state.update(cx, |state, cx| state.start_new_chat(cx));
+            }))
+    }
+
+    fn draft_row(&self) -> impl IntoElement {
+        h_flex()
+            .id("new-chat-draft")
+            .mx(px(8.))
+            .h(px(ROW_HEIGHT))
+            .px(px(8.))
+            .gap(px(10.))
+            .items_center()
+            .rounded(px(8.))
+            .bg(theme::surface_raised())
+            .child(
+                div()
+                    .size(px(AVATAR_SIZE))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(theme::border_strong())
+                    .child(icon(IconName::Pencil, 16., theme::text())),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(14.))
+                            .text_color(theme::text())
+                            .child("New chat"),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .text_color(theme::text_muted())
+                            .child("Draft"),
+                    ),
+            )
     }
 
     fn section_header(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
@@ -455,13 +532,23 @@ impl SidebarView {
         };
         let (visible_from, visible_to) = (top - VIEWPORT_MARGIN, top + height + VIEWPORT_MARGIN);
 
-        let selected = self.state.read(cx).selection.clone();
+        let (selected, drafting) = {
+            let state = self.state.read(cx);
+            (
+                state.selection.clone().filter(|_| !state.new_chat),
+                state.new_chat,
+            )
+        };
         let mut faces: Vec<String> = Vec::new();
         let mut presence_users: Vec<String> = Vec::new();
         let mut y = 0.;
         let mut list = v_flex().w_full().pb(px(12.));
         let mut skipped_height = 0.;
         let directory_state = self.state.clone();
+        if drafting {
+            list = list.child(self.draft_row());
+            y += ROW_HEIGHT;
+        }
         for section in &sections {
             list = with_spacer(list, &mut skipped_height);
             list = list.child(self.section_header(section, cx));
@@ -820,7 +907,7 @@ impl SidebarView {
             (
                 state.sidebar.clone(),
                 state.directory.pinned_channels.clone(),
-                state.selection.clone(),
+                state.selection.clone().filter(|_| !state.new_chat),
             )
         };
         let mut list = v_flex().w_full().pb(px(12.));

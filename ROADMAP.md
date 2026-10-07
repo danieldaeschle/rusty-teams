@@ -2,14 +2,14 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 55 %** (42 done, 5 partial, 34 missing of 81). Partial counts half.
+**Parity: 56 %** (43 done, 4 partial, 34 missing of 81). Partial counts half.
 
 ## By area
 
 | Area | Parity | Done | Partial | Missing |
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
-| [Chat list](#chat-list) | 55 % | 5 | 1 | 4 |
+| [Chat list](#chat-list) | 60 % | 6 | 0 | 4 |
 | [Reading](#reading) | 70 % | 10 | 1 | 4 |
 | [Writing](#writing) | 61 % | 8 | 1 | 5 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
@@ -24,15 +24,14 @@ Feature parity with the Microsoft Teams desktop client.
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | New chat: 1:1 and group with title | Backend is done |
-| 2 | Attach a file, paste or drag an image |  |
-| 3 | Channel: new post with subject, post cards |  |
-| 4 | Sign in on Linux without Chrome on a debug port |  |
-| 5 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
-| 6 | Emoji picker in the composer | Reaction picker exists |
-| 7 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
-| 8 | Typing indicator |  |
-| 9 | Unsent messages survive a restart |  |
+| 1 | Attach a file, paste or drag an image |  |
+| 2 | Channel: new post with subject, post cards |  |
+| 3 | Sign in on Linux without Chrome on a debug port |  |
+| 4 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
+| 5 | Emoji picker in the composer | Reaction picker exists |
+| 6 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 7 | Typing indicator |  |
+| 8 | Unsent messages survive a restart |  |
 
 ## Sign-in and app
 
@@ -54,7 +53,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Chat folders (custom sections), move by menu or drag | Done |  |
 | Hidden teams | Done |  |
 | Unread bold, unread count, mention marker | Done |  |
-| New chat: 1:1 and group with title | Partial | Backend done, no UI |
+| New chat: 1:1 and group with title | Done |  |
 | Mark as unread | Missing |  |
 | Mute chat | Missing |  |
 | Hide chat, leave chat | Missing |  |

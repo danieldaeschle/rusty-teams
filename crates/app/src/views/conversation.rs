@@ -8,6 +8,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
+    input::Escape,
     message_scroller::{MessageScroller, MessageScrollerState},
     v_flex,
 };
@@ -20,6 +21,7 @@ use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, wit
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu};
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
+use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::widgets::icon;
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
@@ -103,6 +105,10 @@ pub struct ConversationView {
     app: Entity<AppState>,
     scroller: Entity<MessageScrollerState>,
     composer: Entity<Composer>,
+    draft: Entity<NewChatDraft>,
+    draft_active: bool,
+    draft_created: Option<(Vec<String>, String)>,
+    draft_error: Option<String>,
     rows: Rc<RefCell<Vec<Row>>>,
     current: Option<Current>,
     pending: Vec<MessageRow>,
@@ -135,15 +141,21 @@ impl ConversationView {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
         let picker = cx.new(|cx| ReactionPicker::new(app.clone(), window, cx));
+        let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
+            cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.observe_window_activation(window, Self::on_window_activation),
         ];
         let mut view = ConversationView {
             app,
             scroller,
             composer,
+            draft,
+            draft_active: false,
+            draft_created: None,
+            draft_error: None,
             rows: Rc::new(RefCell::new(Vec::new())),
             current: None,
             pending: Vec::new(),
@@ -191,8 +203,23 @@ impl ConversationView {
     ) {
         match event {
             AppEvent::Selection => {
-                if let Some(selection) = self.app.read(cx).selection.clone() {
-                    self.open(selection, window, cx);
+                let (new_chat, selection) = {
+                    let state = self.app.read(cx);
+                    (state.new_chat, state.selection.clone())
+                };
+                if new_chat {
+                    self.enter_draft(window, cx);
+                    return;
+                }
+                if self.draft_active {
+                    self.leave_draft(window, cx);
+                }
+                match selection {
+                    Some(selection) => self.open(selection, window, cx),
+                    None => {
+                        self.current = None;
+                        self.rebuild(true, cx);
+                    }
                 }
             }
             AppEvent::Messages(conversation_id) => {
@@ -218,7 +245,9 @@ impl ConversationView {
             AppEvent::Directory => cx.notify(),
             AppEvent::Sidebar => {
                 self.mark_read(ReadTrigger::Incoming, cx);
-                if let Some(current) = self.current.as_mut() {
+                if self.draft_active {
+                    self.on_draft_changed(window, cx);
+                } else if let Some(current) = self.current.as_mut() {
                     let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
                     if current.title != title {
                         current.title = title.clone();
@@ -241,6 +270,9 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) {
         match event {
+            ComposerEvent::Submit(outgoing) if self.draft_active => {
+                self.send_new_chat(outgoing.clone(), window, cx)
+            }
             ComposerEvent::Submit(outgoing) if outgoing.edit.is_some() => {
                 self.send_edit(outgoing.clone(), window, cx)
             }
@@ -289,10 +321,102 @@ impl ConversationView {
             .unwrap_or_default();
         self.composer.update(cx, |composer, cx| {
             composer.set_conversation(&target.0, &target.1, window, cx);
-            composer.focus(window, cx);
         });
+        if !self.draft_active {
+            self.composer
+                .update(cx, |composer, cx| composer.focus(window, cx));
+        }
         self.hovered_message = None;
         self.apply_pending_jump(cx);
+    }
+
+    fn enter_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.draft_active {
+            self.draft_active = true;
+            self.current = None;
+            self.pending.clear();
+            self.pending_outgoing.clear();
+            self.notice = None;
+            self.draft_created = None;
+            self.draft_error = None;
+            self.toolbar_hovered = None;
+            self.toolbar_pinned = None;
+            self.hovered_message = None;
+            self.sync_generation += 1;
+            self.draft.update(cx, |draft, cx| draft.reset(window, cx));
+            self.composer.update(cx, |composer, cx| {
+                composer.set_conversation("", "", window, cx)
+            });
+            self.on_draft_changed(window, cx);
+            self.rebuild(true, cx);
+        }
+        self.draft
+            .update(cx, |draft, cx| draft.focus_query(window, cx));
+        cx.notify();
+    }
+
+    fn leave_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.draft_active = false;
+        self.draft_created = None;
+        self.draft_error = None;
+        self.pending.clear();
+        self.pending_outgoing.clear();
+        self.draft.update(cx, |draft, cx| draft.reset(window, cx));
+    }
+
+    fn on_draft_event(
+        &mut self,
+        _: &Entity<NewChatDraft>,
+        event: &NewChatEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            NewChatEvent::Changed => self.on_draft_changed(window, cx),
+            NewChatEvent::FocusComposer => self
+                .composer
+                .update(cx, |composer, cx| composer.focus(window, cx)),
+            NewChatEvent::Close => self.app.update(cx, |state, cx| state.close_new_chat(cx)),
+        }
+    }
+
+    fn draft_target_chat(&self, cx: &App) -> Option<String> {
+        let chips = self.draft.read(cx).chips();
+        let [chip] = chips else {
+            return None;
+        };
+        let state = self.app.read(cx);
+        existing_one_on_one(
+            &state.sidebar.chats,
+            state.directory.me.as_ref(),
+            &chip.user_id,
+        )
+        .map(|chat| chat.id.clone())
+    }
+
+    fn on_draft_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.draft_active {
+            return;
+        }
+        let target = self.draft_target_chat(cx);
+        if target != self.conversation_id() {
+            match target {
+                Some(chat_id) => self.open(Selection::Chat(chat_id), window, cx),
+                None => {
+                    self.current = None;
+                    self.sync_generation += 1;
+                    self.rebuild(true, cx);
+                }
+            }
+        }
+        let placeholder = {
+            let draft = self.draft.read(cx);
+            composer_placeholder(draft.chips(), &draft.group_name(cx))
+        };
+        self.composer.update(cx, |composer, cx| {
+            composer.set_placeholder(&placeholder, window, cx)
+        });
+        cx.notify();
     }
 
     fn remeasure_images(&mut self, keys: &[String], cx: &mut Context<Self>) {
@@ -506,7 +630,14 @@ impl ConversationView {
 
     fn rebuild(&mut self, reset: bool, cx: &mut Context<Self>) {
         let Some(current) = self.current.as_ref() else {
-            self.apply_rows(Vec::new(), true, cx);
+            let mut rows: Vec<Row> = self
+                .pending
+                .iter()
+                .cloned()
+                .map(|row| Row::Message(Box::new(row)))
+                .collect();
+            assign_series(&mut rows);
+            self.apply_rows(rows, true, cx);
             return;
         };
         let conversation_id = current.selection.conversation_id().to_owned();
@@ -914,6 +1045,9 @@ impl ConversationView {
     }
 
     fn mark_read(&mut self, trigger: ReadTrigger, cx: &mut Context<Self>) {
+        if self.draft_active {
+            return;
+        }
         let state = self.app.read(cx);
         let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|c| c.selection.clone())
         else {
@@ -1019,52 +1153,17 @@ impl ConversationView {
         let Some(current) = self.current.as_ref() else {
             return;
         };
-        let restore =
-            |this: &mut Self, message: &str, window: &mut Window, cx: &mut Context<Self>| {
-                this.notice = Some(message.to_owned());
-                this.composer
-                    .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
-                cx.notify();
-            };
         if mode.read_only || mode.demo {
-            restore(self, "Read-only mode: nothing was sent", window, cx);
+            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
             return;
         }
         let Some(engine) = engine else {
-            restore(self, "Not connected yet: nothing was sent", window, cx);
+            self.restore_unsent("Not connected yet: nothing was sent", &outgoing, window, cx);
             return;
         };
         let conversation_id = current.selection.conversation_id().to_owned();
         let view_mode = current.mode.clone();
-        self.pending_counter += 1;
-        let key = format!("{PENDING_KEY_PREFIX}{}", self.pending_counter);
-        let my_user_id = self.row_context(cx).my_user_id;
-        self.pending_outgoing.insert(key.clone(), outgoing.clone());
-        self.pending.push(MessageRow {
-            key: key.clone(),
-            author: "You".to_owned(),
-            sender_id: my_user_id,
-            created_at: Utc::now(),
-            series: Series::default(),
-            card: false,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            day_header: None,
-            blocks: vec![Block::Paragraph(Inline::plain(&outgoing.text))],
-            edited: false,
-            deleted: false,
-            reactions: Vec::new(),
-            images: Vec::new(),
-            files: Vec::new(),
-            reply_count: None,
-            new_marker: false,
-            reply_faces: Vec::new(),
-            last_reply_time: None,
-            open_thread: None,
-            is_reply: false,
-            delivery: Delivery::Sending,
-            receipt: Receipt::Hidden,
-            own: true,
-        });
+        let key = self.push_pending(&outgoing, cx);
         self.notice = None;
         self.rebuild(false, cx);
         self.scroller
@@ -1110,6 +1209,197 @@ impl ConversationView {
             .ok();
         })
         .detach();
+    }
+
+    fn restore_unsent(
+        &mut self,
+        message: &str,
+        outgoing: &Outgoing,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.notice = Some(message.to_owned());
+        self.composer
+            .update(cx, |composer, cx| composer.restore(outgoing, window, cx));
+        cx.notify();
+    }
+
+    fn push_pending(&mut self, outgoing: &Outgoing, cx: &App) -> String {
+        self.pending_counter += 1;
+        let key = format!("{PENDING_KEY_PREFIX}{}", self.pending_counter);
+        let my_user_id = self.row_context(cx).my_user_id;
+        self.pending_outgoing.insert(key.clone(), outgoing.clone());
+        self.pending.push(MessageRow {
+            key: key.clone(),
+            author: "You".to_owned(),
+            sender_id: my_user_id,
+            created_at: Utc::now(),
+            series: Series::default(),
+            card: false,
+            time: chrono::Local::now().format("%H:%M").to_string(),
+            day_header: None,
+            blocks: vec![Block::Paragraph(Inline::plain(&outgoing.text))],
+            edited: false,
+            deleted: false,
+            reactions: Vec::new(),
+            images: Vec::new(),
+            files: Vec::new(),
+            reply_count: None,
+            new_marker: false,
+            reply_faces: Vec::new(),
+            last_reply_time: None,
+            open_thread: None,
+            is_reply: false,
+            delivery: Delivery::Sending,
+            receipt: Receipt::Hidden,
+            own: true,
+        });
+        key
+    }
+
+    fn send_new_chat(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        let (recipients, topic) = {
+            let draft = self.draft.read(cx);
+            let topic = Some(draft.group_name(cx)).filter(|name| !name.is_empty());
+            (draft.chips().to_vec(), topic)
+        };
+        if recipients.is_empty() {
+            self.restore_unsent("Add at least one person first", &outgoing, window, cx);
+            self.draft
+                .update(cx, |draft, cx| draft.focus_query(window, cx));
+            return;
+        }
+        if self
+            .pending
+            .iter()
+            .any(|row| matches!(row.delivery, Delivery::Sending))
+        {
+            self.restore_unsent("Still creating the chat", &outgoing, window, cx);
+            return;
+        }
+        let state = self.app.read(cx);
+        let (mode, engine) = (state.mode, state.engine.clone());
+        if mode.read_only {
+            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
+            return;
+        }
+        if mode.demo {
+            self.send_demo_new_chat(&outgoing, &recipients, topic.as_deref(), cx);
+            return;
+        }
+        let Some(engine) = engine else {
+            self.restore_unsent("Not connected yet: nothing was sent", &outgoing, window, cx);
+            return;
+        };
+        let user_ids: Vec<String> = recipients.into_iter().map(|pick| pick.user_id).collect();
+        let known_chat = self
+            .draft_created
+            .as_ref()
+            .filter(|(created_for, _)| *created_for == user_ids)
+            .map(|(_, chat_id)| chat_id.clone())
+            .or_else(|| self.draft_target_chat(cx));
+        self.pending.clear();
+        self.pending_outgoing.clear();
+        self.draft_error = None;
+        self.notice = None;
+        let key = self.push_pending(&outgoing, cx);
+        self.rebuild(true, cx);
+        let recipients_for_finish = user_ids.clone();
+        let receiver = runtime::spawn(async move {
+            let chat_id = match known_chat {
+                Some(chat_id) => chat_id,
+                None => {
+                    let created = match user_ids.as_slice() {
+                        [user_id] => engine.create_one_on_one(user_id).await,
+                        _ => engine.create_group(&user_ids, topic.as_deref()).await,
+                    };
+                    match created {
+                        Ok(chat_id) => chat_id,
+                        Err(error) => return (None, Some(short_error(&error))),
+                    }
+                }
+            };
+            let sent = engine
+                .send_message_with_mentions(&chat_id, &outgoing.text, None, &outgoing.mentions)
+                .await;
+            (Some(chat_id), sent.err().map(|error| short_error(&error)))
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = receiver.await;
+            this.update_in(cx, |this, _, cx| {
+                this.finish_new_chat(&key, recipients_for_finish, result, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn finish_new_chat(
+        &mut self,
+        key: &str,
+        user_ids: Vec<String>,
+        result: Result<(Option<String>, Option<String>), tokio::sync::oneshot::error::RecvError>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.draft_active || !self.pending.iter().any(|row| row.key == key) {
+            return;
+        }
+        let (chat_id, error) = result.unwrap_or((None, Some("cancelled".to_owned())));
+        self.draft_created = chat_id.clone().map(|chat_id| (user_ids, chat_id));
+        match (chat_id, error) {
+            (Some(chat_id), None) => {
+                self.app.update(cx, |state, cx| {
+                    state.reload_sidebar(cx);
+                    state.select(Selection::Chat(chat_id), cx);
+                });
+            }
+            (created, error) => {
+                if let Some(row) = self.pending.iter_mut().find(|row| row.key == key) {
+                    row.delivery = Delivery::Failed(error.unwrap_or_default());
+                }
+                self.draft_error = Some(
+                    if created.is_some() {
+                        "Couldn't send the message."
+                    } else {
+                        "Couldn't create the chat."
+                    }
+                    .to_owned(),
+                );
+                self.rebuild(false, cx);
+            }
+        }
+    }
+
+    fn send_demo_new_chat(
+        &mut self,
+        outgoing: &Outgoing,
+        recipients: &[super::new_chat::Pick],
+        topic: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let (store, chats) = {
+            let state = self.app.read(cx);
+            (state.store.clone(), state.sidebar.chats.clone())
+        };
+        let people: Vec<(String, String)> = recipients
+            .iter()
+            .map(|pick| (pick.user_id.clone(), pick.name.clone()))
+            .collect();
+        let (chat, message) = match self.draft_target_chat(cx) {
+            Some(chat_id) => {
+                let Some(chat) = chats.iter().find(|chat| chat.id == chat_id) else {
+                    return;
+                };
+                crate::demo::send_in_chat(chat, &outgoing.text, Utc::now())
+            }
+            None => crate::demo::new_chat(&chats, &people, topic, &outgoing.text, Utc::now()),
+        };
+        let _ = store.upsert_chats(std::slice::from_ref(&chat));
+        let _ = store.upsert_messages(std::slice::from_ref(&message));
+        self.app.update(cx, |state, cx| {
+            state.reload_sidebar(cx);
+            state.select(Selection::Chat(chat.id.clone()), cx);
+        });
     }
 
     fn conversation_id(&self) -> Option<String> {
@@ -1252,6 +1542,9 @@ impl ConversationView {
     }
 
     fn edit_last_own(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.draft_active {
+            return;
+        }
         let key = self.rows.borrow().iter().rev().find_map(|row| match row {
             Row::Message(message)
                 if message.own
@@ -1434,7 +1727,11 @@ impl ConversationView {
             return;
         };
         self.pending.retain(|row| row.key != key);
-        self.send(outgoing, window, cx);
+        if self.draft_active {
+            self.send_new_chat(outgoing, window, cx);
+        } else {
+            self.send(outgoing, window, cx);
+        }
     }
 
     fn finish_send(
@@ -1468,6 +1765,36 @@ impl ConversationView {
             }
         }
         self.rebuild(false, cx);
+    }
+
+    fn render_draft_error(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let message = self.draft_error.clone()?;
+        let failed_key = self
+            .pending
+            .iter()
+            .find(|row| matches!(row.delivery, Delivery::Failed(_)))
+            .map(|row| row.key.clone())?;
+        Some(
+            h_flex()
+                .w_full()
+                .flex_none()
+                .px(px(24.))
+                .py(px(4.))
+                .gap(px(8.))
+                .items_center()
+                .text_size(px(12.))
+                .text_color(theme::red_soft())
+                .child(message)
+                .child(
+                    Button::new("retry-new-chat")
+                        .ghost()
+                        .compact()
+                        .label("Retry")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.retry(&failed_key, window, cx)
+                        })),
+                ),
+        )
     }
 
     fn render_header(&self, current: &Current, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1597,14 +1924,15 @@ impl Render for ConversationView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = theme::background();
         let mut root = v_flex().flex_1().min_w_0().h_full().bg(background);
-        let Some(current) = self.current.as_ref() else {
+        let drafting = self.draft_active;
+        if self.current.is_none() && !drafting {
             return root
                 .items_center()
                 .justify_center()
                 .text_color(theme::text_muted())
                 .child("Select a chat or channel")
                 .into_any_element();
-        };
+        }
         let rows = self.rows.clone();
         let view = cx.weak_entity();
         let app = self.app.clone();
@@ -1661,7 +1989,7 @@ impl Render for ConversationView {
                                 });
                             });
                         }
-                        let is_real = !message.key.starts_with(PENDING_KEY_PREFIX);
+                        let is_real = !drafting && !message.key.starts_with(PENDING_KEY_PREFIX);
                         let hovered = is_real.then(|| {
                             let (view, key) = (view.clone(), message.key.clone());
                             Rc::new(move |hovered: bool, cx: &mut App| {
@@ -1769,7 +2097,14 @@ impl Render for ConversationView {
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
         .with_bottom_fade(background);
 
-        root = root.child(self.render_header(current, cx));
+        root = match self.current.as_ref().filter(|_| !drafting) {
+            Some(current) => root.child(self.render_header(current, cx)),
+            None => root.child(self.draft.clone()),
+        };
+        let sync_failed = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.sync.failed);
         if let Some(notice) = &self.notice {
             root = root.child(
                 h_flex()
@@ -1781,7 +2116,7 @@ impl Render for ConversationView {
                     .bg(theme::amber().opacity(0.15))
                     .text_color(theme::amber())
                     .child(div().flex_1().min_w_0().child(notice.clone()))
-                    .when(current.sync.failed, |bar| {
+                    .when(sync_failed, |bar| {
                         bar.child(
                             Button::new("retry-fetch")
                                 .ghost()
@@ -1792,8 +2127,16 @@ impl Render for ConversationView {
                     }),
             );
         }
-        let empty_channel = current.mode == ViewMode::ThreadList && self.rows.borrow().is_empty();
-        let body = if empty_channel {
+        let empty_channel = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.mode == ViewMode::ThreadList)
+            && self.rows.borrow().is_empty();
+        let body = if drafting && self.current.is_none() && self.rows.borrow().is_empty() {
+            let draft = self.draft.read(cx);
+            let group_name = draft.group_name(cx);
+            draft.render_empty(&self.app.read(cx).directory, &group_name)
+        } else if empty_channel {
             div()
                 .size_full()
                 .flex()
@@ -1807,7 +2150,15 @@ impl Render for ConversationView {
             scroller.into_any_element()
         };
         root.child(div().flex_1().min_h_0().child(body))
+            .children(self.render_draft_error(cx))
             .child(self.composer.clone())
+            .when(drafting, |root| {
+                root.on_action(cx.listener(|this, _: &Escape, window, cx| {
+                    if this.draft.read(cx).has_focus(window, cx) {
+                        this.draft.update(cx, |draft, cx| draft.escape(cx));
+                    }
+                }))
+            })
             .into_any_element()
     }
 }
@@ -1840,4 +2191,112 @@ fn progress_bar() -> impl IntoElement {
                     },
                 ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{AppContext as _, TestAppContext, WindowOptions};
+    use store::Store;
+
+    use super::ConversationView;
+    use crate::app_state::{AppState, Mode, Selection};
+
+    #[gpui_kit::test]
+    fn demo_draft_creates_a_chat_and_selects_it(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        crate::demo::seed(&store);
+        let mode = Mode {
+            demo: true,
+            read_only: false,
+            demo_sync: None,
+        };
+        let (handle, app, _view) = cx.update(|cx| {
+            let app = cx.new(|_| {
+                let mut state = AppState::new(store, mode);
+                crate::demo::seed_directory(&mut state);
+                state.selection = Some(crate::demo::first_selection());
+                state
+            });
+            let shared = app.clone();
+            let (handle, view) =
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| ConversationView::new(shared, window, cx))
+                })
+                .unwrap();
+            (handle, app, view)
+        });
+        cx.update(|cx| app.update(cx, |state, cx| state.start_new_chat(cx)));
+        let step = |cx: &mut TestAppContext, run: fn(&mut gpui_kit::Window, &mut gpui_kit::App)| {
+            cx.update_window(handle, move |_, window, cx| {
+                run(window, cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+        };
+        step(cx, |window, cx| window.render_frame(cx));
+        step(cx, |window, cx| window.input("lea", cx));
+        step(cx, |window, cx| window.press("enter", cx));
+        step(cx, |window, cx| window.press("enter", cx));
+        step(cx, |window, cx| window.input("Hello Lea", cx));
+        step(cx, |window, cx| window.press("enter", cx));
+        cx.update(|cx| {
+            let state = app.read(cx);
+            assert!(!state.new_chat);
+            assert_eq!(
+                state.selection,
+                Some(Selection::Chat("demo-chat-new-1".to_owned()))
+            );
+            let chat = state
+                .sidebar
+                .chats
+                .iter()
+                .find(|chat| chat.id == "demo-chat-new-1")
+                .expect("new chat in the sidebar");
+            assert_eq!(chat.last_message_preview.as_deref(), Some("Hello Lea"));
+        });
+    }
+
+    #[gpui_kit::test]
+    fn escape_closes_the_draft_and_keeps_the_selection(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        crate::demo::seed(&store);
+        let mode = Mode {
+            demo: true,
+            read_only: false,
+            demo_sync: None,
+        };
+        let (handle, app) = cx.update(|cx| {
+            let app = cx.new(|_| {
+                let mut state = AppState::new(store, mode);
+                crate::demo::seed_directory(&mut state);
+                state.selection = Some(crate::demo::first_selection());
+                state
+            });
+            let shared = app.clone();
+            let (handle, _) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| ConversationView::new(shared, window, cx))
+            })
+            .unwrap();
+            (handle, app)
+        });
+        cx.update(|cx| app.update(cx, |state, cx| state.start_new_chat(cx)));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.press("escape", cx);
+            window.render_frame(cx);
+            window.press("escape", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.update(|cx| {
+            let state = app.read(cx);
+            assert!(!state.new_chat);
+            assert_eq!(state.selection, Some(crate::demo::first_selection()));
+        });
+    }
 }

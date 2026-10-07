@@ -19,6 +19,7 @@ const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
 const STAGING_SIZE: (usize, usize) = (960, 540);
 const PRIORITY_CHAT: &str = "demo-chat-priya";
+const NEW_CHAT_PREFIX: &str = "demo-chat-new-";
 const PEOPLE_DIRECTORY: [(&str, &str, &str, &str); 5] = [
     (
         MARA_ID,
@@ -328,6 +329,66 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
         Vec::new()
     };
     people.chain(scope).collect()
+}
+
+pub fn send_in_chat(
+    chat: &ChatRecord,
+    text: &str,
+    now: DateTime<Utc>,
+) -> (ChatRecord, MessageRecord) {
+    let mut chat = chat.clone();
+    chat.last_message_at = Some(now);
+    chat.last_message_preview = Some(text.to_owned());
+    chat.last_message_sender_id = Some(DEMO_USER_ID.to_owned());
+    chat.last_message_sender_name = Some(DEMO_USER_NAME.to_owned());
+    chat.last_message_deleted = false;
+    chat.unread = false;
+    let record = message(
+        &chat.id,
+        &format!("demo-sent-{}", now.timestamp_millis()),
+        None,
+        (DEMO_USER_ID, DEMO_USER_NAME),
+        now,
+        &teams_core::markdown_to_html(text),
+        "[]",
+        false,
+    );
+    (chat, record)
+}
+
+pub fn new_chat(
+    existing: &[ChatRecord],
+    people: &[(String, String)],
+    topic: Option<&str>,
+    text: &str,
+    now: DateTime<Utc>,
+) -> (ChatRecord, MessageRecord) {
+    let number = existing
+        .iter()
+        .filter(|chat| chat.id.starts_with(NEW_CHAT_PREFIX))
+        .count()
+        + 1;
+    let one_on_one = people.len() == 1;
+    let members = std::iter::once(member(DEMO_USER_ID, DEMO_USER_NAME))
+        .chain(people.iter().map(|(user_id, name)| member(user_id, name)))
+        .collect();
+    let chat = ChatRecord {
+        id: format!("{NEW_CHAT_PREFIX}{number}"),
+        kind: if one_on_one { "oneOnOne" } else { "group" }.to_owned(),
+        title: if one_on_one {
+            String::new()
+        } else {
+            topic.unwrap_or_default().to_owned()
+        },
+        member_summary: people
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        members,
+        ..Default::default()
+    };
+    send_in_chat(&chat, text, now)
 }
 
 fn image_directory() -> PathBuf {
@@ -938,6 +999,50 @@ mod tests {
         let channel = mention_candidates("demo-channel-1-1", "gen");
         assert!(matches!(channel[0], MentionCandidate::Channel { .. }));
         assert_eq!(mention_candidates("demo-chat-release", "").len(), 5);
+    }
+
+    #[test]
+    fn new_group_chat_gets_a_title_and_the_first_message() {
+        let people = vec![
+            (MARA_ID.to_owned(), "Mara Lindqvist".to_owned()),
+            (JONAS_ID.to_owned(), "Jonas Ortega".to_owned()),
+        ];
+        let now = Utc::now();
+        let (chat, record) = new_chat(&[], &people, Some("Crew"), "Hello *all*", now);
+        assert_eq!(chat.id, "demo-chat-new-1");
+        assert_eq!(chat.kind, "group");
+        assert_eq!(chat.title, "Crew");
+        assert_eq!(chat.member_summary, "Mara Lindqvist, Jonas Ortega");
+        assert_eq!(chat.members.len(), 3);
+        assert_eq!(chat.members[0].user_id.as_deref(), Some(DEMO_USER_ID));
+        assert_eq!(chat.last_message_preview.as_deref(), Some("Hello *all*"));
+        assert_eq!(chat.last_message_at, Some(now));
+        assert_eq!(record.conversation_id, chat.id);
+        assert_eq!(record.sender_id.as_deref(), Some(DEMO_USER_ID));
+        assert!(record.body_html.contains("Hello"));
+    }
+
+    #[test]
+    fn new_one_on_one_chat_has_no_title_and_counts_up() {
+        let people = vec![(LEA_ID.to_owned(), "Lea Schneider".to_owned())];
+        let (first, _) = new_chat(&[], &people, None, "Hi", Utc::now());
+        assert_eq!(first.kind, "oneOnOne");
+        assert!(first.title.is_empty());
+        let (second, _) = new_chat(&[first], &people, None, "Hi again", Utc::now());
+        assert_eq!(second.id, "demo-chat-new-2");
+    }
+
+    #[test]
+    fn sending_into_a_chat_refreshes_its_preview() {
+        let base = ChatRecord {
+            id: "demo-chat-x".to_owned(),
+            unread: true,
+            ..Default::default()
+        };
+        let (chat, record) = send_in_chat(&base, "Ping", Utc::now());
+        assert!(!chat.unread);
+        assert_eq!(chat.last_message_preview.as_deref(), Some("Ping"));
+        assert_eq!(record.conversation_id, "demo-chat-x");
     }
 
     #[test]
