@@ -245,6 +245,16 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Hang continuation rows of each marker's line under the marker's end.
+    pub(crate) fn set_hanging_indents(
+        &mut self,
+        hanging_indents: std::rc::Rc<[Range<usize>]>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_hanging_indents(hanging_indents, cx);
+        self.rebuild_fold_projection();
+    }
+
     pub fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrap_map.on_layout_changed(wrap_width, cx);
         self.rebuild_fold_projection();

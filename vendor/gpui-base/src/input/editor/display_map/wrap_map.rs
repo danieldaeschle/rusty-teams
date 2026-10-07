@@ -109,6 +109,7 @@ impl WrapMap {
     ) {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
         self.wrapper.adjust_font_families(range, new_text.len());
+        self.wrapper.adjust_hanging_indents(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
@@ -127,6 +128,14 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.set_font_families(font_families, cx);
+    }
+
+    pub(super) fn set_hanging_indents(
+        &mut self,
+        hanging_indents: std::rc::Rc<[Range<usize>]>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_hanging_indents(hanging_indents, cx);
     }
 
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {

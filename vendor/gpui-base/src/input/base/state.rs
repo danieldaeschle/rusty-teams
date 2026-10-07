@@ -8698,6 +8698,59 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_hanging_indent_shifts_wrapped_rows_caret_hit_testing_and_moves(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let text = format!("• {}", "a ".repeat(300));
+        let view = InputView::build_textarea(cx, move |state| state.rows(4).default_value(text));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        let plain_rows = view.input.read_with(&visual, |state, _| {
+            let line = &state.last_layout.as_ref().unwrap().lines[0];
+            assert_eq!(line.wrap_indent, px(0.));
+            line.wrapped_lines
+                .iter()
+                .map(|row| row.len)
+                .collect::<Vec<_>>()
+        });
+
+        visual.update(|_, cx| {
+            view.input
+                .update(cx, |state, cx| state.set_hanging_indents(vec![0..4], cx))
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                let layout = state.last_layout.as_ref().unwrap();
+                let line = &layout.lines[0];
+                assert_eq!(line.wrapped_lines[0].len, plain_rows[0]);
+                assert!(line.wrapped_lines[1].len < plain_rows[1]);
+                let marker_x = line.wrapped_lines[0].x_for_index(4);
+                assert!(marker_x > px(0.));
+                assert_eq!(line.wrap_indent, marker_x);
+
+                let row_start = line.wrapped_lines[0].len;
+                assert_eq!(
+                    line.position_for_index(row_start, layout, false),
+                    Some(point(marker_x, layout.line_height))
+                );
+                let (hit, _) = line
+                    .closest_index_for_position(
+                        point(marker_x + px(1.), layout.line_height + px(1.)),
+                        layout,
+                    )
+                    .unwrap();
+                assert_eq!(hit, row_start);
+
+                state.set_selected_range(row_start..row_start, cx);
+                state.up(&MoveUp, window, cx);
+                assert_eq!(state.cursor(), 4);
+            });
+        });
+    }
+
+    #[gpui::test]
     fn test_editor_decorations_follow_typing(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
@@ -10695,6 +10748,30 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     ) {
         self.wrapping_indent = wrapping_indent;
         self.display_map.set_wrapping_indent(wrapping_indent, cx);
+        cx.notify();
+    }
+
+    /// Hang soft-wrapped continuation rows under the end of a list marker.
+    ///
+    /// Each range is a marker in UTF-8 bytes, e.g. `0..4` for `"• "` at the
+    /// start of `"• Run the tests"`; that line's continuation rows start at the
+    /// x of byte 4 instead of 0. One marker per line, the first wins. A marker
+    /// wider than the wrap width is ignored. Markers shift with edits before
+    /// them and are dropped by edits inside them; set them again on change.
+    /// Lines with inline tokens ignore their marker.
+    pub fn set_hanging_indents(&mut self, markers: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        let mut markers: Vec<Range<usize>> = markers
+            .into_iter()
+            .filter(|marker| !marker.is_empty())
+            .map(|marker| {
+                self.text.clip_offset(marker.start, Bias::Left)
+                    ..self.text.clip_offset(marker.end, Bias::Right)
+            })
+            .filter(|marker| !marker.is_empty())
+            .collect();
+        markers.sort_by_key(|marker| marker.start);
+        markers.dedup_by_key(|marker| self.text.offset_to_point(marker.start).row);
+        self.display_map.set_hanging_indents(markers.into(), cx);
         cx.notify();
     }
 }

@@ -30,21 +30,28 @@ pub enum WrappingIndent {
 
 /// Choose Unicode line-break opportunities using the same shaped widths as
 /// painting. Oversized words fall back to complete graphemes, never UTF-8 bytes.
+/// `hanging_indent` is a byte offset continuation rows align under; it wins over `wrapping_indent`.
 fn measured_wrap_boundaries(
     text: &str,
     width: Pixels,
     wrapping_indent: WrappingIndent,
+    hanging_indent: Option<usize>,
     mut measure: impl FnMut(Range<usize>) -> Pixels,
 ) -> Vec<gpui::Boundary> {
-    let indent = if wrapping_indent == WrappingIndent::Same {
-        text.chars()
+    let mut indent = match hanging_indent {
+        Some(hanging_indent) => hanging_indent,
+        None if wrapping_indent == WrappingIndent::Same => text
+            .chars()
             .take_while(|&c| c == ' ')
             .count()
-            .min(gpui::LineWrapper::MAX_INDENT as usize)
-    } else {
-        0
+            .min(gpui::LineWrapper::MAX_INDENT as usize),
+        None => 0,
     };
-    let indent_width = measure(0..indent);
+    let mut indent_width = measure(0..indent);
+    if hanging_indent.is_some() && indent_width >= width {
+        indent = 0;
+        indent_width = px(0.);
+    }
     let ends: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(ix, grapheme)| ix + grapheme.len())
@@ -95,7 +102,7 @@ fn measured_wrap_boundaries(
             .unwrap_or(fitting_end);
         result.push(gpui::Boundary {
             ix: end,
-            next_indent: indent as u32,
+            next_indent: text[..indent].chars().count() as u32,
         });
         first = ends.partition_point(|&ix| ix <= end);
         start = end;
@@ -140,6 +147,30 @@ pub(crate) fn split_run_by_font_families(
         });
     }
     runs
+}
+
+/// `span` after replacing `edit` with `new_len` bytes, or `None` when the edit touches its inside.
+fn shift_span(span: &Range<usize>, edit: &Range<usize>, new_len: usize) -> Option<Range<usize>> {
+    if span.start < edit.end && edit.start < span.end {
+        return None;
+    }
+    if span.start < edit.end {
+        return Some(span.clone());
+    }
+    let shift = new_len as isize - edit.len() as isize;
+    Some(span.start.checked_add_signed(shift)?..span.end.checked_add_signed(shift)?)
+}
+
+/// Byte offset within the line at `line_start` that its continuation rows hang under.
+fn hanging_indent_at(
+    hanging_indents: &[Range<usize>],
+    line_start: usize,
+    line_len: usize,
+) -> Option<usize> {
+    let first = hanging_indents.partition_point(|marker| marker.start < line_start);
+    let marker = hanging_indents.get(first)?;
+    (marker.start <= line_start + line_len)
+        .then(|| marker.end.min(line_start + line_len) - line_start)
 }
 
 /// Ranges whose entry differs between two sorted span lists.
@@ -301,6 +332,8 @@ pub(crate) struct TextWrapper {
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
     /// Sorted, non-overlapping document byte ranges measured in another font family.
     font_families: Rc<[(Range<usize>, SharedString)]>,
+    /// Sorted list marker ranges, at most one per line; continuation rows start under their end.
+    hanging_indents: Rc<[Range<usize>]>,
     _initialized: bool,
 }
 
@@ -316,6 +349,7 @@ impl TextWrapper {
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
             font_families: Rc::from([]),
+            hanging_indents: Rc::from([]),
             _initialized: false,
         }
     }
@@ -448,6 +482,7 @@ impl TextWrapper {
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
         let font_families = self.font_families.clone();
+        let hanging_indents = self.hanging_indents.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -484,6 +519,7 @@ impl TextWrapper {
                         line_str,
                         wrap_width,
                         wrapping_indent,
+                        hanging_indent_at(&hanging_indents, line_start, line_str.len()),
                         |range| {
                             let runs = split_run_by_font_families(
                                 TextRun {
@@ -544,22 +580,41 @@ impl TextWrapper {
         if self.inline_metrics.is_empty() {
             return;
         }
-        let shift = new_len as isize - range.len() as isize;
         self.inline_metrics = self
             .inline_metrics
             .iter()
-            .filter_map(|(token, width)| {
-                if token.start < range.end && range.start < token.end {
-                    return None;
-                }
-                let token = if token.start >= range.end {
-                    token.start.checked_add_signed(shift)?..token.end.checked_add_signed(shift)?
-                } else {
-                    token.clone()
-                };
-                Some((token, *width))
-            })
+            .filter_map(|(token, width)| Some((shift_span(token, range, new_len)?, *width)))
             .collect();
+    }
+
+    pub(crate) fn adjust_hanging_indents(&mut self, range: &Range<usize>, new_len: usize) {
+        if self.hanging_indents.is_empty() {
+            return;
+        }
+        self.hanging_indents = self
+            .hanging_indents
+            .iter()
+            .filter_map(|marker| shift_span(marker, range, new_len))
+            .collect();
+    }
+
+    pub(crate) fn set_hanging_indents(
+        &mut self,
+        hanging_indents: Rc<[Range<usize>]>,
+        cx: &mut App,
+    ) {
+        if self.hanging_indents == hanging_indents {
+            return;
+        }
+        let as_spans = |markers: &[Range<usize>]| -> Vec<(Range<usize>, ())> {
+            markers.iter().map(|marker| (marker.clone(), ())).collect()
+        };
+        let affected = changed_ranges(
+            &as_spans(&self.hanging_indents),
+            &as_spans(&hanging_indents),
+        );
+        self.hanging_indents = hanging_indents;
+        self.rewrap_rows_of(&affected, cx);
     }
 
     pub(crate) fn set_inline_metrics(
@@ -628,6 +683,13 @@ impl TextWrapper {
         // line not contains `\n`.
         for row in new_start_row..=new_end_row {
             let line = changed_text.slice_line(row);
+            let line_start = changed_text.line_start_offset(row);
+            let wrapping_indent =
+                if hanging_indent_at(&self.hanging_indents, line_start, line.len()).is_some() {
+                    WrappingIndent::Same
+                } else {
+                    self.wrapping_indent
+                };
             let mut wrapped_lines = SmallVec::<[Range<usize>; 1]>::new();
             let mut prev_boundary_ix = 0;
             let mut indent_chars = 0;
@@ -636,7 +698,7 @@ impl TextWrapper {
             if let Some(wrap_width) = wrap_width {
                 // Borrowed for lines within a single rope chunk.
                 let line_str: Cow<str> = line.into();
-                match self.wrapping_indent {
+                match wrapping_indent {
                     WrappingIndent::Same => {
                         // Here only have wrapped line, if there is no wrap meet, the `line_wraps`
                         // result will empty.
@@ -1363,7 +1425,7 @@ mod tests {
                 &(start..previous.len()),
                 &inserted,
                 &mut |line, width, _| {
-                    measured_wrap_boundaries(line, width, WrappingIndent::None, |range| {
+                    measured_wrap_boundaries(line, width, WrappingIndent::None, None, |range| {
                         measure(&line[range])
                     })
                 },
@@ -1383,7 +1445,7 @@ mod tests {
     #[test]
     fn measured_wrap_preserves_words_graphemes_and_indentation() {
         let wrap = |text: &str, width, indent| {
-            measured_wrap_boundaries(text, px(width), indent, |range| {
+            measured_wrap_boundaries(text, px(width), indent, None, |range| {
                 px(text[range].graphemes(true).count() as f32)
             })
             .into_iter()
@@ -1398,6 +1460,34 @@ mod tests {
         assert_eq!(wrap("abc", 0., WrappingIndent::None), vec![1, 2]);
         // Closing punctuation stays with the preceding Chinese character.
         assert_eq!(wrap("你好，世界", 2., WrappingIndent::None), vec![3, 9]);
+    }
+
+    #[test]
+    fn measured_wrap_hangs_continuation_rows_under_the_marker() {
+        let wrap = |text: &str, hanging_indent| {
+            measured_wrap_boundaries(
+                text,
+                px(8.),
+                WrappingIndent::None,
+                hanging_indent,
+                |range| px(text[range].graphemes(true).count() as f32),
+            )
+            .into_iter()
+            .map(|boundary| (boundary.ix, boundary.next_indent))
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(wrap("• aaa bbb ccc", None), [(8, 0)]);
+        assert_eq!(wrap("• aaa bbb ccc", Some(4)), [(8, 2), (12, 2)]);
+        assert_eq!(wrap("• aaa bbb ccc", Some(10)), [(8, 0)]);
+        assert_eq!(hanging_indent_at(&[0..4, 10..13], 0, 8), Some(4));
+        assert_eq!(hanging_indent_at(&[0..4, 10..13], 9, 8), Some(4));
+
+        let mut wrapper = TextWrapper::new(test_font(), px(14.), None);
+        wrapper.hanging_indents = Rc::from([0..4, 10..13]);
+        wrapper.adjust_hanging_indents(&(0..0), 1);
+        wrapper.adjust_hanging_indents(&(12..12), 1);
+        assert_eq!(&*wrapper.hanging_indents, [1..5]);
+        assert_eq!(hanging_indent_at(&[0..4], 5, 8), None);
     }
 
     #[test]
