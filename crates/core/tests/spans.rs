@@ -181,9 +181,130 @@ fn reply_quote() {
 fn list_items() {
     assert_eq!(
         html_to_spans("<ul>\n<li>one</li>\n<li>two <b>b</b></li>\n</ul>"),
+        vec![Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![
+                vec![text("one")],
+                vec![text("two "), Span::Bold(vec![text("b")])],
+            ],
+        }]
+    );
+}
+
+#[test]
+fn ordered_list_keeps_start_and_nesting() {
+    assert_eq!(
+        html_to_spans(r#"<ol start="9"><li>a<ul><li>b</li></ul></li><li>c</li></ol>"#),
+        vec![Span::List {
+            ordered: true,
+            start: 9,
+            items: vec![
+                vec![
+                    text("a"),
+                    Span::LineBreak,
+                    Span::List {
+                        ordered: false,
+                        start: 1,
+                        items: vec![vec![text("b")]],
+                    },
+                ],
+                vec![text("c")],
+            ],
+        }]
+    );
+}
+
+#[test]
+fn list_nested_directly_in_list_joins_the_previous_item() {
+    let spans = html_to_spans("<ul><li>a</li><ul><li>b</li></ul></ul>");
+    let [Span::List { items, .. }] = &spans[..] else {
+        panic!("one list expected")
+    };
+    assert_eq!(items.len(), 1);
+    assert!(matches!(items[0].last(), Some(Span::List { .. })));
+}
+
+#[test]
+fn headings_keep_their_level_up_to_three() {
+    assert_eq!(
+        html_to_spans("<h2>Title</h2><h5>Small</h5>"),
         vec![
-            Span::ListItem(vec![text("one")]),
-            Span::ListItem(vec![text("two "), Span::Bold(vec![text("b")])]),
+            Span::Heading {
+                level: 2,
+                children: vec![text("Title")]
+            },
+            Span::LineBreak,
+            Span::Heading {
+                level: 3,
+                children: vec![text("Small")]
+            },
+        ]
+    );
+}
+
+#[test]
+fn strike_underline_and_rule() {
+    assert_eq!(
+        html_to_spans("<p><s>old</s> <u>new</u></p><hr>"),
+        vec![
+            Span::Strike(vec![text("old")]),
+            text(" "),
+            Span::Underline(vec![text("new")]),
+            Span::LineBreak,
+            Span::Rule,
+        ]
+    );
+}
+
+#[test]
+fn table_rows_and_header() {
+    assert_eq!(
+        html_to_spans(
+            "<table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr></tbody></table>"
+        ),
+        vec![Span::Table {
+            header: true,
+            rows: vec![
+                vec![vec![text("Area")], vec![text("Owner")]],
+                vec![vec![text("Sync")], vec![text("Priya")]],
+            ],
+        }]
+    );
+}
+
+#[test]
+fn table_without_header_cells_has_no_header() {
+    let spans = html_to_spans("<table><tr><td>a</td></tr></table>");
+    assert!(matches!(&spans[..], [Span::Table { header: false, .. }]));
+}
+
+#[test]
+fn plain_blockquote_is_not_a_reply() {
+    assert_eq!(
+        html_to_spans("<blockquote>wise words</blockquote>"),
+        vec![Span::BlockQuote(vec![text("wise words")])]
+    );
+}
+
+#[test]
+fn span_colors_are_parsed() {
+    assert_eq!(
+        html_to_spans(
+            r#"<span style="color: #F00; background-color: rgb(255, 255, 0)">x</span><span>y</span><mark>z</mark>"#
+        ),
+        vec![
+            Span::Colored {
+                color: Some(0xff0000),
+                background: Some(0xffff00),
+                children: vec![text("x")],
+            },
+            text("y"),
+            Span::Colored {
+                color: None,
+                background: Some(0xffff00),
+                children: vec![text("z")],
+            },
         ]
     );
 }

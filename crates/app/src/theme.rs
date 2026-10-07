@@ -37,7 +37,13 @@ const OWN_META: u32 = 0xc9a28c;
 const OWN_READ: u32 = 0xf5c4a5;
 const DROP_BACKGROUND: u32 = 0xce6a3b14;
 const SELECTION: u32 = 0xce6a3b66;
-const CODE_BACKGROUND: u32 = 0x0b0b0c;
+const CODE_SURFACE: u32 = 0x0000003d;
+const CODE_HEADER_BORDER: u32 = 0xffffff0f;
+const INLINE_CODE_FILL: u32 = 0xffffff14;
+const INLINE_CODE_FILL_OWN: u32 = 0x0000003d;
+const INLINE_CODE_BORDER: u32 = 0xffffff1a;
+const TABLE_HEADER: u32 = 0xffffff0d;
+const RULE_OWN: u32 = 0x6a3a25;
 const BADGE_MUTED: u32 = 0x3f3f42;
 const TOAST_MENTION: u32 = 0x2e1d15;
 const GREEN: u32 = 0x22c55e;
@@ -127,6 +133,10 @@ pub fn apply(cx: &mut App) {
         colors.list_hover = color(ROW_HOVER);
         colors.list_active = color(SURFACE_RAISED);
     });
+}
+
+pub fn font_family() -> SharedString {
+    FONT_FAMILY.into()
 }
 
 pub fn background() -> Hsla {
@@ -229,8 +239,36 @@ pub fn drop_background() -> Hsla {
     color_with_alpha(DROP_BACKGROUND)
 }
 
-pub fn code_background() -> Hsla {
-    color(CODE_BACKGROUND)
+pub fn code_surface() -> Hsla {
+    color_with_alpha(CODE_SURFACE)
+}
+
+pub fn code_header_border() -> Hsla {
+    color_with_alpha(CODE_HEADER_BORDER)
+}
+
+pub fn inline_code_fill(own: bool) -> Hsla {
+    color_with_alpha(if own {
+        INLINE_CODE_FILL_OWN
+    } else {
+        INLINE_CODE_FILL
+    })
+}
+
+pub fn inline_code_border() -> Hsla {
+    color_with_alpha(INLINE_CODE_BORDER)
+}
+
+pub fn table_header() -> Hsla {
+    color_with_alpha(TABLE_HEADER)
+}
+
+pub fn rule(own: bool) -> Hsla {
+    if own {
+        color(RULE_OWN)
+    } else {
+        border_strong()
+    }
 }
 
 pub fn badge_muted() -> Hsla {

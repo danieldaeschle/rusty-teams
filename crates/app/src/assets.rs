@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 12] = symbols![
+const SYMBOLS: [(&str, &[u8]); 13] = symbols![
     "done",
     "done_all",
     "keyboard_return",
@@ -21,6 +21,7 @@ const SYMBOLS: [(&str, &[u8]); 12] = symbols![
     "check_circle",
     "error",
     "notifications",
+    "content_copy",
 ];
 
 pub struct AppAssets;

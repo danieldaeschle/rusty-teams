@@ -202,19 +202,48 @@ fn push_plain(text: &mut String, spans: &[Span]) {
                 text.push_str(code);
                 text.push('\n');
             }
-            Span::Bold(children) | Span::Italic(children) | Span::Quote(children) => {
-                push_plain(text, children)
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Quote(children)
+            | Span::BlockQuote(children)
+            | Span::Link { children, .. } => push_plain(text, children),
+            Span::Heading { children, .. } => {
+                push_plain(text, children);
+                text.push('\n');
             }
-            Span::Link { children, .. } => push_plain(text, children),
             Span::Mention { name } => {
                 text.push('@');
                 text.push_str(name);
             }
-            Span::LineBreak => text.push('\n'),
-            Span::ListItem(children) => {
-                text.push_str("- ");
-                push_plain(text, children);
-                text.push('\n');
+            Span::LineBreak | Span::Rule => text.push('\n'),
+            Span::List {
+                ordered,
+                start,
+                items,
+            } => {
+                for (offset, item) in items.iter().enumerate() {
+                    if *ordered {
+                        text.push_str(&format!("{}. ", *start as usize + offset));
+                    } else {
+                        text.push_str("- ");
+                    }
+                    push_plain(text, item);
+                    text.push('\n');
+                }
+            }
+            Span::Table { rows, .. } => {
+                for row in rows {
+                    for (index, cell) in row.iter().enumerate() {
+                        if index > 0 {
+                            text.push('\t');
+                        }
+                        push_plain(text, cell);
+                    }
+                    text.push('\n');
+                }
             }
             Span::Image { .. } => {}
         }

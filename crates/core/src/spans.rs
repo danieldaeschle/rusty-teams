@@ -17,12 +17,33 @@ pub enum Span {
     Mention {
         name: String,
     },
+    Strike(Vec<Span>),
+    Underline(Vec<Span>),
+    Colored {
+        color: Option<u32>,
+        background: Option<u32>,
+        children: Vec<Span>,
+    },
+    Heading {
+        level: u8,
+        children: Vec<Span>,
+    },
     LineBreak,
-    ListItem(Vec<Span>),
+    Rule,
+    List {
+        ordered: bool,
+        start: u32,
+        items: Vec<Vec<Span>>,
+    },
+    Table {
+        header: bool,
+        rows: Vec<Vec<Vec<Span>>>,
+    },
     Image {
         hosted_content_url: String,
     },
     Quote(Vec<Span>),
+    BlockQuote(Vec<Span>),
 }
 
 const BLOCK_ELEMENTS: [&str; 12] = [
@@ -31,6 +52,9 @@ const BLOCK_ELEMENTS: [&str; 12] = [
 const SKIPPED_ELEMENTS: [&str; 4] = ["script", "style", "attachment", "head"];
 const LANGUAGE_PREFIX: &str = "language-";
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
+const REPLY_ITEMTYPE: &str = "schema.skype.com/Reply";
+const MAX_HEADING_LEVEL: u8 = 3;
+const MARK_BACKGROUND: u32 = 0xffff00;
 const MAX_CONSECUTIVE_BREAKS: usize = 2;
 
 pub fn html_to_spans(html: &str) -> Vec<Span> {
@@ -79,24 +103,189 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         return;
     }
     match name {
-        "b" | "strong" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-            spans.push(Span::Bold(convert_children(element)))
-        }
+        "b" | "strong" => spans.push(Span::Bold(convert_children(element))),
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => spans.push(Span::Heading {
+            level: name[1..].parse::<u8>().unwrap_or(1).min(MAX_HEADING_LEVEL),
+            children: convert_children(element),
+        }),
         "i" | "em" => spans.push(Span::Italic(convert_children(element))),
+        "s" | "strike" | "del" => spans.push(Span::Strike(convert_children(element))),
+        "u" | "ins" => spans.push(Span::Underline(convert_children(element))),
+        "span" | "font" | "mark" => push_colored(element, spans),
+        "ul" | "ol" => spans.push(list(element)),
+        "table" => spans.push(table(element)),
         "code" => spans.push(Span::Code(raw_text(element))),
         "pre" | "codeblock" => spans.push(code_block(element)),
         "a" => push_link(element, spans),
         "at" => spans.push(Span::Mention {
             name: raw_text(element).trim().to_owned(),
         }),
-        "br" | "hr" => spans.push(Span::LineBreak),
-        "li" => spans.push(Span::ListItem(convert_children(element))),
-        "blockquote" => spans.push(Span::Quote(convert_children(element))),
+        "br" => spans.push(Span::LineBreak),
+        "hr" => spans.push(Span::Rule),
+        "li" => spans.push(Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![convert_children(element)],
+        }),
+        "blockquote" if is_reply(element) => spans.push(Span::Quote(convert_children(element))),
+        "blockquote" => spans.push(Span::BlockQuote(convert_children(element))),
         "emoji" => push_emoji(element, spans),
         "img" => push_image(element, spans),
         _ => spans.extend(convert_children(element)),
     }
 }
+
+fn is_reply(element: ElementRef<'_>) -> bool {
+    element
+        .value()
+        .attr("itemtype")
+        .is_some_and(|itemtype| itemtype.contains(REPLY_ITEMTYPE))
+}
+
+fn list(element: ElementRef<'_>) -> Span {
+    let mut items: Vec<Vec<Span>> = Vec::new();
+    for child in element.children().filter_map(ElementRef::wrap) {
+        match child.value().name() {
+            "li" => items.push(convert_children(child)),
+            "ul" | "ol" => match items.last_mut() {
+                Some(previous) => previous.push(list(child)),
+                None => items.push(vec![list(child)]),
+            },
+            _ => {}
+        }
+    }
+    Span::List {
+        ordered: element.value().name() == "ol",
+        start: element
+            .value()
+            .attr("start")
+            .and_then(|start| start.trim().parse().ok())
+            .unwrap_or(1),
+        items,
+    }
+}
+
+fn table(element: ElementRef<'_>) -> Span {
+    let rows: Vec<ElementRef<'_>> = element
+        .descendants()
+        .filter_map(ElementRef::wrap)
+        .filter(|row| row.value().name() == "tr" && belongs_to(*row, element))
+        .collect();
+    let header = rows.first().is_some_and(|row| {
+        let in_head = row
+            .parent()
+            .and_then(ElementRef::wrap)
+            .is_some_and(|parent| parent.value().name() == "thead");
+        let mut cells = cells_of(*row).peekable();
+        in_head || (cells.peek().is_some() && cells.all(|cell| cell.value().name() == "th"))
+    });
+    Span::Table {
+        header,
+        rows: rows
+            .into_iter()
+            .map(|row| cells_of(row).map(convert_children).collect())
+            .filter(|cells: &Vec<Vec<Span>>| !cells.is_empty())
+            .collect(),
+    }
+}
+
+fn belongs_to(row: ElementRef<'_>, table: ElementRef<'_>) -> bool {
+    row.ancestors()
+        .filter_map(ElementRef::wrap)
+        .find(|ancestor| ancestor.value().name() == "table")
+        .is_some_and(|owner| owner.id() == table.id())
+}
+
+fn cells_of<'a>(row: ElementRef<'a>) -> impl Iterator<Item = ElementRef<'a>> {
+    row.children()
+        .filter_map(ElementRef::wrap)
+        .filter(|cell| matches!(cell.value().name(), "td" | "th"))
+}
+
+fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+    let value = element.value();
+    let style = value.attr("style").unwrap_or_default();
+    let color = style_value(style, "color")
+        .or_else(|| value.attr("color"))
+        .and_then(parse_color);
+    let background = style_value(style, "background-color")
+        .or_else(|| style_value(style, "background"))
+        .and_then(parse_color)
+        .or((value.name() == "mark").then_some(MARK_BACKGROUND));
+    let children = convert_children(element);
+    if color.is_none() && background.is_none() {
+        spans.extend(children);
+    } else {
+        spans.push(Span::Colored {
+            color,
+            background,
+            children,
+        });
+    }
+}
+
+fn style_value<'a>(style: &'a str, property: &str) -> Option<&'a str> {
+    style.split(';').find_map(|declaration| {
+        let (name, value) = declaration.split_once(':')?;
+        (name.trim().eq_ignore_ascii_case(property)).then(|| value.trim())
+    })
+}
+
+pub fn parse_color(value: &str) -> Option<u32> {
+    let value = value.trim().to_ascii_lowercase();
+    if let Some(hex) = value.strip_prefix('#') {
+        return match hex.len() {
+            3 => {
+                let expanded: String = hex.chars().flat_map(|digit| [digit, digit]).collect();
+                u32::from_str_radix(&expanded, 16).ok()
+            }
+            6 => u32::from_str_radix(hex, 16).ok(),
+            _ => None,
+        };
+    }
+    if let Some(arguments) = value
+        .strip_prefix("rgba(")
+        .or_else(|| value.strip_prefix("rgb("))
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let channels: Vec<u32> = arguments
+            .split(',')
+            .take(3)
+            .map(|channel| {
+                channel
+                    .trim()
+                    .parse::<f32>()
+                    .ok()
+                    .map(|level| level.clamp(0., 255.) as u32)
+            })
+            .collect::<Option<_>>()?;
+        let [red, green, blue] = channels[..] else {
+            return None;
+        };
+        return Some(red << 16 | green << 8 | blue);
+    }
+    NAMED_COLORS
+        .iter()
+        .find(|(name, _)| *name == value)
+        .map(|(_, hex)| *hex)
+}
+
+const NAMED_COLORS: [(&str, u32); 14] = [
+    ("black", 0x000000),
+    ("white", 0xffffff),
+    ("red", 0xff0000),
+    ("green", 0x008000),
+    ("lime", 0x00ff00),
+    ("blue", 0x0000ff),
+    ("yellow", 0xffff00),
+    ("orange", 0xffa500),
+    ("purple", 0x800080),
+    ("fuchsia", 0xff00ff),
+    ("aqua", 0x00ffff),
+    ("teal", 0x008080),
+    ("gray", 0x808080),
+    ("grey", 0x808080),
+];
 
 fn code_block(element: ElementRef<'_>) -> Span {
     let language = language_of(element).or_else(|| {
@@ -179,9 +368,15 @@ fn tidy(spans: &mut Vec<Span>) {
         match span {
             Span::Bold(children)
             | Span::Italic(children)
-            | Span::ListItem(children)
+            | Span::Strike(children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Heading { children, .. }
             | Span::Quote(children)
+            | Span::BlockQuote(children)
             | Span::Link { children, .. } => tidy(children),
+            Span::List { items, .. } => items.iter_mut().for_each(tidy),
+            Span::Table { rows, .. } => rows.iter_mut().flatten().for_each(tidy),
             _ => {}
         }
     }
@@ -202,7 +397,15 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
         let at_edge = |neighbour: Option<&Span>| {
             matches!(
                 neighbour,
-                None | Some(Span::LineBreak | Span::ListItem(_) | Span::Quote(_))
+                None | Some(
+                    Span::LineBreak
+                        | Span::Rule
+                        | Span::List { .. }
+                        | Span::Table { .. }
+                        | Span::Heading { .. }
+                        | Span::Quote(_)
+                        | Span::BlockQuote(_)
+                )
             )
         };
         if at_edge(collapsed.last()) {

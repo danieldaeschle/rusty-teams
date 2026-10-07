@@ -7,6 +7,8 @@ use gpui_kit::base::{
 };
 use gpui_kit::*;
 
+use super::blocks::CODE_PADDING;
+
 const TIME_ROOM: char = '\u{2007}';
 const HIT_SLOP: f32 = 12.;
 
@@ -16,12 +18,24 @@ pub struct Participant {
     copied: Rc<RefCell<String>>,
 }
 
+const PILL_OUTSET: f32 = 3.;
+const PILL_INSET_Y: f32 = 1.;
+
+#[derive(Clone, Debug)]
+pub struct Pill {
+    pub range: Range<usize>,
+    pub fill: Hsla,
+    pub border: Option<Hsla>,
+    pub radius: Pixels,
+}
+
 /// Styled text that takes part in the window text selection, with clickable link ranges.
 pub struct SelectableRichText {
     id: ElementId,
     text: SharedString,
     styled_text: StyledText,
     links: Vec<(Range<usize>, String)>,
+    pills: Vec<Pill>,
 }
 
 impl SelectableRichText {
@@ -36,12 +50,60 @@ impl SelectableRichText {
             styled_text: StyledText::new(text.clone()).with_highlights(highlights),
             text,
             links: Vec::new(),
+            pills: Vec::new(),
         }
     }
 
     pub fn links(mut self, links: Vec<(Range<usize>, String)>) -> Self {
         self.links = links;
         self
+    }
+
+    pub fn font_overrides(mut self, overrides: Vec<(Range<usize>, SharedString)>) -> Self {
+        if !overrides.is_empty() {
+            let styled_text = std::mem::replace(&mut self.styled_text, StyledText::new(""));
+            self.styled_text = styled_text.with_font_family_overrides(overrides);
+        }
+        self
+    }
+
+    pub fn pills(mut self, pills: Vec<Pill>) -> Self {
+        self.pills = pills;
+        self
+    }
+}
+
+fn paint_pills(pills: &[Pill], layout: &TextLayout, window: &mut Window) {
+    let line_height = layout.line_height();
+    let bounds = layout.bounds();
+    for pill in pills {
+        let (Some(start), Some(end)) = (
+            layout.position_for_index(pill.range.start),
+            layout.position_for_index(pill.range.end),
+        ) else {
+            continue;
+        };
+        for line in selection_quads(start, end, bounds, line_height) {
+            let line = Bounds::from_corners(
+                point(line.left() - px(PILL_OUTSET), line.top() + px(PILL_INSET_Y)),
+                point(
+                    line.right() + px(PILL_OUTSET),
+                    line.top() + line_height - px(PILL_INSET_Y),
+                ),
+            );
+            let (border_width, border_color) = match pill.border {
+                Some(color) => (px(1.), color),
+                None => (px(0.), transparent_black()),
+            };
+            window.paint_quad(quad(
+                line,
+                pill.radius,
+                pill.fill,
+                border_width,
+                border_color,
+                BorderStyle::Solid,
+            ));
+        }
     }
 }
 
@@ -180,6 +242,7 @@ impl Element for SelectableRichText {
         if selected_before != TextSelection::selected_text(window, cx) {
             window.refresh();
         }
+        paint_pills(&self.pills, &layout, window);
         let color = Theme::global(cx).tokens.colors.selection;
         let content_end = self.text.trim_end_matches(TIME_ROOM).len();
         let mut copied = String::new();
@@ -188,7 +251,7 @@ impl Element for SelectableRichText {
             if end_index <= range.start {
                 continue;
             }
-            copied.push_str(&self.text[range.start..end_index]);
+            copied.push_str(&self.text[range.start..end_index].replace(CODE_PADDING, ""));
             let (Some(start), Some(end)) = (
                 layout.position_for_index(range.start),
                 layout.position_for_index(end_index),

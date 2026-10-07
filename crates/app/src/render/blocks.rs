@@ -3,6 +3,7 @@ use std::ops::Range;
 use teams_core::Span;
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
+pub const CODE_PADDING: &str = "\u{200a}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
 
@@ -13,6 +14,10 @@ pub struct StyleFlags {
     pub code: bool,
     pub mention: bool,
     pub link: bool,
+    pub strike: bool,
+    pub underline: bool,
+    pub color: Option<u32>,
+    pub background: Option<u32>,
 }
 
 impl StyleFlags {
@@ -117,9 +122,89 @@ impl Inline {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
     Paragraph(Inline),
-    Code(String),
+    Heading {
+        level: u8,
+        inline: Inline,
+    },
+    Code {
+        language: Option<String>,
+        code: String,
+    },
+    Reply(Vec<Block>),
     Quote(Vec<Block>),
-    ListItem(Inline),
+    List {
+        ordered: bool,
+        start: u32,
+        items: Vec<Vec<Block>>,
+    },
+    Table {
+        header: bool,
+        rows: Vec<Vec<Inline>>,
+    },
+    Rule,
+}
+
+impl Block {
+    pub fn markdown(&self) -> Option<String> {
+        let join = |blocks: &[Block]| {
+            blocks
+                .iter()
+                .filter_map(Block::markdown)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        match self {
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.text.clone()),
+            Block::Code { code, .. } => Some(format!("```\n{code}\n```")),
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => Some(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, item)| match ordered {
+                        true => format!("{}. {}", *start as usize + offset, join(item)),
+                        false => format!("- {}", join(item)),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            Block::Table { rows, .. } => Some(
+                rows.iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|cell| cell.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            Block::Quote(children) => Some(join(children)),
+            Block::Reply(_) | Block::Rule => None,
+        }
+    }
+
+    pub fn first_line(&self) -> Option<String> {
+        match self {
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.text.clone()),
+            Block::Code { code, .. } => Some(code.clone()),
+            Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
+            Block::Table { rows, .. } => Some(rows.first()?.first()?.text.clone()),
+            Block::Quote(children) => children.iter().find_map(Block::first_line),
+            Block::Reply(_) | Block::Rule => None,
+        }
+    }
+
+    pub fn last_inline_mut(&mut self) -> Option<&mut Inline> {
+        match self {
+            Block::Paragraph(inline) => Some(inline),
+            Block::List { items, .. } => items.last_mut()?.last_mut()?.last_inline_mut(),
+            _ => None,
+        }
+    }
 }
 
 pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
@@ -130,9 +215,29 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
                 let stripped = inline.without(IMAGE_PLACEHOLDER);
                 (!stripped.is_blank()).then_some(Block::Paragraph(stripped))
             }
+            Block::Reply(children) => {
+                let children = strip_image_placeholders(children);
+                (!children.is_empty()).then_some(Block::Reply(children))
+            }
             Block::Quote(children) => {
                 let children = strip_image_placeholders(children);
                 (!children.is_empty()).then_some(Block::Quote(children))
+            }
+            Block::List {
+                ordered,
+                start,
+                items,
+            } => {
+                let items: Vec<Vec<Block>> = items
+                    .into_iter()
+                    .map(strip_image_placeholders)
+                    .filter(|item| !item.is_empty())
+                    .collect();
+                (!items.is_empty()).then_some(Block::List {
+                    ordered,
+                    start,
+                    items,
+                })
             }
             other => Some(other),
         })
@@ -144,23 +249,68 @@ pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
     let mut current = Inline::default();
     for span in spans {
         match span {
-            Span::CodeBlock { code, .. } => {
+            Span::CodeBlock { language, code } => {
                 flush(&mut current, &mut blocks, Block::Paragraph);
-                blocks.push(Block::Code(code.trim_end_matches('\n').to_owned()));
+                blocks.push(Block::Code {
+                    language: language.clone(),
+                    code: code.trim_end_matches('\n').to_owned(),
+                });
             }
-            Span::Quote(children) => {
+            Span::Quote(children) | Span::BlockQuote(children) => {
                 flush(&mut current, &mut blocks, Block::Paragraph);
                 let inner = layout_blocks(children);
                 if !inner.is_empty() {
-                    blocks.push(Block::Quote(inner));
+                    blocks.push(match span {
+                        Span::Quote(_) => Block::Reply(inner),
+                        _ => Block::Quote(inner),
+                    });
                 }
             }
-            Span::ListItem(children) => {
+            Span::List {
+                ordered,
+                start,
+                items,
+            } => {
                 flush(&mut current, &mut blocks, Block::Paragraph);
-                let mut item = Inline::default();
-                append_inline(children, StyleFlags::default(), None, &mut item);
-                item.trim_end();
-                blocks.push(Block::ListItem(item));
+                let items: Vec<Vec<Block>> = items
+                    .iter()
+                    .map(|item| layout_blocks(item))
+                    .filter(|item| !item.is_empty())
+                    .collect();
+                if !items.is_empty() {
+                    blocks.push(Block::List {
+                        ordered: *ordered,
+                        start: *start,
+                        items,
+                    });
+                }
+            }
+            Span::Table { header, rows } => {
+                flush(&mut current, &mut blocks, Block::Paragraph);
+                let rows: Vec<Vec<Inline>> = rows
+                    .iter()
+                    .map(|row| row.iter().map(|cell| inline_of(cell)).collect())
+                    .collect();
+                if !rows.is_empty() {
+                    blocks.push(Block::Table {
+                        header: *header,
+                        rows,
+                    });
+                }
+            }
+            Span::Heading { level, children } => {
+                flush(&mut current, &mut blocks, Block::Paragraph);
+                let inline = inline_of(children);
+                if !inline.is_blank() {
+                    blocks.push(Block::Heading {
+                        level: *level,
+                        inline,
+                    });
+                }
+            }
+            Span::Rule => {
+                flush(&mut current, &mut blocks, Block::Paragraph);
+                blocks.push(Block::Rule);
             }
             other => append_inline(
                 std::slice::from_ref(other),
@@ -172,6 +322,13 @@ pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
     }
     flush(&mut current, &mut blocks, Block::Paragraph);
     blocks
+}
+
+fn inline_of(spans: &[Span]) -> Inline {
+    let mut inline = Inline::default();
+    append_inline(spans, StyleFlags::default(), None, &mut inline);
+    inline.trim_end();
+    pad_code(inline)
 }
 
 fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Block) {
@@ -187,8 +344,40 @@ fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Bloc
         });
     }
     if !inline.is_blank() {
-        blocks.push(make(inline));
+        blocks.push(make(pad_code(inline)));
     }
+}
+
+fn pad_code(inline: Inline) -> Inline {
+    if !inline.segments.iter().any(|segment| segment.style.code) {
+        return inline;
+    }
+    let mut padded = Inline::default();
+    for (index, segment) in inline.segments.iter().enumerate() {
+        let text = &inline.text[segment.range.clone()];
+        let touches = |neighbour: Option<&Segment>, at_end: bool| {
+            neighbour.is_some_and(|neighbour| {
+                let neighbour_text = &inline.text[neighbour.range.clone()];
+                let edge = if at_end {
+                    neighbour_text.chars().next()
+                } else {
+                    neighbour_text.chars().next_back()
+                };
+                !neighbour.style.code && edge.is_some_and(|edge| !edge.is_whitespace())
+            })
+        };
+        let previous = index
+            .checked_sub(1)
+            .and_then(|previous| inline.segments.get(previous));
+        if segment.style.code && touches(previous, false) {
+            padded.push(CODE_PADDING, StyleFlags::default(), None);
+        }
+        padded.push(text, segment.style, segment.link.as_deref());
+        if segment.style.code && touches(inline.segments.get(index + 1), true) {
+            padded.push(CODE_PADDING, StyleFlags::default(), None);
+        }
+    }
+    padded
 }
 
 fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mut Inline) {
@@ -216,6 +405,50 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 link,
                 out,
             ),
+            Span::Strike(children) => append_inline(
+                children,
+                StyleFlags {
+                    strike: true,
+                    ..style
+                },
+                link,
+                out,
+            ),
+            Span::Underline(children) => append_inline(
+                children,
+                StyleFlags {
+                    underline: true,
+                    ..style
+                },
+                link,
+                out,
+            ),
+            Span::Colored {
+                color,
+                background,
+                children,
+            } => append_inline(
+                children,
+                StyleFlags {
+                    color: color.or(style.color),
+                    background: background.or(style.background),
+                    ..style
+                },
+                link,
+                out,
+            ),
+            Span::Heading { children, .. } => {
+                append_inline(
+                    children,
+                    StyleFlags {
+                        bold: true,
+                        ..style
+                    },
+                    link,
+                    out,
+                );
+                out.push("\n", style, link);
+            }
             Span::Code(text) => out.push(
                 text,
                 StyleFlags {
@@ -252,10 +485,27 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                     link,
                 );
             }
-            Span::LineBreak => out.push("\n", style, link),
-            Span::ListItem(children) | Span::Quote(children) => {
+            Span::LineBreak | Span::Rule => out.push("\n", style, link),
+            Span::Quote(children) | Span::BlockQuote(children) => {
                 append_inline(children, style, link, out);
                 out.push("\n", style, link);
+            }
+            Span::List { items, .. } => {
+                for item in items {
+                    append_inline(item, style, link, out);
+                    out.push("\n", style, link);
+                }
+            }
+            Span::Table { rows, .. } => {
+                for row in rows {
+                    for (index, cell) in row.iter().enumerate() {
+                        if index > 0 {
+                            out.push(" ", style, link);
+                        }
+                        append_inline(cell, style, link, out);
+                    }
+                    out.push("\n", style, link);
+                }
             }
             Span::Image { .. } => out.push(IMAGE_PLACEHOLDER, style, link),
         }
@@ -467,27 +717,113 @@ mod tests {
             blocks,
             vec![
                 Block::Paragraph(Inline::plain("before")),
-                Block::Code("let x = 1;".into()),
+                Block::Code {
+                    language: None,
+                    code: "let x = 1;".into()
+                },
                 Block::Paragraph(Inline::plain("after")),
             ]
         );
     }
 
     #[test]
-    fn list_items_and_quotes_are_blocks() {
+    fn lists_nest_and_quotes_are_blocks() {
         let blocks = layout_blocks(&[
-            Span::ListItem(vec![text("one")]),
-            Span::ListItem(vec![text("two")]),
+            Span::List {
+                ordered: true,
+                start: 3,
+                items: vec![
+                    vec![text("one")],
+                    vec![
+                        text("two"),
+                        Span::List {
+                            ordered: false,
+                            start: 1,
+                            items: vec![vec![text("inner")]],
+                        },
+                    ],
+                ],
+            },
             Span::Quote(vec![text("quoted")]),
         ]);
         assert_eq!(
             blocks,
             vec![
-                Block::ListItem(Inline::plain("one")),
-                Block::ListItem(Inline::plain("two")),
-                Block::Quote(vec![Block::Paragraph(Inline::plain("quoted"))]),
+                Block::List {
+                    ordered: true,
+                    start: 3,
+                    items: vec![
+                        vec![Block::Paragraph(Inline::plain("one"))],
+                        vec![
+                            Block::Paragraph(Inline::plain("two")),
+                            Block::List {
+                                ordered: false,
+                                start: 1,
+                                items: vec![vec![Block::Paragraph(Inline::plain("inner"))]],
+                            },
+                        ],
+                    ],
+                },
+                Block::Reply(vec![Block::Paragraph(Inline::plain("quoted"))]),
             ]
         );
+    }
+
+    #[test]
+    fn heading_rule_and_table_are_blocks() {
+        let blocks = layout_blocks(&[
+            Span::Heading {
+                level: 2,
+                children: vec![text("Title")],
+            },
+            Span::Rule,
+            Span::Table {
+                header: true,
+                rows: vec![vec![vec![text("a")], vec![text("b")]]],
+            },
+        ]);
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Heading {
+                    level: 2,
+                    inline: Inline::plain("Title")
+                },
+                Block::Rule,
+                Block::Table {
+                    header: true,
+                    rows: vec![vec![Inline::plain("a"), Inline::plain("b")]],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn strike_underline_and_color_become_flags() {
+        let inline = paragraph_inline(&[
+            Span::Strike(vec![text("old")]),
+            Span::Underline(vec![text("u")]),
+            Span::Colored {
+                color: Some(0xff0000),
+                background: Some(0xffff00),
+                children: vec![text("c")],
+            },
+        ]);
+        assert!(inline.segments[0].style.strike);
+        assert!(inline.segments[1].style.underline);
+        assert_eq!(inline.segments[2].style.color, Some(0xff0000));
+        assert_eq!(inline.segments[2].style.background, Some(0xffff00));
+    }
+
+    #[test]
+    fn inline_code_gets_room_only_next_to_text() {
+        let inline = paragraph_inline(&[
+            text("run "),
+            Span::Code("x".into()),
+            text(". "),
+            Span::Code("y".into()),
+        ]);
+        assert_eq!(inline.text, "run x\u{200a}. y");
     }
 
     #[test]

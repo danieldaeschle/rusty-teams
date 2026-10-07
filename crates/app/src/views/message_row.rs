@@ -317,13 +317,9 @@ fn meta_room(row: &MessageRow, own: bool) -> usize {
 
 fn with_meta_room(blocks: &[Block], room: usize) -> Option<Vec<Block>> {
     let mut padded = blocks.to_vec();
-    match padded.last_mut()? {
-        Block::Paragraph(inline) | Block::ListItem(inline) => {
-            *inline = inline.with_trailing_room(room);
-            Some(padded)
-        }
-        Block::Code(_) | Block::Quote(_) => None,
-    }
+    let inline = padded.last_mut()?.last_inline_mut()?;
+    *inline = inline.with_trailing_room(room);
+    Some(padded)
 }
 
 fn has_text(row: &MessageRow) -> bool {

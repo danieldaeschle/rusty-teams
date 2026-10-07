@@ -300,12 +300,7 @@ pub fn message_text(record: &MessageRecord) -> String {
         .collect();
     strip_image_placeholders(layout_blocks(&own_spans))
         .into_iter()
-        .filter_map(|block| match block {
-            Block::Paragraph(inline) => Some(inline.text),
-            Block::ListItem(inline) => Some(format!("- {}", inline.text)),
-            Block::Code(code) => Some(format!("```\n{code}\n```")),
-            Block::Quote(_) => None,
-        })
+        .filter_map(|block| block.markdown())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -317,11 +312,7 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
         .collect();
     let text = strip_image_placeholders(layout_blocks(&own_spans))
         .into_iter()
-        .find_map(|block| match block {
-            Block::Paragraph(inline) | Block::ListItem(inline) => Some(inline.text),
-            Block::Code(code) => Some(code),
-            Block::Quote(_) => None,
-        })
+        .find_map(|block| block.first_line())
         .unwrap_or_default();
     let first_line = text.lines().map(str::trim).find(|line| !line.is_empty());
     let excerpt = match first_line {
@@ -604,7 +595,7 @@ mod tests {
         text.body_html = "<p>first line</p><p>second</p>".into();
         assert_eq!(reply_excerpt(&text), "first line");
         let mut quoted = record("q", None, 8, 6);
-        quoted.body_html = "<blockquote>Jonas<br>old text</blockquote><p>my answer</p>".into();
+        quoted.body_html = r#"<blockquote itemtype="http://schema.skype.com/Reply">Jonas<br>old text</blockquote><p>my answer</p>"#.into();
         assert_eq!(reply_excerpt(&quoted), "my answer");
         let mut image = record("b", None, 8, 6);
         image.body_html = "<img src=\"u\">".into();

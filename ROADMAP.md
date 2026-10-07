@@ -64,7 +64,11 @@ Feature parity with the Microsoft Teams desktop client.
 
 | Feature | State | Note |
 |---|---|---|
-| Text formatting: bold, italic, code, code block, lists, links | Done |  |
+| Text formatting: bold, italic, strike, underline, headings, links | Done |  |
+| Code: inline pill, block with language, copy and syntax colors | Done |  |
+| Lists: nested, numbered with start | Done |  |
+| Tables, rules, block quotes, highlight and text color | Done |  |
+| Superscript, subscript, font size | Missing | Shown as plain text |
 | Quotes and replies | Done |  |
 | Reactions shown | Done |  |
 | Edited and deleted markers | Done |  |
