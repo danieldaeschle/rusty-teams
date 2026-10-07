@@ -5,8 +5,7 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, TextRun, Window, point,
-    px, size,
+    App, Font, Pixels, Point, ShapedLine, Size, TextAlign, TextRun, Window, point, px, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -32,11 +31,13 @@ pub enum WrappingIndent {
 /// Choose Unicode line-break opportunities using the same shaped widths as
 /// painting. Oversized words fall back to complete graphemes, never UTF-8 bytes.
 /// `hanging_indent` is a byte offset continuation rows align under; it wins over `wrapping_indent`.
+/// `atomic` ranges (inline tokens) are never split.
 fn measured_wrap_boundaries(
     text: &str,
     width: Pixels,
     wrapping_indent: WrappingIndent,
     hanging_indent: Option<usize>,
+    atomic: &[Range<usize>],
     mut measure: impl FnMut(Range<usize>) -> Pixels,
 ) -> Vec<gpui::Boundary> {
     let mut indent = match hanging_indent {
@@ -56,6 +57,11 @@ fn measured_wrap_boundaries(
     let ends: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(ix, grapheme)| ix + grapheme.len())
+        .filter(|&ix| {
+            !atomic
+                .iter()
+                .any(|range| range.start < ix && ix < range.end)
+        })
         .collect();
     let opportunities: Vec<usize> = unicode_linebreak::linebreaks(text)
         .map(|(ix, _)| ix)
@@ -478,9 +484,6 @@ impl TextWrapper {
         new_text: &Rope,
         cx: &mut App,
     ) {
-        let mut line_wrapper = cx
-            .text_system()
-            .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
         let font_overrides = self.font_overrides.clone();
         let hanging_indents = self.hanging_indents.clone();
@@ -493,8 +496,7 @@ impl TextWrapper {
             range,
             new_text,
             &mut |line_str, wrap_width, line_start| {
-                let mut fragments = Vec::new();
-                let mut offset = 0;
+                let mut tokens = Vec::new();
                 let first = metrics.partition_point(|(r, _)| r.end <= line_start);
                 for (range, width) in &metrics[first..] {
                     if range.start >= line_start + line_str.len() {
@@ -509,43 +511,47 @@ impl TextWrapper {
                     {
                         continue;
                     }
-                    if offset < range.start {
-                        fragments.push(LineFragment::text(&line_str[offset..range.start]));
+                    tokens.push((range, *width));
+                }
+                let shape = |range: Range<usize>| {
+                    if range.is_empty() {
+                        return px(0.);
                     }
-                    fragments.push(LineFragment::element(*width, range.len()));
-                    offset = range.end;
-                }
-                if fragments.is_empty() {
-                    return measured_wrap_boundaries(
-                        line_str,
-                        wrap_width,
-                        wrapping_indent,
-                        hanging_indent_at(&hanging_indents, line_start, line_str.len()),
-                        |range| {
-                            let runs = split_run_by_font_overrides(
-                                TextRun {
-                                    len: range.len(),
-                                    font: font.clone(),
-                                    color: gpui::black(),
-                                    background_color: None,
-                                    underline: None,
-                                    strikethrough: None,
-                                },
-                                line_start + range.start..line_start + range.end,
-                                &font_overrides,
-                            );
-                            text_system
-                                .layout_line(&line_str[range], font_size, &runs, None)
-                                .width
+                    let runs = split_run_by_font_overrides(
+                        TextRun {
+                            len: range.len(),
+                            font: font.clone(),
+                            color: gpui::black(),
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
                         },
+                        line_start + range.start..line_start + range.end,
+                        &font_overrides,
                     );
-                }
-                if offset < line_str.len() {
-                    fragments.push(LineFragment::text(&line_str[offset..]));
-                }
-                line_wrapper
-                    .wrap_line(&fragments, wrap_width, gpui::IndentAdjustment::SameIndent)
-                    .collect()
+                    text_system
+                        .layout_line(&line_str[range], font_size, &runs, None)
+                        .width
+                };
+                let token_ranges: Vec<_> = tokens.iter().map(|(range, _)| range.clone()).collect();
+                measured_wrap_boundaries(
+                    line_str,
+                    wrap_width,
+                    wrapping_indent,
+                    hanging_indent_at(&hanging_indents, line_start, line_str.len()),
+                    &token_ranges,
+                    |range| {
+                        let mut width = px(0.);
+                        let mut offset = range.start;
+                        for (token, token_width) in &tokens {
+                            if token.start >= offset && token.end <= range.end {
+                                width += shape(offset..token.start) + *token_width;
+                                offset = token.end;
+                            }
+                        }
+                        width + shape(offset..range.end)
+                    },
+                )
             },
         );
     }
@@ -1386,6 +1392,43 @@ mod tests {
         });
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn production_wrap_keeps_tokens_whole_and_applies_overrides_and_hanging_indent_on_token_lines()
+    {
+        let cx = shaping_test_context();
+        cx.update(|cx| {
+            let font = gpui::font("DejaVu Sans");
+            let font_size = px(14.);
+            let value = "• iiii @tok iiii iiii iiii iiii";
+            let token = 9..13;
+            let width = shaped_width("• iiii ", &font, font_size, cx) + px(30.);
+            let text = Rope::from(value);
+            let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
+            wrapper.wrapping_indent = WrappingIndent::None;
+            wrapper.update(&text, &(0..0), &text, cx);
+            wrapper.set_inline_metrics(Rc::from([(token.clone(), px(32.))]), cx);
+            let rows = wrapper.line(0).unwrap().wrapped_lines.to_vec();
+            assert!(
+                rows.iter()
+                    .all(|row| !token.contains(&row.start) || row.start == token.start)
+            );
+            assert!(rows.iter().any(|row| row.start == token.start), "{rows:?}");
+            assert_eq!(wrapper.line(0).unwrap().indent, 0);
+
+            wrapper.set_hanging_indents(Rc::from([0..4]), cx);
+            assert_eq!(wrapper.line(0).unwrap().indent, 2);
+
+            let plain = wrapper.line(0).unwrap().wrapped_lines.to_vec();
+            let mono = FontOverride {
+                family: Some("DejaVu Sans Mono".into()),
+                ..Default::default()
+            };
+            wrapper.set_font_overrides(Rc::from([(14..value.len(), mono)]), cx);
+            assert_ne!(wrapper.line(0).unwrap().wrapped_lines.to_vec(), plain);
+        });
+    }
+
     #[test]
     fn font_override_runs_split_at_span_edges_and_follow_edits() {
         let run = TextRun {
@@ -1448,9 +1491,14 @@ mod tests {
                 &(start..previous.len()),
                 &inserted,
                 &mut |line, width, _| {
-                    measured_wrap_boundaries(line, width, WrappingIndent::None, None, |range| {
-                        measure(&line[range])
-                    })
+                    measured_wrap_boundaries(
+                        line,
+                        width,
+                        WrappingIndent::None,
+                        None,
+                        &[],
+                        |range| measure(&line[range]),
+                    )
                 },
             );
             let expected = if value.ends_with('s') {
@@ -1468,7 +1516,7 @@ mod tests {
     #[test]
     fn measured_wrap_preserves_words_graphemes_and_indentation() {
         let wrap = |text: &str, width, indent| {
-            measured_wrap_boundaries(text, px(width), indent, None, |range| {
+            measured_wrap_boundaries(text, px(width), indent, None, &[], |range| {
                 px(text[range].graphemes(true).count() as f32)
             })
             .into_iter()
@@ -1493,6 +1541,7 @@ mod tests {
                 px(8.),
                 WrappingIndent::None,
                 hanging_indent,
+                &[],
                 |range| px(text[range].graphemes(true).count() as f32),
             )
             .into_iter()

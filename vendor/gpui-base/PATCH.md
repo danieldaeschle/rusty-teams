@@ -17,11 +17,11 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | `src/input/base/kind.rs` | `TextareaExtras` (text + range decorations) as `TextareaMode::Extras`; edit tracking and reset hooks; sealed `DecoratedMode` trait for both multi-line modes | decorations on `TextareaState` (composer stays a textarea) |
 | `src/input/editor/decorations.rs` | `TextDecorationCollection<M = EditorMode>`, `RangeDecorationCollection<M = EditorMode>`, `create_*_collection` on `impl<M: DecoratedMode>`; `DecorationCollections` / `TrackedDecoration` `pub` + `#[doc(hidden)]` | same API on textarea and editor; default type param keeps editor code unchanged |
 | `src/input/editor/mod.rs`, `src/input/mod.rs` | doc no longer says decorations are editor-only; export `DecoratedMode`, `TextareaExtras` | docs, API |
+| `src/input/editor/display_map/text_wrapper.rs` | lines with inline tokens wrap through `measured_wrap_boundaries` too (`atomic` token ranges, token width + shaped text segments) instead of gpui's `LineWrapper` | mention lines honour font overrides and hanging indent |
 
 ## Limits
 
 - Syntax-highlight (tree-sitter / LSP) bold or italic still wraps with the base font; only decorations feed wrapping.
-- Lines containing inline tokens wrap through gpui's `LineWrapper` with the base font only and ignore their hanging indent.
 - Hanging-indent markers are dropped by an edit inside them; the app sets them again on change.
 - The unwrapped longest-line width (soft wrap off) ignores font overrides.
 
