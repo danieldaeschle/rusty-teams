@@ -333,6 +333,12 @@ pub fn presence_kind(engine: &Engine, user_id: &str) -> Option<PresenceKind> {
         })
 }
 
+pub fn in_call(engine: &Engine, user_id: &str) -> bool {
+    engine
+        .presence(user_id)
+        .is_some_and(|presence| presence.in_call)
+}
+
 pub type Done = oneshot::Receiver<Result<(), String>>;
 
 fn run<F>(future: F) -> Done

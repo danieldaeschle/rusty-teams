@@ -31,6 +31,11 @@ impl Availability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Presence {
     pub availability: Availability,
+    pub in_call: bool,
+}
+
+fn is_call_activity(activity: Option<&str>) -> bool {
+    matches!(activity, Some("InACall" | "InAConferenceCall"))
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -56,6 +61,7 @@ impl<R: Remote> SyncEngine<R> {
             for entry in found {
                 let presence = Presence {
                     availability: Availability::from_service(&entry.availability),
+                    in_call: is_call_activity(entry.activity.as_deref()),
                 };
                 changed |= known.insert(entry.user_id, presence) != Some(presence);
             }

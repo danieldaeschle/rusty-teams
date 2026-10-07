@@ -18,7 +18,7 @@ use super::stack::{ReplyState, SENT_DURATION, ToastModel, ToastStack};
 use super::toast::{PillView, ToastView};
 use super::settings_view::SettingsView;
 use crate::app_state::{AppEvent, AppState, Selection};
-use crate::data::{Directory, PresenceKind};
+use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
 
 const TICK: Duration = Duration::from_millis(33);
@@ -188,11 +188,15 @@ impl NotificationCenter {
         let own_do_not_disturb = state.directory.me.as_ref().is_some_and(|me| {
             state.directory.presence_of(&me.user_id) == PresenceKind::DoNotDisturb
         });
+        let in_call = match (state.engine.as_ref(), state.directory.me.as_ref()) {
+            (Some(engine), Some(me)) => data::in_call(engine, &me.user_id),
+            _ => false,
+        };
         Environment {
             chat_in_foreground: selected && self.main_window_active(cx),
             system_quiet: platform::system_quiet(),
             own_do_not_disturb,
-            in_call: false,
+            in_call,
         }
     }
 
