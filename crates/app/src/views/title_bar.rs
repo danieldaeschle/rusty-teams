@@ -11,7 +11,7 @@ use crate::theme;
 
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
 const SEARCH_WIDTH: f32 = 380.;
-const SEARCH_HINT: &str = "Chats, Personen, Channels suchen";
+const SEARCH_HINT: &str = "Search chats, people and channels";
 const SHORTCUT_HINT: &str = "Ctrl K";
 const OWN_AVATAR_SIZE: f32 = 26.;
 const APP_ICON_SIZE: f32 = 18.;

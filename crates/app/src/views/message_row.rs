@@ -86,7 +86,7 @@ fn new_marker() -> Div {
                 .text_size(px(11.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::accent_text())
-                .child("Neu"),
+                .child("New"),
         )
 }
 
@@ -186,7 +186,7 @@ fn bubble_meta(row: &MessageRow, own: bool) -> Div {
         .line_height(px(14.))
         .italic()
         .text_color(tint)
-        .when(row.edited, |meta| meta.child("bearbeitet"))
+        .when(row.edited, |meta| meta.child("Edited"))
         .child(row.time.clone())
         .when(own && row.delivery == Delivery::Delivered, |meta| {
             if row.read {
@@ -233,7 +233,7 @@ fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<Any
                 .text_size(px(11.))
                 .text_color(theme::text_muted())
                 .child(icon(IconName::Loader, 12., theme::text_muted()))
-                .child("Wird gesendet")
+                .child("Sending")
                 .into_any_element(),
         ),
         Delivery::Failed(_) => Some(
@@ -241,14 +241,14 @@ fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<Any
                 .gap(px(4.))
                 .text_size(px(11.))
                 .text_color(theme::red_soft())
-                .child("Nicht gesendet.")
+                .child("Failed to send.")
                 .child(
                     div()
                         .id(ElementId::Name(format!("retry-{index}").into()))
                         .cursor_pointer()
                         .text_color(theme::red_tint())
                         .underline()
-                        .child("Erneut senden")
+                        .child("Retry")
                         .when_some(retry, |link, retry| {
                             link.on_click(move |_, _, cx| retry(cx))
                         }),
@@ -263,7 +263,7 @@ fn edited_marker() -> Div {
         .text_size(px(11.))
         .italic()
         .text_color(theme::text_muted())
-        .child("bearbeitet")
+        .child("Edited")
 }
 
 fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) -> Div {
@@ -322,23 +322,23 @@ fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) ->
                     theme::text_muted()
                 })
                 .child(match count {
-                    0 => "Keine Antworten".to_owned(),
-                    1 => "1 Antwort".to_owned(),
-                    count => format!("{count} Antworten"),
+                    0 => "No replies".to_owned(),
+                    1 => "1 reply".to_owned(),
+                    count => format!("{count} replies"),
                 }),
         )
         .children(row.last_reply_time.as_ref().map(|time| {
             div()
                 .text_size(px(11.5))
                 .text_color(theme::text_muted())
-                .child(format!("zuletzt {time}"))
+                .child(format!("Last reply {time}"))
         }))
         .child(div().flex_1())
         .child(
             div()
                 .text_size(px(12.5))
                 .text_color(theme::text_soft())
-                .child("Antworten"),
+                .child("Reply"),
         );
     let mut body = v_flex().gap(px(8.)).child(header);
     if row.deleted {

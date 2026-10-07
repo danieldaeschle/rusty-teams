@@ -9,12 +9,12 @@ use crate::data::{
 };
 use crate::format;
 
-pub const FAVORITES_FALLBACK_NAME: &str = "Angeheftet";
-pub const OTHERS_NAME: &str = "Weitere Chats";
+pub const FAVORITES_FALLBACK_NAME: &str = "Pinned";
+pub const OTHERS_NAME: &str = "Other chats";
 pub const OTHERS_ID: &str = "others";
-pub const EMPTY_FOLDER_HINT: &str = "Leer. Chats hierher ziehen.";
-pub const DELETED_PREVIEW: &str = "Nachricht gelöscht";
-const OWN_PREFIX: &str = "Du";
+pub const EMPTY_FOLDER_HINT: &str = "Empty. Drag chats here.";
+pub const DELETED_PREVIEW: &str = "Message deleted";
+const OWN_PREFIX: &str = "You";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Preview {
@@ -323,24 +323,24 @@ mod tests {
     }
 
     #[test]
-    fn preview_prefix_is_du_for_own_and_first_name_for_groups() {
+    fn preview_prefix_is_you_for_own_and_first_name_for_groups() {
         let mut group = chat("g", "group", false);
-        group.last_message_preview = Some("Hallo".into());
+        group.last_message_preview = Some("Hello".into());
         group.last_message_sender_id = Some("ada".into());
         group.last_message_sender_name = Some("Ada Example".into());
         assert_eq!(
             preview_for(&group, Some(&me())),
             Preview::Text {
                 prefix: Some("Ada".into()),
-                text: "Hallo".into()
+                text: "Hello".into()
             }
         );
         group.last_message_sender_id = Some("me".into());
         assert_eq!(
             preview_for(&group, Some(&me())),
             Preview::Text {
-                prefix: Some("Du".into()),
-                text: "Hallo".into()
+                prefix: Some("You".into()),
+                text: "Hello".into()
             }
         );
         let mut direct = chat("d", "oneOnOne", false);

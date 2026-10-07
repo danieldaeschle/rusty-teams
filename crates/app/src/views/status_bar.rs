@@ -17,36 +17,33 @@ pub enum Tone {
 
 pub fn connection_text(connection: &ConnectionState, mode: Mode) -> (String, Tone) {
     if mode.demo {
-        return ("Demodaten".to_owned(), Tone::Warn);
+        return ("Demo data".to_owned(), Tone::Warn);
     }
     match connection {
-        ConnectionState::Connecting => ("Verbinde".to_owned(), Tone::Warn),
-        ConnectionState::Online => ("Verbunden".to_owned(), Tone::Good),
-        ConnectionState::NoBrowser => ("Browser nicht gestartet".to_owned(), Tone::Bad),
-        ConnectionState::NoAppTab => ("Teams nicht geladen".to_owned(), Tone::Bad),
-        ConnectionState::LoginRequired => ("Anmeldung nötig".to_owned(), Tone::Bad),
-        ConnectionState::Failed(message) => (format!("Fehler: {message}"), Tone::Bad),
+        ConnectionState::Connecting => ("Connecting".to_owned(), Tone::Warn),
+        ConnectionState::Online => ("Connected".to_owned(), Tone::Good),
+        ConnectionState::NoBrowser => ("Browser not running".to_owned(), Tone::Bad),
+        ConnectionState::NoAppTab => ("Teams not loaded".to_owned(), Tone::Bad),
+        ConnectionState::LoginRequired => ("Sign-in required".to_owned(), Tone::Bad),
+        ConnectionState::Failed(message) => (format!("Error: {message}"), Tone::Bad),
     }
 }
 
 pub fn live_text(live: LiveState) -> Option<(&'static str, Tone)> {
     match live {
         LiveState::Off => None,
-        LiveState::Connecting => Some(("Live: verbinde", Tone::Warn)),
+        LiveState::Connecting => Some(("Live: connecting", Tone::Warn)),
         LiveState::Live => Some(("Live", Tone::Good)),
-        LiveState::Reconnecting => Some(("Live: verbinde neu", Tone::Warn)),
-        LiveState::MessageLoss => Some(("Live: Nachrichten verpasst, synchronisiere", Tone::Warn)),
-        LiveState::Failed => Some(("Live: nicht verfügbar", Tone::Bad)),
+        LiveState::Reconnecting => Some(("Live: reconnecting", Tone::Warn)),
+        LiveState::MessageLoss => Some(("Live: missed messages, syncing", Tone::Warn)),
+        LiveState::Failed => Some(("Live: unavailable", Tone::Bad)),
     }
 }
 
 pub fn sync_text(last_sync: Option<DateTime<Utc>>) -> String {
     match last_sync {
-        Some(time) => format!(
-            "Synchronisiert {}",
-            time.with_timezone(&Local).format("%H:%M")
-        ),
-        None => "Noch nicht synchronisiert".to_owned(),
+        Some(time) => format!("Synced {}", time.with_timezone(&Local).format("%H:%M")),
+        None => "Not synced yet".to_owned(),
     }
 }
 
@@ -92,7 +89,7 @@ pub fn render_status_bar(
     }
     bar = bar.child(div().child(sync_text(state.last_sync)));
     if state.mode.read_only {
-        bar = bar.child(div().text_color(theme::amber()).child("Nur lesen"));
+        bar = bar.child(div().text_color(theme::amber()).child("Read-only"));
     }
     match update {
         UpdateStatus::UpToDate => {}
@@ -106,7 +103,7 @@ pub fn render_status_bar(
                     .text_color(theme::on_accent())
                     .cursor_pointer()
                     .hover(|button| button.bg(theme::accent_text()))
-                    .child("Update bereit - Neu starten")
+                    .child("Update ready - Restart")
                     .on_click(on_restart),
             )
         }
@@ -114,7 +111,7 @@ pub fn render_status_bar(
             bar = bar.child(
                 div()
                     .text_color(theme::red())
-                    .child(format!("Update fehlgeschlagen: {message}")),
+                    .child(format!("Update failed: {message}")),
             )
         }
     }
@@ -147,7 +144,7 @@ mod tests {
         );
         assert_eq!(
             connection_text(&ConnectionState::LoginRequired, mode).0,
-            "Anmeldung nötig"
+            "Sign-in required"
         );
         assert_eq!(
             connection_text(&ConnectionState::Connecting, mode).1,
@@ -168,7 +165,7 @@ mod tests {
         };
         assert_eq!(
             connection_text(&ConnectionState::NoBrowser, mode).0,
-            "Demodaten"
+            "Demo data"
         );
     }
 
@@ -180,7 +177,7 @@ mod tests {
 
     #[test]
     fn sync_text_without_sync() {
-        assert_eq!(sync_text(None), "Noch nicht synchronisiert");
-        assert!(sync_text(Some(Utc::now())).starts_with("Synchronisiert "));
+        assert_eq!(sync_text(None), "Not synced yet");
+        assert!(sync_text(Some(Utc::now())).starts_with("Synced "));
     }
 }

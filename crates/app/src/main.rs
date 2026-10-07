@@ -99,7 +99,7 @@ fn transport(endpoint: Option<&str>) -> Arc<dyn session::Transport> {
     if endpoint.is_none() {
         return webview::start(webview::HostConfig {
             user_data_folder: data_path(WEBVIEW_FOLDER),
-            window_title: format!("{APP_NAME} - Anmeldung"),
+            window_title: format!("{APP_NAME} - Sign in"),
         });
     }
     Arc::new(session::CdpTransport::new(endpoint.unwrap_or(session::DEFAULT_ENDPOINT)))

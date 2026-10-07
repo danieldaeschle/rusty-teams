@@ -49,10 +49,10 @@ pub enum PresenceKind {
 impl PresenceKind {
     pub fn label(self) -> &'static str {
         match self {
-            PresenceKind::Available => "Verfügbar",
-            PresenceKind::Busy => "Beschäftigt",
-            PresenceKind::DoNotDisturb => "Nicht stören",
-            PresenceKind::Away => "Abwesend",
+            PresenceKind::Available => "Available",
+            PresenceKind::Busy => "Busy",
+            PresenceKind::DoNotDisturb => "Do not disturb",
+            PresenceKind::Away => "Away",
             PresenceKind::Offline => "Offline",
             PresenceKind::Unknown => "",
         }

@@ -41,13 +41,13 @@ pub fn badge_text(count: u32) -> String {
 
 fn weekday_label(weekday: Weekday) -> &'static str {
     match weekday {
-        Weekday::Mon => "Mo",
-        Weekday::Tue => "Di",
-        Weekday::Wed => "Mi",
-        Weekday::Thu => "Do",
-        Weekday::Fri => "Fr",
-        Weekday::Sat => "Sa",
-        Weekday::Sun => "So",
+        Weekday::Mon => "Mon",
+        Weekday::Tue => "Tue",
+        Weekday::Wed => "Wed",
+        Weekday::Thu => "Thu",
+        Weekday::Fri => "Fri",
+        Weekday::Sat => "Sat",
+        Weekday::Sun => "Sun",
     }
 }
 
@@ -77,20 +77,20 @@ pub fn list_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffse
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
         weekday_label(local.weekday()).to_owned()
     } else {
-        local.format("%d.%m.").to_string()
+        local.format("%b %-d").to_string()
     }
 }
 
 pub fn day_label(day: NaiveDate, today: NaiveDate) -> String {
     if day == today {
-        "Heute".to_owned()
+        "Today".to_owned()
     } else if today.pred_opt() == Some(day) {
-        "Gestern".to_owned()
+        "Yesterday".to_owned()
     } else {
         format!(
-            "{} {}",
+            "{}, {}",
             weekday_label(day.weekday()),
-            day.format("%d.%m.%Y")
+            day.format("%b %-d, %Y")
         )
     }
 }
@@ -168,11 +168,11 @@ mod tests {
     #[test]
     fn list_time_is_clock_today_weekday_this_week_date_before() {
         assert_eq!(list_time_label(utc(7, 13), today(), zero()), "13:05");
-        assert_eq!(list_time_label(utc(5, 13), today(), zero()), "Mo");
-        assert_eq!(list_time_label(utc(6, 9), today(), zero()), "Di");
-        assert_eq!(list_time_label(utc(1, 13), today(), zero()), "Do");
+        assert_eq!(list_time_label(utc(5, 13), today(), zero()), "Mon");
+        assert_eq!(list_time_label(utc(6, 9), today(), zero()), "Tue");
+        assert_eq!(list_time_label(utc(1, 13), today(), zero()), "Thu");
         let september = Utc.with_ymd_and_hms(2026, 9, 30, 13, 0, 0).unwrap();
-        assert_eq!(list_time_label(september, today(), zero()), "30.09.");
+        assert_eq!(list_time_label(september, today(), zero()), "Sep 30");
     }
 
     #[test]
@@ -192,11 +192,11 @@ mod tests {
 
     #[test]
     fn day_labels() {
-        assert_eq!(day_label(today(), today()), "Heute");
-        assert_eq!(day_label(today().pred_opt().unwrap(), today()), "Gestern");
+        assert_eq!(day_label(today(), today()), "Today");
+        assert_eq!(day_label(today().pred_opt().unwrap(), today()), "Yesterday");
         assert_eq!(
             day_label(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), today()),
-            "Do 01.10.2026"
+            "Thu, Oct 1, 2026"
         );
     }
 }

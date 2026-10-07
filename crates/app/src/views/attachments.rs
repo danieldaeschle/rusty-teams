@@ -66,7 +66,7 @@ fn image_view(image: &ImageRef, id: String, directory: &Directory) -> AnyElement
                 div()
                     .text_size(px(11.))
                     .text_color(theme::text_muted())
-                    .child("Bild wird geladen"),
+                    .child("Loading image"),
             )
             .into_any_element();
     };
@@ -94,13 +94,13 @@ struct KindStyle {
 
 fn kind_style(kind: FileKind) -> KindStyle {
     let (label, description, color) = match kind {
-        FileKind::Word => ("DOC", "Word-Dokument", 0x2563EB),
-        FileKind::Excel => ("XLS", "Excel-Tabelle", 0x15803D),
+        FileKind::Word => ("DOC", "Word document", 0x2563EB),
+        FileKind::Excel => ("XLS", "Excel spreadsheet", 0x15803D),
         FileKind::PowerPoint => ("PPT", "PowerPoint", 0xC2410C),
-        FileKind::Pdf => ("PDF", "PDF-Dokument", 0xB91C1C),
-        FileKind::Image => ("IMG", "Bild", 0x7C3AED),
-        FileKind::Archive => ("ZIP", "Archiv", 0xB45309),
-        FileKind::Other => ("", "Datei", 0x525252),
+        FileKind::Pdf => ("PDF", "PDF document", 0xB91C1C),
+        FileKind::Image => ("IMG", "Image", 0x7C3AED),
+        FileKind::Archive => ("ZIP", "Archive", 0xB45309),
+        FileKind::Other => ("", "File", 0x525252),
     };
     KindStyle {
         label,
@@ -241,8 +241,8 @@ mod tests {
             size: Some(2048),
             open_url: String::new(),
         };
-        assert_eq!(file_subtitle(&card), "PDF-Dokument \u{b7} 2 KB");
+        assert_eq!(file_subtitle(&card), "PDF document \u{b7} 2 KB");
         let unknown = FileCard { size: None, ..card };
-        assert_eq!(file_subtitle(&unknown), "PDF-Dokument");
+        assert_eq!(file_subtitle(&unknown), "PDF document");
     }
 }

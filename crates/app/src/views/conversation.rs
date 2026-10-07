@@ -386,7 +386,7 @@ impl ConversationView {
             author: record
                 .sender_name
                 .clone()
-                .unwrap_or_else(|| "Unbekannt".to_owned()),
+                .unwrap_or_else(|| "Unknown".to_owned()),
             excerpt: reply_excerpt(&record),
         };
         self.composer.update(cx, |composer, cx| {
@@ -742,7 +742,7 @@ impl ConversationView {
         self.pending_outgoing.insert(key.clone(), outgoing.clone());
         self.pending.push(MessageRow {
             key: key.clone(),
-            author: "Du".to_owned(),
+            author: "You".to_owned(),
             sender_id: my_user_id,
             created_at: Utc::now(),
             series: Series::default(),
@@ -883,7 +883,7 @@ impl ConversationView {
                     } else {
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::background()));
-                        subline = format!("{} Teilnehmer", chat.members.len());
+                        subline = format!("{} participants", chat.members.len());
                         let shown: Vec<Face> = faces.iter().cloned().map(face).collect();
                         stack = Some(member_stack(directory, &shown, shown.len()));
                     }
@@ -967,7 +967,7 @@ impl Render for ConversationView {
                 .items_center()
                 .justify_center()
                 .text_color(theme::text_muted())
-                .child("Chat oder Channel auswählen")
+                .child("Select a chat or channel")
                 .into_any_element();
         };
         let rows = self.rows.clone();
@@ -1079,7 +1079,7 @@ impl Render for ConversationView {
                             .text_size(px(12.))
                             .text_color(theme::text_muted())
                             .child(icon(IconName::Loader, 12., theme::text_muted()))
-                            .child("Ältere Nachrichten werden geladen")
+                            .child("Loading older messages")
                             .into_any_element()
                     }
                     Some(Row::Start(start)) => {
@@ -1107,7 +1107,7 @@ impl Render for ConversationView {
                                 div()
                                     .text_size(px(12.))
                                     .text_color(theme::text_muted())
-                                    .child("Das ist der Anfang der Unterhaltung"),
+                                    .child("This is the beginning of the conversation"),
                             )
                             .into_any_element()
                     }
@@ -1139,7 +1139,7 @@ impl Render for ConversationView {
                 .justify_center()
                 .text_size(px(13.))
                 .text_color(theme::text_muted())
-                .child("Noch keine Beiträge in diesem Channel")
+                .child("No posts in this channel yet")
                 .into_any_element()
         } else {
             scroller.into_any_element()

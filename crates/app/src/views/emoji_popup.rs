@@ -153,12 +153,12 @@ fn hint() -> Div {
         .text_size(px(11.))
         .text_color(theme::text_muted())
         .child(key("↑↓"))
-        .child("wählen")
+        .child("select")
         .child(key("Tab"))
         .child(key("Enter"))
-        .child("einfügen")
+        .child("insert")
         .child(key("Esc"))
-        .child("zu")
+        .child("close")
 }
 
 /// Bottom-left corner sits above `anchor`, the colon's top-left in window coordinates.

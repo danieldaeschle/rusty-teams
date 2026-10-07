@@ -151,7 +151,7 @@ impl Composer {
             TextareaState::new(window, cx)
                 .auto_grow(MIN_ROWS, MAX_ROWS)
                 .submit_on_enter(true)
-                .placeholder("Nachricht")
+                .placeholder("Type a message")
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
         let recent_emoji = emoji::Recent::load(&app.read(cx).store);
@@ -440,7 +440,7 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let placeholder = format!("Nachricht an {name}");
+        let placeholder = format!("Message {name}");
         self.input.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx)
         });
@@ -684,7 +684,7 @@ impl Composer {
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme::accent_text())
-                                .child(format!("Antwort an {}", reply.author)),
+                                .child(format!("Replying to {}", reply.author)),
                         )
                         .child(
                             div()

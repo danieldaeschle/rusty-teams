@@ -14,7 +14,7 @@ const REPLY_FACE_LIMIT: usize = 3;
 
 pub const LOAD_OLDER_KEY: &str = "load-older";
 const UNKNOWN_AUTHOR: &str = "Unknown";
-const DELETED_TEXT: &str = "Nachricht gelöscht";
+const DELETED_TEXT: &str = "Message deleted";
 const SERIES_GAP_MINUTES: i64 = 5;
 const CORNER_RADIUS: f32 = 14.;
 const CORNER_SERIES: f32 = 4.;
@@ -235,11 +235,11 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
     let first_line = text.lines().map(str::trim).find(|line| !line.is_empty());
     let excerpt = match first_line {
         Some(line) => line.to_owned(),
-        None if !images(record).is_empty() => "Bild".to_owned(),
+        None if !images(record).is_empty() => "Image".to_owned(),
         None => files(record)
             .into_iter()
             .next()
-            .map_or_else(|| "Nachricht".to_owned(), |card| card.name),
+            .map_or_else(|| "Message".to_owned(), |card| card.name),
     };
     if excerpt.chars().count() > REPLY_EXCERPT_CHARS {
         let cut: String = excerpt.chars().take(REPLY_EXCERPT_CHARS).collect();
@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(reply_excerpt(&quoted), "my answer");
         let mut image = record("b", None, 8, 6);
         image.body_html = "<img src=\"u\">".into();
-        assert_eq!(reply_excerpt(&image), "Bild");
+        assert_eq!(reply_excerpt(&image), "Image");
         let mut long = record("c", None, 8, 6);
         long.body_html = format!("<p>{}</p>", "x".repeat(200));
         assert!(reply_excerpt(&long).ends_with("..."));
@@ -548,7 +548,7 @@ mod tests {
             .collect();
         assert_eq!(
             headers,
-            vec![Some("Gestern".into()), None, Some("Heute".into())]
+            vec![Some("Yesterday".into()), None, Some("Today".into())]
         );
     }
 

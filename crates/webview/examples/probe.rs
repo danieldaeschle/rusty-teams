@@ -10,7 +10,7 @@ async fn main() {
     let started = Instant::now();
     let transport = webview::start(webview::HostConfig {
         user_data_folder: folder,
-        window_title: "Rusty Teams probe - Anmeldung".into(),
+        window_title: "Rusty Teams probe - Sign in".into(),
     });
     let session = match Session::with_transport(transport, SessionConfig::default()).await {
         Ok(session) => session,

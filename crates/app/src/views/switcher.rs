@@ -26,7 +26,7 @@ const MAX_RESULTS: usize = 9;
 const MAX_RESULTS_WITH_MESSAGES: usize = 5;
 const MAX_MESSAGE_RESULTS: usize = 5;
 const MIN_MESSAGE_QUERY_CHARS: usize = 2;
-const MESSAGE_GROUP: &str = "Nachrichten";
+const MESSAGE_GROUP: &str = "Messages";
 const CARD_WIDTH: f32 = 520.;
 
 pub enum SwitcherEvent {
@@ -81,7 +81,7 @@ pub fn message_results(
             Some(MessageResult {
                 selection,
                 message_id: hit.message_id,
-                author: hit.sender_name.unwrap_or_else(|| "Unbekannt".to_owned()),
+                author: hit.sender_name.unwrap_or_else(|| "Unknown".to_owned()),
                 conversation,
                 date: format::list_time_label(hit.created_at, today, offset),
                 snippet,
@@ -138,7 +138,7 @@ pub fn candidates_from(state: &AppState) -> Vec<(String, Candidate)> {
                 subtitle: if is_one_on_one(chat) {
                     "Chat".to_owned()
                 } else {
-                    format!("Gruppenchat, {} Teilnehmer", chat.members.len())
+                    format!("Group chat, {} participants", chat.members.len())
                 },
                 avatar: CandidateAvatar::Chat(avatar_for(chat, me)),
                 selection: Selection::Chat(chat.id.clone()),
@@ -180,7 +180,7 @@ impl Switcher {
         cx: &mut Context<Self>,
     ) -> Self {
         let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Zu Chat, Channel oder Nachricht springen")
+            InputState::new(window, cx).placeholder("Jump to a chat, channel or message")
         });
         if !initial_query.is_empty() {
             let query = initial_query.to_owned();
@@ -460,9 +460,9 @@ impl Render for Switcher {
             .border_color(theme::border())
             .text_size(px(11.))
             .text_color(theme::text_muted())
-            .child("Enter öffnen")
-            .child("Pfeile wählen")
-            .child("Esc schließen");
+            .child("Enter to open")
+            .child("Arrows to select")
+            .child("Esc to close");
         div()
             .id("switcher-backdrop")
             .absolute()

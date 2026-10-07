@@ -28,9 +28,9 @@ const HINT_HEIGHT: f32 = 26.;
 const FALLBACK_VIEWPORT: f32 = 900.;
 const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
-const PINNED_LABEL: &str = "Angeheftet";
+const PINNED_LABEL: &str = "Pinned";
 const TEAMS_LABEL: &str = "Teams";
-const HIDDEN_TEAMS_LABEL: &str = "Ausgeblendete Teams";
+const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 
@@ -97,8 +97,8 @@ fn preview_text(preview: &Preview) -> Option<(String, bool)> {
 
 fn preview_icon(text: &str) -> Option<IconName> {
     match text.rsplit(": ").next()? {
-        "Bild" => Some(IconName::Image),
-        "Datei" => Some(IconName::File),
+        "Image" => Some(IconName::Image),
+        "File" => Some(IconName::File),
         _ => None,
     }
 }
@@ -377,7 +377,7 @@ impl SidebarView {
                 let pin_state = context.state.clone();
                 let pin_id = chat_id.clone();
                 let mut popup = popup.item(
-                    PopupMenuItem::new(if pinned { "Lösen" } else { "Anheften" }).on_click(
+                    PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" }).on_click(
                         move |_, _, cx| {
                             pin_state.update(cx, |state, cx| {
                                 if pinned {
@@ -393,24 +393,23 @@ impl SidebarView {
                     let folders = context.folders.clone();
                     let move_state = context.state.clone();
                     let move_id = chat_id.clone();
-                    popup =
-                        popup.submenu("In Ordner verschieben", window, cx, move |submenu, _, _| {
-                            folders.iter().fold(submenu, |submenu, (folder_id, name)| {
-                                let (state, chat_id, folder_id) =
-                                    (move_state.clone(), move_id.clone(), folder_id.clone());
-                                submenu.item(PopupMenuItem::new(name.clone()).on_click(
-                                    move |_, _, cx| {
-                                        state.update(cx, |state, cx| {
-                                            state.move_chat(&chat_id, Some(&folder_id), cx)
-                                        });
-                                    },
-                                ))
-                            })
-                        });
+                    popup = popup.submenu("Move to folder", window, cx, move |submenu, _, _| {
+                        folders.iter().fold(submenu, |submenu, (folder_id, name)| {
+                            let (state, chat_id, folder_id) =
+                                (move_state.clone(), move_id.clone(), folder_id.clone());
+                            submenu.item(PopupMenuItem::new(name.clone()).on_click(
+                                move |_, _, cx| {
+                                    state.update(cx, |state, cx| {
+                                        state.move_chat(&chat_id, Some(&folder_id), cx)
+                                    });
+                                },
+                            ))
+                        })
+                    });
                 }
                 let read_state = context.state.clone();
                 popup.item(
-                    PopupMenuItem::new("Als gelesen markieren")
+                    PopupMenuItem::new("Mark as read")
                         .disabled(!unread)
                         .on_click(move |_, _, cx| {
                             read_state.update(cx, |state, cx| state.mark_chat_read(&chat_id, cx));
@@ -891,9 +890,9 @@ fn team_holds(entry: &SidebarTeam, selected: Option<&Selection>) -> bool {
 
 fn hidden_channels_label(count: usize) -> String {
     if count == 1 {
-        "1 ausgeblendeter Channel".to_owned()
+        "1 hidden channel".to_owned()
     } else {
-        format!("{count} ausgeblendete Channels")
+        format!("{count} hidden channels")
     }
 }
 
