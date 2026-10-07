@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 54 %** (39 done, 7 partial, 33 missing of 79). Partial counts half.
+**Parity: 52 %** (39 done, 7 partial, 35 missing of 81). Partial counts half.
 
 ## By area
 
@@ -13,7 +13,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Reading](#reading) | 70 % | 10 | 1 | 4 |
 | [Writing](#writing) | 46 % | 5 | 3 | 6 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
-| [Channels](#channels) | 50 % | 2 | 1 | 2 |
+| [Channels](#channels) | 36 % | 2 | 1 | 4 |
 | [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
 | [Search and navigation](#search-and-navigation) | 75 % | 3 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
@@ -118,6 +118,8 @@ Feature parity with the Microsoft Teams desktop client.
 | New post with subject | Partial | Backend takes a subject, UI sends none |
 | Post cards like Teams | Missing |  |
 | Follow a channel, per-channel notifications | Missing |  |
+| Channel tabs: tab bar, website and app tabs | Missing | Plan: each tab's Teams Web page in a WebView2 |
+| Files tab | Missing | Plan: native, the channel's SharePoint folder via Graph |
 
 ## Notifications
 
@@ -173,5 +175,5 @@ Feature parity with the Microsoft Teams desktop client.
 
 | Feature | Why |
 |---|---|
-| Tabs and apps | No host contract |
+| Personal apps in the app bar | Outside chat and channels |
 | Server-side search | The local index answers faster |
