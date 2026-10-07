@@ -20,9 +20,10 @@ use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, TaskbarList,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, DestroyIcon, FLASHW_ALL, FLASHWINFO, FlashWindowEx, GWL_EXSTYLE,
+    CreateIconIndirect, DestroyIcon, FLASHW_ALL, FLASHWINFO, FlashWindowEx, GWL_EXSTYLE, GWL_STYLE,
     GetWindowLongPtrW, HICON, HWND_TOPMOST, ICONINFO, IsIconic, SW_HIDE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE,
-    SPI_GETCLIENTAREAANIMATION, SWP_NOOWNERZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
+    SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    SWP_NOZORDER, WS_CAPTION, WS_POPUP, WS_THICKFRAME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
     WS_EX_NOACTIVATE,
 };
@@ -51,6 +52,23 @@ pub fn native_handle(window: &Window) -> Option<NativeHandle> {
 
 pub fn prepare_toast_window(handle: NativeHandle) {
     unsafe {
+        // GPUI creates popups with style 0, and Windows adds a caption frame to that on its own.
+        let frame = (WS_CAPTION | WS_THICKFRAME).0 as isize;
+        let style = GetWindowLongPtrW(hwnd(handle), GWL_STYLE);
+        SetWindowLongPtrW(
+            hwnd(handle),
+            GWL_STYLE,
+            (style & !frame) | WS_POPUP.0 as isize,
+        );
+        let _ = SetWindowPos(
+            hwnd(handle),
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
         let style = GetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE);
         SetWindowLongPtrW(
             hwnd(handle),

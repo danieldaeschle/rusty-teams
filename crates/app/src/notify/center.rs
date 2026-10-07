@@ -35,6 +35,16 @@ struct OpenWindow {
     mention: bool,
 }
 
+impl OpenWindow {
+    fn place(&self, native: NativeHandle, slot: Slot, x: i32, cx: &mut App) {
+        platform::place(native, x, slot.y, slot.width, slot.height);
+        // WM_SIZE arrives while the app is borrowed, so GPUI drops its own resize report.
+        self.handle
+            .update(cx, |_, window, cx| window.bounds_changed(cx))
+            .ok();
+    }
+}
+
 pub struct NotificationCenter {
     app: Entity<AppState>,
     main_window: AnyWindowHandle,
@@ -322,7 +332,7 @@ impl NotificationCenter {
         if let Some(window) = self.windows.get_mut(&id)
             && let Some(native) = window.native
         {
-            platform::place(native, slot.x + offset, slot.y, slot.width, slot.height);
+            window.place(native, slot, slot.x + offset, cx);
             if window.mention != mention {
                 window.mention = mention;
                 platform::set_border_color(native, border_color(mention));
@@ -382,8 +392,10 @@ impl NotificationCenter {
                 },
             );
         }
-        if let Some(native) = self.pill.as_ref().and_then(|pill| pill.native) {
-            platform::place(native, slot.x, slot.y, slot.width, slot.height);
+        if let Some(pill) = self.pill.as_ref()
+            && let Some(native) = pill.native
+        {
+            pill.place(native, slot, slot.x, cx);
         }
     }
 
