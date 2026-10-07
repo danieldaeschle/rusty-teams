@@ -3,8 +3,10 @@
   const wanted = (base + '/' + scope).toLowerCase();
   const fresh = (expires) => expires > Date.now() + marginMs;
   const normalize = (value) => value.toLowerCase().replace(/\/\/+(?=[^/]*$)/, '/');
-  const grants = (scopes) => scopes.some(s => normalize(s) === wanted
-    || (base === 'https://graph.microsoft.com' && s.toLowerCase() === scope.toLowerCase()));
+  const short = scope.toLowerCase();
+  const covers = (value, name) => value === name || value === name + '.all';
+  const grants = (scopes) => scopes.some(s => covers(normalize(s), wanted)
+    || (base === 'https://graph.microsoft.com' && covers(s.toLowerCase(), short)));
   const entries = [];
   let activeHome = null;
   for (let index = 0; index < localStorage.length; index++) {
