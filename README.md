@@ -1,7 +1,7 @@
 # Rusty Teams
 
 A fast native Microsoft Teams chat client written in Rust with [GPUI](https://www.gpui.rs/).
-It does chats and channels. No calls, no meetings, no apps.
+It does chats and channels. Calls and meetings are planned (see [ROADMAP.md](ROADMAP.md)), apps are not.
 
 ![Rusty Teams with demo data](docs/screenshots/app-demo.png)
 

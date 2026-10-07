@@ -1,8 +1,8 @@
 # Roadmap
 
-Feature parity with the Microsoft Teams desktop client, chat scope only. Calls and meetings are out of scope.
+Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 57 %** (39 done, 7 partial, 28 missing of 74). Partial counts half.
+**Parity: 54 %** (39 done, 7 partial, 33 missing of 79). Partial counts half.
 
 ## By area
 
@@ -18,6 +18,7 @@ Feature parity with the Microsoft Teams desktop client, chat scope only. Calls a
 | [Search and navigation](#search-and-navigation) | 75 % | 3 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
+| [Calls and meetings](#calls-and-meetings) | 0 % | 0 | 0 | 5 |
 
 ## Next
 
@@ -158,10 +159,19 @@ Feature parity with the Microsoft Teams desktop client, chat scope only. Calls a
 | Light theme, follow system theme | Missing |  |
 | UI scale | Missing |  |
 
+## Calls and meetings
+
+| Feature | State | Note |
+|---|---|---|
+| Incoming call: ring, accept, decline | Missing | Plan: Teams Web call UI in its own WebView2 window |
+| 1:1 and group calls | Missing | |
+| Join a meeting from a chat | Missing | |
+| Screen sharing | Missing | |
+| In a call shown in presence | Missing | |
+
 ## Out of scope
 
 | Feature | Why |
 |---|---|
-| Calls, meetings, screen sharing | No supported way outside the official client |
 | Tabs and apps | No host contract |
 | Server-side search | The local index answers faster |
