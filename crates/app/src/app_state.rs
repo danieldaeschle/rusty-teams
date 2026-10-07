@@ -116,6 +116,7 @@ impl AppState {
         };
         state.collapsed = state.load_collapsed();
         if !mode.demo {
+            state.directory.load_cached_presence(&state.store);
             state.reload_directory();
         }
         state
@@ -286,11 +287,14 @@ impl AppState {
         if wanted.is_empty() {
             return;
         }
+        self.directory.mark_presence_pending(&wanted);
         if let Some(engine) = self.engine.clone() {
             self.directory.mark_presence_requested(&wanted, now);
-            let done = data::refresh_presence(&engine, wanted);
-            self.on_done(done, cx, |state, cx| {
+            let done = data::refresh_presence(&engine, wanted.clone());
+            self.on_done(done, cx, move |state, cx| {
                 state.sync_presence();
+                state.directory.save_presence(&state.store, &wanted);
+                state.directory.settle_presence(&wanted);
                 cx.emit(AppEvent::Directory);
                 cx.notify();
             });
@@ -395,6 +399,8 @@ impl AppState {
             }
             BackendEvent::Engine(engine) => {
                 self.engine = Some(engine);
+                let waiting = self.directory.waiting_presence_ids();
+                self.request_presence(waiting, cx);
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar(cx),

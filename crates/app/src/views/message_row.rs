@@ -1,4 +1,5 @@
 use gpui_kit::assets::IconName;
+use gpui_kit::base::TextSelection;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -561,7 +562,11 @@ pub fn render_message_row(
                 .w_full()
                 .pt(spacing)
                 .when_some(open_thread, |element, open| {
-                    element.cursor_pointer().on_click(move |_, _, cx| open(cx))
+                    element.cursor_pointer().on_click(move |_, window, cx| {
+                        if TextSelection::selected_text(window, cx).is_empty() {
+                            open(cx);
+                        }
+                    })
                 })
                 .when_some(hovered, |element, hovered| {
                     element.on_hover(move |is_hovered, _, cx| {

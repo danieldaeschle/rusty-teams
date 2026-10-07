@@ -2,6 +2,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::blocks::{Block, Inline, StyleFlags};
+use super::selectable::SelectableRichText;
 use crate::theme;
 
 pub fn render_blocks(blocks: &[Block], id: &str, own: bool, cx: &App) -> AnyElement {
@@ -32,7 +33,11 @@ fn render_block(block: &Block, id: String, own: bool, cx: &App) -> AnyElement {
             .font_family(code_font(cx))
             .text_size(px(12.5))
             .line_height(relative(1.5))
-            .child(code.clone())
+            .child(SelectableRichText::new(
+                ElementId::Name(id.into()),
+                code.clone(),
+                Vec::new(),
+            ))
             .into_any_element(),
         Block::Quote(children) => div()
             .w_full()
@@ -71,32 +76,12 @@ fn render_inline(inline: &Inline, id: String, own: bool) -> AnyElement {
         .filter(|segment| !segment.style.is_plain())
         .map(|segment| (segment.range.clone(), highlight_for(segment.style, own)))
         .collect::<Vec<_>>();
-    let styled = StyledText::new(inline.text.clone()).with_highlights(highlights);
-    let links = inline.links();
-    if links.is_empty() {
-        return div()
-            .w_full()
-            .text_color(theme::text())
-            .child(styled)
-            .into_any_element();
-    }
-    let ranges = links
-        .iter()
-        .map(|(range, _)| range.clone())
-        .collect::<Vec<_>>();
-    let urls = links.into_iter().map(|(_, url)| url).collect::<Vec<_>>();
     div()
         .w_full()
         .text_color(theme::text())
         .child(
-            InteractiveText::new(ElementId::Name(id.into()), styled).on_click(
-                ranges,
-                move |range_index, _, cx| {
-                    if let Some(url) = urls.get(range_index) {
-                        cx.open_url(url);
-                    }
-                },
-            ),
+            SelectableRichText::new(ElementId::Name(id.into()), inline.text.clone(), highlights)
+                .links(inline.links()),
         )
         .into_any_element()
 }

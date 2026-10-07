@@ -892,4 +892,46 @@ mod tests {
             Some((16..19, "Pr".into()))
         );
     }
+
+    mod keys {
+        use std::sync::Arc;
+
+        use gpui_kit::test::TestWindowExt as _;
+        use gpui_kit::{AppContext as _, TestAppContext, WindowOptions};
+        use store::Store;
+
+        use super::super::Composer;
+        use crate::app_state::{AppState, Mode};
+
+        #[gpui_kit::test]
+        fn ctrl_a_selects_the_whole_draft(cx: &mut TestAppContext) {
+            cx.update(gpui_kit::init);
+            let store = Arc::new(Store::open_in_memory().unwrap());
+            let mode = Mode {
+                demo: true,
+                read_only: false,
+                demo_sync: None,
+            };
+            let (handle, composer) = cx.update(|cx| {
+                let app = cx.new(|_| AppState::new(store, mode));
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| Composer::new(app, window, cx))
+                })
+                .unwrap()
+            });
+            let value = cx
+                .update_window(handle, |_, window, cx| {
+                    composer.update(cx, |composer, cx| composer.focus(window, cx));
+                    window.render_frame(cx);
+                    window.input("first line", cx);
+                    window.press("shift-enter", cx);
+                    window.input("second line", cx);
+                    window.press("ctrl-a", cx);
+                    window.input("X", cx);
+                    composer.read(cx).input.read(cx).value()
+                })
+                .unwrap();
+            assert_eq!(value, "X");
+        }
+    }
 }

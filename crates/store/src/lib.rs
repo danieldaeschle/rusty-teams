@@ -8,6 +8,7 @@ mod messages;
 mod meta;
 mod migrations;
 mod models;
+mod presence;
 mod search;
 mod sidebar;
 mod store;

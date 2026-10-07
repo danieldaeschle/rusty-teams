@@ -14,9 +14,9 @@ use super::rules::{
     should_flash,
 };
 use super::settings;
+use super::settings_view::SettingsView;
 use super::stack::{ReplyState, SENT_DURATION, ToastModel, ToastStack};
 use super::toast::{PillView, ToastView};
-use super::settings_view::SettingsView;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
@@ -44,8 +44,11 @@ pub struct NotificationCenter {
     tracker: IncomingTracker,
     throttle: SoundThrottle,
     windows: HashMap<u64, OpenWindow>,
+    opening: HashSet<u64>,
     pill: Option<OpenWindow>,
+    pill_opening: bool,
     settings_window: Option<AnyWindowHandle>,
+    settings_opening: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
     shown_badge: Option<Badge>,
@@ -54,11 +57,7 @@ pub struct NotificationCenter {
 }
 
 impl NotificationCenter {
-    pub fn new(
-        app: Entity<AppState>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = settings::load(&app.read(cx).store);
         let tray = if app.read(cx).mode.demo {
             None
@@ -76,8 +75,11 @@ impl NotificationCenter {
             tracker: IncomingTracker::new(Utc::now()),
             throttle: SoundThrottle::default(),
             windows: HashMap::new(),
+            opening: HashSet::new(),
             pill: None,
+            pill_opening: false,
             settings_window: None,
+            settings_opening: false,
             unread_mentions: HashSet::new(),
             tray,
             shown_badge: None,
@@ -97,7 +99,8 @@ impl NotificationCenter {
         if center.app.read(cx).mode.demo {
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(DEMO_SPEC_DELAY).await;
-                this.update(cx, |center, cx| center.show_demo_toasts(cx)).ok();
+                this.update(cx, |center, cx| center.show_demo_toasts(cx))
+                    .ok();
             })
             .detach();
         }
@@ -186,7 +189,7 @@ impl NotificationCenter {
             .as_ref()
             .is_some_and(|selection| selection.conversation_id() == conversation_id);
         let own_do_not_disturb = state.directory.me.as_ref().is_some_and(|me| {
-            state.directory.presence_of(&me.user_id) == PresenceKind::DoNotDisturb
+            state.directory.presence_of(&me.user_id).kind() == PresenceKind::DoNotDisturb
         });
         let in_call = match (state.engine.as_ref(), state.directory.me.as_ref()) {
             (Some(engine), Some(me)) => data::in_call(engine, &me.user_id),
@@ -308,10 +311,8 @@ impl NotificationCenter {
     fn place_toast(&mut self, id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
         let mention = self.stack.get(id).is_some_and(|toast| toast.mentions_me);
         if !self.windows.contains_key(&id) {
-            let Some(window) = self.open_toast_window(id, slot, area, cx) else {
-                return;
-            };
-            self.windows.insert(id, window);
+            self.open_toast_window(id, slot, area, cx);
+            return;
         }
         let offset = self
             .windows
@@ -329,34 +330,26 @@ impl NotificationCenter {
         }
     }
 
-    fn open_toast_window(
-        &mut self,
-        id: u64,
-        slot: Slot,
-        area: WorkArea,
-        cx: &mut Context<Self>,
-    ) -> Option<OpenWindow> {
-        let mention = self.stack.get(id).is_some_and(|toast| toast.mentions_me);
-        let options = popup_options(slot, area);
-        let center = cx.entity();
-        let (handle, _view) = gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| ToastView::new(center, id, window, cx))
-        })
-        .ok()?;
-        let native = handle
-            .update(cx, |_, window, _| platform::native_handle(window))
-            .ok()
-            .flatten();
-        if let Some(native) = native {
-            platform::prepare_toast_window(native);
-            platform::set_border_color(native, border_color(mention));
+    fn open_toast_window(&mut self, id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
+        if !self.opening.insert(id) {
+            return;
         }
-        Some(OpenWindow {
-            handle,
-            native,
-            opened: Instant::now(),
-            mention,
-        })
+        let mention = self.stack.get(id).is_some_and(|toast| toast.mentions_me);
+        open_popup(
+            popup_options(slot, area),
+            cx,
+            move |center, window, cx| cx.new(|cx| ToastView::new(center, id, window, cx)),
+            move |this, window| {
+                this.opening.remove(&id);
+                let Some(window) = window else {
+                    return;
+                };
+                if let Some(native) = window.native {
+                    platform::set_border_color(native, border_color(mention));
+                }
+                this.windows.insert(id, OpenWindow { mention, ..window });
+            },
+        );
     }
 
     fn sync_pill(
@@ -368,32 +361,26 @@ impl NotificationCenter {
     ) {
         let Some(slot) = slot.filter(|_| hidden > 0) else {
             if let Some(pill) = self.pill.take() {
-                pill.handle.update(cx, |_, window, _| window.remove_window()).ok();
+                pill.handle
+                    .update(cx, |_, window, _| window.remove_window())
+                    .ok();
             }
             return;
         };
-        if self.pill.is_none() {
-            let options = popup_options(slot, area);
-            let center = cx.entity();
-            let opened = gpui_kit::open_window(options, cx, move |_, cx| {
-                cx.new(|cx| PillView::new(center, cx))
-            });
-            if let Ok((handle, _)) = opened {
-                let native = handle
-                    .update(cx, |_, window, _| platform::native_handle(window))
-                    .ok()
-                    .flatten();
-                if let Some(native) = native {
-                    platform::prepare_toast_window(native);
-                    platform::set_border_color(native, border_color(false));
-                }
-                self.pill = Some(OpenWindow {
-                    handle,
-                    native,
-                    opened: Instant::now(),
-                    mention: false,
-                });
-            }
+        if self.pill.is_none() && !self.pill_opening {
+            self.pill_opening = true;
+            open_popup(
+                popup_options(slot, area),
+                cx,
+                |center, _, cx| cx.new(|cx| PillView::new(center, cx)),
+                |this, window| {
+                    this.pill_opening = false;
+                    if let Some(native) = window.as_ref().and_then(|window| window.native) {
+                        platform::set_border_color(native, border_color(false));
+                    }
+                    this.pill = window;
+                },
+            );
         }
         if let Some(native) = self.pill.as_ref().and_then(|pill| pill.native) {
             platform::place(native, slot.x, slot.y, slot.width, slot.height);
@@ -556,7 +543,8 @@ impl NotificationCenter {
             });
             cx.spawn(async move |this, cx| {
                 let sent = matches!(receiver.await, Ok(Ok(())));
-                this.update(cx, |center, cx| center.finish_reply(id, sent, cx)).ok();
+                this.update(cx, |center, cx| center.finish_reply(id, sent, cx))
+                    .ok();
             })
             .detach();
             return;
@@ -599,7 +587,10 @@ impl NotificationCenter {
     }
 
     pub fn mark_read(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(conversation_id) = self.stack.get(id).map(|toast| toast.conversation_id.clone())
+        let Some(conversation_id) = self
+            .stack
+            .get(id)
+            .map(|toast| toast.conversation_id.clone())
         else {
             return;
         };
@@ -631,11 +622,18 @@ impl NotificationCenter {
 
     pub fn open_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
                 return;
             }
             self.settings_window = None;
         }
+        if self.settings_opening {
+            return;
+        }
+        self.settings_opening = true;
         let center = cx.entity();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -651,11 +649,17 @@ impl NotificationCenter {
             is_minimizable: false,
             ..Default::default()
         };
-        if let Ok((handle, _)) = gpui_kit::open_window(options, cx, move |_, cx| {
-            cx.new(|cx| SettingsView::new(center, cx))
-        }) {
-            self.settings_window = Some(handle);
-        }
+        // open_window draws once right away, and SettingsView reads this entity while rendering.
+        cx.defer(move |cx| {
+            let view_center = center.clone();
+            let opened = gpui_kit::open_window(options, cx, move |_, cx| {
+                cx.new(|cx| SettingsView::new(view_center, cx))
+            });
+            center.update(cx, |this, _| {
+                this.settings_opening = false;
+                this.settings_window = opened.ok().map(|(handle, _)| handle);
+            });
+        });
     }
 
     pub fn send_test_notification(&mut self, cx: &mut Context<Self>) {
@@ -690,14 +694,55 @@ impl NotificationCenter {
 }
 
 fn border_color(mention: bool) -> u32 {
-    if mention { MENTION_BORDER } else { FALLBACK_BORDER }
+    if mention {
+        MENTION_BORDER
+    } else {
+        FALLBACK_BORDER
+    }
+}
+
+/// Opens a window outside the current update: `open_window` draws right away, and every
+/// notification view reads the center while rendering.
+fn open_popup<V: Render>(
+    options: WindowOptions,
+    cx: &mut Context<NotificationCenter>,
+    build: impl FnOnce(Entity<NotificationCenter>, &mut Window, &mut App) -> Entity<V> + 'static,
+    opened: impl FnOnce(&mut NotificationCenter, Option<OpenWindow>) + 'static,
+) {
+    let center = cx.entity();
+    cx.defer(move |cx| {
+        let view_center = center.clone();
+        let Ok((handle, _)) = gpui_kit::open_window(options, cx, move |window, cx| {
+            build(view_center, window, cx)
+        }) else {
+            center.update(cx, |this, _| opened(this, None));
+            return;
+        };
+        let native = handle
+            .update(cx, |_, window, _| platform::native_handle(window))
+            .ok()
+            .flatten();
+        if let Some(native) = native {
+            platform::prepare_toast_window(native);
+        }
+        let window = OpenWindow {
+            handle,
+            native,
+            opened: Instant::now(),
+            mention: false,
+        };
+        center.update(cx, |this, _| opened(this, Some(window)));
+    });
 }
 
 fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
     let scale = area.scale;
     let bounds = Bounds::new(
         point(px(slot.x as f32 / scale), px(slot.y as f32 / scale)),
-        size(px(slot.width as f32 / scale), px(slot.height as f32 / scale)),
+        size(
+            px(slot.width as f32 / scale),
+            px(slot.height as f32 / scale),
+        ),
     );
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -740,7 +785,12 @@ pub fn unread_summary(sidebar: &Sidebar) -> (usize, HashSet<String>) {
 }
 
 fn demo_incoming() -> Vec<Incoming> {
-    let item = |conversation: &str, kind: ChatKind, title: &str, sender: &str, text: &str, mention: bool| Incoming {
+    let item = |conversation: &str,
+                kind: ChatKind,
+                title: &str,
+                sender: &str,
+                text: &str,
+                mention: bool| Incoming {
         conversation_id: conversation.to_owned(),
         message_id: format!("{conversation}-message"),
         kind,
@@ -832,8 +882,14 @@ mod tests {
 
     #[test]
     fn selection_kind_follows_sidebar() {
-        assert_eq!(selection_for(&sidebar(), "a"), Some(Selection::Chat("a".into())));
-        assert_eq!(selection_for(&sidebar(), "ch"), Some(Selection::Channel("ch".into())));
+        assert_eq!(
+            selection_for(&sidebar(), "a"),
+            Some(Selection::Chat("a".into()))
+        );
+        assert_eq!(
+            selection_for(&sidebar(), "ch"),
+            Some(Selection::Channel("ch".into()))
+        );
         assert_eq!(selection_for(&sidebar(), "x"), None);
     }
 }

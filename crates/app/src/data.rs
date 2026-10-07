@@ -57,6 +57,44 @@ impl PresenceKind {
             PresenceKind::Unknown => "",
         }
     }
+
+    fn code(self) -> &'static str {
+        match self {
+            PresenceKind::Available => "Available",
+            PresenceKind::Busy => "Busy",
+            PresenceKind::DoNotDisturb => "DoNotDisturb",
+            PresenceKind::Away => "Away",
+            PresenceKind::Offline => "Offline",
+            PresenceKind::Unknown => "Unknown",
+        }
+    }
+
+    fn from_code(code: &str) -> PresenceKind {
+        match code {
+            "Available" => PresenceKind::Available,
+            "Busy" => PresenceKind::Busy,
+            "DoNotDisturb" => PresenceKind::DoNotDisturb,
+            "Away" => PresenceKind::Away,
+            "Offline" => PresenceKind::Offline,
+            _ => PresenceKind::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    Live(PresenceKind),
+    Cached(PresenceKind),
+    Loading,
+}
+
+impl Presence {
+    pub fn kind(self) -> PresenceKind {
+        match self {
+            Presence::Live(kind) | Presence::Cached(kind) => kind,
+            Presence::Loading => PresenceKind::Unknown,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -80,7 +118,9 @@ pub struct Directory {
     pub unread_counts: HashMap<String, u32>,
     pub(crate) avatars: HashMap<String, AvatarState>,
     pub(crate) presence: HashMap<String, (PresenceKind, Instant)>,
+    pub(crate) presence_cached: HashMap<String, PresenceKind>,
     pub(crate) presence_requested: HashMap<String, Instant>,
+    pub(crate) presence_pending: HashSet<String>,
     pub(crate) images: HashMap<String, ImageEntry>,
     pub(crate) images_requested: HashSet<String>,
 }
@@ -142,10 +182,51 @@ impl Directory {
             .collect()
     }
 
-    pub fn presence_of(&self, user_id: &str) -> PresenceKind {
-        self.presence
-            .get(user_id)
-            .map_or(PresenceKind::Unknown, |(kind, _)| *kind)
+    pub fn presence_of(&self, user_id: &str) -> Presence {
+        if let Some((kind, _)) = self.presence.get(user_id) {
+            return Presence::Live(*kind);
+        }
+        match self.presence_cached.get(user_id) {
+            Some(kind) => Presence::Cached(*kind),
+            None if self.presence_pending.contains(user_id) => Presence::Loading,
+            None => Presence::Live(PresenceKind::Unknown),
+        }
+    }
+
+    pub fn load_cached_presence(&mut self, store: &Store) {
+        self.presence_cached = store
+            .presences()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(user_id, code)| (user_id, PresenceKind::from_code(&code)))
+            .collect();
+    }
+
+    pub fn save_presence(&self, store: &Store, user_ids: &[String]) {
+        let rows: Vec<(String, String)> = user_ids
+            .iter()
+            .filter_map(|user_id| {
+                let (kind, _) = self.presence.get(user_id)?;
+                Some((user_id.clone(), kind.code().to_owned()))
+            })
+            .collect();
+        if !rows.is_empty() {
+            let _ = store.upsert_presences(&rows, chrono::Utc::now());
+        }
+    }
+
+    pub fn mark_presence_pending(&mut self, user_ids: &[String]) {
+        self.presence_pending.extend(user_ids.iter().cloned());
+    }
+
+    pub fn settle_presence(&mut self, user_ids: &[String]) {
+        for user_id in user_ids {
+            self.presence_pending.remove(user_id);
+        }
+    }
+
+    pub fn waiting_presence_ids(&self) -> Vec<String> {
+        self.presence_pending.iter().cloned().collect()
     }
 
     pub fn set_presence(&mut self, user_id: &str, kind: PresenceKind) {
@@ -443,7 +524,53 @@ mod tests {
         assert!(directory.stale_presence(["u".to_owned()], start).is_empty());
         let later = start + PRESENCE_MAX_AGE + Duration::from_secs(1);
         assert_eq!(directory.stale_presence(["u".to_owned()], later), vec!["u"]);
-        assert_eq!(directory.presence_of("u"), PresenceKind::Unknown);
+        assert_eq!(directory.presence_of("u").kind(), PresenceKind::Unknown);
+    }
+
+    #[test]
+    fn presence_prefers_live_over_cached_over_loading() {
+        let mut directory = Directory::default();
+        let ids = ["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        directory.mark_presence_pending(&ids);
+        directory
+            .presence_cached
+            .insert("b".into(), PresenceKind::Away);
+        directory
+            .presence_cached
+            .insert("c".into(), PresenceKind::Away);
+        directory.set_presence("c", PresenceKind::Busy);
+        assert_eq!(directory.presence_of("a"), Presence::Loading);
+        assert_eq!(
+            directory.presence_of("b"),
+            Presence::Cached(PresenceKind::Away)
+        );
+        assert_eq!(
+            directory.presence_of("c"),
+            Presence::Live(PresenceKind::Busy)
+        );
+        directory.settle_presence(&ids);
+        assert_eq!(
+            directory.presence_of("a"),
+            Presence::Live(PresenceKind::Unknown)
+        );
+    }
+
+    #[test]
+    fn presence_survives_a_restart_through_the_store() {
+        let store = Store::open_in_memory().unwrap();
+        let mut directory = Directory::default();
+        directory.set_presence("a", PresenceKind::DoNotDisturb);
+        directory.save_presence(&store, &["a".to_owned(), "missing".to_owned()]);
+        let mut restarted = Directory::default();
+        restarted.load_cached_presence(&store);
+        assert_eq!(
+            restarted.presence_of("a"),
+            Presence::Cached(PresenceKind::DoNotDisturb)
+        );
+        assert_eq!(
+            restarted.presence_of("missing"),
+            Presence::Live(PresenceKind::Unknown)
+        );
     }
 
     #[test]

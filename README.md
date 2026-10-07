@@ -14,7 +14,8 @@ It does chats and channels. No calls, no meetings, no apps.
 - Send, edit, delete, react, quote-reply, @mentions
 - Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
 - Inline images, file cards, Adaptive Cards as text
-- Read receipts, presence, unread jump
+- Read receipts, presence (last known status shown at start), unread jump
+- Select and copy message text, `Ctrl+A` in the composer
 - Local full-text search and a `Ctrl+K` switcher, served from the cache
 - Dark theme, opens instantly from the local cache
 - Self-update from an update folder

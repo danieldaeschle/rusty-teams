@@ -29,6 +29,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0005_team_layout.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0006_presence.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

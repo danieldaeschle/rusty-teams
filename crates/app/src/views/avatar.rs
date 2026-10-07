@@ -1,16 +1,23 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::data::{AvatarState, Directory, PresenceKind};
+use std::time::Duration;
+
+use gpui_kit::assets::IconName;
+
+use crate::data::{AvatarState, Directory, Presence, PresenceKind};
 use crate::format;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
+use crate::views::widgets::icon;
 
 const PAIR_RATIO: f32 = 24. / 36.;
 const PRESENCE_MIN: f32 = 10.;
 const PRESENCE_MAX: f32 = 14.;
 const PRESENCE_RATIO: f32 = 0.38;
 const PRESENCE_RING: f32 = 2.;
+const PRESENCE_SPIN_PERIOD: Duration = Duration::from_millis(1600);
+const CACHED_PRESENCE_OPACITY: f32 = 0.5;
 const INITIALS_RATIO: f32 = 0.36;
 const PAIR_INITIALS_RATIO: f32 = 0.42;
 
@@ -125,12 +132,36 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
     )
 }
 
-pub fn with_presence(avatar: AnyElement, kind: PresenceKind, size: f32, ring: Hsla) -> Div {
-    let mut wrapper = div().relative().size(px(size)).flex_none().child(avatar);
-    if let Some(dot) = presence_dot(kind, ring, size) {
-        wrapper = wrapper.child(dot);
+fn presence_spinner(ring: Hsla, avatar_size: f32) -> Div {
+    let outer = presence_size(avatar_size);
+    let spinner = icon(IconName::Loader, outer - PRESENCE_RING, theme::text_muted())
+        .with_animation(
+            "presence-spinner",
+            Animation::new(PRESENCE_SPIN_PERIOD).repeat(),
+            |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+        );
+    div()
+        .absolute()
+        .right(px(-2.))
+        .bottom(px(-2.))
+        .size(px(outer))
+        .rounded_full()
+        .bg(ring)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(spinner)
+}
+
+pub fn with_presence(avatar: AnyElement, presence: Presence, size: f32, ring: Hsla) -> Div {
+    let wrapper = div().relative().size(px(size)).flex_none().child(avatar);
+    match presence {
+        Presence::Loading => wrapper.child(presence_spinner(ring, size)),
+        Presence::Live(kind) => wrapper.children(presence_dot(kind, ring, size)),
+        Presence::Cached(kind) => wrapper.children(
+            presence_dot(kind, ring, size).map(|dot| dot.opacity(CACHED_PRESENCE_OPACITY)),
+        ),
     }
-    wrapper
 }
 
 pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hsla) -> AnyElement {

@@ -1156,7 +1156,7 @@ impl ConversationView {
                             None => avatar,
                         });
                         subline = presence
-                            .map(|kind| kind.label().to_owned())
+                            .map(|presence| presence.kind().label().to_owned())
                             .unwrap_or_default();
                     } else {
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));

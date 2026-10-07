@@ -208,7 +208,7 @@ impl ToastView {
                     .sender_id
                     .as_deref()
                     .map(|user_id| directory.presence_of(user_id))
-                    .unwrap_or(crate::data::PresenceKind::Unknown);
+                    .unwrap_or(crate::data::Presence::Live(crate::data::PresenceKind::Unknown));
                 let face = spec_avatar(directory, &AvatarSpec::Single(sender), AVATAR_SIZE, fill);
                 with_presence(face, presence, AVATAR_SIZE, fill).into_any_element()
             }
