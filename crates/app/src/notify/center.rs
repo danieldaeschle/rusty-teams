@@ -772,7 +772,7 @@ fn demo_incoming() -> Vec<Incoming> {
             },
             "Releases",
             "Mara Lindqvist",
-            "@Daniel kannst du den Merge freigeben? Pipeline wartet.",
+            "@Jonas kannst du den Merge freigeben? Pipeline wartet.",
             true,
         ),
     ]

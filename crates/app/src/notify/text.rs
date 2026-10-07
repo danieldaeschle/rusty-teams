@@ -145,8 +145,8 @@ mod tests {
 
     #[test]
     fn mention_ranges_cover_first_word_after_at() {
-        let text = "Ping @Daniel kannst du @Mara fragen @";
+        let text = "Ping @Jonas kannst du @Mara fragen @";
         let found: Vec<&str> = mention_ranges(text).into_iter().map(|range| &text[range]).collect();
-        assert_eq!(found, ["@Daniel", "@Mara"]);
+        assert_eq!(found, ["@Jonas", "@Mara"]);
     }
 }
