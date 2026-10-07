@@ -30,9 +30,10 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::Block;
 use crate::render::blocks::Inline;
 use crate::rows::{
-    Delivery, LocalImage, MessageRow, Receipt, Row, RowContext, Series, StartInfo, assign_series,
-    changed_indices, diff_keys, flat_rows, message_text, placeholder_rows, reaction_type_for,
-    reply_excerpt, thread_list_rows, thread_rows, trailing_skeleton,
+    Delivery, LocalImage, MessageRow, Receipt, Row, RowContext, Series, StartInfo, api_reaction,
+    assign_series, changed_indices, diff_keys, flat_rows, message_text, placeholder_rows,
+    reaction_glyph, reaction_type_for, reply_excerpt, thread_list_rows, thread_rows,
+    trailing_skeleton,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -1557,6 +1558,7 @@ impl ConversationView {
             return;
         };
         let reaction_type = reaction_type_for(glyph);
+        let wanted = reaction_glyph(glyph);
         let state = self.app.read(cx);
         let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
         let my_user_id = self.row_context(cx).my_user_id;
@@ -1569,7 +1571,7 @@ impl ConversationView {
         };
         let mut reactions = teams_core::reactions(&record);
         let mine = |reaction: &teams_core::ReactionInfo| {
-            reaction.reaction_type == reaction_type
+            reaction_glyph(&reaction.reaction_type) == wanted
                 && my_user_id.is_some()
                 && reaction.user_id == my_user_id
         };
@@ -1594,6 +1596,7 @@ impl ConversationView {
             return;
         };
         let message_id = message_id.to_owned();
+        let reaction_type = api_reaction(&wanted);
         let receiver = runtime::spawn(async move {
             if remove {
                 engine

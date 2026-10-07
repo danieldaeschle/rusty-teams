@@ -267,6 +267,20 @@ pub fn reaction_label(reaction_type: &str) -> String {
     }
 }
 
+pub fn reaction_glyph(reaction_type: &str) -> String {
+    reaction_label(reaction_type)
+        .trim_end_matches('\u{FE0F}')
+        .to_owned()
+}
+
+/// Graph rejects the legacy names ("Unicode 'like' in the payload is not supported").
+pub fn api_reaction(glyph: &str) -> String {
+    match glyph {
+        "\u{2764}" => "\u{2764}\u{FE0F}".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// The reaction type Teams uses for a glyph: the legacy name for the six classic ones.
 pub fn reaction_type_for(glyph: &str) -> String {
     let bare = glyph.trim_end_matches('\u{FE0F}');
@@ -598,6 +612,10 @@ mod tests {
         assert_eq!(reaction_type_for("\u{1F44D}"), "like");
         assert_eq!(reaction_type_for("\u{2764}\u{FE0F}"), "heart");
         assert_eq!(reaction_type_for("\u{1F389}"), "\u{1F389}");
+        assert_eq!(reaction_glyph("like"), reaction_glyph("\u{1F44D}"));
+        assert_eq!(reaction_glyph("heart"), reaction_glyph("\u{2764}\u{FE0F}"));
+        assert_eq!(api_reaction(&reaction_glyph("heart")), "\u{2764}\u{FE0F}");
+        assert_eq!(api_reaction(&reaction_glyph("like")), "\u{1F44D}");
     }
 
     #[test]
