@@ -15,28 +15,28 @@ struct Row {
 
 const ROWS: [Row; 5] = [
     Row {
-        title: "Ton",
-        detail: "Nachricht und Erwähnung",
+        title: "Sound",
+        detail: "Messages and mentions",
         field: |settings| &mut settings.sound,
     },
     Row {
-        title: "Nur Erwähnungen",
-        detail: "Direktnachrichten und @Erwähnungen",
+        title: "Mentions only",
+        detail: "Direct messages and @mentions",
         field: |settings| &mut settings.mentions_only,
     },
     Row {
-        title: "Vorschau anzeigen",
-        detail: "Aus: nur \"Neue Nachricht\"",
+        title: "Show preview",
+        detail: "Off: only \"New message\"",
         field: |settings| &mut settings.preview,
     },
     Row {
-        title: "Taskleiste blinken",
-        detail: "Bei Erwähnung, wenn das Fenster nicht aktiv ist",
+        title: "Flash taskbar",
+        detail: "On mention, when the window is not active",
         field: |settings| &mut settings.flash,
     },
     Row {
-        title: "Beim Schließen in den Tray",
-        detail: "Das X im Titel versteckt das Fenster",
+        title: "Minimize to tray on close",
+        detail: "The title bar X hides the window",
         field: |settings| &mut settings.close_to_tray,
     },
 ];
@@ -172,7 +172,7 @@ impl Render for SettingsView {
                                 div()
                                     .text_size(px(12.))
                                     .text_color(theme::text_muted())
-                                    .child("Ecke auf dem Hauptbildschirm"),
+                                    .child("Corner of the main screen"),
                             ),
                     )
                     .child(button(corner.label()).on_click(move |_, _, cx| {
@@ -188,7 +188,7 @@ impl Render for SettingsView {
                     .w_full()
                     .px(px(20.))
                     .pt(px(12.))
-                    .child(button("Testbenachrichtigung").on_click(move |_, _, cx| {
+                    .child(button("Send test notification").on_click(move |_, _, cx| {
                         test_center.update(cx, |center, cx| center.send_test_notification(cx));
                     })),
             )

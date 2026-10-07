@@ -7,7 +7,7 @@ use super::rules::{ChatKind, Incoming, Preview};
 use crate::app_state::chat_title;
 
 const RECENT_WINDOW: usize = 20;
-const FILE_FALLBACK: &str = "Datei";
+const FILE_FALLBACK: &str = "File";
 
 pub struct IncomingTracker {
     started: DateTime<Utc>,

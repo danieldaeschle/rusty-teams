@@ -22,10 +22,10 @@ impl Corner {
 
     pub fn label(self) -> &'static str {
         match self {
-            Corner::TopLeft => "Oben links",
-            Corner::TopRight => "Oben rechts",
-            Corner::BottomLeft => "Unten links",
-            Corner::BottomRight => "Unten rechts",
+            Corner::TopLeft => "Top left",
+            Corner::TopRight => "Top right",
+            Corner::BottomLeft => "Bottom left",
+            Corner::BottomRight => "Bottom right",
         }
     }
 
@@ -185,7 +185,7 @@ mod tests {
             chat_title: "Chat".into(),
             sender_id: Some("u1".into()),
             sender_name: "Mara".into(),
-            preview: Preview::Text("Hallo".into()),
+            preview: Preview::Text("Hello".into()),
             mentions_me: false,
             muted: false,
         }

@@ -45,7 +45,7 @@ impl ToastView {
             TextareaState::new(window, cx)
                 .auto_grow(1, 4)
                 .submit_on_enter(true)
-                .placeholder("Antworten ...")
+                .placeholder("Reply ...")
         });
         let subscriptions = vec![
             cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| {
@@ -238,10 +238,10 @@ impl ToastView {
                 .into_any_element();
         }
         if model.mentions_me {
-            return side_chip("Erwähnung".to_owned(), true).into_any_element();
+            return side_chip("Mention".to_owned(), true).into_any_element();
         }
         if model.count > 1 {
-            return side_chip(format!("{} neue", model.count), false).into_any_element();
+            return side_chip(format!("{} new", model.count), false).into_any_element();
         }
         div()
             .text_size(px(12.))
@@ -314,12 +314,12 @@ impl ToastView {
             .w_full()
             .mt(px(4.))
             .justify_between()
-            .child(pill_button("Gelesen", "done", false).on_click(move |_, _, cx| {
+            .child(pill_button("Mark as read", "done", false).on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 center.update(cx, |center, cx| center.mark_read(id, cx));
             }))
             .child(
-                pill_button("Antworten", "reply", true).on_click(cx.listener(
+                pill_button("Reply", "reply", true).on_click(cx.listener(
                     |this, _, window, cx| {
                         cx.stop_propagation();
                         this.open_reply(window, cx);
@@ -398,17 +398,17 @@ impl ToastView {
                     .text_size(px(11.))
                     .text_color(theme::text_muted())
                     .child(hint("Enter", "senden"))
-                    .child(hint("Umschalt+Enter", "Zeilenumbruch"))
-                    .child(hint("Esc", "schließen")),
+                    .child(hint("Shift+Enter", "new line"))
+                    .child(hint("Esc", "close")),
             )
     }
 
     fn confirmation(&self, model: &ToastModel, cx: &mut Context<Self>) -> Div {
         let sent = model.reply == ReplyState::Sent;
         let label = if sent {
-            format!("Gesendet an {}", target_name(model))
+            format!("Sent to {}", target_name(model))
         } else {
-            "Senden fehlgeschlagen".to_owned()
+            "Couldn't send".to_owned()
         };
         let (icon_name, tone) = if sent {
             ("check_circle", theme::green())
@@ -439,7 +439,7 @@ impl ToastView {
                 )
             })
             .when(!sent, |row| {
-                row.child(pill_button("Erneut", "reply", true).on_click(cx.listener(
+                row.child(pill_button("Retry", "reply", true).on_click(cx.listener(
                     |this, _, _, cx| {
                         cx.stop_propagation();
                         this.retry(cx);
@@ -593,7 +593,7 @@ impl Render for PillView {
             .text_size(px(13.))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text())
-            .child(format!("+{hidden} weitere"))
+            .child(format!("+{hidden} more"))
             .on_click(move |_, _, cx| {
                 center.update(cx, |center, cx| center.open_chat_list(cx));
             })

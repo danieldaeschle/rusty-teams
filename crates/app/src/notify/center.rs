@@ -640,7 +640,7 @@ impl NotificationCenter {
                 cx,
             ))),
             titlebar: Some(TitlebarOptions {
-                title: Some("Benachrichtigungen".into()),
+                title: Some("Notifications".into()),
                 ..Default::default()
             }),
             is_resizable: false,
@@ -662,7 +662,7 @@ impl NotificationCenter {
             chat_title: "Mara Lindqvist".to_owned(),
             sender_id: None,
             sender_name: "Mara Lindqvist".to_owned(),
-            preview: Preview::Text("Das ist eine Testbenachrichtigung.".to_owned()),
+            preview: Preview::Text("This is a test notification.".to_owned()),
             mentions_me: false,
             muted: false,
         };
@@ -753,7 +753,7 @@ fn demo_incoming() -> Vec<Incoming> {
             ChatKind::Direct,
             "Tobias Klein",
             "Tobias Klein",
-            "Passt, ich schaue morgen drauf.",
+            "Sounds good, I will look at it tomorrow.",
             false,
         ),
         item(
@@ -761,18 +761,18 @@ fn demo_incoming() -> Vec<Incoming> {
             ChatKind::Group { member_count: 5 },
             "Retro-Team",
             "Priya Nair",
-            "Themen bitte bis 17 Uhr eintragen.",
+            "Please add topics by 5 pm.",
             false,
         ),
         item(
             "demo-toast-mention",
             ChatKind::Channel {
-                team: "Plattform".to_owned(),
+                team: "Platform".to_owned(),
                 channel: "Releases".to_owned(),
             },
             "Releases",
             "Mara Lindqvist",
-            "@Jonas kannst du den Merge freigeben? Pipeline wartet.",
+            "@Jonas can you approve the merge? The pipeline is waiting.",
             true,
         ),
     ]

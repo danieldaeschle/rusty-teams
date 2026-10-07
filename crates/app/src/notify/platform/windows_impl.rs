@@ -176,7 +176,7 @@ pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
                 let Some(icon) = icon_from_badge(badge) else {
                     return;
                 };
-                let _ = taskbar.SetOverlayIcon(hwnd(handle), icon, w!("Ungelesene Chats"));
+                let _ = taskbar.SetOverlayIcon(hwnd(handle), icon, w!("Unread chats"));
                 let _ = DestroyIcon(icon);
             }
         }
@@ -237,17 +237,17 @@ pub struct Tray {
 impl Tray {
     pub fn new(sound_on: bool, do_not_disturb: bool) -> Option<Self> {
         let (plain, with_dot) = tray_icons()?;
-        let open = MenuItem::with_id(ID_OPEN, "Rusty Teams öffnen", true, None);
-        let sound = CheckMenuItem::with_id(ID_SOUND, "Ton aus", true, !sound_on, None);
+        let open = MenuItem::with_id(ID_OPEN, "Open", true, None);
+        let sound = CheckMenuItem::with_id(ID_SOUND, "Mute sound", true, !sound_on, None);
         let dnd = CheckMenuItem::with_id(
             ID_DO_NOT_DISTURB,
-            "Nicht stören",
+            "Do not disturb",
             true,
             do_not_disturb,
             None,
         );
-        let settings = MenuItem::with_id(ID_SETTINGS, "Benachrichtigungen", true, None);
-        let quit = MenuItem::with_id(ID_QUIT, "Beenden", true, None);
+        let settings = MenuItem::with_id(ID_SETTINGS, "Notifications", true, None);
+        let quit = MenuItem::with_id(ID_QUIT, "Quit", true, None);
         let menu = Menu::new();
         menu.append_items(&[
             &open,

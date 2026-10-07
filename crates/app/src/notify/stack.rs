@@ -242,7 +242,7 @@ mod tests {
             chat_title: "Chat".into(),
             sender_id: None,
             sender_name: "Mara".into(),
-            preview: Preview::Text("Hallo".into()),
+            preview: Preview::Text("Hello".into()),
             mentions_me: mention,
             muted: false,
         }
