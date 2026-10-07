@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 56 %** (43 done, 4 partial, 34 missing of 81). Partial counts half.
+**Parity: 56 %** (46 done, 4 partial, 35 missing of 85). Partial counts half.
 
 ## By area
 
@@ -10,7 +10,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 60 % | 6 | 0 | 4 |
-| [Reading](#reading) | 70 % | 10 | 1 | 4 |
+| [Reading](#reading) | 71 % | 13 | 1 | 5 |
 | [Writing](#writing) | 61 % | 8 | 1 | 5 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
