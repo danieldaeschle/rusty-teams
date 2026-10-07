@@ -6,7 +6,7 @@ use store::MessageRecord;
 use teams_core::{FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions};
 
 use crate::format;
-use crate::render::blocks::{Inline, MENTION_PAD, strip_image_placeholders};
+use crate::render::blocks::{Inline, strip_image_placeholders};
 use crate::render::{Block, layout_blocks};
 use crate::sidebar_model::Face;
 
@@ -294,8 +294,7 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
             Block::Code(code) => Some(code),
             Block::Quote(_) => None,
         })
-        .unwrap_or_default()
-        .replace(MENTION_PAD, "");
+        .unwrap_or_default();
     let first_line = text.lines().map(str::trim).find(|line| !line.is_empty());
     let excerpt = match first_line {
         Some(line) => line.to_owned(),
@@ -443,6 +442,7 @@ pub fn thread_list_rows(
         row.day_header = (previous_day != Some(day)).then(|| format::day_label(day, context.today));
         previous_day = Some(day);
         row.card = true;
+        row.time = format::post_time_label(root.created_at, context.today, context.offset);
         row.reply_count = Some(thread.reply_ids.len());
         let replies: Vec<&&MessageRecord> = thread
             .reply_ids

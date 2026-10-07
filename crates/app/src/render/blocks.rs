@@ -2,7 +2,6 @@ use std::ops::Range;
 
 use teams_core::Span;
 
-pub const MENTION_PAD: char = '\u{2009}';
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
@@ -243,10 +242,7 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 out,
             ),
             Span::Mention { name } => {
-                let label = format!(
-                    "{MENTION_PAD}@{}{MENTION_PAD}",
-                    name.trim_start_matches('@')
-                );
+                let label = format!("@{}", name.trim_start_matches('@'));
                 out.push(
                     &label,
                     StyleFlags {
@@ -453,7 +449,7 @@ mod tests {
         let Block::Paragraph(inline) = &blocks[0] else {
             panic!("paragraph expected")
         };
-        assert_eq!(inline.text, "\u{2009}@Ada\u{2009} \u{2009}@Bob");
+        assert_eq!(inline.text, "@Ada @Bob");
         assert!(inline.segments[0].style.mention);
     }
 

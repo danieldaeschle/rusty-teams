@@ -65,9 +65,6 @@ fn code_font(cx: &App) -> SharedString {
 }
 
 fn render_inline(inline: &Inline, id: String, own: bool) -> AnyElement {
-    if inline.segments.iter().any(|segment| segment.style.mention) {
-        return render_inline_with_chips(inline, &id, own);
-    }
     let highlights = inline
         .segments
         .iter()
@@ -115,67 +112,22 @@ fn highlight_for(style: StyleFlags, own: bool) -> HighlightStyle {
     if style.code {
         highlight.background_color = Some(theme::code_background());
     }
+    let accent = if own {
+        theme::accent_soft()
+    } else {
+        theme::accent_text()
+    };
+    if style.mention {
+        highlight.font_weight = Some(FontWeight::BOLD);
+        highlight.color = Some(accent);
+    }
     if style.link {
-        let color = if own {
-            theme::accent_soft()
-        } else {
-            theme::accent_text()
-        };
-        highlight.color = Some(color);
+        highlight.color = Some(accent);
         highlight.underline = Some(UnderlineStyle {
             thickness: px(1.),
-            color: Some(color),
+            color: Some(accent),
             wavy: false,
         });
     }
     highlight
-}
-
-fn render_inline_with_chips(inline: &Inline, id: &str, own: bool) -> AnyElement {
-    let mut pieces: Vec<AnyElement> = Vec::new();
-    for (segment_index, segment) in inline.segments.iter().enumerate() {
-        let text = &inline.text[segment.range.clone()];
-        if segment.style.mention {
-            pieces.push(mention_chip(text.trim(), own));
-            continue;
-        }
-        for (word_index, word) in text.split_inclusive(' ').enumerate() {
-            let mut piece = div()
-                .id(ElementId::Name(
-                    format!("{id}-{segment_index}-{word_index}").into(),
-                ))
-                .whitespace_nowrap()
-                .child(
-                    StyledText::new(word.to_owned())
-                        .with_highlights([(0..word.len(), highlight_for(segment.style, own))]),
-                );
-            if let Some(url) = segment.link.clone() {
-                piece = piece
-                    .cursor_pointer()
-                    .on_click(move |_, _, cx| cx.open_url(&url));
-            }
-            pieces.push(piece.into_any_element());
-        }
-    }
-    div()
-        .w_full()
-        .flex()
-        .flex_wrap()
-        .items_center()
-        .text_color(theme::text())
-        .children(pieces)
-        .into_any_element()
-}
-
-fn mention_chip(text: &str, own: bool) -> AnyElement {
-    div()
-        .mx(px(1.))
-        .px(px(6.))
-        .rounded(px(6.))
-        .bg(theme::mention_background(own))
-        .text_color(theme::mention_text())
-        .font_weight(FontWeight::SEMIBOLD)
-        .whitespace_nowrap()
-        .child(text.to_owned())
-        .into_any_element()
 }

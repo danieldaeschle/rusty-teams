@@ -761,6 +761,26 @@ fn channel_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
+        message(
+            channel,
+            "t4",
+            None,
+            mara,
+            at(3, 8, 42),
+            "<p>Sprint Demos.</p><p>I added you both to the sprint. <at id=\"0\">Tobias Klein</at> did you present everything about the migration tool? The spec is at <a href=\"https://wiki.example.com/display/TEAM/Settings+types+and+password+policies\">https://wiki.example.com/display/TEAM/Settings+types+and+password+policies</a>Can you please review it?</p>",
+            "[]",
+            false,
+        ),
+        message(
+            channel,
+            "t4r1",
+            Some("t4"),
+            tobias,
+            at(0, 9, 15),
+            "<p>Yes, all done.</p>",
+            "[]",
+            false,
+        ),
     ]
 }
 
