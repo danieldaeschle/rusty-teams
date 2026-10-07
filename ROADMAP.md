@@ -1,65 +1,167 @@
 # Roadmap
 
-Sorted by priority. IDs `F*` and `V*` come from [docs/review/round-1.md](docs/review/round-1.md).
+Feature parity with the Microsoft Teams desktop client, chat scope only. Calls and meetings are out of scope.
 
-| Prio | Meaning |
-|---|---|
-| P1 | Blocks daily use |
-| P2 | Heavy users miss it weekly |
-| P3 | Nice to have |
+**Parity: 57 %** (39 done, 7 partial, 28 missing of 74). Partial counts half.
 
-## Open
+## By area
 
-| Prio | Feature | State | ID |
-|---|---|---|---|
-| P1 | Message hover toolbar: react, edit, delete, Up-arrow edits last own message | Backend done, no UI | F2 |
-| P1 | New chat: 1:1 and group with title | Backend done, no UI | F5 |
-| P1 | Attach file, paste or drag an image, upload progress | Missing | F9 |
-| P1 | Channel: new post with subject, post cards | Backend takes a subject, UI sends none | F16, V1 |
-| P1 | Built-in login on Linux, no manual Chrome with a debug port | Missing | - |
-| P2 | Emoji picker for reactions (search, recent, skin tone) | Missing, colon codes exist | F10 |
-| P2 | Chat triage menu: mark unread, mute, hide, leave | Missing, menu has pin, move, mark read | F13 |
-| P2 | Muted and meeting chat sections | Missing | F14 |
-| P2 | Keyboard model: Ctrl+1..9, Alt+Up/Down, Esc closes thread | Missing, only Ctrl+K and Alt+R | F19 |
-| P2 | Formatting shortcuts: Ctrl+B, Ctrl+I, code block | Missing | F11 |
-| P2 | Typing indicator | Event arrives, ignored | F12 |
-| P2 | Outbox survives restart, retry state | Pending sends live in memory only | F21 |
-| P2 | Set own status (Available, Busy, DND), status message | Missing | F20 |
-| P2 | Save and pin messages, saved list | Missing | F17 |
-| P2 | Forward message, copy link to message | Missing | F18 |
-| P2 | Link previews | Missing | F15 |
-| P2 | UI polish: empty chat state, contrast of faint text, switcher with avatar and type, narrow window | Open from review round 1 | V2, V6, V7, V8 |
-| P3 | Schedule send | Missing | F22 |
-| P3 | Notes chat `48:notes`, GIF search, praise | Missing | F23 |
-| P3 | Light theme, follow system theme, UI scale | Missing, dark only | F24 |
+| Area | Parity | Done | Partial | Missing |
+|---|---|---|---|---|
+| [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
+| [Chat list](#chat-list) | 55 % | 5 | 1 | 4 |
+| [Reading](#reading) | 70 % | 10 | 1 | 4 |
+| [Writing](#writing) | 46 % | 5 | 3 | 6 |
+| [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
+| [Channels](#channels) | 50 % | 2 | 1 | 2 |
+| [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
+| [Search and navigation](#search-and-navigation) | 75 % | 3 | 0 | 1 |
+| [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
+| [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
 
-## Done
+## Next
 
-| Feature | ID |
-|---|---|
-| Chats and channels, Teams pin order, chat folders, hidden teams | - |
-| Pin a chat, move a chat to a folder | - |
-| Live updates over the Trouter socket | - |
-| Send, quote-reply (Alt+R), channel threads | F3 |
-| @mention autocomplete in the composer | F4 |
-| Emoji by `:` code, English codes and German aliases | F10 (partly) |
-| Inline images, file cards, Adaptive Cards as text | F1 |
-| Read receipts, presence dot, mark read on open | F12 (partly) |
-| Unread jump with "New" divider | F7 |
-| Local FTS5 search and Ctrl+K switcher | F8 |
-| Load older messages on scroll up | - |
-| Edited and deleted markers, reactions shown | - |
-| Dark theme, instant start from the SQLite cache | - |
-| Windows login through embedded WebView2 | - |
-| Self-update from an update folder | - |
-| Desktop notifications on Windows: toast, sound, taskbar badge, tray, settings | F6, F25 |
-| Mentions inline in text, dated old channel posts | - |
-| Selectable message text, last known presence at start | - |
+| # | Feature | Note |
+|---|---|---|
+| 1 | Message toolbar: react, edit, delete, Up-arrow edits the last own message | Backend is done |
+| 2 | New chat: 1:1 and group with title | Backend is done |
+| 3 | Attach a file, paste or drag an image |  |
+| 4 | Channel: new post with subject, post cards |  |
+| 5 | Sign in on Linux without Chrome on a debug port |  |
+| 6 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
+| 7 | Emoji picker for reactions and the composer |  |
+| 8 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 9 | Typing indicator |  |
+| 10 | Unsent messages survive a restart |  |
+
+## Sign-in and app
+
+| Feature | State | Note |
+|---|---|---|
+| Sign in on Windows through embedded WebView2, single sign-on | Done |  |
+| Start from the local cache, no spinner | Done |  |
+| Self-update | Done |  |
+| Tray icon, close to tray | Done |  |
+| Sign in on Linux without starting Chrome by hand | Partial | Works with a Chrome on a debug port |
+| Single instance, second start brings the window to front | Missing |  |
+
+## Chat list
+
+| Feature | State | Note |
+|---|---|---|
+| Chats and channels in one list | Done |  |
+| Pinned chats, synced with Teams | Done |  |
+| Chat folders (custom sections), move by menu or drag | Done |  |
+| Hidden teams | Done |  |
+| Unread bold, unread count, mention marker | Done |  |
+| New chat: 1:1 and group with title | Partial | Backend done, no UI |
+| Mark as unread | Missing |  |
+| Mute chat | Missing |  |
+| Hide chat, leave chat | Missing |  |
+| Muted and Meeting chat sections | Missing | Teams rollout Aug-Sep 2026 |
+
+## Reading
+
+| Feature | State | Note |
+|---|---|---|
+| Text formatting: bold, italic, code, code block, lists, links | Done |  |
+| Quotes and replies | Done |  |
+| Reactions shown | Done |  |
+| Edited and deleted markers | Done |  |
+| Inline images | Done |  |
+| File cards | Done |  |
+| Load older messages on scroll | Done |  |
+| Unread jump with New divider | Done |  |
+| Read receipts | Done |  |
+| Select and copy message text | Done |  |
+| Adaptive Cards | Partial | Shown as text, actions do not work |
+| Typing indicator | Missing | Event arrives, ignored |
+| Link previews | Missing |  |
+| Loop components | Missing |  |
+| Translate a message | Missing |  |
+
+## Writing
+
+| Feature | State | Note |
+|---|---|---|
+| Send, multi-line, Enter sends | Done |  |
+| Markdown while typing: bold, code, lists, links | Done |  |
+| Quote-reply (Alt+R) | Done |  |
+| @mentions with people search | Done |  |
+| Emoji by colon code, English and German aliases | Done |  |
+| Edit own message | Partial | Backend done, no UI |
+| Delete own message | Partial | Backend done, no UI |
+| React to a message | Partial | Backend done, no UI |
+| Emoji picker | Missing |  |
+| Formatting toolbar, Ctrl+B and Ctrl+I | Missing |  |
+| Attach a file, paste or drag an image | Missing |  |
+| GIFs and stickers | Missing |  |
+| Schedule send | Missing |  |
+| Unsent messages survive a restart | Missing | Pending sends live in memory only |
+
+## Message actions
+
+| Feature | State | Note |
+|---|---|---|
+| Forward a message | Missing |  |
+| Copy link to a message | Missing |  |
+| Save a message, saved list | Missing |  |
+| Pin a message in a chat | Missing |  |
+
+## Channels
+
+| Feature | State | Note |
+|---|---|---|
+| Teams and channels tree | Done |  |
+| Thread list, open a thread, reply | Done |  |
+| New post with subject | Partial | Backend takes a subject, UI sends none |
+| Post cards like Teams | Missing |  |
+| Follow a channel, per-channel notifications | Missing |  |
+
+## Notifications
+
+| Feature | State | Note |
+|---|---|---|
+| Desktop toast, click opens the chat at the message | Done |  |
+| Reply and Mark as read in the toast | Done |  |
+| Sound, taskbar badge, flash on mention | Done |  |
+| Quiet during Do not disturb, Focus Assist, calls | Done |  |
+| Mentions-only mode, preview off | Done |  |
+| Stack of 3, queue, Hide all, fade-out | Done |  |
+| Muted chats stay quiet | Missing | Needs Mute chat |
+| Notifications on Linux | Missing |  |
+
+## Search and navigation
+
+| Feature | State | Note |
+|---|---|---|
+| Ctrl+K switcher over chats, channels, people | Done |  |
+| Full-text search over cached messages | Done |  |
+| Jump to a message from search | Done |  |
+| Keyboard: Ctrl+1..9, Alt+Up/Down, Esc closes thread | Missing |  |
+
+## Presence and people
+
+| Feature | State | Note |
+|---|---|---|
+| Presence dots | Done |  |
+| Last known presence at start | Done |  |
+| Set own status and status message | Missing |  |
+| Profile card | Missing |  |
+
+## Look and settings
+
+| Feature | State | Note |
+|---|---|---|
+| Dark theme | Done |  |
+| Notification settings | Done |  |
+| Light theme, follow system theme | Missing |  |
+| UI scale | Missing |  |
 
 ## Out of scope
 
 | Feature | Why |
 |---|---|
-| Calls, meetings | No supported way outside the official client |
-| Tabs, apps | No host contract |
-| Server-side search | Local index is faster |
+| Calls, meetings, screen sharing | No supported way outside the official client |
+| Tabs and apps | No host contract |
+| Server-side search | The local index answers faster |
