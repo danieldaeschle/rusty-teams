@@ -13,6 +13,7 @@ mod format;
 mod assets;
 mod frame_log;
 mod fuzzy;
+mod notify;
 mod render;
 mod rows;
 mod runtime;
@@ -141,13 +142,6 @@ fn main() {
             theme::load_fonts(cx);
             theme::apply(cx);
             bind_keys(cx);
-            cx.on_window_closed(|cx, _| {
-                if cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
-
             let state = cx.new(|_| {
                 let mut state = AppState::new(store, mode);
                 state.start_on_channels = arguments.channels_tab;
@@ -182,10 +176,17 @@ fn main() {
                 composer_text: arguments.composer_text,
                 reply_to_last: arguments.reply_to_last,
             };
-            gpui_kit::open_window(options, cx, move |window, cx| {
+            let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
                 cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
             })
             .expect("failed to open window");
+            let main_window_id = main_window.window_id();
+            cx.on_window_closed(move |cx, closed| {
+                if closed == main_window_id {
+                    cx.quit();
+                }
+            })
+            .detach();
             cx.activate(true);
         });
 }

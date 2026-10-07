@@ -5,7 +5,7 @@ use gpui_kit::component::{TitleBar, h_flex};
 use gpui_kit::*;
 
 use super::avatar::{person_avatar, with_presence};
-use super::widgets::icon;
+use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::theme;
 
@@ -26,7 +26,21 @@ fn app_icon() -> Arc<Image> {
 pub fn render_title_bar(
     directory: &Directory,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_notifications: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let notifications = div()
+        .id("title-notifications")
+        .occlude()
+        .size(px(28.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .hover(|button| button.bg(theme::surface()))
+        .child(symbol("notifications", 18., theme::text_muted()))
+        .on_click(on_notifications);
     let search = h_flex()
         .id("title-search")
         .occlude()
@@ -88,6 +102,7 @@ pub fn render_title_bar(
                         .child(crate::APP_NAME),
                 )
                 .child(div().flex_1().flex().justify_center().child(search))
+                .child(notifications)
                 .children(own)
                 .child(div().w(px(4.))),
         )

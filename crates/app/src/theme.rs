@@ -38,6 +38,7 @@ const OWN_READ: u32 = 0xf5c4a5;
 const DROP_BACKGROUND: u32 = 0xce6a3b14;
 const CODE_BACKGROUND: u32 = 0x0b0b0c;
 const BADGE_MUTED: u32 = 0x3f3f42;
+const TOAST_MENTION: u32 = 0x2e1d15;
 const GREEN: u32 = 0x22c55e;
 const RED: u32 = 0xef4444;
 const CLOSE_BUTTON_HOVER: u32 = 0xc42b1c;
@@ -129,6 +130,10 @@ pub fn apply(cx: &mut App) {
 
 pub fn background() -> Hsla {
     color(BACKGROUND)
+}
+
+pub fn toast_mention_fill() -> Hsla {
+    color(TOAST_MENTION)
 }
 
 pub fn surface() -> Hsla {

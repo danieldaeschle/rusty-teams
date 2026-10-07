@@ -2,11 +2,25 @@ use std::borrow::Cow;
 
 use gpui_kit::{AssetSource, Result, SharedString};
 
-const SYMBOLS: [(&str, &[u8]); 4] = [
-    ("symbols/done.svg", include_bytes!("../assets/symbols/done.svg")),
-    ("symbols/done_all.svg", include_bytes!("../assets/symbols/done_all.svg")),
-    ("symbols/keyboard_return.svg", include_bytes!("../assets/symbols/keyboard_return.svg")),
-    ("symbols/schedule.svg", include_bytes!("../assets/symbols/schedule.svg")),
+macro_rules! symbols {
+    ($($name:literal),* $(,)?) => {
+        [$((concat!("symbols/", $name, ".svg"), include_bytes!(concat!("../assets/symbols/", $name, ".svg")) as &[u8])),*]
+    };
+}
+
+const SYMBOLS: [(&str, &[u8]); 12] = symbols![
+    "done",
+    "done_all",
+    "keyboard_return",
+    "schedule",
+    "close",
+    "reply",
+    "group",
+    "tag",
+    "image",
+    "check_circle",
+    "error",
+    "notifications",
 ];
 
 pub struct AppAssets;

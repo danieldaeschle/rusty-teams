@@ -7,6 +7,7 @@ use super::status_bar::render_status_bar;
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::notify::NotificationCenter;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 
@@ -39,6 +40,7 @@ pub struct AppShell {
     sidebar: Entity<SidebarView>,
     conversation: Entity<ConversationView>,
     switcher: Option<Entity<Switcher>>,
+    notifications: Entity<NotificationCenter>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
@@ -63,11 +65,15 @@ impl AppShell {
         });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
+        let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
+        let closing = notifications.clone();
+        window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
         let mut shell = AppShell {
             state,
             sidebar,
             conversation,
             switcher: None,
+            notifications,
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
@@ -237,6 +243,10 @@ impl Render for AppShell {
         let title_bar = render_title_bar(
             &state.directory,
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
+            cx.listener(|this, _, _, cx| {
+                this.notifications
+                    .update(cx, |center, cx| center.open_settings(cx));
+            }),
         );
         div()
             .id("app-shell")
