@@ -36,6 +36,7 @@ const MENTION_BACKGROUND_OWN: u32 = 0x3b1d11;
 const OWN_META: u32 = 0xc9a28c;
 const OWN_READ: u32 = 0xf5c4a5;
 const DROP_BACKGROUND: u32 = 0xce6a3b14;
+const SELECTION: u32 = 0xce6a3b66;
 const CODE_BACKGROUND: u32 = 0x0b0b0c;
 const BADGE_MUTED: u32 = 0x3f3f42;
 const TOAST_MENTION: u32 = 0x2e1d15;
@@ -108,7 +109,7 @@ pub fn apply(cx: &mut App) {
         colors.ring = color(ACCENT);
         colors.caret = color(ACCENT);
         colors.input = color(BORDER_STRONG);
-        colors.selection = color_with_alpha(MENTION_BACKGROUND);
+        colors.selection = color_with_alpha(SELECTION);
         colors.title_bar = color(BACKGROUND);
         colors.title_bar_border = color(BORDER);
         colors.status_bar = color(BACKGROUND);
