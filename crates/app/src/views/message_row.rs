@@ -1,5 +1,5 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::base::{GlobalState, TextSelection};
+use gpui_kit::base::TextSelection;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -9,10 +9,11 @@ use super::attachments::attachments_view;
 use super::avatar::{member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
+use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::render::{Block, render_blocks};
-use crate::rows::{Delivery, MessageRow, ReactionChip, Receipt, Skeleton, bubble_corners};
+use crate::rows::{Delivery, MessageRow, Receipt, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 
@@ -24,7 +25,7 @@ const SERIES_START_GAP: f32 = 8.;
 const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const SENDING_OPACITY: f32 = 0.6;
-const REACTION_OVERHANG: f32 = 12.;
+const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const CARD_AVATAR_SIZE: f32 = 32.;
 const CARD_GAP: f32 = 12.;
 const META_SIZE: f32 = 11.;
@@ -40,46 +41,11 @@ pub struct RowActions {
     pub hovered: Option<HoverChange>,
     pub menu: Option<MessageMenu>,
     pub react: Option<PickHandler>,
+    pub reaction_controls: Option<ReactionControls>,
     pub highlighted: bool,
 }
 
 const TOOLBAR_LIFT: f32 = 22.;
-
-fn reaction_chip(chip: &ReactionChip, index: usize, react: Option<PickHandler>) -> Stateful<Div> {
-    let (background, border, foreground) = if chip.mine {
-        (theme::bubble_own(), theme::accent(), theme::accent_tint())
-    } else {
-        (theme::surface(), theme::border_strong(), theme::text_soft())
-    };
-    let glyph = chip.label.clone();
-    h_flex()
-        .id(ElementId::Name(
-            format!("reaction-{index}-{}", chip.reaction_type).into(),
-        ))
-        .h(px(22.))
-        .px(px(8.))
-        .gap(px(4.))
-        .items_center()
-        .rounded(px(11.))
-        .bg(background)
-        .border_1()
-        .border_color(border)
-        .text_size(px(12.))
-        .text_color(foreground)
-        .child(chip.label.clone())
-        .child(chip.count.to_string())
-        .when_some(react, |chip, react| {
-            chip.cursor_pointer()
-                .hover(|chip| chip.border_color(theme::accent()))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    GlobalState::suppress_text_selection(cx)
-                })
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    react(&glyph, window, cx);
-                })
-        })
-}
 
 fn labeled_divider(label: &str, line_color: Hsla, text_color: Hsla) -> Div {
     h_flex()
@@ -148,12 +114,14 @@ fn bubble(
         })
         .when(row.delivery == Delivery::Sending, |bubble| {
             bubble.opacity(SENDING_OPACITY)
-        })
-        .when(!row.reactions.is_empty(), |bubble| {
-            bubble.mb(px(REACTION_OVERHANG))
         });
+    let has_reactions = !row.reactions.is_empty();
     let mut content = v_flex().gap(px(6.));
-    let padded_blocks = with_meta_room(&row.blocks, meta_room(row, own));
+    let padded_blocks = if has_reactions {
+        None
+    } else {
+        with_meta_room(&row.blocks, meta_room(row, own))
+    };
     let meta_inline = has_text(row) && padded_blocks.is_some();
     if has_text(row) {
         content = content.child(render_blocks(
@@ -170,7 +138,31 @@ fn bubble(
         &format!("message-{index}"),
         directory,
     ));
-    if !meta_inline {
+    if has_reactions {
+        content = content.child(
+            h_flex()
+                .gap(px(8.))
+                .items_end()
+                .child(
+                    reaction_pills(
+                        &row.reactions,
+                        index,
+                        own,
+                        directory,
+                        extras.react.clone(),
+                        extras.controls.as_ref(),
+                    )
+                    .flex_auto(),
+                )
+                .child(
+                    h_flex()
+                        .h(px(REACTION_FOOTER_HEIGHT))
+                        .flex_none()
+                        .items_center()
+                        .child(bubble_meta(row, own)),
+                ),
+        );
+    } else if !meta_inline {
         content = content.child(h_flex().justify_end().child(bubble_meta(row, own)));
     }
     element = element.child(content);
@@ -181,21 +173,6 @@ fn bubble(
                 .right(px(9.))
                 .bottom(px(5.))
                 .child(bubble_meta(row, own)),
-        );
-    }
-    if !row.reactions.is_empty() {
-        element = element.child(
-            h_flex()
-                .absolute()
-                .when(own, |chips| chips.right(px(11.)))
-                .when(!own, |chips| chips.left(px(11.)))
-                .bottom(px(-14.))
-                .gap(px(4.))
-                .children(
-                    row.reactions
-                        .iter()
-                        .map(|chip| reaction_chip(chip, index, extras.react.clone())),
-                ),
         );
     }
     if let Some(menu) = extras.menu {
@@ -214,6 +191,7 @@ fn bubble(
 struct BubbleExtras {
     menu: Option<MessageMenu>,
     react: Option<PickHandler>,
+    controls: Option<ReactionControls>,
 }
 
 fn bubble_meta(row: &MessageRow, own: bool) -> Div {
@@ -477,13 +455,14 @@ fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) ->
             directory,
         ));
         if !row.reactions.is_empty() {
-            body = body.child(
-                h_flex().gap(px(4.)).flex_wrap().children(
-                    row.reactions
-                        .iter()
-                        .map(|chip| reaction_chip(chip, index, None)),
-                ),
-            );
+            body = body.child(reaction_pills(
+                &row.reactions,
+                index,
+                false,
+                directory,
+                None,
+                None,
+            ));
         }
     }
     v_flex()
@@ -582,9 +561,14 @@ pub fn render_message_row(
         hovered,
         menu,
         react,
+        reaction_controls,
         highlighted,
     } = actions;
-    let extras = BubbleExtras { menu, react };
+    let extras = BubbleExtras {
+        menu,
+        react,
+        controls: reaction_controls,
+    };
     let own = row.own && !row.card;
     let spacing = if row.card {
         px(CARD_GAP)

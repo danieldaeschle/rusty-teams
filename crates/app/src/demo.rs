@@ -610,12 +610,22 @@ fn priority_messages() -> Vec<MessageRecord> {
     ]
 }
 
-fn reaction(kind: &str, users: &[&str]) -> String {
+fn reaction(kind: &str, users: &[(&str, &str, DateTime<Utc>)]) -> Vec<serde_json::Value> {
     users
         .iter()
-        .map(|user| format!(r#"{{"reaction_type":"{kind}","user_id":"{user}","user_name":null}}"#))
-        .collect::<Vec<_>>()
-        .join(",")
+        .map(|(user_id, user_name, created_at)| {
+            serde_json::json!({
+                "reaction_type": kind,
+                "user_id": user_id,
+                "user_name": user_name,
+                "created_at": created_at,
+            })
+        })
+        .collect()
+}
+
+fn reactions_json(groups: Vec<Vec<serde_json::Value>>) -> String {
+    serde_json::Value::Array(groups.into_iter().flatten().collect()).to_string()
 }
 
 fn release_messages() -> Vec<MessageRecord> {
@@ -623,8 +633,50 @@ fn release_messages() -> Vec<MessageRecord> {
     let mara = (MARA_ID, "Mara Lindqvist");
     let jonas = (JONAS_ID, "Jonas Ortega");
     let me = (DEMO_USER_ID, DEMO_USER_NAME);
-    let likes = format!("[{}]", reaction("like", &[JONAS_ID, PRIYA_ID, LEA_ID]));
-    let hearts = format!("[{}]", reaction("heart", &[DEMO_USER_ID, JONAS_ID]));
+    let jonas_name = "Jonas Ortega";
+    let priya_name = "Priya Nair";
+    let lea_name = "Lea Schneider";
+    let mara_name = "Mara Lindqvist";
+    let tobias_name = "Tobias Klein";
+    let likes = reactions_json(vec![reaction(
+        "like",
+        &[
+            (JONAS_ID, jonas_name, at(1, 16, 30)),
+            (PRIYA_ID, priya_name, at(1, 17, 2)),
+            (LEA_ID, lea_name, at(0, 8, 15)),
+        ],
+    )]);
+    let hearts = reactions_json(vec![reaction(
+        "heart",
+        &[
+            (DEMO_USER_ID, DEMO_USER_NAME, at(0, 10, 35)),
+            (JONAS_ID, jonas_name, at(0, 10, 33)),
+        ],
+    )]);
+    let single = reactions_json(vec![reaction(
+        "laugh",
+        &[(PRIYA_ID, priya_name, at(0, 9, 10))],
+    )]);
+    let many = reactions_json(vec![
+        reaction(
+            "like",
+            &[
+                (MARA_ID, mara_name, at(0, 13, 37)),
+                (JONAS_ID, jonas_name, at(0, 13, 38)),
+                (PRIYA_ID, priya_name, at(0, 13, 40)),
+                (LEA_ID, lea_name, at(0, 13, 45)),
+                (TOBIAS_ID, tobias_name, at(0, 13, 50)),
+            ],
+        ),
+        reaction(
+            "heart",
+            &[
+                (LEA_ID, lea_name, at(0, 13, 46)),
+                (TOBIAS_ID, tobias_name, at(0, 13, 51)),
+            ],
+        ),
+        reaction("\u{1F389}", &[(MARA_ID, mara_name, at(0, 13, 39))]),
+    ]);
     vec![
         message(
             chat,
@@ -679,7 +731,7 @@ fn release_messages() -> Vec<MessageRecord> {
             me,
             at(0, 9, 2),
             "<p>I'll take the changelog.</p>",
-            "[]",
+            &single,
             false,
         ),
         message(
@@ -739,7 +791,7 @@ fn release_messages() -> Vec<MessageRecord> {
             me,
             at(0, 13, 36),
             "<p>Build 42 is green, see <a href=\"https://example.com/build/42\">pipeline</a>.</p>",
-            "[]",
+            &many,
             false,
         ),
     ]

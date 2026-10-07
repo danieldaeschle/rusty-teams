@@ -23,9 +23,11 @@ use super::message_actions::{Action, MessageMenu};
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
+use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::data::{is_one_on_one, others};
+use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::Block;
 use crate::render::blocks::Inline;
@@ -102,6 +104,12 @@ struct Current {
     sync: SyncProgress,
 }
 
+struct ReactionDetails {
+    message_key: String,
+    anchor_glyph: String,
+    tab: Option<String>,
+}
+
 pub struct ConversationView {
     app: Entity<AppState>,
     scroller: Entity<MessageScrollerState>,
@@ -119,6 +127,7 @@ pub struct ConversationView {
     toolbar_hovered: Option<String>,
     toolbar_pinned: Option<String>,
     picker: Entity<ReactionPicker>,
+    reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     notice: Option<String>,
     drag_file_count: usize,
@@ -180,6 +189,11 @@ impl ConversationView {
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.observe_window_activation(window, Self::on_window_activation),
+            cx.observe_keystrokes(|this, event, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.close_reaction_details(cx);
+                }
+            }),
         ];
         let mut view = ConversationView {
             app,
@@ -198,6 +212,7 @@ impl ConversationView {
             toolbar_hovered: None,
             toolbar_pinned: None,
             picker,
+            reaction_details: None,
             highlighted_message: None,
             notice: None,
             drag_file_count: 0,
@@ -237,6 +252,7 @@ impl ConversationView {
     ) {
         match event {
             AppEvent::Selection => {
+                self.reaction_details = None;
                 let (new_chat, selection) = {
                     let state = self.app.read(cx);
                     (state.new_chat, state.selection.clone())
@@ -284,9 +300,13 @@ impl ConversationView {
                 }
                 self.start_fetch(cx)
             }
-            AppEvent::Directory => cx.notify(),
+            AppEvent::Directory => {
+                self.refresh_reactor_names(cx);
+                cx.notify();
+            }
             AppEvent::Sidebar => {
                 self.mark_read(ReadTrigger::Incoming, cx);
+                self.refresh_reactor_names(cx);
                 if self.draft_active {
                     self.on_draft_changed(window, cx);
                 } else if let Some(current) = self.current.as_mut() {
@@ -650,10 +670,132 @@ impl ConversationView {
 
     fn row_context(&self, cx: &App) -> RowContext {
         let now = Local::now();
+        let app = self.app.read(cx);
+        let mut names: HashMap<String, String> = HashMap::new();
+        let known_people = app
+            .directory
+            .me
+            .iter()
+            .map(|me| (me.user_id.clone(), me.display_name.clone()))
+            .chain(
+                app.sidebar
+                    .chats
+                    .iter()
+                    .flat_map(|chat| chat.members.iter())
+                    .filter_map(|member| {
+                        Some((member.user_id.clone()?, member.display_name.clone()))
+                    }),
+            );
+        for (user_id, name) in known_people {
+            names.entry(user_id).or_insert(name);
+        }
         RowContext {
             offset: now.offset().fix(),
             today: now.date_naive(),
-            my_user_id: self.app.read(cx).store.meta(META_USER_ID).ok().flatten(),
+            my_user_id: app.store.meta(META_USER_ID).ok().flatten(),
+            names,
+        }
+    }
+
+    fn unknown_reactor_ids(&self) -> Vec<String> {
+        self.rows
+            .borrow()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Message(message) => Some(message),
+                _ => None,
+            })
+            .flat_map(|message| message.reactions.iter())
+            .flat_map(|chip| chip.reactors.iter())
+            .filter(|reactor| reactor.name == UNKNOWN_REACTOR)
+            .filter_map(|reactor| reactor.user_id.clone())
+            .collect()
+    }
+
+    fn refresh_reactor_names(&mut self, cx: &mut Context<Self>) {
+        if self.current.is_none() {
+            return;
+        }
+        let unknown = self.unknown_reactor_ids();
+        if unknown.is_empty() {
+            return;
+        }
+        let names = self.row_context(cx).names;
+        if unknown.iter().any(|user_id| names.contains_key(user_id)) {
+            self.rebuild(false, cx);
+        }
+    }
+
+    fn drop_stale_reaction_details(&mut self) {
+        let Some(details) = self.reaction_details.as_ref() else {
+            return;
+        };
+        let present = self.rows.borrow().iter().any(|row| {
+            matches!(row, Row::Message(message) if message.key == details.message_key
+                && message.reactions.iter().any(|chip| chip.glyph() == details.anchor_glyph))
+        });
+        if !present {
+            self.reaction_details = None;
+        }
+    }
+
+    fn open_reaction_details(&mut self, message_key: &str, glyph: &str, cx: &mut Context<Self>) {
+        let multiple_kinds = self.rows.borrow().iter().any(|row| {
+            matches!(row, Row::Message(message) if message.key == message_key && message.reactions.len() > 1)
+        });
+        self.reaction_details = Some(ReactionDetails {
+            message_key: message_key.to_owned(),
+            anchor_glyph: glyph.to_owned(),
+            tab: multiple_kinds.then(|| glyph.to_owned()),
+        });
+        cx.notify();
+    }
+
+    fn select_reaction_tab(&mut self, tab: Option<String>, cx: &mut Context<Self>) {
+        if let Some(details) = self.reaction_details.as_mut() {
+            details.tab = tab;
+            cx.notify();
+        }
+    }
+
+    fn close_reaction_details(&mut self, cx: &mut Context<Self>) {
+        if self.reaction_details.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn reaction_controls(&self, key: &str, view: WeakEntity<Self>) -> ReactionControls {
+        let open = {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |glyph: &str, cx: &mut App| {
+                view.update(cx, |this, cx| this.open_reaction_details(&key, glyph, cx))
+                    .ok();
+            })
+        };
+        let select_tab = {
+            let view = view.clone();
+            Rc::new(move |tab: Option<String>, cx: &mut App| {
+                view.update(cx, |this, cx| this.select_reaction_tab(tab, cx))
+                    .ok();
+            })
+        };
+        let close = Rc::new(move |cx: &mut App| {
+            view.update(cx, |this, cx| this.close_reaction_details(cx))
+                .ok();
+        });
+        let popover = self
+            .reaction_details
+            .as_ref()
+            .filter(|details| details.message_key == key)
+            .map(|details| ReactionPopover {
+                anchor_glyph: details.anchor_glyph.clone(),
+                tab: details.tab.clone(),
+            });
+        ReactionControls {
+            open,
+            select_tab,
+            close,
+            popover,
         }
     }
 
@@ -706,7 +848,15 @@ impl ConversationView {
             .ok()
             .flatten()
             .is_none_or(|state| state.has_more);
-        let context = self.row_context(cx);
+        let mut context = self.row_context(cx);
+        for record in &records {
+            if let (Some(user_id), Some(name)) = (&record.sender_id, &record.sender_name) {
+                context
+                    .names
+                    .entry(user_id.clone())
+                    .or_insert_with(|| name.clone());
+            }
+        }
         let can_load_older = self.app.read(cx).engine.is_some();
         let start = self.start_info(cx);
         let current = self.current.as_mut().expect("checked above");
@@ -772,6 +922,7 @@ impl ConversationView {
 
     fn apply_rows(&mut self, new_rows: Vec<Row>, reset: bool, cx: &mut Context<Self>) {
         let old_rows = std::mem::replace(&mut *self.rows.borrow_mut(), new_rows);
+        self.drop_stale_reaction_details();
         let new_len = self.rows.borrow().len();
         if reset {
             let marker_index = self
@@ -1584,6 +1735,7 @@ impl ConversationView {
                     reaction_type: reaction_type.clone(),
                     user_id: my_user_id.clone(),
                     user_name: Some("You".to_owned()),
+                    created_at: Some(Utc::now()),
                 });
             }
             record.reactions_json = serde_json::to_string(&reactions).unwrap_or_default();
@@ -2147,14 +2299,23 @@ impl Render for ConversationView {
                                     .ok();
                             }) as Box<dyn Fn(&mut App)>
                         });
-                        let sender = (!message.own && !message.series.has_prev)
+                        let senders: Vec<String> = (!message.own && !message.series.has_prev)
                             .then(|| message.sender_id.clone())
                             .flatten()
-                            .filter(|sender| app.read(cx).directory.avatar(sender).is_none());
-                        if let Some(sender) = sender {
+                            .into_iter()
+                            .chain(
+                                message
+                                    .reactions
+                                    .iter()
+                                    .flat_map(|chip| chip.reactors.iter())
+                                    .filter_map(|reactor| reactor.user_id.clone()),
+                            )
+                            .filter(|sender| app.read(cx).directory.avatar(sender).is_none())
+                            .collect();
+                        if !senders.is_empty() {
                             let app = app.clone();
                             cx.defer(move |cx| {
-                                app.update(cx, |state, cx| state.request_avatars(vec![sender], cx));
+                                app.update(cx, |state, cx| state.request_avatars(senders, cx));
                             });
                         }
                         let missing_images: Vec<ImageRef> = message
@@ -2182,7 +2343,7 @@ impl Render for ConversationView {
                             }) as Rc<dyn Fn(bool, &mut App)>
                         });
                         let actionable = is_real && !message.deleted && !message.card;
-                        let (menu, react) = view
+                        let (menu, react, reaction_controls) = view
                             .upgrade()
                             .filter(|_| actionable)
                             .map(|entity| {
@@ -2191,9 +2352,11 @@ impl Render for ConversationView {
                                     this.message_menu(&message.key, message.own, view.clone());
                                 let react = menu.react.clone();
                                 let visible = this.toolbar_visible(&message.key);
-                                (visible.then_some(menu), Some(react))
+                                let controls = (!message.reactions.is_empty())
+                                    .then(|| this.reaction_controls(&message.key, view.clone()));
+                                (visible.then_some(menu), Some(react), controls)
                             })
-                            .unwrap_or((None, None));
+                            .unwrap_or((None, None, None));
                         let reply = (is_real && !message.deleted).then(|| {
                             let (view, key, handle) =
                                 (view.clone(), message.key.clone(), window.window_handle());
@@ -2220,6 +2383,7 @@ impl Render for ConversationView {
                                 hovered,
                                 menu,
                                 react,
+                                reaction_controls,
                                 highlighted: highlighted.as_deref() == Some(message.key.as_str()),
                             },
                             &state.directory,
@@ -2336,11 +2500,25 @@ impl Render for ConversationView {
                 .relative()
                 .flex_1()
                 .min_h_0()
-                .child(div().flex_1().min_h_0().child(body))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .on_scroll_wheel(
+                            cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
+                        )
+                        .child(body),
+                )
                 .children(self.render_draft_error(cx))
                 .child(self.composer.clone())
                 .child(self.render_drop_overlay(cx)),
         )
+        .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+            if this.reaction_details.is_some() {
+                this.close_reaction_details(cx);
+                cx.stop_propagation();
+            }
+        }))
         .when(drafting, |root| {
             root.on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.draft.read(cx).has_focus(window, cx) {

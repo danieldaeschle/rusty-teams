@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use scraper::{ElementRef, Html};
 use serde::{Deserialize, Serialize};
 use store::MessageRecord;
@@ -106,6 +107,8 @@ pub struct ReactionInfo {
     pub reaction_type: String,
     pub user_id: Option<String>,
     pub user_name: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -422,6 +425,16 @@ mod tests {
             reactions_json: "[]".to_owned(),
             mentions_json: "[]".to_owned(),
         }
+    }
+
+    #[test]
+    fn reaction_without_created_at_still_parses() {
+        let mut stored = record("", "[]");
+        stored.reactions_json =
+            r#"[{"reaction_type":"like","user_id":"u","user_name":null}]"#.to_owned();
+        let parsed = reactions(&stored);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].created_at, None);
     }
 
     #[test]

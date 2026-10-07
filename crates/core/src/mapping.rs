@@ -247,6 +247,7 @@ fn reaction_info(reaction: &Reaction) -> ReactionInfo {
             .as_ref()
             .and_then(|sender| sender.display_name())
             .map(str::to_owned),
+        created_at: reaction.created_date_time,
     }
 }
 

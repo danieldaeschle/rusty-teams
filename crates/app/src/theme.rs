@@ -27,10 +27,11 @@ const TEXT_FAINT: u32 = 0x8e8e93;
 const ACCENT: u32 = 0xce6a3b;
 const ACCENT_TEXT: u32 = 0xe08a5c;
 const ACCENT_SOFT: u32 = 0xf5c4a5;
-const ACCENT_TINT: u32 = 0xf5c4a5;
 const ACCENT_STRONG: u32 = 0xa84f27;
 const BUBBLE_OWN: u32 = 0x4f2a1b;
 const BUBBLE_OTHER: u32 = 0x232325;
+const REACTION_ON_OWN: u32 = 0x6b3a26;
+const WHITE: u32 = 0xffffff;
 const MENTION_BACKGROUND: u32 = 0x3a2a23;
 const MENTION_BACKGROUND_OWN: u32 = 0x3b1d11;
 const OWN_META: u32 = 0xc9a28c;
@@ -199,10 +200,6 @@ pub fn accent_soft() -> Hsla {
     color(ACCENT_SOFT)
 }
 
-pub fn accent_tint() -> Hsla {
-    color(ACCENT_TINT)
-}
-
 pub fn on_accent() -> Hsla {
     color(BACKGROUND)
 }
@@ -213,6 +210,14 @@ pub fn bubble_own() -> Hsla {
 
 pub fn bubble_other() -> Hsla {
     color(BUBBLE_OTHER)
+}
+
+pub fn reaction_on_own() -> Hsla {
+    color(REACTION_ON_OWN)
+}
+
+pub fn white() -> Hsla {
+    color(WHITE)
 }
 
 pub fn mention_background(own: bool) -> Hsla {

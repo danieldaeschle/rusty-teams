@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use store::MessageRecord;
 use teams_core::{FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions};
 
 use crate::format;
+use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
 use crate::render::blocks::{Inline, strip_image_placeholders};
 use crate::render::{Block, layout_blocks};
 use crate::sidebar_model::Face;
@@ -27,6 +28,13 @@ pub struct ReactionChip {
     pub label: String,
     pub count: usize,
     pub mine: bool,
+    pub reactors: Vec<Reactor>,
+}
+
+impl ReactionChip {
+    pub fn glyph(&self) -> String {
+        reaction_glyph(&self.reaction_type)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -290,29 +298,47 @@ pub fn reaction_type_for(glyph: &str) -> String {
         .map_or_else(|| bare.to_owned(), str::to_owned)
 }
 
-pub fn reaction_chips(reactions: &[ReactionInfo], my_user_id: Option<&str>) -> Vec<ReactionChip> {
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut mine: BTreeMap<&str, bool> = BTreeMap::new();
-    let mut order: Vec<&str> = Vec::new();
+pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<ReactionChip> {
+    let my_user_id = context.my_user_id.as_deref();
+    let mut chips: Vec<ReactionChip> = Vec::new();
     for reaction in reactions {
-        let entry = counts.entry(reaction.reaction_type.as_str()).or_insert(0);
-        if *entry == 0 {
-            order.push(reaction.reaction_type.as_str());
-        }
-        *entry += 1;
-        if my_user_id.is_some() && reaction.user_id.as_deref() == my_user_id {
-            mine.insert(reaction.reaction_type.as_str(), true);
-        }
+        let glyph = reaction_glyph(&reaction.reaction_type);
+        let position = match chips.iter().position(|chip| chip.glyph() == glyph) {
+            Some(position) => position,
+            None => {
+                chips.push(ReactionChip {
+                    reaction_type: reaction.reaction_type.clone(),
+                    label: reaction_label(&reaction.reaction_type),
+                    count: 0,
+                    mine: false,
+                    reactors: Vec::new(),
+                });
+                chips.len() - 1
+            }
+        };
+        let chip = &mut chips[position];
+        chip.count += 1;
+        chip.mine |= my_user_id.is_some() && reaction.user_id.as_deref() == my_user_id;
+        chip.reactors.push(Reactor {
+            user_id: reaction.user_id.clone(),
+            name: reactor_name(reaction, context),
+            created_at: reaction.created_at,
+        });
     }
-    order
-        .into_iter()
-        .map(|reaction_type| ReactionChip {
-            reaction_type: reaction_type.to_owned(),
-            label: reaction_label(reaction_type),
-            count: counts[reaction_type],
-            mine: mine.contains_key(reaction_type),
+    chips
+}
+
+fn reactor_name(reaction: &ReactionInfo, context: &RowContext) -> String {
+    reaction
+        .user_name
+        .clone()
+        .or_else(|| {
+            reaction
+                .user_id
+                .as_ref()
+                .and_then(|user_id| context.names.get(user_id).cloned())
         })
-        .collect()
+        .unwrap_or_else(|| UNKNOWN_REACTOR.to_owned())
 }
 
 const REPLY_EXCERPT_CHARS: usize = 90;
@@ -359,6 +385,7 @@ pub struct RowContext {
     pub offset: FixedOffset,
     pub today: NaiveDate,
     pub my_user_id: Option<String>,
+    pub names: HashMap<String, String>,
 }
 
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
@@ -389,7 +416,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         blocks,
         edited: record.edited_at.is_some() && !record.deleted,
         deleted: record.deleted,
-        reactions: reaction_chips(&reactions(record), context.my_user_id.as_deref()),
+        reactions: reaction_chips(&reactions(record), context),
         images,
         local_images: Vec::new(),
         files: files(record),
@@ -643,6 +670,7 @@ mod tests {
             offset: FixedOffset::east_opt(0).unwrap(),
             today: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
             my_user_id: None,
+            names: HashMap::new(),
         }
     }
 
@@ -731,14 +759,43 @@ mod tests {
             reaction_type: kind.into(),
             user_id: None,
             user_name: None,
+            created_at: None,
         };
         let chips = reaction_chips(
             &[reaction("heart"), reaction("like"), reaction("heart")],
-            None,
+            &context(),
         );
         assert_eq!(chips.len(), 2);
         assert_eq!(chips[0].count, 2);
         assert_eq!(chips[1].label, reaction_label("like"));
+    }
+
+    #[test]
+    fn legacy_and_emoji_reactions_share_a_chip() {
+        let reaction = |kind: &str| ReactionInfo {
+            reaction_type: kind.into(),
+            user_id: None,
+            user_name: Some("Lea".into()),
+            created_at: None,
+        };
+        let chips = reaction_chips(&[reaction("like"), reaction("\u{1F44D}")], &context());
+        assert_eq!(chips.len(), 1);
+        assert_eq!(chips[0].count, 2);
+    }
+
+    #[test]
+    fn reactor_name_falls_back_to_directory_then_unknown() {
+        let reaction = |user: &str| ReactionInfo {
+            reaction_type: "like".into(),
+            user_id: Some(user.into()),
+            user_name: None,
+            created_at: None,
+        };
+        let mut context = context();
+        context.names.insert("known".into(), "Priya Nair".into());
+        let chips = reaction_chips(&[reaction("known"), reaction("other")], &context);
+        assert_eq!(chips[0].reactors[0].name, "Priya Nair");
+        assert_eq!(chips[0].reactors[1].name, "Unknown");
     }
 
     fn record_by(id: &str, sender: &str, hour: u32, minute: u32, day: u32) -> MessageRecord {
@@ -848,10 +905,13 @@ mod tests {
             reaction_type: "like".into(),
             user_id: Some(user.into()),
             user_name: None,
+            created_at: None,
         };
-        let chips = reaction_chips(&[reaction("x"), reaction("me")], Some("me"));
+        let mut context = context();
+        context.my_user_id = Some("me".into());
+        let chips = reaction_chips(&[reaction("x"), reaction("me")], &context);
         assert!(chips[0].mine);
-        assert!(!reaction_chips(&[reaction("x")], Some("me"))[0].mine);
+        assert!(!reaction_chips(&[reaction("x")], &context)[0].mine);
     }
 
     fn strings(values: &[&str]) -> Vec<String> {
