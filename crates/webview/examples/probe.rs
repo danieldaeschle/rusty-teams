@@ -18,6 +18,7 @@ async fn main() {
     };
     println!("webviews ready after {:?}", started.elapsed());
     graph_calls(&session, "loaded").await;
+    presence_call(&session, "loaded").await;
     match session.subscribe(App::Teams).await {
         Ok((control, _events)) => match control.enable_events().await {
             Ok(()) => println!("teams events: enabled"),
@@ -28,6 +29,26 @@ async fn main() {
     println!("holding {hold} s");
     tokio::time::sleep(Duration::from_secs(hold)).await;
     graph_calls(&session, "after hold").await;
+    presence_call(&session, "after hold").await;
+}
+
+async fn presence_call(session: &Session, phase: &str) {
+    let me = match session.request(Method::Get, "https://graph.microsoft.com/v1.0/me?$select=id", &Scope::graph("User.Read"), None).await {
+        Ok(response) => response.body["id"].as_str().unwrap_or_default().to_owned(),
+        Err(error) => return println!("{phase} presence: no own id: {error}"),
+    };
+    let call = Instant::now();
+    let body = serde_json::json!([{"mri": format!("8:orgid:{me}")}]);
+    let scope = Scope::new(session::PRESENCE, "user_impersonation");
+    match session.request(Method::Post, "https://presence.teams.microsoft.com/v1/presence/getpresence/", &scope, Some(body)).await {
+        Ok(response) => println!(
+            "{phase} presence: HTTP {} after {:?}, availability present: {}",
+            response.status,
+            call.elapsed(),
+            response.body.pointer("/0/presence/availability").is_some()
+        ),
+        Err(error) => println!("{phase} presence: failed after {:?}: {}", call.elapsed(), error.to_string().chars().take(200).collect::<String>()),
+    }
 }
 
 async fn graph_calls(session: &Session, phase: &str) {

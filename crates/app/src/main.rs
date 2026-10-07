@@ -104,14 +104,20 @@ fn data_path(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
-fn transport(endpoint: Option<&str>) -> Arc<dyn session::Transport> {
+fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<dyn session::Transport> {
     #[cfg(windows)]
     if endpoint.is_none() {
+        let user_data_folder = match database.and_then(std::path::Path::parent) {
+            Some(directory) => directory.join(WEBVIEW_FOLDER),
+            None => data_path(WEBVIEW_FOLDER),
+        };
         return webview::start(webview::HostConfig {
-            user_data_folder: data_path(WEBVIEW_FOLDER),
+            user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),
         });
     }
+    #[cfg(not(windows))]
+    let _ = database;
     Arc::new(session::CdpTransport::new(
         endpoint.unwrap_or(session::DEFAULT_ENDPOINT),
     ))
@@ -139,7 +145,7 @@ fn main() {
     };
     let store = Arc::new(store);
     let receiver = (!arguments.demo)
-        .then(|| backend::start(store.clone(), transport(arguments.endpoint.as_deref())));
+        .then(|| backend::start(store.clone(), transport(arguments.endpoint.as_deref(), arguments.database.as_deref())));
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)
