@@ -1545,13 +1545,11 @@ impl ConversationView {
     }
 
     fn toolbar_visible(&self, key: &str) -> bool {
-        [
-            &self.hovered_message,
-            &self.toolbar_hovered,
-            &self.toolbar_pinned,
-        ]
-        .iter()
-        .any(|slot| slot.as_deref() == Some(key))
+        self.toolbar_pinned
+            .as_deref()
+            .or(self.toolbar_hovered.as_deref())
+            .or(self.hovered_message.as_deref())
+            == Some(key)
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {

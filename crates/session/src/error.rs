@@ -12,7 +12,7 @@ pub enum Error {
     LoginRequired(String),
     #[error("no fresh token for {scope}{detail}")]
     NoFreshToken { scope: String, detail: String },
-    #[error("HTTP {status} from {url}: {message}")]
+    #[error("HTTP {status}: {message} ({url})")]
     Api {
         status: u16,
         url: String,
@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn api_error_uses_graph_message() {
         let error = Error::api(403, "https://graph.microsoft.com/v1.0/me", json!({"error": {"message": "Forbidden"}}));
-        assert_eq!(error.to_string(), "HTTP 403 from https://graph.microsoft.com/v1.0/me: Forbidden");
+        assert_eq!(error.to_string(), "HTTP 403: Forbidden (https://graph.microsoft.com/v1.0/me)");
     }
 
     #[test]

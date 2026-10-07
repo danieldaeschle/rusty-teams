@@ -166,6 +166,7 @@ pub fn message_toolbar(menu: MessageMenu) -> AnyElement {
         .bg(theme::surface())
         .border_1()
         .border_color(theme::border_strong())
+        .occlude()
         .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             GlobalState::suppress_text_selection(cx)
