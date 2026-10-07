@@ -45,7 +45,6 @@ impl Tray {
     pub fn sync(&self, _sound_on: bool, _do_not_disturb: bool, _mention: bool) {}
 }
 
-pub fn set_border_color(_handle: NativeHandle, _rgb: u32) {}
 
 pub fn animations_enabled() -> bool {
     true

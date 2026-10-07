@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui_kit::component::{
     h_flex,
     input::{InputEvent, Textarea, TextareaState},
@@ -21,6 +23,7 @@ use crate::theme;
 const AVATAR_SIZE: f32 = 40.;
 const CLOSE_SIZE: f32 = 24.;
 const TOAST_BORDER_MENTION: f32 = 2.;
+const TOAST_RADIUS: f32 = 12.;
 
 pub struct ToastView {
     center: Entity<NotificationCenter>,
@@ -523,6 +526,8 @@ impl Render for ToastView {
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
+            .opacity(model.opacity(Instant::now()))
+            .rounded(px(TOAST_RADIUS))
             .bg(fill)
             .border(px(border_width))
             .border_color(border)
@@ -566,24 +571,37 @@ impl PillView {
 
 impl Render for PillView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let hidden = self.center.read(cx).hidden_count();
+        let (queued, opacity) = {
+            let center = self.center.read(cx);
+            (center.queued_count(), center.stack_opacity())
+        };
         let center = self.center.clone();
-        div()
-            .id("toast-pill")
+        h_flex()
+            .id("toast-hide-all")
             .size_full()
-            .flex()
+            .gap(px(6.))
             .items_center()
             .justify_center()
+            .opacity(opacity)
+            .rounded(px(TOAST_RADIUS))
             .bg(theme::surface_raised())
             .border_1()
             .border_color(theme::border_strong())
             .cursor_pointer()
-            .text_size(px(13.))
+            .hover(|bar| bar.bg(theme::border_strong()))
+            .text_size(px(12.5))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::text())
-            .child(format!("+{hidden} more"))
+            .text_color(theme::text_soft())
+            .child("Hide all")
+            .when(queued > 0, |bar| {
+                bar.child(
+                    div()
+                        .text_color(theme::text_muted())
+                        .child(format!("{queued} more waiting")),
+                )
+            })
             .on_click(move |_, _, cx| {
-                center.update(cx, |center, cx| center.open_chat_list(cx));
+                center.update(cx, |center, cx| center.hide_all(cx));
             })
     }
 }

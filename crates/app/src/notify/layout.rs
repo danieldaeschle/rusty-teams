@@ -3,8 +3,7 @@ use super::rules::{Corner, Preview};
 use super::stack::{ReplyState, ToastModel};
 
 pub const TOAST_WIDTH: f32 = 360.;
-pub const PILL_WIDTH: f32 = 132.;
-pub const PILL_HEIGHT: f32 = 32.;
+pub const HIDE_ALL_HEIGHT: f32 = 36.;
 pub const SIDE_MARGIN: f32 = 16.;
 pub const EDGE_MARGIN: f32 = 12.;
 pub const STACK_GAP: f32 = 8.;
@@ -67,7 +66,7 @@ pub fn stack_slots(
     let gap = physical(STACK_GAP);
     let mut rows: Vec<(i32, i32)> = Vec::new();
     if with_pill {
-        rows.push((physical(PILL_WIDTH), physical(PILL_HEIGHT)));
+        rows.push((width, physical(HIDE_ALL_HEIGHT)));
     }
     rows.extend(heights.iter().map(|height| (width, physical(*height))));
     let total: i32 = rows.iter().map(|(_, height)| height).sum::<i32>()
@@ -132,9 +131,9 @@ mod tests {
     fn pill_sits_above_oldest_toast() {
         let slots = stack_slots(area(1.), Corner::BottomRight, &[80., 80., 80.], true);
         let pill = slots.pill.unwrap();
-        assert_eq!(pill.height, 32);
+        assert_eq!(pill.height, 36);
         assert_eq!(pill.y + pill.height + 8, slots.toasts[0].y);
-        assert_eq!(pill.x + pill.width, slots.toasts[0].x + slots.toasts[0].width);
+        assert_eq!((pill.x, pill.width), (slots.toasts[0].x, slots.toasts[0].width));
     }
 
     #[test]
@@ -172,6 +171,9 @@ mod tests {
             reply_text: String::new(),
             hovered: false,
             time: String::new(),
+            queued: false,
+            dismissed: false,
+            fade: super::super::stack::Fade::shown(std::time::Instant::now()),
         };
         let short = toast_height(&model("Hi"), true);
         let long = toast_height(&model(&"x".repeat(200)), true);

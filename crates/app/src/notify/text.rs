@@ -76,7 +76,7 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::notify::stack::{ReplyState, ToastTimer};
+    use crate::notify::stack::{Fade, ReplyState, ToastTimer};
 
     fn model(kind: ChatKind, preview: Preview) -> ToastModel {
         ToastModel {
@@ -95,6 +95,9 @@ mod tests {
             reply_text: String::new(),
             hovered: false,
             time: "14:30".into(),
+            queued: false,
+            dismissed: false,
+            fade: Fade::shown(Instant::now()),
         }
     }
 

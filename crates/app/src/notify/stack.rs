@@ -8,6 +8,63 @@ pub const MENTION_DURATION: Duration = Duration::from_secs(10);
 pub const MAX_TOTAL: Duration = Duration::from_secs(20);
 pub const RESUME_REMAINING: Duration = Duration::from_secs(2);
 pub const SENT_DURATION: Duration = Duration::from_millis(1500);
+pub const FADE_IN: Duration = Duration::from_millis(150);
+pub const FAST_FADE: Duration = Duration::from_millis(150);
+pub const SLOW_FADE: Duration = Duration::from_secs(4);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Curve {
+    Linear,
+    EaseInCirc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fade {
+    from: f32,
+    to: f32,
+    start: Instant,
+    duration: Duration,
+    curve: Curve,
+}
+
+impl Fade {
+    pub fn new(from: f32, to: f32, start: Instant, duration: Duration, curve: Curve) -> Self {
+        Fade {
+            from,
+            to,
+            start,
+            duration,
+            curve,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn shown(now: Instant) -> Self {
+        Fade::new(1., 1., now, Duration::ZERO, Curve::Linear)
+    }
+
+    pub fn value(&self, now: Instant) -> f32 {
+        if self.duration.is_zero() {
+            return self.to;
+        }
+        let progress = (now.saturating_duration_since(self.start).as_secs_f32()
+            / self.duration.as_secs_f32())
+        .clamp(0., 1.);
+        let eased = match self.curve {
+            Curve::Linear => progress,
+            Curve::EaseInCirc => 1. - (1. - progress * progress).sqrt(),
+        };
+        self.from + (self.to - self.from) * eased
+    }
+
+    pub fn is_leaving(&self) -> bool {
+        self.to == 0.
+    }
+
+    fn is_gone(&self, now: Instant) -> bool {
+        self.is_leaving() && now.saturating_duration_since(self.start) >= self.duration
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ToastTimer {
@@ -100,11 +157,22 @@ pub struct ToastModel {
     pub reply_text: String,
     pub hovered: bool,
     pub time: String,
+    pub queued: bool,
+    pub dismissed: bool,
+    pub fade: Fade,
 }
 
 impl ToastModel {
     pub fn holds_open(&self) -> bool {
         self.reply != ReplyState::Closed
+    }
+
+    pub fn opacity(&self, now: Instant) -> f32 {
+        self.fade.value(now)
+    }
+
+    pub fn is_leaving(&self) -> bool {
+        self.fade.is_leaving()
     }
 }
 
@@ -150,6 +218,7 @@ impl ToastStack {
             };
         }
         self.next_id += 1;
+        let queued = self.toasts.len() >= MAX_VISIBLE;
         self.toasts.push(ToastModel {
             id: self.next_id,
             conversation_id: incoming.conversation_id.clone(),
@@ -166,6 +235,9 @@ impl ToastStack {
             reply_text: String::new(),
             hovered: false,
             time: String::new(),
+            queued,
+            dismissed: false,
+            fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
         });
         PushOutcome {
             id: self.next_id,
@@ -200,12 +272,76 @@ impl ToastStack {
     }
 
     pub fn visible(&self) -> &[ToastModel] {
-        let start = self.toasts.len().saturating_sub(MAX_VISIBLE);
-        &self.toasts[start..]
+        let shown = self
+            .toasts
+            .iter()
+            .position(|toast| toast.queued)
+            .unwrap_or(self.toasts.len());
+        &self.toasts[..shown]
     }
 
-    pub fn hidden_count(&self) -> usize {
-        self.toasts.len().saturating_sub(MAX_VISIBLE)
+    pub fn queued_count(&self) -> usize {
+        self.toasts.len() - self.visible().len()
+    }
+
+    pub fn promote(&mut self, now: Instant, fade_in: Duration) {
+        for toast in self.toasts.iter_mut().take(MAX_VISIBLE) {
+            if toast.queued {
+                toast.queued = false;
+                toast.timer = ToastTimer::new(now, toast.mentions_me);
+                toast.fade = Fade::new(0., 1., now, fade_in, Curve::Linear);
+            }
+        }
+    }
+
+    pub fn fade_out(&mut self, id: u64, now: Instant, duration: Duration) {
+        if let Some(toast) = self.get_mut(id)
+            && !toast.is_leaving()
+        {
+            toast.fade = Fade::new(toast.opacity(now), 0., now, duration, Curve::EaseInCirc);
+        }
+    }
+
+    pub fn dismiss(&mut self, id: u64, now: Instant, duration: Duration) {
+        let Some(index) = self.toasts.iter().position(|toast| toast.id == id) else {
+            return;
+        };
+        if self.toasts[index].queued {
+            self.toasts.remove(index);
+            return;
+        }
+        let toast = &mut self.toasts[index];
+        if !toast.dismissed {
+            toast.dismissed = true;
+            toast.hovered = false;
+            toast.fade = Fade::new(toast.opacity(now), 0., now, duration, Curve::Linear);
+        }
+    }
+
+    pub fn restore(&mut self, now: Instant, duration: Duration) {
+        for toast in self
+            .toasts
+            .iter_mut()
+            .filter(|toast| toast.is_leaving() && !toast.dismissed)
+        {
+            toast.fade = Fade::new(toast.opacity(now), 1., now, duration, Curve::Linear);
+        }
+    }
+
+    pub fn any_hovered(&self) -> bool {
+        self.toasts.iter().any(|toast| toast.hovered)
+    }
+
+    pub fn ids(&self) -> Vec<u64> {
+        self.toasts.iter().map(|toast| toast.id).collect()
+    }
+
+    pub fn gone(&self, now: Instant) -> Vec<u64> {
+        self.toasts
+            .iter()
+            .filter(|toast| toast.fade.is_gone(now))
+            .map(|toast| toast.id)
+            .collect()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -215,7 +351,12 @@ impl ToastStack {
     pub fn expired(&self, now: Instant) -> Vec<u64> {
         self.toasts
             .iter()
-            .filter(|toast| !toast.holds_open() && toast.timer.expired(now))
+            .filter(|toast| {
+                !toast.queued
+                    && !toast.is_leaving()
+                    && !toast.holds_open()
+                    && toast.timer.expired(now)
+            })
             .map(|toast| toast.id)
             .collect()
     }
@@ -284,20 +425,90 @@ mod tests {
         assert!(!stack.push(&incoming("b", false), now).plays_sound(false));
     }
 
+    fn visible_chats(stack: &ToastStack) -> Vec<&str> {
+        stack
+            .visible()
+            .iter()
+            .map(|toast| toast.conversation_id.as_str())
+            .collect()
+    }
+
     #[test]
-    fn shows_three_newest_and_counts_the_rest() {
+    fn shows_first_three_and_queues_the_rest() {
         let mut stack = ToastStack::default();
         let now = Instant::now();
         for chat in ["a", "b", "c", "d", "e"] {
             stack.push(&incoming(chat, false), now);
         }
-        let visible: Vec<&str> = stack
-            .visible()
-            .iter()
-            .map(|toast| toast.conversation_id.as_str())
+        assert_eq!(visible_chats(&stack), ["a", "b", "c"]);
+        assert_eq!(stack.queued_count(), 2);
+    }
+
+    #[test]
+    fn queued_toast_starts_its_timer_when_promoted() {
+        let mut stack = ToastStack::default();
+        let start = Instant::now();
+        let ids: Vec<u64> = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|chat| stack.push(&incoming(chat, false), start).id)
             .collect();
-        assert_eq!(visible, ["c", "d", "e"]);
-        assert_eq!(stack.hidden_count(), 2);
+        let later = start + Duration::from_secs(30);
+        assert!(!stack.expired(later).contains(&ids[3]));
+        stack.remove(ids[0]);
+        stack.promote(later, FADE_IN);
+        assert_eq!(visible_chats(&stack), ["b", "c", "d"]);
+        assert!(!stack.expired(later + Duration::from_secs(5)).contains(&ids[3]));
+        assert!(stack.expired(later + Duration::from_secs(6)).contains(&ids[3]));
+    }
+
+    #[test]
+    fn slow_fade_stays_visible_then_drops_and_is_gone() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let id = stack.push(&incoming("a", false), now).id;
+        let hide_at = now + Duration::from_secs(6);
+        stack.fade_out(id, hide_at, SLOW_FADE);
+        let toast = stack.get(id).unwrap();
+        assert!(toast.opacity(hide_at + Duration::from_secs(2)) > 0.8);
+        assert!(stack.gone(hide_at + Duration::from_secs(3)).is_empty());
+        assert_eq!(stack.gone(hide_at + SLOW_FADE), vec![id]);
+    }
+
+    #[test]
+    fn restore_brings_a_fading_toast_back() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let id = stack.push(&incoming("a", false), now).id;
+        stack.fade_out(id, now, SLOW_FADE);
+        stack.restore(now + Duration::from_secs(3), FAST_FADE);
+        let toast = stack.get(id).unwrap();
+        assert!(!toast.is_leaving());
+        assert_eq!(toast.opacity(now + Duration::from_secs(4)), 1.);
+        assert!(stack.gone(now + Duration::from_secs(10)).is_empty());
+    }
+
+    #[test]
+    fn hiding_a_queued_toast_drops_it_at_once() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let ids: Vec<u64> = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|chat| stack.push(&incoming(chat, false), now).id)
+            .collect();
+        stack.dismiss(ids[3], now, FAST_FADE);
+        assert!(stack.get(ids[3]).is_none());
+        assert_eq!(stack.queued_count(), 0);
+    }
+
+    #[test]
+    fn dismiss_cuts_a_slow_fade_short_and_hover_does_not_undo_it() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let id = stack.push(&incoming("a", false), now).id;
+        stack.fade_out(id, now, SLOW_FADE);
+        stack.dismiss(id, now + Duration::from_secs(1), FAST_FADE);
+        stack.restore(now + Duration::from_millis(1050), FAST_FADE);
+        assert_eq!(stack.gone(now + Duration::from_millis(1150)), vec![id]);
     }
 
     #[test]

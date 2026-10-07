@@ -7,7 +7,8 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, DeleteObject, GetMonitorInfoW, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
@@ -75,7 +76,14 @@ pub fn prepare_toast_window(handle: NativeHandle) {
             GWL_EXSTYLE,
             style | WS_EX_NOACTIVATE.0 as isize,
         );
-        let preference = DWMWCP_ROUND;
+        let no_border = DWMWA_COLOR_NONE;
+        let _ = DwmSetWindowAttribute(
+            hwnd(handle),
+            DWMWA_BORDER_COLOR,
+            &no_border as *const _ as *const c_void,
+            size_of::<u32>() as u32,
+        );
+        let preference = DWMWCP_DONOTROUND;
         let _ = DwmSetWindowAttribute(
             hwnd(handle),
             DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -350,18 +358,6 @@ fn tray_icons() -> Option<(Icon, Icon)> {
         Icon::from_rgba(plain, TRAY_ICON_SIZE, TRAY_ICON_SIZE).ok()?,
         Icon::from_rgba(dotted.into_raw(), TRAY_ICON_SIZE, TRAY_ICON_SIZE).ok()?,
     ))
-}
-
-pub fn set_border_color(handle: NativeHandle, rgb: u32) {
-    let colorref: u32 = ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff);
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd(handle),
-            DWMWA_BORDER_COLOR,
-            &colorref as *const _ as *const c_void,
-            size_of::<u32>() as u32,
-        );
-    }
 }
 
 pub fn animations_enabled() -> bool {

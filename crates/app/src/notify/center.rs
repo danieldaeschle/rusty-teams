@@ -15,7 +15,9 @@ use super::rules::{
 };
 use super::settings;
 use super::settings_view::SettingsView;
-use super::stack::{ReplyState, SENT_DURATION, ToastModel, ToastStack};
+use super::stack::{
+    FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
+};
 use super::toast::{PillView, ToastView};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{self, Directory, PresenceKind};
@@ -25,14 +27,11 @@ const TICK: Duration = Duration::from_millis(33);
 const SLIDE_DURATION: Duration = Duration::from_millis(180);
 const SLIDE_DISTANCE: f32 = 48.;
 const DEMO_SPEC_DELAY: Duration = Duration::from_secs(3);
-const FALLBACK_BORDER: u32 = 0x3f3f42;
-const MENTION_BORDER: u32 = 0xce6a3b;
 
 struct OpenWindow {
     handle: AnyWindowHandle,
     native: Option<NativeHandle>,
     opened: Instant,
-    mention: bool,
 }
 
 impl OpenWindow {
@@ -57,6 +56,7 @@ pub struct NotificationCenter {
     opening: HashSet<u64>,
     pill: Option<OpenWindow>,
     pill_opening: bool,
+    hover_hold: bool,
     settings_window: Option<AnyWindowHandle>,
     settings_opening: bool,
     unread_mentions: HashSet<String>,
@@ -88,6 +88,7 @@ impl NotificationCenter {
             opening: HashSet::new(),
             pill: None,
             pill_opening: false,
+            hover_hold: false,
             settings_window: None,
             settings_opening: false,
             unread_mentions: HashSet::new(),
@@ -125,8 +126,21 @@ impl NotificationCenter {
         self.stack.get(id)
     }
 
-    pub fn hidden_count(&self) -> usize {
-        self.stack.hidden_count()
+    pub fn queued_count(&self) -> usize {
+        self.stack.queued_count()
+    }
+
+    pub fn stack_opacity(&self) -> f32 {
+        let now = Instant::now();
+        self.stack
+            .visible()
+            .iter()
+            .map(|toast| toast.opacity(now))
+            .fold(0., f32::max)
+    }
+
+    fn animated(&self, duration: Duration) -> Duration {
+        if self.animations { duration } else { Duration::ZERO }
     }
 
     pub fn directory<'a>(&self, cx: &'a App) -> &'a Directory {
@@ -296,12 +310,12 @@ impl NotificationCenter {
             .iter()
             .map(|toast| layout::toast_height(toast, self.settings.preview))
             .collect();
-        let hidden = self.stack.hidden_count();
-        let slots = layout::stack_slots(area, self.settings.corner, &heights, hidden > 0);
+        let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
+        let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
         for (id, slot) in visible.iter().zip(slots.toasts.iter()) {
             self.place_toast(*id, *slot, area, cx);
         }
-        self.sync_pill(slots.pill, area, hidden, cx);
+        self.sync_pill(slots.pill, area, cx);
     }
 
     fn slide_offset(&self, opened: Instant, area: WorkArea) -> i32 {
@@ -319,7 +333,6 @@ impl NotificationCenter {
     }
 
     fn place_toast(&mut self, id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
-        let mention = self.stack.get(id).is_some_and(|toast| toast.mentions_me);
         if !self.windows.contains_key(&id) {
             self.open_toast_window(id, slot, area, cx);
             return;
@@ -329,14 +342,10 @@ impl NotificationCenter {
             .get(&id)
             .map(|window| self.slide_offset(window.opened, area))
             .unwrap_or(0);
-        if let Some(window) = self.windows.get_mut(&id)
+        if let Some(window) = self.windows.get(&id)
             && let Some(native) = window.native
         {
             window.place(native, slot, slot.x + offset, cx);
-            if window.mention != mention {
-                window.mention = mention;
-                platform::set_border_color(native, border_color(mention));
-            }
         }
     }
 
@@ -344,20 +353,15 @@ impl NotificationCenter {
         if !self.opening.insert(id) {
             return;
         }
-        let mention = self.stack.get(id).is_some_and(|toast| toast.mentions_me);
         open_popup(
             popup_options(slot, area),
             cx,
             move |center, window, cx| cx.new(|cx| ToastView::new(center, id, window, cx)),
             move |this, window| {
                 this.opening.remove(&id);
-                let Some(window) = window else {
-                    return;
-                };
-                if let Some(native) = window.native {
-                    platform::set_border_color(native, border_color(mention));
+                if let Some(window) = window {
+                    this.windows.insert(id, window);
                 }
-                this.windows.insert(id, OpenWindow { mention, ..window });
             },
         );
     }
@@ -366,10 +370,9 @@ impl NotificationCenter {
         &mut self,
         slot: Option<Slot>,
         area: WorkArea,
-        hidden: usize,
         cx: &mut Context<Self>,
     ) {
-        let Some(slot) = slot.filter(|_| hidden > 0) else {
+        let Some(slot) = slot else {
             if let Some(pill) = self.pill.take() {
                 pill.handle
                     .update(cx, |_, window, _| window.remove_window())
@@ -385,9 +388,6 @@ impl NotificationCenter {
                 |center, _, cx| cx.new(|cx| PillView::new(center, cx)),
                 |this, window| {
                     this.pill_opening = false;
-                    if let Some(native) = window.as_ref().and_then(|window| window.native) {
-                        platform::set_border_color(native, border_color(false));
-                    }
                     this.pill = window;
                 },
             );
@@ -412,15 +412,55 @@ impl NotificationCenter {
     }
 
     fn drop_toast(&mut self, id: u64, cx: &mut Context<Self>) {
-        self.stack.remove(id);
+        let fast = self.animated(FAST_FADE);
+        self.stack.dismiss(id, Instant::now(), fast);
         cx.notify();
+    }
+
+    pub fn hide_all(&mut self, cx: &mut Context<Self>) {
+        for id in self.stack.ids() {
+            self.drop_toast(id, cx);
+        }
+    }
+
+    fn sync_hover_hold(&mut self, now: Instant) {
+        let any_hovered = self.stack.any_hovered();
+        if !any_hovered && !self.hover_hold {
+            return;
+        }
+        if any_hovered {
+            let fast = self.animated(FAST_FADE);
+            self.stack.restore(now, fast);
+        }
+        for id in self.stack.ids() {
+            if let Some(toast) = self.stack.get_mut(id)
+                && !toast.queued
+            {
+                if any_hovered {
+                    toast.timer.pause(now);
+                } else if !toast.holds_open() {
+                    toast.timer.resume(now);
+                }
+            }
+        }
+        self.hover_hold = any_hovered;
+    }
+
+    fn is_dismissed(&self, id: u64) -> bool {
+        self.stack.get(id).is_none_or(|toast| toast.dismissed)
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
+        let (fade_in, slow) = (self.animated(FADE_IN), self.animated(SLOW_FADE));
         for id in self.stack.expired(now) {
+            self.stack.fade_out(id, now, slow);
+        }
+        for id in self.stack.gone(now) {
             self.stack.remove(id);
         }
+        self.stack.promote(now, fade_in);
+        self.sync_hover_hold(now);
         if !self.stack.is_empty() || !self.windows.is_empty() || self.pill.is_some() {
             self.sync_windows(cx);
             cx.notify();
@@ -499,11 +539,7 @@ impl NotificationCenter {
             return;
         }
         toast.hovered = hovered;
-        if hovered {
-            toast.timer.pause(now);
-        } else if !toast.holds_open() {
-            toast.timer.resume(now);
-        }
+        self.sync_hover_hold(now);
         cx.notify();
     }
 
@@ -599,6 +635,9 @@ impl NotificationCenter {
     }
 
     pub fn mark_read(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.is_dismissed(id) {
+            return;
+        }
         let Some(conversation_id) = self
             .stack
             .get(id)
@@ -611,6 +650,9 @@ impl NotificationCenter {
     }
 
     pub fn activate(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.is_dismissed(id) {
+            return;
+        }
         let Some((conversation_id, message_id)) = self
             .stack
             .get(id)
@@ -626,10 +668,6 @@ impl NotificationCenter {
                 state.jump_to_message(selection, message_id, cx)
             });
         }
-    }
-
-    pub fn open_chat_list(&mut self, cx: &mut Context<Self>) {
-        self.raise_main_window(cx);
     }
 
     pub fn open_settings(&mut self, cx: &mut Context<Self>) {
@@ -705,14 +743,6 @@ impl NotificationCenter {
     }
 }
 
-fn border_color(mention: bool) -> u32 {
-    if mention {
-        MENTION_BORDER
-    } else {
-        FALLBACK_BORDER
-    }
-}
-
 /// Opens a window outside the current update: `open_window` draws right away, and every
 /// notification view reads the center while rendering.
 fn open_popup<V: Render>(
@@ -741,7 +771,6 @@ fn open_popup<V: Render>(
             handle,
             native,
             opened: Instant::now(),
-            mention: false,
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
@@ -765,7 +794,7 @@ fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Opaque,
+        window_background: WindowBackgroundAppearance::Transparent,
         ..Default::default()
     }
 }
@@ -840,6 +869,22 @@ fn demo_incoming() -> Vec<Incoming> {
             "Mara Lindqvist",
             "@Jonas can you approve the merge? The pipeline is waiting.",
             true,
+        ),
+        item(
+            "demo-toast-lea",
+            ChatKind::Direct,
+            "Lea Schneider",
+            "Lea Schneider",
+            "Lunch at 12?",
+            false,
+        ),
+        item(
+            "demo-toast-jonas",
+            ChatKind::Direct,
+            "Jonas Ortega",
+            "Jonas Ortega",
+            "Deploy window moved to Thursday 6 pm.",
+            false,
         ),
     ]
 }
