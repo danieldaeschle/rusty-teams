@@ -12,6 +12,7 @@ It does chats and channels. No calls, no meetings, no apps.
 - Chats and channels, with the Teams pin order, chat folders and hidden teams
 - Live updates over the Teams realtime socket, no polling
 - Send, edit, delete, react, quote-reply, @mentions
+- Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
 - Inline images, file cards, Adaptive Cards as text
 - Read receipts, presence, unread jump
 - Local full-text search and a `Ctrl+K` switcher, served from the cache

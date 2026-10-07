@@ -1,7 +1,7 @@
 # Starts an exe, waits for its main window, saves it as PNG with PrintWindow flag 2 (CopyFromScreen is black for GPUI), stops it.
 # Usage: powershell -ExecutionPolicy Bypass -File window-shot.ps1 -Exe C:\x\teams.exe -Out C:\x\shot.png [-Arguments "--demo"] [-WaitSeconds 6] [-Width 720 -Height 640] [-Keys "^k","plat"] [-PostKeys DOWN,ENTER]
 # -Keys are SendKeys strings sent to the focused window before the shot.
-# -PostKeys (UP, DOWN, ENTER, TAB, ESC or one character) go straight to the window as messages, no foreground needed.
+# -PostKeys (UP, DOWN, ENTER, TAB, ESC, BACK or characters) go straight to the window as messages, no foreground needed.
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [Parameter(Mandatory = $true)][string]$Out,
@@ -43,7 +43,7 @@ if ($Keys.Count -gt 0) {
     foreach ($key in $Keys) { [System.Windows.Forms.SendKeys]::SendWait($key); Start-Sleep -Milliseconds 400 }
     Start-Sleep -Seconds 1
 }
-$virtualKeys = @{ UP = 0x26; DOWN = 0x28; ENTER = 0x0D; TAB = 0x09; ESC = 0x1B }
+$virtualKeys = @{ UP = 0x26; DOWN = 0x28; ENTER = 0x0D; TAB = 0x09; ESC = 0x1B; BACK = 0x08 }
 foreach ($key in ($PostKeys | ForEach-Object { $_ -split ',' })) {
     if ($virtualKeys.ContainsKey($key)) {
         [void][Shot]::PostMessage($process.MainWindowHandle, 0x100, [IntPtr]$virtualKeys[$key], [IntPtr]0x01000001)

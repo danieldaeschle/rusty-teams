@@ -2,6 +2,7 @@ pub mod attachments;
 pub mod avatar;
 pub mod composer;
 pub mod conversation;
+pub mod emoji_popup;
 pub mod message_row;
 pub mod shell;
 pub mod sidebar;

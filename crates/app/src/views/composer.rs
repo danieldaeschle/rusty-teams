@@ -6,8 +6,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     h_flex,
     input::{
-        Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent, MoveDown, MoveUp,
-        Textarea, TextareaState,
+        Backspace, Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent, MoveDown,
+        MoveUp, Textarea, TextareaState,
     },
     v_flex,
 };
@@ -16,8 +16,10 @@ use gpui_kit::*;
 use teams_core::{MentionCandidate, MentionInput};
 
 use super::avatar::{person_avatar, square_avatar};
+use super::emoji_popup::{self, EmojiPopup};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
+use crate::emoji;
 use crate::runtime;
 use crate::theme;
 
@@ -55,6 +57,13 @@ struct MentionPopup {
     highlighted: usize,
 }
 
+struct Conversion {
+    value: String,
+    cursor: usize,
+    range: Range<usize>,
+    original: String,
+}
+
 pub struct Composer {
     app: Entity<AppState>,
     input: Entity<TextareaState>,
@@ -64,6 +73,12 @@ pub struct Composer {
     mention_counter: usize,
     popup: Option<MentionPopup>,
     lookup: Option<Task<()>>,
+    emoji_popup: Option<EmojiPopup>,
+    emoji_dismissed_at: Option<usize>,
+    recent_emoji: emoji::Recent,
+    conversion: Option<Conversion>,
+    undone_value: Option<String>,
+    previous_value: String,
     _subscription: Subscription,
 }
 
@@ -139,6 +154,7 @@ impl Composer {
                 .placeholder("Nachricht")
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
+        let recent_emoji = emoji::Recent::load(&app.read(cx).store);
         Composer {
             app,
             input,
@@ -148,6 +164,12 @@ impl Composer {
             mention_counter: 0,
             popup: None,
             lookup: None,
+            emoji_popup: None,
+            emoji_dismissed_at: None,
+            recent_emoji,
+            conversion: None,
+            undone_value: None,
+            previous_value: String::new(),
             _subscription: subscription,
         }
     }
@@ -161,6 +183,8 @@ impl Composer {
     ) {
         cx.notify();
         if matches!(event, InputEvent::Change) {
+            self.convert_typed(window, cx);
+            self.update_emoji(cx);
             self.update_mention(cx);
         }
         let value = input.read(cx).value();
@@ -174,7 +198,7 @@ impl Composer {
         let tokens: Vec<Range<usize>> = state.tokens().iter().map(|span| span.range()).collect();
         let found = active_mention(&state.value(), state.cursor(), &tokens);
         let Some((range, query)) = found else {
-            self.close_popup();
+            self.close_mention_popup();
             return;
         };
         let unchanged = self
@@ -195,8 +219,116 @@ impl Composer {
     }
 
     fn close_popup(&mut self) {
+        self.close_mention_popup();
+        self.emoji_popup = None;
+    }
+
+    fn close_mention_popup(&mut self) {
         self.popup = None;
         self.lookup = None;
+    }
+
+    fn convert_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.input.read(cx);
+        let (value, cursor) = (state.value().to_string(), state.cursor());
+        let previous = std::mem::replace(&mut self.previous_value, value.clone());
+        let found = match emoji::typed_char(&previous, &value, cursor) {
+            Some(':') => emoji::closing_code(&value, cursor)
+                .and_then(|(range, code)| Some((range, emoji::lookup(code)?))),
+            Some(' ') => emoji::smiley_before_space(&value, cursor),
+            _ => None,
+        };
+        let Some((range, glyph)) = found else {
+            return;
+        };
+        let original = value[range.clone()].to_owned();
+        let cursor = self.replace_text(range.clone(), glyph, cursor, window, cx);
+        self.previous_value = self.input.read(cx).value().to_string();
+        self.conversion = Some(Conversion {
+            value: self.previous_value.clone(),
+            cursor,
+            range: range.start..range.start + glyph.len(),
+            original,
+        });
+        self.remember_emoji(glyph, cx);
+    }
+
+    /// Returns the cursor, kept at the same spot relative to the text after `range`.
+    fn replace_text(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        cursor: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        let cursor = cursor + text.len() - range.len();
+        self.input.update(cx, |state, cx| {
+            state.set_selected_range(range, cx);
+            state.replace(text.to_owned(), window, cx);
+            state.set_selected_range(cursor..cursor, cx);
+        });
+        cursor
+    }
+
+    fn undo_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let state = self.input.read(cx);
+        let unchanged = self.conversion.as_ref().is_some_and(|conversion| {
+            conversion.value == state.value().as_ref() && conversion.cursor == state.cursor()
+        });
+        let Some(conversion) = self.conversion.take().filter(|_| unchanged) else {
+            return false;
+        };
+        self.replace_text(
+            conversion.range,
+            &conversion.original,
+            conversion.cursor,
+            window,
+            cx,
+        );
+        self.undone_value = Some(self.input.read(cx).value().to_string());
+        self.update_emoji(cx);
+        true
+    }
+
+    fn remember_emoji(&mut self, glyph: &str, cx: &App) {
+        self.recent_emoji.push(glyph);
+        self.recent_emoji.save(&self.app.read(cx).store);
+    }
+
+    fn update_emoji(&mut self, cx: &mut Context<Self>) {
+        let state = self.input.read(cx);
+        let found = emoji::active_query(&state.value(), state.cursor());
+        if found.as_ref().map(|(range, _)| range.start) != self.emoji_dismissed_at {
+            self.emoji_dismissed_at = None;
+        }
+        let found = found.filter(|_| self.emoji_dismissed_at.is_none());
+        let Some((range, query)) = found else {
+            self.emoji_popup = None;
+            return;
+        };
+        let unchanged = self
+            .emoji_popup
+            .as_ref()
+            .is_some_and(|popup| popup.query == query && popup.range == range);
+        if unchanged {
+            return;
+        }
+        let matches = emoji::search(&query, self.recent_emoji.glyphs(), emoji_popup::LIMIT);
+        self.emoji_popup = (!matches.is_empty()).then(|| EmojiPopup::new(range, query, matches));
+    }
+
+    fn accept_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(popup) = self.emoji_popup.take() else {
+            return;
+        };
+        let Some(glyph) = popup.selected().map(|found| found.glyph) else {
+            return;
+        };
+        let cursor = popup.range.end;
+        self.replace_text(popup.range, glyph, cursor, window, cx);
+        self.remember_emoji(glyph, cx);
+        cx.notify();
     }
 
     fn request_candidates(&mut self, query: String, cx: &mut Context<Self>) {
@@ -245,16 +377,29 @@ impl Composer {
     }
 
     fn popup_is_open(&self) -> bool {
-        self.popup
-            .as_ref()
-            .is_some_and(|popup| !popup.candidates.is_empty())
+        self.emoji_popup.is_some()
+            || self
+                .popup
+                .as_ref()
+                .is_some_and(|popup| !popup.candidates.is_empty())
     }
 
     fn move_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if let Some(popup) = self.popup.as_mut() {
+        if let Some(popup) = self.emoji_popup.as_mut() {
+            popup.move_highlight(delta);
+            cx.notify();
+        } else if let Some(popup) = self.popup.as_mut() {
             let last = popup.candidates.len().saturating_sub(1) as isize;
             popup.highlighted = (popup.highlighted as isize + delta).clamp(0, last) as usize;
             cx.notify();
+        }
+    }
+
+    fn accept_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.emoji_popup.is_some() {
+            self.accept_emoji(window, cx);
+        } else {
+            self.accept_mention(window, cx);
         }
     }
 
@@ -315,9 +460,14 @@ impl Composer {
 
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
         let state = self.input.read(cx);
-        let text = state.value().trim().to_owned();
+        let mut text = state.value().trim().to_owned();
         if text.is_empty() {
             return None;
+        }
+        if self.undone_value.as_deref() != Some(state.value().as_ref())
+            && let Some((range, glyph)) = emoji::trailing_smiley(&text)
+        {
+            text.replace_range(range, glyph);
         }
         let mentions = state
             .tokens()
@@ -382,6 +532,7 @@ impl Composer {
             state.set_selected_range(end..end, cx);
         });
         self.mention_inputs.clear();
+        self.update_emoji(cx);
         self.update_mention(cx);
         cx.notify();
     }
@@ -473,6 +624,38 @@ impl Composer {
                 .children(rows)
                 .into_any_element(),
         )
+    }
+
+    fn render_emoji_popup(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let popup = self.emoji_popup.as_ref()?;
+        let colon = popup.range.start..popup.range.start + 1;
+        let anchor = self
+            .input
+            .read(cx)
+            .range_to_bounds(&colon)
+            .map(|bounds| bounds.origin);
+        if anchor.is_none() {
+            window.request_animation_frame();
+        }
+        let composer = cx.entity().downgrade();
+        Some(emoji_popup::render(
+            popup,
+            anchor,
+            move |index, window, cx| {
+                composer
+                    .update(cx, |this, cx| {
+                        if let Some(popup) = this.emoji_popup.as_mut() {
+                            popup.highlighted = index;
+                        }
+                        this.accept_emoji(window, cx);
+                    })
+                    .ok();
+            },
+        ))
     }
 
     fn render_reply_strip(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -585,18 +768,26 @@ impl Render for Composer {
             }))
             .capture_action(cx.listener(|this, _: &Enter, window, cx| {
                 if this.popup_is_open() {
-                    this.accept_mention(window, cx);
+                    this.accept_popup(window, cx);
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
                 if this.popup_is_open() {
-                    this.accept_mention(window, cx);
+                    this.accept_popup(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Backspace, window, cx| {
+                if this.undo_conversion(window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, _, cx| {
-                if this.popup.is_some() {
+                if let Some(popup) = &this.emoji_popup {
+                    this.emoji_dismissed_at = Some(popup.range.start);
+                }
+                if this.popup.is_some() || this.emoji_popup.is_some() {
                     this.close_popup();
                     cx.notify();
                     cx.stop_propagation();
@@ -608,6 +799,7 @@ impl Render for Composer {
                     .relative()
                     .w_full()
                     .children(self.render_popup(cx))
+                    .children(self.render_emoji_popup(window, cx))
                     .child(
                         h_flex()
                             .w_full()

@@ -8,6 +8,7 @@ mod avatar_image;
 mod backend;
 mod data;
 mod demo;
+mod emoji;
 mod format;
 mod assets;
 mod frame_log;
