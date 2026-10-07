@@ -92,6 +92,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 
 ## Docs
 
+- [ROADMAP.md](ROADMAP.md) - open and finished features by priority
 - [docs/research](docs/research) - how Teams does realtime, pins, read receipts and edits
 - [docs/design](docs/design) - mockups
 - [docs/build-windows.md](docs/build-windows.md) - cross-compiling without admin rights
