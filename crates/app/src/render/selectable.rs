@@ -188,6 +188,12 @@ impl Element for SelectableRichText {
             CursorStyle::IBeam
         };
         window.set_cursor_style(cursor, hitbox);
+        // gpui-base updates the selection on drag without notifying a view, so nothing redraws.
+        window.on_mouse_event(|event: &MouseMoveEvent, phase, window, _| {
+            if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
+                window.refresh();
+            }
+        });
         if self.links.is_empty() {
             return;
         }
