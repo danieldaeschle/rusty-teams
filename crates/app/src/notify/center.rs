@@ -294,7 +294,7 @@ impl NotificationCenter {
             .stack
             .visible()
             .iter()
-            .map(|toast| layout::toast_height(toast, toast.hovered, self.settings.preview))
+            .map(|toast| layout::toast_height(toast, self.settings.preview))
             .collect();
         let hidden = self.stack.hidden_count();
         let slots = layout::stack_slots(area, self.settings.corner, &heights, hidden > 0);

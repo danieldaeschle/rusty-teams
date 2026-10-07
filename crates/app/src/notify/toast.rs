@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use gpui_kit::component::{
     h_flex,
     input::{InputEvent, Textarea, TextareaState},
@@ -9,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::center::NotificationCenter;
-use super::layout::ACTION_ROW;
+use super::layout::{ACTION_BUTTON, SEND_BUTTON};
 use super::platform;
 use super::rules::ChatKind;
 use super::stack::{ReplyState, ToastModel};
@@ -22,7 +20,6 @@ use crate::theme;
 
 const AVATAR_SIZE: f32 = 40.;
 const CLOSE_SIZE: f32 = 24.;
-const PROGRESS_HEIGHT: f32 = 3.;
 const TOAST_BORDER_MENTION: f32 = 2.;
 
 pub struct ToastView {
@@ -43,7 +40,7 @@ impl ToastView {
     ) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(1, 4)
+                .auto_grow(1, 1)
                 .submit_on_enter(true)
                 .placeholder("Reply ...")
         });
@@ -116,28 +113,35 @@ impl ToastView {
     }
 }
 
-fn pill_button(label: &'static str, symbol_name: &'static str, accent: bool) -> Stateful<Div> {
+fn flat_button(
+    label: &'static str,
+    symbol_name: &'static str,
+    accent: bool,
+    mention: bool,
+) -> Stateful<Div> {
     let color = if accent {
         theme::accent_text()
     } else {
         theme::text_soft()
     };
+    let hover_fill = if mention {
+        theme::bubble_own()
+    } else {
+        theme::border_strong()
+    };
     h_flex()
         .id(label)
-        .h(px(ACTION_ROW))
-        .px(px(14.))
+        .h(px(ACTION_BUTTON))
+        .px(px(10.))
         .gap(px(6.))
         .items_center()
-        .justify_center()
-        .rounded(px(8.))
-        .border_1()
-        .border_color(theme::border_strong())
+        .rounded(px(6.))
         .cursor_pointer()
-        .text_size(px(13.))
+        .text_size(px(12.5))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(color)
-        .hover(|button| button.bg(theme::row_hover()))
-        .child(symbol(symbol_name, 18., color))
+        .hover(move |button| button.bg(hover_fill))
+        .child(symbol(symbol_name, 15., color))
         .child(label)
 }
 
@@ -278,6 +282,7 @@ impl ToastView {
             .child(
                 h_flex()
                     .w_full()
+                    .h(px(20.))
                     .gap(px(8.))
                     .items_center()
                     .justify_between()
@@ -307,19 +312,22 @@ impl ToastView {
             .child(preview)
     }
 
-    fn action_row(&self, cx: &mut Context<Self>) -> Div {
+    fn action_row(&self, mention: bool, cx: &mut Context<Self>) -> Div {
         let id = self.id;
         let center = self.center.clone();
         h_flex()
             .w_full()
             .mt(px(4.))
-            .justify_between()
-            .child(pill_button("Mark as read", "done", false).on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                center.update(cx, |center, cx| center.mark_read(id, cx));
-            }))
+            .gap(px(4.))
+            .justify_end()
             .child(
-                pill_button("Reply", "reply", true).on_click(cx.listener(
+                flat_button("Mark as read", "done", false, mention).on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    center.update(cx, |center, cx| center.mark_read(id, cx));
+                }),
+            )
+            .child(
+                flat_button("Reply", "reply", true, mention).on_click(cx.listener(
                     |this, _, window, cx| {
                         cx.stop_propagation();
                         this.open_reply(window, cx);
@@ -333,19 +341,18 @@ impl ToastView {
         let empty = self.input.read(cx).value().trim().is_empty();
         let send = div()
             .id("toast-send")
-            .size(px(ACTION_ROW))
+            .size(px(SEND_BUTTON))
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .bg(theme::accent())
-            .child(symbol("arrow_upward", 20., theme::on_accent()))
+            .child(symbol("keyboard_return", 20., white()))
             .when(empty, |button| button.opacity(0.4))
             .when(!empty, |button| {
                 button
                     .cursor_pointer()
-                    .hover(|button| button.bg(theme::accent_text()))
+                    .hover(|button| button.bg(white().opacity(0.1)))
                     .on_click(cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
                         this.submit(window, cx);
@@ -364,30 +371,25 @@ impl ToastView {
             .child(
                 h_flex()
                     .w_full()
-                    .h(px(ACTION_ROW))
+                    .items_end()
                     .gap(px(6.))
-                    .items_center()
+                    .py(px(6.))
+                    .pl(px(12.))
+                    .pr(px(6.))
+                    .rounded(px(10.))
+                    .bg(theme::surface())
+                    .border_1()
+                    .border_color(if focused {
+                        theme::accent()
+                    } else {
+                        theme::border_strong()
+                    })
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(ACTION_ROW))
-                            .px(px(10.))
-                            .flex()
-                            .items_center()
-                            .rounded(px(8.))
-                            .bg(theme::surface())
-                            .border_1()
-                            .border_color(if focused {
-                                theme::accent()
-                            } else {
-                                theme::border_strong()
-                            })
-                            .child(
-                                Textarea::new(&self.input)
-                                    .appearance(false)
-                                    .bordered(false),
-                            ),
+                        div().flex_1().min_w_0().child(
+                            Textarea::new(&self.input)
+                                .appearance(false)
+                                .bordered(false),
+                        ),
                     )
                     .child(send),
             )
@@ -395,9 +397,10 @@ impl ToastView {
                 h_flex()
                     .h(px(16.))
                     .gap(px(12.))
+                    .justify_end()
                     .text_size(px(11.))
                     .text_color(theme::text_muted())
-                    .child(hint("Enter", "senden"))
+                    .child(hint("Enter", "send"))
                     .child(hint("Shift+Enter", "new line"))
                     .child(hint("Esc", "close")),
             )
@@ -439,7 +442,7 @@ impl ToastView {
                 )
             })
             .when(!sent, |row| {
-                row.child(pill_button("Retry", "reply", true).on_click(cx.listener(
+                row.child(flat_button("Retry", "reply", true, false).on_click(cx.listener(
                     |this, _, _, cx| {
                         cx.stop_propagation();
                         this.retry(cx);
@@ -487,12 +490,6 @@ impl Render for ToastView {
             theme::border_strong()
         };
         let border_width = if mention { TOAST_BORDER_MENTION } else { 1. };
-        let fraction = model.timer.fraction_left(Instant::now());
-        let bar_color = if model.timer.is_paused() {
-            theme::text_faint()
-        } else {
-            theme::accent()
-        };
         let hovered = model.hovered;
         let content = match model.reply {
             ReplyState::Sent | ReplyState::Failed => self.confirmation(&model, cx),
@@ -517,7 +514,7 @@ impl Render for ToastView {
                         .child(self.avatar(&model, fill, cx))
                         .child(self.body(&model, &text, hovered)),
                 )
-                .when(hovered, |column| column.child(self.action_row(cx))),
+                .child(self.action_row(mention, cx)),
         };
         let center = self.center.clone();
         let hover_center = self.center.clone();
@@ -548,15 +545,6 @@ impl Render for ToastView {
                 }
             }))
             .child(div().size_full().p(px(12.)).child(content))
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .bottom_0()
-                    .h(px(PROGRESS_HEIGHT))
-                    .w(relative(fraction))
-                    .bg(bar_color),
-            )
             .into_any_element()
     }
 }

@@ -49,19 +49,10 @@ impl ToastTimer {
         }
     }
 
-    pub fn is_paused(&self) -> bool {
-        self.paused.is_some()
-    }
-
     fn elapsed(&self, now: Instant) -> Duration {
         self.paused
             .unwrap_or(now)
             .saturating_duration_since(self.started)
-    }
-
-    pub fn fraction_left(&self, now: Instant) -> f32 {
-        let left = self.duration.saturating_sub(self.elapsed(now));
-        (left.as_secs_f32() / self.duration.as_secs_f32()).clamp(0., 1.)
     }
 
     pub fn expired(&self, now: Instant) -> bool {
