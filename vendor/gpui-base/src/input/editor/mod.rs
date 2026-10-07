@@ -5,7 +5,7 @@ use super::{EditorMode, InputBaseState, InputModeKind};
 /// State for source-code editing.
 ///
 /// This is the shared editing engine in its code-editor kind. Languages, line
-/// numbers, folding, indent guides, diagnostics, decorations, and the LSP
+/// numbers, folding, indent guides, diagnostics, and the LSP
 /// providers exist on this kind only, so an ordinary input or textarea never
 /// exposes them.
 pub type EditorState = InputBaseState<EditorMode>;

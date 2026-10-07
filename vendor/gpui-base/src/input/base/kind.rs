@@ -66,6 +66,65 @@ pub trait MultiLineMode: InputModeKind {}
 impl MultiLineMode for TextareaMode {}
 impl MultiLineMode for EditorMode {}
 
+/// The multi-line modes that own text and range decorations.
+pub trait DecoratedMode: MultiLineMode {
+    #[doc(hidden)]
+    fn decoration_collections(
+        extras: &mut Self::Extras,
+    ) -> (
+        &mut DecorationCollections,
+        &mut DecorationCollections<RangeDecoration>,
+    );
+
+    #[doc(hidden)]
+    fn decoration_collections_ref(
+        extras: &Self::Extras,
+    ) -> (
+        &DecorationCollections,
+        &DecorationCollections<RangeDecoration>,
+    );
+}
+
+impl DecoratedMode for TextareaMode {
+    fn decoration_collections(
+        extras: &mut TextareaExtras,
+    ) -> (
+        &mut DecorationCollections,
+        &mut DecorationCollections<RangeDecoration>,
+    ) {
+        (&mut extras.decorations, &mut extras.range_decorations)
+    }
+
+    fn decoration_collections_ref(
+        extras: &TextareaExtras,
+    ) -> (
+        &DecorationCollections,
+        &DecorationCollections<RangeDecoration>,
+    ) {
+        (&extras.decorations, &extras.range_decorations)
+    }
+}
+
+impl DecoratedMode for EditorMode {
+    fn decoration_collections(
+        extras: &mut EditorExtras,
+    ) -> (
+        &mut DecorationCollections,
+        &mut DecorationCollections<RangeDecoration>,
+    ) {
+        (&mut extras.decorations, &mut extras.range_decorations)
+    }
+
+    fn decoration_collections_ref(
+        extras: &EditorExtras,
+    ) -> (
+        &DecorationCollections,
+        &DecorationCollections<RangeDecoration>,
+    ) {
+        (&extras.decorations, &extras.range_decorations)
+    }
+}
+
 /// What the renderer may read out of a mode's extra state.
 ///
 /// Kept apart from [`InputModeKind`] on purpose. This trait is *data*: the
@@ -343,8 +402,41 @@ impl InputModeKind for InputMode {
 impl InputModeKind for TextareaMode {
     const MULTI_LINE: bool = true;
 
-    /// Ordinary multi-line text needs nothing beyond the shared engine.
-    type Extras = ();
+    type Extras = TextareaExtras;
+
+    fn reset_annotations(state: &mut InputBaseState<Self>) {
+        state.extras.decorations.clear();
+        state.extras.range_decorations.clear();
+    }
+
+    fn adjust_annotations(
+        state: &mut InputBaseState<Self>,
+        range: &std::ops::Range<usize>,
+        new_len: usize,
+    ) {
+        state.extras.decorations.adjust_for_edit(range, new_len);
+        state
+            .extras
+            .range_decorations
+            .adjust_for_edit(range, new_len);
+    }
+}
+
+/// What ordinary multi-line text adds: application decorations.
+#[derive(Default)]
+pub struct TextareaExtras {
+    pub(crate) decorations: DecorationCollections,
+    pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
+}
+
+impl InputExtras for TextareaExtras {
+    fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
+        self.decorations.iter().collect()
+    }
+
+    fn range_decorations(&self, ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
+        self.range_decorations.intersecting(ranges)
+    }
 }
 // `EditorMode`'s implementation lives with the editor code, next to the
 // language features it dispatches to.

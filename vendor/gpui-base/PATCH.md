@@ -14,6 +14,9 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | `src/input/base/state.rs` | `set_hanging_indents(markers)` on multi-line states (textarea and editor) | list lines: continuation rows start under the text after `•`, `◦`, `12.` |
 | `src/input/editor/display_map/text_wrapper.rs` | `hanging_indents` on `TextWrapper`, `hanging_indent_at()`, `measured_wrap_boundaries(.., hanging_indent, ..)`, `shift_span()` shared with inline metrics; a line with a marker always wraps as `WrappingIndent::Same` | wrap continuation rows at `wrap_width - marker width`; the existing `LineItem.indent` / `LineLayout.wrap_indent` path then shifts rendering, caret, selection, hit testing and up/down moves |
 | `src/input/editor/display_map/wrap_map.rs`, `display_map.rs` | pass-through for `set_hanging_indents`, adjust on edit | plumbing |
+| `src/input/base/kind.rs` | `TextareaExtras` (text + range decorations) as `TextareaMode::Extras`; edit tracking and reset hooks; sealed `DecoratedMode` trait for both multi-line modes | decorations on `TextareaState` (composer stays a textarea) |
+| `src/input/editor/decorations.rs` | `TextDecorationCollection<M = EditorMode>`, `RangeDecorationCollection<M = EditorMode>`, `create_*_collection` on `impl<M: DecoratedMode>`; `DecorationCollections` / `TrackedDecoration` `pub` + `#[doc(hidden)]` | same API on textarea and editor; default type param keeps editor code unchanged |
+| `src/input/editor/mod.rs`, `src/input/mod.rs` | doc no longer says decorations are editor-only; export `DecoratedMode`, `TextareaExtras` | docs, API |
 
 ## Limits
 
@@ -21,7 +24,6 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 - Lines containing inline tokens wrap through gpui's `LineWrapper` with the base font only and ignore their hanging indent.
 - Hanging-indent markers are dropped by an edit inside them; the app sets them again on change.
 - The unwrapped longest-line width (soft wrap off) ignores font families.
-- Text decorations (and so font families) exist on `EditorState` only, not `TextareaState`.
 
 ## Re-apply on a gpui-kit upgrade
 

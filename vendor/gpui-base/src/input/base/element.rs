@@ -3706,6 +3706,92 @@ mod tests {
         });
     }
 
+    struct TextareaHarness(Entity<crate::input::TextareaState>);
+
+    impl Render for TextareaHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(self.0.clone())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn textarea_decorations_render_fill_and_wrap_like_the_editor() {
+        let platform = gpui_platform::current_platform(true);
+        let mut cx = TestAppContext::build_with_text_system(
+            gpui::TestDispatcher::new(0),
+            None,
+            platform.text_system(),
+        );
+        cx.update(crate::init);
+        let text = "iiiiiiii ".repeat(8);
+        let mono_range = 9..35;
+        let mut textarea = None;
+        let window = cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let state = cx.new(|cx| {
+                crate::input::TextareaState::new(window, cx)
+                    .rows(4)
+                    .default_value(text.clone())
+            });
+            textarea = Some(state.clone());
+            TextareaHarness(state)
+        });
+        let textarea = textarea.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), &mut cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let plain_rows: Vec<_> = textarea.read(cx).last_layout.as_ref().unwrap().lines[0]
+                .wrapped_lines
+                .iter()
+                .map(|row| row.len)
+                .collect();
+            let collection = textarea.update(cx, |state, cx| {
+                state.create_range_decorations_collection(
+                    vec![
+                        RangeDecoration::new(mono_range.clone())
+                            .with_style(RangeDecorationStyle::Fill),
+                    ],
+                    cx,
+                );
+                state.create_decorations_collection(Vec::new(), cx)
+            });
+            collection.set(
+                vec![
+                    TextDecoration::new(mono_range.clone(), HighlightStyle::default())
+                        .with_font_family("DejaVu Sans Mono"),
+                ],
+                cx,
+            );
+            window.draw(cx).clear(cx);
+            let state = textarea.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let line = &layout.lines[0];
+            let rows: Vec<_> = line.wrapped_lines.iter().map(|row| row.len).collect();
+            assert!(rows[0] < plain_rows[0], "{rows:?} vs {plain_rows:?}");
+            for row in line.wrapped_lines.iter() {
+                assert!(row.width <= layout.wrap_width.unwrap());
+            }
+            let (fills, frames) = TextElement::new(textarea.clone()).layout_range_decorations(
+                layout,
+                &state.input_bounds,
+                window,
+                state.input_bounds,
+                cx,
+            );
+            assert_eq!(fills.len(), 1);
+            assert!(frames.is_empty());
+            assert_eq!(collection.get_ranges(cx), vec![mono_range.clone()]);
+        });
+        cx.update(|window, cx| {
+            textarea.update(cx, |state, cx| {
+                state.set_selected_range(0..0, cx);
+                state.replace_text_in_range(None, "X", window, cx);
+                let layers = state.extras.decoration_layers();
+                assert_eq!(layers.into_iter().flatten().next().unwrap().range, 10..36);
+            });
+        });
+    }
+
     #[gpui::test]
     fn horizontal_scroll_is_clamped_before_text_and_caret_layout(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "short text", false);
