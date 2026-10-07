@@ -1,5 +1,7 @@
 use chrono::Utc;
-use graph::{MessageTarget, OutgoingMention};
+use graph::{
+    FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
+};
 use store::MessageRecord;
 
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
@@ -27,17 +29,42 @@ impl<R: Remote> SyncEngine<R> {
         thread_root_id: Option<&str>,
         mentions: &[MentionInput],
     ) -> Result<MessageRecord> {
+        self.send_message_with_extras(
+            conversation_id,
+            markdown,
+            thread_root_id,
+            mentions,
+            &MessageExtras::default(),
+        )
+        .await
+    }
+
+    pub async fn send_message_with_extras(
+        &self,
+        conversation_id: &str,
+        markdown: &str,
+        thread_root_id: Option<&str>,
+        mentions: &[MentionInput],
+        extras: &MessageExtras,
+    ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id)?;
         let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
         let sent = match (conversation, thread_root_id) {
             (Conversation::Chat, None) => {
                 self.remote
-                    .send_chat_message(conversation_id, &html, &mentions)
+                    .send_chat_message(conversation_id, &html, &mentions, extras)
                     .await?
             }
             (Conversation::Channel { team_id }, Some(root_id)) => {
                 self.remote
-                    .reply_to_channel_message(&team_id, conversation_id, root_id, &html, &mentions)
+                    .reply_to_channel_message(
+                        &team_id,
+                        conversation_id,
+                        root_id,
+                        &html,
+                        &mentions,
+                        extras,
+                    )
                     .await?
             }
             (Conversation::Chat, Some(_)) => {
@@ -70,12 +97,30 @@ impl<R: Remote> SyncEngine<R> {
         markdown: &str,
         mentions: &[MentionInput],
     ) -> Result<MessageRecord> {
+        self.reply_to_with_extras(
+            conversation_id,
+            message_id,
+            markdown,
+            mentions,
+            &MessageExtras::default(),
+        )
+        .await
+    }
+
+    pub async fn reply_to_with_extras(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        markdown: &str,
+        mentions: &[MentionInput],
+        extras: &MessageExtras,
+    ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id)?;
         let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
         let sent = match conversation {
             Conversation::Chat => {
                 self.remote
-                    .reply_with_quote(conversation_id, message_id, &html, &mentions)
+                    .reply_with_quote(conversation_id, message_id, &html, &mentions, extras)
                     .await?
             }
             Conversation::Channel { team_id } => {
@@ -86,7 +131,14 @@ impl<R: Remote> SyncEngine<R> {
                     .and_then(|record| record.reply_to_id)
                     .unwrap_or_else(|| message_id.to_owned());
                 self.remote
-                    .reply_to_channel_message(&team_id, conversation_id, &root_id, &html, &mentions)
+                    .reply_to_channel_message(
+                        &team_id,
+                        conversation_id,
+                        &root_id,
+                        &html,
+                        &mentions,
+                        extras,
+                    )
                     .await?
             }
         };
@@ -129,6 +181,24 @@ impl<R: Remote> SyncEngine<R> {
         subject: Option<&str>,
         mentions: &[MentionInput],
     ) -> Result<MessageRecord> {
+        self.post_to_channel_with_extras(
+            channel_id,
+            markdown,
+            subject,
+            mentions,
+            &MessageExtras::default(),
+        )
+        .await
+    }
+
+    pub async fn post_to_channel_with_extras(
+        &self,
+        channel_id: &str,
+        markdown: &str,
+        subject: Option<&str>,
+        mentions: &[MentionInput],
+        extras: &MessageExtras,
+    ) -> Result<MessageRecord> {
         let conversation = self.resolve(channel_id)?;
         let Conversation::Channel { team_id } = &conversation else {
             return Err(Error::Unsupported("posting a root message to a chat"));
@@ -136,9 +206,102 @@ impl<R: Remote> SyncEngine<R> {
         let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
         let sent = self
             .remote
-            .send_channel_message(team_id, channel_id, &html, subject, &mentions)
+            .send_channel_message(team_id, channel_id, &html, subject, &mentions, extras)
             .await?;
         self.cache_sent(channel_id, &sent)
+    }
+
+    /// Upload then share; the app uses the two steps apart so a failed share does not upload again.
+    pub async fn upload_attachment(
+        &self,
+        conversation_id: &str,
+        file_name: &str,
+        bytes: &[u8],
+        progress: impl Fn(u8) + Send + Sync,
+    ) -> Result<FileReference> {
+        let uploaded = self
+            .upload_attachment_file(conversation_id, file_name, bytes, progress)
+            .await?;
+        self.share_attachment(conversation_id, &uploaded).await?;
+        uploaded.reference().ok_or_else(missing_attachment_id)
+    }
+
+    /// Chat files go to the sender's "Microsoft Teams Chat Files", channel files to the channel's folder.
+    pub async fn upload_attachment_file(
+        &self,
+        conversation_id: &str,
+        file_name: &str,
+        bytes: &[u8],
+        progress: impl Fn(u8) + Send + Sync,
+    ) -> Result<UploadedFile> {
+        let destination = match self.resolve(conversation_id)? {
+            Conversation::Chat => UploadDestination::ChatFiles,
+            Conversation::Channel { team_id } => {
+                UploadDestination::Folder(self.channel_folder(&team_id, conversation_id).await?)
+            }
+        };
+        let uploaded = self
+            .remote
+            .upload_file(&destination, file_name, bytes, &progress)
+            .await?;
+        if uploaded.reference().is_none() {
+            let _ = self.remote.delete_file(&uploaded).await;
+            return Err(missing_attachment_id());
+        }
+        Ok(uploaded)
+    }
+
+    /// Read-only for the other chat members; channels need nothing.
+    pub async fn share_attachment(
+        &self,
+        conversation_id: &str,
+        uploaded: &UploadedFile,
+    ) -> Result<()> {
+        if !matches!(self.resolve(conversation_id)?, Conversation::Chat) {
+            return Ok(());
+        }
+        let other_members = self.other_member_ids(conversation_id).await?;
+        self.remote.share_file(uploaded, &other_members).await
+    }
+
+    pub async fn discard_attachment(&self, uploaded: &UploadedFile) -> Result<()> {
+        self.remote.delete_file(uploaded).await
+    }
+
+    async fn channel_folder(&self, team_id: &str, channel_id: &str) -> Result<graph::DriveFolder> {
+        let cached = self
+            .channel_folders
+            .lock()
+            .expect("channel folder cache poisoned")
+            .get(channel_id)
+            .cloned();
+        if let Some(folder) = cached {
+            return Ok(folder);
+        }
+        let folder = self
+            .remote
+            .channel_files_folder(team_id, channel_id)
+            .await?;
+        self.channel_folders
+            .lock()
+            .expect("channel folder cache poisoned")
+            .insert(channel_id.to_owned(), folder.clone());
+        Ok(folder)
+    }
+
+    async fn other_member_ids(&self, chat_id: &str) -> Result<Vec<String>> {
+        let my_user_id = self.my_user_id().await?;
+        let members = self
+            .store
+            .chat(chat_id)?
+            .map(|chat| chat.members)
+            .filter(|members| !members.is_empty())
+            .ok_or_else(|| graph::Error::Upload("Chat members not loaded yet.".into()))?;
+        Ok(members
+            .into_iter()
+            .filter_map(|member| member.user_id)
+            .filter(|user_id| *user_id != my_user_id)
+            .collect())
     }
 
     pub async fn refresh_message(
@@ -224,9 +387,22 @@ impl<R: Remote> SyncEngine<R> {
         mentions: &[MentionInput],
     ) -> Result<()> {
         let conversation = self.resolve(conversation_id)?;
-        let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
+        let (mut html, mentions) = outgoing(&conversation, markdown, mentions)?;
         let target = self.message_target(conversation_id, message_id)?;
-        self.remote.edit_message(&target, &html, &mentions).await?;
+        let mut extras = MessageExtras::default();
+        if let Some(record) = self
+            .store
+            .messages_by_id(conversation_id, &[message_id.to_owned()])?
+            .remove(message_id)
+        {
+            let preserved = crate::stored::edit_preserved(&record);
+            html.push_str(&preserved.images_html);
+            extras.files = preserved.files;
+            extras.kept = preserved.kept;
+        }
+        self.remote
+            .edit_message(&target, &html, &mentions, &extras)
+            .await?;
         self.refresh_message(conversation_id, message_id).await?;
         Ok(())
     }
@@ -329,4 +505,8 @@ fn outgoing(
         ensure_allowed_in_chat(mentions)?;
     }
     Ok(apply_mentions(&markdown_to_html(markdown), mentions))
+}
+
+fn missing_attachment_id() -> Error {
+    graph::Error::Upload("the uploaded file has no attachment id".into()).into()
 }

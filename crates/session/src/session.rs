@@ -83,14 +83,17 @@ impl Session {
     pub async fn request(&self, method: Method, url: &str, scope: &Scope, body: Option<Value>) -> Result<ApiResponse> {
         let request = Request {
             method,
-            url: url.to_owned(),
-            headers: Vec::new(),
             body,
-            binary: false,
+            ..Request::get(url)
         };
+        self.send(request, scope).await
+    }
+
+    pub async fn send(&self, request: Request, scope: &Scope) -> Result<ApiResponse> {
+        let url = request.url.clone();
         let response = self.batch(&[request], scope).await?.remove(0);
         if response.status >= 400 || response.status == 0 {
-            return Err(Error::api(response.status, url, response.body));
+            return Err(Error::api(response.status, &url, response.body));
         }
         Ok(response)
     }

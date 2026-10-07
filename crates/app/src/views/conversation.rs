@@ -15,7 +15,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageRecord;
-use teams_core::{ImageRef, MentionInput};
+use teams_core::{FileCard, ImageRef, MentionInput};
 
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
@@ -23,14 +23,14 @@ use super::message_actions::{Action, MessageMenu};
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
-use super::widgets::icon;
+use super::widgets::{icon, symbol};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::data::{is_one_on_one, others};
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::Block;
 use crate::render::blocks::Inline;
 use crate::rows::{
-    Delivery, MessageRow, Receipt, Row, RowContext, Series, StartInfo, assign_series,
+    Delivery, LocalImage, MessageRow, Receipt, Row, RowContext, Series, StartInfo, assign_series,
     changed_indices, diff_keys, flat_rows, message_text, placeholder_rows, reaction_type_for,
     reply_excerpt, thread_list_rows, thread_rows, trailing_skeleton,
 };
@@ -120,6 +120,7 @@ pub struct ConversationView {
     picker: Entity<ReactionPicker>,
     highlighted_message: Option<String>,
     notice: Option<String>,
+    drag_file_count: usize,
     sync_generation: u64,
     window_active: bool,
     _subscriptions: Vec<Subscription>,
@@ -129,6 +130,37 @@ fn open_limit(selection: &Selection) -> usize {
     match selection {
         Selection::Chat(_) => CHAT_OPEN_LIMIT,
         Selection::Channel(_) => CHANNEL_OPEN_LIMIT,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DropTarget {
+    Chat,
+    Channel,
+    NewChat,
+}
+
+fn drop_overlay_text(title: &str, target: DropTarget, count: usize) -> (String, String) {
+    let files = if count == 1 {
+        "1 file".to_owned()
+    } else {
+        format!("{count} files")
+    };
+    match target {
+        DropTarget::Chat => (
+            format!("Drop to attach to {title}"),
+            format!("{files}. Images go into the message, other files to your OneDrive."),
+        ),
+        DropTarget::Channel => (
+            format!("Drop to attach to {title}"),
+            format!("{files}. Images go into the message, other files to the channel's Files."),
+        ),
+        DropTarget::NewChat => (
+            "Drop to attach to the new chat".to_owned(),
+            format!(
+                "{files}. Images go into the message. Files can be added once the chat exists."
+            ),
+        ),
     }
 }
 
@@ -167,6 +199,7 @@ impl ConversationView {
             picker,
             highlighted_message: None,
             notice: None,
+            drag_file_count: 0,
             sync_generation: 0,
             window_active: window.is_window_active(),
             _subscriptions: subscriptions,
@@ -212,6 +245,14 @@ impl ConversationView {
                     return;
                 }
                 if self.draft_active {
+                    let created = self
+                        .draft_created
+                        .as_ref()
+                        .map(|(_, chat_id)| chat_id.clone());
+                    if let Some(chat_id) = created {
+                        self.composer
+                            .update(cx, |composer, _| composer.carry_images_into(chat_id));
+                    }
                     self.leave_draft(window, cx);
                 }
                 match selection {
@@ -271,12 +312,12 @@ impl ConversationView {
     ) {
         match event {
             ComposerEvent::Submit(outgoing) if self.draft_active => {
-                self.send_new_chat(outgoing.clone(), window, cx)
+                self.send_new_chat((**outgoing).clone(), window, cx)
             }
             ComposerEvent::Submit(outgoing) if outgoing.edit.is_some() => {
-                self.send_edit(outgoing.clone(), window, cx)
+                self.send_edit((**outgoing).clone(), window, cx)
             }
-            ComposerEvent::Submit(outgoing) => self.send(outgoing.clone(), window, cx),
+            ComposerEvent::Submit(outgoing) => self.send((**outgoing).clone(), window, cx),
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
         }
     }
@@ -304,7 +345,7 @@ impl ConversationView {
             sync: SyncProgress::default(),
         });
         self.sync_generation += 1;
-        self.pending.clear();
+        self.clear_pending();
         self.notice = None;
         self.rebuild(true, cx);
         self.start_fetch(cx);
@@ -334,8 +375,7 @@ impl ConversationView {
         if !self.draft_active {
             self.draft_active = true;
             self.current = None;
-            self.pending.clear();
-            self.pending_outgoing.clear();
+            self.clear_pending();
             self.notice = None;
             self.draft_created = None;
             self.draft_error = None;
@@ -359,8 +399,7 @@ impl ConversationView {
         self.draft_active = false;
         self.draft_created = None;
         self.draft_error = None;
-        self.pending.clear();
-        self.pending_outgoing.clear();
+        self.clear_pending();
         self.draft.update(cx, |draft, cx| draft.reset(window, cx));
     }
 
@@ -401,8 +440,17 @@ impl ConversationView {
         let target = self.draft_target_chat(cx);
         if target != self.conversation_id() {
             match target {
-                Some(chat_id) => self.open(Selection::Chat(chat_id), window, cx),
+                Some(chat_id) => {
+                    self.composer.update(cx, |composer, _| {
+                        composer.carry_images_into(chat_id.clone())
+                    });
+                    self.open(Selection::Chat(chat_id), window, cx)
+                }
                 None => {
+                    self.composer.update(cx, |composer, cx| {
+                        composer.carry_images_into(String::new());
+                        composer.set_conversation("", "", window, cx);
+                    });
                     self.current = None;
                     self.sync_generation += 1;
                     self.rebuild(true, cx);
@@ -504,7 +552,7 @@ impl ConversationView {
         } else {
             row_key
         };
-        self.pending.clear();
+        self.clear_pending();
         self.rebuild(true, cx);
         let index = self
             .rows
@@ -1131,11 +1179,16 @@ impl ConversationView {
         self.rebuild(false, cx);
     }
 
+    fn clear_pending(&mut self) {
+        self.pending.clear();
+        self.pending_outgoing.clear();
+    }
+
     fn open_thread(&mut self, root_id: String, cx: &mut Context<Self>) {
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::Thread(root_id);
         }
-        self.pending.clear();
+        self.clear_pending();
         self.rebuild(true, cx);
     }
 
@@ -1143,7 +1196,7 @@ impl ConversationView {
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::ThreadList;
         }
-        self.pending.clear();
+        self.clear_pending();
         self.rebuild(true, cx);
     }
 
@@ -1171,6 +1224,7 @@ impl ConversationView {
 
         let sent = outgoing.clone();
         let receiver = runtime::spawn(async move {
+            let extras = sent.extras();
             let Outgoing {
                 text,
                 mentions,
@@ -1180,22 +1234,40 @@ impl ConversationView {
             match (&view_mode, reply) {
                 (_, Some(reply)) => {
                     engine
-                        .reply_to_with_mentions(&conversation_id, &reply.message_id, text, mentions)
+                        .reply_to_with_extras(
+                            &conversation_id,
+                            &reply.message_id,
+                            text,
+                            mentions,
+                            &extras,
+                        )
                         .await
                 }
                 (ViewMode::Flat, None) => {
                     engine
-                        .send_message_with_mentions(&conversation_id, text, None, mentions)
+                        .send_message_with_extras(&conversation_id, text, None, mentions, &extras)
                         .await
                 }
                 (ViewMode::ThreadList, None) => {
                     engine
-                        .post_to_channel_with_mentions(&conversation_id, text, None, mentions)
+                        .post_to_channel_with_extras(
+                            &conversation_id,
+                            text,
+                            None,
+                            mentions,
+                            &extras,
+                        )
                         .await
                 }
                 (ViewMode::Thread(root_id), None) => {
                     engine
-                        .send_message_with_mentions(&conversation_id, text, Some(root_id), mentions)
+                        .send_message_with_extras(
+                            &conversation_id,
+                            text,
+                            Some(root_id),
+                            mentions,
+                            &extras,
+                        )
                         .await
                 }
             }
@@ -1203,10 +1275,8 @@ impl ConversationView {
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = receiver.await;
-            this.update_in(cx, |this, window, cx| {
-                this.finish_send(&key, result, window, cx)
-            })
-            .ok();
+            this.update(cx, |this, cx| this.finish_send(&key, result, cx))
+                .ok();
         })
         .detach();
     }
@@ -1238,12 +1308,34 @@ impl ConversationView {
             card: false,
             time: chrono::Local::now().format("%H:%M").to_string(),
             day_header: None,
-            blocks: vec![Block::Paragraph(Inline::plain(&outgoing.text))],
+            blocks: if outgoing.text.is_empty() {
+                Vec::new()
+            } else {
+                vec![Block::Paragraph(Inline::plain(&outgoing.text))]
+            },
             edited: false,
             deleted: false,
             reactions: Vec::new(),
             images: Vec::new(),
-            files: Vec::new(),
+            local_images: outgoing
+                .images
+                .iter()
+                .map(|image| LocalImage {
+                    image: image.image.clone(),
+                    size: image.dimensions,
+                })
+                .collect(),
+            files: outgoing
+                .files
+                .iter()
+                .map(|file| FileCard {
+                    name: file.name.clone(),
+                    kind: file.kind,
+                    content_type: None,
+                    size: Some(file.size),
+                    open_url: file.reference.content_url.clone(),
+                })
+                .collect(),
             reply_count: None,
             new_marker: false,
             reply_faces: Vec::new(),
@@ -1280,6 +1372,10 @@ impl ConversationView {
         let state = self.app.read(cx);
         let (mode, engine) = (state.mode, state.engine.clone());
         if mode.read_only {
+            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
+            return;
+        }
+        if mode.demo && outgoing.has_attachments() {
             self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
             return;
         }
@@ -1320,7 +1416,13 @@ impl ConversationView {
                 }
             };
             let sent = engine
-                .send_message_with_mentions(&chat_id, &outgoing.text, None, &outgoing.mentions)
+                .send_message_with_extras(
+                    &chat_id,
+                    &outgoing.text,
+                    None,
+                    &outgoing.mentions,
+                    &outgoing.extras(),
+                )
                 .await;
             (Some(chat_id), sent.err().map(|error| short_error(&error)))
         });
@@ -1536,6 +1638,8 @@ impl ConversationView {
             mentions,
             reply: None,
             edit: Some(edit),
+            images: Vec::new(),
+            files: Vec::new(),
         };
         self.composer
             .update(cx, |composer, cx| composer.begin_edit(draft, window, cx));
@@ -1600,9 +1704,14 @@ impl ConversationView {
             let failed = !matches!(receiver.await, Ok(Ok(())));
             this.update_in(cx, |this, window, cx| {
                 if failed {
-                    this.notice = Some("Edit failed: your text is back in the composer".to_owned());
-                    this.composer
-                        .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+                    if this.composer.read(cx).is_empty(cx) {
+                        this.notice =
+                            Some("Edit failed: your text is back in the composer".to_owned());
+                        this.composer
+                            .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+                    } else {
+                        this.notice = Some("Edit failed".to_owned());
+                    }
                     cx.notify();
                 }
             })
@@ -1738,7 +1847,6 @@ impl ConversationView {
         &mut self,
         key: &str,
         result: Result<teams_core::Result<()>, tokio::sync::oneshot::error::RecvError>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let failure = match result {
@@ -1754,17 +1862,90 @@ impl ConversationView {
             Some(error) => {
                 if let Some(row) = self.pending.iter_mut().find(|row| row.key == key) {
                     row.delivery = Delivery::Failed(error.clone());
-                }
-                self.notice = Some(format!("Not sent: {error}"));
-                if self.composer.read(cx).is_empty(cx)
-                    && let Some(outgoing) = self.pending_outgoing.get(key).cloned()
-                {
-                    self.composer
-                        .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+                    self.notice = Some(format!("Not sent: {error}"));
                 }
             }
         }
         self.rebuild(false, cx);
+    }
+
+    fn render_drop_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let target = match self.current.as_ref().map(|current| &current.selection) {
+            Some(Selection::Chat(_)) => DropTarget::Chat,
+            Some(Selection::Channel(_)) => DropTarget::Channel,
+            None => DropTarget::NewChat,
+        };
+        let title = self
+            .current
+            .as_ref()
+            .map(|current| current.title.as_str())
+            .unwrap_or_default();
+        let (heading, detail) = drop_overlay_text(title, target, self.drag_file_count.max(1));
+        let composer = self.composer.clone();
+        div()
+            .id("drop-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .opacity(0.)
+            .bg(theme::drop_background())
+            .drag_over::<ExternalPaths>(move |style, _, _, cx| {
+                if composer.read(cx).is_editing() {
+                    style
+                } else {
+                    style.opacity(1.)
+                }
+            })
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                    let count = event.drag(cx).paths().len();
+                    if this.drag_file_count != count {
+                        this.drag_file_count = count;
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_drop(cx.listener(|this, dropped: &ExternalPaths, _, cx| {
+                let paths = dropped.paths().to_vec();
+                this.composer
+                    .update(cx, |composer, cx| composer.add_paths(paths, cx));
+            }))
+            .child(
+                div()
+                    .absolute()
+                    .inset(px(12.))
+                    .rounded(px(12.))
+                    .border_2()
+                    .border_dashed()
+                    .border_color(theme::accent())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        v_flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .px(px(28.))
+                            .py(px(18.))
+                            .rounded(px(12.))
+                            .bg(black().opacity(0.55))
+                            .child(symbol("upload", 28., theme::accent_text()))
+                            .child(
+                                div()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text_strong())
+                                    .child(heading),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(theme::text_muted())
+                                    .child(detail),
+                            ),
+                    ),
+            )
     }
 
     fn render_draft_error(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -2149,17 +2330,24 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
-        root.child(div().flex_1().min_h_0().child(body))
-            .children(self.render_draft_error(cx))
-            .child(self.composer.clone())
-            .when(drafting, |root| {
-                root.on_action(cx.listener(|this, _: &Escape, window, cx| {
-                    if this.draft.read(cx).has_focus(window, cx) {
-                        this.draft.update(cx, |draft, cx| draft.escape(cx));
-                    }
-                }))
-            })
-            .into_any_element()
+        root.child(
+            v_flex()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .child(div().flex_1().min_h_0().child(body))
+                .children(self.render_draft_error(cx))
+                .child(self.composer.clone())
+                .child(self.render_drop_overlay(cx)),
+        )
+        .when(drafting, |root| {
+            root.on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.draft.read(cx).has_focus(window, cx) {
+                    this.draft.update(cx, |draft, cx| draft.escape(cx));
+                }
+            }))
+        })
+        .into_any_element()
     }
 }
 
@@ -2197,12 +2385,44 @@ fn progress_bar() -> impl IntoElement {
 mod tests {
     use std::sync::Arc;
 
+    use super::{DropTarget, drop_overlay_text};
+
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, TestAppContext, WindowOptions};
     use store::Store;
 
     use super::ConversationView;
     use crate::app_state::{AppState, Mode, Selection};
+
+    #[test]
+    fn chat_overlay_names_the_chat_and_the_onedrive() {
+        assert_eq!(
+            drop_overlay_text("Mara Lin", DropTarget::Chat, 3),
+            (
+                "Drop to attach to Mara Lin".to_owned(),
+                "3 files. Images go into the message, other files to your OneDrive.".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn channel_overlay_points_to_the_channel_files() {
+        let (_, detail) = drop_overlay_text("Squad / General", DropTarget::Channel, 1);
+        assert_eq!(
+            detail,
+            "1 file. Images go into the message, other files to the channel's Files."
+        );
+    }
+
+    #[test]
+    fn new_chat_overlay_says_files_wait_for_the_chat() {
+        let (heading, detail) = drop_overlay_text("", DropTarget::NewChat, 2);
+        assert_eq!(heading, "Drop to attach to the new chat");
+        assert_eq!(
+            detail,
+            "2 files. Images go into the message. Files can be added once the chat exists."
+        );
+    }
 
     #[gpui_kit::test]
     fn demo_draft_creates_a_chat_and_selects_it(cx: &mut TestAppContext) {

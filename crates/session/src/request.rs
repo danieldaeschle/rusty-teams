@@ -29,6 +29,8 @@ pub struct Request {
     pub headers: Vec<(String, String)>,
     pub body: Option<Value>,
     pub binary: bool,
+    pub anonymous: bool,
+    pub body_base64: Option<String>,
 }
 
 impl Request {
@@ -47,6 +49,19 @@ impl Request {
             headers: Vec::new(),
             body: None,
             binary: false,
+            anonymous: false,
+            body_base64: None,
+        }
+    }
+
+    /// Sent without an Authorization header, for pre-authenticated URLs such as upload sessions.
+    pub fn anonymous_bytes(method: Method, url: impl Into<String>, headers: Vec<(String, String)>, body_base64: String) -> Self {
+        Request {
+            method,
+            headers,
+            anonymous: true,
+            body_base64: Some(body_base64),
+            ..Request::get(url)
         }
     }
 
@@ -64,6 +79,8 @@ impl Request {
             headers: Vec::new(),
             body: Some(body),
             binary: false,
+            anonymous: false,
+            body_base64: None,
         }
     }
 }
@@ -87,7 +104,10 @@ pub(crate) struct WireRequest<'a> {
     pub url: &'a str,
     pub headers: serde_json::Map<String, Value>,
     pub body: Option<String>,
+    #[serde(rename = "bodyBase64")]
+    pub body_base64: Option<&'a str>,
     pub binary: bool,
+    pub anonymous: bool,
 }
 
 impl<'a> From<&'a Request> for WireRequest<'a> {
@@ -105,7 +125,9 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             url: &request.url,
             headers,
             body: request.body.as_ref().map(Value::to_string),
+            body_base64: request.body_base64.as_deref(),
             binary: request.binary,
+            anonymous: request.anonymous,
         }
     }
 }
@@ -164,6 +186,23 @@ mod tests {
         let request = Request::binary_get("u");
         assert!(WireRequest::from(&request).binary);
         assert!(!WireRequest::from(&Request::get("u")).binary);
+    }
+
+    #[test]
+    fn anonymous_bytes_travel_as_base64_without_a_content_type() {
+        let request = Request::anonymous_bytes(
+            Method::Put,
+            "https://upload.example/session",
+            vec![("Content-Range".into(), "bytes 0-2/3".into())],
+            "AQID".into(),
+        );
+        let wire = serde_json::to_value(WireRequest::from(&request)).unwrap();
+        assert_eq!(wire["method"], "PUT");
+        assert_eq!(wire["anonymous"], true);
+        assert_eq!(wire["bodyBase64"], "AQID");
+        assert_eq!(wire["body"], Value::Null);
+        assert!(wire["headers"].get("Content-Type").is_none());
+        assert_eq!(wire["headers"]["Content-Range"], "bytes 0-2/3");
     }
 
     #[test]

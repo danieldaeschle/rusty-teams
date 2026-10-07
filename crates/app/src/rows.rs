@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions};
 
@@ -89,6 +91,13 @@ pub enum Delivery {
     Failed(String),
 }
 
+/// An image of a message that is still being sent, shown from its local bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalImage {
+    pub image: Arc<Image>,
+    pub size: Option<(u32, u32)>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageRow {
     pub key: String,
@@ -104,6 +113,7 @@ pub struct MessageRow {
     pub deleted: bool,
     pub reactions: Vec<ReactionChip>,
     pub images: Vec<ImageRef>,
+    pub local_images: Vec<LocalImage>,
     pub files: Vec<FileCard>,
     pub reply_count: Option<usize>,
     pub new_marker: bool,
@@ -367,6 +377,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         deleted: record.deleted,
         reactions: reaction_chips(&reactions(record), context.my_user_id.as_deref()),
         images,
+        local_images: Vec::new(),
         files: files(record),
         reply_count: None,
         new_marker: false,

@@ -27,7 +27,9 @@ pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
 pub use events::CoreEvent;
 pub use folders::{BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource};
-pub use graph::MentionTarget;
+pub use graph::{
+    FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, UploadedFile,
+};
 pub use images::StoredImage;
 pub use mapping::{chat_record, message_record};
 pub use markdown::{escape_html, markdown_to_html, plain_text_to_html};

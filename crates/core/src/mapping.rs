@@ -203,6 +203,11 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
             .as_deref()
             .filter(|_| attachment.content_type.as_deref() == Some("messageReference"))
             .and_then(quote_info),
+        id: attachment.id.clone(),
+        content: attachment
+            .content
+            .clone()
+            .filter(|_| is_card || attachment.content_type.as_deref() == Some("messageReference")),
     }
 }
 

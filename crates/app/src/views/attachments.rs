@@ -7,6 +7,7 @@ use teams_core::{FileCard, FileKind, ImageRef};
 use super::widgets::icon;
 use crate::data::Directory;
 use crate::format;
+use crate::rows::LocalImage;
 use crate::theme;
 
 pub const IMAGE_MAX_WIDTH: f32 = 360.;
@@ -117,10 +118,10 @@ pub fn file_subtitle(card: &FileCard) -> String {
     }
 }
 
-fn file_view(card: &FileCard, id: String) -> AnyElement {
-    let style = kind_style(card.kind);
-    let badge = div()
-        .size(px(FILE_BADGE_SIZE))
+pub fn file_badge(kind: FileKind, size: f32) -> Div {
+    let style = kind_style(kind);
+    div()
+        .size(px(size))
         .flex_none()
         .flex()
         .items_center()
@@ -133,7 +134,32 @@ fn file_view(card: &FileCard, id: String) -> AnyElement {
         .when(style.label.is_empty(), |badge| {
             badge.child(icon(IconName::File, 16., gpui_kit::white()))
         })
-        .when(!style.label.is_empty(), |badge| badge.child(style.label));
+        .when(!style.label.is_empty(), |badge| badge.child(style.label))
+}
+
+fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
+    let (width, height) = fit_image(image.size);
+    div()
+        .id(ElementId::Name(id.into()))
+        .w(px(width))
+        .h(px(height))
+        .max_w(relative(1.))
+        .flex_none()
+        .rounded(px(IMAGE_RADIUS))
+        .overflow_hidden()
+        .border_1()
+        .border_color(theme::border())
+        .child(
+            img(image.image.clone())
+                .size_full()
+                .rounded(px(IMAGE_RADIUS))
+                .object_fit(ObjectFit::Cover),
+        )
+        .into_any_element()
+}
+
+fn file_view(card: &FileCard, id: String) -> AnyElement {
+    let badge = file_badge(card.kind, FILE_BADGE_SIZE);
     let url = card.open_url.clone();
     h_flex()
         .id(ElementId::Name(id.into()))
@@ -176,11 +202,12 @@ fn file_view(card: &FileCard, id: String) -> AnyElement {
 
 pub fn attachments_view(
     images: &[ImageRef],
+    local_images: &[LocalImage],
     files: &[FileCard],
     id: &str,
     directory: &Directory,
 ) -> Option<Div> {
-    if images.is_empty() && files.is_empty() {
+    if images.is_empty() && local_images.is_empty() && files.is_empty() {
         return None;
     }
     Some(
@@ -190,6 +217,11 @@ pub fn attachments_view(
             .children(
                 images.iter().enumerate().map(|(index, image)| {
                     image_view(image, format!("{id}-image-{index}"), directory)
+                }),
+            )
+            .children(
+                local_images.iter().enumerate().map(|(index, image)| {
+                    local_image_view(image, format!("{id}-local-image-{index}"))
                 }),
             )
             .children(

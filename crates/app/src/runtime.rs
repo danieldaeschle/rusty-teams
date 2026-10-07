@@ -31,3 +31,14 @@ pub fn spawn<T: Send + 'static>(
     });
     receiver
 }
+
+/// Like `spawn`, plus a handle that stops the future at its next await point.
+pub fn spawn_abortable<T: Send + 'static>(
+    future: impl Future<Output = T> + Send + 'static,
+) -> (oneshot::Receiver<T>, tokio::task::AbortHandle) {
+    let (sender, receiver) = oneshot::channel();
+    let task = runtime().spawn(async move {
+        let _ = sender.send(future.await);
+    });
+    (receiver, task.abort_handle())
+}

@@ -88,6 +88,49 @@ pub fn reply_with_quote(chat_id: &str) -> String {
     )
 }
 
+pub const CHAT_FILES_FOLDER: &str = "Microsoft Teams Chat Files";
+
+pub fn chat_files_upload_session(file_name: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/me/drive/root:/{}/{}:/createUploadSession",
+        segment(CHAT_FILES_FOLDER),
+        segment(file_name)
+    )
+}
+
+pub fn folder_upload_session(drive_id: &str, folder_id: &str, file_name: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}:/{}:/createUploadSession",
+        segment(drive_id),
+        segment(folder_id),
+        segment(file_name)
+    )
+}
+
+pub fn channel_files_folder(team_id: &str, channel_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/channels/{}/filesFolder",
+        segment(team_id),
+        segment(channel_id)
+    )
+}
+
+pub fn drive_item(drive_id: &str, item_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}",
+        segment(drive_id),
+        segment(item_id)
+    )
+}
+
+pub fn drive_item_invite(drive_id: &str, item_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}/invite",
+        segment(drive_id),
+        segment(item_id)
+    )
+}
+
 pub fn mark_chat_read(chat_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/chats/{}/markChatReadForUser",
@@ -202,6 +245,18 @@ mod tests {
         assert_eq!(
             reply_with_quote("19:abc@thread.v2"),
             "https://graph.microsoft.com/beta/chats/19%3Aabc%40thread.v2/messages/replyWithQuote"
+        );
+    }
+
+    #[test]
+    fn upload_session_urls_encode_the_file_name() {
+        assert_eq!(
+            chat_files_upload_session("Q3 plan (1).docx"),
+            "https://graph.microsoft.com/v1.0/me/drive/root:/Microsoft%20Teams%20Chat%20Files/Q3%20plan%20%281%29.docx:/createUploadSession"
+        );
+        assert_eq!(
+            folder_upload_session("b!d", "01F", "a.pdf"),
+            "https://graph.microsoft.com/v1.0/drives/b%21d/items/01F:/a.pdf:/createUploadSession"
         );
     }
 

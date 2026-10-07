@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
-use graph::{Graph, MESSAGE_PAGE_SIZE, Message};
+use graph::{DriveFolder, Graph, MESSAGE_PAGE_SIZE, Message};
 use store::{ImageFileCache, MessageRecord, Sidebar, Store, SyncState};
 use tokio::sync::{OnceCell, broadcast};
 
@@ -117,6 +117,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) directory_cache: Mutex<DirectoryCache>,
     preview_changed: AtomicBool,
     pub(crate) receipts: ReceiptCache,
+    pub(crate) channel_folders: Mutex<HashMap<String, DriveFolder>>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -140,6 +141,7 @@ impl<R: Remote> SyncEngine<R> {
             directory_cache: Mutex::new(DirectoryCache::new()),
             preview_changed: AtomicBool::new(false),
             receipts: ReceiptCache::default(),
+            channel_folders: Mutex::new(HashMap::new()),
         }
     }
 

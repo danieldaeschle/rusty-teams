@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
@@ -9,12 +11,20 @@ use gpui_kit::component::{
         Backspace, Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent, MoveDown,
         MoveUp, Textarea, TextareaState,
     },
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{MentionCandidate, MentionInput};
+use teams_core::{
+    FileReference, HostedImage, MentionCandidate, MentionInput, MessageExtras, UploadedFile,
+};
 
+use super::attachment_tray::{
+    AttachmentTray, DoneFile, JobKind, LoadedFile, OutgoingFile, OutgoingImage, PasteAction,
+    UploadJob, UploadResult, discard_uploaded, names_of, paste_action, pasted_image_name,
+    prepare_pasted_image, read_attachment, render_tray,
+};
 use super::avatar::{person_avatar, square_avatar};
 use super::emoji_popup::{self, EmojiPopup};
 use super::widgets::{icon, symbol};
@@ -31,6 +41,9 @@ const MENTION_QUERY_MAX_CHARS: usize = 32;
 const MENTION_QUERY_MAX_WORDS: usize = 3;
 const POPUP_WIDTH: f32 = 380.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
+const DEMO_UPLOAD_STEPS: u8 = 10;
+const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
+const DEMO_FAILURE_STEP: u8 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplyPreview {
@@ -51,10 +64,57 @@ pub struct Outgoing {
     pub mentions: Vec<MentionInput>,
     pub reply: Option<ReplyPreview>,
     pub edit: Option<EditPreview>,
+    pub images: Vec<OutgoingImage>,
+    pub files: Vec<OutgoingFile>,
+}
+
+impl Outgoing {
+    pub fn has_attachments(&self) -> bool {
+        !self.images.is_empty() || !self.files.is_empty()
+    }
+
+    pub fn extras(&self) -> MessageExtras {
+        MessageExtras {
+            kept: Vec::new(),
+            images: self
+                .images
+                .iter()
+                .map(|outgoing| HostedImage {
+                    content_type: outgoing.image.format.mime_type().to_owned(),
+                    bytes: Arc::new(outgoing.image.bytes.clone()),
+                })
+                .collect(),
+            files: self
+                .files
+                .iter()
+                .map(|file| file.reference.clone())
+                .collect(),
+        }
+    }
+}
+
+enum UploadEvent {
+    Progress(u8),
+    Uploaded(UploadedFile),
+    Finished(UploadResult),
+}
+
+enum UploadHandle {
+    Network(tokio::task::AbortHandle),
+    Demo(Task<()>),
+}
+
+impl UploadHandle {
+    fn cancel(self) {
+        match self {
+            UploadHandle::Network(handle) => handle.abort(),
+            UploadHandle::Demo(task) => drop(task),
+        }
+    }
 }
 
 pub enum ComposerEvent {
-    Submit(Outgoing),
+    Submit(Box<Outgoing>),
     EditLast,
 }
 
@@ -88,10 +148,18 @@ pub struct Composer {
     conversion: Option<Conversion>,
     undone_value: Option<String>,
     previous_value: String,
+    tray: AttachmentTray,
+    uploads: HashMap<u64, UploadHandle>,
+    demo_failed: HashSet<u64>,
+    carry_images_into: Option<String>,
     _subscription: Subscription,
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
+
+pub fn is_plain_enter(event: &InputEvent) -> bool {
+    matches!(event, InputEvent::PressEnter { shift: false, .. })
+}
 
 /// Enter sends, Shift+Enter is a newline (handled by the input itself). Blank text never sends.
 pub fn submitted_text(event: &InputEvent, value: &str) -> Option<String> {
@@ -180,6 +248,10 @@ impl Composer {
             conversion: None,
             undone_value: None,
             previous_value: String::new(),
+            tray: AttachmentTray::default(),
+            uploads: HashMap::new(),
+            demo_failed: HashSet::new(),
+            carry_images_into: None,
             _subscription: subscription,
         }
     }
@@ -198,7 +270,9 @@ impl Composer {
             self.update_mention(cx);
         }
         let value = input.read(cx).value();
-        if submitted_text(event, &value).is_some() {
+        if submitted_text(event, &value).is_some()
+            || (is_plain_enter(event) && !self.tray.is_empty())
+        {
             self.submit_current(window, cx);
         }
     }
@@ -458,7 +532,15 @@ impl Composer {
     ) {
         self.set_placeholder(&format!("Message {name}"), window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
+            let carry = self.carry_images_into.take().as_deref() == Some(conversation_id);
             self.conversation_id = Some(conversation_id.to_owned());
+            self.cancel_uploads();
+            let dropped = if carry {
+                self.tray.keep_images_only()
+            } else {
+                self.tray.clear()
+            };
+            self.discard_uploaded(dropped, cx);
             self.reply = None;
             if self.editing.take().is_some() {
                 self.input
@@ -468,6 +550,15 @@ impl Composer {
             self.close_popup();
             cx.notify();
         }
+    }
+
+    /// The draft's images follow the user into this chat; any other switch clears the tray.
+    pub fn carry_images_into(&mut self, conversation_id: String) {
+        self.carry_images_into = Some(conversation_id);
+    }
+
+    fn discard_uploaded(&self, files: Vec<UploadedFile>, cx: &App) {
+        discard_uploaded(self.app.read(cx).engine.clone(), files);
     }
 
     pub fn set_reply(&mut self, reply: Option<ReplyPreview>, cx: &mut Context<Self>) {
@@ -491,9 +582,10 @@ impl Composer {
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
         let state = self.input.read(cx);
         let mut text = state.value().trim().to_owned();
-        if text.is_empty() {
+        if !self.can_send(cx) {
             return None;
         }
+        let attachments_apply = self.editing.is_none();
         if self.undone_value.as_deref() != Some(state.value().as_ref())
             && let Some((range, glyph)) = emoji::trailing_smiley(&text)
         {
@@ -510,7 +602,276 @@ impl Composer {
             mentions,
             reply: self.reply.clone(),
             edit: self.editing.clone(),
+            images: if attachments_apply {
+                self.tray.outgoing_images()
+            } else {
+                Vec::new()
+            },
+            files: if attachments_apply {
+                self.tray.outgoing_files()
+            } else {
+                Vec::new()
+            },
         })
+    }
+
+    fn can_send(&self, cx: &App) -> bool {
+        let has_text = !self.input.read(cx).value().trim().is_empty();
+        if self.editing.is_some() {
+            return has_text;
+        }
+        (has_text || !self.tray.is_empty()) && !self.tray.blocks_send()
+    }
+
+    pub fn is_editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
+    fn files_allowed(&self) -> bool {
+        self.conversation_id
+            .as_deref()
+            .is_some_and(|conversation_id| !conversation_id.is_empty())
+    }
+
+    fn cancel_uploads(&mut self) {
+        for (_, handle) in self.uploads.drain() {
+            handle.cancel();
+        }
+    }
+
+    pub fn open_picker(&mut self, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                this.update(cx, |this, cx| this.add_paths(paths, cx)).ok();
+            }
+        })
+        .detach();
+    }
+
+    pub fn add_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if self.editing.is_some() || paths.is_empty() {
+            return;
+        }
+        let ids = self.tray.add_pending(&names_of(&paths));
+        for (id, path) in ids.into_iter().zip(paths) {
+            cx.spawn(async move |this, cx| {
+                let loaded = cx
+                    .background_executor()
+                    .spawn(async move { read_attachment(&path) })
+                    .await;
+                this.update(cx, |this, cx| this.finish_reading(id, loaded, cx))
+                    .ok();
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    fn add_pasted_image(&mut self, pasted: Image, cx: &mut Context<Self>) {
+        let ids = self.tray.add_pending(&[pasted_image_name()]);
+        cx.notify();
+        let Some(&id) = ids.first() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let loaded = cx
+                .background_executor()
+                .spawn(async move { prepare_pasted_image(pasted) })
+                .await;
+            this.update(cx, |this, cx| this.finish_reading(id, loaded, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        if self.editing.is_some() {
+            return false;
+        }
+        match paste_action(item) {
+            PasteAction::Text => false,
+            PasteAction::Files(paths) => {
+                self.add_paths(paths, cx);
+                true
+            }
+            PasteAction::Image(pasted) => {
+                self.add_pasted_image(pasted, cx);
+                true
+            }
+        }
+    }
+
+    fn finish_reading(
+        &mut self,
+        id: u64,
+        loaded: Result<LoadedFile, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match loaded {
+            Ok(loaded) => {
+                let files_allowed = self.files_allowed();
+                if let Some(job) = self.tray.finish_reading(id, loaded, files_allowed) {
+                    self.start_upload(job, cx);
+                }
+            }
+            Err(message) => self.tray.fail_reading(id, message),
+        }
+        cx.notify();
+    }
+
+    fn start_upload(&mut self, job: UploadJob, cx: &mut Context<Self>) {
+        let Some(conversation_id) = self.conversation_id.clone().filter(|id| !id.is_empty()) else {
+            self.tray.finish_upload(job.id, UploadResult::Failed);
+            return;
+        };
+        let state = self.app.read(cx);
+        let (demo, engine) = (state.mode.demo, state.engine.clone());
+        if demo {
+            self.simulate_upload(job, cx);
+            return;
+        }
+        let Some(engine) = engine else {
+            self.tray.finish_upload(job.id, UploadResult::Failed);
+            return;
+        };
+        let id = job.id;
+        let (event_sender, mut event_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<UploadEvent>();
+        let finished_sender = event_sender.clone();
+        let (_, handle) = runtime::spawn_abortable(async move {
+            let result = async {
+                let uploaded = match job.kind {
+                    JobKind::Upload => {
+                        let progress_sender = event_sender.clone();
+                        let uploaded = engine
+                            .upload_attachment_file(
+                                &conversation_id,
+                                &job.name,
+                                &job.bytes,
+                                move |percent| {
+                                    let _ = progress_sender.send(UploadEvent::Progress(percent));
+                                },
+                            )
+                            .await;
+                        match uploaded {
+                            Ok(uploaded) => {
+                                let _ = event_sender.send(UploadEvent::Uploaded(uploaded.clone()));
+                                uploaded
+                            }
+                            Err(_) => return UploadResult::Failed,
+                        }
+                    }
+                    JobKind::Share(uploaded) => uploaded,
+                };
+                let Some(reference) = uploaded.reference() else {
+                    return UploadResult::Failed;
+                };
+                match engine.share_attachment(&conversation_id, &uploaded).await {
+                    Ok(()) => UploadResult::Done(DoneFile {
+                        reference,
+                        uploaded: Some(uploaded),
+                    }),
+                    Err(_) => UploadResult::ShareFailed(uploaded),
+                }
+            }
+            .await;
+            let _ = finished_sender.send(UploadEvent::Finished(result));
+        });
+        self.uploads.insert(id, UploadHandle::Network(handle));
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = event_receiver.recv().await {
+                let updated = this.update(cx, |this, cx| {
+                    let orphan = match event {
+                        UploadEvent::Progress(percent) => {
+                            this.tray.set_progress(id, percent);
+                            None
+                        }
+                        UploadEvent::Uploaded(uploaded) => this.tray.mark_uploaded(id, uploaded),
+                        UploadEvent::Finished(result) => this.finish_upload(id, result),
+                    };
+                    this.discard_uploaded(orphan.into_iter().collect(), cx);
+                    cx.notify();
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn simulate_upload(&mut self, job: UploadJob, cx: &mut Context<Self>) {
+        let id = job.id;
+        let fails = job.name.to_lowercase().contains("fail") && self.demo_failed.insert(id);
+        let task = cx.spawn(async move |this, cx| {
+            for step in 1..=DEMO_UPLOAD_STEPS {
+                cx.background_executor().timer(DEMO_UPLOAD_STEP).await;
+                if fails && step == DEMO_FAILURE_STEP {
+                    this.update(cx, |this, cx| {
+                        this.finish_upload_in_demo(id, UploadResult::Failed, cx)
+                    })
+                    .ok();
+                    return;
+                }
+                let percent = (u32::from(step) * 100 / u32::from(DEMO_UPLOAD_STEPS)) as u8;
+                this.update(cx, |this, cx| this.set_progress(id, percent, cx))
+                    .ok();
+            }
+            let reference = FileReference {
+                attachment_id: format!("demo-attachment-{id}"),
+                content_url: format!("https://demo.invalid/files/{}", job.name),
+                name: job.name,
+            };
+            let done = DoneFile {
+                reference,
+                uploaded: None,
+            };
+            this.update(cx, |this, cx| {
+                this.finish_upload_in_demo(id, UploadResult::Done(done), cx)
+            })
+            .ok();
+        });
+        self.uploads.insert(id, UploadHandle::Demo(task));
+    }
+
+    fn set_progress(&mut self, id: u64, percent: u8, cx: &mut Context<Self>) {
+        self.tray.set_progress(id, percent);
+        cx.notify();
+    }
+
+    fn finish_upload(&mut self, id: u64, result: UploadResult) -> Option<UploadedFile> {
+        self.uploads.remove(&id);
+        self.tray.finish_upload(id, result)
+    }
+
+    fn finish_upload_in_demo(&mut self, id: u64, result: UploadResult, cx: &mut Context<Self>) {
+        self.finish_upload(id, result);
+        cx.notify();
+    }
+
+    fn remove_attachment(&mut self, id: u64, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(handle) = self.uploads.remove(&id) {
+            handle.cancel();
+        }
+        let uploaded = self.tray.remove(id);
+        self.discard_uploaded(uploaded.into_iter().collect(), cx);
+        cx.notify();
+    }
+
+    fn retry_attachment(&mut self, id: u64, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(job) = self.tray.retry(id) {
+            self.start_upload(job, cx);
+        }
+        cx.notify();
     }
 
     pub fn submit_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -520,10 +881,13 @@ impl Composer {
         self.input
             .update(cx, |state, cx| state.set_value("", window, cx));
         self.mention_inputs.clear();
+        if self.editing.is_none() {
+            self.tray.clear();
+        }
         self.reply = None;
         self.editing = None;
         self.close_popup();
-        cx.emit(ComposerEvent::Submit(outgoing));
+        cx.emit(ComposerEvent::Submit(Box::new(outgoing)));
         cx.notify();
     }
 
@@ -553,6 +917,10 @@ impl Composer {
         });
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
+        if outgoing.edit.is_none() {
+            self.cancel_uploads();
+            self.tray.restore(&outgoing.images, &outgoing.files);
+        }
         self.close_popup();
         cx.notify();
     }
@@ -571,7 +939,7 @@ impl Composer {
     }
 
     pub fn is_empty(&self, cx: &App) -> bool {
-        self.input.read(cx).value().trim().is_empty()
+        self.input.read(cx).value().trim().is_empty() && self.tray.is_empty()
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -799,7 +1167,8 @@ impl Composer {
 impl Render for Composer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focused = self.input.focus_handle(cx).contains_focused(window, cx);
-        let empty = self.is_empty(cx);
+        let can_send = self.can_send(cx);
+        let can_attach = self.editing.is_none();
         let send = div()
             .id("composer-send")
             .size(px(32.))
@@ -809,16 +1178,37 @@ impl Render for Composer {
             .justify_center()
             .rounded(px(8.))
             .child(symbol("keyboard_return", 20., white()))
-            .when(empty, |button| button.opacity(0.4))
-            .when(!empty, |button| {
+            .when(!can_send, |button| button.opacity(0.4))
+            .when(can_send, |button| {
                 button
                     .cursor_pointer()
                     .hover(|button| button.bg(white().opacity(0.1)))
                     .on_click(cx.listener(|this, _, window, cx| this.submit_current(window, cx)))
             });
+        let attach = can_attach.then(|| {
+            div()
+                .id("composer-attach")
+                .size(px(32.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(8.))
+                .cursor_pointer()
+                .hover(|button| button.bg(theme::row_hover()))
+                .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
+                .child(symbol("attach_file", 20., theme::text_muted()))
+                .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx)))
+        });
+        let composer = cx.weak_entity();
         let input = Textarea::new(&self.input)
             .appearance(false)
             .bordered(false)
+            .on_paste(move |item, _, cx| {
+                composer
+                    .update(cx, |this, cx| this.paste(item, cx))
+                    .unwrap_or(false)
+            })
             .token(|context, _, _| {
                 div()
                     .h(context.line_height())
@@ -833,6 +1223,24 @@ impl Render for Composer {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(context.token().label().clone())
             });
+        let tray = can_attach
+            .then(|| {
+                render_tray(
+                    &self.tray,
+                    Self::remove_attachment,
+                    Self::retry_attachment,
+                    cx,
+                )
+            })
+            .flatten();
+        let notice = self.tray.notice().filter(|_| can_attach).map(|notice| {
+            div()
+                .w_full()
+                .mb(px(6.))
+                .text_size(px(12.))
+                .text_color(theme::amber())
+                .child(notice.to_owned())
+        });
         v_flex()
             .w_full()
             .flex_none()
@@ -884,6 +1292,7 @@ impl Render for Composer {
                     cx.stop_propagation();
                 }
             }))
+            .children(notice)
             .children(self.render_reply_strip(cx))
             .children(self.render_edit_strip(cx))
             .child(
@@ -893,13 +1302,8 @@ impl Render for Composer {
                     .children(self.render_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
                     .child(
-                        h_flex()
+                        v_flex()
                             .w_full()
-                            .items_end()
-                            .gap(px(6.))
-                            .py(px(6.))
-                            .pl(px(12.))
-                            .pr(px(6.))
                             .rounded(px(10.))
                             .bg(theme::surface())
                             .border_1()
@@ -908,8 +1312,19 @@ impl Render for Composer {
                             } else {
                                 theme::border_strong()
                             })
-                            .child(div().flex_1().min_w_0().child(input))
-                            .child(send),
+                            .children(tray)
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_end()
+                                    .gap(px(6.))
+                                    .py(px(6.))
+                                    .pl(px(if can_attach { 6. } else { 12. }))
+                                    .pr(px(6.))
+                                    .children(attach)
+                                    .child(div().flex_1().min_w_0().child(input))
+                                    .child(send),
+                            ),
                     ),
             )
     }
@@ -985,6 +1400,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn extras_carry_image_bytes_with_their_mime_type_and_the_file_references() {
+        use std::sync::Arc;
+
+        use gpui_kit::{Image, ImageFormat};
+        use teams_core::FileKind;
+
+        use super::{Outgoing, OutgoingFile, OutgoingImage};
+
+        let outgoing = Outgoing {
+            text: String::new(),
+            mentions: Vec::new(),
+            reply: None,
+            edit: None,
+            images: vec![OutgoingImage {
+                name: "pasted-image.png".into(),
+                image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![1, 2, 3])),
+                dimensions: Some((1, 1)),
+            }],
+            files: vec![OutgoingFile {
+                name: "plan.pdf".into(),
+                size: 9,
+                kind: FileKind::Pdf,
+                uploaded: None,
+                reference: teams_core::FileReference {
+                    attachment_id: "guid".into(),
+                    content_url: "https://files.example/plan.pdf".into(),
+                    name: "plan.pdf".into(),
+                },
+            }],
+        };
+        let extras = outgoing.extras();
+        assert_eq!(extras.images[0].content_type, "image/png");
+        assert_eq!(extras.images[0].bytes.as_slice(), [1, 2, 3]);
+        assert_eq!(extras.files[0].attachment_id, "guid");
+        assert!(outgoing.has_attachments());
+    }
+
+    #[test]
+    fn enter_sends_attachments_even_without_text() {
+        assert!(super::is_plain_enter(&press(false)));
+        assert!(!super::is_plain_enter(&press(true)));
+        assert!(!super::is_plain_enter(&InputEvent::Change));
+    }
+
     mod keys {
         use std::sync::Arc;
 
@@ -1024,6 +1484,233 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(value, "X");
+        }
+
+        #[gpui_kit::test]
+        fn demo_upload_runs_to_done_and_a_file_alone_can_be_sent(cx: &mut TestAppContext) {
+            cx.update(gpui_kit::init);
+            let store = Arc::new(Store::open_in_memory().unwrap());
+            let mode = Mode {
+                demo: true,
+                read_only: false,
+                demo_sync: None,
+            };
+            let (handle, composer) = cx.update(|cx| {
+                let app = cx.new(|_| AppState::new(store, mode));
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| Composer::new(app, window, cx))
+                })
+                .unwrap()
+            });
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("plan.pdf");
+            std::fs::write(&path, b"%PDF-1.7").unwrap();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.add_paths(vec![path], cx);
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert!(composer.tray.blocks_send());
+                assert!(!composer.can_send(cx));
+            });
+            cx.executor()
+                .advance_clock(std::time::Duration::from_secs(3));
+            cx.run_until_parked();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert!(composer.can_send(cx));
+                let outgoing = composer
+                    .outgoing(cx)
+                    .expect("an attachment alone is a message");
+                assert_eq!(outgoing.text, "");
+                assert_eq!(outgoing.files.len(), 1);
+                assert_eq!(outgoing.files[0].name, "plan.pdf");
+            });
+        }
+
+        #[gpui_kit::test]
+        fn attachments_are_dropped_when_the_conversation_changes(cx: &mut TestAppContext) {
+            cx.update(gpui_kit::init);
+            let store = Arc::new(Store::open_in_memory().unwrap());
+            let mode = Mode {
+                demo: true,
+                read_only: false,
+                demo_sync: None,
+            };
+            let (handle, composer) = cx.update(|cx| {
+                let app = cx.new(|_| AppState::new(store, mode));
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| Composer::new(app, window, cx))
+                })
+                .unwrap()
+            });
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("plan.pdf");
+            std::fs::write(&path, b"%PDF-1.7").unwrap();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.add_paths(vec![path], cx);
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("other-chat", "Other", window, cx)
+                });
+            })
+            .unwrap();
+            cx.update(|cx| assert!(composer.read(cx).tray.is_empty()));
+        }
+
+        fn demo_composer(
+            cx: &mut TestAppContext,
+        ) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<Composer>) {
+            cx.update(gpui_kit::init);
+            let store = Arc::new(Store::open_in_memory().unwrap());
+            let mode = Mode {
+                demo: true,
+                read_only: false,
+                demo_sync: None,
+            };
+            let (handle, composer) = cx.update(|cx| {
+                let app = cx.new(|_| AppState::new(store, mode));
+                gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| Composer::new(app, window, cx))
+                })
+                .unwrap()
+            });
+            (handle, composer)
+        }
+
+        fn small_png(directory: &std::path::Path) -> std::path::PathBuf {
+            let path = directory.join("dot.png");
+            image::RgbaImage::new(2, 2).save(&path).unwrap();
+            path
+        }
+
+        #[gpui_kit::test]
+        fn editing_keeps_the_attachments_and_hides_them_from_the_edit(cx: &mut TestAppContext) {
+            use super::super::{EditPreview, Outgoing};
+
+            let (handle, composer) = demo_composer(cx);
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("plan.pdf");
+            std::fs::write(&path, b"%PDF-1.7").unwrap();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.add_paths(vec![path], cx);
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_secs(3));
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    let draft = Outgoing {
+                        text: "old".into(),
+                        mentions: Vec::new(),
+                        reply: None,
+                        edit: Some(EditPreview {
+                            message_id: "m1".into(),
+                            excerpt: "old".into(),
+                        }),
+                        images: Vec::new(),
+                        files: Vec::new(),
+                    };
+                    composer.begin_edit(draft, window, cx);
+                });
+            })
+            .unwrap();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert_eq!(composer.tray.items().len(), 1);
+                let outgoing = composer.outgoing(cx).unwrap();
+                assert!(outgoing.files.is_empty());
+                assert_eq!(outgoing.text, "old");
+            });
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| composer.cancel_edit(window, cx));
+            })
+            .unwrap();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert_eq!(composer.tray.items().len(), 1);
+                assert!(composer.can_send(cx));
+            });
+        }
+
+        #[gpui_kit::test]
+        fn draft_images_follow_only_into_the_chat_that_was_chosen(cx: &mut TestAppContext) {
+            let (handle, composer) = demo_composer(cx);
+            let directory = tempfile::tempdir().unwrap();
+            let path = small_png(directory.path());
+            for (carry, chosen, expected) in [
+                (Some("chat-a"), "chat-a", 1),
+                (None, "chat-b", 0),
+                (Some("chat-a"), "chat-b", 0),
+            ] {
+                cx.update_window(handle, |_, window, cx| {
+                    composer.update(cx, |composer, cx| {
+                        composer.set_conversation("", "", window, cx);
+                        composer.add_paths(vec![path.clone()], cx);
+                    });
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle, |_, window, cx| {
+                    composer.update(cx, |composer, cx| {
+                        if let Some(chat) = carry {
+                            composer.carry_images_into(chat.to_owned());
+                        }
+                        composer.set_conversation(chosen, "Chat", window, cx);
+                    });
+                })
+                .unwrap();
+                cx.update(|cx| assert_eq!(composer.read(cx).tray.items().len(), expected));
+            }
+        }
+
+        #[gpui_kit::test]
+        fn a_draft_target_change_drops_the_files_of_the_old_target_and_keeps_images(
+            cx: &mut TestAppContext,
+        ) {
+            let (handle, composer) = demo_composer(cx);
+            let directory = tempfile::tempdir().unwrap();
+            let png = small_png(directory.path());
+            let pdf = directory.path().join("plan.pdf");
+            std::fs::write(&pdf, b"%PDF-1.7").unwrap();
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("bob-chat", "Bob", window, cx);
+                    composer.add_paths(vec![png, pdf], cx);
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update(|cx| assert_eq!(composer.read(cx).tray.items().len(), 2));
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.carry_images_into(String::new());
+                    composer.set_conversation("", "", window, cx);
+                });
+            })
+            .unwrap();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert_eq!(composer.tray.items().len(), 1);
+                assert_eq!(composer.tray.items()[0].name, "dot.png");
+                assert!(!composer.files_allowed());
+            });
         }
     }
 }

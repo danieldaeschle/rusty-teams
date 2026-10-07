@@ -4,7 +4,7 @@ use session::{GRAPH, Method, Scope};
 use crate::client::Graph;
 use crate::error::Result;
 use crate::models::{Chat, Message};
-use crate::outgoing::{OutgoingMention, message_body};
+use crate::outgoing::{MessageExtras, OutgoingMention, message_body};
 use crate::target::MessageTarget;
 use crate::urls;
 
@@ -22,12 +22,13 @@ impl Graph {
         chat_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.write_for_message(
             Method::Post,
             &urls::chat_message_collection(chat_id),
             "Chat.ReadWrite",
-            Some(message_body(html, mentions)),
+            Some(message_body(html, mentions, extras)),
         )
         .await
     }
@@ -39,8 +40,9 @@ impl Graph {
         html: &str,
         subject: Option<&str>,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
-        let mut body = message_body(html, mentions);
+        let mut body = message_body(html, mentions, extras);
         if let Some(subject) = subject.filter(|subject| !subject.is_empty()) {
             body["subject"] = json!(subject);
         }
@@ -60,12 +62,13 @@ impl Graph {
         message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.write_for_message(
             Method::Post,
             &urls::channel_reply_post(team_id, channel_id, message_id),
             "ChannelMessage.Send",
-            Some(message_body(html, mentions)),
+            Some(message_body(html, mentions, extras)),
         )
         .await
     }
@@ -77,10 +80,11 @@ impl Graph {
         quoted_message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         let body = json!({
             "messageIds": [quoted_message_id],
-            "replyMessage": message_body(html, mentions),
+            "replyMessage": message_body(html, mentions, extras),
         });
         self.write_for_message(
             Method::Post,
@@ -132,12 +136,13 @@ impl Graph {
         target: &MessageTarget,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<()> {
         self.write(
             Method::Patch,
             &target.url(),
             target.write_scope(),
-            Some(message_body(html, mentions)),
+            Some(message_body(html, mentions, extras)),
         )
         .await
     }

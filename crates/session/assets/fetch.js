@@ -59,7 +59,7 @@
     try {
       const response = await fetch(request.url, {
         method: request.method,
-        headers: {Authorization: 'Bearer ' + token, ...request.headers},
+        headers: request.anonymous ? request.headers : {Authorization: 'Bearer ' + token, ...request.headers},
         body: request.bodyBase64 ? Uint8Array.from(atob(request.bodyBase64), (character) => character.charCodeAt(0)) : request.body,
       });
       if (request.binary && response.ok) {

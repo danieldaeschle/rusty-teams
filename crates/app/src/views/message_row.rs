@@ -165,6 +165,7 @@ fn bubble(
     }
     content = content.children(attachments_view(
         &row.images,
+        &row.local_images,
         &row.files,
         &format!("message-{index}"),
         directory,
@@ -323,7 +324,8 @@ fn with_meta_room(blocks: &[Block], room: usize) -> Option<Vec<Block>> {
 }
 
 fn has_text(row: &MessageRow) -> bool {
-    !row.blocks.is_empty() || (row.images.is_empty() && row.files.is_empty())
+    !row.blocks.is_empty()
+        || (row.images.is_empty() && row.local_images.is_empty() && row.files.is_empty())
 }
 
 fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<AnyElement> {
@@ -469,6 +471,7 @@ fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) ->
         }
         body = body.children(attachments_view(
             &row.images,
+            &row.local_images,
             &row.files,
             &format!("message-{index}"),
             directory,

@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 56 %** (46 done, 4 partial, 35 missing of 85). Partial counts half.
+**Parity: 58 %** (47 done, 4 partial, 34 missing of 85). Partial counts half.
 
 ## By area
 
@@ -11,7 +11,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 60 % | 6 | 0 | 4 |
 | [Reading](#reading) | 71 % | 13 | 1 | 5 |
-| [Writing](#writing) | 61 % | 8 | 1 | 5 |
+| [Writing](#writing) | 68 % | 9 | 1 | 4 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
 | [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
@@ -24,14 +24,13 @@ Feature parity with the Microsoft Teams desktop client.
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | Attach a file, paste or drag an image |  |
-| 2 | Channel: new post with subject, post cards |  |
-| 3 | Sign in on Linux without Chrome on a debug port |  |
-| 4 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
-| 5 | Emoji picker in the composer | Reaction picker exists |
-| 6 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
-| 7 | Typing indicator |  |
-| 8 | Unsent messages survive a restart |  |
+| 1 | Channel: new post with subject, post cards |  |
+| 2 | Sign in on Linux without Chrome on a debug port |  |
+| 3 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
+| 4 | Emoji picker in the composer | Reaction picker exists |
+| 5 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 6 | Typing indicator |  |
+| 7 | Unsent messages survive a restart |  |
 
 ## Sign-in and app
 
@@ -97,7 +96,7 @@ Feature parity with the Microsoft Teams desktop client.
 | React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
 | Emoji picker | Partial | For reactions; composer still uses colon codes |
 | Formatting toolbar, Ctrl+B and Ctrl+I | Missing |  |
-| Attach a file, paste or drag an image | Missing |  |
+| Attach a file, paste or drag an image | Done | Images inline, files via OneDrive or the channel's Files |
 | GIFs and stickers | Missing |  |
 | Schedule send | Missing |  |
 | Unsent messages survive a restart | Missing | Pending sends live in memory only |

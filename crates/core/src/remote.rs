@@ -1,8 +1,8 @@
 use chatsvc::{ConversationRef, MemberHorizon, Messages, Receipts};
 use chrono::{DateTime, Utc};
 use graph::{
-    Channel, Chat, Graph, Member, Message, MessageTarget, OutgoingMention, Photo, Presence, Team,
-    User,
+    Channel, Chat, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
+    OutgoingMention, Photo, Presence, Team, UploadDestination, UploadedFile, User,
 };
 
 use crate::error::{Error, Result};
@@ -82,6 +82,7 @@ pub trait Remote {
         chat_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message>;
     async fn send_channel_message(
         &self,
@@ -90,6 +91,7 @@ pub trait Remote {
         html: &str,
         subject: Option<&str>,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message>;
     async fn reply_to_channel_message(
         &self,
@@ -98,6 +100,7 @@ pub trait Remote {
         message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message>;
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
@@ -107,6 +110,7 @@ pub trait Remote {
         target: &MessageTarget,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<()>;
     async fn soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()>;
     async fn create_one_on_one(&self, my_user_id: &str, user_id: &str) -> Result<Chat>;
@@ -124,8 +128,31 @@ pub trait Remote {
         _quoted_message_id: &str,
         _html: &str,
         _mentions: &[OutgoingMention],
+        _extras: &MessageExtras,
     ) -> Result<Message> {
         Err(Error::Unsupported("a quoted reply"))
+    }
+
+    async fn channel_files_folder(&self, _team_id: &str, _channel_id: &str) -> Result<DriveFolder> {
+        Err(Error::Unsupported("a channel files folder"))
+    }
+
+    async fn upload_file(
+        &self,
+        _destination: &UploadDestination,
+        _file_name: &str,
+        _bytes: &[u8],
+        _progress: &(dyn Fn(u8) + Send + Sync),
+    ) -> Result<UploadedFile> {
+        Err(Error::Unsupported("a file upload"))
+    }
+
+    async fn share_file(&self, _file: &UploadedFile, _user_ids: &[String]) -> Result<()> {
+        Err(Error::Unsupported("sharing a file"))
+    }
+
+    async fn delete_file(&self, _file: &UploadedFile) -> Result<()> {
+        Err(Error::Unsupported("deleting a file"))
     }
 
     async fn hosted_content(&self, _url: &str) -> Result<Photo> {
@@ -262,8 +289,9 @@ impl Remote for Graph {
         chat_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
-        Ok(Graph::send_chat_message(self, chat_id, html, mentions).await?)
+        Ok(Graph::send_chat_message(self, chat_id, html, mentions, extras).await?)
     }
 
     async fn send_channel_message(
@@ -273,8 +301,12 @@ impl Remote for Graph {
         html: &str,
         subject: Option<&str>,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
-        Ok(Graph::send_channel_message(self, team_id, channel_id, html, subject, mentions).await?)
+        Ok(
+            Graph::send_channel_message(self, team_id, channel_id, html, subject, mentions, extras)
+                .await?,
+        )
     }
 
     async fn reply_to_channel_message(
@@ -284,11 +316,12 @@ impl Remote for Graph {
         message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
-        Ok(
-            Graph::reply_to_channel_message(self, team_id, channel_id, message_id, html, mentions)
-                .await?,
+        Ok(Graph::reply_to_channel_message(
+            self, team_id, channel_id, message_id, html, mentions, extras,
         )
+        .await?)
     }
 
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
@@ -308,15 +341,19 @@ impl Remote for Graph {
         target: &MessageTarget,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<()> {
         match chatsvc_conversation(target) {
-            Some(conversation) if mentions.is_empty() => Ok(Messages::new(self.session())
-                .edit_message(&conversation, target.message_id(), html)
-                .await?),
+            Some(conversation) if mentions.is_empty() => {
+                let html = format!("{}{html}{}", extras.kept_html(), extras.files_html());
+                Ok(Messages::new(self.session())
+                    .edit_message(&conversation, target.message_id(), &html)
+                    .await?)
+            }
             Some(_) => Err(Error::Unsupported(
                 "editing a channel message with mentions",
             )),
-            None => Ok(Graph::edit_message(self, target, html, mentions).await?),
+            None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
         }
     }
 
@@ -352,8 +389,34 @@ impl Remote for Graph {
         quoted_message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
-        Ok(Graph::reply_with_quote(self, chat_id, quoted_message_id, html, mentions).await?)
+        Ok(
+            Graph::reply_with_quote(self, chat_id, quoted_message_id, html, mentions, extras)
+                .await?,
+        )
+    }
+
+    async fn channel_files_folder(&self, team_id: &str, channel_id: &str) -> Result<DriveFolder> {
+        Ok(Graph::channel_files_folder(self, team_id, channel_id).await?)
+    }
+
+    async fn upload_file(
+        &self,
+        destination: &UploadDestination,
+        file_name: &str,
+        bytes: &[u8],
+        progress: &(dyn Fn(u8) + Send + Sync),
+    ) -> Result<UploadedFile> {
+        Ok(Graph::upload_file(self, destination, file_name, bytes, progress).await?)
+    }
+
+    async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
+        Ok(Graph::share_item(self, file, user_ids).await?)
+    }
+
+    async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
+        Ok(Graph::delete_drive_item(self, &file.drive_id, &file.item_id).await?)
     }
 
     async fn hosted_content(&self, url: &str) -> Result<Photo> {

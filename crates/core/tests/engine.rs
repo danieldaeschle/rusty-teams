@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use graph::{
-    Channel, Chat, Member, Message, MessageTarget, OutgoingMention, Photo, Presence, Team, User,
+    Channel, Chat, DriveFolder, HostedImage, Member, Message, MessageExtras, MessageTarget,
+    OutgoingMention, Photo, Presence, Team, UploadDestination, UploadedFile, User,
 };
 use serde_json::json;
 use store::{ChannelLayoutRecord, ChannelRecord, Store, TeamLayoutRecord, TeamRecord};
@@ -80,6 +81,8 @@ struct Fake {
     presence_answers: Mutex<Vec<Presence>>,
     hosted_requests: Mutex<Vec<String>>,
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
+    extras_sent: Mutex<Vec<MessageExtras>>,
+    folder_requests: Mutex<usize>,
     directory_users: Mutex<Vec<User>>,
     horizons: Mutex<Vec<chatsvc::MemberHorizon>>,
     horizon_calls: Mutex<usize>,
@@ -331,9 +334,11 @@ impl Remote for Handle {
         _chat_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.sent.lock().unwrap().push(html.to_owned());
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
+        self.extras_sent.lock().unwrap().push(extras.clone());
         Ok(message(9000, 500, html))
     }
 
@@ -344,9 +349,11 @@ impl Remote for Handle {
         html: &str,
         subject: Option<&str>,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.record(format!("post subject={subject:?}"));
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
+        self.extras_sent.lock().unwrap().push(extras.clone());
         Ok(message(9001, 501, html))
     }
 
@@ -357,9 +364,11 @@ impl Remote for Handle {
         message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.record(format!("reply to {message_id}"));
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
+        self.extras_sent.lock().unwrap().push(extras.clone());
         Ok(message(9002, 502, html))
     }
 
@@ -386,9 +395,16 @@ impl Remote for Handle {
         target: &MessageTarget,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<()> {
         self.record(format!("edit {} {html}", describe(target)));
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
+        self.extras_sent.lock().unwrap().push(extras.clone());
+        Ok(())
+    }
+
+    async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
+        self.record(format!("delete_file {}", file.item_id));
         Ok(())
     }
 
@@ -421,10 +437,50 @@ impl Remote for Handle {
         quoted_message_id: &str,
         html: &str,
         mentions: &[OutgoingMention],
+        extras: &MessageExtras,
     ) -> Result<Message> {
         self.record(format!("quote_reply {chat_id} {quoted_message_id} {html}"));
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
+        self.extras_sent.lock().unwrap().push(extras.clone());
         Ok(message(9003, 503, html))
+    }
+
+    async fn channel_files_folder(&self, team_id: &str, channel_id: &str) -> Result<DriveFolder> {
+        *self.folder_requests.lock().unwrap() += 1;
+        self.record(format!("files_folder {team_id} {channel_id}"));
+        Ok(DriveFolder {
+            drive_id: "drive-1".into(),
+            item_id: "folder-1".into(),
+        })
+    }
+
+    async fn upload_file(
+        &self,
+        destination: &UploadDestination,
+        file_name: &str,
+        bytes: &[u8],
+        progress: &(dyn Fn(u8) + Send + Sync),
+    ) -> Result<UploadedFile> {
+        let target = match destination {
+            UploadDestination::ChatFiles => "chat-files".to_owned(),
+            UploadDestination::Folder(folder) => format!("{}/{}", folder.drive_id, folder.item_id),
+        };
+        self.record(format!("upload {target} {file_name} {}", bytes.len()));
+        progress(50);
+        progress(100);
+        Ok(UploadedFile {
+            drive_id: "drive-1".into(),
+            item_id: "item-1".into(),
+            name: file_name.to_owned(),
+            web_url: "https://files.example/web".into(),
+            web_dav_url: Some("https://files.example/dav".into()),
+            etag: "\"{GUID-1},2\"".into(),
+        })
+    }
+
+    async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
+        self.record(format!("share {} {}", file.item_id, user_ids.join(",")));
+        Ok(())
     }
 
     async fn hosted_content(&self, url: &str) -> Result<Photo> {
@@ -987,6 +1043,166 @@ async fn channel_sends_post_and_reply_through_graph() {
         .collect();
     assert_eq!(sends, ["post subject=Some(\"Topic\")", "reply to m0030"]);
     assert!(engine.post_to_channel(CHAT, "x", None).await.is_err());
+}
+
+#[tokio::test]
+async fn chat_upload_goes_to_chat_files_and_is_shared_with_the_other_members() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let steps = Arc::new(Mutex::new(Vec::new()));
+    let seen = steps.clone();
+
+    let reference = engine
+        .upload_attachment(CHAT, "plan.pdf", &[1, 2, 3], move |percent| {
+            seen.lock().unwrap().push(percent)
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fake.calls(),
+        ["upload chat-files plan.pdf 3", "share item-1 user-ada"]
+    );
+    assert_eq!(*steps.lock().unwrap(), [50, 100]);
+    assert_eq!(reference.attachment_id, "GUID-1");
+    assert_eq!(reference.content_url, "https://files.example/dav");
+    assert_eq!(reference.name, "plan.pdf");
+}
+
+#[tokio::test]
+async fn channel_upload_uses_the_cached_files_folder_and_shares_nothing() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+
+    engine
+        .upload_attachment(CHANNEL, "a.pdf", &[1], |_| {})
+        .await
+        .unwrap();
+    engine
+        .upload_attachment(CHANNEL, "b.pdf", &[1, 2], |_| {})
+        .await
+        .unwrap();
+
+    assert_eq!(*fake.folder_requests.lock().unwrap(), 1);
+    let uploads: Vec<String> = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("upload") || call.starts_with("share"))
+        .collect();
+    assert_eq!(
+        uploads,
+        [
+            "upload drive-1/folder-1 a.pdf 1",
+            "upload drive-1/folder-1 b.pdf 2"
+        ]
+    );
+}
+
+fn uploaded() -> UploadedFile {
+    UploadedFile {
+        drive_id: "drive-1".into(),
+        item_id: "item-1".into(),
+        name: "a.pdf".into(),
+        web_url: "https://files.example/web".into(),
+        web_dav_url: None,
+        etag: "\"{GUID-1},2\"".into(),
+    }
+}
+
+#[tokio::test]
+async fn sharing_fails_loudly_when_the_chat_members_are_unknown() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine
+        .store()
+        .upsert_chats(&[store::ChatRecord {
+            id: "19:bare@thread.v2".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+
+    let error = engine
+        .share_attachment("19:bare@thread.v2", &uploaded())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Chat members not loaded yet."));
+    engine.share_attachment(CHAT, &uploaded()).await.unwrap();
+    assert!(fake.calls().contains(&"share item-1 user-ada".to_owned()));
+}
+
+#[tokio::test]
+async fn discarding_an_upload_deletes_the_drive_item() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.discard_attachment(&uploaded()).await.unwrap();
+    assert_eq!(fake.calls(), ["delete_file item-1"]);
+}
+
+#[tokio::test]
+async fn an_edit_keeps_the_images_and_files_of_the_original() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine
+        .store()
+        .upsert_messages(&[store::MessageRecord {
+            conversation_id: CHAT.into(),
+            message_id: "m-edit".into(),
+            created_at: base(),
+            body_html: "<p>old</p><p><img src=\"https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/9/$value\"></p><attachment id=\"G1\"></attachment>".into(),
+            attachments_json: r#"[{"content_type":"reference","name":"a.pdf","url":"https://x/a.pdf","text":null}]"#.into(),
+            reactions_json: "[]".into(),
+            mentions_json: "[]".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+
+    let _ = engine.edit_message(CHAT, "m-edit", "new").await;
+
+    let call = fake
+        .calls()
+        .into_iter()
+        .find(|call| call.starts_with("edit"))
+        .unwrap();
+    assert!(call.contains("new<p><img src=\"https://graph.microsoft.com/"));
+    let extras = fake.extras_sent.lock().unwrap();
+    assert_eq!(extras[0].files[0].attachment_id, "G1");
+    assert_eq!(extras[0].files[0].content_url, "https://x/a.pdf");
+}
+
+#[tokio::test]
+async fn upload_to_an_unknown_conversation_fails() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    assert!(
+        engine
+            .upload_attachment("unknown", "a.pdf", &[1], |_| {})
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn send_with_extras_hands_images_and_files_to_the_remote() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let extras = MessageExtras {
+        kept: Vec::new(),
+        images: vec![HostedImage {
+            content_type: "image/png".into(),
+            bytes: Arc::new(vec![9]),
+        }],
+        files: Vec::new(),
+    };
+
+    engine
+        .send_message_with_extras(CHAT, "look", None, &[], &extras)
+        .await
+        .unwrap();
+    engine.send_message(CHAT, "plain", None).await.unwrap();
+
+    let sent = fake.extras_sent.lock().unwrap();
+    assert_eq!(sent[0], extras);
+    assert!(sent[1].is_empty());
 }
 
 #[tokio::test]

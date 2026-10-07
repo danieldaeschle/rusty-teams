@@ -16,6 +16,11 @@ pub struct AttachmentInfo {
     pub size: Option<u64>,
     #[serde(default)]
     pub quote: Option<QuoteInfo>,
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Raw content, kept only for quotes and cards so an edit can send them back unchanged.
+    #[serde(default)]
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +166,86 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
         });
     }
     found
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EditPreserved {
+    pub images_html: String,
+    pub files: Vec<graph::FileReference>,
+    pub kept: Vec<graph::KeptAttachment>,
+}
+
+/// What an edit must carry over: the `<img>` elements, the file attachments and the quote or card attachments, each matched to its `<attachment id>` tag.
+pub fn edit_preserved(record: &MessageRecord) -> EditPreserved {
+    let fragment = Html::parse_fragment(&record.body_html);
+    let mut preserved = EditPreserved::default();
+    let mut tag_ids: Vec<&str> = Vec::new();
+    for element in fragment
+        .root_element()
+        .descendants()
+        .filter_map(ElementRef::wrap)
+    {
+        let value = element.value();
+        let is_emoji = value
+            .attr("itemtype")
+            .is_some_and(|itemtype| itemtype.contains(EMOJI_ITEMTYPE));
+        match value.name() {
+            "img" if !is_emoji && value.attr("src").is_some_and(|src| !src.is_empty()) => {
+                preserved
+                    .images_html
+                    .push_str(&format!("<p>{}</p>", element.html()));
+            }
+            "attachment" => tag_ids.extend(value.attr("id")),
+            _ => {}
+        }
+    }
+    let stored = attachments(record);
+    let attachment_id = |attachment: &AttachmentInfo| {
+        attachment.id.clone().or_else(|| {
+            attachment
+                .quote
+                .as_ref()
+                .map(|quote| quote.message_id.clone())
+        })
+    };
+    let mut unclaimed: Vec<&str> = tag_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            !stored.iter().any(|attachment| {
+                !attachment.is_file() && attachment_id(attachment).as_deref() == Some(*id)
+            })
+        })
+        .collect();
+    for attachment in stored {
+        if attachment.is_file() {
+            let id = match attachment_id(&attachment) {
+                Some(id) if tag_ids.contains(&id.as_str()) => id,
+                Some(_) => continue,
+                None if unclaimed.is_empty() => continue,
+                None => unclaimed.remove(0).to_owned(),
+            };
+            if let Some(content_url) = attachment.url {
+                preserved.files.push(graph::FileReference {
+                    attachment_id: id,
+                    content_url,
+                    name: attachment.name.unwrap_or_default(),
+                });
+            }
+        } else if let Some(id) = attachment_id(&attachment)
+            && tag_ids.contains(&id.as_str())
+            && attachment.content.is_some()
+        {
+            preserved.kept.push(graph::KeptAttachment {
+                id,
+                content_type: attachment.content_type,
+                content: attachment.content,
+                content_url: attachment.url,
+                name: attachment.name,
+            });
+        }
+    }
+    preserved
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,6 +452,62 @@ mod tests {
     }
 
     #[test]
+    fn edits_keep_images_and_match_files_to_their_attachment_tags() {
+        let html = "<p>text</p><p><img src=\"https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/9/$value\"></p><attachment id=\"G1\"></attachment>";
+        let attachments = r#"[{"content_type":"reference","name":"a.pdf","url":"https://x/a.pdf","text":null,"id":"G1"}]"#;
+        let preserved = edit_preserved(&record(html, attachments));
+        assert!(
+            preserved
+                .images_html
+                .starts_with("<p><img src=\"https://graph.microsoft.com/")
+        );
+        assert!(!preserved.images_html.contains("text"));
+        assert_eq!(preserved.files.len(), 1);
+        assert_eq!(preserved.files[0].attachment_id, "G1");
+        assert_eq!(preserved.files[0].content_url, "https://x/a.pdf");
+        assert_eq!(preserved.files[0].name, "a.pdf");
+        assert!(preserved.kept.is_empty());
+    }
+
+    const QUOTED_HTML: &str =
+        "<attachment id=\"Q1\"></attachment><p>answer</p><attachment id=\"F1\"></attachment>";
+
+    #[test]
+    fn a_quoted_reply_keeps_its_quote_and_pairs_the_file_by_id() {
+        let attachments = r#"[
+            {"content_type":"messageReference","name":null,"url":null,"text":null,"id":"Q1","content":"{\"messageId\":\"Q1\",\"messagePreview\":\"hi\"}","quote":{"message_id":"Q1","preview":"hi","sender_name":null}},
+            {"content_type":"reference","name":"a.pdf","url":"https://x/a.pdf","text":null,"id":"F1"}
+        ]"#;
+        let preserved = edit_preserved(&record(QUOTED_HTML, attachments));
+        assert_eq!(preserved.files.len(), 1);
+        assert_eq!(preserved.files[0].attachment_id, "F1");
+        assert_eq!(preserved.kept.len(), 1);
+        assert_eq!(preserved.kept[0].id, "Q1");
+        assert_eq!(
+            preserved.kept[0].content_type.as_deref(),
+            Some("messageReference")
+        );
+        assert!(
+            preserved.kept[0]
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("messagePreview")
+        );
+    }
+
+    #[test]
+    fn records_cached_before_content_was_stored_leave_the_quote_out() {
+        let attachments = r#"[
+            {"content_type":"messageReference","name":null,"url":null,"text":null,"quote":{"message_id":"Q1","preview":"hi","sender_name":null}},
+            {"content_type":"reference","name":"a.pdf","url":"https://x/a.pdf","text":null}
+        ]"#;
+        let preserved = edit_preserved(&record(QUOTED_HTML, attachments));
+        assert_eq!(preserved.files[0].attachment_id, "F1");
+        assert!(preserved.kept.is_empty());
+    }
+
+    #[test]
     fn file_kind_follows_the_extension_then_the_content_type() {
         let kind = |name: Option<&str>, content_type: &str| {
             AttachmentInfo {
@@ -376,6 +517,8 @@ mod tests {
                 text: None,
                 size: None,
                 quote: None,
+                id: None,
+                content: None,
             }
             .file_kind()
         };
