@@ -221,6 +221,7 @@ impl Graph {
             return Err(Error::EmptyUpload);
         }
         let scope = Scope::graph(FILES_SCOPE);
+        let shown_name = file_name;
         let file_name = self.free_name(destination, file_name).await?;
         let file_name = file_name.as_str();
         let session_url = match destination {
@@ -265,7 +266,9 @@ impl Graph {
                 Ok(answer) if matches!(answer.status, 200 | 201) => {
                     guard.disarm();
                     progress(100);
-                    return finished_item(answer.body);
+                    let mut uploaded = finished_item(answer.body)?;
+                    uploaded.name = shown_name.to_owned();
+                    return Ok(uploaded);
                 }
                 Ok(_) => {
                     failures = 0;
