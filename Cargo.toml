@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["spikes/*"]
+exclude = ["spikes/*", "vendor"]
 resolver = "2"
 
 [workspace.package]
@@ -34,3 +34,6 @@ teams-core = { path = "crates/core" }
 gpui-kit = "=0.7.1"
 chatsvc = { path = "crates/chatsvc" }
 webview = { path = "crates/webview" }
+
+[patch.crates-io]
+gpui-base = { path = "vendor/gpui-base" }

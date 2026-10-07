@@ -235,6 +235,16 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Measure these document byte ranges in another font family when wrapping.
+    pub(crate) fn set_font_families(
+        &mut self,
+        font_families: std::rc::Rc<[(Range<usize>, gpui::SharedString)]>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_font_families(font_families, cx);
+        self.rebuild_fold_projection();
+    }
+
     pub fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrap_map.on_layout_changed(wrap_width, cx);
         self.rebuild_fold_projection();

@@ -17,7 +17,12 @@ use std::{ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar,
-    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    input::{
+        RopeExt as _,
+        blink_cursor::CURSOR_WIDTH,
+        decorations::font_family_spans,
+        display_map::{LineLayout, split_run_by_font_families},
+    },
 };
 
 use super::{
@@ -2525,9 +2530,20 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window.text_system().layout_width(font_id, text_size, ' ')
         };
 
+        let font_families: Rc<[(Range<usize>, SharedString)]> = {
+            let state = self.state.read(cx);
+            if state.masked {
+                Rc::from([])
+            } else {
+                font_family_spans(&state.extras.decoration_layers()).into()
+            }
+        };
         self.state.update(cx, |state, cx| {
             state.display_map.set_font(font, text_size, cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
+            state
+                .display_map
+                .set_font_families(font_families.clone(), cx);
         });
 
         let state = self.state.read(cx);
@@ -2686,12 +2702,17 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     run.color = run.color.opacity(0.5);
                 }
 
-                runs.extend(split_run_for_ime_underline(
-                    run,
-                    range.clone(),
-                    ime_marked_range.clone(),
-                    marked_run.underline,
-                ));
+                let mut start = range.start;
+                for run in split_run_by_font_families(run, range.clone(), &font_families) {
+                    let run_range = start..start + run.len;
+                    start = run_range.end;
+                    runs.extend(split_run_for_ime_underline(
+                        run,
+                        run_range,
+                        ime_marked_range.clone(),
+                        marked_run.underline,
+                    ));
+                }
             }
             runs
         } else {
@@ -3615,6 +3636,74 @@ mod tests {
             DecorationHarness(state)
         });
         (editor.unwrap(), window)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn font_family_decorations_shape_wrap_and_hit_test_in_that_font() {
+        let platform = gpui_platform::current_platform(true);
+        let mut cx = TestAppContext::build_with_text_system(
+            gpui::TestDispatcher::new(0),
+            None,
+            platform.text_system(),
+        );
+        let text = "iiiiiiii ".repeat(8);
+        let mono_range = 9..35;
+        let (editor, window) = decoration_editor(&mut cx, &text, true);
+        let mut cx = VisualTestContext::from_window(window.into(), &mut cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let plain_rows = editor.read(cx).last_layout.as_ref().unwrap().lines[0]
+                .wrapped_lines
+                .len();
+            editor.update(cx, |state, cx| {
+                state.create_decorations_collection(
+                    vec![
+                        TextDecoration::new(mono_range.clone(), HighlightStyle::default())
+                            .with_font_family("DejaVu Sans Mono"),
+                    ],
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let line = &layout.lines[0];
+            assert!(line.wrapped_lines.len() > plain_rows);
+            for row in line.wrapped_lines.iter() {
+                assert!(row.width <= layout.wrap_width.unwrap());
+            }
+
+            let mono_offset = mono_range.start + 4;
+            let position = line.position_for_index(mono_offset, layout, false).unwrap();
+            let next = line
+                .position_for_index(mono_offset + 1, layout, false)
+                .unwrap();
+            let mono_glyph_width = window
+                .text_system()
+                .shape_line(
+                    "i".into(),
+                    window.text_style().font_size.to_pixels(window.rem_size()),
+                    &[TextRun {
+                        len: 1,
+                        font: gpui::font("DejaVu Sans Mono"),
+                        color: gpui::black(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                )
+                .width;
+            assert_eq!(next.x - position.x, mono_glyph_width);
+            let (hit, _) = line
+                .closest_index_for_position(
+                    point(position.x + mono_glyph_width / 4., position.y),
+                    layout,
+                )
+                .unwrap();
+            assert_eq!(hit, mono_offset);
+        });
     }
 
     #[gpui::test]

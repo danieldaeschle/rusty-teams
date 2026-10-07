@@ -108,6 +108,7 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
+        self.wrapper.adjust_font_families(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
@@ -118,6 +119,14 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.set_inline_metrics(metrics, cx);
+    }
+
+    pub(super) fn set_font_families(
+        &mut self,
+        font_families: std::rc::Rc<[(Range<usize>, gpui::SharedString)]>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_font_families(font_families, cx);
     }
 
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {

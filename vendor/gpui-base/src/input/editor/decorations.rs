@@ -1,7 +1,7 @@
 use crate::input::EditorMode;
 use std::{collections::BTreeMap, ops::Range};
 
-use gpui::{App, Context, HighlightStyle, Hsla, WeakEntity};
+use gpui::{App, Context, HighlightStyle, Hsla, SharedString, WeakEntity};
 use ropey::Rope;
 use sum_tree::Bias;
 
@@ -72,12 +72,24 @@ impl RangeDecoration {
 pub struct TextDecoration {
     pub range: Range<usize>,
     pub style: HighlightStyle,
+    /// Font family override; unlike `style`, it changes glyph widths and soft wrapping.
+    pub font_family: Option<SharedString>,
 }
 
 impl TextDecoration {
     /// Create a text decoration from a UTF-8 byte range and a GPUI style.
     pub fn new(range: Range<usize>, style: HighlightStyle) -> Self {
-        Self { range, style }
+        Self {
+            range,
+            style,
+            font_family: None,
+        }
+    }
+
+    /// Render this range in another font family, e.g. a monospace one for inline code.
+    pub fn with_font_family(mut self, font_family: impl Into<SharedString>) -> Self {
+        self.font_family = Some(font_family.into());
+        self
     }
 }
 
@@ -427,7 +439,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
     }
 }
 
-fn adjust_range_for_edit(
+pub(crate) fn adjust_range_for_edit(
     range: &Range<usize>,
     edited_range: &Range<usize>,
     inserted_len: usize,
@@ -471,6 +483,36 @@ fn adjust_range_for_edit(
         inserted_end
     };
     start..end
+}
+
+/// Non-overlapping font family spans sorted by start; earlier layers and items win.
+pub(crate) fn font_family_spans(layers: &[&[TextDecoration]]) -> Vec<(Range<usize>, SharedString)> {
+    let mut spans: Vec<(Range<usize>, SharedString)> = Vec::new();
+    for decoration in layers.iter().flat_map(|layer| layer.iter()) {
+        let Some(font_family) = &decoration.font_family else {
+            continue;
+        };
+        let mut uncovered = vec![decoration.range.clone()];
+        for (covered, _) in &spans {
+            uncovered = uncovered
+                .into_iter()
+                .flat_map(|range| {
+                    [
+                        range.start..range.end.min(covered.start),
+                        range.start.max(covered.end)..range.end,
+                    ]
+                })
+                .filter(|range| !range.is_empty())
+                .collect();
+        }
+        spans.extend(
+            uncovered
+                .into_iter()
+                .map(|range| (range, font_family.clone())),
+        );
+    }
+    spans.sort_by_key(|(range, _)| range.start);
+    spans
 }
 
 fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
@@ -537,7 +579,8 @@ impl InputBaseState<EditorMode> {
     /// Collections live until their [`InputBaseState`] is dropped.
     ///
     /// Collections are layered in insertion order; the first collection wins
-    /// when overlapping decorations set the same [`HighlightStyle`] property.
+    /// when overlapping decorations set the same [`HighlightStyle`] property
+    /// or font family. Only the font family affects layout and soft wrapping.
     /// Callers should avoid conflicting overlaps within one collection.
     pub fn create_decorations_collection(
         &mut self,
@@ -721,6 +764,27 @@ mod tests {
         assert_eq!(
             collections.get(second),
             Some(&[TextDecoration::new(5..6, second_style)][..])
+        );
+    }
+
+    #[test]
+    fn font_family_spans_let_earlier_layers_and_items_win() {
+        let style = HighlightStyle::default();
+        let first = [
+            TextDecoration::new(4..8, style).with_font_family("Mono"),
+            TextDecoration::new(6..10, style).with_font_family("Serif"),
+            TextDecoration::new(0..20, style),
+        ];
+        let second = [TextDecoration::new(2..12, style).with_font_family("Other")];
+        assert_eq!(TextDecoration::new(0..1, style).font_family, None);
+        assert_eq!(
+            font_family_spans(&[&first[..], &second[..]]),
+            vec![
+                (2..4, "Other".into()),
+                (4..8, "Mono".into()),
+                (8..10, "Serif".into()),
+                (10..12, "Other".into()),
+            ]
         );
     }
 

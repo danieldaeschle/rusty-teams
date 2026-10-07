@@ -5,7 +5,8 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
+    App, Font, LineFragment, Pixels, Point, ShapedLine, SharedString, Size, TextAlign, TextRun,
+    Window, point, px, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -33,7 +34,7 @@ fn measured_wrap_boundaries(
     text: &str,
     width: Pixels,
     wrapping_indent: WrappingIndent,
-    mut measure: impl FnMut(&str) -> Pixels,
+    mut measure: impl FnMut(Range<usize>) -> Pixels,
 ) -> Vec<gpui::Boundary> {
     let indent = if wrapping_indent == WrappingIndent::Same {
         text.chars()
@@ -43,7 +44,7 @@ fn measured_wrap_boundaries(
     } else {
         0
     };
-    let indent_width = measure(&text[..indent]);
+    let indent_width = measure(0..indent);
     let ends: Vec<usize> = text
         .grapheme_indices(true)
         .map(|(ix, grapheme)| ix + grapheme.len())
@@ -66,7 +67,7 @@ fn measured_wrap_boundaries(
         let remaining = ends.len() - first;
         let mut low = 0;
         let mut high = 1;
-        while measure(&text[start..ends[first + high - 1]]) <= available {
+        while measure(start..ends[first + high - 1]) <= available {
             low = high;
             if high == remaining {
                 break;
@@ -75,7 +76,7 @@ fn measured_wrap_boundaries(
         }
         while low + 1 < high {
             let mid = (low + high) / 2;
-            if measure(&text[start..ends[first + mid - 1]]) <= available {
+            if measure(start..ends[first + mid - 1]) <= available {
                 low = mid;
             } else {
                 high = mid;
@@ -100,6 +101,76 @@ fn measured_wrap_boundaries(
         start = end;
     }
     result
+}
+
+/// Split `run`, covering the document bytes `range`, where `font_families` override its family.
+pub(crate) fn split_run_by_font_families(
+    run: TextRun,
+    range: Range<usize>,
+    font_families: &[(Range<usize>, SharedString)],
+) -> SmallVec<[TextRun; 1]> {
+    let first = font_families.partition_point(|(span, _)| span.end <= range.start);
+    let mut runs = SmallVec::new();
+    let mut offset = range.start;
+    for (span, font_family) in &font_families[first..] {
+        if span.start >= range.end {
+            break;
+        }
+        let start = span.start.max(range.start);
+        let end = span.end.min(range.end);
+        if offset < start {
+            runs.push(TextRun {
+                len: start - offset,
+                ..run.clone()
+            });
+        }
+        let mut font = run.font.clone();
+        font.family = font_family.clone();
+        runs.push(TextRun {
+            len: end - start,
+            font,
+            ..run.clone()
+        });
+        offset = end;
+    }
+    if offset < range.end || runs.is_empty() {
+        runs.push(TextRun {
+            len: range.end - offset,
+            ..run
+        });
+    }
+    runs
+}
+
+/// Ranges whose entry differs between two sorted span lists.
+fn changed_ranges<T: PartialEq>(
+    old: &[(Range<usize>, T)],
+    new: &[(Range<usize>, T)],
+) -> Vec<Range<usize>> {
+    let mut affected = Vec::new();
+    let (mut old, mut new) = (old.iter().peekable(), new.iter().peekable());
+    while old.peek().is_some() || new.peek().is_some() {
+        match (old.peek(), new.peek()) {
+            (Some(a), Some(b)) if a == b => {
+                old.next();
+                new.next();
+            }
+            (Some(a), Some(b)) if a.0.start <= b.0.start => {
+                affected.push(a.0.clone());
+                old.next();
+            }
+            (Some(_), Some(b)) | (None, Some(b)) => {
+                affected.push(b.0.clone());
+                new.next();
+            }
+            (Some(a), None) => {
+                affected.push(a.0.clone());
+                old.next();
+            }
+            (None, None) => break,
+        }
+    }
+    affected
 }
 
 /// A line with soft wrapped lines info.
@@ -228,6 +299,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    /// Sorted, non-overlapping document byte ranges measured in another font family.
+    font_families: Rc<[(Range<usize>, SharedString)]>,
     _initialized: bool,
 }
 
@@ -242,6 +315,7 @@ impl TextWrapper {
             wrapping_indent: WrappingIndent::default(),
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
+            font_families: Rc::from([]),
             _initialized: false,
         }
     }
@@ -373,6 +447,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
+        let font_families = self.font_families.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -409,21 +484,21 @@ impl TextWrapper {
                         line_str,
                         wrap_width,
                         wrapping_indent,
-                        |text| {
+                        |range| {
+                            let runs = split_run_by_font_families(
+                                TextRun {
+                                    len: range.len(),
+                                    font: font.clone(),
+                                    color: gpui::black(),
+                                    background_color: None,
+                                    underline: None,
+                                    strikethrough: None,
+                                },
+                                line_start + range.start..line_start + range.end,
+                                &font_families,
+                            );
                             text_system
-                                .layout_line(
-                                    text,
-                                    font_size,
-                                    &[gpui::TextRun {
-                                        len: text.len(),
-                                        font: font.clone(),
-                                        color: gpui::black(),
-                                        background_color: None,
-                                        underline: None,
-                                        strikethrough: None,
-                                    }],
-                                    None,
-                                )
+                                .layout_line(&line_str[range], font_size, &runs, None)
                                 .width
                         },
                     );
@@ -436,6 +511,33 @@ impl TextWrapper {
                     .collect()
             },
         );
+    }
+
+    pub(crate) fn adjust_font_families(&mut self, range: &Range<usize>, new_len: usize) {
+        if self.font_families.is_empty() {
+            return;
+        }
+        self.font_families = self
+            .font_families
+            .iter()
+            .filter_map(|(span, font_family)| {
+                let span = crate::input::decorations::adjust_range_for_edit(span, range, new_len);
+                (!span.is_empty()).then(|| (span, font_family.clone()))
+            })
+            .collect();
+    }
+
+    pub(crate) fn set_font_families(
+        &mut self,
+        font_families: Rc<[(Range<usize>, SharedString)]>,
+        cx: &mut App,
+    ) {
+        if self.font_families == font_families {
+            return;
+        }
+        let affected = changed_ranges(&self.font_families, &font_families);
+        self.font_families = font_families;
+        self.rewrap_rows_of(&affected, cx);
     }
 
     pub(crate) fn adjust_inline_metrics(&mut self, range: &Range<usize>, new_len: usize) {
@@ -469,37 +571,20 @@ impl TextWrapper {
             return;
         }
         // Only rows whose element geometry changed need another wrap pass.
-        let mut affected = Vec::new();
-        let (mut old, mut new) = (
-            self.inline_metrics.iter().peekable(),
-            metrics.iter().peekable(),
-        );
-        while old.peek().is_some() || new.peek().is_some() {
-            match (old.peek(), new.peek()) {
-                (Some(a), Some(b)) if a == b => {
-                    old.next();
-                    new.next();
-                }
-                (Some(a), Some(b)) if a.0.start <= b.0.start => {
-                    affected.push(a.0.clone());
-                    old.next();
-                }
-                (Some(_), Some(b)) | (None, Some(b)) => {
-                    affected.push(b.0.clone());
-                    new.next();
-                }
-                (Some(a), None) => {
-                    affected.push(a.0.clone());
-                    old.next();
-                }
-                (None, None) => break,
-            }
-        }
+        let affected = changed_ranges(&self.inline_metrics, &metrics);
         self.inline_metrics = metrics;
+        self.rewrap_rows_of(&affected, cx);
+    }
+
+    fn rewrap_rows_of(&mut self, affected: &[Range<usize>], cx: &mut App) {
         let text = self.text.clone();
         let mut rows: Vec<usize> = affected
             .iter()
-            .map(|r| text.offset_to_point(r.start.min(text.len())).row)
+            .flat_map(|r| {
+                let start_row = text.offset_to_point(r.start.min(text.len())).row;
+                let end_row = text.offset_to_point(r.end.min(text.len())).row;
+                start_row..=end_row
+            })
             .collect();
         rows.sort_unstable();
         rows.dedup();
@@ -1195,6 +1280,70 @@ mod tests {
         });
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn production_wrap_measures_font_family_ranges_in_their_own_font() {
+        let cx = shaping_test_context();
+        cx.update(|cx| {
+            let font = gpui::font("DejaVu Sans");
+            let mono = gpui::font("DejaVu Sans Mono");
+            let font_size = px(14.);
+            let value = "iiiiiiii iiiiiiii iiiiiiii";
+            let width = shaped_width("iiiiiiii iiiiiiii ", &font, font_size, cx) + px(1.);
+            assert!(
+                shaped_width("iiiiiiii", &mono, font_size, cx)
+                    > shaped_width("iiiiiiii ", &font, font_size, cx) + px(1.)
+            );
+            let text = Rope::from(value);
+            let wrap = |font_families: Vec<(Range<usize>, SharedString)>, cx: &mut App| {
+                let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
+                wrapper.update(&text, &(0..0), &text, cx);
+                wrapper.set_font_families(font_families.into(), cx);
+                wrapper.line(0).unwrap().wrapped_lines.to_vec()
+            };
+            assert_eq!(wrap(vec![], cx), [0..18, 18..26]);
+            assert_eq!(
+                wrap(vec![(9..17, mono.family.clone())], cx),
+                [0..9, 9..18, 18..26]
+            );
+        });
+    }
+
+    #[test]
+    fn font_family_runs_split_at_span_edges_and_follow_edits() {
+        let run = TextRun {
+            len: 10,
+            font: gpui::font("Sans"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let font_families = [(2..4, SharedString::from("Mono")), (8..20, "Mono".into())];
+        let runs = split_run_by_font_families(run.clone(), 0..10, &font_families);
+        let runs: Vec<_> = runs
+            .iter()
+            .map(|run| (run.len, run.font.family.to_string()))
+            .collect();
+        assert_eq!(
+            runs,
+            [(2, "Sans"), (2, "Mono"), (4, "Sans"), (2, "Mono")]
+                .map(|(len, family)| (len, family.to_string()))
+        );
+        let runs = split_run_by_font_families(TextRun { len: 3, ..run }, 4..7, &font_families);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].font.family, "Sans");
+
+        let mut wrapper = TextWrapper::new(test_font(), px(14.), None);
+        wrapper.font_families = Rc::from(font_families);
+        wrapper.adjust_font_families(&(0..0), 1);
+        wrapper.adjust_font_families(&(9..21), 0);
+        assert_eq!(
+            &*wrapper.font_families,
+            [(3..5, SharedString::from("Mono"))]
+        );
+    }
+
     #[test]
     fn measured_wrap_keeps_cjk_latin_boundary_stable_during_edits() {
         let measure = |text: &str| {
@@ -1214,7 +1363,9 @@ mod tests {
                 &(start..previous.len()),
                 &inserted,
                 &mut |line, width, _| {
-                    measured_wrap_boundaries(line, width, WrappingIndent::None, measure)
+                    measured_wrap_boundaries(line, width, WrappingIndent::None, |range| {
+                        measure(&line[range])
+                    })
                 },
             );
             let expected = if value.ends_with('s') {
@@ -1232,8 +1383,8 @@ mod tests {
     #[test]
     fn measured_wrap_preserves_words_graphemes_and_indentation() {
         let wrap = |text: &str, width, indent| {
-            measured_wrap_boundaries(text, px(width), indent, |s| {
-                px(s.graphemes(true).count() as f32)
+            measured_wrap_boundaries(text, px(width), indent, |range| {
+                px(text[range].graphemes(true).count() as f32)
             })
             .into_iter()
             .map(|b| b.ix)

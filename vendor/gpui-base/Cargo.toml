@@ -247,3 +247,5 @@ useless_conversion = "allow"
 [lints.clippy.style]
 level = "allow"
 priority = -1
+
+[workspace]
