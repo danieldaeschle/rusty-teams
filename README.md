@@ -60,7 +60,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 
 | Step | What happens |
 |---|---|
-| Start | The UI renders from the SQLite cache right away |
+| Start | The UI renders from the SQLite cache right away. A chat still syncing shows a progress line in its header and skeleton bubbles |
 | Sync | `core` fetches chats and channels from Graph with delta queries, pins and folders from the chat service |
 | Live | `chatsvc` keeps the Trouter WebSocket open. An event only says "something changed", the content is then fetched fresh |
 | Write | Sends, edits and reactions go out through Graph or the chat service, then the cache updates |

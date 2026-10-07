@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use chrono::{Local, Offset, Utc};
+use chrono::{DateTime, Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -18,15 +18,16 @@ use teams_core::ImageRef;
 
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, Outgoing, ReplyPreview};
-use super::message_row::{RowActions, render_message_row};
+use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::widgets::icon;
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::data::{is_one_on_one, others};
 use crate::render::Block;
 use crate::render::blocks::Inline;
 use crate::rows::{
-    Delivery, MessageRow, Row, RowContext, Series, StartInfo, assign_series, changed_indices,
-    diff_keys, flat_rows, reply_excerpt, thread_list_rows, thread_rows,
+    Delivery, MessageRow, Receipt, Row, RowContext, Series, StartInfo, assign_series,
+    changed_indices, diff_keys, flat_rows, placeholder_rows, reply_excerpt, thread_list_rows,
+    thread_rows, trailing_skeleton,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -41,6 +42,12 @@ const MAX_NOTICE_CHARS: usize = 140;
 const JUMP_SCAN_LIMIT: usize = 5000;
 const JUMP_CONTEXT_MESSAGES: usize = 12;
 const HIGHLIGHT_DURATION: Duration = Duration::from_secs(2);
+const PROGRESS_DELAY: Duration = Duration::from_millis(400);
+const SKELETON_DELAY: Duration = Duration::from_millis(1000);
+const SLOW_AFTER: Duration = Duration::from_secs(8);
+const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
+const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
+const PROGRESS_BAR_WIDTH: f32 = 0.35;
 
 actions!(teams, [ReplyToHovered]);
 
@@ -49,6 +56,24 @@ enum ViewMode {
     Flat,
     ThreadList,
     Thread(String),
+}
+
+#[derive(Default)]
+struct SyncProgress {
+    messages: bool,
+    receipts: bool,
+    empty_cache: bool,
+    newest_cached: Option<DateTime<Utc>>,
+    shown_at: Option<Instant>,
+    trailing_skeleton: bool,
+    slow: bool,
+    failed: bool,
+}
+
+impl SyncProgress {
+    fn running(&self) -> bool {
+        self.messages || self.receipts
+    }
 }
 
 struct Current {
@@ -62,6 +87,7 @@ struct Current {
     older_blocked: bool,
     fetched: bool,
     first_unread: Option<String>,
+    sync: SyncProgress,
 }
 
 pub struct ConversationView {
@@ -76,6 +102,7 @@ pub struct ConversationView {
     hovered_message: Option<String>,
     highlighted_message: Option<String>,
     notice: Option<String>,
+    sync_generation: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -110,6 +137,7 @@ impl ConversationView {
             hovered_message: None,
             highlighted_message: None,
             notice: None,
+            sync_generation: 0,
             _subscriptions: subscriptions,
         };
         if let Some(selection) = view.app.read(cx).selection.clone() {
@@ -155,7 +183,14 @@ impl ConversationView {
             }
             AppEvent::Images(keys) => self.remeasure_images(keys, cx),
             AppEvent::Jump => self.apply_pending_jump(cx),
-            AppEvent::Status => self.start_fetch(cx),
+            AppEvent::Status => {
+                if let Some(current) = self.current.as_mut()
+                    && current.sync.failed
+                {
+                    current.fetched = false;
+                }
+                self.start_fetch(cx)
+            }
             AppEvent::Directory => cx.notify(),
             AppEvent::Sidebar => {
                 if let Some(current) = self.current.as_mut() {
@@ -202,7 +237,9 @@ impl ConversationView {
             older_blocked: false,
             fetched: false,
             first_unread,
+            sync: SyncProgress::default(),
         });
+        self.sync_generation += 1;
         self.pending.clear();
         self.notice = None;
         self.rebuild(true, cx);
@@ -465,7 +502,15 @@ impl ConversationView {
         current.loaded_limit = limit;
         current.loaded_count = records.len();
         let has_older = sync_has_more && !current.older_blocked && can_load_older;
+        let placeholders = current.sync.messages
+            && records.is_empty()
+            && !matches!(current.mode, ViewMode::Thread(_));
+        let trailing = current.sync.trailing_skeleton && current.mode == ViewMode::Flat;
         let mut rows = match &current.mode {
+            _ if placeholders => {
+                current.has_older = false;
+                placeholder_rows()
+            }
             ViewMode::Flat => {
                 current.has_older = has_older;
                 let mut rows = flat_rows(&records, &context, has_older);
@@ -483,16 +528,21 @@ impl ConversationView {
                 thread_rows(&records, root_id, &context)
             }
         };
+        if trailing && !placeholders {
+            rows.push(trailing_skeleton());
+        }
         rows.extend(
             self.pending
                 .iter()
                 .cloned()
                 .map(|row| Row::Message(Box::new(row))),
         );
-        let read_ids = self.read_message_ids(&records, cx);
+        let receipts = self.receipts(&records, cx);
         for row in rows.iter_mut() {
-            if let Row::Message(message) = row {
-                message.read = read_ids.contains(&message.key);
+            if let Row::Message(message) = row
+                && message.own
+            {
+                message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
             }
         }
         if let Some(unread_id) = &first_unread {
@@ -553,9 +603,11 @@ impl ConversationView {
     }
 
     fn start_fetch(&mut self, cx: &mut Context<Self>) {
-        let Some(engine) = self.app.read(cx).engine.clone() else {
+        let state = self.app.read(cx);
+        let (engine, demo_sync) = (state.engine.clone(), state.mode.demo_sync);
+        if engine.is_none() && demo_sync.is_none() {
             return;
-        };
+        }
         let Some(current) = self.current.as_mut() else {
             return;
         };
@@ -563,47 +615,249 @@ impl ConversationView {
             return;
         }
         current.fetched = true;
+        let is_chat = matches!(current.selection, Selection::Chat(_));
+        let newest_cached = self.rows.borrow().iter().rev().find_map(|row| match row {
+            Row::Message(message) if !message.key.starts_with(PENDING_KEY_PREFIX) => {
+                Some(message.created_at)
+            }
+            _ => None,
+        });
+        let current = self.current.as_mut().expect("checked above");
+        if current.sync.failed {
+            self.notice = None;
+        }
+        current.sync = SyncProgress {
+            messages: true,
+            receipts: is_chat,
+            empty_cache: newest_cached.is_none(),
+            newest_cached,
+            ..SyncProgress::default()
+        };
+        self.sync_generation += 1;
+        let generation = self.sync_generation;
         let conversation_id = current.selection.conversation_id().to_owned();
-        let receiver = runtime::spawn(async move { engine.fetch_newer(&conversation_id).await });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Err(error)) = receiver.await {
-                this.update(cx, |this, cx| {
-                    this.notice = Some(format!("Could not refresh: {}", short_error(&error)));
-                    cx.notify();
+        match (engine, demo_sync) {
+            (Some(engine), _) => {
+                let receiver =
+                    runtime::spawn(async move { engine.fetch_newer(&conversation_id).await });
+                cx.spawn(async move |this, cx| {
+                    let result = receiver.await;
+                    this.update(cx, |this, cx| this.finish_fetch(generation, result, cx))
+                        .ok();
                 })
-                .ok();
+                .detach();
+            }
+            (None, Some(delay)) => self.simulate_sync(generation, delay, cx),
+            (None, None) => {}
+        }
+        self.schedule_progress(generation, cx);
+        self.rebuild(false, cx);
+        self.mark_read(cx);
+        self.refresh_receipts(generation, cx);
+    }
+
+    fn simulate_sync(&mut self, generation: u64, delay: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update(cx, |this, cx| {
+                if let Some(sync) = this.sync_of(generation) {
+                    sync.receipts = false;
+                }
+                this.finish_fetch(generation, Ok(Ok(teams_core::Delta::default())), cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn sync_of(&mut self, generation: u64) -> Option<&mut SyncProgress> {
+        if generation != self.sync_generation {
+            return None;
+        }
+        self.current.as_mut().map(|current| &mut current.sync)
+    }
+
+    fn schedule_progress(&mut self, generation: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let stages = [
+                (PROGRESS_DELAY, Duration::ZERO),
+                (SKELETON_DELAY, PROGRESS_DELAY),
+                (SLOW_AFTER, SKELETON_DELAY),
+            ];
+            for (stage, (at, previous)) in stages.into_iter().enumerate() {
+                cx.background_executor().timer(at - previous).await;
+                let running = this
+                    .update(cx, |this, cx| this.advance_progress(generation, stage, cx))
+                    .unwrap_or(false);
+                if !running {
+                    return;
+                }
             }
         })
         .detach();
-        self.mark_read(cx);
-        self.refresh_receipts(cx);
     }
 
-    fn read_message_ids(
-        &self,
-        records: &[MessageRecord],
-        cx: &App,
-    ) -> std::collections::HashSet<String> {
+    fn advance_progress(&mut self, generation: u64, stage: usize, cx: &mut Context<Self>) -> bool {
+        let Some(sync) = self.sync_of(generation) else {
+            return false;
+        };
+        if !sync.running() {
+            return false;
+        }
+        match stage {
+            0 => sync.shown_at = Some(Instant::now()),
+            1 if sync.messages => {
+                sync.trailing_skeleton = true;
+                self.rebuild(false, cx);
+            }
+            1 => {}
+            _ => sync.slow = true,
+        }
+        cx.notify();
+        true
+    }
+
+    fn finish_fetch(
+        &mut self,
+        generation: u64,
+        result: Result<
+            teams_core::Result<teams_core::Delta>,
+            tokio::sync::oneshot::error::RecvError,
+        >,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(sync) = self.sync_of(generation) else {
+            return;
+        };
+        sync.messages = false;
+        sync.trailing_skeleton = false;
+        let newest_cached = sync.newest_cached;
+        match result {
+            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, cx),
+            Ok(Err(error)) => self.fail_sync(generation, short_error(&error)),
+            Err(error) => self.fail_sync(generation, short_error(&error)),
+        }
+        self.rebuild(false, cx);
+        self.settle_progress(generation, cx);
+    }
+
+    fn fail_sync(&mut self, generation: u64, error: String) {
+        if let Some(sync) = self.sync_of(generation) {
+            sync.failed = true;
+            sync.receipts = false;
+        }
+        self.notice = Some(format!("Could not refresh: {error}"));
+    }
+
+    fn mark_fetched_new(&mut self, newest_cached: Option<DateTime<Utc>>, cx: &mut Context<Self>) {
+        let Some(newest_cached) = newest_cached else {
+            return;
+        };
+        let Some(my_user_id) = self.row_context(cx).my_user_id else {
+            return;
+        };
+        let store = self.app.read(cx).store.clone();
+        let Some(current) = self.current.as_mut() else {
+            return;
+        };
+        if current.first_unread.is_some() || current.mode != ViewMode::Flat {
+            return;
+        }
+        let limit = current
+            .loaded_limit
+            .max(current.loaded_count + GROWTH_HEADROOM);
+        current.first_unread = store
+            .messages(current.selection.conversation_id(), None, limit)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|record| {
+                record.created_at > newest_cached && record.sender_id.as_ref() != Some(&my_user_id)
+            })
+            .map(|record| record.message_id);
+    }
+
+    fn settle_progress(&mut self, generation: u64, cx: &mut Context<Self>) {
+        let Some(sync) = self.sync_of(generation) else {
+            return;
+        };
+        if sync.running() {
+            return;
+        }
+        let remaining = sync
+            .shown_at
+            .map(|shown_at| PROGRESS_MIN_VISIBLE.saturating_sub(shown_at.elapsed()))
+            .unwrap_or_default();
+        if remaining.is_zero() {
+            sync.shown_at = None;
+            sync.slow = false;
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(remaining).await;
+            this.update(cx, |this, cx| {
+                if let Some(sync) = this.sync_of(generation) {
+                    sync.shown_at = None;
+                    sync.slow = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn retry_fetch(&mut self, cx: &mut Context<Self>) {
+        if let Some(current) = self.current.as_mut() {
+            current.fetched = false;
+        }
+        self.start_fetch(cx);
+    }
+
+    fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
         let state = self.app.read(cx);
+        let receipts_syncing = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.sync.receipts);
         if state.mode.demo {
-            return crate::demo::read_message_ids(records);
+            let read_ids = crate::demo::read_message_ids(records);
+            return records
+                .iter()
+                .map(|record| {
+                    let receipt = if receipts_syncing {
+                        Receipt::Pending
+                    } else if read_ids.contains(&record.message_id) {
+                        Receipt::Read
+                    } else {
+                        Receipt::Sent
+                    };
+                    (record.message_id.clone(), receipt)
+                })
+                .collect();
         }
         let Some(engine) = state.engine.as_ref() else {
-            return Default::default();
+            return HashMap::new();
+        };
+        let unknown = if receipts_syncing {
+            Receipt::Pending
+        } else {
+            Receipt::Hidden
         };
         records
             .iter()
-            .filter(|record| {
-                matches!(
-                    engine.receipt_state_for(record),
-                    teams_core::ReceiptState::Read { .. }
-                )
+            .map(|record| {
+                let receipt = match engine.receipt_state_for(record) {
+                    teams_core::ReceiptState::Read { .. } => Receipt::Read,
+                    teams_core::ReceiptState::Sent => Receipt::Sent,
+                    teams_core::ReceiptState::Unknown => unknown,
+                };
+                (record.message_id.clone(), receipt)
             })
-            .map(|record| record.message_id.clone())
             .collect()
     }
 
-    fn refresh_receipts(&mut self, cx: &mut Context<Self>) {
+    fn refresh_receipts(&mut self, generation: u64, cx: &mut Context<Self>) {
         let state = self.app.read(cx);
         let (Some(engine), Some(Selection::Chat(chat_id))) = (
             state.engine.clone(),
@@ -611,9 +865,20 @@ impl ConversationView {
         ) else {
             return;
         };
-        drop(runtime::spawn(async move {
-            engine.refresh_receipts(&chat_id).await
-        }));
+        let receiver = runtime::spawn(async move { engine.refresh_receipts(&chat_id).await });
+        cx.spawn(async move |this, cx| {
+            receiver.await.ok();
+            this.update(cx, |this, cx| {
+                let Some(sync) = this.sync_of(generation) else {
+                    return;
+                };
+                sync.receipts = false;
+                this.rebuild(false, cx);
+                this.settle_progress(generation, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn mark_read(&mut self, cx: &mut Context<Self>) {
@@ -762,7 +1027,7 @@ impl ConversationView {
             open_thread: None,
             is_reply: false,
             delivery: Delivery::Sending,
-            read: false,
+            receipt: Receipt::Hidden,
             own: true,
         });
         self.notice = None;
@@ -929,7 +1194,24 @@ impl ConversationView {
         if let Some(note) = channel_note {
             subline = note.to_owned();
         }
+        let sync = &current.sync;
+        if sync.failed {
+            subline = "Not up to date".to_owned();
+        } else if sync.shown_at.is_some() {
+            subline = if sync.slow {
+                "Taking longer than usual ..."
+            } else if sync.empty_cache {
+                "Loading messages ..."
+            } else {
+                "Updating ..."
+            }
+            .to_owned();
+        }
         header
+            .relative()
+            .when(sync.shown_at.is_some(), |header| {
+                header.child(progress_bar())
+            })
             .children(lead)
             .child(
                 v_flex()
@@ -1066,6 +1348,7 @@ impl Render for ConversationView {
                             cx,
                         )
                     }
+                    Some(Row::Skeleton(skeleton)) => render_skeleton_row(skeleton, index),
                     Some(Row::LoadOlder) => {
                         let view = view.clone();
                         cx.defer(move |cx| {
@@ -1121,13 +1404,24 @@ impl Render for ConversationView {
         root = root.child(self.render_header(current, cx));
         if let Some(notice) = &self.notice {
             root = root.child(
-                div()
+                h_flex()
                     .px_4()
                     .py_1()
+                    .gap(px(8.))
+                    .items_center()
                     .text_xs()
                     .bg(theme::amber().opacity(0.15))
                     .text_color(theme::amber())
-                    .child(notice.clone()),
+                    .child(div().flex_1().min_w_0().child(notice.clone()))
+                    .when(current.sync.failed, |bar| {
+                        bar.child(
+                            Button::new("retry-fetch")
+                                .ghost()
+                                .compact()
+                                .label("Retry")
+                                .on_click(cx.listener(|this, _, _, cx| this.retry_fetch(cx))),
+                        )
+                    }),
             );
         }
         let empty_channel = current.mode == ViewMode::ThreadList && self.rows.borrow().is_empty();
@@ -1148,4 +1442,34 @@ impl Render for ConversationView {
             .child(self.composer.clone())
             .into_any_element()
     }
+}
+
+fn progress_bar() -> impl IntoElement {
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom(px(-1.))
+        .h(px(2.))
+        .overflow_hidden()
+        .bg(theme::border())
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .h_full()
+                .w(relative(PROGRESS_BAR_WIDTH))
+                .bg(theme::own_read())
+                .with_animation(
+                    "sync-progress",
+                    Animation::new(PROGRESS_BAR_PERIOD).repeat(),
+                    |bar, delta| {
+                        let travel = 1. + PROGRESS_BAR_WIDTH;
+                        // The 0.3 phase keeps the bar on screen in the static reduce-motion frame (delta 0).
+                        bar.left(relative(
+                            (delta + 0.3).fract() * travel - PROGRESS_BAR_WIDTH,
+                        ))
+                    },
+                ),
+        )
 }

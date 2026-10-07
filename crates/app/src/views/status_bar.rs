@@ -162,6 +162,7 @@ mod tests {
         let mode = Mode {
             demo: true,
             read_only: false,
+            demo_sync: None,
         };
         assert_eq!(
             connection_text(&ConnectionState::NoBrowser, mode).0,

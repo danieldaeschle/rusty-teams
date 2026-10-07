@@ -2,13 +2,14 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::time::Duration;
 
 use super::attachments::attachments_view;
 use super::avatar::{member_stack, person_avatar};
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::render::{Block, render_blocks};
-use crate::rows::{Delivery, MessageRow, ReactionChip, bubble_corners};
+use crate::rows::{Delivery, MessageRow, ReactionChip, Receipt, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 
@@ -26,6 +27,8 @@ const CARD_GAP: f32 = 12.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
+const PULSE_PERIOD: Duration = Duration::from_millis(1600);
+const SKELETON_LINE_HEIGHT: f32 = 20.;
 
 pub struct RowActions {
     pub open_thread: RowAction,
@@ -188,13 +191,78 @@ fn bubble_meta(row: &MessageRow, own: bool) -> Div {
         .text_color(tint)
         .when(row.edited, |meta| meta.child("Edited"))
         .child(row.time.clone())
-        .when(own && row.delivery == Delivery::Delivered, |meta| {
-            if row.read {
-                meta.child(symbol("done_all", META_CHECK_SIZE, theme::own_read()))
-            } else {
-                meta.child(symbol("done", META_CHECK_SIZE, tint))
-            }
+        .when(
+            own && row.delivery == Delivery::Delivered,
+            |meta| match row.receipt {
+                Receipt::Hidden => meta,
+                Receipt::Pending => meta.child(receipt_slot(tint)),
+                Receipt::Sent => meta.child(symbol("done", META_CHECK_SIZE, tint)),
+                Receipt::Read => meta.child(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+            },
+        )
+}
+
+fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> AnimationElement<E> {
+    element.with_animation(
+        id,
+        Animation::new(PULSE_PERIOD)
+            .repeat_synced()
+            .with_easing(pulsating_between(0.35, 1.)),
+        |element, opacity| element.opacity(opacity),
+    )
+}
+
+fn receipt_slot(tint: Hsla) -> Div {
+    h_flex()
+        .size(px(META_CHECK_SIZE))
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .child(pulse(
+            "receipt-slot",
+            div()
+                .w(px(13.))
+                .h(px(4.))
+                .rounded(px(2.))
+                .bg(tint.opacity(0.5)),
+        ))
+}
+
+pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
+    let corners = bubble_corners(skeleton.own, Default::default());
+    let height = 14. + SKELETON_LINE_HEIGHT * f32::from(skeleton.lines);
+    let shape = div()
+        .w(relative(skeleton.width_ratio))
+        .h(px(height))
+        .rounded_tl(px(corners.top_left))
+        .rounded_tr(px(corners.top_right))
+        .rounded_br(px(corners.bottom_right))
+        .rounded_bl(px(corners.bottom_left))
+        .bg(if skeleton.own {
+            theme::bubble_own().opacity(0.55)
+        } else {
+            theme::bubble_other()
+        });
+    let line = h_flex()
+        .w_full()
+        .when(skeleton.own, |line| line.justify_end())
+        .when(!skeleton.own, |line| {
+            line.gap(px(AVATAR_GAP)).child(
+                div()
+                    .size(px(AVATAR_SIZE))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(theme::bubble_other()),
+            )
         })
+        .child(shape);
+    div()
+        .id(ElementId::Name(format!("row-{index}").into()))
+        .w_full()
+        .px(px(24.))
+        .pt(px(SERIES_START_GAP))
+        .child(pulse("skeleton", line))
+        .into_any_element()
 }
 
 fn meta_room(row: &MessageRow, own: bool) -> usize {
@@ -409,17 +477,13 @@ fn others_row(
         .items_start();
     if first {
         column = column.child(
-            h_flex()
-                .gap(px(8.))
-                .items_baseline()
-                .pl(px(2.))
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text_soft())
-                        .child(row.author.clone()),
-                )
+            h_flex().gap(px(8.)).items_baseline().pl(px(2.)).child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text_soft())
+                    .child(row.author.clone()),
+            ),
         );
     }
     column = column.child(bubble(row, index, false, directory, cx));

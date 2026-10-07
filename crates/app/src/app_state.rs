@@ -40,6 +40,7 @@ pub enum AppEvent {
 pub struct Mode {
     pub demo: bool,
     pub read_only: bool,
+    pub demo_sync: Option<std::time::Duration>,
 }
 
 pub struct AppState {

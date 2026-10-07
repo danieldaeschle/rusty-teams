@@ -23,6 +23,7 @@ mod views;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use directories::ProjectDirs;
 use gpui_kit::component::TitleBar;
@@ -52,6 +53,7 @@ struct Arguments {
     composer_text: Option<String>,
     reply_to_last: bool,
     channels_tab: bool,
+    demo_sync: Option<Duration>,
 }
 
 fn parse_arguments() -> Arguments {
@@ -68,6 +70,12 @@ fn parse_arguments() -> Arguments {
             "--type" => arguments.composer_text = input.next(),
             "--reply-last" => arguments.reply_to_last = true,
             "--channels-tab" => arguments.channels_tab = true,
+            "--demo-sync" => {
+                arguments.demo_sync = input
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .map(Duration::from_secs_f32)
+            }
             "--database" => arguments.database = input.next().map(PathBuf::from),
             "--endpoint" => arguments.endpoint = input.next(),
             "--open" => {
@@ -112,6 +120,7 @@ fn main() {
     let mode = Mode {
         demo: arguments.demo,
         read_only: arguments.read_only,
+        demo_sync: arguments.demo_sync,
     };
     let store = if arguments.demo {
         let store = Store::open_in_memory().expect("in-memory store");

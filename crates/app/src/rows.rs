@@ -72,6 +72,15 @@ pub fn bubble_corners(own: bool, series: Series) -> Corners {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Receipt {
+    #[default]
+    Hidden,
+    Pending,
+    Sent,
+    Read,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivery {
     Delivered,
@@ -103,7 +112,7 @@ pub struct MessageRow {
     pub is_reply: bool,
     pub delivery: Delivery,
     pub own: bool,
-    pub read: bool,
+    pub receipt: Receipt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +127,61 @@ pub const START_KEY: &str = "conversation-start";
 pub enum Row {
     LoadOlder,
     Start(StartInfo),
+    Skeleton(Skeleton),
     Message(Box<MessageRow>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Skeleton {
+    pub key: &'static str,
+    pub own: bool,
+    pub width_ratio: f32,
+    pub lines: u8,
+}
+
+const SKELETON_TRAILING: Skeleton = Skeleton {
+    key: "skeleton-trailing",
+    own: false,
+    width_ratio: 0.32,
+    lines: 1,
+};
+
+const SKELETON_PLACEHOLDERS: [Skeleton; 4] = [
+    Skeleton {
+        key: "skeleton-0",
+        own: false,
+        width_ratio: 0.42,
+        lines: 1,
+    },
+    Skeleton {
+        key: "skeleton-1",
+        own: true,
+        width_ratio: 0.3,
+        lines: 1,
+    },
+    Skeleton {
+        key: "skeleton-2",
+        own: true,
+        width_ratio: 0.48,
+        lines: 2,
+    },
+    Skeleton {
+        key: "skeleton-3",
+        own: false,
+        width_ratio: 0.26,
+        lines: 1,
+    },
+];
+
+pub fn placeholder_rows() -> Vec<Row> {
+    SKELETON_PLACEHOLDERS
+        .into_iter()
+        .map(Row::Skeleton)
+        .collect()
+}
+
+pub fn trailing_skeleton() -> Row {
+    Row::Skeleton(SKELETON_TRAILING)
 }
 
 fn sender_key(row: &MessageRow) -> &str {
@@ -165,6 +228,7 @@ impl Row {
         match self {
             Row::LoadOlder => LOAD_OLDER_KEY,
             Row::Start(_) => START_KEY,
+            Row::Skeleton(skeleton) => skeleton.key,
             Row::Message(message) => &message.key,
         }
     }
@@ -293,7 +357,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         open_thread: None,
         is_reply: record.reply_to_id.is_some(),
         delivery: Delivery::Delivered,
-        read: false,
+        receipt: Receipt::Hidden,
         own: context.my_user_id.is_some() && record.sender_id == context.my_user_id,
     }
 }
@@ -543,7 +607,7 @@ mod tests {
             .iter()
             .map(|row| match row {
                 Row::Message(message) => message.day_header.clone(),
-                Row::LoadOlder | Row::Start(_) => None,
+                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => None,
             })
             .collect();
         assert_eq!(
@@ -635,7 +699,7 @@ mod tests {
         rows.iter()
             .filter_map(|row| match row {
                 Row::Message(message) => Some((message.series.has_prev, message.series.has_next)),
-                Row::LoadOlder | Row::Start(_) => None,
+                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => None,
             })
             .collect()
     }
