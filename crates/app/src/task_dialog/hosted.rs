@@ -17,13 +17,12 @@ pub fn install_host(transport: Arc<WebViewTransport>) {
     let _ = HOST.set(transport);
 }
 
-pub fn open(dialog: UrlDialog, cx: &mut App) {
+pub fn open(dialog: UrlDialog, engine: Option<Arc<Engine>>, cx: &mut App) {
     let Some(host) = HOST.get().cloned() else {
         cx.open_url(&dialog.fallback_url);
         return;
     };
     let state = cx.global::<AppHandle>().0.clone();
-    let engine = state.read(cx).engine.clone();
     let owner = cx
         .active_window()
         .and_then(|window| {

@@ -315,6 +315,7 @@ impl AppState {
                         scope: scope.clone(),
                         web_application_resource,
                     },
+                    self.engine.clone(),
                     cx,
                 );
                 if in_dialog {

@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use gpui_kit::*;
 
+use crate::backend::Engine;
 use crate::card_state::CardScope;
 
 #[cfg(windows)]
@@ -36,11 +39,11 @@ pub enum UrlDialogNext {
 }
 
 #[cfg(windows)]
-pub fn open_url_dialog(dialog: UrlDialog, cx: &mut App) {
-    hosted::open(dialog, cx);
+pub fn open_url_dialog(dialog: UrlDialog, engine: Option<Arc<Engine>>, cx: &mut App) {
+    hosted::open(dialog, engine, cx);
 }
 
 #[cfg(not(windows))]
-pub fn open_url_dialog(dialog: UrlDialog, cx: &mut App) {
+pub fn open_url_dialog(dialog: UrlDialog, _engine: Option<Arc<Engine>>, cx: &mut App) {
     cx.open_url(&dialog.fallback_url);
 }
