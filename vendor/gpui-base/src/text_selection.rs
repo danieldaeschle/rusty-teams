@@ -2824,6 +2824,11 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
                 if state.touch.drag.is_some() {
                     return;
                 }
+                if event.pressed_button != Some(MouseButton::Left) {
+                    state.mouse_down_prepared = false;
+                    state.end(cx);
+                    return;
+                }
                 state.update_in_window(event.position, window, cx)
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
@@ -4430,6 +4435,47 @@ mod tests {
         );
         cx.update(|window, cx| assert!(TextSelection::has_selection(window, cx)));
         assert_eq!(clear_count.get(), 3);
+    }
+
+    #[gpui::test]
+    fn mouse_move_without_button_ends_a_gesture_whose_mouse_up_was_missed(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("once", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        cx.simulate_mouse_down(
+            point(px(15.), px(10.)),
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(40.), px(10.)),
+            Some(MouseButton::Left),
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let state = WindowSelectionState::ensure(window, cx);
+            assert!(state.read(cx).is_selecting());
+        });
+
+        cx.simulate_mouse_move(point(px(60.), px(10.)), None, gpui::Modifiers::default());
+        let selection_after_release = cx.update(|window, cx| {
+            let state = WindowSelectionState::ensure(window, cx);
+            assert!(!state.read(cx).is_selecting());
+            TextSelection::selected_text(window, cx)
+        });
+
+        cx.simulate_mouse_move(point(px(85.), px(10.)), None, gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            assert_eq!(
+                TextSelection::selected_text(window, cx),
+                selection_after_release
+            );
+        });
+        let _ = view;
     }
 
     #[gpui::test]

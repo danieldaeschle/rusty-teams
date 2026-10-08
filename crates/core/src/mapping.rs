@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use graph::{Attachment, Chat, Mention, Message, Reaction};
 use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, TeamRecord};
 
-use crate::card::card_content_text;
+use crate::adaptive_card::card_content_text;
 use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
 use crate::stored::{AttachmentInfo, MentionInfo, QuoteInfo, ReactionInfo};

@@ -79,6 +79,25 @@ fn chat_upsert_replaces_fields_and_members() {
 }
 
 #[test]
+fn chat_upsert_keeps_a_real_title_over_the_only_you_fallback() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[chat("chat-1", "Sample Bot", Some(at(1)))])
+        .unwrap();
+    store
+        .upsert_chats(&[chat("chat-1", "(only you)", Some(at(2)))])
+        .unwrap();
+    assert_eq!(store.chat("chat-1").unwrap().unwrap().title, "Sample Bot");
+    store
+        .upsert_chats(&[chat("chat-2", "(only you)", Some(at(2)))])
+        .unwrap();
+    store
+        .upsert_chats(&[chat("chat-2", "Sample Bot", Some(at(3)))])
+        .unwrap();
+    assert_eq!(store.chat("chat-2").unwrap().unwrap().title, "Sample Bot");
+}
+
+#[test]
 fn recent_chats_are_newest_first_with_unknown_last() {
     let store = Store::open_in_memory().unwrap();
     store

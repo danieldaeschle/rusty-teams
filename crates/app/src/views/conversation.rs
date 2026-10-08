@@ -1618,6 +1618,7 @@ impl ConversationView {
                     size: image.dimensions,
                 })
                 .collect(),
+            adaptive_cards: Vec::new(),
             files: outgoing
                 .files
                 .iter()

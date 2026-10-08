@@ -341,19 +341,18 @@ fn whitespace_collapses() {
 }
 
 #[test]
-fn card_text_follows_python_order() {
+fn card_text_lists_texts_and_facts_in_document_order() {
     let card = json!({
         "type": "AdaptiveCard",
         "body": [
             {"type": "TextBlock", "text": "Deploy finished"},
             {"type": "FactSet", "facts": [{"title": "Env", "value": "prod"}]},
             {"type": "TextBlock", "text": "   "}
-        ],
-        "title": "Header"
+        ]
     });
     assert_eq!(
         card_content_text(&card.to_string()).unwrap(),
-        "Header\nDeploy finished\nEnv\nprod"
+        "Deploy finished\nEnv: prod"
     );
 }
 
@@ -375,25 +374,17 @@ fn record_with(body_html: &str, attachments_json: &str) -> MessageRecord {
 }
 
 #[test]
-fn message_spans_append_card_text_only_for_cards() {
-    let attachments = r#"[
-        {"content_type":"application/vnd.microsoft.card.adaptive","name":null,"url":null,"text":"Line one\nLine two"},
-        {"content_type":"reference","name":"a.pdf","url":"https://files.example.test/a.pdf","text":"[attachment: a.pdf]"}
-    ]"#;
+fn message_spans_leave_cards_to_the_card_renderer() {
+    let card = json!({"body": [{"type": "TextBlock", "text": "Line one"}]}).to_string();
+    let attachments = json!([
+        {"content_type": "application/vnd.microsoft.card.adaptive", "name": null, "url": null, "text": "Line one", "content": card}
+    ])
+    .to_string();
     assert_eq!(
-        message_spans(&record_with("<p>body</p>", attachments)),
-        vec![
-            text("body"),
-            Span::LineBreak,
-            text("Line one"),
-            Span::LineBreak,
-            text("Line two")
-        ]
+        message_spans(&record_with("<p>body</p>", &attachments)),
+        vec![text("body")]
     );
-    assert_eq!(
-        message_spans(&record_with("", attachments)),
-        vec![text("Line one"), Span::LineBreak, text("Line two")]
-    );
+    assert!(message_spans(&record_with("", &attachments)).is_empty());
 }
 
 #[test]

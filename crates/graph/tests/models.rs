@@ -35,6 +35,34 @@ fn chat_titles_follow_topic_then_other_members() {
     );
 }
 
+fn solo_chat(sender: Value) -> Chat {
+    serde_json::from_value(serde_json::json!({
+        "id": "19:solo@unq.gbl.spaces",
+        "chatType": "oneOnOne",
+        "members": [{"userId": "user-me", "displayName": "Test Me"}],
+        "lastMessagePreview": {"id": "1", "from": sender}
+    }))
+    .unwrap()
+}
+
+#[test]
+fn chat_with_only_me_is_named_after_the_bot_or_user_of_the_last_message() {
+    let bot =
+        solo_chat(serde_json::json!({"application": {"id": "app-1", "displayName": "Sample Bot"}}));
+    assert_eq!(bot.title("user-me"), "Sample Bot");
+    let other =
+        solo_chat(serde_json::json!({"user": {"id": "user-ada", "displayName": "Ada Example"}}));
+    assert_eq!(other.title("user-me"), "Ada Example");
+}
+
+#[test]
+fn chat_with_only_me_stays_a_note_to_self_without_another_sender() {
+    let mine = solo_chat(serde_json::json!({"user": {"id": "user-me", "displayName": "Test Me"}}));
+    assert_eq!(mine.title("user-me"), "(only you)");
+    let nameless = solo_chat(serde_json::json!({"application": {"id": "app-1"}}));
+    assert_eq!(nameless.title("user-me"), "(only you)");
+}
+
 #[test]
 fn chat_last_message_time_comes_from_preview() {
     let chats: Vec<Chat> = items("chats.json");

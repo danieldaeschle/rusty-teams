@@ -5,6 +5,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
 
+use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, attachments_view, message_body};
 use super::avatar::{member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
@@ -147,6 +148,11 @@ fn bubble(
         &format!("message-{index}"),
         directory,
         extras.files.as_ref(),
+    ));
+    content = content.children(cards_view(
+        &row.adaptive_cards,
+        &format!("message-{index}"),
+        cx,
     ));
     if has_reactions {
         content = content.child(
@@ -315,7 +321,10 @@ fn with_meta_room(blocks: &[Block], room: usize) -> Option<Vec<Block>> {
 
 fn has_text(row: &MessageRow) -> bool {
     !row.blocks.is_empty()
-        || (row.images.is_empty() && row.local_images.is_empty() && row.files.is_empty())
+        || (row.images.is_empty()
+            && row.local_images.is_empty()
+            && row.files.is_empty()
+            && row.adaptive_cards.is_empty())
 }
 
 fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<AnyElement> {
@@ -477,6 +486,11 @@ fn post_card(
             &format!("message-{index}"),
             directory,
             files,
+        ));
+        body = body.children(cards_view(
+            &row.adaptive_cards,
+            &format!("message-{index}"),
+            cx,
         ));
         if !row.reactions.is_empty() {
             body = body.child(reaction_pills(

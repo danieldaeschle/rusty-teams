@@ -21,7 +21,10 @@ impl Store {
                     last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
-                    kind = excluded.kind, title = excluded.title, member_summary = excluded.member_summary,
+                    kind = excluded.kind,
+                    title = CASE WHEN excluded.title = '(only you)' AND chats.title NOT IN ('', '(only you)')
+                        THEN chats.title ELSE excluded.title END,
+                    member_summary = excluded.member_summary,
                     last_message_at = excluded.last_message_at,
                     last_read_at = COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at),
                     unread = excluded.unread AND (

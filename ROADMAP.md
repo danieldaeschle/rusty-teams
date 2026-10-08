@@ -76,7 +76,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Unread jump with New divider | Done |  |
 | Read receipts | Done |  |
 | Select and copy message text | Done |  |
-| Adaptive Cards | Partial | Shown as text, actions do not work |
+| Adaptive Cards | Partial | Rendered as cards; only open-URL buttons work |
 | Typing indicator | Missing | Event arrives, ignored |
 | Link previews | Missing |  |
 | Loop components | Missing |  |

@@ -1,6 +1,6 @@
 mod actions;
+mod adaptive_card;
 mod avatars;
-mod card;
 mod channel_sync;
 mod download;
 mod draft;
@@ -23,8 +23,12 @@ mod sidebar_sync;
 mod spans;
 mod stored;
 
+pub use adaptive_card::{
+    AdaptiveCard, CardAction, CardActionKind, CardColumn, CardElement, CardFact, CardImage,
+    CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ImageSize, TextColor, TextSize,
+    VerticalAlignment, card_content_text,
+};
 pub use avatars::Avatar;
-pub use card::card_content_text;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, TypingStyle,
     changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -50,6 +54,6 @@ pub use spans::{Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, QuoteInfo, ReactionInfo,
-    attachments, can_delete, can_edit, copy_text, files, images, mentions, message_spans, quotes,
-    reactions, user_mention_inputs,
+    adaptive_cards, attachments, can_delete, can_edit, card_texts, copy_text, files, images,
+    mentions, message_spans, quotes, reactions, user_mention_inputs,
 };

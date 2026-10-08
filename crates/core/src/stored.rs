@@ -3,6 +3,7 @@ use scraper::{ElementRef, Html};
 use serde::{Deserialize, Serialize};
 use store::MessageRecord;
 
+use crate::adaptive_card::{AdaptiveCard, card_content_text};
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
 
@@ -84,6 +85,18 @@ impl AttachmentInfo {
             .is_some_and(|content_type| content_type.contains("card"))
     }
 
+    pub fn adaptive_card(&self) -> Option<AdaptiveCard> {
+        self.content
+            .as_deref()
+            .filter(|_| self.is_card())
+            .and_then(AdaptiveCard::parse)
+    }
+
+    pub fn card_text(&self) -> Option<String> {
+        let content = self.content.as_deref().filter(|_| self.is_card())?;
+        card_content_text(content).or_else(|| self.text.clone())
+    }
+
     pub fn file_kind(&self) -> FileKind {
         match self.name.as_deref().map(FileKind::from_name) {
             Some(FileKind::Other) | None if self.has_image_content_type() => FileKind::Image,
@@ -124,6 +137,20 @@ pub struct MentionInfo {
 
 pub fn attachments(record: &MessageRecord) -> Vec<AttachmentInfo> {
     serde_json::from_str(&record.attachments_json).unwrap_or_default()
+}
+
+pub fn adaptive_cards(record: &MessageRecord) -> Vec<AdaptiveCard> {
+    attachments(record)
+        .iter()
+        .filter_map(AttachmentInfo::adaptive_card)
+        .collect()
+}
+
+pub fn card_texts(record: &MessageRecord) -> Vec<String> {
+    attachments(record)
+        .iter()
+        .filter_map(AttachmentInfo::card_text)
+        .collect()
 }
 
 pub fn reactions(record: &MessageRecord) -> Vec<ReactionInfo> {
@@ -290,10 +317,14 @@ pub fn files(record: &MessageRecord) -> Vec<FileCard> {
 pub fn copy_text(record: &MessageRecord) -> String {
     let mut text = String::new();
     push_plain(&mut text, &message_spans(record));
+    for card_text in card_texts(record) {
+        text.push('\n');
+        text.push_str(&card_text);
+    }
     text.trim().to_owned()
 }
 
-fn push_plain(text: &mut String, spans: &[Span]) {
+pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
     for span in spans {
         match span {
             Span::Text(value) | Span::Code(value) => text.push_str(value),
@@ -394,7 +425,6 @@ fn leading_number(text: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-/// Body spans followed by the flattened text of adaptive-card attachments.
 pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
     spans_with_mentions(record, &mentions(record))
 }
@@ -402,21 +432,6 @@ pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
 fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
     let mut spans = html_to_spans(&record.body_html);
     merge_split_mentions(&mut spans, infos);
-    for card_text in attachments(record)
-        .iter()
-        .filter(|attachment| attachment.is_card())
-        .filter_map(|attachment| attachment.text.as_deref())
-    {
-        if !spans.is_empty() {
-            spans.push(Span::LineBreak);
-        }
-        for (index, line) in card_text.lines().enumerate() {
-            if index > 0 {
-                spans.push(Span::LineBreak);
-            }
-            spans.push(Span::Text(line.to_owned()));
-        }
-    }
     spans
 }
 

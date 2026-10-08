@@ -6,7 +6,8 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
-    Draft, FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions,
+    AdaptiveCard, Draft, FileCard, ImageRef, ReactionInfo, Span, adaptive_cards, card_texts, files,
+    images, message_spans, reactions,
 };
 
 use crate::format;
@@ -125,6 +126,7 @@ pub struct MessageRow {
     pub images: Vec<ImageRef>,
     pub local_images: Vec<LocalImage>,
     pub files: Vec<FileCard>,
+    pub adaptive_cards: Vec<AdaptiveCard>,
     pub reply_count: Option<usize>,
     pub new_marker: bool,
     pub reply_faces: Vec<Face>,
@@ -379,6 +381,13 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
     let excerpt = match first_line {
         Some(line) => line.to_owned(),
         None if !images(record).is_empty() => "Image".to_owned(),
+        None if let Some(line) = card_texts(record)
+            .iter()
+            .flat_map(|text| text.lines())
+            .next() =>
+        {
+            line.to_owned()
+        }
         None => files(record)
             .into_iter()
             .next()
@@ -431,6 +440,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         images,
         local_images: Vec::new(),
         files: files(record),
+        adaptive_cards: adaptive_cards(record),
         reply_count: None,
         new_marker: false,
         reply_faces: Vec::new(),

@@ -38,6 +38,7 @@ use app_state::{AppState, Mode};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
 pub const APP_NAME: &str = "Rusty Teams";
+const HTTP_USER_AGENT: &str = "teams-linux";
 const WINDOW_WIDTH: f32 = 1240.;
 const WINDOW_HEIGHT: f32 = 820.;
 const WINDOW_MIN_WIDTH: f32 = 640.;
@@ -149,7 +150,12 @@ fn main() {
     let receiver = (!arguments.demo)
         .then(|| backend::start(store.clone(), transport(arguments.endpoint.as_deref(), arguments.database.as_deref())));
 
-    gpui_kit::application()
+    let mut application = gpui_kit::application();
+    if let Ok(http_client) = reqwest_client::ReqwestClient::user_agent(HTTP_USER_AGENT) {
+        application = application.with_http_client(Arc::new(http_client));
+    }
+
+    application
         .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);

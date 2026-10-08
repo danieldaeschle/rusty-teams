@@ -757,12 +757,14 @@ fn open_popup<V: Render>(
     let center = cx.entity();
     cx.defer(move |cx| {
         let view_center = center.clone();
-        let Ok((handle, _)) = gpui_kit::open_window(options, cx, move |window, cx| {
-            build(view_center, window, cx)
+        let Ok(handle) = cx.open_window(options, move |window, cx| {
+            let view = build(view_center, window, cx);
+            cx.new(|cx| base::Root::new(view, window, cx).bg(transparent_black()))
         }) else {
             center.update(cx, |this, _| opened(this, None));
             return;
         };
+        let handle = AnyWindowHandle::from(handle);
         let native = handle
             .update(cx, |_, window, _| platform::native_handle(window))
             .ok()

@@ -19,6 +19,10 @@ const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
 const STAGING_SIZE: (usize, usize) = (960, 540);
 const PRIORITY_CHAT: &str = "demo-chat-priya";
+const BOT_CHAT: &str = "demo-chat-wiki-bot";
+const BOT_NAME: &str = "Wiki Bot";
+const CARD_PERSON_URL: &str = "https://avatars.githubusercontent.com/u/9919?s=64";
+const CARD_PAGE_URL: &str = "https://avatars.githubusercontent.com/u/9919?s=64";
 const NEW_CHAT_PREFIX: &str = "demo-chat-new-";
 const PEOPLE_DIRECTORY: [(&str, &str, &str, &str); 5] = [
     (
@@ -150,6 +154,16 @@ struct DemoChat {
 fn demo_chats() -> Vec<DemoChat> {
     let group = |extra: &[(&str, &str)]| people(extra);
     vec![
+        DemoChat {
+            id: BOT_CHAT,
+            kind: "oneOnOne",
+            title: BOT_NAME,
+            members: people(&[]),
+            time: at(0, 13, 45),
+            unread: true,
+            preview: Some(("", BOT_NAME, "Mara Lindqvist edited your page")),
+            deleted: false,
+        },
         DemoChat {
             id: "demo-chat-mara",
             kind: "oneOnOne",
@@ -469,6 +483,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&unread_messages());
     let _ = store.upsert_messages(&channel_messages());
     let _ = store.upsert_messages(&priority_messages());
+    let _ = store.upsert_messages(&bot_messages());
 }
 
 fn photo(palette: &Palette) -> Arc<Image> {
@@ -581,6 +596,59 @@ fn message(
 fn with_attachments(mut record: MessageRecord, attachments_json: &str) -> MessageRecord {
     record.attachments_json = attachments_json.to_owned();
     record
+}
+
+fn bot_messages() -> Vec<MessageRecord> {
+    let card = serde_json::json!({
+        "type": "AdaptiveCard",
+        "body": [
+            {"type": "ColumnSet", "columns": [
+                {"type": "Column", "width": "auto", "verticalContentAlignment": "center", "items": [
+                    {"type": "Image", "url": CARD_PERSON_URL, "size": "small", "style": "person", "height": "32px"}
+                ]},
+                {"type": "Column", "width": "stretch", "verticalContentAlignment": "center", "items": [
+                    {"type": "TextBlock", "size": "medium", "weight": "bolder", "wrap": true, "text": "Mara Lindqvist edited your page"}
+                ]}
+            ]},
+            {"type": "ColumnSet", "separator": true, "columns": [
+                {"type": "Column", "width": "auto", "items": [
+                    {"type": "Image", "url": CARD_PAGE_URL, "width": "24px", "height": "24px"}
+                ]},
+                {"type": "Column", "width": "stretch", "items": [
+                    {"type": "TextBlock", "weight": "bolder", "wrap": true, "text": "[**Release Checklist Q4**](https://example.com/wiki/release-checklist) in [**Platform**](https://example.com/wiki/platform)"},
+                    {"type": "TextBlock", "spacing": "small", "isSubtle": true, "wrap": true, "text": "Owned by: Dana Demo"}
+                ]}
+            ]},
+            {"type": "ActionSet", "actions": [
+                {"type": "Action.OpenUrl", "title": "View page", "url": "https://example.com/wiki/release-checklist"},
+                {"type": "Action.OpenUrl", "title": "View changes", "url": "https://example.com/wiki/release-checklist/changes"},
+                {"type": "Action.Submit", "title": "Watch page", "data": {"action": "watch"}},
+                {"type": "Action.Submit", "title": "Stop watching", "data": {"action": "unwatch"}}
+            ]}
+        ]
+    });
+    let attachments = serde_json::json!([{
+        "content_type": "application/vnd.microsoft.card.adaptive",
+        "name": null,
+        "url": null,
+        "text": null,
+        "content": card.to_string()
+    }]);
+    let mut record = with_attachments(
+        message(
+            BOT_CHAT,
+            "b1",
+            None,
+            ("", BOT_NAME),
+            at(0, 13, 45),
+            "<attachment id=\"b1\"></attachment>",
+            "[]",
+            false,
+        ),
+        &attachments.to_string(),
+    );
+    record.sender_id = None;
+    vec![record]
 }
 
 fn priority_messages() -> Vec<MessageRecord> {

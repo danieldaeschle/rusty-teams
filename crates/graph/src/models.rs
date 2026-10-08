@@ -156,10 +156,26 @@ impl Chat {
             })
             .collect();
         if names.is_empty() {
-            "(only you)".to_owned()
+            self.preview_sender_name(my_user_id)
+                .unwrap_or("(only you)")
+                .to_owned()
         } else {
             names.join(", ")
         }
+    }
+
+    fn preview_sender_name(&self, my_user_id: &str) -> Option<&str> {
+        let sender = self.last_message_preview.as_ref()?.from.as_ref()?;
+        let application = sender
+            .application
+            .as_ref()
+            .and_then(|identity| identity.display_name.as_deref());
+        let other_user = sender
+            .user
+            .as_ref()
+            .filter(|identity| identity.id.as_deref() != Some(my_user_id))
+            .and_then(|identity| identity.display_name.as_deref());
+        application.or(other_user).filter(|name| !name.is_empty())
     }
 
     pub fn last_message_time(&self) -> Option<DateTime<Utc>> {
