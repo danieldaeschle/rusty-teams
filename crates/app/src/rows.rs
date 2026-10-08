@@ -274,9 +274,9 @@ pub fn reaction_label(reaction_type: &str) -> String {
     match reaction_type {
         "like" => "\u{1F44D}".to_owned(),
         "heart" => "\u{2764}".to_owned(),
-        "laugh" => "\u{1F602}".to_owned(),
+        "laugh" => "\u{1F606}".to_owned(),
         "surprised" => "\u{1F62E}".to_owned(),
-        "sad" => "\u{1F622}".to_owned(),
+        "sad" => "\u{1F641}".to_owned(),
         "angry" => "\u{1F620}".to_owned(),
         other => other.to_owned(),
     }
@@ -938,6 +938,14 @@ mod tests {
         assert_eq!(chips.len(), 2);
         assert_eq!(chips[0].count, 2);
         assert_eq!(chips[1].label, reaction_label("like"));
+    }
+
+    #[test]
+    fn legacy_laugh_and_sad_use_the_teams_glyphs() {
+        assert_eq!(reaction_label("laugh"), "\u{1F606}");
+        assert_eq!(reaction_label("sad"), "\u{1F641}");
+        assert_eq!(reaction_type_for("\u{1F606}"), "laugh");
+        assert_eq!(reaction_type_for("\u{1F641}"), "sad");
     }
 
     #[test]

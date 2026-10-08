@@ -164,6 +164,72 @@ impl<T: MessageTransport> Messages<T> {
         ensure_success(&answer)
     }
 
+    pub async fn set_emotion(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        key: &str,
+    ) -> Result<()> {
+        let url = self.emotions_url(conversation, message_id);
+        let body = json!({"emotions": {"key": key, "value": Utc::now().timestamp_millis()}});
+        self.send_retrying_server_errors(Method::Put, &url, &body)
+            .await
+    }
+
+    pub async fn unset_emotion(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        key: &str,
+    ) -> Result<()> {
+        let url = self.emotions_url(conversation, message_id);
+        let body = json!({"emotions": {"key": key}});
+        self.send_retrying_server_errors(Method::Delete, &url, &body)
+            .await
+    }
+
+    pub async fn unset_emotions(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        keys: &[&str],
+    ) -> Result<()> {
+        let mut last_error = None;
+        let mut any_succeeded = false;
+        for key in keys {
+            match self.unset_emotion(conversation, message_id, key).await {
+                Ok(()) => any_succeeded = true,
+                Err(error) => last_error = Some(error),
+            }
+        }
+        match last_error {
+            Some(error) if !any_succeeded => Err(error),
+            _ => Ok(()),
+        }
+    }
+
+    fn emotions_url(&self, conversation: &ConversationRef, message_id: &str) -> String {
+        format!(
+            "{}/properties?name=emotions",
+            self.message_url(conversation, message_id)
+        )
+    }
+
+    async fn send_retrying_server_errors(
+        &self,
+        method: Method,
+        url: &str,
+        body: &Value,
+    ) -> Result<()> {
+        let request = || Request::with_body(method, url, body.clone());
+        let mut answer = self.transport.send(request()).await?;
+        if (500..600).contains(&answer.status) {
+            tokio::time::sleep(self.retry_delay).await;
+            answer = self.transport.send(request()).await?;
+        }
+        ensure_success(&answer)
+    }
+
     async fn put(&self, url: &str, body: &Value) -> Result<ApiResponse> {
         self.transport
             .send(Request::with_body(Method::Put, url, body.clone()))

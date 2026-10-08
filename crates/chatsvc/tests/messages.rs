@@ -169,3 +169,85 @@ fn messages_use_the_ic3_scope() {
     assert_eq!(scope.resource, session::IC3);
     assert_eq!(scope.name, "Teams.AccessAsUser.All");
 }
+
+#[tokio::test]
+async fn set_emotion_puts_key_and_numeric_timestamp() {
+    let mock = Mock::new(&[200]);
+    messages(&mock)
+        .set_emotion(
+            &ConversationRef::chat("19:a@thread.v2"),
+            "m1",
+            "1f603_grinningfacewithbigeyes",
+        )
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests[0].method, Method::Put);
+    assert!(
+        requests[0]
+            .url
+            .ends_with("/messages/m1/properties?name=emotions")
+    );
+    let emotions = &requests[0].body.as_ref().unwrap()["emotions"];
+    assert_eq!(emotions["key"], "1f603_grinningfacewithbigeyes");
+    assert!(emotions["value"].is_number());
+}
+
+#[tokio::test]
+async fn unset_emotion_deletes_with_key_body_and_retries_a_500() {
+    let mock = Mock::new(&[500, 200]);
+    messages(&mock)
+        .unset_emotion(&ConversationRef::chat("19:a@thread.v2"), "m1", "like")
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].method, Method::Delete);
+    assert!(requests[1].url.ends_with("/properties?name=emotions"));
+    assert_eq!(
+        requests[1].body.as_ref().unwrap(),
+        &serde_json::json!({"emotions": {"key": "like"}})
+    );
+}
+
+#[tokio::test]
+async fn emotion_gives_up_after_the_second_500() {
+    let mock = Mock::new(&[500, 500]);
+    assert!(
+        messages(&mock)
+            .set_emotion(&ConversationRef::chat("19:a"), "m1", "like")
+            .await
+            .is_err()
+    );
+    assert_eq!(mock.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn unset_emotions_tries_every_key_and_succeeds_if_one_does() {
+    let mock = Mock::new(&[404, 200]);
+    messages(&mock)
+        .unset_emotions(&ConversationRef::chat("19:a"), "m1", &["primary", "alias"])
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0].body.as_ref().unwrap()["emotions"]["key"],
+        "primary"
+    );
+    assert_eq!(
+        requests[1].body.as_ref().unwrap()["emotions"]["key"],
+        "alias"
+    );
+}
+
+#[tokio::test]
+async fn unset_emotions_fails_when_every_key_fails() {
+    let mock = Mock::new(&[404, 404]);
+    assert!(
+        messages(&mock)
+            .unset_emotions(&ConversationRef::chat("19:a"), "m1", &["primary", "alias"])
+            .await
+            .is_err()
+    );
+}

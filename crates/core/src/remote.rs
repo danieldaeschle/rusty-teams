@@ -363,10 +363,21 @@ impl Remote for Graph {
     }
 
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
+        if let Some(key) = chatsvc::emotion_key(reaction_type) {
+            return Ok(Messages::new(self.session())
+                .set_emotion(&conversation_ref(target), target.message_id(), key)
+                .await?);
+        }
         Ok(Graph::set_reaction(self, target, reaction_type).await?)
     }
 
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
+        let keys = chatsvc::emotion_keys(reaction_type);
+        if !keys.is_empty() {
+            return Ok(Messages::new(self.session())
+                .unset_emotions(&conversation_ref(target), target.message_id(), keys)
+                .await?);
+        }
         Ok(Graph::unset_reaction(self, target, reaction_type).await?)
     }
 
@@ -509,19 +520,24 @@ impl Remote for Graph {
 
 fn chatsvc_conversation(target: &MessageTarget) -> Option<ConversationRef> {
     match target {
-        MessageTarget::Chat { chat_id, .. } => {
-            CHATSVC_CHAT_WRITES.then(|| ConversationRef::chat(chat_id))
-        }
+        MessageTarget::Chat { .. } => CHATSVC_CHAT_WRITES.then(|| conversation_ref(target)),
+        MessageTarget::Channel { .. } => Some(conversation_ref(target)),
+    }
+}
+
+fn conversation_ref(target: &MessageTarget) -> ConversationRef {
+    match target {
+        MessageTarget::Chat { chat_id, .. } => ConversationRef::chat(chat_id),
         MessageTarget::Channel {
             channel_id,
             root_id: None,
             ..
-        } => Some(ConversationRef::channel_root(channel_id)),
+        } => ConversationRef::channel_root(channel_id),
         MessageTarget::Channel {
             channel_id,
             root_id: Some(root_id),
             ..
-        } => Some(ConversationRef::channel_reply(channel_id, root_id)),
+        } => ConversationRef::channel_reply(channel_id, root_id),
     }
 }
 
@@ -568,6 +584,15 @@ mod tests {
         assert_eq!(
             chatsvc_conversation(&reply),
             Some(ConversationRef::channel_reply("19:c@thread.tacv2", "m1"))
+        );
+    }
+
+    #[test]
+    fn reactions_reach_chats_regardless_of_the_feature_switch() {
+        let chat = MessageTarget::chat("19:a@thread.v2", "m1");
+        assert_eq!(
+            conversation_ref(&chat),
+            ConversationRef::chat("19:a@thread.v2")
         );
     }
 
