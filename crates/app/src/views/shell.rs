@@ -14,6 +14,7 @@ use crate::updater::{self, IdleInputs, UpdateStatus};
 actions!(teams, [OpenSwitcher, NewChat]);
 
 pub fn bind_keys(cx: &mut App) {
+    super::composer::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("ctrl-k", OpenSwitcher, None),
         KeyBinding::new("ctrl-n", NewChat, None),

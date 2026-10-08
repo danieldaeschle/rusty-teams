@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 58 %** (47 done, 4 partial, 34 missing of 85). Partial counts half.
+**Parity: 59 %** (48 done, 4 partial, 33 missing of 85). Partial counts half.
 
 ## By area
 
@@ -11,7 +11,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 60 % | 6 | 0 | 4 |
 | [Reading](#reading) | 71 % | 13 | 1 | 5 |
-| [Writing](#writing) | 68 % | 9 | 1 | 4 |
+| [Writing](#writing) | 75 % | 10 | 1 | 3 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
 | [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
@@ -87,7 +87,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Feature | State | Note |
 |---|---|---|
 | Send, multi-line, Enter sends | Done |  |
-| Markdown while typing: bold, code, lists, links | Done |  |
+| Markdown while typing: bold, code, lists, links | Done | Converts as you type or paste; Backspace or Ctrl+Z brings the raw text back |
 | Quote-reply (Alt+R) | Done |  |
 | @mentions with people search | Done |  |
 | Emoji by colon code, English and German aliases | Done |  |
@@ -95,7 +95,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Delete own message | Done |  |
 | React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
 | Emoji picker | Partial | For reactions; composer still uses colon codes |
-| Formatting toolbar, Ctrl+B and Ctrl+I | Missing |  |
+| Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block |
 | Attach a file, paste or drag an image | Done | Images inline, files via OneDrive or the channel's Files |
 | GIFs and stickers | Missing |  |
 | Schedule send | Missing |  |

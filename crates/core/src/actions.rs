@@ -31,7 +31,7 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<MessageRecord> {
         self.send_message_with_extras(
             conversation_id,
-            markdown,
+            &markdown_to_html(markdown),
             thread_root_id,
             mentions,
             &MessageExtras::default(),
@@ -39,16 +39,17 @@ impl<R: Remote> SyncEngine<R> {
         .await
     }
 
+    /// `html` is the message body; mentions are matched as `@name` in it.
     pub async fn send_message_with_extras(
         &self,
         conversation_id: &str,
-        markdown: &str,
+        html: &str,
         thread_root_id: Option<&str>,
         mentions: &[MentionInput],
         extras: &MessageExtras,
     ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id)?;
-        let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
+        let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = match (conversation, thread_root_id) {
             (Conversation::Chat, None) => {
                 self.remote
@@ -100,7 +101,7 @@ impl<R: Remote> SyncEngine<R> {
         self.reply_to_with_extras(
             conversation_id,
             message_id,
-            markdown,
+            &markdown_to_html(markdown),
             mentions,
             &MessageExtras::default(),
         )
@@ -111,12 +112,12 @@ impl<R: Remote> SyncEngine<R> {
         &self,
         conversation_id: &str,
         message_id: &str,
-        markdown: &str,
+        html: &str,
         mentions: &[MentionInput],
         extras: &MessageExtras,
     ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id)?;
-        let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
+        let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = match conversation {
             Conversation::Chat => {
                 self.remote
@@ -183,7 +184,7 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<MessageRecord> {
         self.post_to_channel_with_extras(
             channel_id,
-            markdown,
+            &markdown_to_html(markdown),
             subject,
             mentions,
             &MessageExtras::default(),
@@ -194,7 +195,7 @@ impl<R: Remote> SyncEngine<R> {
     pub async fn post_to_channel_with_extras(
         &self,
         channel_id: &str,
-        markdown: &str,
+        html: &str,
         subject: Option<&str>,
         mentions: &[MentionInput],
         extras: &MessageExtras,
@@ -203,7 +204,7 @@ impl<R: Remote> SyncEngine<R> {
         let Conversation::Channel { team_id } = &conversation else {
             return Err(Error::Unsupported("posting a root message to a chat"));
         };
-        let (html, mentions) = outgoing(&conversation, markdown, mentions)?;
+        let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = self
             .remote
             .send_channel_message(team_id, channel_id, &html, subject, &mentions, extras)
@@ -386,8 +387,24 @@ impl<R: Remote> SyncEngine<R> {
         markdown: &str,
         mentions: &[MentionInput],
     ) -> Result<()> {
+        self.edit_message_html(
+            conversation_id,
+            message_id,
+            &markdown_to_html(markdown),
+            mentions,
+        )
+        .await
+    }
+
+    pub async fn edit_message_html(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        html: &str,
+        mentions: &[MentionInput],
+    ) -> Result<()> {
         let conversation = self.resolve(conversation_id)?;
-        let (mut html, mentions) = outgoing(&conversation, markdown, mentions)?;
+        let (mut html, mentions) = outgoing(&conversation, html, mentions)?;
         let target = self.message_target(conversation_id, message_id)?;
         let mut extras = MessageExtras::default();
         if let Some(record) = self
@@ -498,13 +515,13 @@ impl<R: Remote> SyncEngine<R> {
 
 fn outgoing(
     conversation: &Conversation,
-    markdown: &str,
+    html: &str,
     mentions: &[MentionInput],
 ) -> Result<(String, Vec<OutgoingMention>)> {
     if matches!(conversation, Conversation::Chat) {
         ensure_allowed_in_chat(mentions)?;
     }
-    Ok(apply_mentions(&markdown_to_html(markdown), mentions))
+    Ok(apply_mentions(html, mentions))
 }
 
 fn missing_attachment_id() -> Error {

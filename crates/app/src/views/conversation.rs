@@ -33,13 +33,12 @@ use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
-use crate::render::Block;
-use crate::render::blocks::Inline;
+use crate::render::layout_blocks;
 use crate::rows::{
     Delivery, LocalImage, MessageRow, Receipt, Row, RowContext, Series, StartInfo, api_reaction,
-    assign_series, changed_indices, diff_keys, flat_rows, message_text, placeholder_rows,
-    reaction_glyph, reaction_type_for, reply_excerpt, thread_list_rows, thread_rows,
-    trailing_skeleton,
+    assign_series, changed_indices, diff_keys, flat_rows, message_draft, message_text,
+    placeholder_rows, reaction_glyph, reaction_type_for, reply_excerpt, thread_list_rows,
+    thread_rows, trailing_skeleton,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -1520,11 +1519,10 @@ impl ConversationView {
         let sent = outgoing.clone();
         let receiver = runtime::spawn(async move {
             let extras = sent.extras();
+            let html = sent.html();
+            let text = &html;
             let Outgoing {
-                text,
-                mentions,
-                reply,
-                ..
+                mentions, reply, ..
             } = &sent;
             match (&view_mode, reply) {
                 (_, Some(reply)) => {
@@ -1603,10 +1601,10 @@ impl ConversationView {
             card: false,
             time: chrono::Local::now().format("%H:%M").to_string(),
             day_header: None,
-            blocks: if outgoing.text.is_empty() {
+            blocks: if outgoing.draft.is_blank() {
                 Vec::new()
             } else {
-                vec![Block::Paragraph(Inline::plain(&outgoing.text))]
+                layout_blocks(&teams_core::html_to_spans(&outgoing.html()))
             },
             edited: false,
             deleted: false,
@@ -1713,7 +1711,7 @@ impl ConversationView {
             let sent = engine
                 .send_message_with_extras(
                     &chat_id,
-                    &outgoing.text,
+                    &outgoing.html(),
                     None,
                     &outgoing.mentions,
                     &outgoing.extras(),
@@ -1787,9 +1785,16 @@ impl ConversationView {
                 let Some(chat) = chats.iter().find(|chat| chat.id == chat_id) else {
                     return;
                 };
-                crate::demo::send_in_chat(chat, &outgoing.text, Utc::now())
+                crate::demo::send_in_chat(chat, &outgoing.text(), &outgoing.html(), Utc::now())
             }
-            None => crate::demo::new_chat(&chats, &people, topic, &outgoing.text, Utc::now()),
+            None => crate::demo::new_chat(
+                &chats,
+                &people,
+                topic,
+                &outgoing.text(),
+                &outgoing.html(),
+                Utc::now(),
+            ),
         };
         let _ = store.upsert_chats(std::slice::from_ref(&chat));
         let _ = store.upsert_messages(std::slice::from_ref(&message));
@@ -1930,7 +1935,7 @@ impl ConversationView {
             Vec::new()
         };
         let draft = Outgoing {
-            text: message_text(&record),
+            draft: message_draft(&record),
             mentions,
             reply: None,
             edit: Some(edit),
@@ -1971,7 +1976,7 @@ impl ConversationView {
         let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
         if mode.demo {
             if let Some(mut record) = self.own_record(&edit.message_id, cx) {
-                record.body_html = teams_core::markdown_to_html(&outgoing.text);
+                record.body_html = outgoing.html();
                 record.edited_at = Some(Utc::now());
                 let _ = store.upsert_messages(std::slice::from_ref(&record));
                 self.rebuild(false, cx);
@@ -1988,10 +1993,10 @@ impl ConversationView {
         let sent = outgoing.clone();
         let receiver = runtime::spawn(async move {
             engine
-                .edit_message_with_mentions(
+                .edit_message_html(
                     &conversation_id,
                     &edit.message_id,
-                    &sent.text,
+                    &sent.html(),
                     &sent.mentions,
                 )
                 .await

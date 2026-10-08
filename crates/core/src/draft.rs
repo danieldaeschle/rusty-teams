@@ -757,7 +757,10 @@ impl Draft {
         let content = self.content_range(index);
         let start = range.start.max(content.start);
         let range = start..range.end.max(start);
-        let line_was_empty = self.lines[index] == LineKind::Text && content.is_empty();
+        let tail_end = self.line_ranges()[self.line_at(range.end)].end;
+        let line_was_empty = self.lines[index] == LineKind::Text
+            && range.start == content.start
+            && range.end >= tail_end;
         let joined = lines
             .iter()
             .map(|line| line.content.as_str())
@@ -1967,6 +1970,23 @@ mod tests {
             target.lines()[1..],
             [LineKind::Bullet(0), LineKind::Bullet(0)]
         );
+    }
+
+    #[test]
+    fn markdown_pasted_on_its_own_line_converts_from_the_first_line() {
+        let raw = "- a\n- b";
+        let mut draft = Draft::plain("");
+        draft.apply_edit(raw, raw.len(), None);
+        let lines = Draft::from_markdown(raw).slice(0..usize::MAX);
+        let cursor = draft.insert_lines(0..raw.len(), &lines);
+        assert_eq!(draft.text(), "• a\n• b");
+        assert_eq!(cursor, draft.text().len());
+        let mut inline = Draft::plain("x ");
+        inline.apply_edit("x **b**", 7, None);
+        let lines = Draft::from_markdown("**b**").slice(0..usize::MAX);
+        inline.insert_lines(2..7, &lines);
+        assert_eq!(inline.text(), "x b");
+        assert_eq!(inline.marks(), [mark(2..3, MarkKind::Bold)]);
     }
 
     #[test]

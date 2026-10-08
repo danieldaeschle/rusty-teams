@@ -1,15 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    h_flex,
+    ActiveTheme as _, h_flex,
     input::{
-        Backspace, Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent, MoveDown,
-        MoveUp, Textarea, TextareaState,
+        Backspace, Copy, Cut, Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent,
+        InputState, MoveDown, MoveUp, OutdentInline, RangeDecorationCollection, Redo,
+        TextDecorationCollection, Textarea, TextareaMode, TextareaState, Undo,
     },
     tooltip::Tooltip,
     v_flex,
@@ -17,7 +20,9 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
-    FileReference, HostedImage, MentionCandidate, MentionInput, MessageExtras, UploadedFile,
+    Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
+    MentionCandidate, MentionInput, MessageExtras, TypingStyle, UploadedFile, has_markdown,
+    map_offset, reverse_edits,
 };
 
 use super::attachment_tray::{
@@ -26,7 +31,9 @@ use super::attachment_tray::{
     prepare_pasted_image, read_attachment, render_tray,
 };
 use super::avatar::{person_avatar, square_avatar};
+use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
+use super::format_toolbar::{self, FormatButton};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
@@ -44,6 +51,40 @@ const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
+const SNAPSHOT_LIMIT: usize = 100;
+const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
+const KEY_CONTEXT: &str = "Composer";
+
+actions!(
+    composer,
+    [
+        ToggleBold,
+        ToggleItalic,
+        ToggleUnderline,
+        ToggleStrike,
+        ToggleCode,
+        EditLink
+    ]
+);
+
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("ctrl-b", ToggleBold, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-i", ToggleItalic, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-u", ToggleUnderline, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-shift-x", ToggleStrike, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-shift-c", ToggleCode, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-k", EditLink, Some(KEY_CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-b", ToggleBold, Some(KEY_CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-i", ToggleItalic, Some(KEY_CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-u", ToggleUnderline, Some(KEY_CONTEXT)),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-k", EditLink, Some(KEY_CONTEXT)),
+    ]);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplyPreview {
@@ -60,7 +101,7 @@ pub struct EditPreview {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outgoing {
-    pub text: String,
+    pub draft: Draft,
     pub mentions: Vec<MentionInput>,
     pub reply: Option<ReplyPreview>,
     pub edit: Option<EditPreview>,
@@ -69,6 +110,16 @@ pub struct Outgoing {
 }
 
 impl Outgoing {
+    /// Without list and quote markers, for previews.
+    pub fn text(&self) -> String {
+        self.draft.plain_text()
+    }
+
+    /// The body before mentions become `<at>` tags.
+    pub fn html(&self) -> String {
+        self.draft.to_html()
+    }
+
     pub fn has_attachments(&self) -> bool {
         !self.images.is_empty() || !self.files.is_empty()
     }
@@ -125,12 +176,23 @@ struct MentionPopup {
     highlighted: usize,
 }
 
+/// An automatic edit Backspace takes back while nothing changed since.
 struct Conversion {
     value: String,
     cursor: usize,
-    range: Range<usize>,
-    original: String,
+    before: Draft,
+    restore: Vec<Edit>,
 }
+
+struct LinkEditor {
+    range: Range<usize>,
+    field: Entity<InputState>,
+}
+
+type DraftDecorations = (
+    TextDecorationCollection<TextareaMode>,
+    RangeDecorationCollection<TextareaMode>,
+);
 
 pub struct Composer {
     app: Entity<AppState>,
@@ -148,11 +210,23 @@ pub struct Composer {
     conversion: Option<Conversion>,
     undone_value: Option<String>,
     previous_value: String,
+    draft: Draft,
+    decorations: DraftDecorations,
+    pending_style: Option<TypingStyle>,
+    snapshots: VecDeque<Draft>,
+    replaying_history: bool,
+    pasted_markdown: Option<String>,
+    paste_hint: Option<Task<()>>,
+    copied: Option<(String, Vec<DraftLine>)>,
+    toolbar_dismissed: Option<Range<usize>>,
+    mouse_selecting: bool,
+    link_editor: Option<LinkEditor>,
+    composer_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     tray: AttachmentTray,
     uploads: HashMap<u64, UploadHandle>,
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
-    _subscription: Subscription,
+    _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -214,6 +288,22 @@ fn candidate_subtitle(candidate: &MentionCandidate) -> String {
     }
 }
 
+fn looks_like_url(text: &str) -> bool {
+    ["https://", "http://", "www."]
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+        && !text.contains(char::is_whitespace)
+}
+
+fn normalized_url(text: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() || text.contains("://") || text.starts_with("mailto:") {
+        text.to_owned()
+    } else {
+        format!("https://{text}")
+    }
+}
+
 fn candidate_key(candidate: &MentionCandidate) -> &str {
     match candidate {
         MentionCandidate::Person(person) => &person.user_id,
@@ -231,6 +321,13 @@ impl Composer {
                 .placeholder("Type a message")
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
+        let observer = cx.observe(&input, |_, _, cx| cx.notify());
+        let decorations = input.update(cx, |state, cx| {
+            (
+                state.create_decorations_collection(Vec::new(), cx),
+                state.create_range_decorations_collection(Vec::new(), cx),
+            )
+        });
         let recent_emoji = emoji::Recent::load(&app.read(cx).store);
         Composer {
             app,
@@ -248,11 +345,23 @@ impl Composer {
             conversion: None,
             undone_value: None,
             previous_value: String::new(),
+            draft: Draft::default(),
+            decorations,
+            pending_style: None,
+            snapshots: VecDeque::new(),
+            replaying_history: false,
+            pasted_markdown: None,
+            paste_hint: None,
+            copied: None,
+            toolbar_dismissed: None,
+            mouse_selecting: false,
+            link_editor: None,
+            composer_bounds: Rc::new(Cell::new(None)),
             tray: AttachmentTray::default(),
             uploads: HashMap::new(),
             demo_failed: HashSet::new(),
             carry_images_into: None,
-            _subscription: subscription,
+            _subscriptions: [subscription, observer],
         }
     }
 
@@ -265,7 +374,7 @@ impl Composer {
     ) {
         cx.notify();
         if matches!(event, InputEvent::Change) {
-            self.convert_typed(window, cx);
+            self.on_change(window, cx);
             self.update_emoji(cx);
             self.update_mention(cx);
         }
@@ -312,29 +421,216 @@ impl Composer {
         self.lookup = None;
     }
 
-    fn convert_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.input.read(cx);
         let (value, cursor) = (state.value().to_string(), state.cursor());
         let previous = std::mem::replace(&mut self.previous_value, value.clone());
-        let found = match emoji::typed_char(&previous, &value, cursor) {
-            Some(':') => emoji::closing_code(&value, cursor)
+        let replaying = std::mem::take(&mut self.replaying_history);
+        if value == self.draft.text() {
+            self.refresh_style(cx);
+            return;
+        }
+        if replaying && let Some(snapshot) = self.snapshot_for(&value) {
+            self.draft = snapshot;
+            self.pending_style = None;
+            self.refresh_style(cx);
+            return;
+        }
+        let typing = self.pending_style.take();
+        let cursor = self.draft.apply_edit(&value, cursor, typing.as_ref());
+        self.commit(Some(cursor), window, cx);
+        if replaying {
+            return;
+        }
+        if let Some(pasted) = self.pasted_markdown.take()
+            && self.convert_paste(&pasted, cursor, window, cx)
+        {
+            return;
+        }
+        let typed = emoji::typed_char(&previous, self.draft.text(), cursor);
+        if typed.is_some() && self.convert_markdown(cursor, window, cx) {
+            return;
+        }
+        self.convert_emoji(typed, cursor, window, cx);
+    }
+
+    fn convert_markdown(
+        &mut self,
+        cursor: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let before = self.draft.clone();
+        let Some((cursor, style)) = self.draft.convert_typed(cursor) else {
+            self.draft.take_edits();
+            return false;
+        };
+        self.finish_conversion(before, cursor, window, cx);
+        self.pending_style = (!style.is_empty()).then_some(style);
+        true
+    }
+
+    fn convert_emoji(
+        &mut self,
+        typed: Option<char>,
+        cursor: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = self.draft.text();
+        let found = match typed {
+            Some(':') => emoji::closing_code(value, cursor)
                 .and_then(|(range, code)| Some((range, emoji::lookup(code)?))),
-            Some(' ') => emoji::smiley_before_space(&value, cursor),
+            Some(' ') => emoji::smiley_before_space(value, cursor),
             _ => None,
         };
         let Some((range, glyph)) = found else {
             return;
         };
-        let original = value[range.clone()].to_owned();
-        let cursor = self.replace_text(range.clone(), glyph, cursor, window, cx);
-        self.previous_value = self.input.read(cx).value().to_string();
-        self.conversion = Some(Conversion {
-            value: self.previous_value.clone(),
-            cursor,
-            range: range.start..range.start + glyph.len(),
-            original,
-        });
+        let before = self.draft.clone();
+        self.draft.replace(range.clone(), glyph);
+        self.finish_conversion(before, cursor + glyph.len() - range.len(), window, cx);
         self.remember_emoji(glyph, cx);
+    }
+
+    fn finish_conversion(
+        &mut self,
+        before: Draft,
+        cursor: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let edits = self.draft.take_edits();
+        let restore = reverse_edits(&edits, before.text());
+        self.apply_to_input(edits, cursor..cursor, window, cx);
+        self.conversion = Some(Conversion {
+            value: self.draft.text().to_owned(),
+            cursor,
+            before,
+            restore,
+        });
+    }
+
+    fn convert_paste(
+        &mut self,
+        pasted: &str,
+        cursor: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let pasted = pasted.replace("\r\n", "\n");
+        let Some(start) = cursor
+            .checked_sub(pasted.len())
+            .filter(|start| self.draft.text().get(*start..cursor) == Some(pasted.as_str()))
+        else {
+            return false;
+        };
+        let lines = Draft::from_markdown(&pasted).slice(0..usize::MAX);
+        let cursor = self.draft.insert_lines(start..cursor, &lines);
+        self.commit(Some(cursor), window, cx);
+        self.paste_hint = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PASTE_HINT_DURATION).await;
+            this.update(cx, |this, cx| {
+                this.paste_hint = None;
+                cx.notify();
+            })
+            .ok();
+        }));
+        true
+    }
+
+    /// Puts the draft's pending edits into the input, then places the selection.
+    fn commit(&mut self, cursor: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let edits = self.draft.take_edits();
+        let selection = self.input.read(cx).selected_range();
+        let selection = match cursor {
+            Some(cursor) => cursor..cursor,
+            None if edits.is_empty() => selection,
+            None => map_offset(&edits, selection.start)..map_offset(&edits, selection.end),
+        };
+        self.apply_to_input(edits, selection, window, cx);
+    }
+
+    fn apply_to_input(
+        &mut self,
+        edits: Vec<Edit>,
+        selection: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.input.update(cx, |state, cx| {
+            let edited = !edits.is_empty();
+            if edited {
+                state.apply_edits(&edits, window, cx);
+            }
+            if edited || state.selected_range() != selection {
+                state.set_selected_range(selection.clone(), cx);
+            }
+        });
+        let value = self.input.read(cx).value().to_string();
+        if value != self.draft.text() {
+            self.draft.apply_edit(&value, selection.end, None);
+            self.draft.take_edits();
+        }
+        self.previous_value = value;
+        self.remember_snapshot();
+        self.refresh_style(cx);
+    }
+
+    fn remember_snapshot(&mut self) {
+        if self
+            .snapshots
+            .back()
+            .is_some_and(|last| last.text() == self.draft.text())
+        {
+            self.snapshots.pop_back();
+        }
+        self.snapshots.push_back(self.draft.clone());
+        if self.snapshots.len() > SNAPSHOT_LIMIT {
+            self.snapshots.pop_front();
+        }
+    }
+
+    fn snapshot_for(&self, value: &str) -> Option<Draft> {
+        self.snapshots
+            .iter()
+            .rev()
+            .find(|snapshot| snapshot.text() == value)
+            .cloned()
+    }
+
+    fn refresh_style(&mut self, cx: &mut Context<Self>) {
+        let style = draft_style(&self.draft, cx.theme().mono_font_family.clone());
+        let (text, ranges) = &self.decorations;
+        text.set(style.text, cx);
+        ranges.set(style.ranges, cx);
+        self.input
+            .update(cx, |state, cx| state.set_hanging_indents(style.markers, cx));
+    }
+
+    fn load_draft(
+        &mut self,
+        draft: Draft,
+        content: InputContent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let end = draft.text().len();
+        self.input.update(cx, |state, cx| {
+            state.set_value(content, window, cx);
+            state.set_selected_range(end..end, cx);
+        });
+        self.previous_value = draft.text().to_owned();
+        self.draft = draft;
+        self.pending_style = None;
+        self.conversion = None;
+        self.pasted_markdown = None;
+        self.paste_hint = None;
+        self.link_editor = None;
+        self.toolbar_dismissed = None;
+        self.snapshots.clear();
+        self.remember_snapshot();
+        self.refresh_style(cx);
     }
 
     /// Returns the cursor, kept at the same spot relative to the text after `range`.
@@ -363,16 +659,226 @@ impl Composer {
         let Some(conversion) = self.conversion.take().filter(|_| unchanged) else {
             return false;
         };
-        self.replace_text(
-            conversion.range,
-            &conversion.original,
-            conversion.cursor,
-            window,
-            cx,
-        );
+        let cursor = map_offset(&conversion.restore, conversion.cursor);
+        self.draft = conversion.before;
+        self.pending_style = None;
+        self.apply_to_input(conversion.restore, cursor..cursor, window, cx);
         self.undone_value = Some(self.input.read(cx).value().to_string());
         self.update_emoji(cx);
         true
+    }
+
+    fn selection(&self, cx: &App) -> Range<usize> {
+        self.input.read(cx).selected_range()
+    }
+
+    fn toggle_mark(&mut self, kind: MarkKind, cx: &mut Context<Self>) {
+        let selection = self.selection(cx);
+        if selection.is_empty() {
+            let cursor = selection.start;
+            let mut pending = self
+                .pending_style
+                .take()
+                .filter(|pending| pending.at == cursor)
+                .unwrap_or(TypingStyle {
+                    at: cursor,
+                    ..TypingStyle::default()
+                });
+            pending.toggle(kind, &self.draft.style_at(cursor));
+            self.pending_style = (!pending.is_empty()).then_some(pending);
+        } else {
+            self.draft.toggle(selection, kind);
+            self.draft.take_edits();
+            self.remember_snapshot();
+            self.refresh_style(cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_lines(&mut self, kind: LineKind, window: &mut Window, cx: &mut Context<Self>) {
+        let selection = self.selection(cx);
+        self.draft.toggle_lines(selection, kind);
+        self.commit(None, window, cx);
+        cx.notify();
+    }
+
+    fn press_format(&mut self, button: FormatButton, window: &mut Window, cx: &mut Context<Self>) {
+        match button {
+            FormatButton::Bold => self.toggle_mark(MarkKind::Bold, cx),
+            FormatButton::Italic => self.toggle_mark(MarkKind::Italic, cx),
+            FormatButton::Underline => self.toggle_mark(MarkKind::Underline, cx),
+            FormatButton::Strike => self.toggle_mark(MarkKind::Strike, cx),
+            FormatButton::Code => self.toggle_mark(MarkKind::Code, cx),
+            FormatButton::Link => self.open_link_editor(window, cx),
+            FormatButton::Bulleted => self.toggle_lines(LineKind::Bullet(0), window, cx),
+            FormatButton::Numbered => self.toggle_lines(LineKind::Numbered(0), window, cx),
+            FormatButton::Quote => self.toggle_lines(LineKind::Quote, window, cx),
+        }
+    }
+
+    fn format_state(&self, button: FormatButton, selection: &Range<usize>) -> FormatState {
+        let range = selection.clone();
+        match button {
+            FormatButton::Bold => self.draft.state(range, &MarkKind::Bold),
+            FormatButton::Italic => self.draft.state(range, &MarkKind::Italic),
+            FormatButton::Underline => self.draft.state(range, &MarkKind::Underline),
+            FormatButton::Strike => self.draft.state(range, &MarkKind::Strike),
+            FormatButton::Code => self.draft.state(range, &MarkKind::Code),
+            FormatButton::Link => self.draft.state(range, &MarkKind::Link(String::new())),
+            FormatButton::Bulleted => self.draft.line_state(range, &LineKind::Bullet(0)),
+            FormatButton::Numbered => self.draft.line_state(range, &LineKind::Numbered(0)),
+            FormatButton::Quote => self.draft.line_state(range, &LineKind::Quote),
+        }
+    }
+
+    fn edit_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.link_editor.is_some() {
+            return;
+        }
+        if self.draft.is_blank() && self.selection(cx).is_empty() {
+            window.dispatch_action(Box::new(super::shell::OpenSwitcher), cx);
+            return;
+        }
+        self.open_link_editor(window, cx);
+    }
+
+    fn open_link_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let range = self.selection(cx);
+        let prefill = self
+            .draft
+            .link_in(range.clone())
+            .or_else(|| {
+                cx.read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .map(|text| text.trim().to_owned())
+                    .filter(|text| looks_like_url(text))
+            })
+            .unwrap_or_default();
+        let field = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Paste or type a link")
+                .default_value(prefill)
+        });
+        field.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.select_all(window, cx);
+        });
+        self.link_editor = Some(LinkEditor { range, field });
+        cx.notify();
+    }
+
+    fn apply_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.link_editor.take() else {
+            return;
+        };
+        let url = normalized_url(&editor.field.read(cx).value());
+        self.focus(window, cx);
+        if editor.range.is_empty() {
+            if !url.is_empty() {
+                let end = self.draft.insert_link(editor.range.start, &url, &url);
+                self.commit(Some(end), window, cx);
+            }
+        } else {
+            self.draft.set_link(editor.range.clone(), &url);
+            self.draft.take_edits();
+            self.remember_snapshot();
+            self.refresh_style(cx);
+            self.input.update(cx, |state, cx| {
+                state.set_selected_range(editor.range.clone(), cx)
+            });
+            self.toolbar_dismissed = Some(editor.range);
+        }
+        cx.notify();
+    }
+
+    fn close_link_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.link_editor.take() else {
+            return;
+        };
+        self.focus(window, cx);
+        self.input
+            .update(cx, |state, cx| state.set_selected_range(editor.range, cx));
+        cx.notify();
+    }
+
+    fn break_line(&mut self, shift: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        if !selection.is_empty() {
+            return false;
+        }
+        match self.draft.break_line(selection.start, shift) {
+            Some(cursor) => {
+                self.commit(Some(cursor), window, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn backspace_at_start(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        if !selection.is_empty() {
+            return false;
+        }
+        match self.draft.backspace_at_start(selection.start) {
+            Some(cursor) => {
+                self.commit(Some(cursor), window, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn indent(&mut self, outdent: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        if !self.draft.indent(selection, outdent) {
+            return false;
+        }
+        self.commit(None, window, cx);
+        true
+    }
+
+    fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        let Some(text) = self.draft.text().get(selection.clone()).map(str::to_owned) else {
+            return false;
+        };
+        if text.is_empty() {
+            return false;
+        }
+        let lines = self.draft.slice(selection);
+        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
+            text.clone(),
+            lines.clone(),
+        ));
+        self.copied = Some((text, lines));
+        true
+    }
+
+    fn copied_lines(&self, item: &ClipboardItem, text: &str) -> Option<Vec<DraftLine>> {
+        item.entries()
+            .iter()
+            .find_map(|entry| match entry {
+                ClipboardEntry::String(string) if string.text() == text => {
+                    string.metadata_json::<Vec<DraftLine>>()
+                }
+                _ => None,
+            })
+            .or_else(|| {
+                let normalized = text.replace("\r\n", "\n");
+                self.copied
+                    .as_ref()
+                    .filter(|(copied, _)| *copied == normalized)
+                    .map(|(_, lines)| lines.clone())
+            })
+    }
+
+    fn toolbar_requested(&self, cx: &App) -> bool {
+        let selection = self.selection(cx);
+        !selection.is_empty()
+            && !self.mouse_selecting
+            && self.toolbar_dismissed.as_ref() != Some(&selection)
+            && !self.popup_is_open()
     }
 
     fn remember_emoji(&mut self, glyph: &str, cx: &App) {
@@ -543,8 +1049,7 @@ impl Composer {
             self.discard_uploaded(dropped, cx);
             self.reply = None;
             if self.editing.take().is_some() {
-                self.input
-                    .update(cx, |state, cx| state.set_value("", window, cx));
+                self.load_draft(Draft::default(), InputContent::new(""), window, cx);
             }
             self.mention_inputs.clear();
             self.close_popup();
@@ -581,15 +1086,16 @@ impl Composer {
 
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
         let state = self.input.read(cx);
-        let mut text = state.value().trim().to_owned();
         if !self.can_send(cx) {
             return None;
         }
+        let mut draft = self.current_draft(cx).trimmed();
         let attachments_apply = self.editing.is_none();
         if self.undone_value.as_deref() != Some(state.value().as_ref())
-            && let Some((range, glyph)) = emoji::trailing_smiley(&text)
+            && let Some((range, glyph)) = emoji::trailing_smiley(draft.text())
         {
-            text.replace_range(range, glyph);
+            draft.replace(range, glyph);
+            draft.take_edits();
         }
         let mentions = state
             .tokens()
@@ -598,7 +1104,7 @@ impl Composer {
             .cloned()
             .collect();
         Some(Outgoing {
-            text,
+            draft,
             mentions,
             reply: self.reply.clone(),
             edit: self.editing.clone(),
@@ -615,8 +1121,18 @@ impl Composer {
         })
     }
 
+    /// The draft, or the plain input text while a change is still on its way to the draft.
+    fn current_draft(&self, cx: &App) -> Draft {
+        let value = self.input.read(cx).value();
+        if self.draft.text() == value.as_ref() {
+            self.draft.clone()
+        } else {
+            Draft::plain(&value)
+        }
+    }
+
     fn can_send(&self, cx: &App) -> bool {
-        let has_text = !self.input.read(cx).value().trim().is_empty();
+        let has_text = !self.current_draft(cx).is_blank();
         if self.editing.is_some() {
             return has_text;
         }
@@ -693,21 +1209,30 @@ impl Composer {
         .detach();
     }
 
-    fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
-        if self.editing.is_some() {
+    fn paste(&mut self, item: &ClipboardItem, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.editing.is_none() {
+            match paste_action(item) {
+                PasteAction::Text => {}
+                PasteAction::Files(paths) => {
+                    self.add_paths(paths, cx);
+                    return true;
+                }
+                PasteAction::Image(pasted) => {
+                    self.add_pasted_image(pasted, cx);
+                    return true;
+                }
+            }
+        }
+        let Some(text) = item.text() else {
             return false;
+        };
+        if let Some(lines) = self.copied_lines(item, &text) {
+            let cursor = self.draft.insert_lines(self.selection(cx), &lines);
+            self.commit(Some(cursor), window, cx);
+            return true;
         }
-        match paste_action(item) {
-            PasteAction::Text => false,
-            PasteAction::Files(paths) => {
-                self.add_paths(paths, cx);
-                true
-            }
-            PasteAction::Image(pasted) => {
-                self.add_pasted_image(pasted, cx);
-                true
-            }
-        }
+        self.pasted_markdown = has_markdown(&text).then_some(text);
+        false
     }
 
     fn finish_reading(
@@ -878,8 +1403,7 @@ impl Composer {
         let Some(outgoing) = self.outgoing(cx) else {
             return;
         };
-        self.input
-            .update(cx, |state, cx| state.set_value("", window, cx));
+        self.load_draft(Draft::default(), InputContent::new(""), window, cx);
         self.mention_inputs.clear();
         if self.editing.is_none() {
             self.tray.clear();
@@ -893,11 +1417,12 @@ impl Composer {
 
     pub fn restore(&mut self, outgoing: &Outgoing, window: &mut Window, cx: &mut Context<Self>) {
         self.mention_inputs.clear();
-        let mut content = InputContent::new(outgoing.text.clone());
+        let text = outgoing.draft.text();
+        let mut content = InputContent::new(text.to_owned());
         let mut cursor = 0;
         for mention in &outgoing.mentions {
             let needle = format!("@{}", mention.text);
-            let Some(offset) = outgoing.text[cursor..].find(&needle) else {
+            let Some(offset) = text[cursor..].find(&needle) else {
                 continue;
             };
             let range = cursor + offset..cursor + offset + needle.len();
@@ -910,11 +1435,7 @@ impl Composer {
                 cursor = range.end;
             }
         }
-        let end = outgoing.text.len();
-        self.input.update(cx, |state, cx| {
-            state.set_value(content, window, cx);
-            state.set_selected_range(end..end, cx);
-        });
+        self.load_draft(outgoing.draft.clone(), content, window, cx);
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
         if outgoing.edit.is_none() {
@@ -925,21 +1446,19 @@ impl Composer {
         cx.notify();
     }
 
+    /// Markdown in `text` arrives formatted.
     pub fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let text = text.to_owned();
-        let end = text.len();
-        self.input.update(cx, |state, cx| {
-            state.set_value(text, window, cx);
-            state.set_selected_range(end..end, cx);
-        });
+        let draft = Draft::from_markdown(text);
+        let content = InputContent::new(draft.text().to_owned());
+        self.load_draft(draft, content, window, cx);
         self.mention_inputs.clear();
         self.update_emoji(cx);
         self.update_mention(cx);
         cx.notify();
     }
 
-    pub fn is_empty(&self, cx: &App) -> bool {
-        self.input.read(cx).value().trim().is_empty() && self.tray.is_empty()
+    pub fn is_empty(&self, _: &App) -> bool {
+        self.draft.is_blank() && self.tray.is_empty()
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1057,6 +1576,91 @@ impl Composer {
                     .ok();
             },
         ))
+    }
+
+    fn render_toolbar(&self, focused: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let composer = cx.entity().downgrade();
+        if self.link_editor.is_none() && !(focused && self.toolbar_requested(cx)) {
+            return None;
+        }
+        let state = self.input.read(cx);
+        let range = self
+            .link_editor
+            .as_ref()
+            .map_or_else(|| state.selected_range(), |editor| editor.range.clone());
+        let start = state.range_to_bounds(&(range.start..range.start))?;
+        let end = state.range_to_bounds(&(range.end..range.end))?;
+        let input_bounds = state.input_bounds();
+        let center_x = if start.origin.y == end.origin.y {
+            (start.origin.x + end.origin.x) / 2.
+        } else {
+            input_bounds.center().x
+        };
+        let edges = self
+            .composer_bounds
+            .get()
+            .map_or((input_bounds.left(), input_bounds.right()), |bounds| {
+                (bounds.left(), bounds.right())
+            });
+        let width = match self.link_editor {
+            Some(_) => format_toolbar::link_width(),
+            None => format_toolbar::bar_width(),
+        };
+        let placement = format_toolbar::place(center_x, start.origin.y, edges, width);
+        let element = match &self.link_editor {
+            Some(editor) => format_toolbar::render(
+                placement,
+                format_toolbar::Mode::Link {
+                    field: &editor.field,
+                    on_apply: Rc::new(move |window, cx| {
+                        composer
+                            .update(cx, |this, cx| this.apply_link(window, cx))
+                            .ok();
+                    }),
+                },
+            ),
+            None => {
+                let state_of = |button| self.format_state(button, &range);
+                format_toolbar::render(
+                    placement,
+                    format_toolbar::Mode::Bar {
+                        state: &state_of,
+                        on_press: Rc::new(move |button, window, cx| {
+                            composer
+                                .update(cx, |this, cx| this.press_format(button, window, cx))
+                                .ok();
+                        }),
+                    },
+                )
+            }
+        };
+        Some(element)
+    }
+
+    fn render_paste_hint(&self) -> Option<Div> {
+        self.paste_hint.as_ref()?;
+        Some(
+            h_flex()
+                .mt(px(6.))
+                .gap(px(6.))
+                .items_center()
+                .text_size(px(12.))
+                .text_color(theme::text_muted())
+                .child("Formatted from Markdown")
+                .child(
+                    div()
+                        .px(px(5.))
+                        .py(px(1.))
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(theme::border_strong())
+                        .bg(theme::surface_raised())
+                        .text_size(px(11.))
+                        .text_color(theme::text())
+                        .child("Ctrl+Z"),
+                )
+                .child("plain text"),
+        )
     }
 
     fn render_edit_strip(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -1204,9 +1808,9 @@ impl Render for Composer {
         let input = Textarea::new(&self.input)
             .appearance(false)
             .bordered(false)
-            .on_paste(move |item, _, cx| {
+            .on_paste(move |item, window, cx| {
                 composer
-                    .update(cx, |this, cx| this.paste(item, cx))
+                    .update(cx, |this, cx| this.paste(item, window, cx))
                     .unwrap_or(false)
             })
             .token(|context, _, _| {
@@ -1241,14 +1845,68 @@ impl Render for Composer {
                 .text_color(theme::amber())
                 .child(notice.to_owned())
         });
+        let composer_bounds = self.composer_bounds.clone();
         v_flex()
             .w_full()
             .flex_none()
             .px(px(24.))
             .pt(px(8.))
             .pb(px(12.))
+            .key_context(KEY_CONTEXT)
+            .on_action(cx.listener(|this, _: &ToggleBold, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Bold, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleItalic, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Italic, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleUnderline, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Underline, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleStrike, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Strike, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCode, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Code, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &EditLink, window, cx| this.edit_link(window, cx)))
+            .capture_action(cx.listener(|this, _: &Undo, _, _| {
+                if this.link_editor.is_none() {
+                    this.replaying_history = true;
+                    this.conversion = None;
+                    this.paste_hint = None;
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Redo, _, _| {
+                if this.link_editor.is_none() {
+                    this.replaying_history = true;
+                    this.conversion = None;
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Copy, _, cx| {
+                if this.link_editor.is_none() && this.copy_selection(cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Cut, window, cx| {
+                if this.link_editor.is_none() && this.copy_selection(cx) {
+                    this.input
+                        .update(cx, |state, cx| state.replace("", window, cx));
+                    cx.stop_propagation();
+                }
+            }))
             .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
-                if this.popup_is_open() {
+                if this.link_editor.is_some() {
+                } else if this.popup_is_open() {
                     this.move_highlight(-1, cx);
                     cx.stop_propagation();
                 } else if this.editing.is_none() && this.is_empty(cx) {
@@ -1257,29 +1915,55 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
-                if this.popup_is_open() {
+                if this.link_editor.is_none() && this.popup_is_open() {
                     this.move_highlight(1, cx);
                     cx.stop_propagation();
                 }
             }))
-            .capture_action(cx.listener(|this, _: &Enter, window, cx| {
-                if this.popup_is_open() {
+            .capture_action(cx.listener(|this, action: &Enter, window, cx| {
+                if this.link_editor.is_some() {
+                    this.apply_link(window, cx);
+                    cx.stop_propagation();
+                } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
+                    cx.stop_propagation();
+                } else if this.break_line(action.shift, window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
-                if this.popup_is_open() {
+                if this.link_editor.is_some() {
+                } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
+                    cx.stop_propagation();
+                } else if this.indent(false, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
+                if this.link_editor.is_none() && this.indent(true, window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Backspace, window, cx| {
-                if this.undo_conversion(window, cx) {
+                if this.link_editor.is_none()
+                    && (this.undo_conversion(window, cx) || this.backspace_at_start(window, cx))
+                {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.link_editor.is_some() {
+                    this.close_link_editor(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.toolbar_requested(cx) {
+                    this.toolbar_dismissed = Some(this.selection(cx));
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
                 if let Some(popup) = &this.emoji_popup {
                     this.emoji_dismissed_at = Some(popup.range.start);
                 }
@@ -1301,8 +1985,10 @@ impl Render for Composer {
                     .w_full()
                     .children(self.render_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
+                    .children(self.render_toolbar(focused, cx))
                     .child(
                         v_flex()
+                            .relative()
                             .w_full()
                             .rounded(px(10.))
                             .bg(theme::surface())
@@ -1312,6 +1998,14 @@ impl Render for Composer {
                             } else {
                                 theme::border_strong()
                             })
+                            .child(
+                                canvas(
+                                    move |bounds, _, _| composer_bounds.set(Some(bounds)),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
                             .children(tray)
                             .child(
                                 h_flex()
@@ -1322,11 +2016,37 @@ impl Render for Composer {
                                     .pl(px(if can_attach { 6. } else { 12. }))
                                     .pr(px(6.))
                                     .children(attach)
-                                    .child(div().flex_1().min_w_0().child(input))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .capture_any_mouse_down(cx.listener(
+                                                |this, _: &MouseDownEvent, _, _| {
+                                                    this.mouse_selecting = true;
+                                                    this.toolbar_dismissed = None;
+                                                    this.link_editor = None;
+                                                },
+                                            ))
+                                            .capture_any_mouse_up(cx.listener(
+                                                |this, _: &MouseUpEvent, _, cx| {
+                                                    this.mouse_selecting = false;
+                                                    cx.notify();
+                                                },
+                                            ))
+                                            .on_mouse_up_out(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.mouse_selecting = false;
+                                                    cx.notify();
+                                                }),
+                                            )
+                                            .child(input),
+                                    )
                                     .child(send),
                             ),
                     ),
             )
+            .children(self.render_paste_hint())
     }
 }
 
@@ -1410,7 +2130,7 @@ mod tests {
         use super::{Outgoing, OutgoingFile, OutgoingImage};
 
         let outgoing = Outgoing {
-            text: String::new(),
+            draft: teams_core::Draft::default(),
             mentions: Vec::new(),
             reply: None,
             edit: None,
@@ -1486,6 +2206,220 @@ mod tests {
             assert_eq!(value, "X");
         }
 
+        struct Typist<'a> {
+            cx: &'a mut TestAppContext,
+            handle: gpui_kit::AnyWindowHandle,
+            composer: gpui_kit::Entity<Composer>,
+        }
+
+        impl Typist<'_> {
+            fn act(&mut self, action: impl FnOnce(&mut gpui_kit::Window, &mut gpui_kit::App)) {
+                self.cx
+                    .update_window(self.handle, |_, window, cx| action(window, cx))
+                    .unwrap();
+                self.cx.run_until_parked();
+            }
+
+            fn type_text(&mut self, text: &str) {
+                for character in text.chars() {
+                    self.act(|window, cx| window.input(&character.to_string(), cx));
+                }
+            }
+
+            fn press(&mut self, keys: &str) {
+                for key in keys.split(' ') {
+                    self.act(|window, cx| window.press(key, cx));
+                }
+            }
+
+            fn value(&mut self) -> String {
+                let composer = self.composer.clone();
+                self.cx
+                    .update(|cx| composer.read(cx).input.read(cx).value().to_string())
+            }
+
+            fn draft(&mut self) -> teams_core::Draft {
+                let composer = self.composer.clone();
+                self.cx.update(|cx| composer.read(cx).draft.clone())
+            }
+
+            fn outgoing(&mut self) -> super::super::Outgoing {
+                let composer = self.composer.clone();
+                self.cx
+                    .update(|cx| composer.read(cx).outgoing(cx))
+                    .expect("text to send")
+            }
+        }
+
+        fn typist(cx: &mut TestAppContext) -> Typist<'_> {
+            let (handle, composer) = demo_composer(cx);
+            cx.update(super::super::bind_keys);
+            let mut typist = Typist {
+                cx,
+                handle,
+                composer: composer.clone(),
+            };
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| composer.focus(window, cx));
+                window.render_frame(cx);
+            });
+            typist
+        }
+
+        #[gpui_kit::test]
+        fn typed_markdown_is_formatted_and_backspace_brings_it_back(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("a **bold**");
+            assert_eq!(typist.value(), "a bold");
+            assert_eq!(typist.draft().state(2..6, &MarkKind::Bold), FormatState::On);
+            typist.press("backspace");
+            assert_eq!(typist.value(), "a **bold**");
+            assert!(typist.draft().marks().is_empty());
+            let composer = typist.composer.clone();
+            assert_eq!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).input.read(cx).cursor()),
+                10
+            );
+            typist.press("backspace");
+            typist.type_text("* x");
+            assert_eq!(typist.value(), "a bold x");
+            assert_eq!(
+                typist.draft().state(6..8, &MarkKind::Bold),
+                FormatState::Off
+            );
+        }
+
+        #[gpui_kit::test]
+        fn enter_continues_a_list_instead_of_sending(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("1. one");
+            typist.press("enter");
+            typist.type_text("two");
+            assert_eq!(typist.value(), "1. one\n2. two");
+            typist.press("enter enter");
+            assert_eq!(typist.value(), "1. one\n2. two\n");
+            typist.type_text("after");
+            typist.press("enter");
+            assert_eq!(typist.value(), "");
+        }
+
+        #[gpui_kit::test]
+        fn tab_nests_a_list_item(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("- a");
+            typist.press("enter tab");
+            typist.type_text("b");
+            assert_eq!(typist.value(), "• a\n\u{2003}\u{2003}◦ b");
+            typist.press("shift-tab");
+            assert_eq!(typist.value(), "• a\n• b");
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_b_toggles_bold_on_a_selection_and_for_the_next_text(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("shift-left shift-left ctrl-b");
+            assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
+            assert_eq!(
+                typist.draft().state(0..5, &MarkKind::Bold),
+                FormatState::Mixed
+            );
+            typist.press("ctrl-b");
+            assert!(typist.draft().marks().is_empty());
+            typist.press("end ctrl-i");
+            typist.type_text("!");
+            assert_eq!(typist.outgoing().html(), "hello<i>!</i>");
+        }
+
+        #[gpui_kit::test]
+        fn pasted_markdown_converts_and_ctrl_z_restores_the_raw_text(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                    "**hi** there".to_owned(),
+                ));
+            typist.press("ctrl-v");
+            assert_eq!(typist.value(), "hi there");
+            let composer = typist.composer.clone();
+            assert!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).paste_hint.is_some())
+            );
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "**hi** there");
+            assert!(typist.draft().marks().is_empty());
+        }
+
+        #[gpui_kit::test]
+        fn copy_and_paste_inside_the_composer_keeps_formatting(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("`code` ");
+            typist.press("ctrl-a ctrl-c end ctrl-v");
+            assert_eq!(typist.value(), "code code ");
+            assert_eq!(typist.draft().state(5..9, &MarkKind::Code), FormatState::On);
+        }
+
+        #[gpui_kit::test]
+        fn undo_brings_the_formatting_back_with_the_text(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("~~old~~");
+            typist.press("ctrl-a");
+            typist.type_text("new");
+            typist.press("ctrl-z ctrl-z");
+            assert_eq!(typist.value(), "old");
+            assert_eq!(
+                typist.draft().state(0..3, &MarkKind::Strike),
+                FormatState::On
+            );
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_k_turns_the_selection_into_a_link(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("see docs");
+            typist.press("shift-left shift-left shift-left shift-left ctrl-k");
+            let composer = typist.composer.clone();
+            assert!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).link_editor.is_some())
+            );
+            typist.type_text("example.com");
+            typist.press("enter");
+            assert!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).link_editor.is_none())
+            );
+            assert_eq!(
+                typist.outgoing().html(),
+                "see <a href=\"https://example.com\">docs</a>"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn quotes_continue_on_shift_enter_and_send_as_blockquote(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("> quoted");
+            typist.press("shift-enter");
+            typist.type_text("more");
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.html(), "<blockquote>quoted<br>more</blockquote>");
+            assert_eq!(outgoing.text(), "quoted\nmore");
+        }
+
         #[gpui_kit::test]
         fn demo_upload_runs_to_done_and_a_file_alone_can_be_sent(cx: &mut TestAppContext) {
             cx.update(gpui_kit::init);
@@ -1527,7 +2461,7 @@ mod tests {
                 let outgoing = composer
                     .outgoing(cx)
                     .expect("an attachment alone is a message");
-                assert_eq!(outgoing.text, "");
+                assert_eq!(outgoing.text(), "");
                 assert_eq!(outgoing.files.len(), 1);
                 assert_eq!(outgoing.files[0].name, "plan.pdf");
             });
@@ -1617,7 +2551,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     let draft = Outgoing {
-                        text: "old".into(),
+                        draft: teams_core::Draft::plain("old"),
                         mentions: Vec::new(),
                         reply: None,
                         edit: Some(EditPreview {
@@ -1636,7 +2570,7 @@ mod tests {
                 assert_eq!(composer.tray.items().len(), 1);
                 let outgoing = composer.outgoing(cx).unwrap();
                 assert!(outgoing.files.is_empty());
-                assert_eq!(outgoing.text, "old");
+                assert_eq!(outgoing.text(), "old");
             });
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| composer.cancel_edit(window, cx));
