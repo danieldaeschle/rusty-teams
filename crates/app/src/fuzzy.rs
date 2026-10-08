@@ -8,23 +8,38 @@ pub fn score(query: &str, candidate: &str) -> Option<i64> {
         return Some(0);
     }
     let lowered: Vec<char> = candidate.to_lowercase().chars().collect();
-    score_plain(&query, &lowered)
+    let plain = score_plain(&query, &lowered, false);
+    let word_starts = score_plain(&query, &lowered, true);
+    plain.max(word_starts)
 }
 
-fn score_plain(query: &[char], candidate: &[char]) -> Option<i64> {
+fn is_word_start(candidate: &[char], index: usize) -> bool {
+    index == 0 || !candidate[index - 1].is_alphanumeric()
+}
+
+fn score_plain(query: &[char], candidate: &[char], prefer_word_starts: bool) -> Option<i64> {
     let mut score = 0i64;
     let mut position = 0usize;
     let mut previous_match: Option<usize> = None;
     for &wanted in query {
-        let found = candidate[position..].iter().position(|&c| c == wanted)? + position;
+        let mut occurrences =
+            (position..candidate.len()).filter(|&index| candidate[index] == wanted);
+        let found = if prefer_word_starts {
+            (position..candidate.len())
+                .find(|&index| candidate[index] == wanted && is_word_start(candidate, index))
+                .or_else(|| occurrences.next())?
+        } else {
+            occurrences.next()?
+        };
         score += 10;
         if previous_match.is_some_and(|previous| previous + 1 == found) {
             score += 15;
         }
-        if found == 0 || !candidate[found - 1].is_alphanumeric() {
+        if is_word_start(candidate, found) {
             score += 20;
+        } else {
+            score -= (found - previous_match.map_or(0, |previous| previous + 1)) as i64;
         }
-        score -= (found - previous_match.map_or(0, |previous| previous + 1)) as i64;
         previous_match = Some(found);
         position = found + 1;
     }
@@ -32,16 +47,24 @@ fn score_plain(query: &[char], candidate: &[char]) -> Option<i64> {
 }
 
 pub fn rank<T: Clone>(query: &str, items: &[(String, T)], limit: usize) -> Vec<T> {
-    let mut scored: Vec<(i64, usize)> = items
+    let mut scored: Vec<(i64, usize, usize)> = items
         .iter()
         .enumerate()
-        .filter_map(|(index, (label, _))| score(query, label).map(|score| (score, index)))
+        .filter_map(|(index, (label, _))| {
+            score(query, label).map(|score| (score, label.chars().count(), index))
+        })
         .collect();
-    scored.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.cmp(&right.2))
+    });
     scored
         .into_iter()
         .take(limit)
-        .map(|(_, index)| items[index].1.clone())
+        .map(|(_, _, index)| items[index].1.clone())
         .collect()
 }
 
@@ -73,6 +96,16 @@ mod tests {
         let ranked = rank("alph", &items, 5);
         assert_eq!(ranked.len(), 2);
         assert_eq!(rank("a", &items, 1).len(), 1);
+    }
+
+    #[test]
+    fn initials_beat_a_contiguous_match_inside_a_word() {
+        let items = vec![
+            ("QA cw review".to_owned(), "meeting"),
+            ("Ada Lovelace, Christoph Wiechert".to_owned(), "group"),
+            ("Christoph Wiechert".to_owned(), "person"),
+        ];
+        assert_eq!(rank("cw", &items, 3), ["person", "group", "meeting"]);
     }
 
     #[test]
