@@ -90,6 +90,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams`, see [docs/build-windows.md](docs/build-windows.md) |
 | Tests | `cargo test` |
+| Screenshot without a desktop (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 
 ## Docs
 
