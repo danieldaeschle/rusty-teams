@@ -717,6 +717,13 @@ fn bot_messages() -> Vec<MessageRecord> {
             ]}
         ]
     });
+    vec![
+        bot_card_message("b1", at(0, 13, 45), &card),
+        bot_card_message("b2", at(0, 13, 52), &input_card()),
+    ]
+}
+
+fn bot_card_message(id: &str, time: DateTime<Utc>, card: &serde_json::Value) -> MessageRecord {
     let attachments = serde_json::json!([{
         "content_type": "application/vnd.microsoft.card.adaptive",
         "name": null,
@@ -727,11 +734,11 @@ fn bot_messages() -> Vec<MessageRecord> {
     let mut record = with_attachments(
         message(
             BOT_CHAT,
-            "b1",
+            id,
             None,
             ("", BOT_NAME),
-            at(0, 13, 45),
-            "<attachment id=\"b1\"></attachment>",
+            time,
+            &format!("<attachment id=\"{id}\"></attachment>"),
             "[]",
             false,
         ),
@@ -739,7 +746,44 @@ fn bot_messages() -> Vec<MessageRecord> {
     );
     record.sender_id = None;
     record.sender_application_id = Some(BOT_ID.to_owned());
-    vec![record]
+    record
+}
+
+fn input_card() -> serde_json::Value {
+    serde_json::json!({
+        "type": "AdaptiveCard",
+        "body": [
+            {"type": "TextBlock", "size": "medium", "weight": "bolder", "text": "Release request"},
+            {"type": "Input.Text", "id": "title", "label": "Title", "placeholder": "Short summary", "isRequired": true, "errorMessage": "Give the release a title"},
+            {"type": "Input.Text", "id": "notes", "label": "Notes", "placeholder": "Anything the reviewers should know", "isMultiline": true},
+            {"type": "Input.Text", "id": "token", "label": "Access code", "style": "Password", "regex": "^\\d{4}$", "errorMessage": "Enter four digits"},
+            {"type": "ColumnSet", "columns": [
+                {"type": "Column", "width": "stretch", "items": [
+                    {"type": "Input.Number", "id": "count", "label": "Servers", "placeholder": "1-20", "min": 1, "max": 20, "value": 4}
+                ]},
+                {"type": "Column", "width": "stretch", "items": [
+                    {"type": "Input.Date", "id": "day", "label": "Release day", "value": "2026-11-02"}
+                ]},
+                {"type": "Column", "width": "stretch", "items": [
+                    {"type": "Input.Time", "id": "hour", "label": "Start time", "value": "09:30"}
+                ]}
+            ]},
+            {"type": "Input.ChoiceSet", "id": "channel", "label": "Channel", "placeholder": "Pick a channel", "isRequired": true, "choices": [
+                {"title": "Stable", "value": "stable"}, {"title": "Beta", "value": "beta"}, {"title": "Nightly", "value": "nightly"}
+            ]},
+            {"type": "Input.ChoiceSet", "id": "region", "label": "Region", "style": "expanded", "value": "eu", "choices": [
+                {"title": "Europe", "value": "eu"}, {"title": "North America", "value": "na"}
+            ]},
+            {"type": "Input.ChoiceSet", "id": "checks", "label": "Checks", "style": "expanded", "isMultiSelect": true, "value": "lint", "choices": [
+                {"title": "Lint", "value": "lint"}, {"title": "Unit tests", "value": "unit"}, {"title": "Smoke tests", "value": "smoke"}
+            ]},
+            {"type": "Input.Toggle", "id": "notify", "title": "Notify the team", "value": "yes", "valueOn": "yes", "valueOff": "no"}
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": "Request release", "data": {"action": "release"}},
+            {"type": "Action.Submit", "title": "Cancel", "associatedInputs": "none", "data": {"action": "cancel"}}
+        ]
+    })
 }
 
 fn bot_app() -> ChatApp {
@@ -788,7 +832,11 @@ fn settings_card() -> serde_json::Value {
         "type": "AdaptiveCard",
         "body": [
             {"type": "TextBlock", "weight": "bolder", "text": "Notification settings"},
-            {"type": "TextBlock", "wrap": true, "isSubtle": true, "text": "Choose how the bot tells you about page changes."}
+            {"type": "TextBlock", "wrap": true, "isSubtle": true, "text": "Choose how the bot tells you about page changes."},
+            {"type": "Input.ChoiceSet", "id": "frequency", "label": "Frequency", "style": "expanded", "value": "daily", "choices": [
+                {"title": "Immediately", "value": "now"}, {"title": "Daily digest", "value": "daily"}
+            ]},
+            {"type": "Input.Toggle", "id": "mentions", "title": "Only when I am mentioned", "value": "false"}
         ],
         "actions": [
             {"type": "Action.Submit", "title": "Save", "data": {"save": true}}

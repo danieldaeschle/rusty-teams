@@ -22,6 +22,7 @@ use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
+use super::adaptive_card::ensure_cards_inputs;
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
@@ -2709,6 +2710,14 @@ impl Render for ConversationView {
                                 }
                                 known
                             });
+                        ensure_cards_inputs(
+                            &app,
+                            &message.adaptive_cards,
+                            &message.conversation_id,
+                            &message.key,
+                            window,
+                            cx,
+                        );
                         let state = app.read(cx);
                         render_message_row(
                             message,

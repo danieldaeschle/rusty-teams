@@ -22,6 +22,7 @@ chatsvc.workspace = true
 chrono.workspace = true
 directories.workspace = true
 gpui-kit.workspace = true
+regex.workspace = true
 reqwest_client.workspace = true
 graph.workspace = true
 serde.workspace = true

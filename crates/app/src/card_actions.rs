@@ -1,7 +1,7 @@
 use gpui_kit::*;
 use serde_json::Value;
 use teams_core::{
-    AdaptiveCard, CardAction, CardActionKind, CardActionOutcome, ChatApp, TaskDialog,
+    AdaptiveCard, CardAction, CardActionOutcome, CardInput, ChatApp, TaskDialog,
     TaskDialogKind, adaptive_cards,
 };
 use tokio::sync::oneshot;
@@ -33,17 +33,15 @@ impl AppState {
         scope: CardScope,
         action_key: String,
         action: CardAction,
+        inputs: Vec<CardInput>,
         cx: &mut Context<Self>,
     ) {
-        let task = match (&scope.surface, &action.kind) {
-            (Surface::Dialog, CardActionKind::Submit(submit)) => {
-                CardTask::Submit(submit.data.clone())
-            }
-            _ => CardTask::Action(action),
-        };
         if self.cards.is_busy(&action_key) {
             return;
         }
+        let Some(task) = self.card_task(&scope, action, &inputs, cx) else {
+            return;
+        };
         self.cards.set_phase(&action_key, ActionPhase::Busy);
         self.cards.clear_note(&scope.card_key());
         self.announce_cards(&scope, cx);
@@ -224,7 +222,7 @@ impl AppState {
         .detach();
     }
 
-    fn announce_cards(&mut self, scope: &CardScope, cx: &mut Context<Self>) {
+    pub(crate) fn announce_cards(&mut self, scope: &CardScope, cx: &mut Context<Self>) {
         cx.emit(AppEvent::Cards(scope.conversation_id.clone()));
         cx.notify();
     }
@@ -233,6 +231,7 @@ impl AppState {
         let Some(card) = AdaptiveCard::parse(json) else {
             return false;
         };
+        self.cards.clear_card(&scope.card_key());
         if scope.surface == Surface::Dialog {
             if let Some(dialog) = self.task_dialog.as_mut() {
                 dialog.card = card;
@@ -283,7 +282,7 @@ impl AppState {
                 let Some(card) = AdaptiveCard::parse(&json) else {
                     return;
                 };
-                self.cards.clear_card(&scope.card_key());
+                self.cards.clear_card(&CardScope::dialog_key());
                 self.task_dialog = Some(TaskDialogState {
                     title,
                     card,

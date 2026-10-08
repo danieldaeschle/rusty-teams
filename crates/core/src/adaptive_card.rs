@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value, json};
 
+use crate::card_inputs::{CardInput, merge_input_data, parse_input};
 use crate::markdown::markdown_to_html;
 use crate::spans::{Span, html_to_spans};
 use crate::stored::push_plain;
@@ -9,6 +10,7 @@ use crate::stored::push_plain;
 const SUPPORTED_URL_SCHEMES: [&str; 2] = ["https://", "http://"];
 const IMAGE_URL_SCHEME: &str = "https://";
 const ACTION_TYPE_PREFIX: &str = "Action.";
+const INPUT_TYPE_PREFIX: &str = "Input.";
 const OPEN_URL_ACTION: &str = "Action.OpenUrl";
 const SUBMIT_ACTION: &str = "Action.Submit";
 const EXECUTE_ACTION: &str = "Action.Execute";
@@ -49,6 +51,7 @@ pub enum CardElement {
     },
     Facts(Vec<CardFact>),
     Actions(Vec<CardAction>),
+    Input(CardInput),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,6 +158,7 @@ pub struct CardAction {
     pub kind: CardActionKind,
     pub enabled: bool,
     pub visible: bool,
+    pub collects_inputs: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +196,27 @@ pub struct InvokePayload {
 }
 
 impl SubmitAction {
+    pub fn with_inputs(&self, values: &Map<String, Value>) -> SubmitAction {
+        let mut data = merge_input_data(&self.data, values);
+        if !values.is_empty() && self.is_message_back() {
+            let mut sent = data.as_object().cloned().unwrap_or_default();
+            sent.remove(TEAMS_SETTINGS_KEY);
+            if let Some(settings) = data
+                .get_mut(TEAMS_SETTINGS_KEY)
+                .and_then(Value::as_object_mut)
+            {
+                settings.insert("value".to_owned(), Value::Object(sent));
+            }
+        }
+        SubmitAction { data }
+    }
+
+    fn is_message_back(&self) -> bool {
+        self.teams_settings()
+            .and_then(|settings| string_field(settings, "type"))
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("messageBack"))
+    }
+
     fn teams_settings(&self) -> Option<&Value> {
         self.data.get(TEAMS_SETTINGS_KEY)
     }
@@ -248,6 +273,23 @@ pub fn task_value(data: Value) -> Value {
 }
 
 impl CardAction {
+    pub fn with_inputs(&self, values: &Map<String, Value>) -> CardAction {
+        let kind = match &self.kind {
+            CardActionKind::Submit(submit) => CardActionKind::Submit(submit.with_inputs(values)),
+            CardActionKind::Execute(execute) => {
+                CardActionKind::Execute(ExecuteAction {
+                    data: merge_input_data(&execute.data, values),
+                    ..execute.clone()
+                })
+            }
+            other => other.clone(),
+        };
+        CardAction {
+            kind,
+            ..self.clone()
+        }
+    }
+
     pub fn invoke_payload(&self) -> Option<InvokePayload> {
         match &self.kind {
             CardActionKind::Submit(submit) => Some(submit.payload()),
@@ -296,6 +338,28 @@ impl AdaptiveCard {
         visibility
     }
 
+    pub fn own_inputs(&self) -> Vec<CardInput> {
+        let mut inputs = Vec::new();
+        collect_inputs(&self.items, &mut inputs);
+        inputs
+    }
+
+    pub fn all_inputs(&self) -> Vec<CardInput> {
+        let mut inputs = self.own_inputs();
+        for action in self.all_actions() {
+            if let CardActionKind::ShowCard(card) = &action.kind {
+                inputs.extend(card.all_inputs());
+            }
+        }
+        inputs
+    }
+
+    fn all_actions(&self) -> Vec<&CardAction> {
+        let mut actions: Vec<&CardAction> = self.actions.iter().collect();
+        collect_item_actions(&self.items, &mut actions);
+        actions
+    }
+
     pub fn plain_text(&self) -> Option<String> {
         let mut lines = Vec::new();
         collect_lines(&self.items, &mut lines);
@@ -331,6 +395,32 @@ fn collect_visibility(
     }
 }
 
+fn collect_inputs(items: &[CardItem], inputs: &mut Vec<CardInput>) {
+    for item in items {
+        match &item.element {
+            CardElement::Input(input) => inputs.push(input.clone()),
+            CardElement::Columns(columns) => columns
+                .iter()
+                .for_each(|column| collect_inputs(&column.items, inputs)),
+            CardElement::Container { items, .. } => collect_inputs(items, inputs),
+            _ => {}
+        }
+    }
+}
+
+fn collect_item_actions<'card>(items: &'card [CardItem], actions: &mut Vec<&'card CardAction>) {
+    for item in items {
+        match &item.element {
+            CardElement::Actions(set) => actions.extend(set),
+            CardElement::Columns(columns) => columns
+                .iter()
+                .for_each(|column| collect_item_actions(&column.items, actions)),
+            CardElement::Container { items, .. } => collect_item_actions(items, actions),
+            _ => {}
+        }
+    }
+}
+
 pub fn card_content_text(content: &str) -> Option<String> {
     AdaptiveCard::parse(content)?.plain_text()
 }
@@ -350,7 +440,10 @@ fn collect_lines(items: &[CardItem], lines: &mut Vec<String>) {
                     lines.push(line.trim().to_owned());
                 }
             }
-            CardElement::Image(_) | CardElement::ImageSet(_) | CardElement::Actions(_) => {}
+            CardElement::Image(_)
+            | CardElement::ImageSet(_)
+            | CardElement::Actions(_)
+            | CardElement::Input(_) => {}
         }
     }
 }
@@ -388,6 +481,9 @@ fn parse_item(value: &Value) -> Option<CardItem> {
         "Container" => parse_container(value),
         "FactSet" => parse_fact_set(value),
         "ActionSet" => parse_action_set(value),
+        input_type if input_type.starts_with(INPUT_TYPE_PREFIX) => {
+            parse_input(value, input_type).map(CardElement::Input)
+        }
         _ => None,
     };
     let element = element.or_else(|| fallback_item(value).map(|item| item.element))?;
@@ -620,6 +716,8 @@ fn parse_action(value: &Value) -> Option<CardAction> {
             .and_then(Value::as_bool)
             .unwrap_or(true),
         visible,
+        collects_inputs: !string_field(value, "associatedInputs")
+            .is_some_and(|mode| mode.eq_ignore_ascii_case("none")),
     })
 }
 

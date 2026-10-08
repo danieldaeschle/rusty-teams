@@ -3,6 +3,7 @@ pub mod adaptive_card;
 pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
+pub mod card_input;
 pub mod composer;
 pub mod conversation;
 pub mod dialog_overlay;

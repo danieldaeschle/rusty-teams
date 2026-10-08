@@ -1,16 +1,18 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     AdaptiveCard, CardAction, CardActionKind, CardColumn, CardElement, CardFact, CardImage,
-    CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ImageSize, TextColor, TextSize,
+    CardInput, CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ImageSize, TextColor, TextSize,
     VerticalAlignment,
 };
 
+use super::card_input::input_view;
 use super::widgets::symbol;
-use crate::app_state::AppHandle;
+use crate::app_state::{AppHandle, AppState};
 use crate::card_state::{ActionPhase, CardScope, CardState};
 use crate::render::{layout_blocks, render_blocks};
 use crate::theme;
@@ -49,7 +51,8 @@ struct CardContext<'a> {
     scope: &'a CardScope,
     state: &'a CardState,
     root_key: String,
-    initial_visibility: HashMap<String, bool>,
+    initial_visibility: Rc<HashMap<String, bool>>,
+    inputs: Vec<CardInput>,
 }
 
 impl<'a> CardContext<'a> {
@@ -59,7 +62,21 @@ impl<'a> CardContext<'a> {
             scope,
             state: &cx.global::<AppHandle>().0.read(cx).cards,
             root_key: scope.card_key(),
-            initial_visibility: card.element_visibility(),
+            initial_visibility: Rc::new(card.element_visibility()),
+            inputs: card.own_inputs(),
+        }
+    }
+
+    fn nested(&self, card: &AdaptiveCard) -> CardContext<'a> {
+        let mut inputs = self.inputs.clone();
+        inputs.extend(card.own_inputs());
+        CardContext {
+            cx: self.cx,
+            scope: self.scope,
+            state: self.state,
+            root_key: self.root_key.clone(),
+            initial_visibility: self.initial_visibility.clone(),
+            inputs,
         }
     }
 
@@ -87,6 +104,25 @@ pub fn cards_view(
             card_view(card, &scope, cx)
         })
         .collect()
+}
+
+pub fn ensure_cards_inputs(
+    app: &Entity<AppState>,
+    cards: &[AdaptiveCard],
+    conversation_id: &str,
+    message_id: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if cards.is_empty() {
+        return;
+    }
+    app.update(cx, |state, cx| {
+        for (index, card) in cards.iter().enumerate() {
+            let scope = CardScope::message(conversation_id, message_id, index);
+            state.ensure_card_inputs(&scope, card, window, cx);
+        }
+    });
 }
 
 pub fn card_view(card: &AdaptiveCard, scope: &CardScope, cx: &App) -> AnyElement {
@@ -196,6 +232,7 @@ fn element_view(element: &CardElement, id: &str, context: &CardContext) -> AnyEl
         }
         CardElement::Facts(facts) => facts_view(facts, id, context.cx),
         CardElement::Actions(actions) => actions_view(actions, id, context).into_any_element(),
+        CardElement::Input(input) => input_view(input, context.scope, context.state),
     }
 }
 
@@ -387,6 +424,7 @@ fn actions_view(actions: &[CardAction], id: &str, context: &CardContext) -> Div 
         )
         .when_some(open_card, |column, card| {
             let nested_id = format!("{id}-show");
+            let nested_context = context.nested(card);
             column.child(
                 v_flex()
                     .w_full()
@@ -394,12 +432,12 @@ fn actions_view(actions: &[CardAction], id: &str, context: &CardContext) -> Div 
                     .gap(px(ACTION_GAP))
                     .rounded(px(CONTAINER_RADIUS))
                     .bg(theme::surface_raised())
-                    .child(items_view(&card.items, &nested_id, context))
+                    .child(items_view(&card.items, &nested_id, &nested_context))
                     .when(!card.actions.is_empty(), |nested| {
                         nested.child(actions_view(
                             &card.actions,
                             &format!("{nested_id}-actions"),
-                            context,
+                            &nested_context,
                         ))
                     }),
             )
@@ -464,11 +502,17 @@ fn action_button(
         }
         CardActionKind::Submit(_) | CardActionKind::Execute(_) => {
             let action = action.clone();
+            let inputs = context.inputs.clone();
             enabled.on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                let (scope, action, button_id) = (scope.clone(), action.clone(), button_id.clone());
+                let (scope, action, button_id, inputs) = (
+                    scope.clone(),
+                    action.clone(),
+                    button_id.clone(),
+                    inputs.clone(),
+                );
                 cx.global::<AppHandle>().0.clone().update(cx, |state, cx| {
-                    state.run_card_action(scope, button_id, action, cx)
+                    state.run_card_action(scope, button_id, action, inputs, cx)
                 });
             })
         }

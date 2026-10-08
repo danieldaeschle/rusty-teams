@@ -9,6 +9,7 @@ mod assets;
 mod avatar_image;
 mod backend;
 mod card_actions;
+mod card_inputs;
 mod chat_actions;
 mod crash_log;
 mod card_state;

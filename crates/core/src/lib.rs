@@ -2,6 +2,7 @@ mod actions;
 mod adaptive_card;
 mod avatars;
 mod card_actions;
+mod card_inputs;
 mod channel_sync;
 mod download;
 mod draft;
@@ -32,6 +33,11 @@ pub use adaptive_card::{
 };
 pub use avatars::Avatar;
 pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
+pub use card_inputs::{
+    CardInput, CardInputKind, ChoiceInput, ChoiceStyle, DATE_PLACEHOLDER, InputChoice, InputError,
+    MomentInput, NumberInput, TIME_PLACEHOLDER, TextInput, TextStyle, ToggleInput,
+    collect_input_values, merge_input_data,
+};
 pub use chatsvc::ChatApp;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,

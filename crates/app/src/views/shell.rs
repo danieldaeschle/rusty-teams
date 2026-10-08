@@ -286,7 +286,18 @@ impl AppShell {
 }
 
 impl Render for AppShell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(dialog) = self
+            .state
+            .read(cx)
+            .task_dialog
+            .as_ref()
+            .map(|dialog| (dialog.scope.clone(), dialog.card.clone()))
+        {
+            self.state.update(cx, |state, cx| {
+                state.ensure_card_inputs(&dialog.0, &dialog.1, window, cx)
+            });
+        }
         if let Some(me) = self.state.read(cx).directory.me.clone() {
             let app = self.state.clone();
             cx.defer(move |cx| {
