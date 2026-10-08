@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use session::{Method, Request, Scope, Session};
@@ -7,11 +7,13 @@ use session::{Method, Request, Scope, Session};
 use crate::client::Graph;
 use crate::error::{Error, Result};
 use crate::outgoing::FileReference;
+use crate::people::decode_binary;
 use crate::urls;
 
 const FILES_SCOPE: &str = "Files.ReadWrite";
 const CHUNK_UNIT_BYTES: u64 = 327_680;
 pub const UPLOAD_CHUNK_BYTES: u64 = 4 * CHUNK_UNIT_BYTES;
+pub const DOWNLOAD_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CHUNK_RETRIES: usize = 3;
 const MAX_NAME_ATTEMPTS: usize = 50;
 
@@ -25,6 +27,13 @@ pub struct DriveFolder {
 pub enum UploadDestination {
     ChatFiles,
     Folder(DriveFolder),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedFile {
+    pub name: String,
+    pub size: u64,
+    pub download_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +73,14 @@ struct DriveItem {
 }
 
 #[derive(Debug, Deserialize)]
+struct SharedItem {
+    name: String,
+    size: Option<u64>,
+    #[serde(default, rename = "@microsoft.graph.downloadUrl")]
+    download_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ParentReference {
     drive_id: Option<String>,
@@ -97,6 +114,30 @@ pub fn chunk_ranges(total: u64) -> Vec<(u64, u64)> {
         ranges.push(range);
     }
     ranges
+}
+
+/// The `u!` sharing token for a file URL: base64url without padding.
+pub fn share_id(url: &str) -> String {
+    format!("u!{}", URL_SAFE_NO_PAD.encode(url))
+}
+
+/// Inclusive ranges of at most `chunk` bytes that cover `total` bytes.
+pub fn download_ranges(total: u64, chunk: u64) -> Vec<(u64, u64)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while start < total {
+        let end = (start + chunk).min(total) - 1;
+        ranges.push((start, end));
+        start = end + 1;
+    }
+    ranges
+}
+
+fn range_header(start: u64, end: Option<u64>) -> String {
+    match end {
+        Some(end) => format!("bytes={start}-{end}"),
+        None => format!("bytes={start}-"),
+    }
 }
 
 /// First byte the server still wants, from `nextExpectedRanges` (`["1310720-"]`).
@@ -300,6 +341,54 @@ impl Graph {
         next_expected_start(&answer.body)
     }
 
+    pub async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
+        let answer = self
+            .session()
+            .request(
+                Method::Get,
+                &urls::shared_drive_item(&share_id(open_url)),
+                &Scope::graph(FILES_SCOPE),
+                None,
+            )
+            .await?;
+        let item: SharedItem = serde_json::from_value(answer.body)?;
+        let download_url = item
+            .download_url
+            .filter(|url| !url.is_empty())
+            .ok_or_else(|| Error::Download("the file has no download link".into()))?;
+        let size = item
+            .size
+            .ok_or_else(|| Error::Download("size unknown".into()))?;
+        Ok(SharedFile {
+            name: item.name,
+            size,
+            download_url,
+        })
+    }
+
+    pub async fn download_range(
+        &self,
+        download_url: &str,
+        start: u64,
+        end: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        let request = Request::anonymous_binary_get(
+            download_url,
+            vec![("Range".to_owned(), range_header(start, end))],
+        );
+        let answer = self
+            .session()
+            .send(request, &Scope::graph(FILES_SCOPE))
+            .await?;
+        if start > 0 && answer.status != 206 {
+            return Err(Error::Download(format!(
+                "range ignored (HTTP {})",
+                answer.status
+            )));
+        }
+        Ok(decode_binary(download_url, answer)?.bytes)
+    }
+
     pub async fn delete_drive_item(&self, drive_id: &str, item_id: &str) -> Result<()> {
         self.session()
             .request(
@@ -377,6 +466,50 @@ mod tests {
         assert_eq!(etag_guid("\"abc,3\""), None);
         assert_eq!(etag_guid("{}"), None);
         assert_eq!(etag_guid(""), None);
+    }
+
+    #[test]
+    fn share_id_is_base64url_without_padding() {
+        assert_eq!(share_id("a"), "u!YQ");
+        assert_eq!(share_id("ab"), "u!YWI");
+        assert_eq!(share_id("abc"), "u!YWJj");
+        assert_eq!(share_id("a?>"), "u!YT8-");
+        let id = share_id("https://contoso.sharepoint.com/:w:/r/sites/x/Doc.docx?d=w1&csf=1");
+        assert!(id.starts_with("u!") && !id.contains(['=', '+', '/']));
+    }
+
+    #[test]
+    fn download_ranges_cover_the_file_in_order() {
+        assert!(download_ranges(0, 10).is_empty());
+        assert_eq!(download_ranges(1, 10), vec![(0, 0)]);
+        assert_eq!(download_ranges(10, 10), vec![(0, 9)]);
+        assert_eq!(download_ranges(25, 10), vec![(0, 9), (10, 19), (20, 24)]);
+        let ranges = download_ranges(2 * DOWNLOAD_CHUNK_BYTES + 5, DOWNLOAD_CHUNK_BYTES);
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(
+            ranges[2],
+            (2 * DOWNLOAD_CHUNK_BYTES, 2 * DOWNLOAD_CHUNK_BYTES + 4)
+        );
+    }
+
+    #[test]
+    fn range_header_is_inclusive() {
+        assert_eq!(range_header(0, Some(4_194_303)), "bytes=0-4194303");
+        assert_eq!(range_header(8_388_608, None), "bytes=8388608-");
+    }
+
+    #[test]
+    fn shared_item_reads_the_download_url() {
+        let item: SharedItem = serde_json::from_value(json!({
+            "id": "1", "name": "plan.pdf", "size": 12,
+            "@microsoft.graph.downloadUrl": "https://dl.example/x"
+        }))
+        .unwrap();
+        assert_eq!(item.download_url.as_deref(), Some("https://dl.example/x"));
+        assert_eq!(item.size, Some(12));
+        let without_size: SharedItem =
+            serde_json::from_value(json!({"id": "1", "name": "a"})).unwrap();
+        assert_eq!(without_size.size, None);
     }
 
     #[test]

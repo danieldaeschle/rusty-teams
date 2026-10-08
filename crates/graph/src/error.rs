@@ -14,4 +14,6 @@ pub enum Error {
     EmptyUpload,
     #[error("upload failed: {0}")]
     Upload(String),
+    #[error("download failed: {0}")]
+    Download(String),
 }

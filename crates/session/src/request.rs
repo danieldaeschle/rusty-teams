@@ -65,6 +65,15 @@ impl Request {
         }
     }
 
+    /// Sent without an Authorization header; a successful answer carries `{"base64": .., "contentType": ..}`.
+    pub fn anonymous_binary_get(url: impl Into<String>, headers: Vec<(String, String)>) -> Self {
+        Request {
+            headers,
+            anonymous: true,
+            ..Request::binary_get(url)
+        }
+    }
+
     pub fn delete(url: impl Into<String>) -> Self {
         Request {
             method: Method::Delete,
@@ -203,6 +212,17 @@ mod tests {
         assert_eq!(wire["body"], Value::Null);
         assert!(wire["headers"].get("Content-Type").is_none());
         assert_eq!(wire["headers"]["Content-Range"], "bytes 0-2/3");
+    }
+
+    #[test]
+    fn anonymous_binary_get_keeps_range_header_and_flags() {
+        let request = Request::anonymous_binary_get("https://download.example/file", vec![("Range".into(), "bytes=0-9".into())]);
+        let wire = serde_json::to_value(WireRequest::from(&request)).unwrap();
+        assert_eq!(wire["method"], "GET");
+        assert_eq!(wire["anonymous"], true);
+        assert_eq!(wire["binary"], true);
+        assert_eq!(wire["bodyBase64"], Value::Null);
+        assert_eq!(wire["headers"]["Range"], "bytes=0-9");
     }
 
     #[test]

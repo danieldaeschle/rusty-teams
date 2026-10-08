@@ -5,7 +5,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
 
-use super::attachments::attachments_view;
+use super::attachments::{FileActions, attachments_view};
 use super::avatar::{member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
@@ -42,6 +42,7 @@ pub struct RowActions {
     pub menu: Option<MessageMenu>,
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
+    pub files: Option<FileActions>,
     pub highlighted: bool,
 }
 
@@ -137,6 +138,7 @@ fn bubble(
         &row.files,
         &format!("message-{index}"),
         directory,
+        extras.files.as_ref(),
     ));
     if has_reactions {
         content = content.child(
@@ -192,6 +194,7 @@ struct BubbleExtras {
     menu: Option<MessageMenu>,
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
+    files: Option<FileActions>,
 }
 
 fn bubble_meta(row: &MessageRow, own: bool) -> Div {
@@ -349,7 +352,13 @@ fn edited_marker() -> Div {
         .child("Edited")
 }
 
-fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) -> Div {
+fn post_card(
+    row: &MessageRow,
+    index: usize,
+    directory: &Directory,
+    files: Option<&FileActions>,
+    cx: &App,
+) -> Div {
     let header = h_flex()
         .gap(px(10.))
         .items_center()
@@ -453,6 +462,7 @@ fn post_card(row: &MessageRow, index: usize, directory: &Directory, cx: &App) ->
             &row.files,
             &format!("message-{index}"),
             directory,
+            files,
         ));
         if !row.reactions.is_empty() {
             body = body.child(reaction_pills(
@@ -562,12 +572,14 @@ pub fn render_message_row(
         menu,
         react,
         reaction_controls,
+        files,
         highlighted,
     } = actions;
     let extras = BubbleExtras {
         menu,
         react,
         controls: reaction_controls,
+        files,
     };
     let own = row.own && !row.card;
     let spacing = if row.card {
@@ -585,7 +597,7 @@ pub fn render_message_row(
         container = container.child(new_marker());
     }
     let body = if row.card {
-        post_card(row, index, directory, cx)
+        post_card(row, index, directory, extras.files.as_ref(), cx)
     } else if own {
         own_row(row, index, directory, retry, extras, cx)
     } else {

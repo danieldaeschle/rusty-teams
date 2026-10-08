@@ -1,11 +1,14 @@
+use std::rc::Rc;
+
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{FileCard, FileKind, ImageRef};
 
-use super::widgets::icon;
+use super::widgets::{icon, symbol};
 use crate::data::Directory;
+use crate::downloads::{self, DownloadState};
 use crate::format;
 use crate::rows::LocalImage;
 use crate::theme;
@@ -17,6 +20,17 @@ const IMAGE_FALLBACK: (f32, f32) = (240., 160.);
 const IMAGE_RADIUS: f32 = 10.;
 const FILE_CARD_WIDTH: f32 = 300.;
 const FILE_BADGE_SIZE: f32 = 34.;
+const SAVE_BUTTON_SIZE: f32 = 28.;
+const SAVE_BUTTON_RADIUS: f32 = 6.;
+const SAVE_PROGRESS_HEIGHT: f32 = 2.;
+
+pub type FileActivate = Rc<dyn Fn(usize, &mut App)>;
+
+#[derive(Clone)]
+pub struct FileActions {
+    pub states: Vec<Option<DownloadState>>,
+    pub activate: FileActivate,
+}
 
 pub fn fit_image(size: Option<(u32, u32)>) -> (f32, f32) {
     let Some((width, height)) = size.filter(|(width, height)| *width > 0 && *height > 0) else {
@@ -158,11 +172,65 @@ fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
         .into_any_element()
 }
 
-fn file_view(card: &FileCard, id: String) -> AnyElement {
+fn save_button(
+    state: Option<&DownloadState>,
+    id: String,
+    index: usize,
+    activate: FileActivate,
+) -> Stateful<Div> {
+    let look = downloads::button_look(state);
+    let tooltip = look.tooltip.clone();
+    let clickable = look.clickable;
+    let button = div()
+        .id(ElementId::Name(id.into()))
+        .size(px(SAVE_BUTTON_SIZE))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(SAVE_BUTTON_RADIUS))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .when(look.clickable, |button| {
+            button
+                .cursor_pointer()
+                .hover(|button| button.bg(theme::row_hover()))
+        })
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            if clickable {
+                activate(index, cx);
+            }
+        });
+    match look.percent {
+        Some(percent) => button.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme::text_muted())
+                .child(downloads::percent_label(percent)),
+        ),
+        None => button.child(symbol(look.symbol, 16., theme::text_muted())),
+    }
+}
+
+fn file_view(
+    card: &FileCard,
+    id: String,
+    index: usize,
+    actions: Option<&FileActions>,
+) -> AnyElement {
     let badge = file_badge(card.kind, FILE_BADGE_SIZE);
     let url = card.open_url.clone();
+    let state = actions
+        .and_then(|actions| actions.states.get(index))
+        .and_then(Option::as_ref);
+    let progress = downloads::progress_fraction(state);
+    let button = actions
+        .filter(|_| !card.open_url.is_empty())
+        .map(|actions| save_button(state, format!("{id}-save"), index, actions.activate.clone()));
     h_flex()
         .id(ElementId::Name(id.into()))
+        .relative()
+        .overflow_hidden()
         .w(px(FILE_CARD_WIDTH))
         .max_w(relative(1.))
         .gap(px(10.))
@@ -196,6 +264,18 @@ fn file_view(card: &FileCard, id: String) -> AnyElement {
                 ),
         )
         .child(icon(IconName::ExternalLink, 14., theme::text_muted()))
+        .children(button)
+        .when_some(progress, |card, fraction| {
+            card.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .bottom_0()
+                    .h(px(SAVE_PROGRESS_HEIGHT))
+                    .w(relative(fraction))
+                    .bg(theme::accent()),
+            )
+        })
         .on_click(move |_, _, cx| cx.open_url(&url))
         .into_any_element()
 }
@@ -206,6 +286,7 @@ pub fn attachments_view(
     files: &[FileCard],
     id: &str,
     directory: &Directory,
+    file_actions: Option<&FileActions>,
 ) -> Option<Div> {
     if images.is_empty() && local_images.is_empty() && files.is_empty() {
         return None;
@@ -224,12 +305,9 @@ pub fn attachments_view(
                     local_image_view(image, format!("{id}-local-image-{index}"))
                 }),
             )
-            .children(
-                files
-                    .iter()
-                    .enumerate()
-                    .map(|(index, card)| file_view(card, format!("{id}-file-{index}"))),
-            ),
+            .children(files.iter().enumerate().map(|(index, card)| {
+                file_view(card, format!("{id}-file-{index}"), index, file_actions)
+            })),
     )
 }
 

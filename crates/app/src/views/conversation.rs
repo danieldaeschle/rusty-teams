@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,7 @@ use gpui_kit::*;
 use store::MessageRecord;
 use teams_core::{FileCard, ImageRef, MentionInput};
 
+use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu};
@@ -26,7 +28,9 @@ use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
+use crate::backend::Engine;
 use crate::data::{is_one_on_one, others};
+use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::Block;
@@ -47,6 +51,8 @@ const GROWTH_HEADROOM: usize = 20;
 const META_USER_ID: &str = "me_user_id";
 const PENDING_KEY_PREFIX: &str = "pending-";
 const MAX_NOTICE_CHARS: usize = 140;
+const DEMO_DOWNLOAD_STEPS: u8 = 10;
+const DEMO_DOWNLOAD_STEP: Duration = Duration::from_millis(100);
 const JUMP_SCAN_LIMIT: usize = 5000;
 const JUMP_CONTEXT_MESSAGES: usize = 12;
 const HIGHLIGHT_DURATION: Duration = Duration::from_secs(2);
@@ -123,6 +129,7 @@ pub struct ConversationView {
     pending: Vec<MessageRow>,
     pending_counter: usize,
     pending_outgoing: HashMap<String, Outgoing>,
+    downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
     toolbar_pinned: Option<String>,
@@ -178,7 +185,142 @@ fn short_error(error: &dyn std::fmt::Display) -> String {
     error.to_string().chars().take(MAX_NOTICE_CHARS).collect()
 }
 
+enum DownloadEvent {
+    Progress(u8),
+    Finished(Result<PathBuf, String>),
+}
+
+async fn save_file(
+    engine: &Engine,
+    card: &FileCard,
+    events: &tokio::sync::mpsc::UnboundedSender<DownloadEvent>,
+) -> Result<PathBuf, String> {
+    let mut part = PartFile::create(&downloads::downloads_directory(), &card.name)
+        .map_err(|error| short_error(&error))?;
+    engine
+        .download_file(
+            &card.open_url,
+            |bytes| part.write(bytes),
+            |percent| {
+                let _ = events.send(DownloadEvent::Progress(percent));
+            },
+        )
+        .await
+        .map_err(|error| short_error(&error))?;
+    part.finish().map_err(|error| short_error(&error))
+}
+
 impl ConversationView {
+    fn file_actions(
+        &self,
+        message_key: &str,
+        files: &[FileCard],
+        view: WeakEntity<Self>,
+    ) -> FileActions {
+        let conversation_id = self.conversation_id().unwrap_or_default();
+        let (key, cards) = (message_key.to_owned(), files.to_vec());
+        let open_urls: Vec<&str> = files.iter().map(|card| card.open_url.as_str()).collect();
+        FileActions {
+            states: self
+                .downloads
+                .states_for(&conversation_id, message_key, &open_urls),
+            activate: Rc::new(move |index, cx| {
+                let Some(card) = cards.get(index).cloned() else {
+                    return;
+                };
+                let key = key.clone();
+                let conversation_id = conversation_id.clone();
+                view.update(cx, |this, cx| {
+                    this.activate_file(&conversation_id, &key, card, cx)
+                })
+                .ok();
+            }),
+        }
+    }
+
+    fn activate_file(
+        &mut self,
+        conversation_id: &str,
+        message_key: &str,
+        card: FileCard,
+        cx: &mut Context<Self>,
+    ) {
+        let key = DownloadKey::new(conversation_id, message_key, &card.open_url);
+        match downloads::click_action(self.downloads.state(&key)) {
+            ClickAction::Ignore => {}
+            ClickAction::Start => self.start_download(key, card, cx),
+            ClickAction::Reveal(path) => {
+                let folder = path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(downloads::downloads_directory);
+                match downloads::reveal_target(&path, path.exists(), folder) {
+                    RevealTarget::File(path) => downloads::reveal_in_file_manager(&path),
+                    RevealTarget::Folder(folder) => cx.open_with_system(&folder),
+                }
+            }
+        }
+    }
+
+    fn start_download(&mut self, key: DownloadKey, card: FileCard, cx: &mut Context<Self>) {
+        if !self.downloads.begin(&key) {
+            return;
+        }
+        cx.notify();
+        let state = self.app.read(cx);
+        let (demo, engine) = (state.mode.demo, state.engine.clone());
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<DownloadEvent>();
+        if demo {
+            cx.spawn(async move |this, cx| {
+                for step in 1..=DEMO_DOWNLOAD_STEPS {
+                    cx.background_executor().timer(DEMO_DOWNLOAD_STEP).await;
+                    let percent = (u32::from(step) * 100 / u32::from(DEMO_DOWNLOAD_STEPS)) as u8;
+                    let progressed = this.update(cx, |this, cx| {
+                        this.downloads.set_progress(&key, percent);
+                        cx.notify();
+                    });
+                    if progressed.is_err() {
+                        return;
+                    }
+                }
+                let outcome =
+                    downloads::write_demo_file(&card.name).map_err(|error| short_error(&error));
+                this.update(cx, |this, cx| {
+                    this.downloads.finish(&key, outcome);
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+            return;
+        }
+        let Some(engine) = engine else {
+            self.downloads.finish(&key, Err("not connected".to_owned()));
+            return;
+        };
+        drop(runtime::spawn(async move {
+            let outcome = save_file(&engine, &card, &sender).await;
+            let _ = sender.send(DownloadEvent::Finished(outcome));
+        }));
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = receiver.recv().await {
+                let updated = this.update(cx, |this, cx| {
+                    match event {
+                        DownloadEvent::Progress(percent) => {
+                            this.downloads.set_progress(&key, percent)
+                        }
+                        DownloadEvent::Finished(outcome) => this.downloads.finish(&key, outcome),
+                    }
+                    cx.notify();
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
@@ -208,6 +350,7 @@ impl ConversationView {
             pending: Vec::new(),
             pending_counter: 0,
             pending_outgoing: HashMap::new(),
+            downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
             toolbar_pinned: None,
@@ -2372,6 +2515,16 @@ impl Render for ConversationView {
                                     .ok();
                             }) as Box<dyn Fn(&mut App)>
                         });
+                        let files = (is_real && !message.deleted && !message.files.is_empty())
+                            .then(|| view.upgrade())
+                            .flatten()
+                            .map(|entity| {
+                                entity.read(cx).file_actions(
+                                    &message.key,
+                                    &message.files,
+                                    view.clone(),
+                                )
+                            });
                         let state = app.read(cx);
                         render_message_row(
                             message,
@@ -2384,6 +2537,7 @@ impl Render for ConversationView {
                                 menu,
                                 react,
                                 reaction_controls,
+                                files,
                                 highlighted: highlighted.as_deref() == Some(message.key.as_str()),
                             },
                             &state.directory,

@@ -2,7 +2,7 @@ use chatsvc::{ConversationRef, MemberHorizon, Messages, Receipts};
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, Team, UploadDestination, UploadedFile, User,
+    OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
 };
 
 use crate::error::{Error, Result};
@@ -153,6 +153,19 @@ pub trait Remote {
 
     async fn delete_file(&self, _file: &UploadedFile) -> Result<()> {
         Err(Error::Unsupported("deleting a file"))
+    }
+
+    async fn resolve_share(&self, _open_url: &str) -> Result<SharedFile> {
+        Err(Error::Unsupported("resolving a shared file"))
+    }
+
+    async fn download_range(
+        &self,
+        _download_url: &str,
+        _start: u64,
+        _end: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        Err(Error::Unsupported("a file download"))
     }
 
     async fn hosted_content(&self, _url: &str) -> Result<Photo> {
@@ -417,6 +430,19 @@ impl Remote for Graph {
 
     async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
         Ok(Graph::delete_drive_item(self, &file.drive_id, &file.item_id).await?)
+    }
+
+    async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
+        Ok(Graph::resolve_share(self, open_url).await?)
+    }
+
+    async fn download_range(
+        &self,
+        download_url: &str,
+        start: u64,
+        end: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        Ok(Graph::download_range(self, download_url, start, end).await?)
     }
 
     async fn hosted_content(&self, url: &str) -> Result<Photo> {

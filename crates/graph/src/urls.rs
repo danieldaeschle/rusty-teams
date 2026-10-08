@@ -140,6 +140,13 @@ pub fn drive_item(drive_id: &str, item_id: &str) -> String {
     )
 }
 
+pub fn shared_drive_item(share_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/shares/{}/driveItem?$select=id,name,size,@microsoft.graph.downloadUrl",
+        segment(share_id)
+    )
+}
+
 pub fn drive_item_invite(drive_id: &str, item_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/drives/{}/items/{}/invite",

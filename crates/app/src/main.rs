@@ -9,6 +9,7 @@ mod avatar_image;
 mod backend;
 mod data;
 mod demo;
+mod downloads;
 mod emoji;
 mod format;
 mod frame_log;

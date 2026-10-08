@@ -13,8 +13,9 @@ mod writes;
 pub use client::{BATCH_SIZE, CHAT_PAGE_SIZE, Graph, MESSAGE_PAGE_SIZE};
 pub use error::{Error, Result};
 pub use files::{
-    DriveFolder, UPLOAD_CHUNK_BYTES, UploadDestination, UploadedFile, chunk_range_at, chunk_ranges,
-    etag_guid, next_expected_start,
+    DOWNLOAD_CHUNK_BYTES, DriveFolder, SharedFile, UPLOAD_CHUNK_BYTES, UploadDestination,
+    UploadedFile, chunk_range_at, chunk_ranges, download_ranges, etag_guid, next_expected_start,
+    percent_done, share_id,
 };
 pub use models::{
     Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message, Photo,

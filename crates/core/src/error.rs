@@ -6,6 +6,8 @@ pub enum Error {
     Graph(#[from] graph::Error),
     #[error(transparent)]
     Store(#[from] store::Error),
+    #[error("cannot write the file: {0}")]
+    Io(#[from] std::io::Error),
     #[error("folder service: {0}")]
     Folders(String),
     #[error("unknown conversation {0}")]

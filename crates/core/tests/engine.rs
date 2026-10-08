@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use graph::{
     Channel, Chat, DriveFolder, HostedImage, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, Team, UploadDestination, UploadedFile, User,
+    OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
 };
 use serde_json::json;
 use store::{ChannelLayoutRecord, ChannelRecord, Store, TeamLayoutRecord, TeamRecord};
@@ -476,6 +476,39 @@ impl Remote for Handle {
             web_dav_url: Some("https://files.example/dav".into()),
             etag: "\"{GUID-1},2\"".into(),
         })
+    }
+
+    async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
+        self.record(format!("resolve {open_url}"));
+        Ok(SharedFile {
+            name: "big.bin".into(),
+            size: 2 * graph::DOWNLOAD_CHUNK_BYTES + 3,
+            download_url: if open_url.contains("short") {
+                "https://dl.example/short".into()
+            } else if open_url.contains("grown") {
+                "https://dl.example/grown".into()
+            } else {
+                "https://dl.example/big".into()
+            },
+        })
+    }
+
+    async fn download_range(
+        &self,
+        download_url: &str,
+        start: u64,
+        end: Option<u64>,
+    ) -> Result<Vec<u8>> {
+        let total = 2 * graph::DOWNLOAD_CHUNK_BYTES + 3;
+        let shown_end = end.map_or(String::new(), |end| end.to_string());
+        self.record(format!("range {download_url} {start}-{shown_end}"));
+        let length = match end {
+            _ if download_url.contains("short") => 1,
+            Some(end) => end - start + 1,
+            None if download_url.contains("grown") => total - start + 10,
+            None => total - start,
+        };
+        Ok(vec![7; length as usize])
     }
 
     async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
@@ -1167,6 +1200,101 @@ async fn an_edit_keeps_the_images_and_files_of_the_original() {
     let extras = fake.extras_sent.lock().unwrap();
     assert_eq!(extras[0].files[0].attachment_id, "G1");
     assert_eq!(extras[0].files[0].content_url, "https://x/a.pdf");
+}
+
+#[tokio::test]
+async fn download_streams_every_chunk_and_reports_progress() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let written = Mutex::new(0usize);
+    let percents = Mutex::new(Vec::new());
+    let shared = engine
+        .download_file(
+            "https://files.example/doc",
+            |bytes| {
+                *written.lock().unwrap() += bytes.len();
+                Ok(())
+            },
+            |percent| percents.lock().unwrap().push(percent),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*written.lock().unwrap() as u64, shared.size);
+    let chunk = graph::DOWNLOAD_CHUNK_BYTES;
+    let ranges: Vec<String> = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("range"))
+        .collect();
+    assert_eq!(
+        ranges,
+        vec![
+            format!("range https://dl.example/big 0-{}", chunk - 1),
+            format!("range https://dl.example/big {chunk}-{}", 2 * chunk - 1),
+            format!("range https://dl.example/big {}-", 2 * chunk),
+        ]
+    );
+    let percents = percents.lock().unwrap();
+    assert_eq!(percents.first(), Some(&0));
+    assert_eq!(percents.last(), Some(&100));
+    assert!(percents.windows(2).all(|pair| pair[0] <= pair[1]));
+}
+
+#[tokio::test]
+async fn download_keeps_a_file_that_grew_past_the_reported_size() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let written = Mutex::new(0usize);
+    let percents = Mutex::new(Vec::new());
+    let shared = engine
+        .download_file(
+            "https://files.example/grown",
+            |bytes| {
+                *written.lock().unwrap() += bytes.len();
+                Ok(())
+            },
+            |percent| percents.lock().unwrap().push(percent),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*written.lock().unwrap() as u64, shared.size + 10);
+    assert!(
+        percents
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|percent| *percent <= 100)
+    );
+}
+
+#[tokio::test]
+async fn download_rejects_a_short_chunk() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let result = engine
+        .download_file("https://files.example/short", |_| Ok(()), |_| {})
+        .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn download_stops_when_the_writer_fails() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let result = engine
+        .download_file(
+            "https://files.example/doc",
+            |_| Err(std::io::Error::other("disk full")),
+            |_| {},
+        )
+        .await;
+    assert!(matches!(result, Err(Error::Io(_))));
+    let ranges = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("range"))
+        .count();
+    assert_eq!(ranges, 1);
 }
 
 #[tokio::test]

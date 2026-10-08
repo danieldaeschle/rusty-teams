@@ -2,6 +2,7 @@ mod actions;
 mod avatars;
 mod card;
 mod channel_sync;
+mod download;
 mod engine;
 mod error;
 mod events;
@@ -28,7 +29,8 @@ pub use error::{Error, Result};
 pub use events::CoreEvent;
 pub use folders::{BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource};
 pub use graph::{
-    FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, UploadedFile,
+    FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, SharedFile,
+    UploadedFile,
 };
 pub use images::StoredImage;
 pub use mapping::{chat_record, message_record};
