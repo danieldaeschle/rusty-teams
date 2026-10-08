@@ -22,6 +22,7 @@ mod frame_log;
 mod fuzzy;
 mod notice;
 mod notify;
+mod people;
 mod reaction_model;
 mod read_state;
 mod render;

@@ -45,6 +45,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0009_muted.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0010_name_lookup_indexes.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

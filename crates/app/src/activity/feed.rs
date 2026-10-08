@@ -1,11 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use store::ActivityRecord;
 
 use crate::notify::Incoming;
-use crate::reaction_model::tooltip_text;
+use crate::reaction_model::{UNKNOWN_REACTOR, tooltip_text};
 
 pub const RETENTION_DAYS: i64 = 14;
 
@@ -112,6 +112,24 @@ pub struct Actor {
     pub name: String,
 }
 
+impl Actor {
+    pub fn is_unresolved(&self) -> bool {
+        self.user_id.is_some() && (self.name.is_empty() || self.name == UNKNOWN_REACTOR)
+    }
+
+    pub fn display_name<'a>(&'a self, resolved: &'a HashMap<String, String>) -> &'a str {
+        if self.is_unresolved()
+            && let Some(name) = self
+                .user_id
+                .as_ref()
+                .and_then(|user_id| resolved.get(user_id))
+        {
+            return name;
+        }
+        &self.name
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub id: i64,
@@ -127,13 +145,20 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn names(&self) -> String {
+    pub fn names(&self, resolved: &HashMap<String, String>) -> String {
         let names: Vec<&str> = self
             .actors
             .iter()
-            .map(|actor| actor.name.as_str())
+            .map(|actor| actor.display_name(resolved))
             .collect();
         tooltip_text(&names)
+    }
+
+    pub fn unresolved_user_ids(&self) -> impl Iterator<Item = &String> {
+        self.actors
+            .iter()
+            .filter(|actor| actor.is_unresolved())
+            .filter_map(|actor| actor.user_id.as_ref())
     }
 
     pub fn latest_actor(&self) -> Option<&Actor> {
@@ -569,7 +594,7 @@ mod tests {
         record(&mut feed, &incoming("chat", "m3", "Anna", 3));
         let entries = all(&feed);
         let entry = entries[0];
-        assert_eq!(entry.names(), "Ben and Anna");
+        assert_eq!(entry.names(&HashMap::new()), "Ben and Anna");
         assert_eq!(entry.latest_actor().unwrap().name, "Anna");
     }
 
@@ -644,7 +669,7 @@ mod tests {
         );
         let entries = all(&feed);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].names(), "Anna and Ben");
+        assert_eq!(entries[0].names(&HashMap::new()), "Anna and Ben");
         assert_eq!(entries[0].glyphs, vec!["A", "B"]);
         assert_eq!(entries[0].count, 2);
         assert_eq!(entries[0].updated_at, at(9, 5));
@@ -687,7 +712,7 @@ mod tests {
         assert!(all(&feed).is_empty());
         react(&mut feed, &[sighting("Cleo", "C", Some(at(9, 0)))]);
         react(&mut feed, &[sighting("Dan", "D", None)]);
-        assert_eq!(all(&feed)[0].names(), "Cleo and Dan");
+        assert_eq!(all(&feed)[0].names(&HashMap::new()), "Cleo and Dan");
     }
 
     #[test]

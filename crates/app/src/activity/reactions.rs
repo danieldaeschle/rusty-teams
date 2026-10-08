@@ -41,6 +41,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
+    use crate::app_state::{AppState, Mode};
+    use crate::people::resolve_names;
 
     fn record(message_id: &str, sender: &str, reactions_json: &str) -> MessageRecord {
         MessageRecord {
@@ -80,5 +82,20 @@ mod tests {
         let reaction = r#"[{"reaction_type":"heart","user_id":"u9"}]"#;
         let found = reacted_messages(&[record("mine", "me", reaction)], "me", |_| None);
         assert_eq!(found[0].sightings[0].name, UNKNOWN_REACTOR);
+    }
+
+    #[test]
+    fn channel_reactor_is_named_from_another_message_sender() {
+        let reaction = r#"[{"reaction_type":"like","user_id":"u5"}]"#;
+        let mut other = record("other", "u5", "[]");
+        other.sender_name = Some("Cleo".into());
+        let records = vec![record("mine", "me", reaction), other];
+        let store = std::sync::Arc::new(store::Store::open_in_memory().unwrap());
+        store.upsert_messages(&records).unwrap();
+        let state = AppState::new(store, Mode::default());
+        let names = resolve_names(&state, &["u5".to_owned(), "u6".to_owned()]);
+        let found = reacted_messages(&records, "me", |user_id| names.get(user_id).cloned());
+        assert_eq!(found[0].sightings[0].name, "Cleo");
+        assert!(!names.contains_key("u6"));
     }
 }

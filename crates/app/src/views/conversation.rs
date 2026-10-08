@@ -34,6 +34,7 @@ use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
 use crate::notice::short_error;
+use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::layout_blocks;
@@ -849,24 +850,7 @@ impl ConversationView {
     fn row_context(&self, cx: &App) -> RowContext {
         let now = Local::now();
         let app = self.app.read(cx);
-        let mut names: HashMap<String, String> = HashMap::new();
-        let known_people = app
-            .directory
-            .me
-            .iter()
-            .map(|me| (me.user_id.clone(), me.display_name.clone()))
-            .chain(
-                app.sidebar
-                    .chats
-                    .iter()
-                    .flat_map(|chat| chat.members.iter())
-                    .filter_map(|member| {
-                        Some((member.user_id.clone()?, member.display_name.clone()))
-                    }),
-            );
-        for (user_id, name) in known_people {
-            names.entry(user_id).or_insert(name);
-        }
+        let names = local_names(app);
         let card_overrides = self
             .current
             .as_ref()
@@ -905,8 +889,8 @@ impl ConversationView {
         if unknown.is_empty() {
             return;
         }
-        let names = self.row_context(cx).names;
-        if unknown.iter().any(|user_id| names.contains_key(user_id)) {
+        let names = resolve_names(self.app.read(cx), &unknown);
+        if !names.is_empty() {
             self.rebuild(false, cx);
         }
     }
@@ -1034,6 +1018,16 @@ impl ConversationView {
             .flatten()
             .is_none_or(|state| state.has_more);
         let mut context = self.row_context(cx);
+        let reactor_ids: Vec<String> = records
+            .iter()
+            .flat_map(teams_core::reactions)
+            .filter(|reaction| reaction.user_name.is_none())
+            .filter_map(|reaction| reaction.user_id)
+            .filter(|user_id| !context.names.contains_key(user_id))
+            .collect();
+        for (user_id, name) in resolve_names(self.app.read(cx), &reactor_ids) {
+            context.names.entry(user_id).or_insert(name);
+        }
         for record in &records {
             if let (Some(user_id), Some(name)) = (&record.sender_id, &record.sender_name) {
                 context

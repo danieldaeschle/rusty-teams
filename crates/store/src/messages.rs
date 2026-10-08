@@ -140,6 +140,33 @@ impl Store {
         Ok(found)
     }
 
+    pub fn display_names(&self, user_ids: &[String]) -> Result<HashMap<String, String>> {
+        if user_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "SELECT value, COALESCE(
+                 (SELECT display_name FROM chat_members
+                  WHERE user_id = value AND display_name <> '' LIMIT 1),
+                 (SELECT sender_name FROM messages
+                  WHERE sender_id = value AND sender_name <> ''
+                  ORDER BY created_at DESC LIMIT 1))
+             FROM json_each(?1)",
+        )?;
+        let ids = serde_json::to_string(user_ids).unwrap_or_else(|_| "[]".to_owned());
+        let rows = statement.query_map([ids], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let mut names = HashMap::new();
+        for row in rows {
+            if let (user_id, Some(name)) = row? {
+                names.insert(user_id, name);
+            }
+        }
+        Ok(names)
+    }
+
     pub fn thread_has_sender(
         &self,
         conversation_id: &str,

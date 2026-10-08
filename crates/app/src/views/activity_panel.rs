@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use chrono::{DateTime, Local, NaiveDate, Offset};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
@@ -12,6 +14,7 @@ use crate::activity::{ActivityCenter, Entry, Filter, Kind};
 use crate::app_state::{AppState, chat_title};
 use crate::data::is_one_on_one;
 use crate::format;
+use crate::people::resolve_names;
 use crate::theme;
 
 const PANEL_WIDTH: f32 = 420.;
@@ -38,6 +41,8 @@ pub struct ActivityPanel {
     filter: Filter,
     focus_handle: FocusHandle,
     scroll: ScrollHandle,
+    resolved_names: HashMap<String, String>,
+    looked_up: HashSet<String>,
     _observations: [Subscription; 2],
 }
 
@@ -70,6 +75,8 @@ impl ActivityPanel {
             filter,
             focus_handle,
             scroll: ScrollHandle::new(),
+            resolved_names: HashMap::new(),
+            looked_up: HashSet::new(),
             _observations: observations,
         }
     }
@@ -192,12 +199,13 @@ impl ActivityPanel {
     ) -> AnyElement {
         let activity = self.activity.clone();
         let id = entry.id;
+        let resolved_names = &self.resolved_names;
         let unread = !entry.read;
         let actor = entry.latest_actor();
         let avatar = person_avatar(
             directory,
             actor.and_then(|actor| actor.user_id.as_deref()),
-            actor.map_or("", |actor| actor.name.as_str()),
+            actor.map_or("", |actor| actor.display_name(resolved_names)),
             AVATAR_SIZE,
         );
         let group = SharedString::from(format!("activity-row-group-{id}"));
@@ -239,7 +247,7 @@ impl ActivityPanel {
                             } else {
                                 theme::text_soft()
                             })
-                            .child(headline(entry, sidebar)),
+                            .child(headline(entry, sidebar, resolved_names)),
                     )
                     .child(
                         div()
@@ -339,8 +347,8 @@ fn kind_marker(entry: &Entry) -> Div {
     }
 }
 
-fn headline(entry: &Entry, sidebar: &Sidebar) -> String {
-    let names = entry.names();
+fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, String>) -> String {
+    let names = entry.names(resolved_names);
     let verb = match entry.kind {
         Kind::Messages => names,
         Kind::Mention => format!("{names} mentioned you"),
@@ -394,12 +402,24 @@ impl Render for ActivityPanel {
         let app = self.app.clone();
         let activity = self.activity.clone();
         let state = app.read(cx);
-        let mut rows: Vec<AnyElement> = Vec::new();
-        for section in activity
+        let sections = activity
             .read(cx)
             .feed()
-            .sections(self.filter, today, offset)
-        {
+            .sections(self.filter, today, offset);
+        let unresolved: Vec<String> = sections
+            .iter()
+            .flat_map(|section| section.entries.iter())
+            .flat_map(|entry| entry.unresolved_user_ids())
+            .filter(|user_id| !self.looked_up.contains(*user_id))
+            .cloned()
+            .collect();
+        if !unresolved.is_empty() {
+            self.looked_up.extend(unresolved.iter().cloned());
+            self.resolved_names
+                .extend(resolve_names(state, &unresolved));
+        }
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for section in sections {
             rows.push(date_header(section.bucket.label()));
             for entry in section.entries {
                 rows.push(self.row(
@@ -470,6 +490,8 @@ impl Render for ActivityPanel {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use chrono::{TimeZone, Utc};
     use store::{ChatRecord, Sidebar};
 
@@ -512,14 +534,30 @@ mod tests {
             }],
             teams: Vec::new(),
         };
-        assert_eq!(headline(&entry(Kind::Messages, 1), &sidebar), "Anna");
         assert_eq!(
-            headline(&entry(Kind::Reaction, 1), &sidebar),
+            headline(&entry(Kind::Messages, 1), &sidebar, &HashMap::new()),
+            "Anna"
+        );
+        assert_eq!(
+            headline(&entry(Kind::Reaction, 1), &sidebar, &HashMap::new()),
             "Anna reacted"
         );
         assert_eq!(
-            headline(&entry(Kind::Mention, 1), &sidebar),
+            headline(&entry(Kind::Mention, 1), &sidebar, &HashMap::new()),
             "Anna mentioned you"
+        );
+    }
+
+    #[test]
+    fn headline_resolves_a_persisted_unknown_actor() {
+        let mut stale = entry(Kind::Reaction, 1);
+        stale.actors[0].name = "Unknown".into();
+        let sidebar = Sidebar::default();
+        let resolved = HashMap::from([("u1".to_owned(), "Anna".to_owned())]);
+        assert_eq!(headline(&stale, &sidebar, &resolved), "Anna reacted");
+        assert_eq!(
+            headline(&stale, &sidebar, &HashMap::new()),
+            "Unknown reacted"
         );
     }
 }

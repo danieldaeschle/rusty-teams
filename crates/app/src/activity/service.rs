@@ -9,6 +9,7 @@ use super::reactions::reacted_messages;
 use crate::app_state::{AppEvent, AppState};
 use crate::demo;
 use crate::notify::{IncomingTracker, channel_alerts};
+use crate::people::resolve_names;
 
 const WATERMARK_KEY: &str = "activity_watermark";
 const RECENT_WINDOW: usize = 20;
@@ -204,17 +205,12 @@ fn reacted_in(state: &AppState, conversation_id: &str, my_user_id: &str) -> Vec<
     let Ok(records) = state.store.messages(conversation_id, None, RECENT_WINDOW) else {
         return Vec::new();
     };
-    let members = state
-        .sidebar
-        .chats
+    let reactor_ids: Vec<String> = records
         .iter()
-        .find(|chat| chat.id == conversation_id)
-        .map(|chat| chat.members.as_slice())
-        .unwrap_or_default();
-    reacted_messages(&records, my_user_id, |user_id| {
-        members
-            .iter()
-            .find(|member| member.user_id.as_deref() == Some(user_id))
-            .map(|member| member.display_name.clone())
-    })
+        .flat_map(teams_core::reactions)
+        .filter(|reaction| reaction.user_name.is_none())
+        .filter_map(|reaction| reaction.user_id)
+        .collect();
+    let names = resolve_names(state, &reactor_ids);
+    reacted_messages(&records, my_user_id, |user_id| names.get(user_id).cloned())
 }

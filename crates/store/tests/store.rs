@@ -395,11 +395,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 9);
+    assert_eq!(reopened.schema_version().unwrap(), 10);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -431,7 +431,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 9);
+    assert_eq!(store.schema_version().unwrap(), 10);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -497,7 +497,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 9);
+    assert_eq!(store.schema_version().unwrap(), 10);
 }
 
 #[test]
@@ -728,6 +728,7 @@ fn migration_indexes_rows_that_predate_search() {
                  DROP TRIGGER channels_title_insert; DROP TRIGGER channels_title_update; DROP TRIGGER channels_title_delete;
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
                  DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity;
+                 DROP INDEX messages_by_sender; DROP INDEX chat_members_by_user;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
                  ALTER TABLE chats DROP COLUMN muted;
                  PRAGMA user_version = 3;",
@@ -950,4 +951,34 @@ fn activity_prune_drops_only_older_rows() {
         .map(|record| record.id)
         .collect();
     assert_eq!(ids, vec![3, 2]);
+}
+
+#[test]
+fn display_names_prefer_members_then_latest_sender_name() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5)))])
+        .unwrap();
+    let sent_by = |message_id: &str, minute: u32, sender: &str, name: Option<&str>| MessageRecord {
+        sender_id: Some(sender.to_owned()),
+        sender_name: name.map(str::to_owned),
+        ..message("channel", message_id, minute)
+    };
+    store
+        .upsert_messages(&[
+            sent_by("m1", 1, "user-ada", Some("Ada Sender")),
+            sent_by("m2", 2, "user-sam", Some("Sam Old")),
+            sent_by("m3", 3, "user-sam", Some("Sam New")),
+            sent_by("m4", 4, "user-sam", None),
+            sent_by("m5", 5, "user-blank", Some("")),
+        ])
+        .unwrap();
+    let wanted: Vec<String> = ["user-ada", "user-sam", "user-blank", "user-none"]
+        .map(str::to_owned)
+        .to_vec();
+    let names = store.display_names(&wanted).unwrap();
+    assert_eq!(names.len(), 2);
+    assert_eq!(names["user-ada"], "Ada Example");
+    assert_eq!(names["user-sam"], "Sam New");
+    assert!(store.display_names(&[]).unwrap().is_empty());
 }
