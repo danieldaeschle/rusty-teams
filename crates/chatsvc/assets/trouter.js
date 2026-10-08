@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = 2;
+  const VERSION = 3;
   const GLOBAL_NAME = '__chatsvcTrouter';
   const BINDING_NAME = '__chatsvcRealtime';
   const EPID_KEY = '__chatsvcEpid';
@@ -13,6 +13,7 @@
   const MAX_QUEUE = 200;
   const MAX_PRESENCE_ENTRIES = 1000;
   const MAX_PRESENCE_FIELD = 128;
+  const MAX_SENDER_NAME = 256;
 
   if (window.top !== window || !location.origin.startsWith('https://teams.')) return;
   const existing = window[GLOBAL_NAME];
@@ -69,6 +70,15 @@
     if (resourceType === 'ThreadUpdate') return 'thread_update';
     return 'other';
   };
+  const typingDetails = (resource) => {
+    const sender = /\/contacts\/8:orgid:([0-9a-f-]{1,64})\/?$/i.exec(String((resource && resource.from) || ''));
+    const name = resource && resource.imdisplayname;
+    return {
+      typing: /^Control\/ClearTyping/.test(String((resource && resource.messagetype) || '')) ? 'clear' : 'start',
+      senderId: sender ? sender[1] : null,
+      senderName: typeof name === 'string' ? name.slice(0, MAX_SENDER_NAME) : null,
+    };
+  };
   const forwardNotification = (path, body) => {
     const receivedAt = Date.now();
     if (path === 'unifiedPresenceService') {
@@ -88,6 +98,7 @@
       channel: 'event', resourceType, eventKind, receivedAt,
       conversationId: resource ? conversationOf(resource) || null : null,
       messageId: messageLike && resource.id ? String(resource.id) : null,
+      ...(eventKind === 'typing' ? typingDetails(resource) : {}),
     });
   };
 

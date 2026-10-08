@@ -118,6 +118,7 @@ pub trait Remote {
     async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()>;
     async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>>;
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
+    async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()>;
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
     async fn edit_message(
@@ -405,6 +406,12 @@ impl Remote for Graph {
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
         Ok(Conversations::new(self.session())
             .set_alerts(chat_id, !muted)
+            .await?)
+    }
+
+    async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .send_typing(conversation, active)
             .await?)
     }
 

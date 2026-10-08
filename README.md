@@ -16,7 +16,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 - Rich text composer: format bar over a selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code; Markdown converts as you type or paste
 - Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
 - Inline images, file cards, Adaptive Cards (layout, links, images, buttons: submit, execute, show card, toggle; input fields; task dialogs)
-- Read receipts, presence (last known status shown at start), unread jump
+- Read receipts, typing indicator (shown and sent), presence (last known status shown at start), unread jump
 - Select and copy message text, `Ctrl+A` in the composer
 - Local full-text search and a `Ctrl+K` switcher, served from the cache
 - Activity bell: feed of new messages, @mentions and reactions to your messages, kept for 14 days

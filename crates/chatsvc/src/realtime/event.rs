@@ -31,6 +31,15 @@ pub struct MessageEvent {
     pub received_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypingEvent {
+    pub conversation_id: String,
+    pub user_id: String,
+    pub display_name: String,
+    pub active: bool,
+    pub received_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusKind {
@@ -62,6 +71,7 @@ pub struct TrouterEndpoint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeEvent {
     Message(MessageEvent),
+    Typing(TypingEvent),
     Status(StatusEvent),
     Presence(Vec<PresenceUpdate>),
     Endpoint(TrouterEndpoint),
@@ -89,6 +99,12 @@ enum Wire {
         message_id: Option<String>,
         #[serde(rename = "receivedAt")]
         received_at: i64,
+        #[serde(default)]
+        typing: Option<String>,
+        #[serde(rename = "senderId", default)]
+        sender_id: Option<String>,
+        #[serde(rename = "senderName", default)]
+        sender_name: Option<String>,
     },
     Status {
         kind: StatusKind,
@@ -116,15 +132,30 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
             conversation_id,
             message_id,
             received_at,
+            typing,
+            sender_id,
+            sender_name,
         } => {
             let received_at = DateTime::from_timestamp_millis(received_at)
                 .ok_or_else(|| Error::Decode("receivedAt out of range".into()))?;
+            let conversation_id = conversation_id
+                .map(bounded)
+                .filter(|value| !value.is_empty());
+            if event_kind == EventKind::Typing
+                && let Some(event) = typing_event(
+                    conversation_id.clone(),
+                    typing.as_deref(),
+                    sender_id,
+                    sender_name,
+                    received_at,
+                )
+            {
+                return Ok(RealtimeEvent::Typing(event));
+            }
             Ok(RealtimeEvent::Message(MessageEvent {
                 resource_type: bounded(resource_type),
                 kind: event_kind,
-                conversation_id: conversation_id
-                    .map(bounded)
-                    .filter(|value| !value.is_empty()),
+                conversation_id,
                 message_id: message_id.map(bounded).filter(|value| !value.is_empty()),
                 received_at,
             }))
@@ -167,6 +198,31 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
             }))
         }
     }
+}
+
+fn typing_event(
+    conversation_id: Option<String>,
+    signal: Option<&str>,
+    sender_id: Option<String>,
+    sender_name: Option<String>,
+    received_at: DateTime<Utc>,
+) -> Option<TypingEvent> {
+    let active = match signal? {
+        "start" => true,
+        "clear" => false,
+        _ => return None,
+    };
+    let user_id = bounded(sender_id?);
+    if user_id.is_empty() {
+        return None;
+    }
+    Some(TypingEvent {
+        conversation_id: conversation_id?,
+        user_id,
+        display_name: bounded(sender_name.unwrap_or_default()),
+        active,
+        received_at,
+    })
 }
 
 fn without_port(authority: &str) -> &str {
@@ -221,6 +277,78 @@ mod tests {
             panic!("expected message")
         };
         assert_eq!(event.kind, EventKind::Other);
+    }
+
+    fn typing_payload(extra: &str) -> String {
+        format!(
+            r#"{{"channel":"event","resourceType":"NewMessage","eventKind":"typing",
+            "conversationId":"19:abc@thread.v2","messageId":null,"receivedAt":5{extra}}}"#
+        )
+    }
+
+    #[test]
+    fn decodes_typing_start_and_clear() {
+        for (signal, active) in [("start", true), ("clear", false)] {
+            let payload = typing_payload(&format!(
+                r#","typing":"{signal}","senderId":"abc-1","senderName":"Ada Lovelace""#
+            ));
+            assert_eq!(
+                decode_payload(&payload).unwrap(),
+                RealtimeEvent::Typing(TypingEvent {
+                    conversation_id: "19:abc@thread.v2".into(),
+                    user_id: "abc-1".into(),
+                    display_name: "Ada Lovelace".into(),
+                    active,
+                    received_at: DateTime::from_timestamp_millis(5).unwrap(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn typing_without_a_name_keeps_an_empty_name_and_cuts_long_ones() {
+        let RealtimeEvent::Typing(event) =
+            decode_payload(&typing_payload(r#","typing":"start","senderId":"a""#)).unwrap()
+        else {
+            panic!("expected typing")
+        };
+        assert_eq!(event.display_name, "");
+        let long = typing_payload(&format!(
+            r#","typing":"start","senderId":"a","senderName":"{}""#,
+            "n".repeat(1000)
+        ));
+        let RealtimeEvent::Typing(event) = decode_payload(&long).unwrap() else {
+            panic!("expected typing")
+        };
+        assert_eq!(event.display_name.chars().count(), MAX_FIELD_LENGTH);
+    }
+
+    #[test]
+    fn typing_without_a_valid_sender_or_signal_stays_a_plain_message() {
+        for extra in [
+            "",
+            r#","typing":"start""#,
+            r#","typing":"start","senderId":null"#,
+            r##","typing":"start","senderId":"""##,
+            r#","typing":"bogus","senderId":"a""#,
+            r#","senderId":"a""#,
+        ] {
+            let RealtimeEvent::Message(event) = decode_payload(&typing_payload(extra)).unwrap()
+            else {
+                panic!("expected message for {extra}")
+            };
+            assert_eq!(event.kind, EventKind::Typing);
+        }
+    }
+
+    #[test]
+    fn typing_without_a_conversation_stays_a_plain_message() {
+        let payload = r#"{"channel":"event","resourceType":"NewMessage","eventKind":"typing",
+            "conversationId":null,"receivedAt":5,"typing":"start","senderId":"a"}"#;
+        assert!(matches!(
+            decode_payload(payload).unwrap(),
+            RealtimeEvent::Message(_)
+        ));
     }
 
     #[test]

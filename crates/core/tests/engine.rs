@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use graph::{
     Channel, Chat, DriveFolder, HostedImage, Member, Message, MessageExtras, MessageTarget,
@@ -422,6 +423,14 @@ impl Remote for Handle {
 
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
         self.record(format!("mute {chat_id} {muted}"));
+        Ok(())
+    }
+
+    async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
+        self.record(format!(
+            "typing {} {active}",
+            conversation.conversation_id()
+        ));
         Ok(())
     }
 
@@ -1541,6 +1550,45 @@ async fn refresh_message_upserts_an_edit_older_than_the_newest_cached() {
     );
 
     assert!(engine.refresh_message(CHAT, "m0999").await.is_err());
+}
+
+#[tokio::test]
+async fn send_typing_addresses_chats_channels_and_threads() {
+    let chat_fake = Arc::new(Fake::default());
+    let chat_engine = chat_engine(&chat_fake, small_pages()).await;
+    chat_engine.send_typing(CHAT, None, true).await.unwrap();
+    chat_engine.send_typing(CHAT, None, false).await.unwrap();
+    assert!(
+        chat_engine
+            .send_typing("19:unknown@thread.v2", None, true)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        chat_fake.calls(),
+        [
+            format!("typing {CHAT} true"),
+            format!("typing {CHAT} false")
+        ]
+    );
+
+    let channel_fake = Arc::new(Fake::default());
+    let channel_engine = channel_engine(&channel_fake).await;
+    channel_engine
+        .send_typing(CHANNEL, None, true)
+        .await
+        .unwrap();
+    channel_engine
+        .send_typing(CHANNEL, Some("m0042"), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        channel_fake.calls(),
+        [
+            format!("typing {CHANNEL} true"),
+            format!("typing {CHANNEL};messageid=m0042 true"),
+        ]
+    );
 }
 
 #[tokio::test]

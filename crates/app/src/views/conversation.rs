@@ -18,11 +18,11 @@ use gpui_kit::*;
 use store::MessageRecord;
 use teams_core::{FileCard, ImageRef};
 
+use super::adaptive_card::ensure_cards_inputs;
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
-use super::adaptive_card::ensure_cards_inputs;
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
@@ -47,6 +47,7 @@ use crate::rows::{
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
+use crate::typing::typing_label;
 
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -64,6 +65,10 @@ const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
 const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
 const PROGRESS_BAR_WIDTH: f32 = 0.35;
+const TYPING_LINE_HEIGHT: f32 = 20.;
+const TYPING_DOT_SIZE: f32 = 5.;
+const TYPING_DOT_COUNT: usize = 3;
+const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
 
 actions!(teams, [ReplyToHovered]);
 
@@ -454,6 +459,7 @@ impl ConversationView {
                 cx.notify();
             }
             AppEvent::TaskDialog => {}
+            AppEvent::Typing => cx.notify(),
             AppEvent::Sidebar => {
                 self.mark_read(ReadTrigger::Incoming, cx);
                 self.refresh_reactor_names(cx);
@@ -490,10 +496,86 @@ impl ConversationView {
             }
             ComposerEvent::Submit(outgoing) => self.send((**outgoing).clone(), window, cx),
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
+            ComposerEvent::Typing(active) => self.send_typing(*active, cx),
         }
     }
 
+    fn typing_target(&self) -> Option<(String, Option<String>)> {
+        let current = self.current.as_ref().filter(|_| !self.draft_active)?;
+        let thread_root_id = match &current.mode {
+            ViewMode::Thread(root_id) => Some(root_id.clone()),
+            ViewMode::Flat | ViewMode::ThreadList => None,
+        };
+        Some((
+            current.selection.conversation_id().to_owned(),
+            thread_root_id,
+        ))
+    }
+
+    fn send_typing(&self, active: bool, cx: &App) {
+        let state = self.app.read(cx);
+        if state.mode.demo || state.mode.read_only {
+            return;
+        }
+        let (Some(engine), Some((conversation_id, thread_root_id))) =
+            (state.engine.clone(), self.typing_target())
+        else {
+            return;
+        };
+        drop(runtime::spawn(async move {
+            let sent = engine
+                .send_typing(&conversation_id, thread_root_id.as_deref(), active)
+                .await;
+            if let Err(error) = sent
+                && cfg!(debug_assertions)
+            {
+                eprintln!("typing indicator not sent: {error}");
+            }
+        }));
+    }
+
+    fn stop_typing(&mut self, cx: &mut Context<Self>) {
+        if self
+            .composer
+            .update(cx, |composer, _| composer.stop_typing())
+        {
+            self.send_typing(false, cx);
+        }
+    }
+
+    fn render_typing_line(&self, cx: &App) -> impl IntoElement {
+        let names = self
+            .current
+            .as_ref()
+            .filter(|_| !self.draft_active)
+            .map(|current| {
+                self.app
+                    .read(cx)
+                    .typing
+                    .names(current.selection.conversation_id())
+            })
+            .unwrap_or_default();
+        h_flex()
+            .h(px(TYPING_LINE_HEIGHT))
+            .flex_none()
+            .px(px(24.))
+            .gap(px(6.))
+            .items_center()
+            .text_size(px(12.))
+            .text_color(theme::text_muted())
+            .when(!names.is_empty(), |line| {
+                line.child(typing_dots()).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(typing_label(&names)),
+                )
+            })
+    }
+
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
+        self.stop_typing(cx);
         self.toolbar_hovered = None;
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
@@ -545,6 +627,7 @@ impl ConversationView {
 
     fn enter_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.draft_active {
+            self.stop_typing(cx);
             self.draft_active = true;
             self.current = None;
             self.clear_pending();
@@ -1517,6 +1600,7 @@ impl ConversationView {
     }
 
     fn open_thread(&mut self, root_id: String, cx: &mut Context<Self>) {
+        self.stop_typing(cx);
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::Thread(root_id);
         }
@@ -1525,6 +1609,7 @@ impl ConversationView {
     }
 
     fn back_to_threads(&mut self, cx: &mut Context<Self>) {
+        self.stop_typing(cx);
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::ThreadList;
         }
@@ -2852,6 +2937,7 @@ impl Render for ConversationView {
                         .child(body),
                 )
                 .children(self.render_draft_error(cx))
+                .child(self.render_typing_line(cx))
                 .child(self.composer.clone())
                 .child(self.render_drop_overlay(cx)),
         )
@@ -2870,6 +2956,27 @@ impl Render for ConversationView {
         })
         .into_any_element()
     }
+}
+
+fn typing_dots() -> impl IntoElement {
+    h_flex()
+        .gap(px(3.))
+        .flex_none()
+        .children((0..TYPING_DOT_COUNT).map(|index| {
+            let phase_offset = index as f32 / TYPING_DOT_COUNT as f32;
+            div()
+                .size(px(TYPING_DOT_SIZE))
+                .rounded_full()
+                .bg(theme::text_muted())
+                .with_animation(
+                    ElementId::NamedInteger("typing-dot".into(), index as u64),
+                    Animation::new(TYPING_PULSE_PERIOD).repeat(),
+                    move |dot, delta| {
+                        let wave = 1. - ((delta - phase_offset).rem_euclid(1.) * 2. - 1.).abs();
+                        dot.opacity(0.3 + 0.7 * wave)
+                    },
+                )
+        }))
 }
 
 fn progress_bar() -> impl IntoElement {

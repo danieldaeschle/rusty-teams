@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+use chatsvc::TypingEvent;
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
@@ -12,8 +13,10 @@ use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 use crate::notice::Notice;
 use crate::notify;
+use crate::typing::TypingState;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
+const RECENT_MESSAGES_FOR_TYPING: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -39,6 +42,7 @@ pub enum AppEvent {
     Directory,
     Cards(String),
     TaskDialog,
+    Typing,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,6 +75,8 @@ pub struct AppState {
     pub notice: Option<Notice>,
     pub notice_count: u64,
     pub keep_unread: Option<String>,
+    pub typing: TypingState,
+    typing_timer_running: bool,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -140,6 +146,8 @@ impl AppState {
             notice: None,
             notice_count: 0,
             keep_unread: None,
+            typing: TypingState::default(),
+            typing_timer_running: false,
         };
         state.collapsed = state.load_collapsed();
         state.followed_channels = notify::load_followed_channels(&state.store);
@@ -443,6 +451,85 @@ impl AppState {
         cx.notify();
     }
 
+    fn apply_typing(&mut self, event: TypingEvent, cx: &mut Context<Self>) {
+        let is_me = self
+            .directory
+            .me
+            .as_ref()
+            .is_some_and(|me| me.user_id == event.user_id);
+        if is_me {
+            return;
+        }
+        if event.active {
+            self.typing.start(
+                &event.conversation_id,
+                &event.user_id,
+                &event.display_name,
+                Instant::now(),
+                event.received_at,
+            );
+            self.schedule_typing_expiry(cx);
+        } else {
+            self.typing.clear(&event.conversation_id, &event.user_id);
+        }
+        cx.emit(AppEvent::Typing);
+        cx.notify();
+    }
+
+    fn clear_typists_who_sent(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if !self.typing.is_active(conversation_id) {
+            return;
+        }
+        let Ok(recent) = self
+            .store
+            .messages(conversation_id, None, RECENT_MESSAGES_FOR_TYPING)
+        else {
+            return;
+        };
+        let mut changed = false;
+        for message in recent {
+            if let Some(sender_id) = message.sender_id.as_deref() {
+                changed |= self
+                    .typing
+                    .message_from(conversation_id, sender_id, message.created_at);
+            }
+        }
+        if changed {
+            cx.emit(AppEvent::Typing);
+            cx.notify();
+        }
+    }
+
+    fn schedule_typing_expiry(&mut self, cx: &mut Context<Self>) {
+        if self.typing_timer_running {
+            return;
+        }
+        self.typing_timer_running = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let next = this.update(cx, |state, _| {
+                    let next = state.typing.next_expiry();
+                    state.typing_timer_running = next.is_some();
+                    next
+                });
+                let Ok(Some(next)) = next else { return };
+                cx.background_executor()
+                    .timer(next.saturating_duration_since(Instant::now()))
+                    .await;
+                let alive = this.update(cx, |state, cx| {
+                    if state.typing.expire(Instant::now()) {
+                        cx.emit(AppEvent::Typing);
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub fn reload_sidebar(&mut self, cx: &mut Context<Self>) {
         if let Ok(sidebar) = self.store.sidebar() {
             self.sidebar = sidebar;
@@ -472,6 +559,7 @@ impl AppState {
                 CoreEvent::MessagesChanged { conversation_id }
                 | CoreEvent::ReceiptsChanged { conversation_id },
             ) => {
+                self.clear_typists_who_sent(&conversation_id, cx);
                 cx.emit(AppEvent::Messages(conversation_id));
             }
             BackendEvent::Core(CoreEvent::ImagesChanged { keys }) => {
@@ -502,6 +590,7 @@ impl AppState {
                 }
                 cx.emit(AppEvent::Directory);
             }
+            BackendEvent::Typing(event) => self.apply_typing(event, cx),
             BackendEvent::Live(live) => {
                 self.live = live;
                 cx.emit(AppEvent::Status);
@@ -524,9 +613,17 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use store::{ChannelRecord, ChatRecord, SidebarTeam, TeamRecord};
+    use std::sync::Arc;
 
-    use super::{Selection, chat_title, selection_title};
+    use chatsvc::TypingEvent;
+    use chrono::{Duration, Utc};
+    use gpui_kit::{AppContext as _, TestAppContext};
+    use store::{ChannelRecord, ChatRecord, MessageRecord, SidebarTeam, Store, TeamRecord};
+    use teams_core::CoreEvent;
+
+    use super::{AppState, Mode, Selection, chat_title, selection_title};
+    use crate::backend::BackendEvent;
+    use crate::data::Person;
     use store::Sidebar;
 
     fn chat(id: &str, title: &str, unread: bool) -> ChatRecord {
@@ -579,5 +676,67 @@ mod tests {
             selection_title(&sidebar(), &Selection::Chat("c1".into())),
             "First"
         );
+    }
+
+    fn typing_event(user_id: &str, active: bool) -> BackendEvent {
+        BackendEvent::Typing(TypingEvent {
+            conversation_id: "c1".into(),
+            user_id: user_id.into(),
+            display_name: format!("Name {user_id}"),
+            active,
+            received_at: Utc::now(),
+        })
+    }
+
+    #[gpui_kit::test]
+    fn typing_events_track_other_users_and_ignore_me(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| {
+            cx.new(|_| {
+                let mut state = AppState::new(store.clone(), Mode::default());
+                state.directory.me = Some(Person {
+                    user_id: "me".into(),
+                    display_name: "Me".into(),
+                });
+                state
+            })
+        });
+        let names = |cx: &mut TestAppContext| cx.update(|cx| app.read(cx).typing.names("c1"));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(typing_event("me", true), cx);
+                state.apply(typing_event("ada", true), cx);
+            })
+        });
+        assert_eq!(names(cx), vec!["Name ada".to_owned()]);
+
+        let message = MessageRecord {
+            conversation_id: "c1".into(),
+            message_id: "m1".into(),
+            sender_id: Some("ada".into()),
+            created_at: Utc::now() + Duration::seconds(1),
+            ..Default::default()
+        };
+        store.upsert_messages(&[message]).unwrap();
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(
+                    BackendEvent::Core(CoreEvent::MessagesChanged {
+                        conversation_id: "c1".into(),
+                    }),
+                    cx,
+                )
+            })
+        });
+        assert!(names(cx).is_empty());
+
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(typing_event("ada", true), cx);
+                state.apply(typing_event("ada", false), cx);
+            })
+        });
+        assert!(names(cx).is_empty());
     }
 }

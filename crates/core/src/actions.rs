@@ -1,3 +1,4 @@
+use chatsvc::ConversationRef;
 use chrono::{Duration, Utc};
 use graph::{
     FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
@@ -397,6 +398,22 @@ impl<R: Remote> SyncEngine<R> {
         self.store.remove_chats(&[chat_id.to_owned()])?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
+    }
+
+    pub async fn send_typing(
+        &self,
+        conversation_id: &str,
+        thread_root_id: Option<&str>,
+        active: bool,
+    ) -> Result<()> {
+        let conversation = match (self.resolve(conversation_id)?, thread_root_id) {
+            (Conversation::Chat, _) => ConversationRef::chat(conversation_id),
+            (Conversation::Channel { .. }, None) => ConversationRef::channel_root(conversation_id),
+            (Conversation::Channel { .. }, Some(root_id)) => {
+                ConversationRef::channel_reply(conversation_id, root_id)
+            }
+        };
+        self.remote.send_typing(&conversation, active).await
     }
 
     pub async fn set_reaction(

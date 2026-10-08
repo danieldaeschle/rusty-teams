@@ -208,6 +208,19 @@ impl<T: MessageTransport> Messages<T> {
         }
     }
 
+    pub async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
+        let url = format!(
+            "{}/{}/messages",
+            self.base_url,
+            encode(&conversation.conversation_id())
+        );
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Post, &url, typing_body(active)))
+            .await?;
+        ensure_success(&answer)
+    }
+
     fn emotions_url(&self, conversation: &ConversationRef, message_id: &str) -> String {
         format!(
             "{}/properties?name=emotions",
@@ -244,6 +257,14 @@ fn edit_body(message_id: &str, html: &str) -> Value {
         "messagetype": "RichText/Html",
         "contenttype": "text",
         "properties": {"edittime": Utc::now().timestamp_millis().to_string()},
+    })
+}
+
+fn typing_body(active: bool) -> Value {
+    json!({
+        "content": "",
+        "messagetype": if active { "Control/Typing" } else { "Control/ClearTyping" },
+        "contenttype": "Application/Message",
     })
 }
 

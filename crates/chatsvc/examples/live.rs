@@ -45,6 +45,15 @@ fn describe(event: &RealtimeEvent) -> String {
                 .map(mask_conversation_id)
                 .unwrap_or_else(|| "-".into()),
         ),
+        RealtimeEvent::Typing(typing) => format!(
+            "{} typing {} conv={}",
+            typing
+                .received_at
+                .with_timezone(&Local)
+                .format("%H:%M:%S%.3f"),
+            if typing.active { "start" } else { "clear" },
+            mask_conversation_id(&typing.conversation_id),
+        ),
         RealtimeEvent::Status(status) => format!("# status {:?} {}", status.kind, status.detail),
         RealtimeEvent::Presence(updates) => format!("# presence updates={}", updates.len()),
         RealtimeEvent::Endpoint(endpoint) => format!(

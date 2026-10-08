@@ -195,6 +195,7 @@ impl AppState {
             chats: &self.sidebar.chats,
             directory: &self.directory,
             collapsed: &self.collapsed,
+            typing: &self.typing,
             now: Utc::now(),
             offset: Local::now().offset().fix(),
         };

@@ -8,6 +8,7 @@ use crate::data::{
     Directory, FolderKind, Person, face_members, is_one_on_one, others, unread_count,
 };
 use crate::format;
+use crate::typing::{TypingState, preview_label};
 
 pub const FAVORITES_FALLBACK_NAME: &str = "Pinned";
 pub const OTHERS_NAME: &str = "Other chats";
@@ -21,6 +22,7 @@ const GROUP_KIND: &str = "group";
 pub enum Preview {
     Empty,
     Deleted,
+    Typing(String),
     Text {
         prefix: Option<String>,
         text: String,
@@ -90,6 +92,7 @@ pub struct SectionInput<'a> {
     pub chats: &'a [ChatRecord],
     pub directory: &'a Directory,
     pub collapsed: &'a HashSet<String>,
+    pub typing: &'a TypingState,
     pub now: DateTime<Utc>,
     pub offset: FixedOffset,
 }
@@ -165,6 +168,12 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
                 .find_map(|(user_id, _)| user_id)
         })
         .flatten();
+    let typing_names = input.typing.names(&chat.id);
+    let preview = if typing_names.is_empty() {
+        preview_for(chat, me)
+    } else {
+        Preview::Typing(preview_label(&typing_names, is_one_on_one(chat)))
+    };
     ChatItem {
         id: chat.id.clone(),
         title: chat_title(chat),
@@ -178,7 +187,7 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
                 )
             })
             .unwrap_or_default(),
-        preview: preview_for(chat, me),
+        preview,
         unread,
         muted: chat.muted,
         is_group: chat.kind == GROUP_KIND,
@@ -343,10 +352,23 @@ mod tests {
         directory: &'a Directory,
         collapsed: &'a HashSet<String>,
     ) -> SectionInput<'a> {
+        typing_input(chats, directory, collapsed, &NO_TYPING)
+    }
+
+    static NO_TYPING: std::sync::LazyLock<TypingState> =
+        std::sync::LazyLock::new(TypingState::default);
+
+    fn typing_input<'a>(
+        chats: &'a [ChatRecord],
+        directory: &'a Directory,
+        collapsed: &'a HashSet<String>,
+        typing: &'a TypingState,
+    ) -> SectionInput<'a> {
         SectionInput {
             chats,
             directory,
             collapsed,
+            typing,
             now: Utc.with_ymd_and_hms(2026, 10, 7, 12, 0, 0).unwrap(),
             offset: FixedOffset::east_opt(0).unwrap(),
         }
@@ -548,6 +570,39 @@ mod tests {
         let group = chat_item(&chats[1], &context, None);
         assert_eq!(group.presence_user, None);
         assert!(matches!(group.avatar, AvatarSpec::Pair(..)));
+    }
+
+    #[test]
+    fn typing_replaces_the_preview_even_in_muted_chats() {
+        let mut direct = chat("d", "oneOnOne", false);
+        direct.last_message_preview = Some("Earlier".into());
+        direct.muted = true;
+        let group = chat("g", "group", false);
+        let chats = vec![direct, group];
+        let directory = Directory::default();
+        let collapsed = HashSet::new();
+        let now = std::time::Instant::now();
+        let mut typing = TypingState::default();
+        typing.start("d", "ada", "Ada Example", now, Utc::now());
+        typing.start("g", "ada", "Ada Example", now, Utc::now());
+        let context = typing_input(&chats, &directory, &collapsed, &typing);
+        assert_eq!(
+            chat_item(&chats[0], &context, None).preview,
+            Preview::Typing("typing...".into())
+        );
+        assert_eq!(
+            chat_item(&chats[1], &context, None).preview,
+            Preview::Typing("Ada is typing...".into())
+        );
+        typing.clear("d", "ada");
+        let context = typing_input(&chats, &directory, &collapsed, &typing);
+        assert_eq!(
+            chat_item(&chats[0], &context, None).preview,
+            Preview::Text {
+                prefix: None,
+                text: "Earlier".into()
+            }
+        );
     }
 
     #[test]

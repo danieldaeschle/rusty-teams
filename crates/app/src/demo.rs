@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use gpui_kit::Image;
@@ -650,6 +651,13 @@ pub fn seed_directory(state: &mut AppState) {
             state.directory.set_image(STAGING_IMAGE_KEY, &path);
         }
     }
+    state.typing.start(
+        "demo-chat-mara",
+        MARA_ID,
+        "Mara Lindqvist",
+        Instant::now(),
+        Utc::now(),
+    );
     state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
     state.last_sync = Some(Utc::now());
     state.apply_bot_titles();

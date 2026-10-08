@@ -251,3 +251,43 @@ async fn unset_emotions_fails_when_every_key_fails() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn send_typing_posts_a_control_message_without_retrying() {
+    let mock = Mock::new(&[201, 201, 500]);
+    let chat = ConversationRef::chat("19:a@thread.v2");
+    messages(&mock).send_typing(&chat, true).await.unwrap();
+    messages(&mock).send_typing(&chat, false).await.unwrap();
+    assert!(messages(&mock).send_typing(&chat, true).await.is_err());
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0].method, Method::Post);
+    assert_eq!(
+        requests[0].url,
+        format!("{BASE}/19%3Aa%40thread.v2/messages")
+    );
+    let start = requests[0].body.as_ref().unwrap();
+    assert_eq!(start["messagetype"], "Control/Typing");
+    assert_eq!(start["content"], "");
+    assert_eq!(start["contenttype"], "Application/Message");
+    assert_eq!(
+        requests[1].body.as_ref().unwrap()["messagetype"],
+        "Control/ClearTyping"
+    );
+}
+
+#[tokio::test]
+async fn send_typing_addresses_a_channel_reply_thread() {
+    let mock = Mock::new(&[201]);
+    messages(&mock)
+        .send_typing(
+            &ConversationRef::channel_reply("19:c@thread.tacv2", "99"),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.requests()[0].url,
+        format!("{BASE}/19%3Ac%40thread.tacv2%3Bmessageid%3D99/messages")
+    );
+}

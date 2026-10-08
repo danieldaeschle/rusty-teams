@@ -268,6 +268,7 @@ fn preview_text(preview: &Preview) -> Option<(String, bool)> {
     match preview {
         Preview::Empty => None,
         Preview::Deleted => Some((DELETED_PREVIEW.to_owned(), true)),
+        Preview::Typing(text) => Some((text.clone(), true)),
         Preview::Text {
             prefix: Some(prefix),
             text,
@@ -292,7 +293,7 @@ impl SidebarView {
             }
             if matches!(
                 event,
-                AppEvent::Sidebar | AppEvent::Selection | AppEvent::Directory
+                AppEvent::Sidebar | AppEvent::Selection | AppEvent::Directory | AppEvent::Typing
             ) {
                 cx.notify();
             }
@@ -560,7 +561,9 @@ impl SidebarView {
                 ))
             })
             .child(item.time_label.clone());
-        let preview_color = if item.muted {
+        let preview_color = if matches!(item.preview, Preview::Typing(_)) {
+            theme::accent_text()
+        } else if item.muted {
             theme::text_faint()
         } else if unread {
             theme::text_strong()
@@ -653,6 +656,7 @@ impl SidebarView {
                 chats: &state.sidebar.chats,
                 directory: &state.directory,
                 collapsed: &state.collapsed,
+                typing: &state.typing,
                 now,
                 offset,
             };

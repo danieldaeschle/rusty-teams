@@ -21,6 +21,6 @@ pub use pins::{
 pub use reactions::{emotion_key, emotion_keys};
 pub use realtime::{
     EventKind, MessageEvent, PresenceUpdate, Realtime, RealtimeConfig, RealtimeEvent, StatusEvent,
-    StatusKind, TrouterEndpoint,
+    StatusKind, TrouterEndpoint, TypingEvent,
 };
 pub use receipts::{MemberHorizon, Receipts};

@@ -31,6 +31,7 @@ mod runtime;
 mod sidebar_model;
 mod task_dialog;
 mod theme;
+mod typing;
 mod updater;
 mod views;
 

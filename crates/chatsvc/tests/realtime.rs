@@ -58,6 +58,7 @@ async fn serve(mut stream: TcpStream, port: u16, calls: Calls) {
                     json!({"channel": "status", "kind": "connected", "detail": ""}),
                     json!({"channel": "event", "resourceType": "NewMessage", "eventKind": "new_message", "conversationId": "19:abc@thread.v2", "messageId": "1", "receivedAt": 1791368146999i64}),
                     json!({"channel": "event", "resourceType": "NewMessage", "eventKind": "typing", "conversationId": null, "messageId": null, "receivedAt": 1791368147000i64}),
+                    json!({"channel": "event", "resourceType": "NewMessage", "eventKind": "typing", "conversationId": "19:abc@thread.v2", "messageId": null, "receivedAt": 1791368148000i64, "typing": "start", "senderId": "abc-1", "senderName": "Ada"}),
                 ];
                 for payload in payloads {
                     websocket.send(binding_event(payload)).await.unwrap();
@@ -108,6 +109,13 @@ async fn forwards_decoded_events_and_drops_foreign_or_garbage_payloads() {
     };
     assert_eq!(typing.kind, EventKind::Typing);
     assert_eq!(typing.conversation_id, None);
+    let RealtimeEvent::Typing(sender_typing) = realtime.recv().await.unwrap() else {
+        panic!("expected typing with sender")
+    };
+    assert!(sender_typing.active);
+    assert_eq!(sender_typing.user_id, "abc-1");
+    assert_eq!(sender_typing.display_name, "Ada");
+    assert_eq!(sender_typing.conversation_id, "19:abc@thread.v2");
 
     let methods: Vec<String> = calls
         .lock()

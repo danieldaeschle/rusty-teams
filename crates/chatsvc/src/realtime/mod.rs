@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 
 pub use event::{
     EventKind, MessageEvent, PresenceUpdate, RealtimeEvent, StatusEvent, StatusKind,
-    TrouterEndpoint, decode_payload,
+    TrouterEndpoint, TypingEvent, decode_payload,
 };
 pub use host::{DEFAULT_TROUTER_HOST, is_trouter_host};
 

@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -39,6 +39,7 @@ use crate::app_state::AppState;
 use crate::emoji;
 use crate::runtime;
 use crate::theme;
+use crate::typing::OutgoingTyping;
 
 const MIN_ROWS: usize = 1;
 const MAX_ROWS: usize = 8;
@@ -184,6 +185,7 @@ impl UploadHandle {
 pub enum ComposerEvent {
     Submit(Box<Outgoing>),
     EditLast,
+    Typing(bool),
 }
 
 struct MentionPopup {
@@ -244,6 +246,7 @@ pub struct Composer {
     conversion: Option<Conversion>,
     undone_value: Option<String>,
     previous_value: String,
+    typing: OutgoingTyping,
     draft: Draft,
     decorations: DraftDecorations,
     pending_style: Option<TypingStyle>,
@@ -421,6 +424,7 @@ impl Composer {
             conversion: None,
             undone_value: None,
             previous_value: String::new(),
+            typing: OutgoingTyping::default(),
             draft: Draft::default(),
             decorations,
             pending_style: None,
@@ -503,9 +507,23 @@ impl Composer {
         self.lookup = None;
     }
 
+    fn report_typing(&mut self, has_text: bool, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
+        if let Some(active) = self.typing.on_text(has_text, Instant::now()) {
+            cx.emit(ComposerEvent::Typing(active));
+        }
+    }
+
+    pub fn stop_typing(&mut self) -> bool {
+        self.typing.stop()
+    }
+
     fn on_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.input.read(cx);
         let (value, input_cursor) = (state.value().to_string(), state.cursor());
+        self.report_typing(!value.trim().is_empty(), cx);
         let previous = std::mem::replace(&mut self.previous_value, value.clone());
         if previous != value {
             let (start, old_end, new_end) = changed_span(&previous, &value);
@@ -1838,6 +1856,7 @@ impl Composer {
         let Some(outgoing) = self.outgoing(cx) else {
             return;
         };
+        self.typing.reset();
         self.load_draft(Draft::default(), InputContent::new(""), window, cx);
         self.mention_inputs.clear();
         if self.editing.is_none() {

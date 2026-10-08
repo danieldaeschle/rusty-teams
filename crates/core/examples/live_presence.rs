@@ -55,7 +55,7 @@ async fn main() {
                         println!("{at:6.1}s presence push {} entries, known {known}/{}", updates.len(), user_ids.len());
                     }
                     RealtimeEvent::Status(status) => println!("{at:6.1}s status {:?} {}", status.kind, status.detail),
-                    RealtimeEvent::Message(_) => {}
+                    RealtimeEvent::Message(_) | RealtimeEvent::Typing(_) => {}
                 }
             }
             _ = &mut deadline => break,

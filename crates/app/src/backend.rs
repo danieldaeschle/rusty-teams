@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chatsvc::{EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind};
+use chatsvc::{EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind, TypingEvent};
 use chrono::{DateTime, Utc};
 use graph::Graph;
 use session::{Session, SessionConfig, Transport};
@@ -46,6 +46,7 @@ pub enum BackendEvent {
     Engine(Arc<Engine>),
     Core(CoreEvent),
     Live(LiveState),
+    Typing(TypingEvent),
     Favorites(Vec<String>),
     Synced(DateTime<Utc>),
 }
@@ -203,6 +204,9 @@ async fn realtime_loop(
                                 nudge.clone(),
                                 message,
                             ));
+                        }
+                        RealtimeEvent::Typing(typing) => {
+                            let _ = events.send(BackendEvent::Typing(typing));
                         }
                         RealtimeEvent::Status(status) => {
                             let _ = events.send(BackendEvent::Live(live_state_for(status.kind)));
