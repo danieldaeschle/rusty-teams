@@ -3,7 +3,7 @@ use std::ops::Range;
 use teams_core::Span;
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
-pub const CODE_PADDING: &str = "\u{200a}";
+pub const CODE_PADDING: &str = "\u{2004}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
 
@@ -66,6 +66,10 @@ impl Inline {
             style,
             link: link.map(str::to_owned),
         });
+    }
+
+    pub fn plain_text(&self) -> String {
+        self.text.replace(CODE_PADDING, "")
     }
 
     pub fn with_trailing_room(&self, width_in_spaces: usize) -> Inline {
@@ -154,7 +158,7 @@ impl Block {
                 .join("\n")
         };
         match self {
-            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.text.clone()),
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.plain_text()),
             Block::Code { code, .. } => Some(format!("```\n{code}\n```")),
             Block::List {
                 ordered,
@@ -175,7 +179,7 @@ impl Block {
                 rows.iter()
                     .map(|row| {
                         row.iter()
-                            .map(|cell| cell.text.as_str())
+                            .map(Inline::plain_text)
                             .collect::<Vec<_>>()
                             .join(" | ")
                     })
@@ -189,10 +193,10 @@ impl Block {
 
     pub fn first_line(&self) -> Option<String> {
         match self {
-            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.text.clone()),
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.plain_text()),
             Block::Code { code, .. } => Some(code.clone()),
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
-            Block::Table { rows, .. } => Some(rows.first()?.first()?.text.clone()),
+            Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
             Block::Quote(children) => children.iter().find_map(Block::first_line),
             Block::Reply(_) | Block::Rule => None,
         }
@@ -355,25 +359,17 @@ fn pad_code(inline: Inline) -> Inline {
     let mut padded = Inline::default();
     for (index, segment) in inline.segments.iter().enumerate() {
         let text = &inline.text[segment.range.clone()];
-        let touches = |neighbour: Option<&Segment>, at_end: bool| {
-            neighbour.is_some_and(|neighbour| {
-                let neighbour_text = &inline.text[neighbour.range.clone()];
-                let edge = if at_end {
-                    neighbour_text.chars().next()
-                } else {
-                    neighbour_text.chars().next_back()
-                };
-                !neighbour.style.code && edge.is_some_and(|edge| !edge.is_whitespace())
-            })
+        let touches = |neighbour: Option<&Segment>| {
+            neighbour.is_some_and(|neighbour| !neighbour.style.code && !neighbour.range.is_empty())
         };
         let previous = index
             .checked_sub(1)
             .and_then(|previous| inline.segments.get(previous));
-        if segment.style.code && touches(previous, false) {
+        if segment.style.code && touches(previous) {
             padded.push(CODE_PADDING, StyleFlags::default(), None);
         }
         padded.push(text, segment.style, segment.link.as_deref());
-        if segment.style.code && touches(inline.segments.get(index + 1), true) {
+        if segment.style.code && touches(inline.segments.get(index + 1)) {
             padded.push(CODE_PADDING, StyleFlags::default(), None);
         }
     }
@@ -820,14 +816,15 @@ mod tests {
     }
 
     #[test]
-    fn inline_code_gets_room_only_next_to_text() {
+    fn inline_code_gets_room_next_to_text() {
         let inline = paragraph_inline(&[
             text("run "),
             Span::Code("x".into()),
             text(". "),
             Span::Code("y".into()),
         ]);
-        assert_eq!(inline.text, "run x\u{200a}. y");
+        assert_eq!(inline.text, "run \u{2004}x\u{2004}. \u{2004}y");
+        assert_eq!(inline.plain_text(), "run x. y");
     }
 
     #[test]
