@@ -499,7 +499,19 @@ impl Composer {
         if typed.is_some() && self.convert_markdown(cursor, window, cx) {
             return;
         }
+        if matches!(typed, Some(' ' | '\n')) && self.convert_link(cursor, window, cx) {
+            return;
+        }
         self.convert_emoji(typed, cursor, window, cx);
+    }
+
+    fn convert_link(&mut self, cursor: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let before = self.draft.clone();
+        if !self.draft.autolink_typed(cursor) {
+            return false;
+        }
+        self.finish_conversion(before, cursor, window, cx);
+        true
     }
 
     fn convert_markdown(
@@ -579,7 +591,11 @@ impl Composer {
         };
         let lines = Draft::from_markdown(&pasted).slice(0..usize::MAX);
         let cursor = self.draft.insert_lines(start..cursor, &lines);
+        let changed_text = self.draft.text().get(start..cursor) != Some(pasted.as_str());
         self.commit(Some(cursor), window, cx);
+        if !changed_text {
+            return true;
+        }
         self.paste_hint = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PASTE_HINT_DURATION).await;
             this.update(cx, |this, cx| {
@@ -952,6 +968,7 @@ impl Composer {
         }
         match self.draft.break_line(selection.start, shift) {
             Some(cursor) => {
+                self.draft.link_word_ending_at(selection.start);
                 self.commit(Some(cursor), window, cx);
                 true
             }
@@ -2457,6 +2474,118 @@ mod tests {
                 typist.draft().state(6..8, &MarkKind::Bold),
                 FormatState::Off
             );
+        }
+
+        #[gpui_kit::test]
+        fn typed_url_is_linked_and_backspace_takes_the_link_back(cx: &mut TestAppContext) {
+            use teams_core::{Mark, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("see https://a.b ");
+            assert_eq!(typist.value(), "see https://a.b ");
+            assert_eq!(
+                typist.draft().marks(),
+                [Mark {
+                    range: 4..15,
+                    kind: MarkKind::Link("https://a.b".into())
+                }]
+            );
+            typist.press("backspace");
+            assert_eq!(typist.value(), "see https://a.b ");
+            assert!(typist.draft().marks().is_empty());
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_z_takes_an_autolink_back(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("https://a.b ");
+            assert_eq!(typist.draft().marks().len(), 1);
+            typist.press("ctrl-z");
+            assert!(typist.draft().marks().is_empty());
+        }
+
+        #[gpui_kit::test]
+        fn pasted_url_is_linked_and_ctrl_z_restores_the_raw_text(cx: &mut TestAppContext) {
+            use teams_core::{Mark, MarkKind};
+
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                    "x https://a.b y".to_owned(),
+                ));
+            typist.press("ctrl-v");
+            assert_eq!(typist.value(), "x https://a.b y");
+            assert_eq!(
+                typist.draft().marks(),
+                [Mark {
+                    range: 2..13,
+                    kind: MarkKind::Link("https://a.b".into())
+                }]
+            );
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "x https://a.b y");
+            assert!(typist.draft().marks().is_empty());
+        }
+
+        #[gpui_kit::test]
+        fn the_link_editor_changes_and_removes_an_autolink(cx: &mut TestAppContext) {
+            use teams_core::{Mark, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("https://a.b x");
+            typist.press("home");
+            typist.press("shift-right ".repeat(11).trim_end());
+            typist.press("ctrl-k");
+            typist.type_text("other.de");
+            typist.press("enter");
+            assert_eq!(
+                typist.draft().marks(),
+                [Mark {
+                    range: 0..11,
+                    kind: MarkKind::Link("https://other.de".into())
+                }]
+            );
+            typist.press("ctrl-k backspace enter");
+            assert!(typist.draft().marks().is_empty());
+            assert_eq!(typist.value(), "https://a.b x");
+        }
+
+        #[gpui_kit::test]
+        fn enter_in_a_list_links_the_url_before_the_cursor(cx: &mut TestAppContext) {
+            use teams_core::{Mark, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("- https://a.b");
+            typist.press("enter");
+            assert_eq!(typist.value(), "• https://a.b\n• ");
+            assert_eq!(
+                typist.draft().marks(),
+                [Mark {
+                    range: 4..15,
+                    kind: MarkKind::Link("https://a.b".into())
+                }]
+            );
+        }
+
+        #[gpui_kit::test]
+        fn a_url_only_paste_links_without_the_paste_hint(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                    "x https://a.b y".to_owned(),
+                ));
+            typist.press("ctrl-v");
+            assert_eq!(typist.draft().marks().len(), 1);
+            let composer = typist.composer.clone();
+            assert!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).paste_hint.is_none())
+            );
+            typist.press("ctrl-z");
+            assert!(typist.draft().marks().is_empty());
         }
 
         #[gpui_kit::test]

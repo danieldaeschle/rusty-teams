@@ -11,6 +11,8 @@ pub const MAX_DEPTH: u8 = 2;
 const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
+const AUTOLINK_PREFIXES: [&str; 4] = ["http://", "https://", "www.", "mailto:"];
+const AUTOLINK_TRAILING: &str = ".,;:!?'\"";
 const FENCE: &str = "```";
 const MARKDOWN_INDENT: usize = 2;
 
@@ -533,7 +535,9 @@ impl Draft {
             kinds = typing.apply(kinds);
         }
         let marker = self.marker_range(self.line_at(start));
+        let auto_urls = self.auto_link_urls(&(start..old_end));
         self.splice(start..old_end, &replacement, &kinds);
+        self.retarget_links(&auto_urls, &(start..start + replacement.len()));
         self.journal = Journal::default();
         let mut cursor = cursor.min(self.text.len());
         let typed_into_marker = old_end == start
@@ -599,6 +603,51 @@ impl Draft {
                 remove: vec![kind],
             },
         ))
+    }
+
+    /// A URL typed just before the space or newline at `cursor - 1` becomes a link.
+    pub fn autolink_typed(&mut self, cursor: usize) -> bool {
+        self.journal = Journal::default();
+        let Some(end) = cursor.checked_sub(1) else {
+            return false;
+        };
+        if !matches!(self.text.get(end..cursor), Some(" " | "\n")) {
+            return false;
+        }
+        self.link_word_ending_at(end)
+    }
+
+    /// Links the URL in the word that ends at `end`. Leaves the journal alone.
+    pub fn link_word_ending_at(&mut self, end: usize) -> bool {
+        let index = self.line_at(end);
+        if matches!(self.lines[index], LineKind::Code(_)) {
+            return false;
+        }
+        let content_start = self.content_range(index).start;
+        let Some(before) = self.text.get(content_start..end) else {
+            return false;
+        };
+        let word_start = before.rfind(char::is_whitespace).map_or(0, |at| {
+            at + before[at..].chars().next().map_or(1, char::len_utf8)
+        });
+        let word = &before[word_start..];
+        let Some(found) = word.char_indices().find_map(|(offset, _)| {
+            let previous = word[..offset].chars().next_back();
+            let length = bare_url_at(&word[offset..], previous)?;
+            Some(offset..offset + length)
+        }) else {
+            return false;
+        };
+        let range =
+            content_start + word_start + found.start..content_start + word_start + found.end;
+        let taken = self.marks.iter().any(|mark| {
+            matches!(mark.kind, MarkKind::Code | MarkKind::Link(_)) && overlaps(&mark.range, &range)
+        });
+        let Some(url) = link_url(&self.text[range.clone()]).filter(|_| !taken) else {
+            return false;
+        };
+        self.add_mark(range, MarkKind::Link(url));
+        true
     }
 
     /// Enter (or Shift+Enter) inside a list, quote or code block, or after a ``` fence.
@@ -942,6 +991,46 @@ impl Draft {
         kinds
     }
 
+    fn auto_link_urls(&self, range: &Range<usize>) -> Vec<String> {
+        self.marks
+            .iter()
+            .filter_map(|mark| match &mark.kind {
+                MarkKind::Link(url)
+                    if mark.range.start <= range.end
+                        && range.start <= mark.range.end
+                        && autolink_prefix(&self.text[mark.range.clone()]).is_some()
+                        && link_url(&self.text[mark.range.clone()]).as_ref() == Some(url) =>
+                {
+                    Some(url.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn retarget_links(&mut self, auto_urls: &[String], edited: &Range<usize>) {
+        if auto_urls.is_empty() {
+            return;
+        }
+        let mut kept = Vec::with_capacity(self.marks.len());
+        for mark in std::mem::take(&mut self.marks) {
+            let touched = mark.range.start <= edited.end && edited.start <= mark.range.end;
+            match &mark.kind {
+                MarkKind::Link(url) if touched && auto_urls.contains(url) => {
+                    if let Some(new_url) = link_url(&self.text[mark.range.clone()]) {
+                        kept.push(Mark {
+                            range: mark.range,
+                            kind: MarkKind::Link(new_url),
+                        });
+                    }
+                }
+                _ => kept.push(mark),
+            }
+        }
+        self.marks = kept;
+        self.normalize_marks();
+    }
+
     fn content_parts(&self, range: Range<usize>) -> Vec<Range<usize>> {
         (self.line_at(range.start)..=self.line_at(range.end))
             .map(|index| {
@@ -1283,6 +1372,39 @@ pub fn link_url(text: &str) -> Option<String> {
     scheme.is_none().then(|| format!("https://{text}"))
 }
 
+fn autolink_prefix(text: &str) -> Option<&'static str> {
+    AUTOLINK_PREFIXES.into_iter().find(|prefix| {
+        text.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    })
+}
+
+/// Length of the URL at the start of `rest`, when `previous` does not continue a word.
+fn bare_url_at(rest: &str, previous: Option<char>) -> Option<usize> {
+    if previous.is_some_and(char::is_alphanumeric) {
+        return None;
+    }
+    bare_url_len(rest)
+}
+
+/// Length of the URL a word starts with, without trailing punctuation.
+fn bare_url_len(rest: &str) -> Option<usize> {
+    let word = &rest[..rest.find(char::is_whitespace).unwrap_or(rest.len())];
+    let prefix = autolink_prefix(word)?;
+    let mut end = word.len();
+    while let Some(last) = word[..end].chars().next_back() {
+        let trailing = match last {
+            ')' => word[..end].matches(')').count() > word[..end].matches('(').count(),
+            other => AUTOLINK_TRAILING.contains(other),
+        };
+        if !trailing {
+            break;
+        }
+        end -= last.len_utf8();
+    }
+    (end > prefix.len()).then_some(end)
+}
+
 /// The markers of a format closed by the last typed character, relative to `before`.
 fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> {
     let end = before.len();
@@ -1528,20 +1650,34 @@ fn markdown_lines(text: &str) -> Vec<DraftLine> {
 fn parse_inline(source: &str) -> (String, Vec<Mark>) {
     let mut text = String::with_capacity(source.len());
     let mut marks = Vec::new();
-    parse_into(source, &mut text, &mut marks);
+    parse_into(source, &mut text, &mut marks, true);
     (text, marks)
 }
 
-fn parse_into(source: &str, text: &mut String, marks: &mut Vec<Mark>) {
+fn parse_into(source: &str, text: &mut String, marks: &mut Vec<Mark>, autolink: bool) {
     let mut rest = source;
     let mut previous: Option<char> = None;
     while let Some(character) = rest.chars().next() {
+        if autolink
+            && let Some(length) = bare_url_at(rest, previous)
+            && let Some(url) = link_url(&rest[..length])
+        {
+            let start = text.len();
+            text.push_str(&rest[..length]);
+            marks.push(Mark {
+                range: start..text.len(),
+                kind: MarkKind::Link(url),
+            });
+            previous = rest[..length].chars().next_back();
+            rest = &rest[length..];
+            continue;
+        }
         if let Some((inner, consumed, kind)) = inline_at(rest, previous) {
             let start = text.len();
-            if kind == MarkKind::Code {
-                text.push_str(inner);
-            } else {
-                parse_into(inner, text, marks);
+            match kind {
+                MarkKind::Code => text.push_str(inner),
+                MarkKind::Link(_) => parse_into(inner, text, marks, false),
+                _ => parse_into(inner, text, marks, autolink),
             }
             marks.push(Mark {
                 range: start..text.len(),
@@ -1802,6 +1938,182 @@ mod tests {
             draft.marks(),
             [mark(4..8, MarkKind::Link("https://example.com".into()))]
         );
+    }
+
+    fn typed_autolinked(draft: &mut Draft, text: &str) {
+        for character in text.chars() {
+            let mut next = draft.text().to_owned();
+            next.push(character);
+            let cursor = next.len();
+            draft.apply_edit(&next, cursor, None);
+            draft.autolink_typed(cursor);
+            draft.take_edits();
+        }
+    }
+
+    fn autolinked(text: &str) -> Draft {
+        let mut draft = Draft::default();
+        typed_autolinked(&mut draft, text);
+        draft
+    }
+
+    fn edited(draft: &mut Draft, range: Range<usize>, replacement: &str) {
+        let mut next = draft.text().to_owned();
+        next.replace_range(range.clone(), replacement);
+        draft.apply_edit(&next, range.start + replacement.len(), None);
+    }
+
+    #[test]
+    fn typed_url_followed_by_a_space_becomes_a_link() {
+        let draft = autolinked("https://example.com ");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..19, MarkKind::Link("https://example.com".into()))]
+        );
+    }
+
+    #[test]
+    fn typed_url_followed_by_a_newline_becomes_a_link() {
+        let draft = autolinked("a mailto:x@y.de\n");
+        assert_eq!(
+            draft.marks(),
+            [mark(2..15, MarkKind::Link("mailto:x@y.de".into()))]
+        );
+    }
+
+    #[test]
+    fn autolink_leaves_trailing_punctuation_out_and_adds_the_scheme() {
+        let draft = autolinked("see www.x.de. ");
+        assert_eq!(
+            draft.marks(),
+            [mark(4..12, MarkKind::Link("https://www.x.de".into()))]
+        );
+        let wiki = autolinked("https://a.b/x_(y) ");
+        assert_eq!(
+            wiki.marks(),
+            [mark(0..17, MarkKind::Link("https://a.b/x_(y)".into()))]
+        );
+        let bracketed = autolinked("https://a.b) ");
+        assert_eq!(
+            bracketed.marks(),
+            [mark(0..11, MarkKind::Link("https://a.b".into()))]
+        );
+    }
+
+    #[test]
+    fn autolink_starts_after_any_non_alphanumeric_character() {
+        let bracketed = autolinked("(https://a.b) ");
+        assert_eq!(
+            bracketed.marks(),
+            [mark(1..12, MarkKind::Link("https://a.b".into()))]
+        );
+        let quoted = autolinked("\"www.x.de\" ");
+        assert_eq!(
+            quoted.marks(),
+            [mark(1..9, MarkKind::Link("https://www.x.de".into()))]
+        );
+        let colon = autolinked("see:https://a.b ");
+        assert_eq!(
+            colon.marks(),
+            [mark(4..15, MarkKind::Link("https://a.b".into()))]
+        );
+        assert!(autolinked("xhttps://a.b ").marks().is_empty());
+    }
+
+    #[test]
+    fn a_link_labelled_with_a_bare_domain_keeps_its_url_when_relabelled() {
+        let mut draft = Draft::plain("example.com");
+        draft.set_link(0..11, "example.com");
+        edited(&mut draft, 0..11, "our site");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..8, MarkKind::Link("https://example.com".into()))]
+        );
+    }
+
+    #[test]
+    fn autolink_skips_plain_words_code_and_existing_links() {
+        assert!(autolinked("example.com ").marks().is_empty());
+        assert!(autolinked("http:// ").marks().is_empty());
+        let mut block = Draft::from_markdown("```\nhttps://a.b");
+        typed_autolinked(&mut block, " ");
+        assert!(block.marks().is_empty());
+        let mut code = Draft::plain("https://a.b");
+        code.toggle(0..11, MarkKind::Code);
+        typed_autolinked(&mut code, " ");
+        assert_eq!(code.marks(), [mark(0..11, MarkKind::Code)]);
+        let mut linked = Draft::plain("https://a.b");
+        linked.set_link(0..11, "https://other.de");
+        typed_autolinked(&mut linked, " ");
+        assert_eq!(
+            linked.marks(),
+            [mark(0..11, MarkKind::Link("https://other.de".into()))]
+        );
+    }
+
+    #[test]
+    fn markdown_import_links_bare_urls_outside_code_and_labels() {
+        let draft = Draft::from_markdown("go to https://a.b now");
+        assert_eq!(
+            draft.marks(),
+            [mark(6..17, MarkKind::Link("https://a.b".into()))]
+        );
+        assert_eq!(
+            Draft::from_markdown("run `https://a.b` now").marks(),
+            [mark(4..15, MarkKind::Code)]
+        );
+        let labelled = Draft::from_markdown("[https://a.b](https://c.d)");
+        assert_eq!(
+            labelled.marks(),
+            [mark(0..11, MarkKind::Link("https://c.d".into()))]
+        );
+        assert!(has_markdown("x https://a.b y"));
+    }
+
+    #[test]
+    fn editing_an_auto_link_moves_its_url() {
+        let mut draft = autolinked("https://a.bc ");
+        edited(&mut draft, 11..12, "d");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..12, MarkKind::Link("https://a.bd".into()))]
+        );
+        edited(&mut draft, 11..11, "e");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..13, MarkKind::Link("https://a.bed".into()))]
+        );
+    }
+
+    #[test]
+    fn editing_a_labelled_link_keeps_its_url() {
+        let mut draft = typed_draft("[docs](https://example.com)");
+        edited(&mut draft, 2..2, "x");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..5, MarkKind::Link("https://example.com".into()))]
+        );
+    }
+
+    #[test]
+    fn breaking_an_auto_link_into_non_url_text_removes_it() {
+        let mut draft = autolinked("https://a.bc ");
+        edited(&mut draft, 9..9, " ");
+        assert!(draft.marks().is_empty());
+    }
+
+    #[test]
+    fn an_auto_link_can_be_relabelled_or_unlinked() {
+        let mut draft = autolinked("https://a.bc ");
+        assert_eq!(draft.link_in(0..4), Some("https://a.bc".into()));
+        draft.set_link(0..12, "https://other.de");
+        assert_eq!(
+            draft.marks(),
+            [mark(0..12, MarkKind::Link("https://other.de".into()))]
+        );
+        edited(&mut draft, 12..12, "x");
+        draft.set_link(0..12, "");
+        assert!(draft.marks().is_empty());
     }
 
     #[test]
