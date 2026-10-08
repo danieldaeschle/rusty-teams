@@ -23,7 +23,7 @@ fn serialize(settings: &Settings) -> String {
         ("mentions_only", settings.mentions_only.to_string()),
         ("preview", settings.preview.to_string()),
         ("corner", settings.corner.key().to_owned()),
-        ("flash", settings.flash.to_string()),
+        ("taskbar_flash", settings.flash.to_string()),
         ("close_to_tray", settings.close_to_tray.to_string()),
         ("do_not_disturb", settings.do_not_disturb.to_string()),
     ]
@@ -45,7 +45,7 @@ fn parse(text: &str) -> Settings {
             "mentions_only" => settings.mentions_only = flag,
             "preview" => settings.preview = flag,
             "corner" => settings.corner = Corner::from_key(value).unwrap_or_default(),
-            "flash" => settings.flash = flag,
+            "taskbar_flash" => settings.flash = flag,
             "close_to_tray" => settings.close_to_tray = flag,
             "do_not_disturb" => settings.do_not_disturb = flag,
             _ => {}
@@ -70,6 +70,12 @@ mod tests {
             do_not_disturb: true,
         };
         assert_eq!(parse(&serialize(&settings)), settings);
+    }
+
+    #[test]
+    fn old_flash_key_is_ignored() {
+        assert!(parse("flash=false").flash);
+        assert!(!parse("taskbar_flash=false").flash);
     }
 
     #[test]

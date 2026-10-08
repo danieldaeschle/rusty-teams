@@ -243,7 +243,7 @@ impl NotificationCenter {
         self.present(&incoming, decision, cx);
         if should_flash(
             &self.settings,
-            incoming.mentions_me && decision.toast,
+            decision.toast,
             self.main_window_active(cx),
         ) && let Some(native) = self.main_native
         {
@@ -519,7 +519,7 @@ impl NotificationCenter {
         let (count, still_unread) = unread_summary(&self.app.read(cx).sidebar);
         self.unread_mentions
             .retain(|conversation_id| still_unread.contains(conversation_id));
-        let badge = badge_for(count, !self.unread_mentions.is_empty());
+        let badge = badge_for(count);
         if badge == self.shown_badge {
             return;
         }

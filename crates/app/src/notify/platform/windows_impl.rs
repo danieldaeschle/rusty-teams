@@ -21,7 +21,7 @@ use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, TaskbarList,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, DestroyIcon, FLASHW_ALL, FLASHWINFO, FlashWindowEx, GWL_EXSTYLE, GWL_STYLE,
+    CreateIconIndirect, DestroyIcon, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx, GWL_EXSTYLE, GWL_STYLE,
     GetWindowLongPtrW, HICON, HWND_TOPMOST, ICONINFO, IsIconic, SW_HIDE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE,
     SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, WS_CAPTION, WS_POPUP, WS_THICKFRAME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
@@ -37,7 +37,6 @@ const SOUND_BYTES: &[u8] = include_bytes!("../../../assets/sounds/notification.m
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/teams-fast-256.png");
 const TRAY_ICON_SIZE: u32 = 32;
 const TRAY_DOT_RADIUS: f32 = 6.;
-const FLASH_COUNT: u32 = 3;
 const BASE_DPI: f32 = 96.;
 
 fn hwnd(handle: NativeHandle) -> HWND {
@@ -176,8 +175,8 @@ pub fn flash(handle: NativeHandle) {
     let info = FLASHWINFO {
         cbSize: size_of::<FLASHWINFO>() as u32,
         hwnd: hwnd(handle),
-        dwFlags: FLASHW_ALL,
-        uCount: FLASH_COUNT,
+        dwFlags: FLASHW_TRAY | FLASHW_TIMERNOFG,
+        uCount: 0,
         dwTimeout: 0,
     };
     unsafe {

@@ -128,7 +128,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | Desktop toast, click opens the chat at the message | Done |  |
 | Reply and Mark as read in the toast | Done |  |
-| Sound, taskbar badge, flash on mention | Done |  |
+| Sound, red taskbar badge, taskbar flash on new messages | Done |  |
 | Quiet during Do not disturb, Focus Assist, calls | Done |  |
 | Mentions-only mode, preview off | Done |  |
 | Stack of 3, queue, Hide all, fade-out | Done |  |

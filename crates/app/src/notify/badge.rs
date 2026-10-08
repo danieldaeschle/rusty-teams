@@ -3,17 +3,15 @@ const GLYPH_WIDTH: usize = 5;
 const GLYPH_HEIGHT: usize = 7;
 const GLYPH_SCALE: usize = 2;
 const GLYPH_GAP: usize = 1;
-const NEUTRAL: [u8; 3] = [0xf4, 0xf4, 0xf5];
-const MENTION: [u8; 3] = [0xef, 0x44, 0x44];
+const RED: [u8; 3] = [0xef, 0x44, 0x44];
 const INK: [u8; 3] = [0x0a, 0x0a, 0x0a];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Badge {
     pub text: String,
-    pub mention: bool,
 }
 
-pub fn badge_for(unread_chats: usize, unread_mention: bool) -> Option<Badge> {
+pub fn badge_for(unread_chats: usize) -> Option<Badge> {
     if unread_chats == 0 {
         return None;
     }
@@ -22,10 +20,7 @@ pub fn badge_for(unread_chats: usize, unread_mention: bool) -> Option<Badge> {
     } else {
         unread_chats.to_string()
     };
-    Some(Badge {
-        text,
-        mention: unread_mention,
-    })
+    Some(Badge { text })
 }
 
 const GLYPHS: [[u8; GLYPH_HEIGHT]; 11] = [
@@ -60,7 +55,6 @@ pub fn text_width(text: &str) -> usize {
 
 /// BGRA, premultiplied, top-down, `BADGE_SIZE` square.
 pub fn render_badge(badge: &Badge) -> Vec<u8> {
-    let fill = if badge.mention { MENTION } else { NEUTRAL };
     let mut pixels = vec![0u8; BADGE_SIZE * BADGE_SIZE * 4];
     let center = (BADGE_SIZE as f32 - 1.) / 2.;
     let radius = BADGE_SIZE as f32 / 2.;
@@ -68,7 +62,7 @@ pub fn render_badge(badge: &Badge) -> Vec<u8> {
         for column in 0..BADGE_SIZE {
             let distance = ((column as f32 - center).powi(2) + (row as f32 - center).powi(2)).sqrt();
             if distance <= radius - 0.5 {
-                put(&mut pixels, column, row, fill);
+                put(&mut pixels, column, row, RED);
             }
         }
     }
@@ -115,26 +109,20 @@ mod tests {
 
     #[test]
     fn no_unread_means_no_badge() {
-        assert_eq!(badge_for(0, true), None);
+        assert_eq!(badge_for(0), None);
     }
 
     #[test]
     fn counts_chats_and_caps_at_nine_plus() {
-        assert_eq!(badge_for(3, false).unwrap().text, "3");
-        assert_eq!(badge_for(9, false).unwrap().text, "9");
-        assert_eq!(badge_for(10, false).unwrap().text, "9+");
-        assert_eq!(badge_for(250, false).unwrap().text, "9+");
-    }
-
-    #[test]
-    fn mention_turns_badge_red() {
-        assert!(badge_for(1, true).unwrap().mention);
-        assert!(!badge_for(1, false).unwrap().mention);
+        assert_eq!(badge_for(3).unwrap().text, "3");
+        assert_eq!(badge_for(9).unwrap().text, "9");
+        assert_eq!(badge_for(10).unwrap().text, "9+");
+        assert_eq!(badge_for(250).unwrap().text, "9+");
     }
 
     #[test]
     fn rendered_badge_has_fill_ink_and_transparent_corner() {
-        let badge = badge_for(3, true).unwrap();
+        let badge = badge_for(3).unwrap();
         let pixels = render_badge(&badge);
         assert_eq!(pixels.len(), BADGE_SIZE * BADGE_SIZE * 4);
         assert_eq!(pixels[3], 0);

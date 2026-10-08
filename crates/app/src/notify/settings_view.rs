@@ -31,7 +31,7 @@ const ROWS: [Row; 5] = [
     },
     Row {
         title: "Flash taskbar",
-        detail: "On mention, when the window is not active",
+        detail: "On new messages, until you open the window",
         field: |settings| &mut settings.flash,
     },
     Row {

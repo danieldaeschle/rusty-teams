@@ -169,8 +169,8 @@ impl SoundThrottle {
     }
 }
 
-pub fn should_flash(settings: &Settings, mentions_me: bool, window_active: bool) -> bool {
-    settings.flash && mentions_me && !window_active
+pub fn should_flash(settings: &Settings, toast_shown: bool, window_active: bool) -> bool {
+    settings.flash && toast_shown && !window_active
 }
 
 #[cfg(test)]
@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn flash_needs_mention_inactive_window_and_setting() {
+    fn flash_needs_toast_inactive_window_and_setting() {
         let settings = Settings::default();
         assert!(should_flash(&settings, true, false));
         assert!(!should_flash(&settings, true, true));
