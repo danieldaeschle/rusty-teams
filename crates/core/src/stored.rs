@@ -4,10 +4,12 @@ use serde::{Deserialize, Serialize};
 use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
+use crate::markdown::escape_html;
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
 
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
+const REPLY_ITEMTYPE: &str = "schema.skype.com/Reply";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentInfo {
@@ -432,9 +434,40 @@ pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
 }
 
 fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
-    let mut spans = html_to_spans(&record.body_html);
+    let mut spans = html_to_spans(&with_inline_quotes(record));
     merge_split_mentions(&mut spans, infos);
     spans
+}
+
+fn with_inline_quotes(record: &MessageRecord) -> String {
+    let mut html = record.body_html.clone();
+    for attachment in attachments(record) {
+        let Some(quote) = attachment.quote else {
+            continue;
+        };
+        let id = attachment.id.unwrap_or_else(|| quote.message_id.clone());
+        let tag = format!("<attachment id=\"{id}\"></attachment>");
+        let block = quote_html(&quote);
+        if html.contains(&tag) {
+            html = html.replacen(&tag, &block, 1);
+        } else {
+            html.insert_str(0, &block);
+        }
+    }
+    html
+}
+
+fn quote_html(quote: &QuoteInfo) -> String {
+    let sender = quote
+        .sender_name
+        .as_deref()
+        .map(|name| format!("<strong itemprop=\"mri\">{}</strong>", escape_html(name)))
+        .unwrap_or_default();
+    format!(
+        "<blockquote itemscope=\"\" itemtype=\"http://{REPLY_ITEMTYPE}\" itemid=\"{}\">{sender}<p itemprop=\"preview\">{}</p></blockquote>",
+        escape_html(&quote.message_id),
+        escape_html(&quote.preview),
+    )
 }
 
 pub fn user_mention_inputs(record: &MessageRecord) -> Vec<MentionInput> {
@@ -739,6 +772,30 @@ mod tests {
         );
         let stored = record("", &serde_json::to_string(&[info]).unwrap());
         assert_eq!(quotes(&stored).len(), 1);
+    }
+
+    #[test]
+    fn a_message_reference_renders_as_a_reply_quote_where_its_tag_sits() {
+        let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"id":"Q1","quote":{"message_id":"Q1","preview":"a < b","sender_name":"Ada"}}]"#;
+        let stored = record("<p></p><attachment id=\"Q1\"></attachment>\ntest<p></p>", json);
+        let spans = message_spans(&stored);
+        let Some(Span::Quote(children)) = spans.first() else {
+            panic!("expected a reply quote first, got {spans:?}");
+        };
+        let mut quoted = String::new();
+        push_plain(&mut quoted, children);
+        assert!(quoted.contains("Ada"));
+        assert!(quoted.contains("a < b"));
+        let mut own = String::new();
+        push_plain(&mut own, &spans[1..]);
+        assert_eq!(own.trim(), "test");
+    }
+
+    #[test]
+    fn a_message_reference_without_its_tag_still_shows_the_quote() {
+        let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"quote":{"message_id":"Q1","preview":"hi","sender_name":null}}]"#;
+        let spans = message_spans(&record("<p>answer</p>", json));
+        assert!(matches!(spans.first(), Some(Span::Quote(_))));
     }
 
     fn with_mentions(body_html: &str, mentions_json: &str) -> MessageRecord {
