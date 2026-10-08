@@ -51,6 +51,8 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .py(px(3.))
             .border_l(px(3.))
             .border_color(theme::accent())
+            .rounded_r(px(4.))
+            .bg(theme::quote_fill())
             .text_size(px(12.5))
             .text_color(theme::text_muted())
             .child(render_block_list(children, &id, own, depth, cx))
@@ -61,6 +63,8 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .py(px(2.))
             .border_l(px(3.))
             .border_color(theme::border_strong())
+            .rounded_r(px(4.))
+            .bg(theme::quote_fill())
             .text_color(theme::text_soft())
             .child(render_block_list(children, &id, own, depth, cx))
             .into_any_element(),

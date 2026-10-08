@@ -42,6 +42,7 @@ const CODE_SURFACE: u32 = 0x0000003d;
 const CODE_HEADER_BORDER: u32 = 0xffffff0f;
 const INLINE_CODE_FILL: u32 = 0xffffff14;
 const INLINE_CODE_FILL_OWN: u32 = 0x0000003d;
+const QUOTE_FILL: u32 = 0x00000052;
 const INLINE_CODE_BORDER: u32 = 0xffffff1a;
 const TABLE_HEADER: u32 = 0xffffff0d;
 const RULE_OWN: u32 = 0x6a3a25;
@@ -258,6 +259,10 @@ pub fn inline_code_fill(own: bool) -> Hsla {
     } else {
         INLINE_CODE_FILL
     })
+}
+
+pub fn quote_fill() -> Hsla {
+    color_with_alpha(QUOTE_FILL)
 }
 
 pub fn inline_code_border() -> Hsla {
