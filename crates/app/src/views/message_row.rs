@@ -1,4 +1,3 @@
-use gpui_kit::assets::IconName;
 use gpui_kit::base::TextSelection;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -11,7 +10,7 @@ use super::avatar::{bot_avatar, member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
-use super::widgets::{icon, symbol};
+use super::widgets::symbol;
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
@@ -26,7 +25,6 @@ const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
 const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
-const SENDING_OPACITY: f32 = 0.6;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const CARD_AVATAR_SIZE: f32 = 32.;
 const CARD_GAP: f32 = 12.;
@@ -119,9 +117,6 @@ fn bubble(
         })
         .when(failed, |bubble| {
             bubble.border_1().border_color(theme::red())
-        })
-        .when(row.delivery == Delivery::Sending, |bubble| {
-            bubble.opacity(SENDING_OPACITY)
         });
     let has_reactions = !row.reactions.is_empty();
     let mut content = v_flex().gap(px(6.));
@@ -230,6 +225,9 @@ fn bubble_meta(row: &MessageRow, own: bool) -> Div {
         .text_color(tint)
         .when(row.edited, |meta| meta.child("Edited"))
         .child(row.time.clone())
+        .when(own && row.delivery == Delivery::Sending, |meta| {
+            meta.child(symbol("schedule", META_CHECK_SIZE, tint))
+        })
         .when(
             own && row.delivery == Delivery::Delivered,
             |meta| match row.receipt {
@@ -332,17 +330,7 @@ fn has_text(row: &MessageRow) -> bool {
 
 fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<AnyElement> {
     match &row.delivery {
-        Delivery::Delivered => None,
-        Delivery::Sending => Some(
-            h_flex()
-                .gap(px(4.))
-                .items_center()
-                .text_size(px(11.))
-                .text_color(theme::text_muted())
-                .child(icon(IconName::Loader, 12., theme::text_muted()))
-                .child("Sending")
-                .into_any_element(),
-        ),
+        Delivery::Delivered | Delivery::Sending => None,
         Delivery::Failed(_) => Some(
             h_flex()
                 .gap(px(4.))
