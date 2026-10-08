@@ -46,6 +46,16 @@ fn describe(event: &RealtimeEvent) -> String {
                 .unwrap_or_else(|| "-".into()),
         ),
         RealtimeEvent::Status(status) => format!("# status {:?} {}", status.kind, status.detail),
+        RealtimeEvent::Presence(updates) => format!("# presence updates={}", updates.len()),
+        RealtimeEvent::Endpoint(endpoint) => format!(
+            "# endpoint host={}",
+            endpoint
+                .trouter_uri
+                .trim_start_matches("https://")
+                .split('/')
+                .next()
+                .unwrap_or("-")
+        ),
     }
 }
 
@@ -58,7 +68,6 @@ fn kind_name(kind: EventKind) -> &'static str {
         EventKind::ReadReceipt => "read_receipt",
         EventKind::ThreadActivity => "thread_activity",
         EventKind::Control => "control",
-        EventKind::Presence => "presence",
         EventKind::Other => "other",
     }
 }

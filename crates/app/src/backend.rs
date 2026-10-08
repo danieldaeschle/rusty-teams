@@ -16,6 +16,7 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 const REFRESH_SETTLE: Duration = Duration::from_secs(2);
 const PINS_INTERVAL: Duration = Duration::from_secs(90);
 const REALTIME_RETRY: Duration = Duration::from_secs(15);
+const PRESENCE_RESUBSCRIBE: Duration = Duration::from_secs(30 * 60);
 const MAX_ERROR_CHARS: usize = 120;
 const IMAGE_DIRECTORY: &str = "images";
 const IMAGE_CACHE_MAX_BYTES: u64 = 200 * 1024 * 1024;
@@ -129,6 +130,7 @@ async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, events: Eve
         nudge,
     ));
     tokio::spawn(pins_loop(session, events.clone()));
+    tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;
 }
 
@@ -210,6 +212,11 @@ async fn realtime_loop(
                                 receipt_engine.handle_receipt_status(&receipt_status).await
                             });
                         }
+                        RealtimeEvent::Presence(updates) => engine.apply_presence(&updates),
+                        RealtimeEvent::Endpoint(endpoint) => {
+                            let engine = engine.clone();
+                            tokio::spawn(async move { engine.presence_endpoint(endpoint).await });
+                        }
                     }
                 }
                 let _ = events.send(BackendEvent::Live(LiveState::Reconnecting));
@@ -219,6 +226,15 @@ async fn realtime_loop(
             }
         }
         tokio::time::sleep(REALTIME_RETRY).await;
+    }
+}
+
+async fn presence_resubscribe_loop(engine: Arc<Engine>) {
+    let mut interval = tokio::time::interval(PRESENCE_RESUBSCRIBE);
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        let _ = engine.resubscribe_presence().await;
     }
 }
 

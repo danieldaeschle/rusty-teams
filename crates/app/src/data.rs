@@ -14,6 +14,7 @@ use crate::runtime;
 
 const FAVORITES_KIND_MARKER: &str = "favorite";
 const PRESENCE_MAX_AGE: Duration = Duration::from_secs(60);
+const PUSHED_PRESENCE_MAX_AGE: Duration = Duration::from_secs(5 * 60);
 const MEMBER_FACE_LIMIT: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,21 +230,28 @@ impl Directory {
         self.presence_pending.iter().cloned().collect()
     }
 
-    pub fn set_presence(&mut self, user_id: &str, kind: PresenceKind) {
+    pub fn set_presence(&mut self, user_id: &str, kind: PresenceKind) -> bool {
         self.presence
-            .insert(user_id.to_owned(), (kind, Instant::now()));
+            .insert(user_id.to_owned(), (kind, Instant::now()))
+            .is_none_or(|(previous, _)| previous != kind)
     }
 
     pub fn stale_presence(
         &self,
         user_ids: impl IntoIterator<Item = String>,
         now: Instant,
+        pushed: bool,
     ) -> Vec<String> {
+        let max_age = if pushed {
+            PUSHED_PRESENCE_MAX_AGE
+        } else {
+            PRESENCE_MAX_AGE
+        };
         let mut seen = HashSet::new();
         user_ids
             .into_iter()
             .filter(|user_id| {
-                let fresh = |at: &Instant| now.duration_since(*at) < PRESENCE_MAX_AGE;
+                let fresh = |at: &Instant| now.duration_since(*at) < max_age;
                 let known_fresh = self.presence.get(user_id).is_some_and(|(_, at)| fresh(at));
                 let asked_fresh = self.presence_requested.get(user_id).is_some_and(fresh);
                 !known_fresh && !asked_fresh && seen.insert(user_id.clone())
@@ -444,6 +452,11 @@ pub fn refresh_presence(engine: &Arc<Engine>, user_ids: Vec<String>) -> Done {
     run(async move { engine.refresh_presence(&user_ids).await })
 }
 
+pub fn watch_presence(engine: &Arc<Engine>, user_ids: Vec<String>) -> Done {
+    let engine = engine.clone();
+    run(async move { engine.watch_presence(&user_ids).await })
+}
+
 pub fn move_to_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id: &str) -> Done {
     let (engine, conversation_id, folder_id) = (
         engine.clone(),
@@ -515,15 +528,32 @@ mod tests {
     }
 
     #[test]
-    fn presence_is_refetched_after_a_minute() {
+    fn presence_is_refetched_after_the_max_age() {
         let mut directory = Directory::default();
         let start = Instant::now();
-        let wanted = directory.stale_presence(["u".to_owned()], start);
+        let wanted = directory.stale_presence(["u".to_owned()], start, false);
         assert_eq!(wanted, vec!["u"]);
         directory.mark_presence_requested(&wanted, start);
-        assert!(directory.stale_presence(["u".to_owned()], start).is_empty());
+        assert!(
+            directory
+                .stale_presence(["u".to_owned()], start, false)
+                .is_empty()
+        );
         let later = start + PRESENCE_MAX_AGE + Duration::from_secs(1);
-        assert_eq!(directory.stale_presence(["u".to_owned()], later), vec!["u"]);
+        assert_eq!(
+            directory.stale_presence(["u".to_owned()], later, false),
+            vec!["u"]
+        );
+        assert!(
+            directory
+                .stale_presence(["u".to_owned()], later, true)
+                .is_empty()
+        );
+        let much_later = start + PUSHED_PRESENCE_MAX_AGE + Duration::from_secs(1);
+        assert_eq!(
+            directory.stale_presence(["u".to_owned()], much_later, true),
+            vec!["u"]
+        );
         assert_eq!(directory.presence_of("u").kind(), PresenceKind::Unknown);
     }
 

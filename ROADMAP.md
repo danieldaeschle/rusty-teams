@@ -148,7 +148,7 @@ Feature parity with the Microsoft Teams desktop client.
 
 | Feature | State | Note |
 |---|---|---|
-| Presence dots | Done |  |
+| Presence dots (live push) | Done |  |
 | Last known presence at start | Done |  |
 | Set own status and status message | Missing |  |
 | Profile card | Missing |  |

@@ -12,6 +12,7 @@ pub use pins::{
     ChannelLayout, Folder, FolderKind, Folders, PinnedChannels, PinnedChats, Pins, TeamLayout,
 };
 pub use realtime::{
-    EventKind, MessageEvent, Realtime, RealtimeConfig, RealtimeEvent, StatusEvent, StatusKind,
+    EventKind, MessageEvent, PresenceUpdate, Realtime, RealtimeConfig, RealtimeEvent, StatusEvent,
+    StatusKind, TrouterEndpoint,
 };
 pub use receipts::{MemberHorizon, Receipts};

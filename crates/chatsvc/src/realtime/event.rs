@@ -1,9 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use super::host::is_trouter_host;
 use crate::error::{Error, Result};
 
 const MAX_FIELD_LENGTH: usize = 256;
+const ORGID_PREFIX: &str = "8:orgid:";
+const HTTPS_PREFIX: &str = "https://";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -15,7 +18,6 @@ pub enum EventKind {
     ReadReceipt,
     ThreadActivity,
     Control,
-    Presence,
     #[serde(other)]
     Other,
 }
@@ -45,9 +47,32 @@ pub struct StatusEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresenceUpdate {
+    pub user_id: String,
+    pub availability: String,
+    pub activity: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrouterEndpoint {
+    pub endpoint_id: String,
+    pub trouter_uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeEvent {
     Message(MessageEvent),
     Status(StatusEvent),
+    Presence(Vec<PresenceUpdate>),
+    Endpoint(TrouterEndpoint),
+}
+
+#[derive(Deserialize)]
+struct WirePresence {
+    mri: String,
+    availability: String,
+    #[serde(default)]
+    activity: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +94,15 @@ enum Wire {
         kind: StatusKind,
         #[serde(default)]
         detail: String,
+    },
+    Presence {
+        entries: Vec<WirePresence>,
+    },
+    Endpoint {
+        #[serde(rename = "endpointId")]
+        endpoint_id: String,
+        #[serde(rename = "trouterUri")]
+        trouter_uri: String,
     },
 }
 
@@ -99,6 +133,50 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
             kind,
             detail: bounded(detail),
         })),
+        Wire::Presence { entries } => Ok(RealtimeEvent::Presence(
+            entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let user_id = entry.mri.strip_prefix(ORGID_PREFIX)?;
+                    Some(PresenceUpdate {
+                        user_id: bounded(user_id.to_owned()),
+                        availability: bounded(entry.availability),
+                        activity: entry
+                            .activity
+                            .map(bounded)
+                            .filter(|value| !value.is_empty()),
+                    })
+                })
+                .collect(),
+        )),
+        Wire::Endpoint {
+            endpoint_id,
+            trouter_uri,
+        } => {
+            let host = trouter_uri
+                .strip_prefix(HTTPS_PREFIX)
+                .and_then(|rest| rest.split('/').next())
+                .map(without_port)
+                .filter(|host| is_trouter_host(host));
+            if host.is_none() || endpoint_id.is_empty() {
+                return Err(Error::Decode("endpoint rejected".into()));
+            }
+            Ok(RealtimeEvent::Endpoint(TrouterEndpoint {
+                endpoint_id: bounded(endpoint_id),
+                trouter_uri,
+            }))
+        }
+    }
+}
+
+fn without_port(authority: &str) -> &str {
+    match authority.rsplit_once(':') {
+        Some((host, port))
+            if !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            host
+        }
+        _ => authority,
     }
 }
 
@@ -126,7 +204,7 @@ mod tests {
 
     #[test]
     fn null_and_empty_ids_become_none() {
-        let payload = r#"{"channel":"event","resourceType":"presence","eventKind":"presence",
+        let payload = r#"{"channel":"event","resourceType":"typing","eventKind":"typing",
             "conversationId":null,"messageId":"","receivedAt":1}"#;
         let RealtimeEvent::Message(event) = decode_payload(payload).unwrap() else {
             panic!("expected message")
@@ -184,6 +262,59 @@ mod tests {
             panic!("expected status")
         };
         assert_eq!(status.detail.chars().count(), MAX_FIELD_LENGTH);
+    }
+
+    #[test]
+    fn decodes_presence_and_skips_foreign_mris() {
+        let payload = r#"{"channel":"presence","entries":[
+            {"mri":"8:orgid:abc","availability":"Busy","activity":"InACall"},
+            {"mri":"8:orgid:def","availability":"Away","activity":""},
+            {"mri":"4:+4912345","availability":"Offline"}]}"#;
+        let RealtimeEvent::Presence(updates) = decode_payload(payload).unwrap() else {
+            panic!("expected presence")
+        };
+        assert_eq!(
+            updates,
+            vec![
+                PresenceUpdate {
+                    user_id: "abc".into(),
+                    availability: "Busy".into(),
+                    activity: Some("InACall".into()),
+                },
+                PresenceUpdate {
+                    user_id: "def".into(),
+                    availability: "Away".into(),
+                    activity: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn decodes_endpoint_on_a_trouter_host() {
+        let payload = r#"{"channel":"endpoint","endpointId":"e1",
+            "trouterUri":"https://pub-ent-sece-04-f.trouter.teams.microsoft.com:3443/v4/f/x/unifiedPresenceService"}"#;
+        let RealtimeEvent::Endpoint(endpoint) = decode_payload(payload).unwrap() else {
+            panic!("expected endpoint")
+        };
+        assert_eq!(endpoint.endpoint_id, "e1");
+        assert!(endpoint.trouter_uri.ends_with("/unifiedPresenceService"));
+    }
+
+    #[test]
+    fn rejects_endpoints_off_trouter_or_without_https() {
+        for uri in [
+            "https://evil.example/unifiedPresenceService",
+            "http://go-eu.trouter.teams.microsoft.com/x",
+            "https://go-eu.trouter.teams.microsoft.com.evil.com/x",
+            "https://a@go-eu.trouter.teams.microsoft.com/x",
+            "https://go-eu.trouter.teams.microsoft.com:x/x",
+            "go-eu.trouter.teams.microsoft.com/x",
+        ] {
+            let payload =
+                format!(r#"{{"channel":"endpoint","endpointId":"e1","trouterUri":"{uri}"}}"#);
+            assert!(decode_payload(&payload).is_err(), "{uri}");
+        }
     }
 
     #[test]

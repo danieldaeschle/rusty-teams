@@ -13,7 +13,7 @@ pub(super) const BINDING_NAME: &str = "__chatsvcRealtime";
 const WORKER_SOURCE: &str = include_str!("../../assets/trouter.js");
 const ENSURE_BODY: &str = concat!(
     include_str!("../../assets/trouter.js"),
-    "\nreturn window.__chatsvcTrouter.ensure({token, host: args.host, forwardPresence: args.forwardPresence});"
+    "\nreturn window.__chatsvcTrouter.ensure({token, host: args.host});"
 );
 const STOP_EXPRESSION: &str = "window.__chatsvcTrouter ? window.__chatsvcTrouter.stop() : null";
 const STOP_STEP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -80,7 +80,7 @@ impl Runner {
     }
 
     pub(super) async fn ensure(&mut self) -> session::Result<Value> {
-        let args = json!({"host": self.host, "forwardPresence": self.config.forward_presence});
+        let args = json!({"host": self.host});
         let outcome = self
             .session
             .run_with_token(
@@ -249,7 +249,7 @@ mod tests {
         assert!(
             ENSURE_BODY
                 .trim_end()
-                .ends_with("forwardPresence: args.forwardPresence});")
+                .ends_with("ensure({token, host: args.host});")
         );
         assert_eq!(ENSURE_BODY.matches("const VERSION").count(), 1);
     }

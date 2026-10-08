@@ -11,7 +11,10 @@ use session::Session;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-pub use event::{EventKind, MessageEvent, RealtimeEvent, StatusEvent, StatusKind, decode_payload};
+pub use event::{
+    EventKind, MessageEvent, PresenceUpdate, RealtimeEvent, StatusEvent, StatusKind,
+    TrouterEndpoint, decode_payload,
+};
 pub use host::{DEFAULT_TROUTER_HOST, is_trouter_host};
 
 use crate::error::Result;
@@ -24,7 +27,6 @@ pub struct RealtimeConfig {
     pub host: Option<String>,
     pub default_host: String,
     pub discover_host: bool,
-    pub forward_presence: bool,
     pub ensure_interval: Duration,
     pub navigation_settle: Duration,
     pub max_reattach_backoff: Duration,
@@ -36,7 +38,6 @@ impl Default for RealtimeConfig {
             host: None,
             default_host: DEFAULT_TROUTER_HOST.to_owned(),
             discover_host: true,
-            forward_presence: false,
             ensure_interval: Duration::from_secs(30),
             navigation_settle: Duration::from_millis(1500),
             max_reattach_backoff: Duration::from_secs(30),

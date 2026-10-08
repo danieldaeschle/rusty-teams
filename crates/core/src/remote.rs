@@ -180,6 +180,16 @@ pub trait Remote {
         Err(Error::Unsupported("presence"))
     }
 
+    async fn subscribe_presence(
+        &self,
+        _endpoint_id: &str,
+        _trouter_uri: &str,
+        _user_ids: &[String],
+        _purge: bool,
+    ) -> Result<()> {
+        Err(Error::Unsupported("presence subscriptions"))
+    }
+
     async fn consumption_horizons(&self, _conversation_id: &str) -> Result<Vec<MemberHorizon>> {
         Err(Error::Unsupported("read receipts"))
     }
@@ -459,6 +469,16 @@ impl Remote for Graph {
 
     async fn presences(&self, user_ids: &[String]) -> Result<Vec<Presence>> {
         Ok(Graph::presences(self, user_ids).await?)
+    }
+
+    async fn subscribe_presence(
+        &self,
+        endpoint_id: &str,
+        trouter_uri: &str,
+        user_ids: &[String],
+        purge: bool,
+    ) -> Result<()> {
+        Ok(Graph::subscribe_presence(self, endpoint_id, trouter_uri, user_ids, purge).await?)
     }
 
     async fn consumption_horizons(&self, conversation_id: &str) -> Result<Vec<MemberHorizon>> {

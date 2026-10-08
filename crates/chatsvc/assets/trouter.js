@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = 1;
+  const VERSION = 2;
   const GLOBAL_NAME = '__chatsvcTrouter';
   const BINDING_NAME = '__chatsvcRealtime';
   const EPID_KEY = '__chatsvcEpid';
@@ -11,6 +11,8 @@
   const CONNECT_TIMEOUT_MS = 20000;
   const MAX_BACKOFF_MS = 30000;
   const MAX_QUEUE = 200;
+  const MAX_PRESENCE_ENTRIES = 1000;
+  const MAX_PRESENCE_FIELD = 128;
 
   if (window.top !== window || !location.origin.startsWith('https://teams.')) return;
   const existing = window[GLOBAL_NAME];
@@ -30,7 +32,7 @@
   };
 
   const state = {
-    token: null, host: null, forwardPresence: false, epid: loadEpid(), socket: null, ready: false,
+    token: null, host: null, epid: loadEpid(), socket: null, ready: false,
     closed: false, ackCounter: 0, lastFrameAt: 0, registeredAt: 0, retry: 0, reconnectTimer: null, queue: [],
   };
 
@@ -48,6 +50,7 @@
     flush();
   };
   const status = (kind, detail) => forward({channel: 'status', kind, detail: detail || ''});
+  const announceEndpoint = () => forward({channel: 'endpoint', endpointId: state.epid, trouterUri: state.surl + '/unifiedPresenceService'});
 
   const conversationOf = (resource) => {
     const link = (resource && (resource.conversationLink || resource.to || resource.id)) || '';
@@ -69,7 +72,12 @@
   const forwardNotification = (path, body) => {
     const receivedAt = Date.now();
     if (path === 'unifiedPresenceService') {
-      if (state.forwardPresence) forward({channel: 'event', resourceType: 'presence', conversationId: null, messageId: null, eventKind: 'presence', receivedAt});
+      const cut = (value) => (typeof value === 'string' ? value.slice(0, MAX_PRESENCE_FIELD) : null);
+      const entries = ((body && Array.isArray(body.presence)) ? body.presence : []).slice(0, MAX_PRESENCE_ENTRIES)
+        .map((entry) => ({mri: cut(entry && entry.mri), availability: cut(entry && entry.presence && entry.presence.availability),
+          activity: cut(entry && entry.presence && entry.presence.activity)}))
+        .filter((entry) => entry.mri && entry.availability);
+      if (entries.length) forward({channel: 'presence', entries});
       return;
     }
     const resource = body && body.resource;
@@ -140,6 +148,7 @@
           activity();
           state.ready = true;
           state.retry = 0;
+          announceEndpoint();
           status('connected');
         } catch (error) {
           status('error', registerDetail(error));
@@ -202,9 +211,11 @@
     ensure: (config) => {
       state.token = config.token;
       state.host = config.host;
-      state.forwardPresence = !!config.forwardPresence;
       connect();
-      if (state.ready) status('connected', 'reattached');
+      if (state.ready) {
+        announceEndpoint();
+        status('connected', 'reattached');
+      }
       flush();
       return state.ready ? 'ready' : state.socket ? 'connecting' : 'waiting';
     },

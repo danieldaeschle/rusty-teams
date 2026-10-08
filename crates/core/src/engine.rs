@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use chatsvc::TrouterEndpoint;
 use chrono::{DateTime, Duration, Utc};
 use graph::{DriveFolder, Graph, MESSAGE_PAGE_SIZE, Message};
 use store::{ImageFileCache, MessageRecord, Sidebar, Store, SyncState};
@@ -111,6 +112,9 @@ pub struct SyncEngine<R: Remote = Graph> {
     my_tenant_id: OnceCell<String>,
     pub(crate) folder_source: Option<Arc<dyn FolderSource>>,
     pub(crate) presences: Mutex<HashMap<String, Presence>>,
+    pub(crate) watched_presence: Mutex<HashSet<String>>,
+    pub(crate) presence_endpoint: Mutex<Option<TrouterEndpoint>>,
+    pub(crate) presence_subscribing: tokio::sync::Mutex<()>,
     pub(crate) avatars_in_flight: Mutex<HashSet<String>>,
     pub(crate) images_in_flight: Mutex<HashSet<String>>,
     pub(crate) image_files: Option<ImageFileCache>,
@@ -135,6 +139,9 @@ impl<R: Remote> SyncEngine<R> {
             my_tenant_id: OnceCell::new(),
             folder_source: None,
             presences: Mutex::new(HashMap::new()),
+            watched_presence: Mutex::new(HashSet::new()),
+            presence_endpoint: Mutex::new(None),
+            presence_subscribing: tokio::sync::Mutex::new(()),
             avatars_in_flight: Mutex::new(HashSet::new()),
             images_in_flight: Mutex::new(HashSet::new()),
             image_files: None,

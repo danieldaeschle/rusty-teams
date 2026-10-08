@@ -272,26 +272,31 @@ impl AppState {
         }
     }
 
-    fn sync_presence(&mut self) {
+    fn sync_presence(&mut self) -> Vec<String> {
         let Some(engine) = self.engine.clone() else {
-            return;
+            return Vec::new();
         };
-        for user_id in self.directory.requested_presence_ids() {
-            if let Some(kind) = data::presence_kind(&engine, &user_id) {
-                self.directory.set_presence(&user_id, kind);
-            }
-        }
+        self.directory
+            .requested_presence_ids()
+            .into_iter()
+            .filter(|user_id| {
+                data::presence_kind(&engine, user_id)
+                    .is_some_and(|kind| self.directory.set_presence(user_id, kind))
+            })
+            .collect()
     }
 
     pub fn request_presence(&mut self, user_ids: Vec<String>, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let wanted = self.directory.stale_presence(user_ids, now);
+        let pushed = self.live == LiveState::Live;
+        let wanted = self.directory.stale_presence(user_ids, now, pushed);
         if wanted.is_empty() {
             return;
         }
         self.directory.mark_presence_pending(&wanted);
         if let Some(engine) = self.engine.clone() {
             self.directory.mark_presence_requested(&wanted, now);
+            drop(data::watch_presence(&engine, wanted.clone()));
             let done = data::refresh_presence(&engine, wanted.clone());
             self.on_done(done, cx, move |state, cx| {
                 state.sync_presence();
@@ -445,6 +450,12 @@ impl AppState {
                     }
                 }
                 cx.emit(AppEvent::Images(keys));
+            }
+            BackendEvent::Core(CoreEvent::PresenceChanged) => {
+                let changed = self.sync_presence();
+                self.directory.save_presence(&self.store, &changed);
+                cx.emit(AppEvent::Directory);
+                cx.notify();
             }
             BackendEvent::Core(_) => {
                 if !self.mode.demo {

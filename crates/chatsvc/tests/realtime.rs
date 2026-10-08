@@ -164,7 +164,7 @@ async fn start_injects_worker_and_ensures_with_default_host() {
     let arguments: serde_json::Value = serde_json::from_str(arguments_json).unwrap();
     assert_eq!(
         arguments,
-        serde_json::json!({"forwardPresence": false, "host": "go-eu.trouter.teams.microsoft.com"})
+        serde_json::json!({"host": "go-eu.trouter.teams.microsoft.com"})
     );
     realtime.stop().await;
 }

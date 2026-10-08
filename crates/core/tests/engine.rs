@@ -79,6 +79,7 @@ struct Fake {
     photos: Mutex<HashMap<String, Vec<u8>>>,
     photo_requests: Mutex<Vec<Vec<String>>>,
     presence_answers: Mutex<Vec<Presence>>,
+    presence_subscriptions: Mutex<Vec<(String, Vec<String>, bool)>>,
     hosted_requests: Mutex<Vec<String>>,
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
     extras_sent: Mutex<Vec<MessageExtras>>,
@@ -560,6 +561,21 @@ impl Remote for Handle {
             .filter(|presence| user_ids.contains(&presence.user_id))
             .cloned()
             .collect())
+    }
+
+    async fn subscribe_presence(
+        &self,
+        endpoint_id: &str,
+        _trouter_uri: &str,
+        user_ids: &[String],
+        purge: bool,
+    ) -> Result<()> {
+        self.presence_subscriptions.lock().unwrap().push((
+            endpoint_id.to_owned(),
+            user_ids.to_vec(),
+            purge,
+        ));
+        Ok(())
     }
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
@@ -1644,6 +1660,74 @@ async fn presence_maps_availability_and_announces_changes_once() {
     );
     assert_eq!(events.try_recv().unwrap(), CoreEvent::PresenceChanged);
     engine.refresh_presence(&wanted).await.unwrap();
+    assert!(events.try_recv().is_err());
+}
+
+fn trouter_endpoint(endpoint_id: &str) -> chatsvc::TrouterEndpoint {
+    chatsvc::TrouterEndpoint {
+        endpoint_id: endpoint_id.to_owned(),
+        trouter_uri: "https://go-eu.trouter.teams.microsoft.com/v4/f/x/unifiedPresenceService"
+            .to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn presence_subscribes_watched_users_once_the_endpoint_is_known() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.watch_presence(&ids(&["ada", "bob"])).await.unwrap();
+    assert!(fake.presence_subscriptions.lock().unwrap().is_empty());
+    engine
+        .presence_endpoint(trouter_endpoint("e1"))
+        .await
+        .unwrap();
+    engine.watch_presence(&ids(&["bob", "cy"])).await.unwrap();
+    engine.watch_presence(&ids(&["cy"])).await.unwrap();
+    assert_eq!(
+        *fake.presence_subscriptions.lock().unwrap(),
+        vec![
+            ("e1".to_owned(), ids(&["ada", "bob"]), true),
+            ("e1".to_owned(), ids(&["cy"]), false),
+        ]
+    );
+    engine
+        .presence_endpoint(trouter_endpoint("e1"))
+        .await
+        .unwrap();
+    assert_eq!(fake.presence_subscriptions.lock().unwrap().len(), 2);
+    engine.resubscribe_presence().await.unwrap();
+    engine
+        .presence_endpoint(trouter_endpoint("e2"))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.presence_subscriptions.lock().unwrap()[2..],
+        [
+            ("e1".to_owned(), ids(&["ada", "bob", "cy"]), true),
+            ("e2".to_owned(), ids(&["ada", "bob", "cy"]), true),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn pushed_presence_announces_changes_once() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    let mut events = engine.subscribe();
+    let update = |user_id: &str, availability: &str| chatsvc::PresenceUpdate {
+        user_id: user_id.to_owned(),
+        availability: availability.to_owned(),
+        activity: None,
+    };
+    let updates = vec![update("ada", "Busy"), update("bob", "Away")];
+    engine.apply_presence(&updates);
+    assert_eq!(
+        engine.presence("ada").unwrap().availability,
+        Availability::Busy
+    );
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::PresenceChanged);
+    assert!(events.try_recv().is_err());
+    engine.apply_presence(&updates);
     assert!(events.try_recv().is_err());
 }
 
