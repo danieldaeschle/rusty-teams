@@ -140,6 +140,23 @@ impl Store {
         Ok(found)
     }
 
+    pub fn thread_has_sender(
+        &self,
+        conversation_id: &str,
+        root_id: &str,
+        user_id: &str,
+    ) -> Result<bool> {
+        let connection = self.lock()?;
+        Ok(connection.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM messages
+                WHERE conversation_id = ?1 AND sender_id = ?3 AND deleted = 0
+                  AND (message_id = ?2 OR reply_to_id = ?2))",
+            params![conversation_id, root_id, user_id],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn message_count(&self, conversation_id: &str) -> Result<usize> {
         let connection = self.lock()?;
         let count: i64 = connection.query_row(

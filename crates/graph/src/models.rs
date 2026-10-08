@@ -51,6 +51,10 @@ impl Sender {
             .find_map(|identity| identity.id.as_deref())
     }
 
+    pub fn is_group(&self) -> bool {
+        self.tag.is_some() || self.conversation.is_some()
+    }
+
     pub fn user_id(&self) -> Option<&str> {
         self.user.as_ref().and_then(|user| user.id.as_deref())
     }

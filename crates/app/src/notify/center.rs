@@ -198,6 +198,7 @@ impl NotificationCenter {
         let found = self.tracker.collect(
             &state.store,
             &state.sidebar,
+            &state.followed_channels,
             my_user_id.as_deref(),
             conversation_id,
         );
@@ -730,6 +731,7 @@ impl NotificationCenter {
             preview: Preview::Text("This is a test notification.".to_owned()),
             mentions_me: false,
             muted: false,
+            signals: Default::default(),
             created_at: Utc::now(),
         };
         let decision = Decision {
@@ -866,6 +868,7 @@ fn demo_incoming() -> Vec<Incoming> {
         preview: Preview::Text(text.to_owned()),
         mentions_me: mention,
         muted: false,
+        signals: Default::default(),
         created_at: Utc::now(),
     };
     vec![

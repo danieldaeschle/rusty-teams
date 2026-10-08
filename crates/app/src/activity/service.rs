@@ -8,7 +8,7 @@ use super::preview_label;
 use super::reactions::reacted_messages;
 use crate::app_state::{AppEvent, AppState};
 use crate::demo;
-use crate::notify::IncomingTracker;
+use crate::notify::{IncomingTracker, channel_alerts};
 
 const WATERMARK_KEY: &str = "activity_watermark";
 const RECENT_WINDOW: usize = 20;
@@ -143,6 +143,7 @@ impl ActivityCenter {
         let found = self.tracker.collect(
             &state.store,
             &state.sidebar,
+            &state.followed_channels,
             my_user_id.as_deref(),
             conversation_id,
         );
@@ -152,7 +153,7 @@ impl ActivityCenter {
             .unwrap_or_default();
         let _ = state.store.set_meta_time(WATERMARK_KEY, Utc::now());
         if !foreground {
-            for incoming in &found {
+            for incoming in found.iter().filter(|incoming| channel_alerts(incoming)) {
                 self.feed
                     .record_message(incoming, preview_label(&incoming.preview));
             }

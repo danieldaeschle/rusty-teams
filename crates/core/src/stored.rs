@@ -133,6 +133,8 @@ pub struct MentionInfo {
     pub id: Option<i64>,
     #[serde(default)]
     pub target_id: Option<String>,
+    #[serde(default)]
+    pub group: bool,
 }
 
 pub fn attachments(record: &MessageRecord) -> Vec<AttachmentInfo> {

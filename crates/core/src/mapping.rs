@@ -270,9 +270,53 @@ fn mention_info(mention: &Mention) -> Option<MentionInfo> {
         target_id: mentioned
             .and_then(|sender| sender.target_id())
             .map(str::to_owned),
+        group: mentioned.is_some_and(|sender| sender.is_group()),
     })
 }
 
 fn to_json<T: serde::Serialize>(values: &[T]) -> String {
     serde_json::to_string(values).unwrap_or_else(|_| "[]".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn mentions_of(mentioned: serde_json::Value) -> Vec<MentionInfo> {
+        let message: Message = serde_json::from_value(json!({
+            "id": "1",
+            "createdDateTime": "2026-10-06T09:00:00Z",
+            "mentions": [{"id": 0, "mentionText": "Target", "mentioned": mentioned}],
+        }))
+        .unwrap();
+        message_record("c", &message)
+            .map(|record| crate::stored::mentions(&record))
+            .unwrap()
+    }
+
+    #[test]
+    fn channel_team_and_tag_mentions_are_group_mentions() {
+        for mentioned in [
+            json!({"conversation": {"id": "19:chan@thread.tacv2", "conversationIdentityType": "channel"}}),
+            json!({"conversation": {"id": "team-1", "conversationIdentityType": "team"}}),
+            json!({"tag": {"id": "tag-1"}}),
+        ] {
+            let mentions = mentions_of(mentioned);
+            assert!(mentions[0].group);
+            assert_eq!(mentions[0].user_id, None);
+            assert!(mentions[0].target_id.is_some());
+        }
+    }
+
+    #[test]
+    fn user_and_application_mentions_are_not_group_mentions() {
+        for mentioned in [
+            json!({"user": {"id": "u1"}}),
+            json!({"application": {"id": "bot-1"}}),
+        ] {
+            assert!(!mentions_of(mentioned)[0].group);
+        }
+    }
 }

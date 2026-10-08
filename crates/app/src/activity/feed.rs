@@ -485,6 +485,7 @@ mod tests {
             preview: Preview::Text(format!("text {message_id}")),
             mentions_me: false,
             muted: false,
+            signals: Default::default(),
             created_at: at(9, minute),
         }
     }

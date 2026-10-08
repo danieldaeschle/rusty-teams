@@ -10,6 +10,7 @@ use teams_core::{ChatApp, CoreEvent, ImageRef};
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::notify;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
 
@@ -59,6 +60,7 @@ pub struct AppState {
     pub mode: Mode,
     pub directory: Directory,
     pub collapsed: HashSet<String>,
+    pub followed_channels: HashSet<String>,
     pub start_on_channels: bool,
     pub pending_jump: Option<(String, String)>,
     pub cards: CardState,
@@ -124,6 +126,7 @@ impl AppState {
             mode,
             directory: Directory::default(),
             collapsed: HashSet::new(),
+            followed_channels: HashSet::new(),
             start_on_channels: false,
             pending_jump: None,
             cards: CardState::default(),
@@ -132,6 +135,7 @@ impl AppState {
             bot_apps_pending: HashSet::new(),
         };
         state.collapsed = state.load_collapsed();
+        state.followed_channels = notify::load_followed_channels(&state.store);
         if !mode.demo {
             state.directory.load_cached_presence(&state.store);
             state.reload_directory();
@@ -152,6 +156,14 @@ impl AppState {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub fn toggle_followed_channel(&mut self, channel_id: &str, cx: &mut Context<Self>) {
+        if !self.followed_channels.remove(channel_id) {
+            self.followed_channels.insert(channel_id.to_owned());
+        }
+        notify::save_followed_channels(&self.store, &self.followed_channels);
+        cx.notify();
     }
 
     pub fn toggle_collapsed(&mut self, section_id: &str, cx: &mut Context<Self>) {

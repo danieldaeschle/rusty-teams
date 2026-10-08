@@ -9,7 +9,7 @@ use gpui_kit::*;
 use store::{ChannelRecord, SidebarTeam, TeamRecord};
 
 use super::avatar::{spec_avatar, square_avatar, with_presence};
-use super::widgets::{count_badge, dot, icon, unread_marker};
+use super::widgets::{count_badge, dot, icon, symbol, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{Directory, FolderKind};
 use crate::format;
@@ -625,9 +625,12 @@ impl SidebarView {
         team: &TeamRecord,
         channel: &ChannelRecord,
         selected: bool,
+        followed: bool,
     ) -> AnyElement {
         let unread = channel.unread;
         let state = self.state.clone();
+        let menu_state = self.state.clone();
+        let menu_channel_id = channel_id.to_owned();
         let selection = Selection::Channel(channel_id.to_owned());
         let now = Utc::now();
         let offset = Local::now().offset().fix();
@@ -672,6 +675,7 @@ impl SidebarView {
                                     .text_color(theme::text())
                                     .child(format!("{} / {}", team.name, channel.name)),
                             )
+                            .when(followed, |line| line.child(followed_bell()))
                             .child(
                                 div()
                                     .flex_none()
@@ -704,6 +708,13 @@ impl SidebarView {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
             })
+            .context_menu(move |popup, _, _| {
+                popup.item(follow_item(
+                    menu_state.clone(),
+                    menu_channel_id.clone(),
+                    followed,
+                ))
+            })
             .into_any_element()
     }
 
@@ -727,6 +738,7 @@ impl SidebarView {
         selected: Option<&Selection>,
         cx: &mut Context<Self>,
     ) -> Div {
+        let followed = self.state.read(cx).followed_channels.clone();
         let team_id = entry.team.id.clone();
         let expanded = team_holds(entry, selected) || self.expanded_teams.contains(&team_id);
         let unread = entry.channels.iter().any(|channel| channel.unread);
@@ -785,7 +797,11 @@ impl SidebarView {
             .iter()
             .filter(|channel| !is_hidden(channel) || is_selected(channel))
         {
-            list = list.child(self.team_channel_row(channel, is_selected(channel)));
+            list = list.child(self.team_channel_row(
+                channel,
+                is_selected(channel),
+                followed.contains(&channel.id),
+            ));
         }
         let hidden: Vec<&ChannelRecord> = entry
             .channels
@@ -811,7 +827,11 @@ impl SidebarView {
         ));
         if revealed {
             for channel in hidden {
-                list = list.child(self.team_channel_row(channel, false));
+                list = list.child(self.team_channel_row(
+                    channel,
+                    false,
+                    followed.contains(&channel.id),
+                ));
             }
         }
         list
@@ -854,8 +874,15 @@ impl SidebarView {
             .on_click(on_click)
     }
 
-    fn team_channel_row(&self, channel: &ChannelRecord, is_selected: bool) -> impl IntoElement {
+    fn team_channel_row(
+        &self,
+        channel: &ChannelRecord,
+        is_selected: bool,
+        followed: bool,
+    ) -> impl IntoElement {
         let state = self.state.clone();
+        let menu_state = self.state.clone();
+        let menu_channel_id = channel.id.clone();
         let selection = Selection::Channel(channel.id.clone());
         h_flex()
             .id(SharedString::from(format!("channel-{}", channel.id)))
@@ -894,19 +921,28 @@ impl SidebarView {
                     .text_color(theme::text())
                     .child(channel.name.clone()),
             )
+            .when(followed, |row| row.child(followed_bell()))
             .when(channel.unread, |row| row.child(dot(7.)))
             .on_click(move |_, _, cx| {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
             })
+            .context_menu(move |popup, _, _| {
+                popup.item(follow_item(
+                    menu_state.clone(),
+                    menu_channel_id.clone(),
+                    followed,
+                ))
+            })
     }
 
     fn channels_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (sidebar, pinned_ids, selected) = {
+        let (sidebar, pinned_ids, followed, selected) = {
             let state = self.state.read(cx);
             (
                 state.sidebar.clone(),
                 state.directory.pinned_channels.clone(),
+                state.followed_channels.clone(),
                 state.selection.clone().filter(|_| !state.new_chat),
             )
         };
@@ -927,7 +963,13 @@ impl SidebarView {
             list = list.child(self.plain_header(PINNED_LABEL));
             for (team, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
-                list = list.child(self.channel_row(&channel.id, team, channel, is_selected));
+                list = list.child(self.channel_row(
+                    &channel.id,
+                    team,
+                    channel,
+                    is_selected,
+                    followed.contains(&channel.id),
+                ));
             }
         }
         list = list.child(self.plain_header(TEAMS_LABEL));
@@ -966,6 +1008,20 @@ impl SidebarView {
             .child(list)
             .into_any_element()
     }
+}
+
+fn followed_bell() -> impl IntoElement {
+    symbol("notifications", 12., theme::text_muted())
+}
+
+fn follow_item(state: Entity<AppState>, channel_id: String, followed: bool) -> PopupMenuItem {
+    PopupMenuItem::new("Notify on all posts")
+        .checked(followed)
+        .on_click(move |_, _, cx| {
+            state.update(cx, |state, cx| {
+                state.toggle_followed_channel(&channel_id, cx)
+            });
+        })
 }
 
 fn team_holds(entry: &SidebarTeam, selected: Option<&Selection>) -> bool {

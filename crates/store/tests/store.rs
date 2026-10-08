@@ -213,6 +213,24 @@ fn deleted_flag_and_json_columns_round_trip() {
 }
 
 #[test]
+fn thread_has_sender_checks_root_and_replies() {
+    let store = Store::open_in_memory().unwrap();
+    let mut reply = message("c", "r1", 2);
+    reply.reply_to_id = Some("root".to_owned());
+    reply.sender_id = Some("user-bob".to_owned());
+    let mut other_reply = message("c", "r2", 3);
+    other_reply.reply_to_id = Some("other".to_owned());
+    other_reply.sender_id = Some("user-carl".to_owned());
+    store
+        .upsert_messages(&[message("c", "root", 1), reply, other_reply])
+        .unwrap();
+    assert!(store.thread_has_sender("c", "root", "user-ada").unwrap());
+    assert!(store.thread_has_sender("c", "root", "user-bob").unwrap());
+    assert!(!store.thread_has_sender("c", "root", "user-carl").unwrap());
+    assert!(!store.thread_has_sender("d", "root", "user-ada").unwrap());
+}
+
+#[test]
 fn sync_state_round_trip() {
     let store = Store::open_in_memory().unwrap();
     assert_eq!(store.sync_state("c").unwrap(), None);

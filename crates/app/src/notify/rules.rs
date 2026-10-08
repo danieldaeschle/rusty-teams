@@ -99,6 +99,14 @@ pub enum Preview {
     Image,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChannelSignals {
+    pub mentions_channel: bool,
+    pub in_my_thread: bool,
+    pub hidden: bool,
+    pub followed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Incoming {
     pub conversation_id: String,
@@ -110,6 +118,7 @@ pub struct Incoming {
     pub preview: Preview,
     pub mentions_me: bool,
     pub muted: bool,
+    pub signals: ChannelSignals,
     pub created_at: DateTime<Utc>,
 }
 
@@ -133,13 +142,22 @@ pub struct Decision {
     pub sound: bool,
 }
 
+pub fn channel_alerts(incoming: &Incoming) -> bool {
+    if !matches!(incoming.kind, ChatKind::Channel { .. }) || incoming.mentions_me {
+        return true;
+    }
+    let signals = incoming.signals;
+    !signals.hidden && (signals.mentions_channel || signals.in_my_thread || signals.followed)
+}
+
 const SILENT: Decision = Decision {
     toast: false,
     sound: false,
 };
 
 pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment) -> Decision {
-    let suppressed = environment.chat_in_foreground
+    let suppressed = !channel_alerts(incoming)
+        || environment.chat_in_foreground
         || environment.system_quiet
         || environment.own_do_not_disturb
         || settings.do_not_disturb
@@ -191,8 +209,16 @@ mod tests {
             preview: Preview::Text("Hello".into()),
             mentions_me: false,
             muted: false,
+            signals: ChannelSignals::default(),
             created_at: Utc::now(),
         }
+    }
+
+    fn channel() -> Incoming {
+        incoming(ChatKind::Channel {
+            team: "Team".into(),
+            channel: "General".into(),
+        })
     }
 
     fn group() -> Incoming {
@@ -280,6 +306,56 @@ mod tests {
         let mut mention = group();
         mention.mentions_me = true;
         assert!(decide(&settings, &mention, Environment::default()).toast);
+    }
+
+    #[test]
+    fn plain_channel_post_is_silent() {
+        assert!(!channel_alerts(&channel()));
+        assert_eq!(
+            decide(&Settings::default(), &channel(), Environment::default()),
+            SILENT
+        );
+    }
+
+    #[test]
+    fn channel_alerts_for_each_trigger() {
+        let triggers: [fn(&mut Incoming); 4] = [
+            |incoming| incoming.mentions_me = true,
+            |incoming| incoming.signals.mentions_channel = true,
+            |incoming| incoming.signals.in_my_thread = true,
+            |incoming| incoming.signals.followed = true,
+        ];
+        for trigger in triggers {
+            let mut message = channel();
+            trigger(&mut message);
+            assert!(channel_alerts(&message));
+            assert!(decide(&Settings::default(), &message, Environment::default()).toast);
+        }
+    }
+
+    #[test]
+    fn hidden_channel_only_alerts_for_mentions_of_me() {
+        let triggers: [fn(&mut Incoming); 3] = [
+            |incoming| incoming.signals.mentions_channel = true,
+            |incoming| incoming.signals.in_my_thread = true,
+            |incoming| incoming.signals.followed = true,
+        ];
+        for trigger in triggers {
+            let mut message = channel();
+            trigger(&mut message);
+            message.signals.hidden = true;
+            assert!(!channel_alerts(&message));
+        }
+        let mut mention = channel();
+        mention.signals.hidden = true;
+        mention.mentions_me = true;
+        assert!(channel_alerts(&mention));
+    }
+
+    #[test]
+    fn chats_ignore_channel_signals() {
+        assert!(channel_alerts(&group()));
+        assert!(channel_alerts(&incoming(ChatKind::Direct)));
     }
 
     #[test]
