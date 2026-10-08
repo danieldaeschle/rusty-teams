@@ -2,7 +2,8 @@ use crate::input::{DecoratedMode, EditorMode};
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{
-    App, Context, Font, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString, WeakEntity,
+    App, Context, Font, FontStyle, FontWeight, HighlightStyle, Hsla, Pixels, SharedString,
+    WeakEntity, px,
 };
 use ropey::Rope;
 use sum_tree::Bias;
@@ -18,6 +19,13 @@ pub enum RangeDecorationStyle {
     /// Draw a continuous one-pixel frame around the visual range.
     #[default]
     Frame,
+    /// A rounded box per visual row around the glyphs, e.g. an inline code pill.
+    Pill,
+    /// One rounded box across the full text width of every line whose start lies in
+    /// `range.start..=range.end`, e.g. a code block background.
+    Block,
+    /// A bar at the left edge of the lines a [`Self::Block`] would cover, e.g. a quote.
+    Bar,
 }
 
 /// A geometric decoration over a UTF-8 byte range.
@@ -26,6 +34,8 @@ pub struct RangeDecoration {
     range: Range<usize>,
     style: RangeDecorationStyle,
     color: Option<Hsla>,
+    border: Option<Hsla>,
+    radius: Pixels,
 }
 
 impl RangeDecoration {
@@ -35,6 +45,8 @@ impl RangeDecoration {
             range,
             style: RangeDecorationStyle::default(),
             color: None,
+            border: None,
+            radius: px(0.),
         }
     }
 
@@ -63,6 +75,26 @@ impl RangeDecoration {
     pub fn with_color(mut self, color: Hsla) -> Self {
         self.color = Some(color);
         self
+    }
+
+    /// A one-pixel border for [`RangeDecorationStyle::Pill`] and [`RangeDecorationStyle::Block`].
+    pub fn with_border(mut self, color: Hsla) -> Self {
+        self.border = Some(color);
+        self
+    }
+
+    /// Corner radius for pills and blocks; the width of a [`RangeDecorationStyle::Bar`].
+    pub fn with_radius(mut self, radius: Pixels) -> Self {
+        self.radius = radius;
+        self
+    }
+
+    pub fn border(&self) -> Option<Hsla> {
+        self.border
+    }
+
+    pub fn radius(&self) -> Pixels {
+        self.radius
     }
 }
 

@@ -7,9 +7,10 @@ use gpui::{
 };
 use gpui::{
     HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
-    LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement as _, Path, Pixels,
-    Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign, TextRun,
-    TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px, relative, size,
+    LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement as _, Path,
+    Pixels, Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign,
+    TextRun, TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px,
+    relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -830,6 +831,9 @@ impl<M: InputModeKind> TextElement<M> {
         }
         for decoration in state.extras.range_decorations(&visible_spans) {
             match decoration.style() {
+                RangeDecorationStyle::Pill
+                | RangeDecorationStyle::Block
+                | RangeDecorationStyle::Bar => {}
                 RangeDecorationStyle::Fill => {
                     let color = decoration
                         .color()
@@ -871,6 +875,92 @@ impl<M: InputModeKind> TextElement<M> {
             }
         }
         (fills, frames)
+    }
+
+    /// Rounded pills, blocks and bars, painted as quads with the fills.
+    fn layout_range_decoration_quads(
+        &self,
+        last_layout: &LastLayout,
+        bounds: &Bounds<Pixels>,
+        cx: &App,
+    ) -> Vec<PaintQuad> {
+        let state = self.state.read(cx);
+        let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
+        let text_end = state.text.len();
+        let mut visible_spans: Vec<Range<usize>> = Vec::new();
+        for (&offset, line) in last_layout
+            .visible_line_byte_offsets
+            .iter()
+            .zip(last_layout.lines.iter())
+        {
+            let end = (offset + line.len() + 1).min(last_layout.visible_range_offset.end);
+            if let Some(previous) = visible_spans.last_mut().filter(|span| span.end == offset) {
+                previous.end = end;
+            } else if offset < end {
+                visible_spans.push(offset..end);
+            }
+        }
+        let mut quads = Vec::new();
+        for decoration in state.extras.range_decorations(&visible_spans) {
+            let color = decoration
+                .color()
+                .unwrap_or(state.editor_style.foreground.opacity(0.12));
+            let border = decoration.border();
+            let radius = decoration.radius();
+            let range = decoration.range().clone();
+            match decoration.style() {
+                RangeDecorationStyle::Pill => {
+                    let Some(corners) = Self::layout_range_corners(&range, last_layout) else {
+                        continue;
+                    };
+                    for row in corners {
+                        let row_bounds = Bounds::from_corners(
+                            origin + row.top_left + point(-PILL_PADDING, px(1.)),
+                            origin + row.bottom_right + point(PILL_PADDING, px(-1.)),
+                        );
+                        quads.push(rounded_quad(row_bounds, radius, color, border));
+                    }
+                }
+                RangeDecorationStyle::Block | RangeDecorationStyle::Bar => {
+                    let mut top: Option<Pixels> = None;
+                    let mut bottom = px(0.);
+                    let mut y = last_layout.visible_top;
+                    for (&line_start, line) in last_layout
+                        .visible_line_byte_offsets
+                        .iter()
+                        .zip(last_layout.lines.iter())
+                    {
+                        let height =
+                            last_layout.line_height * line.wrapped_lines.len().max(1) as f32;
+                        let covered = range.contains(&line_start)
+                            || (line_start == range.end && range.end == text_end);
+                        if covered {
+                            top.get_or_insert(y);
+                            bottom = y + height;
+                        }
+                        y += height;
+                    }
+                    let Some(top) = top else {
+                        continue;
+                    };
+                    let width = match decoration.style() {
+                        RangeDecorationStyle::Bar => radius.max(px(1.)),
+                        _ => last_layout.content_width - last_layout.line_number_width,
+                    };
+                    let block_bounds = Bounds::from_corners(
+                        origin + point(px(0.), top),
+                        origin + point(width, bottom),
+                    );
+                    let corner = match decoration.style() {
+                        RangeDecorationStyle::Bar => px(0.),
+                        _ => radius,
+                    };
+                    quads.push(rounded_quad(block_bounds, corner, color, border));
+                }
+                RangeDecorationStyle::Fill | RangeDecorationStyle::Frame => {}
+            }
+        }
+        quads
     }
 
     fn layout_search_matches(
@@ -2303,6 +2393,7 @@ pub(super) struct PrepaintState {
     document_color_paths: Vec<(Path<Pixels>, Hsla)>,
     range_decoration_fills: Vec<(Path<Pixels>, Hsla)>,
     range_decoration_frames: Vec<(Path<Pixels>, Hsla)>,
+    range_decoration_quads: Vec<PaintQuad>,
     hover_definition_hitbox: Option<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
     /// The whole input, for deciding whether a long press started in it.
@@ -2373,6 +2464,24 @@ fn print_points_as_svg_path(
             println!("L{},{}", p.x.as_f32() as i32, p.y.as_f32() as i32);
         }
     }
+}
+
+const PILL_PADDING: Pixels = px(2.);
+
+fn rounded_quad(
+    bounds: Bounds<Pixels>,
+    radius: Pixels,
+    color: Hsla,
+    border: Option<Hsla>,
+) -> PaintQuad {
+    gpui::quad(
+        bounds,
+        radius,
+        color,
+        if border.is_some() { px(1.) } else { px(0.) },
+        border.unwrap_or(gpui::transparent_black()),
+        gpui::BorderStyle::default(),
+    )
 }
 
 fn frame_outline_points(corners: &[Corners<Point<Pixels>>]) -> Vec<Point<Pixels>> {
@@ -2895,6 +3004,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window.content_mask().bounds,
             cx,
         );
+        let range_decoration_quads = self.layout_range_decoration_quads(&last_layout, &bounds, cx);
 
         let state = self.state.read(cx);
         let line_numbers = if state.mode.line_number() {
@@ -2985,6 +3095,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             document_color_paths,
             range_decoration_fills,
             range_decoration_frames,
+            range_decoration_quads,
             indent_guides_path,
             fold_icon_layout,
             ghost_first_line,
@@ -3115,6 +3226,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
         }
 
         // Application decorations sit below the user's selection.
+        for quad in &prepaint.range_decoration_quads {
+            window.paint_quad(quad.clone());
+        }
         for (path, color) in &prepaint.range_decoration_fills {
             window.paint_path(path.clone(), *color);
         }
@@ -3712,6 +3826,64 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().size_full().child(self.0.clone())
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pills_blocks_and_bars_paint_as_quads_only() {
+        let platform = gpui_platform::current_platform(true);
+        let mut cx = TestAppContext::build_with_text_system(
+            gpui::TestDispatcher::new(0),
+            None,
+            platform.text_system(),
+        );
+        cx.update(crate::init);
+        let mut textarea = None;
+        let window = cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let state = cx.new(|cx| {
+                crate::input::TextareaState::new(window, cx)
+                    .rows(4)
+                    .default_value("ab\ncd\nef\n")
+            });
+            textarea = Some(state.clone());
+            TextareaHarness(state)
+        });
+        let textarea = textarea.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), &mut cx);
+        cx.update(|window, cx| {
+            textarea.update(cx, |state, cx| {
+                state.create_range_decorations_collection(
+                    vec![
+                        RangeDecoration::new(0..1)
+                            .with_style(RangeDecorationStyle::Pill)
+                            .with_radius(px(4.)),
+                        RangeDecoration::new(3..8).with_style(RangeDecorationStyle::Block),
+                        RangeDecoration::new(8..9)
+                            .with_style(RangeDecorationStyle::Bar)
+                            .with_radius(px(3.)),
+                    ],
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            let state = textarea.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let element = TextElement::new(textarea.clone());
+            let (fills, frames) = element.layout_range_decorations(
+                layout,
+                &state.input_bounds,
+                window,
+                state.input_bounds,
+                cx,
+            );
+            assert!(fills.is_empty() && frames.is_empty());
+            let quads = element.layout_range_decoration_quads(layout, &state.input_bounds, cx);
+            assert_eq!(quads.len(), 3);
+            let line_height = layout.line_height;
+            assert_eq!(quads[1].bounds.size.height, line_height * 2.);
+            assert_eq!(quads[2].bounds.size.width, px(3.));
+            assert_eq!(quads[2].bounds.size.height, line_height);
+        });
     }
 
     #[cfg(target_os = "linux")]

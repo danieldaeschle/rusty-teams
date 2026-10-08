@@ -1021,6 +1021,19 @@ impl<M: InputModeKind> InputBaseState<M> {
         });
     }
 
+    /// Apply `(byte range in the current text, replacement)` edits as one undo step.
+    pub fn apply_edits(
+        &mut self,
+        edits: &[(Range<usize>, String)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_edits_allowed(|this| {
+            this.undo_manager.set_pending_intent(EditIntent::Atomic);
+            this.replace_text_in_ranges(edits, window, cx);
+        });
+    }
+
     /// Replace text at the current cursor position.
     ///
     /// And the cursor will be moved to the end of replaced text.
