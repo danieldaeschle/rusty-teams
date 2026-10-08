@@ -474,7 +474,7 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 Some(url.as_str()),
                 out,
             ),
-            Span::Mention { name } => {
+            Span::Mention { name, .. } => {
                 let label = format!("@{}", name.trim_start_matches('@'));
                 out.push(
                     &label,
@@ -690,10 +690,14 @@ mod tests {
     #[test]
     fn mention_gets_an_at_sign_once() {
         let blocks = layout_blocks(&[
-            Span::Mention { name: "Ada".into() },
+            Span::Mention {
+                name: "Ada".into(),
+                id: None,
+            },
             text(" "),
             Span::Mention {
                 name: "@Bob".into(),
+                id: None,
             },
         ]);
         let Block::Paragraph(inline) = &blocks[0] else {

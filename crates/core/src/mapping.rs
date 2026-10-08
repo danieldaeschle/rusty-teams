@@ -263,6 +263,10 @@ fn mention_info(mention: &Mention) -> Option<MentionInfo> {
             .and_then(|sender| sender.user_id())
             .map(str::to_owned),
         name,
+        id: mention.id,
+        target_id: mentioned
+            .and_then(|sender| sender.target_id())
+            .map(str::to_owned),
     })
 }
 

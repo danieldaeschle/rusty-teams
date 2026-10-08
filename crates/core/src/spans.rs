@@ -16,6 +16,7 @@ pub enum Span {
     },
     Mention {
         name: String,
+        id: Option<String>,
     },
     Strike(Vec<Span>),
     Underline(Vec<Span>),
@@ -119,6 +120,7 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         "a" => push_link(element, spans),
         "at" => spans.push(Span::Mention {
             name: raw_text(element).trim().to_owned(),
+            id: element.value().attr("id").map(str::to_owned),
         }),
         "br" => spans.push(Span::LineBreak),
         "hr" => spans.push(Span::Rule),

@@ -1667,7 +1667,7 @@ impl SpanLines {
                 Span::Link { url, children } => {
                     self.walk(children, kind, &with(MarkKind::Link(url.clone())))
                 }
-                Span::Mention { name } => {
+                Span::Mention { name, .. } => {
                     self.append(&format!("@{}", name.trim_start_matches('@')), kind, marks)
                 }
                 Span::LineBreak | Span::Rule if !self.open || block_follows => {}

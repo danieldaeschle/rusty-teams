@@ -51,5 +51,5 @@ pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, QuoteInfo, ReactionInfo,
     attachments, can_delete, can_edit, copy_text, files, images, mentions, message_spans, quotes,
-    reactions,
+    reactions, user_mention_inputs,
 };

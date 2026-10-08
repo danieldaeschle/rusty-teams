@@ -16,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageRecord;
-use teams_core::{FileCard, ImageRef, MentionInput};
+use teams_core::{FileCard, ImageRef};
 
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
@@ -1924,13 +1924,7 @@ impl ConversationView {
             Some(Selection::Chat(_))
         );
         let mentions = if in_chat {
-            teams_core::mentions(&record)
-                .into_iter()
-                .filter_map(|mention| {
-                    let user_id = mention.user_id?;
-                    Some(MentionInput::user(&user_id, &mention.name))
-                })
-                .collect()
+            teams_core::user_mention_inputs(&record)
         } else {
             Vec::new()
         };

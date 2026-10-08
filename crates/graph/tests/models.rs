@@ -89,3 +89,15 @@ fn parses_channel_thread_with_replies() {
         Some("1800000000001")
     );
 }
+
+#[test]
+fn a_tag_mention_exposes_its_target_id_and_name() {
+    let message: Message = serde_json::from_str(
+        r#"{"id":"1","mentions":[{"id":0,"mentionText":"Tip","mentioned":{"tag":{"id":"T1","displayName":"Tip of the day"}}}]}"#,
+    )
+    .unwrap();
+    let mentioned = message.mentions[0].mentioned.as_ref().unwrap();
+    assert_eq!(mentioned.target_id(), Some("T1"));
+    assert_eq!(mentioned.display_name(), Some("Tip of the day"));
+    assert_eq!(mentioned.user_id(), None);
+}

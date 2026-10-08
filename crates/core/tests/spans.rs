@@ -49,7 +49,8 @@ fn mention_uses_the_visible_name() {
         html_to_spans(r#"<p><at id="0">Ada Example</at> please look</p>"#),
         vec![
             Span::Mention {
-                name: "Ada Example".to_owned()
+                name: "Ada Example".to_owned(),
+                id: Some("0".to_owned())
             },
             text(" please look")
         ]

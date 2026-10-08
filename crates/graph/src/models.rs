@@ -32,14 +32,23 @@ pub struct Identity {
 pub struct Sender {
     pub user: Option<Identity>,
     pub application: Option<Identity>,
+    pub tag: Option<Identity>,
+    pub conversation: Option<Identity>,
 }
 
 impl Sender {
     pub fn display_name(&self) -> Option<&str> {
-        [&self.user, &self.application]
+        [&self.user, &self.application, &self.tag, &self.conversation]
             .into_iter()
             .flatten()
             .find_map(|identity| identity.display_name.as_deref())
+    }
+
+    pub fn target_id(&self) -> Option<&str> {
+        [&self.user, &self.application, &self.tag, &self.conversation]
+            .into_iter()
+            .flatten()
+            .find_map(|identity| identity.id.as_deref())
     }
 
     pub fn user_id(&self) -> Option<&str> {

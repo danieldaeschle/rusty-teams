@@ -3,6 +3,7 @@ use scraper::{ElementRef, Html};
 use serde::{Deserialize, Serialize};
 use store::MessageRecord;
 
+use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
 
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
@@ -115,6 +116,10 @@ pub struct ReactionInfo {
 pub struct MentionInfo {
     pub user_id: Option<String>,
     pub name: String,
+    #[serde(default)]
+    pub id: Option<i64>,
+    #[serde(default)]
+    pub target_id: Option<String>,
 }
 
 pub fn attachments(record: &MessageRecord) -> Vec<AttachmentInfo> {
@@ -126,7 +131,13 @@ pub fn reactions(record: &MessageRecord) -> Vec<ReactionInfo> {
 }
 
 pub fn mentions(record: &MessageRecord) -> Vec<MentionInfo> {
-    serde_json::from_str(&record.mentions_json).unwrap_or_default()
+    let mut infos: Vec<MentionInfo> =
+        serde_json::from_str(&record.mentions_json).unwrap_or_default();
+    for (index, info) in infos.iter_mut().enumerate() {
+        info.id = info.id.or(i64::try_from(index).ok());
+        info.target_id = info.target_id.take().or_else(|| info.user_id.clone());
+    }
+    infos
 }
 
 pub fn quotes(record: &MessageRecord) -> Vec<QuoteInfo> {
@@ -302,7 +313,7 @@ fn push_plain(text: &mut String, spans: &[Span]) {
                 push_plain(text, children);
                 text.push('\n');
             }
-            Span::Mention { name } => {
+            Span::Mention { name, .. } => {
                 text.push('@');
                 text.push_str(name);
             }
@@ -385,7 +396,12 @@ fn leading_number(text: &str) -> Option<u32> {
 
 /// Body spans followed by the flattened text of adaptive-card attachments.
 pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
+    spans_with_mentions(record, &mentions(record))
+}
+
+fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
     let mut spans = html_to_spans(&record.body_html);
+    merge_split_mentions(&mut spans, infos);
     for card_text in attachments(record)
         .iter()
         .filter(|attachment| attachment.is_card())
@@ -402,6 +418,110 @@ pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
         }
     }
     spans
+}
+
+pub fn user_mention_inputs(record: &MessageRecord) -> Vec<MentionInput> {
+    let infos = mentions(record);
+    let mut inputs = Vec::new();
+    collect_user_mentions(&spans_with_mentions(record, &infos), &infos, &mut inputs);
+    inputs
+}
+
+fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec<MentionInput>) {
+    for span in spans {
+        match span {
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Heading { children, .. }
+            | Span::Quote(children)
+            | Span::BlockQuote(children)
+            | Span::Link { children, .. } => collect_user_mentions(children, infos, inputs),
+            Span::List { items, .. } => items
+                .iter()
+                .for_each(|item| collect_user_mentions(item, infos, inputs)),
+            Span::Table { rows, .. } => rows
+                .iter()
+                .flatten()
+                .for_each(|cell| collect_user_mentions(cell, infos, inputs)),
+            Span::Mention { name, id } => {
+                let parsed: Option<i64> = id.as_deref().and_then(|id| id.parse().ok());
+                let user_id = infos
+                    .iter()
+                    .find(|info| parsed.is_some() && info.id == parsed)
+                    .and_then(|info| info.user_id.as_deref());
+                if let Some(user_id) = user_id {
+                    inputs.push(MentionInput::user(user_id, name));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
+    let target_of = |id: &Option<String>| -> Option<String> {
+        let parsed: i64 = id.as_deref()?.parse().ok()?;
+        mentions
+            .iter()
+            .find(|info| info.id == Some(parsed))?
+            .target_id
+            .clone()
+    };
+    let mut merged: Vec<Span> = Vec::with_capacity(spans.len());
+    for mut span in std::mem::take(spans) {
+        match &mut span {
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Heading { children, .. }
+            | Span::Quote(children)
+            | Span::BlockQuote(children)
+            | Span::Link { children, .. } => merge_split_mentions(children, mentions),
+            Span::List { items, .. } => items
+                .iter_mut()
+                .for_each(|item| merge_split_mentions(item, mentions)),
+            Span::Table { rows, .. } => rows
+                .iter_mut()
+                .flatten()
+                .for_each(|cell| merge_split_mentions(cell, mentions)),
+            Span::Mention { name, id } => {
+                let continues = match merged.as_slice() {
+                    [
+                        ..,
+                        Span::Mention {
+                            id: previous_id, ..
+                        },
+                        Span::Text(gap),
+                    ] => {
+                        gap.trim().is_empty()
+                            && target_of(id).is_some()
+                            && target_of(previous_id) == target_of(id)
+                    }
+                    _ => false,
+                };
+                if continues {
+                    merged.pop();
+                    if let Some(Span::Mention {
+                        name: previous_name,
+                        ..
+                    }) = merged.last_mut()
+                    {
+                        previous_name.push(' ');
+                        previous_name.push_str(name);
+                    }
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        merged.push(span);
+    }
+    *spans = merged;
 }
 
 #[cfg(test)]
@@ -601,5 +721,108 @@ mod tests {
         );
         let stored = record("", &serde_json::to_string(&[info]).unwrap());
         assert_eq!(quotes(&stored).len(), 1);
+    }
+
+    fn with_mentions(body_html: &str, mentions_json: &str) -> MessageRecord {
+        let mut stored = record(body_html, "[]");
+        stored.mentions_json = mentions_json.to_owned();
+        stored
+    }
+
+    fn mention_names(spans: &[Span]) -> Vec<&str> {
+        spans
+            .iter()
+            .filter_map(|span| match span {
+                Span::Mention { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tag_mention_split_per_word_merges_into_one() {
+        let json = r#"[
+            {"user_id":null,"name":"Tip","id":0,"target_id":"T1"},
+            {"user_id":null,"name":"of","id":1,"target_id":"T1"},
+            {"user_id":null,"name":"the","id":2,"target_id":"T1"},
+            {"user_id":null,"name":"day","id":3,"target_id":"T1"}
+        ]"#;
+        let html = r#"<p>Hey <at id="0">Tip</at> <at id="1">of</at> <at id="2">the</at> <at id="3">day</at>!</p>"#;
+        let spans = message_spans(&with_mentions(html, json));
+        assert_eq!(mention_names(&spans), vec!["Tip of the day"]);
+        assert_eq!(
+            copy_text(&with_mentions(html, json)),
+            "Hey @Tip of the day!"
+        );
+    }
+
+    #[test]
+    fn a_two_word_user_name_merges_but_different_users_stay_apart() {
+        let json = r#"[
+            {"user_id":"U1","name":"Ada","id":0,"target_id":"U1"},
+            {"user_id":"U1","name":"Lovelace","id":1,"target_id":"U1"},
+            {"user_id":"U2","name":"Bob","id":2,"target_id":"U2"}
+        ]"#;
+        let html = r#"<at id="0">Ada</at> <at id="1">Lovelace</at> <at id="2">Bob</at>"#;
+        let spans = message_spans(&with_mentions(html, json));
+        assert_eq!(mention_names(&spans), vec!["Ada Lovelace", "Bob"]);
+    }
+
+    #[test]
+    fn different_users_next_to_each_other_stay_two_mentions() {
+        let json = r#"[
+            {"user_id":"U1","name":"Ada","id":0,"target_id":"U1"},
+            {"user_id":"U2","name":"Bob","id":1,"target_id":"U2"}
+        ]"#;
+        let html = r#"<at id="0">Ada</at> <at id="1">Bob</at>"#;
+        let spans = message_spans(&with_mentions(html, json));
+        assert_eq!(mention_names(&spans), vec!["Ada", "Bob"]);
+    }
+
+    #[test]
+    fn nested_split_mentions_merge() {
+        let json = r#"[
+            {"user_id":"U1","name":"Ada","id":0,"target_id":"U1"},
+            {"user_id":"U1","name":"Lovelace","id":1,"target_id":"U1"}
+        ]"#;
+        let html = r#"<b><at id="0">Ada</at> <at id="1">Lovelace</at></b>"#;
+        let spans = message_spans(&with_mentions(html, json));
+        let [Span::Bold(children)] = spans.as_slice() else {
+            panic!("bold expected: {spans:?}")
+        };
+        assert_eq!(mention_names(children), vec!["Ada Lovelace"]);
+    }
+
+    #[test]
+    fn old_mention_json_without_ids_merges_users_by_position() {
+        let json = r#"[{"user_id":"U1","name":"Ada"},{"user_id":"U1","name":"Lovelace"},{"user_id":null,"name":"Tip"},{"user_id":null,"name":"day"}]"#;
+        let html = r#"<at id="0">Ada</at> <at id="1">Lovelace</at> <at id="2">Tip</at> <at id="3">day</at>"#;
+        let stored = with_mentions(html, json);
+        let parsed = mentions(&stored);
+        assert_eq!(
+            (parsed[1].id, parsed[1].target_id.as_deref()),
+            (Some(1), Some("U1"))
+        );
+        assert_eq!(
+            mention_names(&message_spans(&stored)),
+            vec!["Ada Lovelace", "Tip", "day"]
+        );
+    }
+
+    #[test]
+    fn edit_mentions_follow_the_merged_names() {
+        let json = r#"[
+            {"user_id":"U1","name":"Ada","id":0,"target_id":"U1"},
+            {"user_id":"U1","name":"Lovelace","id":1,"target_id":"U1"},
+            {"user_id":"U2","name":"Bob","id":2,"target_id":"U2"}
+        ]"#;
+        let html = r#"<at id="0">Ada</at> <at id="1">Lovelace</at> and <at id="2">Bob</at>"#;
+        assert_eq!(
+            user_mention_inputs(&with_mentions(html, json)),
+            vec![
+                MentionInput::user("U1", "Ada Lovelace"),
+                MentionInput::user("U2", "Bob"),
+            ]
+        );
     }
 }
