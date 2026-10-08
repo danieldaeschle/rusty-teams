@@ -18,6 +18,7 @@ use super::settings_view::SettingsView;
 use super::stack::{
     FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
+use super::text::describe;
 use super::toast::{PillView, ToastView};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{self, Directory, PresenceKind};
@@ -308,7 +309,10 @@ impl NotificationCenter {
             .stack
             .visible()
             .iter()
-            .map(|toast| layout::toast_height(toast, self.settings.preview))
+            .map(|toast| {
+                let lines = preview_lines(&describe(toast, self.settings.preview).preview, cx);
+                layout::toast_height(toast, lines)
+            })
             .collect();
         let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
         let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
@@ -781,6 +785,21 @@ fn open_popup<V: Render>(
     });
 }
 
+fn preview_lines(text: &str, cx: &App) -> usize {
+    let mut wrapper = cx
+        .text_system()
+        .line_wrapper(font(crate::theme::font_family()), px(layout::PREVIEW_SIZE));
+    text.split('\n')
+        .map(|line| {
+            let fragments = [LineFragment::text(line)];
+            wrapper
+                .wrap_line(&fragments, px(layout::PREVIEW_WIDTH), IndentAdjustment::NoIndent)
+                .count()
+                + 1
+        })
+        .sum()
+}
+
 fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
     let scale = area.scale;
     let bounds = Bounds::new(
@@ -898,7 +917,7 @@ fn demo_incoming() -> Vec<Incoming> {
 mod tests {
     use store::{ChannelRecord, ChatRecord, SidebarTeam, TeamRecord};
 
-    use super::{selection_for, unread_summary};
+    use super::{preview_lines, selection_for, unread_summary};
     use crate::app_state::Selection;
     use store::Sidebar;
 
@@ -953,5 +972,15 @@ mod tests {
             Some(Selection::Channel("ch".into()))
         );
         assert_eq!(selection_for(&sidebar(), "x"), None);
+    }
+
+    #[gpui_kit::test]
+    fn preview_lines_follow_the_wrapped_text(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            assert_eq!(preview_lines("ok", cx), 1);
+            assert_eq!(preview_lines("a\nb", cx), 2);
+            let long = "Cristina: ok, thanks for the info! I think not now ".repeat(3);
+            assert!(preview_lines(&long, cx) >= 2);
+        });
     }
 }

@@ -9,7 +9,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::center::NotificationCenter;
-use super::layout::{ACTION_BUTTON, SEND_BUTTON};
+use super::layout::{
+    ACTION_BUTTON, AVATAR_GAP, AVATAR_SIZE, MENTION_BORDER, PREVIEW_MAX_LINES, PREVIEW_SIZE,
+    SEND_BUTTON, TOAST_PADDING,
+};
 use super::platform;
 use super::rules::ChatKind;
 use super::stack::{ReplyState, ToastModel};
@@ -20,9 +23,7 @@ use crate::views::composer::submitted_text;
 use crate::views::widgets::symbol;
 use crate::theme;
 
-const AVATAR_SIZE: f32 = 40.;
 const CLOSE_SIZE: f32 = 24.;
-const TOAST_BORDER_MENTION: f32 = 2.;
 const TOAST_RADIUS: f32 = 12.;
 
 pub struct ToastView {
@@ -163,10 +164,10 @@ fn highlighted_preview(text: &str, mention: bool) -> AnyElement {
         styled = styled.with_highlights(highlights);
     }
     div()
-        .text_size(px(13.))
+        .text_size(px(PREVIEW_SIZE))
         .line_height(px(18.))
         .text_color(theme::text())
-        .line_clamp(2)
+        .line_clamp(PREVIEW_MAX_LINES)
         .child(styled)
         .into_any_element()
 }
@@ -492,7 +493,7 @@ impl Render for ToastView {
         } else {
             theme::border_strong()
         };
-        let border_width = if mention { TOAST_BORDER_MENTION } else { 1. };
+        let border_width = if mention { MENTION_BORDER } else { 1. };
         let hovered = model.hovered;
         let content = match model.reply {
             ReplyState::Sent | ReplyState::Failed => self.confirmation(&model, cx),
@@ -501,7 +502,7 @@ impl Render for ToastView {
                 .child(
                     h_flex()
                         .w_full()
-                        .gap(px(12.))
+                        .gap(px(AVATAR_GAP))
                         .items_start()
                         .child(self.avatar(&model, fill, cx))
                         .child(self.body(&model, &text, true)),
@@ -512,7 +513,7 @@ impl Render for ToastView {
                 .child(
                     h_flex()
                         .w_full()
-                        .gap(px(12.))
+                        .gap(px(AVATAR_GAP))
                         .items_start()
                         .child(self.avatar(&model, fill, cx))
                         .child(self.body(&model, &text, hovered)),
@@ -549,7 +550,7 @@ impl Render for ToastView {
                     this.center.update(cx, |center, cx| center.dismiss(id, cx));
                 }
             }))
-            .child(div().size_full().p(px(12.)).child(content))
+            .child(div().size_full().p(px(TOAST_PADDING)).child(content))
             .into_any_element()
     }
 }

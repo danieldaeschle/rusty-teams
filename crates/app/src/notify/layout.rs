@@ -1,5 +1,5 @@
 use super::platform::WorkArea;
-use super::rules::{Corner, Preview};
+use super::rules::Corner;
 use super::stack::{ReplyState, ToastModel};
 
 pub const TOAST_WIDTH: f32 = 360.;
@@ -11,7 +11,14 @@ pub const ACTION_BUTTON: f32 = 28.;
 pub const SEND_BUTTON: f32 = 32.;
 const BASE_HEIGHT: f32 = 62.;
 const PREVIEW_LINE: f32 = 18.;
-const CHARS_PER_LINE: usize = 40;
+pub const PREVIEW_SIZE: f32 = 13.;
+pub const PREVIEW_MAX_LINES: usize = 2;
+pub const TOAST_PADDING: f32 = 12.;
+pub const AVATAR_SIZE: f32 = 40.;
+pub const AVATAR_GAP: f32 = 12.;
+pub const MENTION_BORDER: f32 = 2.;
+pub const PREVIEW_WIDTH: f32 =
+    TOAST_WIDTH - 2. * (TOAST_PADDING + MENTION_BORDER) - AVATAR_SIZE - AVATAR_GAP;
 const ACTION_ROW_SPACING: f32 = 4.;
 const REPLY_FIELD_FRAME: f32 = 14.;
 const REPLY_HINT_ROW: f32 = 20.;
@@ -26,15 +33,8 @@ pub struct Slot {
     pub height: i32,
 }
 
-fn preview_lines(model: &ToastModel, preview_on: bool) -> usize {
-    match (&model.preview, preview_on) {
-        (Preview::Text(text), true) => text.chars().count().div_ceil(CHARS_PER_LINE).clamp(1, 2),
-        _ => 1,
-    }
-}
-
-pub fn toast_height(model: &ToastModel, preview_on: bool) -> f32 {
-    let base = BASE_HEIGHT + preview_lines(model, preview_on) as f32 * PREVIEW_LINE;
+pub fn toast_height(model: &ToastModel, preview_lines: usize) -> f32 {
+    let base = BASE_HEIGHT + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
     match model.reply {
         ReplyState::Sent | ReplyState::Failed => CONFIRM_HEIGHT,
         ReplyState::Open => {
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn heights_stay_in_board_range() {
-        use super::super::rules::ChatKind;
+        use super::super::rules::{ChatKind, Preview};
         use super::super::stack::{ReplyState, ToastTimer};
         let model = |text: &str| ToastModel {
             id: 1,
@@ -175,10 +175,9 @@ mod tests {
             dismissed: false,
             fade: super::super::stack::Fade::shown(std::time::Instant::now()),
         };
-        let short = toast_height(&model("Hi"), true);
-        let long = toast_height(&model(&"x".repeat(200)), true);
-        assert_eq!(short, 112.);
-        assert_eq!(long, 130.);
-        assert_eq!(toast_height(&model(&"x".repeat(200)), false), short);
+        assert_eq!(toast_height(&model("Hi"), 1), 112.);
+        assert_eq!(toast_height(&model("Hi"), 2), 130.);
+        assert_eq!(toast_height(&model("Hi"), 5), 130.);
+        assert_eq!(toast_height(&model("Hi"), 0), 112.);
     }
 }
