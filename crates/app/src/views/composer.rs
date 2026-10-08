@@ -10,8 +10,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, h_flex,
     input::{
-        Backspace, Copy, Cut, Enter, Escape, IndentInline, InlineToken, InputContent, InputEvent,
-        InputState, MoveDown, MoveUp, OutdentInline, RangeDecorationCollection, Redo,
+        Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, InlineToken, InputContent,
+        InputEvent, InputState, MoveDown, MoveUp, OutdentInline, RangeDecorationCollection, Redo,
         TextDecorationCollection, Textarea, TextareaMode, TextareaState, Undo,
     },
     tooltip::Tooltip,
@@ -187,6 +187,7 @@ struct Conversion {
 struct LinkEditor {
     range: Range<usize>,
     field: Entity<InputState>,
+    refused: bool,
 }
 
 type DraftDecorations = (
@@ -425,6 +426,8 @@ impl Composer {
             self.refresh_style(cx);
             return;
         }
+        self.format_undo.clear();
+        self.format_redo.clear();
         if replaying && let Some(snapshot) = self.snapshot_for(&value) {
             self.draft = snapshot;
             self.pending_style = None;
@@ -556,6 +559,10 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !edits.is_empty() {
+            self.format_undo.clear();
+            self.format_redo.clear();
+        }
         self.input.update(cx, |state, cx| {
             let edited = !edits.is_empty();
             if edited {
@@ -816,7 +823,11 @@ impl Composer {
             state.focus(window, cx);
             state.select_all(window, cx);
         });
-        self.link_editor = Some(LinkEditor { range, field });
+        self.link_editor = Some(LinkEditor {
+            range,
+            field,
+            refused: false,
+        });
         cx.notify();
     }
 
@@ -830,7 +841,11 @@ impl Composer {
         } else if let Some(url) = link_url(&typed) {
             url
         } else {
-            self.link_editor = Some(editor);
+            self.link_editor = Some(LinkEditor {
+                refused: true,
+                ..editor
+            });
+            cx.notify();
             return;
         };
         self.focus(window, cx);
@@ -890,6 +905,20 @@ impl Composer {
         }
     }
 
+    fn delete_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        if !selection.is_empty() {
+            return false;
+        }
+        match self.draft.delete_forward(selection.start) {
+            Some(cursor) => {
+                self.commit(Some(cursor), window, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
     fn indent(&mut self, outdent: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let selection = self.selection(cx);
         if !self.draft.indent(selection, outdent) {
@@ -901,12 +930,10 @@ impl Composer {
 
     fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
         let selection = self.selection(cx);
-        let Some(text) = self.draft.text().get(selection.clone()).map(str::to_owned) else {
-            return false;
-        };
-        if text.is_empty() {
+        if selection.is_empty() || self.draft.text().get(selection.clone()).is_none() {
             return false;
         }
+        let text = self.draft.plain_slice(selection.clone());
         let lines = self.draft.slice(selection);
         cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
             text.clone(),
@@ -1678,6 +1705,7 @@ impl Composer {
                 placement,
                 format_toolbar::Mode::Link {
                     field: &editor.field,
+                    refused: editor.refused,
                     on_apply: Rc::new(move |window, cx| {
                         composer
                             .update(cx, |this, cx| this.apply_link(window, cx))
@@ -2018,6 +2046,11 @@ impl Render for Composer {
                 if this.link_editor.is_none()
                     && (this.undo_conversion(window, cx) || this.backspace_at_start(window, cx))
                 {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Delete, window, cx| {
+                if this.link_editor.is_none() && this.delete_forward(window, cx) {
                     cx.stop_propagation();
                 }
             }))
@@ -2490,12 +2523,61 @@ mod tests {
             assert!(typist.draft().marks().is_empty());
             typist.press("ctrl-y");
             assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
-            typist.press("end");
+        }
+
+        #[gpui_kit::test]
+        fn undo_after_typing_undoes_the_typing_not_an_older_bold(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("shift-left shift-left ctrl-b end");
             typist.type_text(" x");
-            typist.press("ctrl-z");
+            typist.press("backspace backspace");
             assert_eq!(typist.value(), "hello");
-            assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
             typist.press("ctrl-z");
+            assert_ne!(typist.value(), "hello");
+            assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
+        }
+
+        #[gpui_kit::test]
+        fn delete_at_a_code_line_end_joins_without_padding(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("```");
+            typist.press("enter");
+            typist.type_text("a");
+            typist.press("enter");
+            typist.type_text("b");
+            typist.press("up end delete");
+            assert_eq!(typist.outgoing().html(), "<pre>ab</pre>");
+        }
+
+        #[gpui_kit::test]
+        fn copied_code_has_no_padding_in_the_plain_text(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("```");
+            typist.press("enter");
+            typist.type_text("  x");
+            typist.press("ctrl-a ctrl-c");
+            let text = typist.cx.read_from_clipboard().and_then(|item| item.text());
+            assert_eq!(text.as_deref(), Some("  x"));
+        }
+
+        #[gpui_kit::test]
+        fn a_refused_link_keeps_the_field_open_and_says_why(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("docs");
+            typist.press("ctrl-a ctrl-k");
+            typist.type_text("javascript:alert(1)");
+            typist.press("enter");
+            let composer = typist.composer.clone();
+            assert!(typist.cx.update(|cx| {
+                composer
+                    .read(cx)
+                    .link_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.refused)
+            }));
             assert!(typist.draft().marks().is_empty());
         }
 
@@ -2517,7 +2599,7 @@ mod tests {
                 .cx
                 .write_to_clipboard(gpui_kit::ClipboardItem::new_string("**x**".to_owned()));
             typist.press("ctrl-v");
-            assert_eq!(typist.value(), "   :) **x**");
+            assert_eq!(typist.value(), "\u{2003}:) **x**");
             let composer = typist.composer.clone();
             assert!(
                 typist

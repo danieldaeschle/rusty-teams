@@ -124,6 +124,7 @@ pub enum Mode<'a> {
     },
     Link {
         field: &'a Entity<InputState>,
+        refused: bool,
         on_apply: ApplyHandler,
     },
 }
@@ -193,8 +194,8 @@ fn bar(state: &dyn Fn(FormatButton) -> FormatState, on_press: PressHandler) -> D
     row
 }
 
-fn link_editor(field: &Entity<InputState>, on_apply: ApplyHandler) -> Div {
-    h_flex()
+fn link_editor(field: &Entity<InputState>, refused: bool, on_apply: ApplyHandler) -> Div {
+    let row = h_flex()
         .gap(px(BUTTON_GAP * 2.))
         .items_center()
         .child(
@@ -203,7 +204,11 @@ fn link_editor(field: &Entity<InputState>, on_apply: ApplyHandler) -> Div {
                 .h(px(BUTTON))
                 .rounded(px(6.))
                 .border_1()
-                .border_color(theme::accent())
+                .border_color(if refused {
+                    theme::red()
+                } else {
+                    theme::accent()
+                })
                 .bg(theme::surface())
                 .child(Input::new(field).appearance(false).bordered(false)),
         )
@@ -228,7 +233,17 @@ fn link_editor(field: &Entity<InputState>, on_apply: ApplyHandler) -> Div {
                     cx.stop_propagation();
                 })
                 .on_click(move |_, window, cx| on_apply(window, cx)),
+        );
+    v_flex().child(row).when(refused, |editor| {
+        editor.child(
+            div()
+                .pt(px(4.))
+                .px(px(2.))
+                .text_size(px(11.5))
+                .text_color(theme::red_soft())
+                .child("Only http, https and mailto links"),
         )
+    })
 }
 
 fn arrow(offset: Pixels) -> impl IntoElement {
@@ -261,7 +276,11 @@ fn arrow(offset: Pixels) -> impl IntoElement {
 pub fn render(placement: Placement, mode: Mode<'_>) -> AnyElement {
     let content = match mode {
         Mode::Bar { state, on_press } => bar(state, on_press),
-        Mode::Link { field, on_apply } => link_editor(field, on_apply),
+        Mode::Link {
+            field,
+            refused,
+            on_apply,
+        } => link_editor(field, refused, on_apply),
     };
     deferred(
         anchored()

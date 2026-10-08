@@ -12,7 +12,7 @@ const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
 const INDENT: &str = "\u{2003}\u{2003}";
 const QUOTE_MARKER: &str = "\u{2003}";
-const CODE_MARKER: &str = "   ";
+const CODE_MARKER: &str = "\u{2003}";
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 const FENCE: &str = "```";
 const MARKDOWN_INDENT: usize = 2;
@@ -652,6 +652,67 @@ impl Draft {
         }
     }
 
+    /// Forward Delete next to a marker: at a line end it joins the next line without its
+    /// marker; inside a marker it deletes the first character of the content instead.
+    pub fn delete_forward(&mut self, cursor: usize) -> Option<usize> {
+        self.journal = Journal::default();
+        let index = self.line_at(cursor);
+        let line = self.line_ranges()[index].clone();
+        let content = self.content_range(index);
+        if cursor >= line.start && cursor < content.start {
+            let next = self.text[content.start..]
+                .chars()
+                .next()
+                .filter(|character| *character != '\n');
+            match next {
+                Some(character) => {
+                    self.splice(content.start..content.start + character.len_utf8(), "", &[]);
+                }
+                None if index + 1 < self.lines.len() => {
+                    let next_content = self.content_range(index + 1);
+                    self.splice(content.end..next_content.start, "", &[]);
+                }
+                None => return Some(content.start),
+            }
+            return Some(self.repair(content.start));
+        }
+        if cursor != line.end || index + 1 >= self.lines.len() {
+            return None;
+        }
+        let next_marker = self.marker_range(index + 1);
+        if next_marker.is_empty() {
+            return None;
+        }
+        self.splice(cursor..next_marker.end, "", &[]);
+        Some(self.repair(cursor))
+    }
+
+    /// The text of `range` without list, quote and code markers in front of whole lines
+    /// and without code padding, for the plain clipboard.
+    pub fn plain_slice(&self, range: Range<usize>) -> String {
+        let mut plain = String::with_capacity(range.len());
+        for (index, line) in self.line_ranges().into_iter().enumerate() {
+            if line.end < range.start || line.start > range.end {
+                continue;
+            }
+            let marker = self.marker_range(index);
+            let skip_marker = matches!(self.lines[index], LineKind::Code(_));
+            let start = if skip_marker {
+                range.start.max(marker.end)
+            } else {
+                range.start.max(line.start)
+            };
+            let end = range.end.min(line.end);
+            if start < end {
+                plain.push_str(&self.text[start..end]);
+            }
+            if line.end < range.end && line.end < self.text.len() {
+                plain.push('\n');
+            }
+        }
+        plain
+    }
+
     /// Backspace at the start of a formatted line drops (or lifts) its format.
     pub fn backspace_at_start(&mut self, cursor: usize) -> Option<usize> {
         self.journal = Journal::default();
@@ -1117,6 +1178,23 @@ impl Draft {
         }
     }
 
+    /// Padding merged into a code line's content by a join or a cross-line delete.
+    fn drop_stray_padding(&mut self, index: usize, mut cursor: usize) -> usize {
+        loop {
+            let content = self.content_range(index);
+            let Some(offset) = self.text[content.clone()].find(CODE_MARKER) else {
+                return cursor;
+            };
+            let stray = content.start + offset..content.start + offset + CODE_MARKER.len();
+            self.splice(stray.clone(), "", &[]);
+            if cursor >= stray.end {
+                cursor -= CODE_MARKER.len();
+            } else if cursor > stray.start {
+                cursor = stray.start;
+            }
+        }
+    }
+
     /// Lines whose marker was edited away become text; numbered items are renumbered; code
     /// lines get their padding back.
     fn repair(&mut self, mut cursor: usize) -> usize {
@@ -1126,10 +1204,11 @@ impl Draft {
                 continue;
             }
             if matches!(kind, LineKind::Code(_)) {
-                let start = self.line_ranges()[index].start;
-                if !self.text[start..].starts_with(CODE_MARKER) {
-                    cursor = self.replace_marker(start..start, CODE_MARKER, cursor);
+                let line = self.line_ranges()[index].clone();
+                if !self.text[line.start..].starts_with(CODE_MARKER) {
+                    cursor = self.replace_marker(line.start..line.start, CODE_MARKER, cursor);
                 }
+                cursor = self.drop_stray_padding(index, cursor);
                 continue;
             }
             let line = self.line_ranges()[index].clone();
@@ -1244,15 +1323,16 @@ pub fn link_url(text: &str) -> Option<String> {
     if LINK_SCHEMES.iter().any(|scheme| lower.starts_with(scheme)) {
         return Some(text.to_owned());
     }
-    let scheme = text
-        .split_once(':')
-        .map(|(scheme, _)| scheme)
-        .filter(|scheme| {
-            scheme.starts_with(|character: char| character.is_ascii_alphabetic())
-                && scheme
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || "+.-".contains(character))
-        });
+    let scheme = text.split_once(':').filter(|(scheme, rest)| {
+        let host_and_port = scheme.contains('.')
+            || scheme.eq_ignore_ascii_case("localhost")
+            || rest.starts_with(|character: char| character.is_ascii_digit());
+        !host_and_port
+            && scheme.starts_with(|character: char| character.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "+.-".contains(character))
+    });
     scheme.is_none().then(|| format!("https://{text}"))
 }
 
@@ -2133,6 +2213,60 @@ mod tests {
         assert!(draft.in_code(3));
         assert!(!draft.in_code(4));
         assert!(draft.in_code(draft.text().len()));
+    }
+
+    #[test]
+    fn code_indentation_is_kept_on_paste_split_and_send() {
+        let mut draft = typed_draft("```py");
+        let cursor = draft.break_line(draft.text().len(), false).unwrap();
+        let pasted = "def f():\n    return 1";
+        let mut next = draft.text().to_owned();
+        next.insert_str(cursor, pasted);
+        draft.apply_edit(&next, cursor + pasted.len(), None);
+        assert_eq!(
+            draft.to_html(),
+            "<pre class=\"language-py\">def f():\n    return 1</pre>"
+        );
+        let mut split = Draft::from_markdown("```\n   a    b\n```");
+        let after_a = CODE_MARKER.len() + "   a".len();
+        split.break_line(after_a, false).unwrap();
+        assert_eq!(split.to_html(), "<pre>   a\n    b</pre>");
+    }
+
+    #[test]
+    fn delete_never_moves_padding_into_code() {
+        let mut draft = Draft::from_markdown("```\nlet a = 1;\nlet b = 2;\n```");
+        let end_of_first = draft.line_ranges()[0].end;
+        assert_eq!(draft.delete_forward(end_of_first), Some(end_of_first));
+        assert_eq!(draft.to_html(), "<pre>let a = 1;let b = 2;</pre>");
+        let cursor = draft.delete_forward(0).unwrap();
+        assert_eq!(cursor, CODE_MARKER.len());
+        assert_eq!(draft.to_html(), "<pre>et a = 1;let b = 2;</pre>");
+        let mut selected = Draft::from_markdown("```\nx = 1\ny = 2\n```");
+        let second = selected.line_ranges()[1].start;
+        let mut next = selected.text().to_owned();
+        next.replace_range(0..second + CODE_MARKER.len(), "");
+        selected.apply_edit(&next, 0, None);
+        assert_eq!(selected.to_html(), "<pre>y = 2</pre>");
+    }
+
+    #[test]
+    fn plain_copies_leave_code_padding_out() {
+        let draft = Draft::from_markdown("```\n  a\nb\n```");
+        assert_eq!(draft.plain_slice(0..draft.text().len()), "  a\nb");
+    }
+
+    #[test]
+    fn host_and_port_links_are_schemeless() {
+        assert_eq!(
+            link_url("localhost:3000"),
+            Some("https://localhost:3000".into())
+        );
+        assert_eq!(
+            link_url("example.com:8080/x"),
+            Some("https://example.com:8080/x".into())
+        );
+        assert_eq!(link_url("javascript:alert(1)"), None);
     }
 
     #[test]
