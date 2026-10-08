@@ -1,6 +1,6 @@
 use chrono::{DateTime, Local, NaiveDate, Offset};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::Sidebar;
@@ -20,6 +20,7 @@ const PANEL_MARGIN: f32 = 8.;
 const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 28.;
+const MARK_READ_SIZE: f32 = 24.;
 const FILTER_KEY: &str = "activity_filter";
 
 pub enum ActivityPanelEvent {
@@ -189,6 +190,7 @@ impl ActivityPanel {
         offset: chrono::FixedOffset,
         panel: Entity<ActivityPanel>,
     ) -> AnyElement {
+        let activity = self.activity.clone();
         let id = entry.id;
         let unread = !entry.read;
         let actor = entry.latest_actor();
@@ -198,8 +200,10 @@ impl ActivityPanel {
             actor.map_or("", |actor| actor.name.as_str()),
             AVATAR_SIZE,
         );
+        let group = SharedString::from(format!("activity-row-group-{id}"));
         h_flex()
             .id(ElementId::Name(format!("activity-row-{id}").into()))
+            .group(group.clone())
             .mx(px(6.))
             .px(px(6.))
             .py(px(8.))
@@ -253,22 +257,62 @@ impl ActivityPanel {
                 v_flex()
                     .flex_none()
                     .items_end()
-                    .gap(px(6.))
+                    .gap(px(2.))
                     .child(
                         div()
                             .text_size(px(11.))
                             .text_color(theme::text_muted())
                             .child(format::list_time_label(entry.updated_at, today, offset)),
                     )
-                    .child(if unread {
-                        dot(8.)
-                    } else {
-                        div().size(px(8.)).flex_none()
-                    }),
+                    .child(status_slot(id, unread, group, activity)),
             )
             .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open(id, cx)))
             .into_any_element()
     }
+}
+
+fn status_slot(
+    id: i64,
+    unread: bool,
+    group: SharedString,
+    activity: Entity<ActivityCenter>,
+) -> Div {
+    let slot = div()
+        .h(px(MARK_READ_SIZE))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_end();
+    if !unread {
+        return slot;
+    }
+    slot.child(
+        div()
+            .flex()
+            .group_hover(group.clone(), |wrapper| wrapper.hidden())
+            .child(dot(8.)),
+    )
+    .child(
+        div()
+            .id(ElementId::Name(format!("activity-mark-read-{id}").into()))
+            .hidden()
+            .group_hover(group, |button| button.flex())
+            .size(px(MARK_READ_SIZE))
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(theme::border_strong())
+            .bg(theme::surface_raised())
+            .cursor_pointer()
+            .child(icon(IconName::Check, 14., theme::text()))
+            .tooltip(|window, cx| Tooltip::new("Mark as read").build(window, cx))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                activity.update(cx, |activity, cx| activity.mark_read(id, cx));
+            }),
+    )
 }
 
 fn kind_marker(entry: &Entry) -> Div {
