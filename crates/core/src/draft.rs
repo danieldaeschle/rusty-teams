@@ -618,6 +618,7 @@ impl Draft {
             LineKind::Quote if !shift => None,
             LineKind::Quote => {
                 self.splice(cursor..cursor, "\n", &[]);
+                self.lines[index] = LineKind::Quote;
                 self.lines[index + 1] = LineKind::Quote;
                 Some(cursor + 1)
             }
@@ -699,10 +700,12 @@ impl Draft {
                     cursor
                 })
             }
-            LineKind::Quote => (cursor == line.start).then(|| {
+            LineKind::Quote
+                if cursor == line.start && (index == 0 || self.lines[index - 1] != kind) =>
+            {
                 self.lines[index] = LineKind::Text;
-                cursor
-            }),
+                Some(cursor)
+            }
             _ if cursor == line.start && index > 0 => {
                 self.splice(line.start - 1..content.start, "", &[]);
                 Some(self.repair(line.start - 1))
@@ -1316,6 +1319,10 @@ fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> 
         }
     }
     None
+}
+
+pub fn changed_span(old: &str, new: &str) -> (usize, usize, usize) {
+    edit_span(old, new, new.len())
 }
 
 fn edit_span(old: &str, new: &str, cursor: usize) -> (usize, usize, usize) {
@@ -2188,6 +2195,26 @@ mod tests {
         );
         assert_eq!(link_url("javascript:alert(1)"), None);
         assert_eq!(link_url("tel:0123456"), None);
+    }
+
+    #[test]
+    fn a_quote_stays_a_quote_when_split_or_joined() {
+        let mut draft = Draft::from_markdown("> a\n> b");
+        let second = draft.line_ranges()[1].start;
+        assert_eq!(draft.break_line(second, true), Some(second + 1));
+        assert_eq!(
+            draft.lines(),
+            [LineKind::Quote, LineKind::Quote, LineKind::Quote]
+        );
+        let mut joined = Draft::from_markdown("> a\n> b");
+        let second = joined.line_ranges()[1].start;
+        assert_eq!(joined.backspace_at_start(second), Some(second - 1));
+        assert_eq!(
+            (joined.text(), joined.lines()),
+            ("ab", &[LineKind::Quote][..])
+        );
+        assert_eq!(joined.backspace_at_start(0), Some(0));
+        assert_eq!(joined.lines(), [LineKind::Text]);
     }
 
     #[test]

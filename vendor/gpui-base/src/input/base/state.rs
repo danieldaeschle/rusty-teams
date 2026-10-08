@@ -8822,6 +8822,28 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_line_indent_without_marker_wraps_rows_at_the_indent_not_at_leading_spaces(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let text = format!("        {}", "word ".repeat(200));
+        let view = InputView::build_textarea(cx, move |state| state.rows(4).default_value(text));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|_, cx| {
+            view.input
+                .update(cx, |state, cx| state.set_line_indents(vec![(0, px(10.))], cx))
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        view.input.read_with(&visual, |state, _| {
+            let line = &state.last_layout.as_ref().unwrap().lines[0];
+            assert!(line.wrapped_lines.len() > 1);
+            assert_eq!(line.wrap_indent, px(0.));
+            assert_eq!(line.line_indent(1), px(10.));
+            assert!(line.wrapped_lines[1].len > 20);
+        });
+    }
+
+    #[gpui::test]
     fn test_editor_decorations_follow_typing(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);

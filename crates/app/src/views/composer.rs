@@ -21,8 +21,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
-    MentionCandidate, MentionInput, MessageExtras, TypingStyle, UploadedFile, has_markdown,
-    link_url, map_offset, reverse_edits,
+    MentionCandidate, MentionInput, MessageExtras, TypingStyle, UploadedFile, changed_span,
+    has_markdown, link_url, map_offset, reverse_edits,
 };
 
 use super::attachment_tray::{
@@ -186,8 +186,8 @@ struct Conversion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepKind {
-    Typing { after_space: bool },
-    Deleting,
+    Typing { at: usize, after_space: bool },
+    Deleting { start: usize, end: usize },
     Other,
 }
 
@@ -308,6 +308,7 @@ fn candidate_subtitle(candidate: &MentionCandidate) -> String {
 fn step_kind(previous: &str, value: &str, cursor: usize) -> StepKind {
     if let Some(typed) = emoji::typed_char(previous, value, cursor).filter(|typed| *typed != '\n') {
         return StepKind::Typing {
+            at: cursor - typed.len_utf8(),
             after_space: typed.is_whitespace(),
         };
     }
@@ -320,9 +321,29 @@ fn step_kind(previous: &str, value: &str, cursor: usize) -> StepKind {
         && previous.get(..cursor) == value.get(..cursor)
         && previous.get(cursor + removed..) == value.get(cursor..);
     if one_char_removed {
-        StepKind::Deleting
+        StepKind::Deleting {
+            start: cursor,
+            end: cursor + removed,
+        }
     } else {
         StepKind::Other
+    }
+}
+
+fn continues(last: &HistoryStep, kind: StepKind) -> bool {
+    let caret = &last.selection;
+    match (last.kind, kind) {
+        (
+            StepKind::Typing { after_space, .. },
+            StepKind::Typing {
+                at,
+                after_space: space,
+            },
+        ) => (!after_space || space) && caret.is_empty() && caret.start == at,
+        (StepKind::Deleting { .. }, StepKind::Deleting { start, end }) => {
+            caret.is_empty() && (caret.start == end || caret.start == start)
+        }
+        _ => false,
     }
 }
 
@@ -624,15 +645,10 @@ impl Composer {
         };
         let at_end = self.history_index + 1 == self.history.len();
         let merges = at_end
-            && match (self.history.last().map(|last| last.kind), kind) {
-                (Some(StepKind::Typing { after_space: false }), StepKind::Typing { .. }) => true,
-                (
-                    Some(StepKind::Typing { after_space: true }),
-                    StepKind::Typing { after_space },
-                ) => after_space,
-                (Some(StepKind::Deleting), StepKind::Deleting) => true,
-                _ => false,
-            };
+            && self
+                .history
+                .last()
+                .is_some_and(|last| continues(last, kind));
         if merges {
             if let Some(last) = self.history.last_mut() {
                 *last = step;
@@ -657,21 +673,38 @@ impl Composer {
         let Some(target) = target else {
             return;
         };
+        let source_selection = self.history[self.history_index].selection.clone();
         self.history_index = target;
         let step = &self.history[target];
-        let mut content = InputContent::new(step.draft.text().to_owned());
-        for (range, token) in &step.tokens {
-            if let Ok(next) = content.clone().with_token(range.clone(), token.clone()) {
-                content = next;
-            }
-        }
-        let (draft, selection) = (step.draft.clone(), step.selection.clone());
+        let (draft, tokens) = (step.draft.clone(), step.tokens.clone());
+        let current = self.input.read(cx).value().to_string();
+        let (start, old_end, new_end) = changed_span(&current, draft.text());
+        let selection = match (start == old_end && start == new_end, back) {
+            (false, _) => new_end..new_end,
+            (true, true) => source_selection,
+            (true, false) => step.selection.clone(),
+        };
+        self.draft = draft.clone();
+        self.previous_value = draft.text().to_owned();
         self.input.update(cx, |state, cx| {
-            state.set_value(content, window, cx);
+            if start != old_end || start != new_end {
+                state.apply_edits(
+                    &[(start..old_end, draft.text()[start..new_end].to_owned())],
+                    window,
+                    cx,
+                );
+            }
+            for (range, token) in tokens {
+                let present = state.tokens().iter().any(|span| span.range() == range);
+                if !present && range.start >= start && range.end <= new_end {
+                    state
+                        .replace_range_with_token(range, token, window, cx)
+                        .ok();
+                }
+            }
             state.set_selected_range(selection, cx);
         });
-        self.previous_value = draft.text().to_owned();
-        self.draft = draft;
+        self.undone_value = Some(self.input.read(cx).value().to_string());
         self.pending_style = None;
         self.conversion = None;
         self.paste_hint = None;
@@ -2655,6 +2688,61 @@ mod tests {
             assert!(typist.draft().marks().is_empty());
             typist.press("ctrl-y");
             assert_eq!(typist.draft().state(0..5, &MarkKind::Bold), FormatState::On);
+        }
+
+        fn cursor(typist: &mut Typist<'_>) -> usize {
+            let composer = typist.composer.clone();
+            typist
+                .cx
+                .update(|cx| composer.read(cx).input.read(cx).cursor())
+        }
+
+        #[gpui_kit::test]
+        fn typing_elsewhere_is_its_own_undo_step_and_undo_puts_the_caret_there(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("home");
+            typist.type_text("X");
+            typist.press("end ctrl-z");
+            assert_eq!(typist.value(), "hello");
+            assert_eq!(cursor(&mut typist), 0);
+            typist.press("ctrl-y");
+            assert_eq!(typist.value(), "Xhello");
+            assert_eq!(cursor(&mut typist), 1);
+        }
+
+        #[gpui_kit::test]
+        fn undo_keeps_the_scroll_position(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            for line in 0..14 {
+                typist.type_text(&format!("line {line}"));
+                typist.press("shift-enter");
+            }
+            typist.type_text("end");
+            let composer = typist.composer.clone();
+            let scroll = |typist: &mut Typist<'_>| {
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).input.read(cx).scroll_offset().y)
+            };
+            typist.act(|window, cx| window.render_frame(cx));
+            let before = scroll(&mut typist);
+            assert!(before < gpui_kit::px(0.));
+            typist.press("ctrl-z");
+            typist.act(|window, cx| window.render_frame(cx));
+            assert_eq!(scroll(&mut typist), before);
+        }
+
+        #[gpui_kit::test]
+        fn a_smiley_taken_back_with_ctrl_z_is_sent_as_typed(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("ok :) ");
+            assert!(typist.value().contains('🙂'));
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "ok :) ");
+            assert_eq!(typist.outgoing().text(), "ok :)");
         }
 
         #[gpui_kit::test]

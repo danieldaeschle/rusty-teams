@@ -547,11 +547,13 @@ impl TextWrapper {
                 let token_ranges: Vec<_> = tokens.iter().map(|(range, _)| range.clone()).collect();
                 let wrap_width =
                     (wrap_width - line_indent_at(&line_indents, line_start)).max(px(1.));
+                let line_indented = line_indent_at(&line_indents, line_start) > px(0.);
                 measured_wrap_boundaries(
                     line_str,
                     wrap_width,
                     wrapping_indent,
-                    hanging_indent_at(&hanging_indents, line_start, line_str.len()),
+                    hanging_indent_at(&hanging_indents, line_start, line_str.len())
+                        .or(line_indented.then_some(0)),
                     &token_ranges,
                     |range| {
                         let mut width = px(0.);
