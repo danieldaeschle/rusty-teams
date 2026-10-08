@@ -7,8 +7,9 @@ pub const CODE_PADDING: &str = "\u{2004}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
 const BASE_FONT_PIXELS: f32 = 14.;
-const SMALL_SCALE: f32 = 0.75;
-const LARGE_SCALE: f32 = 1.5;
+// CSS absolute sizes Teams sends: xx-small = 9px, x-large = 24px, against a 14px body.
+const SMALL_SCALE: f32 = 9. / 14.;
+const LARGE_SCALE: f32 = 24. / 14.;
 const SCRIPT_SCALE: f32 = 0.75;
 const SUPERSCRIPT_RAISE: f32 = 0.35;
 const SUBSCRIPT_DROP: f32 = 0.2;
@@ -895,9 +896,9 @@ mod tests {
         assert_eq!(inline.text, "2bigsp");
         assert_eq!(styles[0].script, Some(Script::Super));
         assert_eq!(styles[0].font_scale(), 0.75);
-        assert_eq!(styles[1].font_scale(), 1.5);
+        assert_eq!(styles[1].font_scale(), 24. / 14.);
         assert_eq!(styles[2].script, Some(Script::Sub));
-        assert_eq!(styles[2].font_scale(), 0.5625);
+        assert_eq!(styles[2].font_scale(), 9. / 14. * 0.75);
         assert_eq!(styles[3].font_scale(), 1.5);
     }
 

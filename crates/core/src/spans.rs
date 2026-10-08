@@ -245,8 +245,12 @@ fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>) {
 fn parse_font_size(value: &str) -> Option<FontSize> {
     let value = value.trim().to_ascii_lowercase();
     match value.as_str() {
-        "xx-small" | "x-small" | "small" | "smaller" => Some(FontSize::Small),
-        "large" | "x-large" | "xx-large" | "larger" => Some(FontSize::Large),
+        "xx-small" => Some(FontSize::Small),
+        "x-large" => Some(FontSize::Large),
+        "x-small" => Some(FontSize::Pixels(10)),
+        "small" | "smaller" => Some(FontSize::Pixels(13)),
+        "large" | "larger" => Some(FontSize::Pixels(18)),
+        "xx-large" => Some(FontSize::Pixels(32)),
         "0" => Some(FontSize::Hidden),
         _ => {
             let pixels: f32 = value.strip_suffix("px")?.trim().parse().ok()?;

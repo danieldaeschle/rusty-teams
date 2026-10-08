@@ -425,16 +425,23 @@ fn superscript_and_subscript() {
 fn font_sizes_map_to_small_large_and_pixels() {
     let sized =
         |value: &str| html_to_spans(&format!("<span style=\"font-size:{value};\">t</span>"));
-    for value in ["xx-small", "x-small", "small"] {
+    assert_eq!(
+        sized("xx-small"),
+        vec![Span::Sized(FontSize::Small, vec![text("t")])]
+    );
+    assert_eq!(
+        sized("x-large"),
+        vec![Span::Sized(FontSize::Large, vec![text("t")])]
+    );
+    for (value, pixels) in [
+        ("x-small", 10),
+        ("small", 13),
+        ("large", 18),
+        ("xx-large", 32),
+    ] {
         assert_eq!(
             sized(value),
-            vec![Span::Sized(FontSize::Small, vec![text("t")])]
-        );
-    }
-    for value in ["large", "x-large", "xx-large"] {
-        assert_eq!(
-            sized(value),
-            vec![Span::Sized(FontSize::Large, vec![text("t")])]
+            vec![Span::Sized(FontSize::Pixels(pixels), vec![text("t")])]
         );
     }
     assert_eq!(
