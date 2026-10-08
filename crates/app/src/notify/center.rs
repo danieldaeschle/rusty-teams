@@ -525,6 +525,9 @@ impl NotificationCenter {
         }
         if let Some(native) = self.main_native {
             platform::set_badge(native, badge.as_ref());
+            if badge.is_none() && self.shown_badge.is_some() {
+                platform::stop_flash(native);
+            }
         }
         self.shown_badge = badge;
         self.sync_tray();

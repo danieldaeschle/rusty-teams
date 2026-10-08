@@ -27,6 +27,8 @@ pub fn hide_window(_handle: NativeHandle) {}
 
 pub fn flash(_handle: NativeHandle) {}
 
+pub fn stop_flash(_handle: NativeHandle) {}
+
 pub fn set_badge(_handle: NativeHandle, _badge: Option<&Badge>) {}
 
 pub fn play_sound() {}

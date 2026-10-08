@@ -4,7 +4,7 @@ const GLYPH_HEIGHT: usize = 7;
 const GLYPH_SCALE: usize = 2;
 const GLYPH_GAP: usize = 1;
 const RED: [u8; 3] = [0xef, 0x44, 0x44];
-const INK: [u8; 3] = [0x0a, 0x0a, 0x0a];
+const INK: [u8; 3] = [0xff, 0xff, 0xff];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Badge {
@@ -132,7 +132,7 @@ mod tests {
                 .any(|pixel| pixel == [blue, green, red, 0xff])
         };
         assert!(has(0x44, 0x44, 0xef));
-        assert!(has(0x0a, 0x0a, 0x0a));
+        assert!(has(0xff, 0xff, 0xff));
     }
 
     #[test]
