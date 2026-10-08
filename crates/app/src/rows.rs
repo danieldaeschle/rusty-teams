@@ -5,7 +5,9 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
-use teams_core::{FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions};
+use teams_core::{
+    Draft, FileCard, ImageRef, ReactionInfo, Span, files, images, message_spans, reactions,
+};
 
 use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
@@ -355,6 +357,15 @@ pub fn message_text(record: &MessageRecord) -> String {
         .join("\n")
 }
 
+/// The message as the composer edits it, formatting kept.
+pub fn message_draft(record: &MessageRecord) -> Draft {
+    let own_spans: Vec<Span> = message_spans(record)
+        .into_iter()
+        .filter(|span| !matches!(span, Span::Quote(_)))
+        .collect();
+    Draft::from_spans(&own_spans).trimmed()
+}
+
 pub fn reply_excerpt(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
         .into_iter()
@@ -643,6 +654,22 @@ mod tests {
         assert_eq!(reaction_glyph("heart"), reaction_glyph("\u{2764}\u{FE0F}"));
         assert_eq!(api_reaction(&reaction_glyph("heart")), "\u{2764}\u{FE0F}");
         assert_eq!(api_reaction(&reaction_glyph("like")), "\u{1F44D}");
+    }
+
+    #[test]
+    fn editing_loads_the_message_formatted_without_its_reply_quote() {
+        let mut edited = record("a", None, 8, 6);
+        edited.body_html =
+            "<blockquote itemtype=\"http://schema.skype.com/Reply\">old</blockquote>\
+                            <p><b>Plan</b> for <a href=\"https://x.test\">today</a></p>\
+                            <ol><li>one</li><li>two</li></ol>"
+                .into();
+        let draft = message_draft(&edited);
+        assert_eq!(draft.text(), "Plan for today\n1. one\n2. two");
+        assert_eq!(
+            draft.to_html(),
+            "<b>Plan</b> for <a href=\"https://x.test\">today</a><ol><li>one</li><li>two</li></ol>"
+        );
     }
 
     #[test]

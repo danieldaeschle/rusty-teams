@@ -333,12 +333,13 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
 
 pub fn send_in_chat(
     chat: &ChatRecord,
-    text: &str,
+    preview: &str,
+    html: &str,
     now: DateTime<Utc>,
 ) -> (ChatRecord, MessageRecord) {
     let mut chat = chat.clone();
     chat.last_message_at = Some(now);
-    chat.last_message_preview = Some(text.to_owned());
+    chat.last_message_preview = Some(preview.to_owned());
     chat.last_message_sender_id = Some(DEMO_USER_ID.to_owned());
     chat.last_message_sender_name = Some(DEMO_USER_NAME.to_owned());
     chat.last_message_deleted = false;
@@ -349,7 +350,7 @@ pub fn send_in_chat(
         None,
         (DEMO_USER_ID, DEMO_USER_NAME),
         now,
-        &teams_core::markdown_to_html(text),
+        html,
         "[]",
         false,
     );
@@ -360,7 +361,8 @@ pub fn new_chat(
     existing: &[ChatRecord],
     people: &[(String, String)],
     topic: Option<&str>,
-    text: &str,
+    preview: &str,
+    html: &str,
     now: DateTime<Utc>,
 ) -> (ChatRecord, MessageRecord) {
     let number = existing
@@ -388,7 +390,7 @@ pub fn new_chat(
         members,
         ..Default::default()
     };
-    send_in_chat(&chat, text, now)
+    send_in_chat(&chat, preview, html, now)
 }
 
 fn image_directory() -> PathBuf {
@@ -1060,14 +1062,21 @@ mod tests {
             (JONAS_ID.to_owned(), "Jonas Ortega".to_owned()),
         ];
         let now = Utc::now();
-        let (chat, record) = new_chat(&[], &people, Some("Crew"), "Hello *all*", now);
+        let (chat, record) = new_chat(
+            &[],
+            &people,
+            Some("Crew"),
+            "Hello all",
+            "Hello <i>all</i>",
+            now,
+        );
         assert_eq!(chat.id, "demo-chat-new-1");
         assert_eq!(chat.kind, "group");
         assert_eq!(chat.title, "Crew");
         assert_eq!(chat.member_summary, "Mara Lindqvist, Jonas Ortega");
         assert_eq!(chat.members.len(), 3);
         assert_eq!(chat.members[0].user_id.as_deref(), Some(DEMO_USER_ID));
-        assert_eq!(chat.last_message_preview.as_deref(), Some("Hello *all*"));
+        assert_eq!(chat.last_message_preview.as_deref(), Some("Hello all"));
         assert_eq!(chat.last_message_at, Some(now));
         assert_eq!(record.conversation_id, chat.id);
         assert_eq!(record.sender_id.as_deref(), Some(DEMO_USER_ID));
@@ -1077,10 +1086,10 @@ mod tests {
     #[test]
     fn new_one_on_one_chat_has_no_title_and_counts_up() {
         let people = vec![(LEA_ID.to_owned(), "Lea Schneider".to_owned())];
-        let (first, _) = new_chat(&[], &people, None, "Hi", Utc::now());
+        let (first, _) = new_chat(&[], &people, None, "Hi", "Hi", Utc::now());
         assert_eq!(first.kind, "oneOnOne");
         assert!(first.title.is_empty());
-        let (second, _) = new_chat(&[first], &people, None, "Hi again", Utc::now());
+        let (second, _) = new_chat(&[first], &people, None, "Hi again", "Hi again", Utc::now());
         assert_eq!(second.id, "demo-chat-new-2");
     }
 
@@ -1091,7 +1100,7 @@ mod tests {
             unread: true,
             ..Default::default()
         };
-        let (chat, record) = send_in_chat(&base, "Ping", Utc::now());
+        let (chat, record) = send_in_chat(&base, "Ping", "Ping", Utc::now());
         assert!(!chat.unread);
         assert_eq!(chat.last_message_preview.as_deref(), Some("Ping"));
         assert_eq!(record.conversation_id, "demo-chat-x");

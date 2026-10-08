@@ -3,6 +3,7 @@ mod avatars;
 mod card;
 mod channel_sync;
 mod download;
+mod draft;
 mod engine;
 mod error;
 mod events;
@@ -24,6 +25,10 @@ mod stored;
 
 pub use avatars::Avatar;
 pub use card::card_content_text;
+pub use draft::{
+    Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, TypingStyle,
+    changed_span, has_markdown, link_url, map_offset, reverse_edits,
+};
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
 pub use events::CoreEvent;

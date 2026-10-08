@@ -12,6 +12,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 - Chats and channels, with the Teams pin order, chat folders and hidden teams
 - Live updates over the Teams realtime socket, no polling
 - Send, edit, delete, react, quote-reply, @mentions
+- Rich text composer: format bar over a selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code; Markdown converts as you type or paste
 - Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
 - Inline images, file cards, Adaptive Cards as text
 - Read receipts, presence (last known status shown at start), unread jump

@@ -142,6 +142,16 @@ mod tests {
     }
 
     #[test]
+    fn mentions_inside_formatted_draft_html_become_at_tags() {
+        let (html, mentions) = apply_mentions(
+            &crate::Draft::from_markdown("**hi @Ada** and `@Bo`").to_html(),
+            &[MentionInput::user("u1", "Ada")],
+        );
+        assert_eq!(html, "<b>hi <at id=\"0\">Ada</at></b> and <code>@Bo</code>");
+        assert_eq!(mentions.len(), 1);
+    }
+
+    #[test]
     fn chats_only_take_user_mentions() {
         assert!(ensure_allowed_in_chat(&[MentionInput::user("u", "A")]).is_ok());
         assert!(ensure_allowed_in_chat(&[MentionInput::team("t", "Squad")]).is_err());
