@@ -10,6 +10,7 @@ mod avatar_image;
 mod backend;
 mod card_actions;
 mod chat_actions;
+mod crash_log;
 mod card_state;
 mod data;
 mod demo;
@@ -135,6 +136,7 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
 }
 
 fn main() {
+    crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
     let arguments = parse_arguments();
     #[cfg(windows)]
     updater::clean_up_old_binary();
