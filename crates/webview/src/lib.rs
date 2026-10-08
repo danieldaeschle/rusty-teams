@@ -1,9 +1,12 @@
 #![cfg(windows)]
 
+mod dialog;
 mod fanout;
 mod host;
+mod host_dialog;
 mod transport;
 
+pub use dialog::{DialogEvent, DialogHandle, DialogSpec};
 pub use host::{HostConfig, start};
 pub use transport::{HostState, WebViewTransport};
 

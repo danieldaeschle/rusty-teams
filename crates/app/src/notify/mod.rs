@@ -13,3 +13,5 @@ mod text;
 mod toast;
 
 pub use center::NotificationCenter;
+#[cfg(windows)]
+pub use platform::native_handle;

@@ -552,6 +552,7 @@ mod tests {
             reply_to_id: None,
             sender_id: Some("u".to_owned()),
             sender_name: None,
+            sender_application_id: None,
             created_at: Utc::now(),
             edited_at: None,
             deleted: false,

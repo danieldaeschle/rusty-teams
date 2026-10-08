@@ -129,6 +129,9 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
         sender_name: sender
             .and_then(|sender| sender.display_name())
             .map(str::to_owned),
+        sender_application_id: sender
+            .and_then(|sender| sender.application_id())
+            .map(str::to_owned),
         created_at,
         edited_at: message.last_edited_date_time,
         deleted,

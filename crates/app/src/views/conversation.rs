@@ -441,6 +441,7 @@ impl ConversationView {
                 }
             }
             AppEvent::Images(keys) => self.remeasure_images(keys, cx),
+            AppEvent::Cards(conversation_id) => self.refresh_cards(conversation_id, cx),
             AppEvent::Jump => self.apply_pending_jump(cx),
             AppEvent::Status => {
                 if let Some(current) = self.current.as_mut()
@@ -454,6 +455,7 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
+            AppEvent::TaskDialog => {}
             AppEvent::Sidebar => {
                 self.mark_read(ReadTrigger::Incoming, cx);
                 self.refresh_reactor_names(cx);
@@ -663,6 +665,33 @@ impl ConversationView {
         cx.notify();
     }
 
+    fn refresh_cards(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        let is_current = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.selection.conversation_id() == conversation_id);
+        if !is_current {
+            return;
+        }
+        self.rebuild(false, cx);
+        let indices: Vec<usize> = self
+            .rows
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| match row {
+                Row::Message(message) if !message.adaptive_cards.is_empty() => Some(index),
+                _ => None,
+            })
+            .collect();
+        self.scroller.update(cx, |scroller, cx| {
+            for index in indices {
+                scroller.remeasure_items(index..index + 1, cx);
+            }
+        });
+        cx.notify();
+    }
+
     fn apply_pending_jump(&mut self, cx: &mut Context<Self>) {
         let Some(conversation_id) = self
             .current
@@ -841,12 +870,18 @@ impl ConversationView {
         for (user_id, name) in known_people {
             names.entry(user_id).or_insert(name);
         }
+        let card_overrides = self
+            .current
+            .as_ref()
+            .map(|current| app.cards.overrides_for(current.selection.conversation_id()))
+            .unwrap_or_default();
         RowContext {
             offset: now.offset().fix(),
             today: now.date_naive(),
             my_user_id: app.store.meta(META_USER_ID).ok().flatten(),
             names,
             pending_reactions: self.pending_reactions.clone(),
+            card_overrides,
         }
     }
 
@@ -1603,10 +1638,17 @@ impl ConversationView {
         let key = format!("{PENDING_KEY_PREFIX}{}", self.pending_counter);
         let my_user_id = self.row_context(cx).my_user_id;
         self.pending_outgoing.insert(key.clone(), outgoing.clone());
+        let conversation_id = self
+            .current
+            .as_ref()
+            .map(|current| current.selection.conversation_id().to_owned())
+            .unwrap_or_default();
         self.pending.push(MessageRow {
             key: key.clone(),
+            conversation_id,
             author: "You".to_owned(),
             sender_id: my_user_id,
+            application_id: None,
             created_at: Utc::now(),
             series: Series::default(),
             card: false,
@@ -2651,11 +2693,30 @@ impl Render for ConversationView {
                                     view.clone(),
                                 )
                             });
+                        let bot = message
+                            .application_id
+                            .as_deref()
+                            .and_then(|application_id| {
+                                let known = app
+                                    .read(cx)
+                                    .bot_identity(&message.conversation_id, application_id);
+                                if known.is_none() {
+                                    let (app, conversation_id) =
+                                        (app.clone(), message.conversation_id.clone());
+                                    cx.defer(move |cx| {
+                                        app.update(cx, |state, cx| {
+                                            state.request_chat_apps(&conversation_id, cx)
+                                        });
+                                    });
+                                }
+                                known
+                            });
                         let state = app.read(cx);
                         render_message_row(
                             message,
                             index,
                             RowActions {
+                                bot,
                                 open_thread,
                                 retry,
                                 reply,

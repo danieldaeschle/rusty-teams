@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use chatsvc::TrouterEndpoint;
+use chatsvc::{ChatApp, TrouterEndpoint};
 use chrono::{DateTime, Duration, Utc};
 use graph::{DriveFolder, Graph, MESSAGE_PAGE_SIZE, Message};
 use store::{ImageFileCache, MessageRecord, Sidebar, Store, SyncState};
@@ -122,6 +122,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     preview_changed: AtomicBool,
     pub(crate) receipts: ReceiptCache,
     pub(crate) channel_folders: Mutex<HashMap<String, DriveFolder>>,
+    pub(crate) chat_apps: Mutex<HashMap<String, Vec<ChatApp>>>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -149,6 +150,7 @@ impl<R: Remote> SyncEngine<R> {
             preview_changed: AtomicBool::new(false),
             receipts: ReceiptCache::default(),
             channel_folders: Mutex::new(HashMap::new()),
+            chat_apps: Mutex::new(HashMap::new()),
         }
     }
 

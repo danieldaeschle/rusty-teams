@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, attachments_view, message_body};
-use super::avatar::{member_stack, person_avatar};
+use super::avatar::{bot_avatar, member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::widgets::{icon, symbol};
+use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
 use crate::rows::{Delivery, MessageRow, Receipt, Skeleton, bubble_corners};
@@ -36,6 +37,7 @@ const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 
 pub struct RowActions {
+    pub bot: Option<BotIdentity>,
     pub open_thread: RowAction,
     pub retry: RowAction,
     pub reply: RowAction,
@@ -151,7 +153,8 @@ fn bubble(
     ));
     content = content.children(cards_view(
         &row.adaptive_cards,
-        &format!("message-{index}"),
+        &row.conversation_id,
+        &row.key,
         cx,
     ));
     if has_reactions {
@@ -489,7 +492,8 @@ fn post_card(
         ));
         body = body.children(cards_view(
             &row.adaptive_cards,
-            &format!("message-{index}"),
+            &row.conversation_id,
+            &row.key,
             cx,
         ));
         if !row.reactions.is_empty() {
@@ -523,11 +527,13 @@ fn others_row(
     row: &MessageRow,
     index: usize,
     directory: &Directory,
+    bot: Option<&BotIdentity>,
     retry: RowAction,
     extras: BubbleExtras,
     cx: &App,
 ) -> Div {
     let first = !row.series.has_prev;
+    let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
     let mut column = v_flex()
         .gap(px(2.))
         .max_w(relative(MAX_WIDTH_RATIO))
@@ -539,7 +545,7 @@ fn others_row(
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
-                    .child(row.author.clone()),
+                    .child(author.clone()),
             ),
         );
     }
@@ -547,7 +553,9 @@ fn others_row(
     if let Some(note) = delivery_note(row, retry, index) {
         column = column.child(note);
     }
-    let lead = if first || row.card {
+    let lead = if let Some(bot) = bot.filter(|_| first || row.card) {
+        bot_avatar(bot, AVATAR_SIZE)
+    } else if first || row.card {
         person_avatar(
             directory,
             row.sender_id.as_deref(),
@@ -593,6 +601,7 @@ pub fn render_message_row(
     cx: &App,
 ) -> AnyElement {
     let RowActions {
+        bot,
         open_thread,
         retry,
         reply,
@@ -631,7 +640,7 @@ pub fn render_message_row(
     } else if own {
         own_row(row, index, directory, retry, extras, cx)
     } else {
-        others_row(row, index, directory, retry, extras, cx)
+        others_row(row, index, directory, bot.as_ref(), retry, extras, cx)
     };
     container
         .child(

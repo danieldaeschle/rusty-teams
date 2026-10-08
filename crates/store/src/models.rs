@@ -68,6 +68,7 @@ pub struct MessageRecord {
     pub attachments_json: String,
     pub reactions_json: String,
     pub mentions_json: String,
+    pub sender_application_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

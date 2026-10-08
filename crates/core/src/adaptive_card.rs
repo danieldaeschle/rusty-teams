@@ -1,4 +1,6 @@
-use serde_json::Value;
+use std::collections::HashMap;
+
+use serde_json::{Map, Value, json};
 
 use crate::markdown::markdown_to_html;
 use crate::spans::{Span, html_to_spans};
@@ -8,6 +10,15 @@ const SUPPORTED_URL_SCHEMES: [&str; 2] = ["https://", "http://"];
 const IMAGE_URL_SCHEME: &str = "https://";
 const ACTION_TYPE_PREFIX: &str = "Action.";
 const OPEN_URL_ACTION: &str = "Action.OpenUrl";
+const SUBMIT_ACTION: &str = "Action.Submit";
+const EXECUTE_ACTION: &str = "Action.Execute";
+const SHOW_CARD_ACTION: &str = "Action.ShowCard";
+const TOGGLE_VISIBILITY_ACTION: &str = "Action.ToggleVisibility";
+const TEAMS_SETTINGS_KEY: &str = "msteams";
+pub const CARD_THEME: &str = "dark";
+const MESSAGE_BACK_NAME: &str = "messageback";
+const TASK_FETCH_NAME: &str = "task/fetch";
+const EXECUTE_NAME: &str = "adaptiveCard/action";
 const PIXEL_SUFFIX: &str = "px";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +30,8 @@ pub struct AdaptiveCard {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CardItem {
+    pub id: Option<String>,
+    pub visible: bool,
     pub separator: bool,
     pub spacing: CardSpacing,
     pub element: CardElement,
@@ -137,24 +150,128 @@ pub struct CardFact {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CardAction {
+    pub id: Option<String>,
     pub title: String,
     pub kind: CardActionKind,
+    pub enabled: bool,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CardActionKind {
+    OpenUrl(String),
+    Submit(SubmitAction),
+    Execute(ExecuteAction),
+    ShowCard(Box<AdaptiveCard>),
+    ToggleVisibility(Vec<ToggleTarget>),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CardActionKind {
-    OpenUrl(String),
-    Unsupported,
+pub struct SubmitAction {
+    pub data: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecuteAction {
+    pub id: Option<String>,
+    pub verb: String,
+    pub data: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToggleTarget {
+    pub element_id: String,
+    pub visible: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvokePayload {
+    pub name: &'static str,
+    pub value: Value,
+}
+
+impl SubmitAction {
+    fn teams_settings(&self) -> Option<&Value> {
+        self.data.get(TEAMS_SETTINGS_KEY)
+    }
+
+    pub fn is_task_fetch(&self) -> bool {
+        self.teams_settings()
+            .and_then(|settings| string_field(settings, "type"))
+            .is_some_and(|kind| kind == TASK_FETCH_NAME)
+    }
+
+    pub fn payload(&self) -> InvokePayload {
+        if self.is_task_fetch() {
+            let mut data = self.data.as_object().cloned().unwrap_or_default();
+            data.remove(TEAMS_SETTINGS_KEY);
+            data.insert("type".to_owned(), json!(TASK_FETCH_NAME));
+            return InvokePayload {
+                name: TASK_FETCH_NAME,
+                value: task_value(Value::Object(data)),
+            };
+        }
+        let message_back = self
+            .teams_settings()
+            .filter(|settings| {
+                string_field(settings, "type").is_some_and(|kind| {
+                    kind.eq_ignore_ascii_case("messageBack") || kind.eq_ignore_ascii_case("imBack")
+                })
+            })
+            .and_then(|settings| settings.get("value"));
+        InvokePayload {
+            name: MESSAGE_BACK_NAME,
+            value: message_back.unwrap_or(&self.data).clone(),
+        }
+    }
+}
+
+impl ExecuteAction {
+    pub fn payload(&self) -> InvokePayload {
+        let mut action = Map::new();
+        action.insert("type".to_owned(), json!(EXECUTE_ACTION));
+        if let Some(id) = &self.id {
+            action.insert("id".to_owned(), json!(id));
+        }
+        action.insert("verb".to_owned(), json!(self.verb));
+        action.insert("data".to_owned(), self.data.clone());
+        InvokePayload {
+            name: EXECUTE_NAME,
+            value: json!({"action": action, "trigger": "manual"}),
+        }
+    }
+}
+
+pub fn task_value(data: Value) -> Value {
+    json!({"data": data, "context": {"theme": CARD_THEME}})
+}
+
+impl CardAction {
+    pub fn invoke_payload(&self) -> Option<InvokePayload> {
+        match &self.kind {
+            CardActionKind::Submit(submit) => Some(submit.payload()),
+            CardActionKind::Execute(execute) => Some(execute.payload()),
+            _ => None,
+        }
+    }
+
+    pub fn is_clickable(&self) -> bool {
+        self.enabled && !matches!(self.kind, CardActionKind::Unsupported)
+    }
 }
 
 impl AdaptiveCard {
     pub fn parse(content: &str) -> Option<AdaptiveCard> {
-        let root: Value = serde_json::from_str(content).ok()?;
+        Self::from_value(&serde_json::from_str(content).ok()?)
+    }
+
+    fn from_value(root: &Value) -> Option<AdaptiveCard> {
         let object = root.as_object()?;
         let mut items = parse_items(object.get("body"));
         let actions = parse_actions(object.get("actions"));
         if items.is_empty()
-            && let Some(item) = fallback_item(&root)
+            && let Some(item) = fallback_item(root)
         {
             items.push(item);
         }
@@ -172,10 +289,45 @@ impl AdaptiveCard {
         })
     }
 
+    /// Initial visibility of every element and action that has an id, nested cards included.
+    pub fn element_visibility(&self) -> HashMap<String, bool> {
+        let mut visibility = HashMap::new();
+        collect_visibility(&self.items, &self.actions, &mut visibility);
+        visibility
+    }
+
     pub fn plain_text(&self) -> Option<String> {
         let mut lines = Vec::new();
         collect_lines(&self.items, &mut lines);
         (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+}
+
+fn collect_visibility(
+    items: &[CardItem],
+    actions: &[CardAction],
+    visibility: &mut HashMap<String, bool>,
+) {
+    for item in items {
+        if let Some(id) = &item.id {
+            visibility.insert(id.clone(), item.visible);
+        }
+        match &item.element {
+            CardElement::Columns(columns) => columns
+                .iter()
+                .for_each(|column| collect_visibility(&column.items, &[], visibility)),
+            CardElement::Container { items, .. } => collect_visibility(items, &[], visibility),
+            CardElement::Actions(actions) => collect_visibility(&[], actions, visibility),
+            _ => {}
+        }
+    }
+    for action in actions {
+        if let Some(id) = &action.id {
+            visibility.insert(id.clone(), action.visible);
+        }
+        if let CardActionKind::ShowCard(card) = &action.kind {
+            collect_visibility(&card.items, &card.actions, visibility);
+        }
     }
 }
 
@@ -184,7 +336,7 @@ pub fn card_content_text(content: &str) -> Option<String> {
 }
 
 fn collect_lines(items: &[CardItem], lines: &mut Vec<String>) {
-    for item in items {
+    for item in items.iter().filter(|item| item.visible) {
         match &item.element {
             CardElement::Text(text) => push_line(lines, &text.spans),
             CardElement::Columns(columns) => columns
@@ -222,7 +374,9 @@ fn parse_items(value: Option<&Value>) -> Vec<CardItem> {
 }
 
 fn parse_item(value: &Value) -> Option<CardItem> {
-    if !is_visible(value) {
+    let id = string_field(value, "id").map(str::to_owned);
+    let visible = is_visible(value);
+    if !visible && id.is_none() {
         return None;
     }
     let element = match string_field(value, "type")? {
@@ -238,6 +392,8 @@ fn parse_item(value: &Value) -> Option<CardItem> {
     };
     let element = element.or_else(|| fallback_item(value).map(|item| item.element))?;
     Some(CardItem {
+        id,
+        visible,
         separator: value
             .get("separator")
             .and_then(Value::as_bool)
@@ -250,6 +406,8 @@ fn parse_item(value: &Value) -> Option<CardItem> {
 fn fallback_item(value: &Value) -> Option<CardItem> {
     let text = string_field(value, "fallbackText").filter(|text| !text.trim().is_empty())?;
     Some(CardItem {
+        id: None,
+        visible: true,
         separator: false,
         spacing: CardSpacing::Default,
         element: CardElement::Text(plain_text_block(vec![Span::Text(text.to_owned())])),
@@ -410,7 +568,9 @@ fn parse_actions(value: Option<&Value>) -> Vec<CardAction> {
 }
 
 fn parse_action(value: &Value) -> Option<CardAction> {
-    if !is_visible(value) {
+    let id = string_field(value, "id").map(str::to_owned);
+    let visible = is_visible(value);
+    if !visible && id.is_none() {
         return None;
     }
     let action_type = string_field(value, "type")?;
@@ -420,16 +580,65 @@ fn parse_action(value: &Value) -> Option<CardAction> {
     let title = string_field(value, "title")
         .map(str::trim)
         .filter(|title| !title.is_empty())?;
-    let kind = match string_field(value, "url") {
-        Some(url) if action_type == OPEN_URL_ACTION && is_supported_url(url) => {
-            CardActionKind::OpenUrl(url.to_owned())
+    let data = || value.get("data").cloned().unwrap_or(Value::Null);
+    let kind = match action_type {
+        OPEN_URL_ACTION => string_field(value, "url")
+            .filter(|url| is_supported_url(url))
+            .map_or(CardActionKind::Unsupported, |url| {
+                CardActionKind::OpenUrl(url.to_owned())
+            }),
+        SUBMIT_ACTION => CardActionKind::Submit(SubmitAction { data: data() }),
+        EXECUTE_ACTION => string_field(value, "verb").map_or(CardActionKind::Unsupported, |verb| {
+            CardActionKind::Execute(ExecuteAction {
+                id: id.clone(),
+                verb: verb.to_owned(),
+                data: data(),
+            })
+        }),
+        SHOW_CARD_ACTION => value
+            .get("card")
+            .and_then(AdaptiveCard::from_value)
+            .map_or(CardActionKind::Unsupported, |card| {
+                CardActionKind::ShowCard(Box::new(card))
+            }),
+        TOGGLE_VISIBILITY_ACTION => {
+            let targets = parse_toggle_targets(value.get("targetElements"));
+            if targets.is_empty() {
+                CardActionKind::Unsupported
+            } else {
+                CardActionKind::ToggleVisibility(targets)
+            }
         }
         _ => CardActionKind::Unsupported,
     };
     Some(CardAction {
+        id,
         title: title.to_owned(),
         kind,
+        enabled: value
+            .get("isEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        visible,
     })
+}
+
+fn parse_toggle_targets(value: Option<&Value>) -> Vec<ToggleTarget> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|target| match target.as_str() {
+            Some(element_id) => Some(ToggleTarget {
+                element_id: element_id.to_owned(),
+                visible: None,
+            }),
+            None => Some(ToggleTarget {
+                element_id: string_field(target, "elementId")?.to_owned(),
+                visible: target.get("isVisible").and_then(Value::as_bool),
+            }),
+        })
+        .collect()
 }
 
 fn is_bold_weight(weight: &str) -> bool {

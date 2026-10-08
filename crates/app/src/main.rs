@@ -7,6 +7,8 @@ mod app_state;
 mod assets;
 mod avatar_image;
 mod backend;
+mod card_actions;
+mod card_state;
 mod data;
 mod demo;
 mod downloads;
@@ -21,6 +23,7 @@ mod render;
 mod rows;
 mod runtime;
 mod sidebar_model;
+mod task_dialog;
 mod theme;
 mod updater;
 mod views;
@@ -114,10 +117,12 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
             Some(directory) => directory.join(WEBVIEW_FOLDER),
             None => data_path(WEBVIEW_FOLDER),
         };
-        return webview::start(webview::HostConfig {
+        let transport = webview::start(webview::HostConfig {
             user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),
         });
+        task_dialog::install_host(transport.clone());
+        return transport;
     }
     #[cfg(not(windows))]
     let _ = database;
@@ -167,6 +172,7 @@ fn main() {
                 state.start_on_channels = arguments.channels_tab;
                 state
             });
+            cx.set_global(app_state::AppHandle(state.clone()));
             if arguments.demo {
                 state.update(cx, |state, cx| {
                     demo::seed_directory(state);

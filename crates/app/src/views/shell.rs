@@ -2,6 +2,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::conversation::{ConversationView, ReplyToHovered};
+use super::dialog_overlay::render_task_dialog;
 use super::sidebar::SidebarView;
 use super::status_bar::render_status_bar;
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
@@ -288,6 +289,7 @@ impl Render for AppShell {
                     .child(status),
             )
             .children(self.switcher.clone())
+            .children(render_task_dialog(self.state.read(cx), cx))
             .child(crate::frame_log::probe("last"))
     }
 }

@@ -76,7 +76,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Unread jump with New divider | Done |  |
 | Read receipts | Done |  |
 | Select and copy message text | Done |  |
-| Adaptive Cards | Partial | Rendered as cards; only open-URL buttons work |
+| Adaptive Cards | Partial | Buttons work (submit, execute, show card, toggle, task dialog card). URL task dialogs run in a hosted window on Windows (Teams JS SDK host, see docs/research/card-actions.md), in the browser on Linux. Missing: input fields |
 | Typing indicator | Missing | Event arrives, ignored |
 | Link previews | Missing |  |
 | Loop components | Missing |  |

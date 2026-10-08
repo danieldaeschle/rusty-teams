@@ -1,4 +1,7 @@
-use chatsvc::{ConversationRef, MemberHorizon, Messages, Receipts};
+use chatsvc::{
+    CardActions, ChatApp, ConversationRef, InvokeRequest, InvokeResponse, MemberHorizon, Messages,
+    Receipts,
+};
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
@@ -192,6 +195,14 @@ pub trait Remote {
 
     async fn consumption_horizons(&self, _conversation_id: &str) -> Result<Vec<MemberHorizon>> {
         Err(Error::Unsupported("read receipts"))
+    }
+
+    async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<ChatApp>> {
+        Err(Error::Unsupported("chat apps"))
+    }
+
+    async fn invoke_card(&self, _invoke: InvokeRequest) -> Result<InvokeResponse> {
+        Err(Error::Unsupported("card actions"))
     }
 }
 
@@ -485,6 +496,14 @@ impl Remote for Graph {
         Ok(Receipts::new(self.session())
             .consumption_horizons(conversation_id)
             .await?)
+    }
+
+    async fn chat_apps(&self, chat_id: &str) -> Result<Vec<ChatApp>> {
+        Ok(CardActions::new(self.session()).chat_apps(chat_id).await?)
+    }
+
+    async fn invoke_card(&self, invoke: InvokeRequest) -> Result<InvokeResponse> {
+        Ok(CardActions::new(self.session()).invoke(invoke).await?)
     }
 }
 

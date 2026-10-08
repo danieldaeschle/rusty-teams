@@ -129,3 +129,14 @@ fn a_tag_mention_exposes_its_target_id_and_name() {
     assert_eq!(mentioned.display_name(), Some("Tip of the day"));
     assert_eq!(mentioned.user_id(), None);
 }
+
+#[test]
+fn an_application_sender_exposes_its_id_but_no_user_id() {
+    let message: Message = serde_json::from_str(
+        r#"{"id":"1","from":{"application":{"id":"bot-guid","displayName":"Wiki Bot"}}}"#,
+    )
+    .unwrap();
+    let sender = message.from.as_ref().unwrap();
+    assert_eq!(sender.application_id(), Some("bot-guid"));
+    assert_eq!(sender.user_id(), None);
+}

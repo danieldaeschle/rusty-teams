@@ -1,0 +1,239 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
+use teams_core::AdaptiveCard;
+
+const DIALOG_KEY: &str = "task-dialog";
+pub const DONE_HOLD: Duration = Duration::from_millis(1600);
+pub const MAX_REASON_CHARS: usize = 160;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionPhase {
+    Busy,
+    Done,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotIdentity {
+    pub name: String,
+    pub icon_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskDialogState {
+    pub title: String,
+    pub card: AdaptiveCard,
+    pub scope: CardScope,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CardOverride {
+    pub basis: String,
+    pub cards: Vec<AdaptiveCard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Surface {
+    Message,
+    Dialog,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardScope {
+    pub conversation_id: String,
+    pub message_id: String,
+    pub card_index: usize,
+    pub surface: Surface,
+}
+
+impl CardScope {
+    pub fn message(conversation_id: &str, message_id: &str, card_index: usize) -> Self {
+        CardScope {
+            conversation_id: conversation_id.to_owned(),
+            message_id: message_id.to_owned(),
+            card_index,
+            surface: Surface::Message,
+        }
+    }
+
+    pub fn card_key(&self) -> String {
+        match self.surface {
+            Surface::Message => format!("{}-card-{}", self.message_id, self.card_index),
+            Surface::Dialog => Self::dialog_key(),
+        }
+    }
+
+    pub fn dialog_key() -> String {
+        DIALOG_KEY.to_owned()
+    }
+}
+
+#[derive(Default)]
+pub struct CardState {
+    phases: HashMap<String, ActionPhase>,
+    visibility: HashMap<String, bool>,
+    open_cards: HashMap<String, usize>,
+    notes: HashMap<String, String>,
+    overrides: HashMap<(String, String), CardOverride>,
+}
+
+impl CardState {
+    pub fn phase(&self, action_key: &str) -> Option<&ActionPhase> {
+        self.phases.get(action_key)
+    }
+
+    pub fn is_busy(&self, action_key: &str) -> bool {
+        self.phases.get(action_key) == Some(&ActionPhase::Busy)
+    }
+
+    pub fn set_phase(&mut self, action_key: &str, phase: ActionPhase) {
+        self.phases.insert(action_key.to_owned(), phase);
+    }
+
+    pub fn clear_done(&mut self, action_key: &str) {
+        if self.phases.get(action_key) == Some(&ActionPhase::Done) {
+            self.phases.remove(action_key);
+        }
+    }
+
+    pub fn clear_card(&mut self, card_key: &str) {
+        self.phases.retain(|key, _| !key.starts_with(card_key));
+        self.visibility.retain(|key, _| !key.starts_with(card_key));
+        self.open_cards.retain(|key, _| !key.starts_with(card_key));
+        self.notes.remove(card_key);
+    }
+
+    pub fn is_visible(&self, element_key: &str, initial: bool) -> bool {
+        self.visibility.get(element_key).copied().unwrap_or(initial)
+    }
+
+    pub fn toggle_visibility(&mut self, element_key: &str, initial: bool, forced: Option<bool>) {
+        let next = forced.unwrap_or(!self.is_visible(element_key, initial));
+        self.visibility.insert(element_key.to_owned(), next);
+    }
+
+    pub fn open_card(&self, actions_key: &str) -> Option<usize> {
+        self.open_cards.get(actions_key).copied()
+    }
+
+    pub fn toggle_open_card(&mut self, actions_key: &str, index: usize) {
+        if self.open_cards.get(actions_key) == Some(&index) {
+            self.open_cards.remove(actions_key);
+        } else {
+            self.open_cards.insert(actions_key.to_owned(), index);
+        }
+    }
+
+    pub fn note(&self, card_key: &str) -> Option<&str> {
+        self.notes.get(card_key).map(String::as_str)
+    }
+
+    pub fn set_note(&mut self, card_key: &str, text: String) {
+        self.notes.insert(card_key.to_owned(), text);
+    }
+
+    pub fn clear_note(&mut self, card_key: &str) {
+        self.notes.remove(card_key);
+    }
+
+    pub fn set_override(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        replaced: CardOverride,
+    ) {
+        self.overrides.insert(
+            (conversation_id.to_owned(), message_id.to_owned()),
+            replaced,
+        );
+    }
+
+    pub fn overrides_for(&self, conversation_id: &str) -> HashMap<String, CardOverride> {
+        self.overrides
+            .iter()
+            .filter(|((conversation, _), _)| conversation == conversation_id)
+            .map(|((_, message_id), replaced)| (message_id.clone(), replaced.clone()))
+            .collect()
+    }
+}
+
+pub fn short_reason(reason: &str) -> String {
+    reason.chars().take(MAX_REASON_CHARS).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn done_clears_but_busy_and_failed_stay() {
+        let mut state = CardState::default();
+        state.set_phase("a", ActionPhase::Done);
+        state.set_phase("b", ActionPhase::Busy);
+        state.set_phase("c", ActionPhase::Failed("nope".into()));
+        for key in ["a", "b", "c"] {
+            state.clear_done(key);
+        }
+        assert_eq!(state.phase("a"), None);
+        assert!(state.is_busy("b"));
+        assert_eq!(state.phase("c"), Some(&ActionPhase::Failed("nope".into())));
+    }
+
+    #[test]
+    fn visibility_toggles_from_the_initial_value_or_is_forced() {
+        let mut state = CardState::default();
+        assert!(!state.is_visible("e", false));
+        state.toggle_visibility("e", false, None);
+        assert!(state.is_visible("e", false));
+        state.toggle_visibility("e", false, None);
+        assert!(!state.is_visible("e", false));
+        state.toggle_visibility("e", false, Some(true));
+        state.toggle_visibility("e", false, Some(true));
+        assert!(state.is_visible("e", false));
+    }
+
+    #[test]
+    fn one_show_card_is_open_per_action_set() {
+        let mut state = CardState::default();
+        state.toggle_open_card("set", 1);
+        assert_eq!(state.open_card("set"), Some(1));
+        state.toggle_open_card("set", 2);
+        assert_eq!(state.open_card("set"), Some(2));
+        state.toggle_open_card("set", 2);
+        assert_eq!(state.open_card("set"), None);
+    }
+
+    #[test]
+    fn overrides_are_scoped_to_their_conversation() {
+        let mut state = CardState::default();
+        let replaced = CardOverride {
+            basis: "[]".into(),
+            cards: Vec::new(),
+        };
+        state.set_override("c1", "m1", replaced.clone());
+        assert_eq!(state.overrides_for("c1").get("m1"), Some(&replaced));
+        assert!(state.overrides_for("c2").is_empty());
+    }
+
+    #[test]
+    fn reasons_are_shortened() {
+        assert_eq!(
+            short_reason(&"x".repeat(500)).chars().count(),
+            MAX_REASON_CHARS
+        );
+    }
+
+    #[test]
+    fn card_keys_differ_by_surface_and_index() {
+        let message = CardScope::message("c", "m", 2);
+        assert_eq!(message.card_key(), "m-card-2");
+        let dialog = CardScope {
+            surface: Surface::Dialog,
+            ..message
+        };
+        assert_eq!(dialog.card_key(), "task-dialog");
+    }
+}

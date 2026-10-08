@@ -13,7 +13,7 @@ const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
 
-const BACKGROUND: u32 = 0x0f0f10;
+pub const BACKGROUND: u32 = 0x0f0f10;
 const SURFACE: u32 = 0x161617;
 const SURFACE_RAISED: u32 = 0x232325;
 const ROW_HOVER: u32 = 0x1c1c1e;

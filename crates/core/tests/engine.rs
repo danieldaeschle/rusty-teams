@@ -87,6 +87,10 @@ struct Fake {
     directory_users: Mutex<Vec<User>>,
     horizons: Mutex<Vec<chatsvc::MemberHorizon>>,
     horizon_calls: Mutex<usize>,
+    apps: Mutex<Vec<chatsvc::ChatApp>>,
+    app_calls: Mutex<usize>,
+    invokes: Mutex<Vec<chatsvc::InvokeRequest>>,
+    invoke_answer: Mutex<Option<chatsvc::InvokeResponse>>,
 }
 
 impl Fake {
@@ -552,6 +556,21 @@ impl Remote for Handle {
     ) -> Result<Vec<chatsvc::MemberHorizon>> {
         *self.horizon_calls.lock().unwrap() += 1;
         Ok(self.horizons.lock().unwrap().clone())
+    }
+
+    async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<chatsvc::ChatApp>> {
+        *self.app_calls.lock().unwrap() += 1;
+        Ok(self.apps.lock().unwrap().clone())
+    }
+
+    async fn invoke_card(&self, invoke: chatsvc::InvokeRequest) -> Result<chatsvc::InvokeResponse> {
+        self.invokes.lock().unwrap().push(invoke);
+        Ok(self
+            .invoke_answer
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(chatsvc::InvokeResponse::Empty))
     }
 
     async fn presences(&self, user_ids: &[String]) -> Result<Vec<Presence>> {
@@ -2616,4 +2635,231 @@ async fn reconnect_refetches_known_chats_only() {
         events.try_recv().unwrap(),
         CoreEvent::ReceiptsChanged { .. }
     ));
+}
+
+const BOT_GUID: &str = "0000aaaa-0000-0000-0000-000000000001";
+
+fn chat_app(app_id: &str, name: &str, bot_ids: &[&str]) -> chatsvc::ChatApp {
+    chatsvc::ChatApp {
+        app_id: app_id.to_owned(),
+        name: name.to_owned(),
+        bot_ids: bot_ids.iter().map(|bot| (*bot).to_owned()).collect(),
+        small_image_url: None,
+        accent_color: None,
+        web_application_resource: None,
+    }
+}
+
+fn bot_message(application_id: &str) -> Message {
+    serde_json::from_value(json!({
+        "id": "m0001",
+        "messageType": "message",
+        "createdDateTime": base().to_rfc3339(),
+        "from": {"application": {"id": application_id, "displayName": "Wiki Bot"}},
+        "body": {"contentType": "html", "content": "<attachment id=\"a1\"></attachment>"},
+    }))
+    .unwrap()
+}
+
+async fn card_engine(fake: &Arc<Fake>, application_id: &str) -> SyncEngine<Handle> {
+    let engine = chat_engine(fake, small_pages()).await;
+    fake.set_chat_messages(vec![bot_message(application_id)]);
+    engine.fetch_newer(CHAT).await.unwrap();
+    engine
+}
+
+fn submit_action(data: serde_json::Value) -> teams_core::CardAction {
+    let card = json!({"body": [{"type": "TextBlock", "text": "x"}], "actions": [
+        {"type": "Action.Submit", "title": "Go", "data": data}
+    ]});
+    teams_core::AdaptiveCard::parse(&card.to_string())
+        .unwrap()
+        .actions
+        .remove(0)
+}
+
+#[tokio::test]
+async fn card_submit_invokes_the_matching_bot_and_caches_the_apps() {
+    let fake = Arc::new(Fake::default());
+    *fake.apps.lock().unwrap() = vec![
+        chat_app(
+            "app-other",
+            "Other",
+            &["0000bbbb-0000-0000-0000-000000000002"],
+        ),
+        chat_app("app-wiki", "Wiki", &[BOT_GUID]),
+    ];
+    let engine = card_engine(&fake, BOT_GUID).await;
+    let action = submit_action(json!({"type": "unwatch"}));
+
+    let first = engine.card_action(CHAT, "m0001", &action).await.unwrap();
+    let second = engine.card_action(CHAT, "m0001", &action).await.unwrap();
+
+    assert_eq!(first, teams_core::CardActionOutcome::Sent);
+    assert_eq!(second, first);
+    assert_eq!(*fake.app_calls.lock().unwrap(), 1);
+    let invokes = fake.invokes.lock().unwrap();
+    assert_eq!(invokes[0].app_id, "app-wiki");
+    assert_eq!(invokes[0].bot_id, BOT_GUID);
+    assert_eq!(invokes[0].name, "messageback");
+    assert_eq!(invokes[0].value, json!({"type": "unwatch"}));
+    assert_eq!(invokes[0].server_message_id, "m0001");
+    assert_eq!(invokes[0].conversation_id, CHAT);
+    assert_eq!(invokes[0].display_name, "Me Myself");
+}
+
+#[tokio::test]
+async fn card_action_falls_back_to_the_only_bot_app() {
+    let fake = Arc::new(Fake::default());
+    *fake.apps.lock().unwrap() = vec![
+        chat_app("app-tabs", "Tabs", &[]),
+        chat_app("app-wiki", "Wiki", &[BOT_GUID]),
+    ];
+    let engine = card_engine(&fake, "unrelated-id").await;
+    engine
+        .card_action(CHAT, "m0001", &submit_action(json!({})))
+        .await
+        .unwrap();
+    let invokes = fake.invokes.lock().unwrap();
+    assert_eq!(invokes[0].app_id, "app-wiki");
+    assert_eq!(invokes[0].bot_id, BOT_GUID);
+}
+
+#[tokio::test]
+async fn card_action_with_several_unmatched_bot_apps_is_an_error() {
+    let fake = Arc::new(Fake::default());
+    *fake.apps.lock().unwrap() = vec![
+        chat_app("app-one", "One", &["bot-1"]),
+        chat_app("app-two", "Two", &["bot-2"]),
+    ];
+    let engine = card_engine(&fake, "unrelated-id").await;
+    let outcome = engine
+        .card_action(CHAT, "m0001", &submit_action(json!({})))
+        .await;
+    assert!(outcome.is_err());
+    assert!(fake.invokes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn card_answers_map_to_outcomes() {
+    use chatsvc::{InvokeResponse, TaskContent, TaskContinue, TaskResponse};
+    use teams_core::{CardActionOutcome, TaskDialog, TaskDialogKind};
+
+    let fake = Arc::new(Fake::default());
+    *fake.apps.lock().unwrap() = vec![chat_app("app-wiki", "Wiki", &[BOT_GUID])];
+    let engine = card_engine(&fake, BOT_GUID).await;
+    let action = submit_action(json!({"msteams": {"type": "task/fetch"}}));
+    let answers = [
+        (
+            InvokeResponse::Card(json!({"type": "AdaptiveCard"})),
+            CardActionOutcome::ReplaceCard(json!({"type": "AdaptiveCard"}).to_string()),
+        ),
+        (
+            InvokeResponse::Message("Saved".into()),
+            CardActionOutcome::Message("Saved".into()),
+        ),
+        (
+            InvokeResponse::Task(TaskResponse::Message("Done".into())),
+            CardActionOutcome::Message("Done".into()),
+        ),
+        (
+            InvokeResponse::Failed {
+                status_code: 500,
+                message: "Broken".into(),
+            },
+            CardActionOutcome::Failed("The app answered 500: Broken".into()),
+        ),
+        (
+            InvokeResponse::Task(TaskResponse::Continue(TaskContinue {
+                title: Some("Settings".into()),
+                width: None,
+                height: Some(300),
+                content: TaskContent::Url {
+                    url: "https://bot.example/task".into(),
+                    fallback_url: None,
+                },
+            })),
+            CardActionOutcome::Dialog(TaskDialog {
+                title: Some("Settings".into()),
+                width: 520,
+                height: 300,
+                kind: TaskDialogKind::Url {
+                    url: "https://bot.example/task".into(),
+                    fallback_url: "https://bot.example/task".into(),
+                },
+            }),
+        ),
+        (
+            InvokeResponse::Task(TaskResponse::Continue(TaskContinue {
+                title: None,
+                width: Some(600),
+                height: Some(400),
+                content: TaskContent::Card(json!({"type": "AdaptiveCard"})),
+            })),
+            CardActionOutcome::Dialog(TaskDialog {
+                title: None,
+                width: 600,
+                height: 400,
+                kind: TaskDialogKind::Card(json!({"type": "AdaptiveCard"}).to_string()),
+            }),
+        ),
+    ];
+    for (answer, expected) in answers {
+        *fake.invoke_answer.lock().unwrap() = Some(answer);
+        assert_eq!(
+            engine.card_action(CHAT, "m0001", &action).await.unwrap(),
+            expected
+        );
+    }
+    assert_eq!(fake.invokes.lock().unwrap()[0].name, "task/fetch");
+}
+
+#[tokio::test]
+async fn task_submit_wraps_the_data_for_the_dialog() {
+    let fake = Arc::new(Fake::default());
+    *fake.apps.lock().unwrap() = vec![chat_app("app-wiki", "Wiki", &[BOT_GUID])];
+    let engine = card_engine(&fake, BOT_GUID).await;
+    engine
+        .task_submit(CHAT, "m0001", json!({"choice": "a"}))
+        .await
+        .unwrap();
+    let invokes = fake.invokes.lock().unwrap();
+    assert_eq!(invokes[0].name, "task/submit");
+    assert_eq!(
+        invokes[0].value,
+        json!({"data": {"choice": "a"}, "context": {"theme": "dark"}})
+    );
+}
+
+#[tokio::test]
+async fn dialog_identity_names_the_user_and_the_tenant() {
+    let fake = Arc::new(Fake::default());
+    let engine = card_engine(&fake, BOT_GUID).await;
+    let identity = engine.dialog_identity(CHAT).await.unwrap();
+    assert_eq!(identity.user_id, ME);
+    assert_eq!(identity.display_name, "Me Myself");
+    assert_eq!(identity.tenant_id, "tenant-1");
+}
+
+#[tokio::test]
+async fn card_actions_without_a_payload_are_rejected() {
+    let fake = Arc::new(Fake::default());
+    let engine = card_engine(&fake, BOT_GUID).await;
+    let card = json!({"body": [{"type": "TextBlock", "text": "x"}], "actions": [
+        {"type": "Action.OpenUrl", "title": "Open", "url": "https://example.com"}
+    ]});
+    let action = teams_core::AdaptiveCard::parse(&card.to_string())
+        .unwrap()
+        .actions
+        .remove(0);
+    assert!(engine.card_action(CHAT, "m0001", &action).await.is_err());
+}
+
+#[tokio::test]
+async fn bot_messages_remember_their_application() {
+    let fake = Arc::new(Fake::default());
+    let engine = card_engine(&fake, BOT_GUID).await;
+    let record = engine.open_conversation(CHAT).unwrap().remove(0);
+    assert_eq!(record.sender_application_id.as_deref(), Some(BOT_GUID));
+    assert_eq!(record.sender_id, None);
 }

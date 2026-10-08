@@ -274,6 +274,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tray-icon",
+ "uuid",
  "webview",
  "windows 0.62.2",
 ]

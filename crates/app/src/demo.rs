@@ -7,9 +7,13 @@ use store::{
     ChannelLayoutRecord, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store,
     TeamLayoutRecord, TeamRecord,
 };
-use teams_core::{MentionCandidate, PersonCandidate, PersonSource};
+use teams_core::{
+    CardActionOutcome, ChatApp, MentionCandidate, PersonCandidate, PersonSource, TaskDialog,
+    TaskDialogKind,
+};
 
 use crate::app_state::{AppState, Selection};
+use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
 
 pub const DEMO_USER_ID: &str = "demo-me";
@@ -21,6 +25,9 @@ const STAGING_SIZE: (usize, usize) = (960, 540);
 const PRIORITY_CHAT: &str = "demo-chat-priya";
 const BOT_CHAT: &str = "demo-chat-wiki-bot";
 const BOT_NAME: &str = "Wiki Bot";
+const BOT_APP_NAME: &str = "Wiki Cloud";
+const BOT_ID: &str = "00000000-0000-0000-0000-00000000b07a";
+const CARD_ANSWER_DELAY: std::time::Duration = std::time::Duration::from_millis(700);
 const CARD_PERSON_URL: &str = "https://avatars.githubusercontent.com/u/9919?s=64";
 const CARD_PAGE_URL: &str = "https://avatars.githubusercontent.com/u/9919?s=64";
 const NEW_CHAT_PREFIX: &str = "demo-chat-new-";
@@ -528,6 +535,8 @@ pub fn seed_directory(state: &mut AppState) {
             conversation_ids: Vec::new(),
         },
     ];
+    state.bot_apps.insert(BOT_CHAT.to_owned(), vec![bot_app()]);
+    let directory = &mut state.directory;
     directory.pinned_channels = ids(&["demo-channel-1-1", "demo-channel-3-2"]);
     directory
         .unread_counts
@@ -564,6 +573,7 @@ pub fn seed_directory(state: &mut AppState) {
     }
     state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
     state.last_sync = Some(Utc::now());
+    state.apply_bot_titles();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -583,6 +593,7 @@ fn message(
         reply_to_id: reply_to.map(str::to_owned),
         sender_id: Some(sender.0.to_owned()),
         sender_name: Some(sender.1.to_owned()),
+        sender_application_id: None,
         created_at: time,
         edited_at: edited.then_some(time + Duration::minutes(2)),
         deleted: false,
@@ -619,11 +630,17 @@ fn bot_messages() -> Vec<MessageRecord> {
                     {"type": "TextBlock", "spacing": "small", "isSubtle": true, "wrap": true, "text": "Owned by: Dana Demo"}
                 ]}
             ]},
+            {"type": "TextBlock", "id": "owner-note", "isVisible": false, "isSubtle": true, "wrap": true, "text": "Owner notes are only shown on request."},
             {"type": "ActionSet", "actions": [
                 {"type": "Action.OpenUrl", "title": "View page", "url": "https://example.com/wiki/release-checklist"},
                 {"type": "Action.OpenUrl", "title": "View changes", "url": "https://example.com/wiki/release-checklist/changes"},
                 {"type": "Action.Submit", "title": "Watch page", "data": {"action": "watch"}},
-                {"type": "Action.Submit", "title": "Stop watching", "data": {"action": "unwatch"}}
+                {"type": "Action.Submit", "title": "Stop watching", "data": {"action": "unwatch"}},
+                {"type": "Action.Submit", "title": "Settings", "data": {"msteams": {"type": "task/fetch"}}},
+                {"type": "Action.ToggleVisibility", "title": "Owner notes", "targetElements": ["owner-note"]},
+                {"type": "Action.ShowCard", "title": "Details", "card": {"body": [
+                    {"type": "TextBlock", "wrap": true, "text": "Last edited by **Mara Lindqvist** on Tuesday."}
+                ]}}
             ]}
         ]
     });
@@ -648,7 +665,62 @@ fn bot_messages() -> Vec<MessageRecord> {
         &attachments.to_string(),
     );
     record.sender_id = None;
+    record.sender_application_id = Some(BOT_ID.to_owned());
     vec![record]
+}
+
+fn bot_app() -> ChatApp {
+    ChatApp {
+        app_id: "demo-app-wiki".to_owned(),
+        name: BOT_APP_NAME.to_owned(),
+        bot_ids: vec![BOT_ID.to_owned()],
+        small_image_url: None,
+        accent_color: None,
+        web_application_resource: None,
+    }
+}
+
+pub async fn card_answer(task: CardTask) -> CardAnswer {
+    tokio::time::sleep(CARD_ANSWER_DELAY).await;
+    let data = match task {
+        CardTask::Submit(_) => {
+            return Ok((
+                CardActionOutcome::Message("Settings saved".into()),
+                Some((bot_app(), BOT_ID.to_owned())),
+            ));
+        }
+        CardTask::Action(action) => match action.invoke_payload() {
+            Some(payload) => payload.value,
+            None => return Err("Not supported".to_owned()),
+        },
+    };
+    let outcome = if data.pointer("/data/type").and_then(|kind| kind.as_str()) == Some("task/fetch")
+    {
+        CardActionOutcome::Dialog(TaskDialog {
+            title: None,
+            width: 520,
+            height: 300,
+            kind: TaskDialogKind::Card(settings_card().to_string()),
+        })
+    } else if data.get("action").and_then(|action| action.as_str()) == Some("unwatch") {
+        CardActionOutcome::Failed("The app answered 500: demo failure".into())
+    } else {
+        CardActionOutcome::Sent
+    };
+    Ok((outcome, Some((bot_app(), BOT_ID.to_owned()))))
+}
+
+fn settings_card() -> serde_json::Value {
+    serde_json::json!({
+        "type": "AdaptiveCard",
+        "body": [
+            {"type": "TextBlock", "weight": "bolder", "text": "Notification settings"},
+            {"type": "TextBlock", "wrap": true, "isSubtle": true, "text": "Choose how the bot tells you about page changes."}
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": "Save", "data": {"save": true}}
+        ]
+    })
 }
 
 fn priority_messages() -> Vec<MessageRecord> {

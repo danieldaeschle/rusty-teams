@@ -32,6 +32,7 @@ tokio.workspace = true
 image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "webp"] }
 
 [target.'cfg(windows)'.dependencies]
+uuid.workspace = true
 webview.workspace = true
 raw-window-handle = "0.6"
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }

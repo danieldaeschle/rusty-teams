@@ -363,6 +363,7 @@ fn record_with(body_html: &str, attachments_json: &str) -> MessageRecord {
         reply_to_id: None,
         sender_id: None,
         sender_name: None,
+        sender_application_id: None,
         created_at: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
         edited_at: None,
         deleted: false,

@@ -10,7 +10,7 @@ use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
 
 const MESSAGE_COLUMNS: &str = "conversation_id, message_id, reply_to_id, sender_id, sender_name, created_at, \
-     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json";
+     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id";
 
 impl Store {
     pub fn upsert_messages(&self, messages: &[MessageRecord]) -> Result<()> {
@@ -19,13 +19,14 @@ impl Store {
         {
             let mut upsert = transaction.prepare_cached(&format!(
                 "INSERT INTO messages ({MESSAGE_COLUMNS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT (conversation_id, message_id) DO UPDATE SET
                     reply_to_id = excluded.reply_to_id, sender_id = excluded.sender_id,
                     sender_name = excluded.sender_name, created_at = excluded.created_at,
                     edited_at = excluded.edited_at, deleted = excluded.deleted, body_html = excluded.body_html,
                     attachments_json = excluded.attachments_json, reactions_json = excluded.reactions_json,
-                    mentions_json = excluded.mentions_json"
+                    mentions_json = excluded.mentions_json,
+                    sender_application_id = excluded.sender_application_id"
             ))?;
             for message in messages {
                 upsert.execute(params![
@@ -41,6 +42,7 @@ impl Store {
                     message.attachments_json,
                     message.reactions_json,
                     message.mentions_json,
+                    message.sender_application_id,
                 ])?;
                 index_message(&transaction, message)?;
             }
@@ -163,5 +165,6 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         attachments_json: row.get(9)?,
         reactions_json: row.get(10)?,
         mentions_json: row.get(11)?,
+        sender_application_id: row.get(12)?,
     })
 }

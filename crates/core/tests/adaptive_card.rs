@@ -1,7 +1,7 @@
 use serde_json::json;
 use teams_core::{
-    AdaptiveCard, CardActionKind, CardElement, ColumnWidth, ImageSize, Span, TextColor, TextSize,
-    VerticalAlignment, card_content_text,
+    AdaptiveCard, CardAction, CardActionKind, CardElement, ColumnWidth, ImageSize, Span, TextColor,
+    TextSize, ToggleTarget, VerticalAlignment, card_content_text,
 };
 
 fn digest_card() -> String {
@@ -92,7 +92,124 @@ fn digest_card_keeps_layout_text_and_actions() {
     );
     assert_eq!(actions[1].kind, CardActionKind::Unsupported);
     assert_eq!(actions[2].title, "Watch");
+    let CardActionKind::Submit(submit) = &actions[2].kind else {
+        panic!("watch is a submit action");
+    };
+    assert_eq!(submit.data, json!({"action": "watch"}));
+    assert!(actions[2].is_clickable());
+}
+
+fn card_actions(actions: serde_json::Value) -> Vec<CardAction> {
+    let card = json!({"body": [{"type": "TextBlock", "text": "x"}], "actions": actions});
+    AdaptiveCard::parse(&card.to_string()).unwrap().actions
+}
+
+#[test]
+fn plain_submit_sends_its_data_as_a_message_back() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Unwatch", "data": {"type": "unwatch", "page": "p1"}}
+    ]));
+    let payload = actions[0].invoke_payload().unwrap();
+    assert_eq!(payload.name, "messageback");
+    assert_eq!(payload.value, json!({"type": "unwatch", "page": "p1"}));
+}
+
+#[test]
+fn task_fetch_submit_wraps_data_without_the_teams_settings() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Bell", "data": {"cardType": "n", "msteams": {"type": "task/fetch"}}}
+    ]));
+    let payload = actions[0].invoke_payload().unwrap();
+    assert_eq!(payload.name, "task/fetch");
+    assert_eq!(
+        payload.value,
+        json!({"data": {"cardType": "n", "type": "task/fetch"}, "context": {"theme": "dark"}})
+    );
+}
+
+#[test]
+fn message_back_and_im_back_send_the_teams_value() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "A", "data": {"msteams": {"type": "messageBack", "value": {"k": 1}}}},
+        {"type": "Action.Submit", "title": "B", "data": {"msteams": {"type": "imBack"}, "k": 2}}
+    ]));
+    let first = actions[0].invoke_payload().unwrap();
+    assert_eq!((first.name, first.value), ("messageback", json!({"k": 1})));
+    let second = actions[1].invoke_payload().unwrap();
+    assert_eq!(second.value, json!({"msteams": {"type": "imBack"}, "k": 2}));
+}
+
+#[test]
+fn execute_action_carries_verb_id_and_data() {
+    let actions = card_actions(json!([
+        {"type": "Action.Execute", "id": "a1", "title": "Approve", "verb": "approve", "data": {"n": 3}},
+        {"type": "Action.Execute", "title": "No verb"}
+    ]));
+    let payload = actions[0].invoke_payload().unwrap();
+    assert_eq!(payload.name, "adaptiveCard/action");
+    assert_eq!(
+        payload.value,
+        json!({
+            "action": {"type": "Action.Execute", "id": "a1", "verb": "approve", "data": {"n": 3}},
+            "trigger": "manual"
+        })
+    );
+    assert_eq!(actions[1].kind, CardActionKind::Unsupported);
+}
+
+#[test]
+fn show_card_and_toggle_actions_are_parsed_locally() {
+    let actions = card_actions(json!([
+        {"type": "Action.ShowCard", "title": "More", "card": {"body": [{"type": "TextBlock", "text": "nested"}]}},
+        {"type": "Action.ToggleVisibility", "title": "Toggle", "targetElements": ["a", {"elementId": "b", "isVisible": true}]},
+        {"type": "Action.ToggleVisibility", "title": "Empty", "targetElements": []}
+    ]));
+    let CardActionKind::ShowCard(nested) = &actions[0].kind else {
+        panic!("show card expected");
+    };
+    assert_eq!(nested.plain_text().as_deref(), Some("nested"));
+    assert!(actions[0].invoke_payload().is_none());
+    assert_eq!(
+        actions[1].kind,
+        CardActionKind::ToggleVisibility(vec![
+            ToggleTarget {
+                element_id: "a".to_owned(),
+                visible: None
+            },
+            ToggleTarget {
+                element_id: "b".to_owned(),
+                visible: Some(true)
+            },
+        ])
+    );
     assert_eq!(actions[2].kind, CardActionKind::Unsupported);
+}
+
+#[test]
+fn disabled_actions_stay_disabled_and_hidden_ones_need_an_id() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Off", "isEnabled": false, "data": {}},
+        {"type": "Action.Submit", "title": "Gone", "isVisible": false},
+        {"type": "Action.Submit", "title": "Later", "id": "later", "isVisible": false}
+    ]));
+    assert_eq!(actions.len(), 2);
+    assert!(!actions[0].is_clickable());
+    assert!(!actions[1].visible);
+    assert_eq!(actions[1].id.as_deref(), Some("later"));
+}
+
+#[test]
+fn toggled_items_keep_their_id_and_stay_out_of_the_text() {
+    let card = json!({"body": [
+        {"type": "TextBlock", "text": "shown"},
+        {"type": "TextBlock", "id": "details", "isVisible": false, "text": "secret"}
+    ]})
+    .to_string();
+    let parsed = AdaptiveCard::parse(&card).unwrap();
+    assert_eq!(parsed.items.len(), 2);
+    assert_eq!(parsed.items[1].id.as_deref(), Some("details"));
+    assert!(!parsed.items[1].visible);
+    assert_eq!(parsed.plain_text().as_deref(), Some("shown"));
 }
 
 #[test]
@@ -150,4 +267,29 @@ fn cards_without_content_are_none() {
     assert!(AdaptiveCard::parse("not json").is_none());
     assert!(AdaptiveCard::parse(r#"{"body": []}"#).is_none());
     assert!(AdaptiveCard::parse("[1]").is_none());
+}
+
+#[test]
+fn element_visibility_covers_items_actions_and_nested_cards() {
+    let card = json!({
+        "body": [
+            {"type": "TextBlock", "id": "title", "text": "t"},
+            {"type": "Container", "items": [
+                {"type": "TextBlock", "id": "details", "isVisible": false, "text": "d"}
+            ]},
+            {"type": "ActionSet", "actions": [
+                {"type": "Action.Submit", "id": "later", "isVisible": false, "title": "Later"},
+                {"type": "Action.ShowCard", "title": "More", "card": {"body": [
+                    {"type": "TextBlock", "id": "nested", "isVisible": false, "text": "n"}
+                ]}}
+            ]}
+        ]
+    })
+    .to_string();
+    let visibility = AdaptiveCard::parse(&card).unwrap().element_visibility();
+    assert_eq!(visibility.len(), 4);
+    assert!(visibility["title"]);
+    assert!(!visibility["details"]);
+    assert!(!visibility["later"]);
+    assert!(!visibility["nested"]);
 }

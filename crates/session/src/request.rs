@@ -22,6 +22,13 @@ impl Method {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BodyToken {
+    pub resource: String,
+    pub scope: String,
+    pub placeholder: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
@@ -31,6 +38,7 @@ pub struct Request {
     pub binary: bool,
     pub anonymous: bool,
     pub body_base64: Option<String>,
+    pub body_tokens: Vec<BodyToken>,
 }
 
 impl Request {
@@ -51,7 +59,18 @@ impl Request {
             binary: false,
             anonymous: false,
             body_base64: None,
+            body_tokens: Vec::new(),
         }
+    }
+
+    /// Replaces `placeholder` in the body with a token for `resource` inside the page, so the token never leaves it.
+    pub fn with_body_token(mut self, resource: &str, scope: &str, placeholder: &str) -> Self {
+        self.body_tokens.push(BodyToken {
+            resource: resource.to_owned(),
+            scope: scope.to_owned(),
+            placeholder: placeholder.to_owned(),
+        });
+        self
     }
 
     /// Sent without an Authorization header, for pre-authenticated URLs such as upload sessions.
@@ -90,6 +109,7 @@ impl Request {
             binary: false,
             anonymous: false,
             body_base64: None,
+            body_tokens: Vec::new(),
         }
     }
 }
@@ -117,6 +137,8 @@ pub(crate) struct WireRequest<'a> {
     pub body_base64: Option<&'a str>,
     pub binary: bool,
     pub anonymous: bool,
+    #[serde(rename = "bodyTokens")]
+    pub body_tokens: &'a [BodyToken],
 }
 
 impl<'a> From<&'a Request> for WireRequest<'a> {
@@ -137,6 +159,7 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             body_base64: request.body_base64.as_deref(),
             binary: request.binary,
             anonymous: request.anonymous,
+            body_tokens: &request.body_tokens,
         }
     }
 }
@@ -223,6 +246,23 @@ mod tests {
         assert_eq!(wire["binary"], true);
         assert_eq!(wire["bodyBase64"], Value::Null);
         assert_eq!(wire["headers"]["Range"], "bytes=0-9");
+    }
+
+    #[test]
+    fn body_tokens_travel_as_placeholders() {
+        let request = Request::with_body(Method::Post, "u", json!({"token": "@@t@@"}))
+            .with_body_token(
+                "https://api.spaces.skype.com",
+                "user_impersonation",
+                "@@t@@",
+            );
+        let wire = serde_json::to_value(WireRequest::from(&request)).unwrap();
+        assert_eq!(
+            wire["bodyTokens"][0]["resource"],
+            "https://api.spaces.skype.com"
+        );
+        assert_eq!(wire["bodyTokens"][0]["placeholder"], "@@t@@");
+        assert_eq!(wire["body"], r#"{"token":"@@t@@"}"#);
     }
 
     #[test]

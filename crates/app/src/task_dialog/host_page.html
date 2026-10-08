@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title></title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: __BACKGROUND__; }
+iframe { display: block; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<iframe id="app"></iframe>
+<script>
+(() => {
+  const config = __CONFIG__;
+  const makeAcquirer = __ACQUIRE__;
+  const frame = document.getElementById('app');
+  const originOf = (url) => { try { return new URL(url).origin; } catch (error) { return null; } };
+  let childOrigin = null;
+  const toHost = (message) => window.chrome.webview.postMessage(JSON.stringify(message));
+  const postToChild = (message) => {
+    if (frame.contentWindow && childOrigin) frame.contentWindow.postMessage(message, childOrigin);
+  };
+  const load = (url) => { childOrigin = originOf(url); frame.src = url; };
+  const answerAuthToken = async ({id, uuidAsString, resource}) => {
+    let args;
+    try {
+      const acquire = await makeAcquirer({marginMs: config.marginMs, forceRefresh: false});
+      const {token, refreshError} = await acquire(resource, '.default');
+      args = token ? [true, token] : [false, refreshError || 'tokenFailed'];
+    } catch (error) {
+      args = [false, 'tokenFailed'];
+    }
+    postToChild({id, uuidAsString, args});
+  };
+  window.addEventListener('message', (event) => {
+    if (event.source !== frame.contentWindow || event.origin !== childOrigin) return;
+    if (event.data && typeof event.data === 'object') toHost({kind: 'sdk', message: event.data});
+  });
+  window.chrome.webview.addEventListener('message', (event) => {
+    const directive = event.data || {};
+    if (directive.kind === 'post') postToChild(directive.message);
+    else if (directive.kind === 'authToken') answerAuthToken(directive);
+    else if (directive.kind === 'load') load(directive.url);
+  });
+  load(config.url);
+})();
+</script>
+</body>
+</html>

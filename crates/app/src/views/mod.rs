@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod avatar;
 pub mod composer;
 pub mod conversation;
+pub mod dialog_overlay;
 pub mod draft_style;
 pub mod emoji_popup;
 pub mod format_toolbar;

@@ -8,11 +8,24 @@ use crate::scope::Scope;
 use crate::session::{FETCH_SCRIPT, NOT_GRANTED_PREFIX, Session};
 
 const TOKEN_MARKER: &str = "if (!token) return {noToken: true, refreshError};";
+const ACQUIRE_CALL: &str = "const {token, refreshError} = await acquire(resource, scope);";
+
+/// A JS function expression: `(factory)({marginMs, forceRefresh})` resolves to `acquire(resource, scope)`, which answers `{token, refreshError}`.
+pub fn token_acquirer_script() -> String {
+    let call_at = FETCH_SCRIPT
+        .find(ACQUIRE_CALL)
+        .expect("fetch.js contains the acquire call");
+    format!("{}return acquire;}})", &FETCH_SCRIPT[..call_at])
+}
 
 impl Session {
     /// Opens a dedicated CDP connection to the app tab. Events of the tab arrive on the stream.
     pub async fn subscribe(&self, app: App) -> Result<(TabControl, TabEvents)> {
-        let (control, events) = self.transport.open(app, true).await?.ok_or(Error::NoAppTab)?;
+        let (control, events) = self
+            .transport
+            .open(app, true)
+            .await?
+            .ok_or(Error::NoAppTab)?;
         Ok((control, events.expect("opened with events")))
     }
 
@@ -52,7 +65,9 @@ impl Session {
                 .map_err(|error| Error::Cdp(format!("unexpected page answer: {error}")))?;
             let reason = outcome.refresh_error.unwrap_or_default();
             if reason.starts_with(NOT_GRANTED_PREFIX) {
-                return Err(Error::LoginRequired(format!("{app} app is not granted {scope}")));
+                return Err(Error::LoginRequired(format!(
+                    "{app} app is not granted {scope}"
+                )));
             }
             let detail = if reason.is_empty() {
                 String::new()
@@ -65,5 +80,18 @@ impl Session {
             });
         }
         Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acquirer_script_returns_the_acquire_function_before_any_request_runs() {
+        let script = token_acquirer_script();
+        assert!(script.starts_with("(async ({"));
+        assert!(script.ends_with("return acquire;})"));
+        assert!(!script.contains("const run = "));
     }
 }

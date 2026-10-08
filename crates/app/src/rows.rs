@@ -10,6 +10,7 @@ use teams_core::{
     images, message_spans, reactions,
 };
 
+use crate::card_state::CardOverride;
 use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
 use crate::render::blocks::{Inline, strip_image_placeholders};
@@ -112,8 +113,10 @@ pub struct LocalImage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageRow {
     pub key: String,
+    pub conversation_id: String,
     pub author: String,
     pub sender_id: Option<String>,
+    pub application_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub series: Series,
     pub card: bool,
@@ -453,6 +456,7 @@ pub struct RowContext {
     pub my_user_id: Option<String>,
     pub names: HashMap<String, String>,
     pub pending_reactions: PendingReactions,
+    pub card_overrides: HashMap<String, CardOverride>,
 }
 
 fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<ReactionInfo> {
@@ -481,7 +485,9 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
     };
     MessageRow {
         key: record.message_id.clone(),
+        conversation_id: record.conversation_id.clone(),
         sender_id: record.sender_id.clone(),
+        application_id: record.sender_application_id.clone(),
         created_at: record.created_at,
         series: Series::default(),
         card: false,
@@ -498,7 +504,10 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         images,
         local_images: Vec::new(),
         files: files(record),
-        adaptive_cards: adaptive_cards(record),
+        adaptive_cards: match context.card_overrides.get(&record.message_id) {
+            Some(replaced) if replaced.basis == record.attachments_json => replaced.cards.clone(),
+            _ => adaptive_cards(record),
+        },
         reply_count: None,
         new_marker: false,
         reply_faces: Vec::new(),
@@ -703,6 +712,7 @@ mod tests {
             reply_to_id: reply_to.map(str::to_owned),
             sender_id: Some("u".into()),
             sender_name: Some("Author".into()),
+            sender_application_id: None,
             created_at: Utc.with_ymd_and_hms(2026, 10, day, hour, 0, 0).unwrap(),
             edited_at: None,
             deleted: false,
@@ -830,6 +840,7 @@ mod tests {
             my_user_id: None,
             names: HashMap::new(),
             pending_reactions: HashMap::new(),
+            card_overrides: HashMap::new(),
         }
     }
 

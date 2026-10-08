@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName;
 
+use crate::card_state::BotIdentity;
 use crate::data::{AvatarState, Directory, Presence, PresenceKind};
 use crate::format;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -85,6 +86,29 @@ pub fn person_avatar(
         name: name.to_owned(),
     };
     face_circle(directory, &face, size, INITIALS_RATIO)
+}
+
+pub fn bot_avatar(identity: &BotIdentity, size: f32) -> AnyElement {
+    let initials = {
+        let name = identity.name.clone();
+        move || initials_circle(&name, &name, size, false, INITIALS_RATIO).into_any_element()
+    };
+    match &identity.icon_url {
+        Some(url) => div()
+            .size(px(size))
+            .flex_none()
+            .rounded_full()
+            .overflow_hidden()
+            .child(
+                img(url.clone())
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .with_loading(initials.clone())
+                    .with_fallback(initials),
+            )
+            .into_any_element(),
+        None => initials(),
+    }
 }
 
 pub fn presence_size(avatar_size: f32) -> f32 {

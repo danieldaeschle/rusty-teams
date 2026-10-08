@@ -1,18 +1,44 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use session::{App, BoxFuture, Diagnosis, Error, OpenedTab, Result, TabChannel, TabCommand, TabEvent, Transport, is_login_url};
-use tokio::sync::{mpsc::UnboundedSender, watch};
+use session::{
+    App, BoxFuture, Diagnosis, Error, OpenedTab, Result, TabChannel, TabCommand, TabEvent,
+    Transport, is_login_url,
+};
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    watch,
+};
+
+use crate::dialog::{DialogCommand, DialogEvent, DialogHandle, DialogSpec};
 
 const ENDPOINT_NAME: &str = "WebView2";
 const READY_WAIT: Duration = Duration::from_secs(30);
 
 pub(crate) enum UiRequest {
-    Call { app: App, command: TabCommand },
-    Subscribe { app: App, sink: UnboundedSender<TabEvent> },
-    Wake { app: App },
+    Call {
+        app: App,
+        command: TabCommand,
+    },
+    Subscribe {
+        app: App,
+        sink: UnboundedSender<TabEvent>,
+    },
+    Wake {
+        app: App,
+    },
     Retry,
+    OpenDialog {
+        id: u64,
+        spec: DialogSpec,
+        events: UnboundedSender<DialogEvent>,
+    },
+    Dialog {
+        id: u64,
+        command: DialogCommand,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -27,6 +53,7 @@ pub struct WebViewTransport {
     waker: Arc<dyn Fn() + Send + Sync>,
     state: watch::Receiver<HostState>,
     ready_wait: Duration,
+    next_dialog: AtomicU64,
 }
 
 impl WebViewTransport {
@@ -40,7 +67,20 @@ impl WebViewTransport {
             waker,
             state,
             ready_wait: READY_WAIT,
+            next_dialog: AtomicU64::new(1),
         }
+    }
+
+    pub fn open_dialog(&self, spec: DialogSpec) -> (DialogHandle, UnboundedReceiver<DialogEvent>) {
+        let id = self.next_dialog.fetch_add(1, Ordering::Relaxed);
+        let (events, receiver) = unbounded_channel();
+        let handle = DialogHandle {
+            id,
+            requests: self.requests.clone(),
+            waker: self.waker.clone(),
+        };
+        let _ = self.send(UiRequest::OpenDialog { id, spec, events });
+        (handle, receiver)
     }
 
     fn send(&self, request: UiRequest) -> Result<()> {
@@ -144,7 +184,10 @@ mod tests {
         HostState {
             ready: true,
             failure: None,
-            urls: urls.iter().map(|&(app, url)| (app, url.to_owned())).collect(),
+            urls: urls
+                .iter()
+                .map(|&(app, url)| (app, url.to_owned()))
+                .collect(),
         }
     }
 
@@ -174,14 +217,25 @@ mod tests {
     #[tokio::test]
     async fn open_before_ready_has_no_tab() {
         let ui = fake_ui();
-        assert!(ui.transport.open(App::Teams, false).await.unwrap().is_none());
+        assert!(
+            ui.transport
+                .open(App::Teams, false)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn calls_reach_the_ui_thread_and_answers_come_back() {
         let ui = fake_ui();
         ui.state.send_replace(ready(&[]));
-        let (control, events) = ui.transport.open(App::Outlook, false).await.unwrap().unwrap();
+        let (control, events) = ui
+            .transport
+            .open(App::Outlook, false)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(events.is_none());
         let requests = ui.requests;
         let answer = tokio::task::spawn_blocking(move || match requests.recv().unwrap() {
@@ -219,7 +273,10 @@ mod tests {
     async fn diagnose_sees_a_login_page() {
         let ui = fake_ui();
         ui.state.send_replace(ready(&[
-            (App::Teams, "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"),
+            (
+                App::Teams,
+                "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            ),
             (App::Outlook, "https://outlook.cloud.microsoft/mail/"),
         ]));
         let diagnosis = ui.transport.diagnose().await.unwrap();

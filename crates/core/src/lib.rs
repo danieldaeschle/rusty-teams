@@ -1,6 +1,7 @@
 mod actions;
 mod adaptive_card;
 mod avatars;
+mod card_actions;
 mod channel_sync;
 mod download;
 mod draft;
@@ -24,11 +25,14 @@ mod spans;
 mod stored;
 
 pub use adaptive_card::{
-    AdaptiveCard, CardAction, CardActionKind, CardColumn, CardElement, CardFact, CardImage,
-    CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ImageSize, TextColor, TextSize,
-    VerticalAlignment, card_content_text,
+    AdaptiveCard, CARD_THEME, CardAction, CardActionKind, CardColumn, CardElement, CardFact,
+    CardImage, CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ExecuteAction,
+    ImageSize, InvokePayload, SubmitAction, TextColor, TextSize, ToggleTarget, VerticalAlignment,
+    card_content_text, task_value,
 };
 pub use avatars::Avatar;
+pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
+pub use chatsvc::ChatApp;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,

@@ -12,8 +12,8 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     CallDevToolsProtocolMethodCompletedHandler, CoreWebView2EnvironmentOptions,
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    DevToolsProtocolEventReceivedEventHandler, NavigationCompletedEventHandler, ProcessFailedEventHandler,
-    SourceChangedEventHandler, take_pwstr,
+    DevToolsProtocolEventReceivedEventHandler, NavigationCompletedEventHandler,
+    ProcessFailedEventHandler, SourceChangedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
@@ -22,6 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, PCWSTR, PWSTR, w};
 
 use crate::fanout::Subscribers;
+use crate::host_dialog::{self, Dialog};
 use crate::transport::{HostState, UiRequest, WebViewTransport};
 use crate::{BROWSER_ARGUMENTS, FORWARDED_EVENTS};
 
@@ -47,10 +48,12 @@ struct View {
     webview: ICoreWebView2,
 }
 
-struct Shared {
+pub(crate) struct Shared {
     config: HostConfig,
     windows: HashMap<App, HWND>,
     views: RefCell<HashMap<App, View>>,
+    pub(crate) environment: RefCell<Option<ICoreWebView2Environment>>,
+    pub(crate) dialogs: RefCell<HashMap<u64, Dialog>>,
     subscribers: RefCell<Subscribers>,
     state: watch::Sender<HostState>,
     requests: mpsc::Receiver<UiRequest>,
@@ -62,7 +65,7 @@ thread_local! {
     static SHARED: RefCell<Option<Rc<Shared>>> = const { RefCell::new(None) };
 }
 
-fn shared() -> Option<Rc<Shared>> {
+pub(crate) fn shared() -> Option<Rc<Shared>> {
     SHARED.with(|slot| slot.borrow().clone())
 }
 
@@ -76,7 +79,8 @@ pub fn start(config: HostConfig) -> Arc<WebViewTransport> {
         .name("webview2".into())
         .spawn(move || run(config, requests, state_sender, window_sender));
     if let Err(error) = spawned {
-        failure_state.send_modify(|state| state.failure = Some(format!("no webview thread: {error}")));
+        failure_state
+            .send_modify(|state| state.failure = Some(format!("no webview thread: {error}")));
     }
     let window = window_receiver.recv().ok();
     let waker = Arc::new(move || {
@@ -108,6 +112,8 @@ fn run(
         config,
         windows,
         views: RefCell::new(HashMap::new()),
+        environment: RefCell::new(None),
+        dialogs: RefCell::new(HashMap::new()),
         subscribers: RefCell::new(Subscribers::default()),
         state,
         requests,
@@ -173,14 +179,18 @@ fn load(shared: &Rc<Shared>) {
 
 fn create_views(shared: &Rc<Shared>) -> std::result::Result<(), String> {
     let environment = create_environment(&shared.config.user_data_folder)?;
+    *shared.environment.borrow_mut() = Some(environment.clone());
     for app in App::ALL {
-        let view = create_view(shared, &environment, app).map_err(|error| format!("{app} webview: {error}"))?;
+        let view = create_view(shared, &environment, app)
+            .map_err(|error| format!("{app} webview: {error}"))?;
         shared.views.borrow_mut().insert(app, view);
     }
     Ok(())
 }
 
-fn create_environment(user_data_folder: &std::path::Path) -> std::result::Result<ICoreWebView2Environment, String> {
+fn create_environment(
+    user_data_folder: &std::path::Path,
+) -> std::result::Result<ICoreWebView2Environment, String> {
     let options = CoreWebView2EnvironmentOptions::default();
     unsafe {
         options.set_additional_browser_arguments(BROWSER_ARGUMENTS.to_owned());
@@ -208,7 +218,11 @@ fn create_environment(user_data_folder: &std::path::Path) -> std::result::Result
         .ok_or_else(|| "WebView2 runtime returned no environment".to_owned())
 }
 
-fn create_view(shared: &Rc<Shared>, environment: &ICoreWebView2Environment, app: App) -> windows::core::Result<View> {
+fn create_view(
+    shared: &Rc<Shared>,
+    environment: &ICoreWebView2Environment,
+    app: App,
+) -> windows::core::Result<View> {
     let window = shared.windows[&app];
     let (sender, receiver) = mpsc::channel();
     let creator = environment.clone();
@@ -228,11 +242,10 @@ fn create_view(shared: &Rc<Shared>, environment: &ICoreWebView2Environment, app:
         webview2_com::Error::WindowsError(error) => error,
         other => windows::core::Error::new(windows::core::HRESULT(-1), other.to_string()),
     })?;
-    let controller = receiver
-        .recv()
-        .ok()
-        .flatten()
-        .ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no controller"))?;
+    let controller =
+        receiver.recv().ok().flatten().ok_or_else(|| {
+            windows::core::Error::new(windows::core::HRESULT(-1), "no controller")
+        })?;
     let webview = unsafe { controller.CoreWebView2() }?;
     fit(window, &controller);
     unsafe {
@@ -244,7 +257,10 @@ fn create_view(shared: &Rc<Shared>, environment: &ICoreWebView2Environment, app:
     watch_failures(&webview, app)?;
     forward_events(&webview, app)?;
     unsafe { webview.Navigate(&HSTRING::from(app.start_url())) }?;
-    Ok(View { controller, webview })
+    Ok(View {
+        controller,
+        webview,
+    })
 }
 
 fn watch_source(webview: &ICoreWebView2, app: App) -> windows::core::Result<()> {
@@ -320,7 +336,9 @@ fn watch_failures(webview: &ICoreWebView2, app: App) -> windows::core::Result<()
         unsafe { arguments.ProcessFailedKind(&mut kind) }?;
         if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
             if !shared.restarting.replace(true) {
-                unsafe { PostMessageW(Some(shared.windows[&app]), WM_RESTART, WPARAM(0), LPARAM(0)) }?;
+                unsafe {
+                    PostMessageW(Some(shared.windows[&app]), WM_RESTART, WPARAM(0), LPARAM(0))
+                }?;
             }
         } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
             || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE
@@ -336,19 +354,20 @@ fn forward_events(webview: &ICoreWebView2, app: App) -> windows::core::Result<()
     for name in FORWARDED_EVENTS {
         let receiver = unsafe { webview.GetDevToolsProtocolEventReceiver(&HSTRING::from(name)) }?;
         let mut token = 0;
-        let handler = DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, arguments| {
-            let (Some(arguments), Some(shared)) = (arguments, shared()) else {
-                return Ok(());
-            };
-            let mut parameters = PWSTR::null();
-            unsafe { arguments.ParameterObjectAsJson(&mut parameters) }?;
-            let event = TabEvent {
-                method: name.to_owned(),
-                params: serde_json::from_str(&take_pwstr(parameters)).unwrap_or(Value::Null),
-            };
-            shared.subscribers.borrow_mut().publish(app, &event);
-            Ok(())
-        }));
+        let handler =
+            DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, arguments| {
+                let (Some(arguments), Some(shared)) = (arguments, shared()) else {
+                    return Ok(());
+                };
+                let mut parameters = PWSTR::null();
+                unsafe { arguments.ParameterObjectAsJson(&mut parameters) }?;
+                let event = TabEvent {
+                    method: name.to_owned(),
+                    params: serde_json::from_str(&take_pwstr(parameters)).unwrap_or(Value::Null),
+                };
+                shared.subscribers.borrow_mut().publish(app, &event);
+                Ok(())
+            }));
         unsafe { receiver.add_DevToolsProtocolEventReceived(&handler, &mut token) }?;
     }
     Ok(())
@@ -380,11 +399,21 @@ fn on_source_changed(shared: &Shared, app: App, url: String) {
 }
 
 fn webview_of(shared: &Shared, app: App) -> Option<ICoreWebView2> {
-    shared.views.borrow().get(&app).map(|view| view.webview.clone())
+    shared
+        .views
+        .borrow()
+        .get(&app)
+        .map(|view| view.webview.clone())
 }
 
 fn current_url(shared: &Shared, app: App) -> String {
-    shared.state.borrow().urls.get(&app).cloned().unwrap_or_default()
+    shared
+        .state
+        .borrow()
+        .urls
+        .get(&app)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn drain(shared: &Rc<Shared>) {
@@ -398,6 +427,10 @@ fn drain(shared: &Rc<Shared>) {
                     restart(shared);
                 }
             }
+            UiRequest::OpenDialog { id, spec, events } => {
+                host_dialog::open(shared, id, spec, events)
+            }
+            UiRequest::Dialog { id, command } => host_dialog::run(shared, id, command),
         }
     }
 }
@@ -410,13 +443,15 @@ fn call(shared: &Shared, app: App, command: TabCommand) {
     let parameters = HSTRING::from(command.params.to_string());
     let pending = Rc::new(RefCell::new(Some(command)));
     let answered = pending.clone();
-    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |code, json| {
-        if let Some(command) = answered.borrow_mut().take() {
-            command.respond(answer(code, &json));
-        }
-        Ok(())
-    }));
-    if let Err(error) = unsafe { webview.CallDevToolsProtocolMethod(&method, &parameters, &handler) }
+    let handler =
+        CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |code, json| {
+            if let Some(command) = answered.borrow_mut().take() {
+                command.respond(answer(code, &json));
+            }
+            Ok(())
+        }));
+    if let Err(error) =
+        unsafe { webview.CallDevToolsProtocolMethod(&method, &parameters, &handler) }
         && let Some(command) = pending.borrow_mut().take()
     {
         let reason = format!("{}: {error}", command.method);
@@ -484,7 +519,13 @@ fn show(shared: &Shared, app: App) {
 fn restart(shared: &Rc<Shared>) {
     shared.state.send_modify(|state| state.ready = false);
     shared.subscribers.borrow_mut().clear();
-    let views: Vec<View> = shared.views.borrow_mut().drain().map(|(_, view)| view).collect();
+    host_dialog::close_all(shared);
+    let views: Vec<View> = shared
+        .views
+        .borrow_mut()
+        .drain()
+        .map(|(_, view)| view)
+        .collect();
     for view in views {
         unsafe {
             let _ = view.controller.Close();
@@ -494,7 +535,7 @@ fn restart(shared: &Rc<Shared>) {
     shared.restarting.set(false);
 }
 
-fn fit(window: HWND, controller: &ICoreWebView2Controller) {
+pub(crate) fn fit(window: HWND, controller: &ICoreWebView2Controller) {
     let mut bounds = RECT::default();
     unsafe {
         if GetClientRect(window, &mut bounds).is_ok() {
@@ -510,7 +551,12 @@ fn app_of(shared: &Shared, window: HWND) -> Option<App> {
         .find_map(|(&app, &candidate)| (candidate == window).then_some(app))
 }
 
-extern "system" fn window_procedure(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+extern "system" fn window_procedure(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     let Some(shared) = shared() else {
         return unsafe { DefWindowProcW(window, message, wparam, lparam) };
     };

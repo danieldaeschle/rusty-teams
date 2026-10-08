@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -7,6 +9,9 @@ use teams_core::{
     VerticalAlignment,
 };
 
+use super::widgets::symbol;
+use crate::app_state::AppHandle;
+use crate::card_state::{ActionPhase, CardScope, CardState};
 use crate::render::{layout_blocks, render_blocks};
 use crate::theme;
 
@@ -22,6 +27,10 @@ const ACTION_RADIUS: f32 = 6.;
 const ACTION_TEXT_SIZE: f32 = 13.;
 const ACTION_DISABLED_OPACITY: f32 = 0.5;
 const ACTION_DISABLED_TOOLTIP: &str = "Not supported in this app";
+const ACTION_BUSY_OPACITY: f32 = 0.6;
+const ACTION_CHECK_SIZE: f32 = 14.;
+const ACTION_ICON_GAP: f32 = 4.;
+const NOTE_TEXT_SIZE: f32 = 12.;
 const FACT_TITLE_WIDTH: f32 = 96.;
 const FACT_GAP: f32 = 2.;
 const CONTAINER_PADDING: f32 = 8.;
@@ -35,20 +44,64 @@ const MEDIUM_IMAGE: f32 = 80.;
 const LARGE_IMAGE: f32 = 160.;
 const EXTERNAL_IMAGE_SCHEME: &str = "https://";
 
-pub fn cards_view(cards: &[AdaptiveCard], id: &str, cx: &App) -> Vec<AnyElement> {
+struct CardContext<'a> {
+    cx: &'a App,
+    scope: &'a CardScope,
+    state: &'a CardState,
+    root_key: String,
+    initial_visibility: HashMap<String, bool>,
+}
+
+impl<'a> CardContext<'a> {
+    fn new(card: &AdaptiveCard, scope: &'a CardScope, cx: &'a App) -> Self {
+        CardContext {
+            cx,
+            scope,
+            state: &cx.global::<AppHandle>().0.read(cx).cards,
+            root_key: scope.card_key(),
+            initial_visibility: card.element_visibility(),
+        }
+    }
+
+    fn visible(&self, id: Option<&String>, initial: bool) -> bool {
+        match id {
+            Some(id) => self
+                .state
+                .is_visible(&format!("{}/{id}", self.root_key), initial),
+            None => initial,
+        }
+    }
+}
+
+pub fn cards_view(
+    cards: &[AdaptiveCard],
+    conversation_id: &str,
+    message_id: &str,
+    cx: &App,
+) -> Vec<AnyElement> {
     cards
         .iter()
         .enumerate()
-        .map(|(index, card)| card_view(card, &format!("{id}-card-{index}"), cx))
+        .map(|(index, card)| {
+            let scope = CardScope::message(conversation_id, message_id, index);
+            card_view(card, &scope, cx)
+        })
         .collect()
 }
 
-fn card_view(card: &AdaptiveCard, id: &str, cx: &App) -> AnyElement {
+pub fn card_view(card: &AdaptiveCard, scope: &CardScope, cx: &App) -> AnyElement {
+    let context = CardContext::new(card, scope, cx);
+    let id = scope.card_key();
     let width = if card.full_width {
         CARD_FULL_WIDTH
     } else {
         CARD_WIDTH
     };
+    let note = context.state.note(&id).map(str::to_owned);
+    let visible_actions = card
+        .actions
+        .iter()
+        .any(|action| context.visible(action.id.as_ref(), action.visible));
     v_flex()
         .w(px(width))
         .max_w(relative(1.))
@@ -58,35 +111,50 @@ fn card_view(card: &AdaptiveCard, id: &str, cx: &App) -> AnyElement {
         .border(px(CARD_BORDER_WIDTH))
         .border_color(theme::border())
         .text_color(theme::text_strong())
-        .child(items_view(&card.items, id, cx))
-        .when(!card.actions.is_empty(), |card_element| {
+        .child(items_view(&card.items, &id, &context))
+        .when(visible_actions, |card_element| {
+            card_element.child(div().mt(px(spacing_pixels(CardSpacing::Default))).child(
+                actions_view(&card.actions, &format!("{id}-actions"), &context),
+            ))
+        })
+        .when_some(note, |card_element, note| {
             card_element.child(
                 div()
                     .mt(px(spacing_pixels(CardSpacing::Default)))
-                    .child(actions_view(&card.actions, &format!("{id}-actions"))),
+                    .text_size(px(NOTE_TEXT_SIZE))
+                    .text_color(theme::text_muted())
+                    .child(note),
             )
         })
         .into_any_element()
 }
 
-fn items_view(items: &[CardItem], id: &str, cx: &App) -> Div {
-    v_flex()
-        .w_full()
-        .children(items.iter().enumerate().map(|(index, item)| {
-            let item_id = format!("{id}-{index}");
+fn items_view(items: &[CardItem], id: &str, context: &CardContext) -> Div {
+    let mut shown = 0;
+    let mut column = v_flex().w_full();
+    for (index, item) in items.iter().enumerate() {
+        if !context.visible(item.id.as_ref(), item.visible) {
+            continue;
+        }
+        let item_id = format!("{id}-{index}");
+        let first = shown == 0;
+        shown += 1;
+        column = column.child(
             div()
                 .w_full()
-                .when(index > 0, |wrapper| {
+                .when(!first, |wrapper| {
                     wrapper.mt(px(spacing_pixels(item.spacing)))
                 })
-                .when(index > 0 && item.separator, |wrapper| {
+                .when(!first && item.separator, |wrapper| {
                     wrapper
                         .pt(px(SEPARATOR_PADDING))
                         .border_t_1()
                         .border_color(theme::border())
                 })
-                .child(element_view(&item.element, &item_id, cx))
-        }))
+                .child(element_view(&item.element, &item_id, context)),
+        );
+    }
+    column
 }
 
 fn spacing_pixels(spacing: CardSpacing) -> f32 {
@@ -100,9 +168,9 @@ fn spacing_pixels(spacing: CardSpacing) -> f32 {
     }
 }
 
-fn element_view(element: &CardElement, id: &str, cx: &App) -> AnyElement {
+fn element_view(element: &CardElement, id: &str, context: &CardContext) -> AnyElement {
     match element {
-        CardElement::Text(text) => text_view(text, id, cx),
+        CardElement::Text(text) => text_view(text, id, context.cx),
         CardElement::Image(image) => image_view(image, id),
         CardElement::ImageSet(images) => h_flex()
             .flex_wrap()
@@ -114,10 +182,10 @@ fn element_view(element: &CardElement, id: &str, cx: &App) -> AnyElement {
                     .map(|(index, image)| image_view(image, &format!("{id}-{index}"))),
             )
             .into_any_element(),
-        CardElement::Columns(columns) => columns_view(columns, id, cx),
+        CardElement::Columns(columns) => columns_view(columns, id, context),
         CardElement::Container { style, items } => {
             let tint = container_tint(*style);
-            items_view(items, id, cx)
+            items_view(items, id, context)
                 .when_some(tint, |container, tint| {
                     container
                         .p(px(CONTAINER_PADDING))
@@ -126,8 +194,8 @@ fn element_view(element: &CardElement, id: &str, cx: &App) -> AnyElement {
                 })
                 .into_any_element()
         }
-        CardElement::Facts(facts) => facts_view(facts, id, cx),
-        CardElement::Actions(actions) => actions_view(actions, id).into_any_element(),
+        CardElement::Facts(facts) => facts_view(facts, id, context.cx),
+        CardElement::Actions(actions) => actions_view(actions, id, context).into_any_element(),
     }
 }
 
@@ -208,7 +276,7 @@ fn facts_view(facts: &[CardFact], id: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn columns_view(columns: &[CardColumn], id: &str, cx: &App) -> AnyElement {
+fn columns_view(columns: &[CardColumn], id: &str, context: &CardContext) -> AnyElement {
     div()
         .flex()
         .flex_row()
@@ -216,7 +284,7 @@ fn columns_view(columns: &[CardColumn], id: &str, cx: &App) -> AnyElement {
         .w_full()
         .gap(px(COLUMN_GAP))
         .children(columns.iter().enumerate().map(|(index, column)| {
-            let content = items_view(&column.items, &format!("{id}-{index}"), cx);
+            let content = items_view(&column.items, &format!("{id}-{index}"), context);
             let aligned = v_flex()
                 .h_full()
                 .map(|aligned| match column.vertical_alignment {
@@ -296,42 +364,167 @@ fn named_image_width(size: ImageSize) -> Option<f32> {
     }
 }
 
-fn actions_view(actions: &[CardAction], id: &str) -> Div {
-    h_flex().w_full().flex_wrap().gap(px(ACTION_GAP)).children(
-        actions
-            .iter()
-            .enumerate()
-            .map(|(index, action)| action_button(action, format!("{id}-{index}"))),
-    )
+fn actions_view(actions: &[CardAction], id: &str, context: &CardContext) -> Div {
+    let open_card = context
+        .state
+        .open_card(id)
+        .and_then(|index| actions.get(index))
+        .and_then(|action| match &action.kind {
+            CardActionKind::ShowCard(card) => Some(card),
+            _ => None,
+        });
+    v_flex()
+        .w_full()
+        .gap(px(ACTION_GAP))
+        .child(
+            h_flex().w_full().flex_wrap().gap(px(ACTION_GAP)).children(
+                actions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, action)| context.visible(action.id.as_ref(), action.visible))
+                    .map(|(index, action)| action_button(action, index, id, context)),
+            ),
+        )
+        .when_some(open_card, |column, card| {
+            let nested_id = format!("{id}-show");
+            column.child(
+                v_flex()
+                    .w_full()
+                    .p(px(CONTAINER_PADDING))
+                    .gap(px(ACTION_GAP))
+                    .rounded(px(CONTAINER_RADIUS))
+                    .bg(theme::surface_raised())
+                    .child(items_view(&card.items, &nested_id, context))
+                    .when(!card.actions.is_empty(), |nested| {
+                        nested.child(actions_view(
+                            &card.actions,
+                            &format!("{nested_id}-actions"),
+                            context,
+                        ))
+                    }),
+            )
+        })
 }
 
-fn action_button(action: &CardAction, id: String) -> Stateful<Div> {
+fn action_button(
+    action: &CardAction,
+    index: usize,
+    actions_id: &str,
+    context: &CardContext,
+) -> Stateful<Div> {
+    let button_id = format!("{actions_id}-{index}");
+    let phase = context.state.phase(&button_id).cloned();
+    let label = action_label(
+        action,
+        &phase,
+        context.state.open_card(actions_id) == Some(index),
+    );
     let button = div()
-        .id(ElementId::Name(id.into()))
+        .id(ElementId::Name(button_id.clone().into()))
         .px(px(12.))
         .py(px(6.))
         .rounded(px(ACTION_RADIUS))
         .border_1()
-        .border_color(theme::border_strong())
+        .border_color(match phase {
+            Some(ActionPhase::Failed(_)) => theme::red(),
+            _ => theme::border_strong(),
+        })
         .text_size(px(ACTION_TEXT_SIZE))
         .font_weight(FontWeight::SEMIBOLD)
-        .child(action.title.clone());
+        .child(label);
+    if !action.is_clickable() {
+        return button
+            .text_color(theme::text_muted())
+            .opacity(ACTION_DISABLED_OPACITY)
+            .when(action.enabled, |button| {
+                button.tooltip(|window, cx| Tooltip::new(ACTION_DISABLED_TOOLTIP).build(window, cx))
+            })
+            .on_click(|_, _, cx| cx.stop_propagation());
+    }
+    let enabled = button.text_color(theme::accent_text());
+    if phase == Some(ActionPhase::Busy) {
+        return enabled
+            .opacity(ACTION_BUSY_OPACITY)
+            .on_click(|_, _, cx| cx.stop_propagation());
+    }
+    let enabled = enabled
+        .cursor_pointer()
+        .hover(|button| button.bg(theme::row_hover()))
+        .when_some(failure_reason(&phase), |button, reason| {
+            button.tooltip(move |window, cx| Tooltip::new(reason.clone()).build(window, cx))
+        });
+    let scope = context.scope.clone();
     match &action.kind {
         CardActionKind::OpenUrl(url) => {
             let url = url.clone();
-            button
-                .text_color(theme::accent_text())
-                .cursor_pointer()
-                .hover(|button| button.bg(theme::row_hover()))
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    cx.open_url(&url);
-                })
+            enabled.on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                cx.open_url(&url);
+            })
         }
-        CardActionKind::Unsupported => button
-            .text_color(theme::text_muted())
-            .opacity(ACTION_DISABLED_OPACITY)
-            .tooltip(|window, cx| Tooltip::new(ACTION_DISABLED_TOOLTIP).build(window, cx))
-            .on_click(|_, _, cx| cx.stop_propagation()),
+        CardActionKind::Submit(_) | CardActionKind::Execute(_) => {
+            let action = action.clone();
+            enabled.on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let (scope, action, button_id) = (scope.clone(), action.clone(), button_id.clone());
+                cx.global::<AppHandle>().0.clone().update(cx, |state, cx| {
+                    state.run_card_action(scope, button_id, action, cx)
+                });
+            })
+        }
+        CardActionKind::ShowCard(_) => {
+            let actions_id = actions_id.to_owned();
+            enabled.on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let (scope, actions_id) = (scope.clone(), actions_id.clone());
+                cx.global::<AppHandle>().0.clone().update(cx, |state, cx| {
+                    state.toggle_show_card(&scope, &actions_id, index, cx)
+                });
+            })
+        }
+        CardActionKind::ToggleVisibility(targets) => {
+            let elements: Vec<(String, bool, Option<bool>)> = targets
+                .iter()
+                .map(|target| {
+                    let initial = context
+                        .initial_visibility
+                        .get(&target.element_id)
+                        .copied()
+                        .unwrap_or(true);
+                    (target.element_id.clone(), initial, target.visible)
+                })
+                .collect();
+            let root_key = context.root_key.clone();
+            enabled.on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let (scope, root_key, elements) =
+                    (scope.clone(), root_key.clone(), elements.clone());
+                cx.global::<AppHandle>().0.clone().update(cx, |state, cx| {
+                    state.toggle_card_elements(&scope, &root_key, elements, cx)
+                });
+            })
+        }
+        CardActionKind::Unsupported => enabled,
+    }
+}
+
+fn failure_reason(phase: &Option<ActionPhase>) -> Option<String> {
+    match phase {
+        Some(ActionPhase::Failed(reason)) => Some(reason.clone()),
+        _ => None,
+    }
+}
+
+fn action_label(action: &CardAction, phase: &Option<ActionPhase>, open: bool) -> AnyElement {
+    match phase {
+        Some(ActionPhase::Busy) => format!("{}...", action.title).into_any_element(),
+        Some(ActionPhase::Done) => h_flex()
+            .gap(px(ACTION_ICON_GAP))
+            .items_center()
+            .child(symbol("done", ACTION_CHECK_SIZE, theme::green()))
+            .child(action.title.clone())
+            .into_any_element(),
+        _ if open => format!("{} ^", action.title).into_any_element(),
+        _ => action.title.clone().into_any_element(),
     }
 }

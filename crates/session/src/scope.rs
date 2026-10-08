@@ -6,6 +6,7 @@ pub const GRAPH: &str = "https://graph.microsoft.com";
 pub const IC3: &str = "https://ic3.teams.office.com";
 pub const PRESENCE: &str = "https://presence.teams.microsoft.com";
 pub const OUTLOOK: &str = "https://outlook.office.com";
+pub const SPACES: &str = "https://api.spaces.skype.com";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {

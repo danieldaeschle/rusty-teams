@@ -172,6 +172,7 @@ mod tests {
             reply_to_id: None,
             sender_id: Some(sender.into()),
             sender_name: Some("Sender".into()),
+            sender_application_id: None,
             created_at: at,
             edited_at: None,
             deleted: false,

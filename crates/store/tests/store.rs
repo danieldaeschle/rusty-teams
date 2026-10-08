@@ -46,7 +46,20 @@ fn message(conversation_id: &str, message_id: &str, minute: u32) -> MessageRecor
         attachments_json: "[]".to_owned(),
         reactions_json: "[]".to_owned(),
         mentions_json: "[]".to_owned(),
+        sender_application_id: None,
     }
+}
+
+#[test]
+fn sender_application_round_trips() {
+    let store = Store::open_in_memory().unwrap();
+    let bot_message = MessageRecord {
+        sender_application_id: Some("bot-guid".to_owned()),
+        ..message("c1", "m1", 1)
+    };
+    store.upsert_messages(std::slice::from_ref(&bot_message)).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"], bot_message);
 }
 
 fn ids(messages: &[MessageRecord]) -> Vec<&str> {
@@ -345,11 +358,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(store.schema_version().unwrap(), 7);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 6);
+    assert_eq!(reopened.schema_version().unwrap(), 7);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -381,7 +394,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), 7);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -447,7 +460,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), 7);
 }
 
 #[test]
@@ -678,6 +691,7 @@ fn migration_indexes_rows_that_predate_search() {
                  DROP TRIGGER channels_title_insert; DROP TRIGGER channels_title_update; DROP TRIGGER channels_title_delete;
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
                  DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence;
+                 ALTER TABLE messages DROP COLUMN sender_application_id;
                  PRAGMA user_version = 3;",
             )
             .unwrap();

@@ -54,6 +54,12 @@ impl Sender {
     pub fn user_id(&self) -> Option<&str> {
         self.user.as_ref().and_then(|user| user.id.as_deref())
     }
+
+    pub fn application_id(&self) -> Option<&str> {
+        self.application
+            .as_ref()
+            .and_then(|application| application.id.as_deref())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

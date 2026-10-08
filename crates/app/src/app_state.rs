@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
-use teams_core::{CoreEvent, ImageRef};
+use teams_core::{ChatApp, CoreEvent, ImageRef};
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
+use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
@@ -34,6 +35,8 @@ pub enum AppEvent {
     Jump,
     Status,
     Directory,
+    Cards(String),
+    TaskDialog,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -58,7 +61,15 @@ pub struct AppState {
     pub collapsed: HashSet<String>,
     pub start_on_channels: bool,
     pub pending_jump: Option<(String, String)>,
+    pub cards: CardState,
+    pub task_dialog: Option<TaskDialogState>,
+    pub bot_apps: HashMap<String, Vec<ChatApp>>,
+    pub bot_apps_pending: HashSet<String>,
 }
+
+pub struct AppHandle(pub Entity<AppState>);
+
+impl Global for AppHandle {}
 
 impl EventEmitter<AppEvent> for AppState {}
 
@@ -115,6 +126,10 @@ impl AppState {
             collapsed: HashSet::new(),
             start_on_channels: false,
             pending_jump: None,
+            cards: CardState::default(),
+            task_dialog: None,
+            bot_apps: HashMap::new(),
+            bot_apps_pending: HashSet::new(),
         };
         state.collapsed = state.load_collapsed();
         if !mode.demo {
@@ -408,6 +423,7 @@ impl AppState {
     pub fn reload_sidebar(&mut self, cx: &mut Context<Self>) {
         if let Ok(sidebar) = self.store.sidebar() {
             self.sidebar = sidebar;
+            self.apply_bot_titles();
         }
         if !self.mode.demo {
             self.reload_directory();
