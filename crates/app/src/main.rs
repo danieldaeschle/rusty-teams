@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+mod activity;
 mod app_state;
 mod assets;
 mod avatar_image;

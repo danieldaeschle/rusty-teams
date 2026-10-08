@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
+
 pub const SOUND_THROTTLE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -108,6 +110,7 @@ pub struct Incoming {
     pub preview: Preview,
     pub mentions_me: bool,
     pub muted: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 impl Incoming {
@@ -188,6 +191,7 @@ mod tests {
             preview: Preview::Text("Hello".into()),
             mentions_me: false,
             muted: false,
+            created_at: Utc::now(),
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod activity_panel;
 pub mod adaptive_card;
 pub mod attachment_tray;
 pub mod attachments;

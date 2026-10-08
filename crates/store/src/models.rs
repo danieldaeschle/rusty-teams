@@ -151,3 +151,17 @@ pub struct ConversationHit {
     pub conversation_id: String,
     pub title: String,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivityRecord {
+    pub id: i64,
+    pub conversation_id: String,
+    pub kind: String,
+    pub message_id: String,
+    pub actors_json: String,
+    pub preview: String,
+    pub glyphs: String,
+    pub count: u32,
+    pub updated_at: DateTime<Utc>,
+    pub read: bool,
+}

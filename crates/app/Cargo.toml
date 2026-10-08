@@ -24,6 +24,7 @@ directories.workspace = true
 gpui-kit.workspace = true
 reqwest_client.workspace = true
 graph.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 session.workspace = true
 store.workspace = true

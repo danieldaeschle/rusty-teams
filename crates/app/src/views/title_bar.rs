@@ -2,10 +2,11 @@ use std::sync::{Arc, OnceLock};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{TitleBar, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::{person_avatar, with_presence};
-use super::widgets::{icon, symbol};
+use super::widgets::{count_badge, icon, symbol};
 use crate::data::Directory;
 use crate::theme;
 
@@ -25,11 +26,13 @@ fn app_icon() -> Arc<Image> {
 
 pub fn render_title_bar(
     directory: &Directory,
+    activity_unread: usize,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_notifications: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let notifications = div()
         .id("title-notifications")
+        .relative()
         .occlude()
         .size(px(28.))
         .flex()
@@ -40,6 +43,18 @@ pub fn render_title_bar(
         .cursor_pointer()
         .hover(|button| button.bg(theme::surface()))
         .child(symbol("notifications", 18., theme::text_muted()))
+        .when(activity_unread > 0, |bell| {
+            bell.child(
+                div()
+                    .absolute()
+                    .top(px(-4.))
+                    .right(px(-6.))
+                    .child(count_badge(
+                        activity_unread.min(u32::MAX as usize) as u32,
+                        false,
+                    )),
+            )
+        })
         .on_click(on_notifications);
     let search = h_flex()
         .id("title-search")

@@ -85,6 +85,7 @@ pub fn build_incoming(
         preview: preview_of(record),
         mentions_me: mentions_me(record, my_user_id),
         muted: false,
+        created_at: record.created_at,
     })
 }
 
@@ -124,7 +125,7 @@ fn mentions_me(record: &MessageRecord, my_user_id: Option<&str>) -> bool {
         .any(|mention| mention.user_id.as_deref() == Some(me))
 }
 
-fn preview_of(record: &MessageRecord) -> Preview {
+pub fn preview_of(record: &MessageRecord) -> Preview {
     if let Some(text) = teams_core::preview_text(&record.body_html) {
         return Preview::Text(text);
     }

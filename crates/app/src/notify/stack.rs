@@ -377,6 +377,7 @@ mod tests {
             preview: Preview::Text("Hello".into()),
             mentions_me: mention,
             muted: false,
+            created_at: chrono::Utc::now(),
         }
     }
 

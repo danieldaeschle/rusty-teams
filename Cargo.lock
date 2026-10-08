@@ -267,6 +267,7 @@ dependencies = [
  "image",
  "raw-window-handle",
  "rodio",
+ "serde",
  "serde_json",
  "session",
  "store",

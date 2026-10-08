@@ -730,6 +730,7 @@ impl NotificationCenter {
             preview: Preview::Text("This is a test notification.".to_owned()),
             mentions_me: false,
             muted: false,
+            created_at: Utc::now(),
         };
         let decision = Decision {
             toast: true,
@@ -865,6 +866,7 @@ fn demo_incoming() -> Vec<Incoming> {
         preview: Preview::Text(text.to_owned()),
         mentions_me: mention,
         muted: false,
+        created_at: Utc::now(),
     };
     vec![
         item(

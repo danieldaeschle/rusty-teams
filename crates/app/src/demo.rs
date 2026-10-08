@@ -12,6 +12,7 @@ use teams_core::{
     TaskDialogKind,
 };
 
+use crate::activity::{Actor, Entry, Kind};
 use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
@@ -435,6 +436,78 @@ pub fn read_message_ids(records: &[MessageRecord]) -> std::collections::HashSet<
 
 pub fn first_selection() -> Selection {
     Selection::Chat(RELEASE_CHAT.to_owned())
+}
+
+pub fn activity_entries() -> Vec<Entry> {
+    let actor = |user_id: &str, name: &str| Actor {
+        user_id: Some(user_id.to_owned()),
+        name: name.to_owned(),
+    };
+    let entry = |conversation_id: &str,
+                 kind: Kind,
+                 message_id: &str,
+                 actors: Vec<Actor>,
+                 preview: &str,
+                 count: u32,
+                 updated_at: DateTime<Utc>,
+                 read: bool| Entry {
+        id: 0,
+        conversation_id: conversation_id.to_owned(),
+        kind,
+        message_id: message_id.to_owned(),
+        actors,
+        preview: preview.to_owned(),
+        glyphs: Vec::new(),
+        count,
+        updated_at,
+        read,
+    };
+    let reaction = Entry {
+        glyphs: vec!["\u{1F602}".to_owned(), "\u{1F44D}".to_owned()],
+        ..entry(
+            RELEASE_CHAT,
+            Kind::Reaction,
+            "m3",
+            vec![actor(PRIYA_ID, "Priya Nair"), actor(LEA_ID, "Lea Schneider")],
+            "I'll take the changelog.",
+            2,
+            at(0, 13, 20),
+            false,
+        )
+    };
+    vec![
+        entry(
+            UNREAD_CHAT,
+            Kind::Messages,
+            "u3",
+            vec![actor(LEA_ID, "Lea Schneider"), actor(PRIYA_ID, "Priya Nair")],
+            "Who is taking the review?",
+            3,
+            at(0, 13, 12),
+            false,
+        ),
+        entry(
+            "demo-channel-1-1",
+            Kind::Mention,
+            "t1",
+            vec![actor(MARA_ID, "Mara Lindqvist")],
+            "@Dana can you approve the merge? The pipeline is waiting.",
+            1,
+            at(0, 11, 40),
+            false,
+        ),
+        reaction,
+        entry(
+            "demo-chat-customer-3",
+            Kind::Messages,
+            "demo-customer-3-closed",
+            vec![actor(TOBIAS_ID, "Tobias Klein")],
+            "Ticket is closed",
+            1,
+            at(1, 16, 0),
+            true,
+        ),
+    ]
 }
 
 pub fn seed(store: &Store) {

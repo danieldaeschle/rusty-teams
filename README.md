@@ -18,6 +18,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 - Read receipts, presence (last known status shown at start), unread jump
 - Select and copy message text, `Ctrl+A` in the composer
 - Local full-text search and a `Ctrl+K` switcher, served from the cache
+- Activity bell: feed of new messages, @mentions and reactions to your messages, kept for 14 days
 - Dark theme, opens instantly from the local cache
 - Self-update from an update folder
 

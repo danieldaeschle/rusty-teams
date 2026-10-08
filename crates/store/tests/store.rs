@@ -358,11 +358,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 7);
+    assert_eq!(reopened.schema_version().unwrap(), 8);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -391,10 +391,10 @@ fn old_schema_is_upgraded_in_place() {
     let path = directory.path().join("cache.sqlite3");
     drop(Store::open(&path).unwrap());
     let connection = rusqlite_open(&path);
-    connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; PRAGMA user_version = 0").unwrap();
+    connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 7);
+    assert_eq!(store.schema_version().unwrap(), 8);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -460,7 +460,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 7);
+    assert_eq!(store.schema_version().unwrap(), 8);
 }
 
 #[test]
@@ -690,7 +690,7 @@ fn migration_indexes_rows_that_predate_search() {
                 "DROP TRIGGER chats_title_insert; DROP TRIGGER chats_title_update; DROP TRIGGER chats_title_delete;
                  DROP TRIGGER channels_title_insert; DROP TRIGGER channels_title_update; DROP TRIGGER channels_title_delete;
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
-                 DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence;
+                 DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
                  PRAGMA user_version = 3;",
             )
@@ -805,4 +805,44 @@ fn presence_upsert_keeps_the_latest_availability() {
     let mut presences = store.presences().unwrap();
     presences.sort();
     assert_eq!(presences, second.to_vec());
+}
+
+fn activity(id: i64, minute: u32) -> store::ActivityRecord {
+    store::ActivityRecord {
+        id,
+        conversation_id: "c1".to_owned(),
+        kind: "messages".to_owned(),
+        message_id: format!("m{id}"),
+        actors_json: r#"[{"user_id":"user-ada","name":"Ada Example"}]"#.to_owned(),
+        preview: "hello".to_owned(),
+        glyphs: String::new(),
+        count: 1,
+        updated_at: at(minute),
+        read: false,
+    }
+}
+
+#[test]
+fn activity_upsert_inserts_then_updates_in_place() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_activity(&[activity(1, 5), activity(2, 9)]).unwrap();
+    let mut changed = activity(1, 12);
+    changed.count = 3;
+    changed.read = true;
+    store.upsert_activity(std::slice::from_ref(&changed)).unwrap();
+    let records = store.activity().unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0], changed);
+    assert_eq!(records[1].id, 2);
+}
+
+#[test]
+fn activity_prune_drops_only_older_rows() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_activity(&[activity(1, 5), activity(2, 9), activity(3, 20)])
+        .unwrap();
+    assert_eq!(store.prune_activity(at(9)).unwrap(), 1);
+    let ids: Vec<i64> = store.activity().unwrap().iter().map(|record| record.id).collect();
+    assert_eq!(ids, vec![3, 2]);
 }

@@ -12,6 +12,10 @@ mod stack;
 mod text;
 mod toast;
 
-pub use center::NotificationCenter;
+pub use center::{NotificationCenter, selection_for};
+pub use incoming::{IncomingTracker, preview_of};
+pub use rules::{Incoming, Preview};
+#[cfg(test)]
+pub use rules::ChatKind;
 #[cfg(windows)]
 pub use platform::native_handle;

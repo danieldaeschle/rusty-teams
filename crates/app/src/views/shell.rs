@@ -1,14 +1,16 @@
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
+use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::sidebar::SidebarView;
 use super::status_bar::render_status_bar;
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
+use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
-use crate::notify::NotificationCenter;
+use crate::notify::{NotificationCenter, selection_for};
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 
@@ -46,10 +48,13 @@ pub struct AppShell {
     conversation: Entity<ConversationView>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
+    activity: Entity<ActivityCenter>,
+    activity_panel: Option<Entity<ActivityPanel>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
     _subscription: Subscription,
+    _activity_observation: Subscription,
 }
 
 impl AppShell {
@@ -71,6 +76,8 @@ impl AppShell {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
+        let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
+        let activity_observation = cx.observe(&activity, |_, _, cx| cx.notify());
         let closing = notifications.clone();
         window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
         let mut shell = AppShell {
@@ -79,10 +86,13 @@ impl AppShell {
             conversation,
             switcher: None,
             notifications,
+            activity,
+            activity_panel: None,
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
             _subscription: subscription,
+            _activity_observation: activity_observation,
         };
         shell.apply_open_target(cx);
         let Startup {
@@ -193,6 +203,7 @@ impl AppShell {
             cx.notify();
             return;
         }
+        self.activity_panel = None;
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let switcher = cx.new(|cx| Switcher::new(app, candidates, initial_query, window, cx));
@@ -226,6 +237,52 @@ impl AppShell {
         self.switcher = Some(switcher);
         cx.notify();
     }
+
+    fn toggle_activity_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.activity_panel.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+            return;
+        }
+        self.switcher = None;
+        let (app, activity) = (self.state.clone(), self.activity.clone());
+        let panel = cx.new(|cx| ActivityPanel::new(app, activity, window, cx));
+        cx.subscribe_in(
+            &panel,
+            window,
+            |this, _, event: &ActivityPanelEvent, window, cx| {
+                this.activity_panel = None;
+                window.focus(&this.focus_handle, cx);
+                match event {
+                    ActivityPanelEvent::Close => {}
+                    ActivityPanelEvent::OpenSettings => this
+                        .notifications
+                        .update(cx, |center, cx| center.open_settings(cx)),
+                    ActivityPanelEvent::Open {
+                        conversation_id,
+                        message_id,
+                    } => {
+                        let selection =
+                            selection_for(&this.state.read(cx).sidebar, conversation_id);
+                        if let Some(selection) = selection {
+                            let message_id = message_id.clone();
+                            this.state.update(cx, |state, cx| {
+                                if message_id.is_empty() {
+                                    state.select(selection, cx)
+                                } else {
+                                    state.jump_to_message(selection, message_id, cx)
+                                }
+                            });
+                        }
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+        self.activity_panel = Some(panel);
+        cx.notify();
+    }
 }
 
 impl Render for AppShell {
@@ -247,11 +304,9 @@ impl Render for AppShell {
         );
         let title_bar = render_title_bar(
             &state.directory,
+            self.activity.read(cx).feed().unread_count(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
-            cx.listener(|this, _, _, cx| {
-                this.notifications
-                    .update(cx, |center, cx| center.open_settings(cx));
-            }),
+            cx.listener(|this, _, window, cx| this.toggle_activity_panel(window, cx)),
         );
         div()
             .id("app-shell")
@@ -288,6 +343,7 @@ impl Render for AppShell {
                     )
                     .child(status),
             )
+            .children(self.activity_panel.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
             .child(crate::frame_log::probe("last"))
