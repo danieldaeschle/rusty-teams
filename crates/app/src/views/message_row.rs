@@ -80,9 +80,13 @@ fn bubble(
     directory: &Directory,
     extras: BubbleExtras,
     cx: &App,
-) -> Div {
+) -> Stateful<Div> {
     let corners = bubble_corners(own, row.series);
     let mut element = div()
+        .id(ElementId::Name(format!("bubble-{index}").into()))
+        .when_some(extras.hover.clone(), |element, hover| {
+            element.on_hover(move |is_hovered, _, cx| hover(*is_hovered, cx))
+        })
         .relative()
         .rounded_tl(px(corners.top_left))
         .rounded_tr(px(corners.top_right))
@@ -191,6 +195,7 @@ fn bubble(
 
 #[derive(Default)]
 struct BubbleExtras {
+    hover: Option<HoverChange>,
     menu: Option<MessageMenu>,
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
@@ -575,7 +580,9 @@ pub fn render_message_row(
         files,
         highlighted,
     } = actions;
+    let card_hover = hovered.clone().filter(|_| row.card);
     let extras = BubbleExtras {
+        hover: hovered,
         menu,
         react,
         controls: reaction_controls,
@@ -616,7 +623,7 @@ pub fn render_message_row(
                         }
                     })
                 })
-                .when_some(hovered, |element, hovered| {
+                .when_some(card_hover, |element, hovered| {
                     element.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
                 })
                 .when_some(reply, |element, reply| {

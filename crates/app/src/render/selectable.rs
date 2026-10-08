@@ -73,22 +73,19 @@ impl SelectableRichText {
     }
 }
 
-fn paint_pills(pills: &[Pill], layout: &TextLayout, window: &mut Window) {
+fn paint_pills(pills: &[Pill], text: &str, layout: &TextLayout, window: &mut Window) {
     let line_height = layout.line_height();
     let bounds = layout.bounds();
     for pill in pills {
-        let (Some(start), Some(end)) = (
-            layout.position_for_index(pill.range.start),
-            layout.position_for_index(pill.range.end),
-        ) else {
-            continue;
-        };
-        for line in selection_quads(start, end, bounds, line_height) {
+        let lines = pill_lines(text, pill.range.clone(), bounds.left(), |index| {
+            layout.position_for_index(index)
+        });
+        for line in lines {
             let line = Bounds::from_corners(
-                point(line.left() - px(PILL_OUTSET), line.top() + px(PILL_INSET_Y)),
+                point(line.left - px(PILL_OUTSET), line.top + px(PILL_INSET_Y)),
                 point(
-                    line.right() + px(PILL_OUTSET),
-                    line.top() + line_height - px(PILL_INSET_Y),
+                    line.right + px(PILL_OUTSET),
+                    line.top + line_height - px(PILL_INSET_Y),
                 ),
             );
             let (border_width, border_color) = match pill.border {
@@ -105,6 +102,53 @@ fn paint_pills(pills: &[Pill], layout: &TextLayout, window: &mut Window) {
             ));
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+struct PillLine {
+    left: Pixels,
+    right: Pixels,
+    top: Pixels,
+}
+
+fn pill_lines(
+    text: &str,
+    range: Range<usize>,
+    line_left: Pixels,
+    position: impl Fn(usize) -> Option<Point<Pixels>>,
+) -> Vec<PillLine> {
+    let mut lines: Vec<PillLine> = Vec::new();
+    let Some(slice) = text.get(range.clone()) else {
+        return lines;
+    };
+    let mut before = position(range.start);
+    for (offset, character) in slice.char_indices() {
+        let after = position(range.start + offset + character.len_utf8());
+        let (Some(start), Some(end)) = (before, after) else {
+            before = after;
+            continue;
+        };
+        before = after;
+        if character == '\n' {
+            continue;
+        }
+        // gpui places a wrap-boundary index at the end of the previous line.
+        let left = if start.y == end.y { start.x } else { line_left };
+        let right = if character.is_whitespace() {
+            left
+        } else {
+            end.x
+        };
+        match lines.last_mut() {
+            Some(line) if line.top == end.y => line.right = right.max(line.right),
+            _ => lines.push(PillLine {
+                left,
+                right,
+                top: end.y,
+            }),
+        }
+    }
+    lines
 }
 
 fn link_at(
@@ -242,7 +286,7 @@ impl Element for SelectableRichText {
         if selected_before != TextSelection::selected_text(window, cx) {
             window.refresh();
         }
-        paint_pills(&self.pills, &layout, window);
+        paint_pills(&self.pills, &self.text, &layout, window);
         let color = Theme::global(cx).tokens.colors.selection;
         let content_end = self.text.trim_end_matches(TIME_ROOM).len();
         let mut copied = String::new();
@@ -316,7 +360,7 @@ mod tests {
         WindowOptions, div, point, px, size,
     };
 
-    use super::SelectableRichText;
+    use super::{PillLine, SelectableRichText, pill_lines};
 
     const TEXT: &str = "plain bold link";
 
@@ -384,5 +428,52 @@ mod tests {
         });
         assert!(link_x.is_some());
         assert_eq!(cx.opened_url().as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn pill_wrapped_whole_onto_next_line_paints_only_there() {
+        let text = "the code";
+        let position = |index: usize| {
+            Some(if index <= 4 {
+                point(px(index as f32 * 10.), px(0.))
+            } else {
+                point(px((index - 4) as f32 * 10.), px(20.))
+            })
+        };
+        assert_eq!(
+            pill_lines(text, 4..8, px(0.), position),
+            vec![PillLine {
+                left: px(0.),
+                right: px(40.),
+                top: px(20.),
+            }]
+        );
+    }
+
+    #[test]
+    fn pill_split_by_a_wrap_paints_one_piece_per_line_without_the_trailing_space() {
+        let text = "ab cd";
+        let position = |index: usize| {
+            Some(if index <= 3 {
+                point(px(index as f32 * 10.), px(0.))
+            } else {
+                point(px((index - 3) as f32 * 10.), px(20.))
+            })
+        };
+        assert_eq!(
+            pill_lines(text, 0..5, px(0.), position),
+            vec![
+                PillLine {
+                    left: px(0.),
+                    right: px(20.),
+                    top: px(0.),
+                },
+                PillLine {
+                    left: px(0.),
+                    right: px(20.),
+                    top: px(20.),
+                },
+            ]
+        );
     }
 }
