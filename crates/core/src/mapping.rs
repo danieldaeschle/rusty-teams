@@ -38,6 +38,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
         .last_message_preview
         .as_ref()
         .map(OwnedPreview::from_graph);
+    let last_event_system = preview.as_ref().is_some_and(|preview| preview.system);
     Some(ChatRecord {
         id: chat.id.clone(),
         kind: chat.chat_type.clone(),
@@ -49,7 +50,8 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
             .join(", "),
         last_message_at,
         last_read_at,
-        unread: is_unread(chat.last_message_time(), last_read_at, last_from_me),
+        unread: !last_event_system
+            && is_unread(chat.last_message_time(), last_read_at, last_from_me),
         members: chat
             .members
             .iter()
@@ -66,6 +68,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
         last_message_sender_name: preview
             .as_ref()
             .and_then(|preview| preview.sender_name.clone()),
+        last_event_system,
     })
 }
 
@@ -283,6 +286,42 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    fn chat_with_preview(preview: serde_json::Value) -> Chat {
+        serde_json::from_value(json!({
+            "id": "19:meeting@thread.v2",
+            "chatType": "meeting",
+            "viewpoint": {"lastMessageReadDateTime": "2026-10-06T09:00:00Z"},
+            "lastMessagePreview": preview,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn system_event_after_the_read_marker_is_not_unread() {
+        let chat = chat_with_preview(json!({
+            "id": "1",
+            "messageType": "unknownFutureValue",
+            "createdDateTime": "2026-10-06T10:00:00Z",
+            "from": null,
+        }));
+        let record = chat_record(&chat, "me").unwrap();
+        assert!(!record.unread);
+        assert!(record.last_event_system);
+    }
+
+    #[test]
+    fn regular_message_after_the_read_marker_is_unread() {
+        let chat = chat_with_preview(json!({
+            "id": "1",
+            "messageType": "message",
+            "createdDateTime": "2026-10-06T10:00:00Z",
+            "from": {"user": {"id": "other"}},
+        }));
+        let record = chat_record(&chat, "me").unwrap();
+        assert!(record.unread);
+        assert!(!record.last_event_system);
+    }
 
     fn mentions_of(mentioned: serde_json::Value) -> Vec<MentionInfo> {
         let message: Message = serde_json::from_value(json!({

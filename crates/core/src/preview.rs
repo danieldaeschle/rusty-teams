@@ -23,6 +23,7 @@ pub(crate) struct OwnedPreview {
     pub sender_id: Option<String>,
     pub sender_name: Option<String>,
     pub deleted: bool,
+    pub system: bool,
 }
 
 impl OwnedPreview {
@@ -48,6 +49,7 @@ impl OwnedPreview {
                 .and_then(|sender| sender.display_name())
                 .map(str::to_owned),
             deleted,
+            system: !regular,
         }
     }
 
@@ -61,6 +63,7 @@ impl OwnedPreview {
             sender_id: record.sender_id.clone(),
             sender_name: record.sender_name.clone(),
             deleted: record.deleted,
+            system: false,
         }
     }
 

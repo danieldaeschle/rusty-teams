@@ -20,6 +20,7 @@ pub struct ChatRecord {
     pub last_message_sender_id: Option<String>,
     pub last_message_sender_name: Option<String>,
     pub last_message_deleted: bool,
+    pub last_event_system: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

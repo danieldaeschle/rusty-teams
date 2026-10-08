@@ -5,6 +5,23 @@ use store::{
     MessageRecord, Store, SyncState, TeamRecord,
 };
 
+#[test]
+fn a_system_event_keeps_the_previous_unread_state() {
+    let store = Store::open_in_memory().unwrap();
+    for (previous, expected) in [(true, true), (false, false)] {
+        let id = format!("chat-{previous}");
+        let mut seeded = chat(&id, "Planning", Some(at(5)));
+        seeded.unread = previous;
+        store.upsert_chats(&[seeded]).unwrap();
+
+        let mut event = chat(&id, "Planning", Some(at(12)));
+        event.unread = false;
+        event.last_event_system = true;
+        store.upsert_chats(&[event]).unwrap();
+        assert_eq!(store.chat(&id).unwrap().unwrap().unread, expected);
+    }
+}
+
 fn at(minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 6, 9, minute, 0).unwrap()
 }
@@ -57,7 +74,9 @@ fn sender_application_round_trips() {
         sender_application_id: Some("bot-guid".to_owned()),
         ..message("c1", "m1", 1)
     };
-    store.upsert_messages(std::slice::from_ref(&bot_message)).unwrap();
+    store
+        .upsert_messages(std::slice::from_ref(&bot_message))
+        .unwrap();
     let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
     assert_eq!(found["m1"], bot_message);
 }
@@ -843,11 +862,15 @@ fn activity(id: i64, minute: u32) -> store::ActivityRecord {
 #[test]
 fn activity_upsert_inserts_then_updates_in_place() {
     let store = Store::open_in_memory().unwrap();
-    store.upsert_activity(&[activity(1, 5), activity(2, 9)]).unwrap();
+    store
+        .upsert_activity(&[activity(1, 5), activity(2, 9)])
+        .unwrap();
     let mut changed = activity(1, 12);
     changed.count = 3;
     changed.read = true;
-    store.upsert_activity(std::slice::from_ref(&changed)).unwrap();
+    store
+        .upsert_activity(std::slice::from_ref(&changed))
+        .unwrap();
     let records = store.activity().unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0], changed);
@@ -861,6 +884,11 @@ fn activity_prune_drops_only_older_rows() {
         .upsert_activity(&[activity(1, 5), activity(2, 9), activity(3, 20)])
         .unwrap();
     assert_eq!(store.prune_activity(at(9)).unwrap(), 1);
-    let ids: Vec<i64> = store.activity().unwrap().iter().map(|record| record.id).collect();
+    let ids: Vec<i64> = store
+        .activity()
+        .unwrap()
+        .iter()
+        .map(|record| record.id)
+        .collect();
     assert_eq!(ids, vec![3, 2]);
 }

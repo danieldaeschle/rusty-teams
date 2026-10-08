@@ -27,11 +27,11 @@ impl Store {
                     member_summary = excluded.member_summary,
                     last_message_at = excluded.last_message_at,
                     last_read_at = COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at),
-                    unread = excluded.unread AND (
+                    unread = CASE WHEN ?12 THEN chats.unread ELSE excluded.unread AND (
                         excluded.last_message_at IS NULL
                         OR COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at) IS NULL
                         OR excluded.last_message_at > COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at)
-                    ), last_message_preview = excluded.last_message_preview,
+                    ) END, last_message_preview = excluded.last_message_preview,
                     last_message_sender_id = excluded.last_message_sender_id,
                     last_message_sender_name = excluded.last_message_sender_name,
                     last_message_deleted = excluded.last_message_deleted",
@@ -54,6 +54,7 @@ impl Store {
                     chat.last_message_sender_id,
                     chat.last_message_sender_name,
                     chat.last_message_deleted,
+                    chat.last_event_system,
                 ])?;
                 clear_members.execute([&chat.id])?;
                 for (position, member) in chat.members.iter().enumerate() {
@@ -179,6 +180,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         last_message_sender_id: row.get(8)?,
         last_message_sender_name: row.get(9)?,
         last_message_deleted: row.get(10)?,
+        last_event_system: false,
     })
 }
 
