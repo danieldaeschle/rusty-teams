@@ -302,6 +302,52 @@ pub fn reaction_type_for(glyph: &str) -> String {
         .map_or_else(|| bare.to_owned(), str::to_owned)
 }
 
+pub type PendingReactions = HashMap<String, Vec<(String, bool)>>;
+
+fn is_own_reaction(reaction: &ReactionInfo, wanted: &str, my_user_id: Option<&str>) -> bool {
+    my_user_id.is_some()
+        && reaction.user_id.as_deref() == my_user_id
+        && reaction_glyph(&reaction.reaction_type) == wanted
+}
+
+pub fn has_own_reaction(reactions: &[ReactionInfo], glyph: &str, my_user_id: Option<&str>) -> bool {
+    let wanted = reaction_glyph(glyph);
+    reactions
+        .iter()
+        .any(|reaction| is_own_reaction(reaction, &wanted, my_user_id))
+}
+
+pub fn set_own_reaction(
+    reactions: &mut Vec<ReactionInfo>,
+    glyph: &str,
+    my_user_id: Option<&str>,
+    present: bool,
+    now: DateTime<Utc>,
+) {
+    let wanted = reaction_glyph(glyph);
+    if !present {
+        reactions.retain(|reaction| !is_own_reaction(reaction, &wanted, my_user_id));
+    } else if !has_own_reaction(reactions, glyph, my_user_id) {
+        reactions.push(ReactionInfo {
+            reaction_type: reaction_type_for(glyph),
+            user_id: my_user_id.map(str::to_owned),
+            user_name: Some("You".to_owned()),
+            created_at: Some(now),
+        });
+    }
+}
+
+pub fn apply_pending_reactions(
+    reactions: &mut Vec<ReactionInfo>,
+    pending: Option<&Vec<(String, bool)>>,
+    my_user_id: Option<&str>,
+    now: DateTime<Utc>,
+) {
+    for (glyph, present) in pending.into_iter().flatten() {
+        set_own_reaction(reactions, glyph, my_user_id, *present, now);
+    }
+}
+
 pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<ReactionChip> {
     let my_user_id = context.my_user_id.as_deref();
     let mut chips: Vec<ReactionChip> = Vec::new();
@@ -406,6 +452,18 @@ pub struct RowContext {
     pub today: NaiveDate,
     pub my_user_id: Option<String>,
     pub names: HashMap<String, String>,
+    pub pending_reactions: PendingReactions,
+}
+
+fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<ReactionInfo> {
+    let mut visible = reactions(record);
+    apply_pending_reactions(
+        &mut visible,
+        context.pending_reactions.get(&record.message_id),
+        context.my_user_id.as_deref(),
+        Utc::now(),
+    );
+    visible
 }
 
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
@@ -436,7 +494,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         blocks,
         edited: record.edited_at.is_some() && !record.deleted,
         deleted: record.deleted,
-        reactions: reaction_chips(&reactions(record), context),
+        reactions: reaction_chips(&visible_reactions(record, context), context),
         images,
         local_images: Vec::new(),
         files: files(record),
@@ -655,6 +713,69 @@ mod tests {
         }
     }
 
+    fn own_reaction(reaction_type: &str) -> ReactionInfo {
+        ReactionInfo {
+            reaction_type: reaction_type.into(),
+            user_id: Some("me".into()),
+            user_name: None,
+            created_at: None,
+        }
+    }
+
+    #[test]
+    fn setting_a_reaction_is_idempotent_and_only_touches_mine() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 1, 8, 0, 0).unwrap();
+        let other = ReactionInfo {
+            user_id: Some("them".into()),
+            ..own_reaction("like")
+        };
+        let mut reactions = vec![other.clone()];
+        set_own_reaction(&mut reactions, "\u{1F44D}", Some("me"), true, now);
+        set_own_reaction(&mut reactions, "\u{1F44D}", Some("me"), true, now);
+        assert_eq!(reactions.len(), 2);
+        assert_eq!(reactions[1].reaction_type, "like");
+        assert_eq!(reactions[1].user_id.as_deref(), Some("me"));
+        set_own_reaction(&mut reactions, "\u{1F44D}", Some("me"), false, now);
+        set_own_reaction(&mut reactions, "\u{1F44D}", Some("me"), false, now);
+        assert_eq!(reactions, vec![other]);
+    }
+
+    #[test]
+    fn setting_matches_legacy_names_and_variation_selectors() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 1, 8, 0, 0).unwrap();
+        let mut reactions = vec![own_reaction("heart")];
+        assert!(has_own_reaction(&reactions, "\u{2764}\u{FE0F}", Some("me")));
+        set_own_reaction(&mut reactions, "\u{2764}\u{FE0F}", Some("me"), false, now);
+        assert!(reactions.is_empty());
+        set_own_reaction(&mut reactions, "\u{1F389}", Some("me"), true, now);
+        assert_eq!(reactions[0].reaction_type, "\u{1F389}");
+    }
+
+    #[test]
+    fn setting_without_a_known_user_never_matches() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 1, 8, 0, 0).unwrap();
+        let mut reactions = Vec::new();
+        set_own_reaction(&mut reactions, "\u{1F44D}", None, true, now);
+        set_own_reaction(&mut reactions, "\u{1F44D}", None, true, now);
+        assert_eq!(reactions.len(), 2);
+    }
+
+    #[test]
+    fn pending_reactions_overlay_the_stored_ones() {
+        let mut stored = record("a", None, 8, 6);
+        stored.reactions_json = serde_json::to_string(&[own_reaction("like")]).unwrap();
+        let mut context = context();
+        context.my_user_id = Some("me".into());
+        context.pending_reactions.insert(
+            "a".into(),
+            vec![("\u{1F44D}".into(), false), ("\u{1F389}".into(), true)],
+        );
+        let chips = message_row(&stored, &context).reactions;
+        assert_eq!(chips.len(), 1);
+        assert_eq!(chips[0].reaction_type, "\u{1F389}");
+        assert!(chips[0].mine);
+    }
+
     #[test]
     fn reaction_type_maps_classic_glyphs_to_names() {
         assert_eq!(reaction_type_for("\u{1F44D}"), "like");
@@ -708,6 +829,7 @@ mod tests {
             today: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
             my_user_id: None,
             names: HashMap::new(),
+            pending_reactions: HashMap::new(),
         }
     }
 

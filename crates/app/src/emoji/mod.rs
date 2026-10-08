@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn quick_reactions_lead_with_a_case_insensitive_query() {
-        let found = search("Herz", Recent::default().glyphs(), 7);
+        let found = search("Herz", &Recent::default().glyphs(), 7);
         assert_eq!(found[0].glyph, "❤️");
         assert_eq!(found[0].alias, Some("herz"));
     }

@@ -1109,8 +1109,10 @@ impl Composer {
     }
 
     fn remember_emoji(&mut self, glyph: &str, cx: &App) {
+        let store = &self.app.read(cx).store;
+        self.recent_emoji.reload(store);
         self.recent_emoji.push(glyph);
-        self.recent_emoji.save(&self.app.read(cx).store);
+        self.recent_emoji.save(store);
     }
 
     fn update_emoji(&mut self, cx: &mut Context<Self>) {
@@ -1132,7 +1134,7 @@ impl Composer {
         if unchanged {
             return;
         }
-        let matches = emoji::search(&query, self.recent_emoji.glyphs(), emoji_popup::LIMIT);
+        let matches = emoji::search(&query, &self.recent_emoji.glyphs(), emoji_popup::LIMIT);
         self.emoji_popup = (!matches.is_empty()).then(|| EmojiPopup::new(range, query, matches));
     }
 

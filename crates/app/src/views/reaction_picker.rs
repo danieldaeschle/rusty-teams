@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui_kit::base::PopoverState;
@@ -6,13 +7,14 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app_state::AppState;
 use crate::emoji;
+use crate::rows::reaction_glyph;
 use crate::theme;
 
-pub const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2764}", "\u{1F602}", "\u{1F62E}"];
 const PICKER_QUICK: [&str; 6] = [
     "\u{1F44D}",
     "\u{2764}",
@@ -45,36 +47,66 @@ const GRID_COLUMNS: usize = 8;
 const GRID_LIMIT: usize = 32;
 
 pub type PickHandler = Rc<dyn Fn(&str, &mut Window, &mut App)>;
+pub type DoneHandler = Rc<dyn Fn(&mut Window, &mut App)>;
+
+#[derive(Clone)]
+struct PickTarget {
+    on_pick: PickHandler,
+    on_done: DoneHandler,
+    popover: WeakEntity<PopoverState>,
+}
 
 pub struct ReactionPicker {
     app: Entity<AppState>,
     input: Entity<InputState>,
     query: String,
-    recent: emoji::Recent,
-    target: Option<(PickHandler, WeakEntity<PopoverState>)>,
+    recent: Entity<emoji::Recent>,
+    selected: HashSet<String>,
+    target: Option<PickTarget>,
     _subscription: Subscription,
 }
 
 impl ReactionPicker {
-    pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        app: Entity<AppState>,
+        recent: Entity<emoji::Recent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search emoji"));
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
-        let recent = emoji::Recent::load(&app.read(cx).store);
         ReactionPicker {
             app,
             input,
             query: String::new(),
             recent,
+            selected: HashSet::new(),
             target: None,
             _subscription: subscription,
         }
     }
 
-    pub fn set_target(&mut self, on_pick: PickHandler, popover: WeakEntity<PopoverState>) {
-        self.target = Some((on_pick, popover));
+    pub fn set_target(
+        &mut self,
+        on_pick: PickHandler,
+        on_done: DoneHandler,
+        popover: WeakEntity<PopoverState>,
+        selected: HashSet<String>,
+    ) {
+        self.target = Some(PickTarget {
+            on_pick,
+            on_done,
+            popover,
+        });
+        self.selected = selected;
     }
 
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let store = self.app.read(cx).store.clone();
+        self.recent.update(cx, |recent, cx| {
+            recent.reload(&store);
+            cx.notify();
+        });
         self.query.clear();
         self.input.update(cx, |state, cx| {
             state.set_value("", window, cx);
@@ -96,17 +128,17 @@ impl ReactionPicker {
                 cx.notify();
             }
             InputEvent::PressEnter { .. } => {
-                if let Some(first) = self.results().first().cloned() {
-                    self.pick(&first, window, cx);
+                if let Some(first) = self.results(cx).first().cloned() {
+                    self.pick(&first, false, window, cx);
                 }
             }
             _ => {}
         }
     }
 
-    fn results(&self) -> Vec<String> {
+    fn results(&self, cx: &App) -> Vec<String> {
+        let recent = self.recent.read(cx).glyphs();
         if self.query.is_empty() {
-            let recent = self.recent.glyphs();
             let fill = FALLBACK_RECENT
                 .iter()
                 .map(|glyph| (*glyph).to_owned())
@@ -118,25 +150,40 @@ impl ReactionPicker {
                 .take(GRID_LIMIT)
                 .collect();
         }
-        emoji::search(&self.query, self.recent.glyphs(), GRID_LIMIT)
+        emoji::search(&self.query, &recent, GRID_LIMIT)
             .into_iter()
             .map(|found| found.glyph.to_owned())
             .collect()
     }
 
-    fn pick(&mut self, glyph: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.recent.push(glyph);
-        self.recent.save(&self.app.read(cx).store);
-        if let Some((on_pick, popover)) = self.target.take() {
-            on_pick(glyph, window, cx);
-            popover
-                .update(cx, |state, cx| state.dismiss(window, cx))
-                .ok();
+    fn pick(&mut self, glyph: &str, keep_open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let target = if keep_open {
+            self.target.clone()
+        } else {
+            self.target.take()
+        };
+        let Some(target) = target else {
+            return;
+        };
+        let normalized = reaction_glyph(glyph);
+        if !self.selected.remove(&normalized) {
+            self.selected.insert(normalized);
         }
+        (target.on_pick)(glyph, window, cx);
+        if keep_open {
+            cx.notify();
+            return;
+        }
+        target
+            .popover
+            .update(cx, |state, cx| state.dismiss(window, cx))
+            .ok();
+        (target.on_done)(window, cx);
     }
 
     fn cell(&self, glyph: String, index: usize, cx: &mut Context<Self>) -> Stateful<Div> {
         let picked = glyph.clone();
+        let selected = self.selected.contains(&reaction_glyph(&glyph));
         div()
             .id(("reaction-picker-cell", index))
             .size(px(CELL_SIZE))
@@ -146,15 +193,18 @@ impl ReactionPicker {
             .rounded(px(6.))
             .text_size(px(20.))
             .cursor_pointer()
+            .when(selected, |cell| cell.bg(theme::reaction_on_own()))
             .hover(|cell| cell.bg(theme::border_strong()))
             .child(glyph)
-            .on_click(cx.listener(move |this, _, window, cx| this.pick(&picked, window, cx)))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                this.pick(&picked, event.modifiers().shift, window, cx)
+            }))
     }
 }
 
 impl Render for ReactionPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let results = self.results();
+        let results = self.results(cx);
         let label = if self.query.is_empty() {
             "Recently used"
         } else if results.is_empty() {

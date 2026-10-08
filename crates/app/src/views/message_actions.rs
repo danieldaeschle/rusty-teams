@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
@@ -9,13 +10,16 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
     popover::Popover,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::reaction_picker::{PickHandler, QUICK_REACTIONS, ReactionPicker};
+use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::widgets::icon;
+use crate::rows::reaction_glyph;
 use crate::theme;
 
 const BAR_BUTTON: f32 = 28.;
+pub const QUICK_REACTION_COUNT: usize = 4;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
@@ -31,6 +35,9 @@ pub struct MessageMenu {
     pub pin: OpenChange,
     pub hover: HoverChange,
     pub picker: Entity<ReactionPicker>,
+    pub quick: Vec<String>,
+    pub mine: HashSet<String>,
+    pub done: DoneHandler,
 }
 
 fn element_id(prefix: &str, key: &str) -> ElementId {
@@ -49,23 +56,28 @@ fn bar_button(id: ElementId) -> Stateful<Div> {
         .hover(|button| button.bg(theme::border_strong()))
 }
 
-fn reaction_button(menu: &MessageMenu, glyph: &'static str, index: usize) -> AnyElement {
-    let react = menu.react.clone();
+fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement {
+    let (react, done, picked) = (menu.react.clone(), menu.done.clone(), glyph.to_owned());
+    let selected = menu.mine.contains(&reaction_glyph(glyph));
     bar_button(element_id(&format!("quick-reaction-{index}"), &menu.key))
         .text_size(px(17.))
-        .child(glyph)
+        .when(selected, |button| button.bg(theme::reaction_on_own()))
+        .child(glyph.to_owned())
         .on_click(move |_, window, cx| {
             cx.stop_propagation();
-            react(glyph, window, cx);
+            react(&picked, window, cx);
+            done(window, cx);
         })
         .into_any_element()
 }
 
 fn picker_button(menu: &MessageMenu) -> AnyElement {
-    let (picker, picker_reset, react, pin) = (
+    let (picker, picker_reset, react, done, mine, pin) = (
         menu.picker.clone(),
         menu.picker.clone(),
         menu.react.clone(),
+        menu.done.clone(),
+        menu.mine.clone(),
         menu.pin.clone(),
     );
     Popover::new(element_id("reaction-picker", &menu.key))
@@ -85,7 +97,9 @@ fn picker_button(menu: &MessageMenu) -> AnyElement {
         })
         .content(move |_, _, cx| {
             let popover = cx.entity().downgrade();
-            picker.update(cx, |picker, _| picker.set_target(react.clone(), popover));
+            picker.update(cx, |picker, _| {
+                picker.set_target(react.clone(), done.clone(), popover, mine.clone())
+            });
             picker.clone()
         })
         .into_any_element()
@@ -131,7 +145,8 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
 
 pub fn message_toolbar(menu: MessageMenu) -> AnyElement {
     let hover = menu.hover.clone();
-    let mut children: Vec<AnyElement> = QUICK_REACTIONS
+    let mut children: Vec<AnyElement> = menu
+        .quick
         .iter()
         .enumerate()
         .map(|(index, glyph)| reaction_button(&menu, glyph, index))

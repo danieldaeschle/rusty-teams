@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ use teams_core::{FileCard, ImageRef};
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
-use super::message_actions::{Action, MessageMenu};
+use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
@@ -31,14 +31,15 @@ use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
 use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
+use crate::emoji;
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::layout_blocks;
 use crate::rows::{
-    Delivery, LocalImage, MessageRow, Receipt, Row, RowContext, Series, StartInfo, api_reaction,
-    assign_series, changed_indices, diff_keys, flat_rows, message_draft, message_text,
-    placeholder_rows, reaction_glyph, reaction_type_for, reply_excerpt, thread_list_rows,
-    thread_rows, trailing_skeleton,
+    Delivery, LocalImage, MessageRow, PendingReactions, Receipt, Row, RowContext, Series,
+    StartInfo, api_reaction, apply_pending_reactions, assign_series, changed_indices, diff_keys,
+    flat_rows, has_own_reaction, message_draft, message_text, placeholder_rows, reaction_glyph,
+    reply_excerpt, set_own_reaction, thread_list_rows, thread_rows, trailing_skeleton,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -128,10 +129,13 @@ pub struct ConversationView {
     pending: Vec<MessageRow>,
     pending_counter: usize,
     pending_outgoing: HashMap<String, Outgoing>,
+    pending_reactions: PendingReactions,
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
     toolbar_pinned: Option<String>,
+    toolbar_suppressed: Option<String>,
+    recent: Entity<emoji::Recent>,
     picker: Entity<ReactionPicker>,
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
@@ -323,7 +327,8 @@ impl ConversationView {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
-        let picker = cx.new(|cx| ReactionPicker::new(app.clone(), window, cx));
+        let recent = cx.new(|cx| emoji::Recent::load(&app.read(cx).store));
+        let picker = cx.new(|cx| ReactionPicker::new(app.clone(), recent.clone(), window, cx));
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
@@ -349,10 +354,13 @@ impl ConversationView {
             pending: Vec::new(),
             pending_counter: 0,
             pending_outgoing: HashMap::new(),
+            pending_reactions: HashMap::new(),
             downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
             toolbar_pinned: None,
+            toolbar_suppressed: None,
+            recent,
             picker,
             reaction_details: None,
             highlighted_message: None,
@@ -488,6 +496,7 @@ impl ConversationView {
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
         self.toolbar_hovered = None;
         self.toolbar_pinned = None;
+        self.toolbar_suppressed = None;
         let title = selection_title(&self.app.read(cx).sidebar, &selection);
         let mode = match selection {
             Selection::Chat(_) => ViewMode::Flat,
@@ -544,6 +553,7 @@ impl ConversationView {
             self.draft_error = None;
             self.toolbar_hovered = None;
             self.toolbar_pinned = None;
+            self.toolbar_suppressed = None;
             self.hovered_message = None;
             self.sync_generation += 1;
             self.draft.update(cx, |draft, cx| draft.reset(window, cx));
@@ -836,6 +846,7 @@ impl ConversationView {
             today: now.date_naive(),
             my_user_id: app.store.meta(META_USER_ID).ok().flatten(),
             names,
+            pending_reactions: self.pending_reactions.clone(),
         }
     }
 
@@ -1833,6 +1844,20 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
+        if let Some(suppressed) = self.toolbar_suppressed.as_deref()
+            && self.hovered_message.as_deref() != Some(suppressed)
+            && self.toolbar_hovered.as_deref() != Some(suppressed)
+        {
+            self.toolbar_suppressed = None;
+        }
+        cx.notify();
+    }
+
+    fn suppress_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.toolbar_hovered.as_deref() == Some(key) {
+            self.toolbar_hovered = None;
+        }
+        self.toolbar_suppressed = Some(key.to_owned());
         cx.notify();
     }
 
@@ -1846,21 +1871,26 @@ impl ConversationView {
     }
 
     fn toolbar_visible(&self, key: &str) -> bool {
-        self.toolbar_pinned
-            .as_deref()
-            .or(self.toolbar_hovered.as_deref())
-            .or(self.hovered_message.as_deref())
-            == Some(key)
+        self.toolbar_suppressed.as_deref() != Some(key)
+            && self
+                .toolbar_pinned
+                .as_deref()
+                .or(self.toolbar_hovered.as_deref())
+                .or(self.hovered_message.as_deref())
+                == Some(key)
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {
         let Some(conversation_id) = self.conversation_id() else {
             return;
         };
-        let reaction_type = reaction_type_for(glyph);
-        let wanted = reaction_glyph(glyph);
         let state = self.app.read(cx);
         let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
+        let engine = engine.filter(|_| !mode.read_only);
+        if !mode.demo && engine.is_none() {
+            self.show_notice("Read-only mode: reaction not sent", cx);
+            return;
+        }
         let my_user_id = self.row_context(cx).my_user_id;
         let Some(mut record) = store
             .messages_by_id(&conversation_id, &[message_id.to_owned()])
@@ -1869,47 +1899,122 @@ impl ConversationView {
         else {
             return;
         };
-        let mut reactions = teams_core::reactions(&record);
-        let mine = |reaction: &teams_core::ReactionInfo| {
-            reaction_glyph(&reaction.reaction_type) == wanted
-                && my_user_id.is_some()
-                && reaction.user_id == my_user_id
-        };
-        let remove = reactions.iter().any(mine);
-        if mode.demo {
-            if remove {
-                reactions.retain(|reaction| !mine(reaction));
-            } else {
-                reactions.push(teams_core::ReactionInfo {
-                    reaction_type: reaction_type.clone(),
-                    user_id: my_user_id.clone(),
-                    user_name: Some("You".to_owned()),
-                    created_at: Some(Utc::now()),
-                });
-            }
+        let wanted = reaction_glyph(glyph);
+        let mut visible = teams_core::reactions(&record);
+        apply_pending_reactions(
+            &mut visible,
+            self.pending_reactions.get(message_id),
+            my_user_id.as_deref(),
+            Utc::now(),
+        );
+        let added = !has_own_reaction(&visible, glyph, my_user_id.as_deref());
+        let Some(engine) = engine.filter(|_| !mode.demo) else {
+            let mut reactions = teams_core::reactions(&record);
+            set_own_reaction(
+                &mut reactions,
+                glyph,
+                my_user_id.as_deref(),
+                added,
+                Utc::now(),
+            );
             record.reactions_json = serde_json::to_string(&reactions).unwrap_or_default();
             let _ = store.upsert_messages(std::slice::from_ref(&record));
+            if added {
+                self.record_reaction_use(glyph, cx);
+            }
             self.rebuild(false, cx);
             return;
-        }
-        let Some(engine) = engine.filter(|_| !mode.read_only) else {
-            self.show_notice("Read-only mode: reaction not sent", cx);
-            return;
         };
-        let message_id = message_id.to_owned();
+        let entries = self
+            .pending_reactions
+            .entry(message_id.to_owned())
+            .or_default();
+        entries.retain(|(pending, _)| *pending != wanted);
+        entries.push((wanted.clone(), added));
+        self.rebuild(false, cx);
+        let (message_id, glyph) = (message_id.to_owned(), glyph.to_owned());
         let reaction_type = api_reaction(&wanted);
-        let receiver = runtime::spawn(async move {
-            if remove {
-                engine
-                    .unset_reaction(&conversation_id, &message_id, &reaction_type)
-                    .await
-            } else {
-                engine
-                    .set_reaction(&conversation_id, &message_id, &reaction_type)
-                    .await
+        let receiver = runtime::spawn({
+            let (conversation_id, message_id) = (conversation_id.clone(), message_id.clone());
+            async move {
+                if added {
+                    engine
+                        .set_reaction(&conversation_id, &message_id, &reaction_type)
+                        .await
+                } else {
+                    engine
+                        .unset_reaction(&conversation_id, &message_id, &reaction_type)
+                        .await
+                }
             }
         });
-        self.report_failure(receiver, "Reaction failed", cx);
+        cx.spawn(async move |this, cx| {
+            let outcome = match receiver.await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error)) => Err(short_error(&error)),
+                Err(_) => Err("cancelled".to_owned()),
+            };
+            this.update(cx, |this, cx| {
+                this.finish_reaction(&conversation_id, &message_id, &glyph, added, outcome, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn finish_reaction(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        glyph: &str,
+        added: bool,
+        outcome: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        let wanted = reaction_glyph(glyph);
+        let store = self.app.read(cx).store.clone();
+        if outcome.is_ok() {
+            let my_user_id = self.row_context(cx).my_user_id;
+            if let Some(mut record) = store
+                .messages_by_id(conversation_id, &[message_id.to_owned()])
+                .ok()
+                .and_then(|mut found| found.remove(message_id))
+            {
+                let mut reactions = teams_core::reactions(&record);
+                set_own_reaction(
+                    &mut reactions,
+                    glyph,
+                    my_user_id.as_deref(),
+                    added,
+                    Utc::now(),
+                );
+                record.reactions_json = serde_json::to_string(&reactions).unwrap_or_default();
+                let _ = store.upsert_messages(std::slice::from_ref(&record));
+            }
+            if added {
+                self.record_reaction_use(glyph, cx);
+            }
+        }
+        if let Some(entries) = self.pending_reactions.get_mut(message_id) {
+            entries.retain(|entry| *entry != (wanted.clone(), added));
+            if entries.is_empty() {
+                self.pending_reactions.remove(message_id);
+            }
+        }
+        self.rebuild(false, cx);
+        if let Err(error) = outcome {
+            self.show_notice(&format!("Reaction failed: {error}"), cx);
+        }
+    }
+
+    fn record_reaction_use(&mut self, glyph: &str, cx: &mut Context<Self>) {
+        let store = self.app.read(cx).store.clone();
+        self.recent.update(cx, |recent, cx| {
+            recent.reload(&store);
+            recent.record_use(glyph);
+            recent.save(&store);
+            cx.notify();
+        });
     }
 
     fn begin_edit(&mut self, message_id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2082,7 +2187,14 @@ impl ConversationView {
         .detach();
     }
 
-    fn message_menu(&self, key: &str, own: bool, view: WeakEntity<Self>) -> MessageMenu {
+    fn message_menu(
+        &self,
+        key: &str,
+        own: bool,
+        mine: HashSet<String>,
+        view: WeakEntity<Self>,
+        cx: &App,
+    ) -> MessageMenu {
         let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
             let (view, key) = (view.clone(), key.to_owned());
             Rc::new(move |window, cx| {
@@ -2124,6 +2236,9 @@ impl ConversationView {
             pin,
             hover,
             picker: self.picker.clone(),
+            quick: self.recent.read(cx).most_used(QUICK_REACTION_COUNT),
+            mine,
+            done: action(|this, key, _, cx| this.suppress_toolbar(key, cx)),
         }
     }
 
@@ -2491,8 +2606,19 @@ impl Render for ConversationView {
                             .filter(|_| actionable)
                             .map(|entity| {
                                 let this = entity.read(cx);
-                                let menu =
-                                    this.message_menu(&message.key, message.own, view.clone());
+                                let mine = message
+                                    .reactions
+                                    .iter()
+                                    .filter(|chip| chip.mine)
+                                    .map(|chip| chip.glyph())
+                                    .collect();
+                                let menu = this.message_menu(
+                                    &message.key,
+                                    message.own,
+                                    mine,
+                                    view.clone(),
+                                    cx,
+                                );
                                 let react = menu.react.clone();
                                 let visible = this.toolbar_visible(&message.key);
                                 let controls = (!message.reactions.is_empty())
