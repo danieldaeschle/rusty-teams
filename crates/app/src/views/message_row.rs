@@ -5,14 +5,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
 
-use super::attachments::{FileActions, attachments_view};
+use super::attachments::{FileActions, attachments_view, message_body};
 use super::avatar::{member_stack, person_avatar};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
-use crate::render::{Block, render_blocks};
+use crate::render::Block;
 use crate::rows::{Delivery, MessageRow, Receipt, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
@@ -129,14 +129,18 @@ fn bubble(
     };
     let meta_inline = has_text(row) && padded_blocks.is_some();
     if has_text(row) {
-        content = content.child(render_blocks(
+        content = content.children(message_body(
             padded_blocks.as_deref().unwrap_or(&row.blocks),
+            &row.images,
+            &row.local_images,
             &format!("message-{index}"),
             own,
+            directory,
             cx,
         ));
     }
     content = content.children(attachments_view(
+        &row.blocks,
         &row.images,
         &row.local_images,
         &row.files,
@@ -449,19 +453,24 @@ fn post_card(
     } else {
         if has_text(row) {
             body = body.child(
-                div()
+                v_flex()
+                    .gap(px(6.))
                     .text_size(px(BODY_SIZE))
                     .line_height(relative(1.45))
                     .text_color(theme::text_strong())
-                    .child(render_blocks(
+                    .children(message_body(
                         &row.blocks,
+                        &row.images,
+                        &row.local_images,
                         &format!("message-{index}"),
                         false,
+                        directory,
                         cx,
                     )),
             );
         }
         body = body.children(attachments_view(
+            &row.blocks,
             &row.images,
             &row.local_images,
             &row.files,

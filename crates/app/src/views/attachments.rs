@@ -10,6 +10,7 @@ use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::downloads::{self, DownloadState};
 use crate::format;
+use crate::render::{Block, render_blocks};
 use crate::rows::LocalImage;
 use crate::theme;
 
@@ -23,6 +24,8 @@ const FILE_BADGE_SIZE: f32 = 34.;
 const SAVE_BUTTON_SIZE: f32 = 28.;
 const SAVE_BUTTON_RADIUS: f32 = 6.;
 const SAVE_PROGRESS_HEIGHT: f32 = 2.;
+const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
+const LOCAL_IMAGE_SUFFIX: &str = "/$value";
 
 pub type FileActivate = Rc<dyn Fn(usize, &mut App)>;
 
@@ -280,7 +283,87 @@ fn file_view(
         .into_any_element()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    Remote(usize),
+    Local(usize),
+}
+
+fn local_image_index(url: &str) -> Option<usize> {
+    url.strip_prefix(LOCAL_IMAGE_PREFIX)?
+        .strip_suffix(LOCAL_IMAGE_SUFFIX)?
+        .parse::<usize>()
+        .ok()?
+        .checked_sub(1)
+}
+
+fn placement(url: &str, images: &[ImageRef], local_count: usize) -> Option<Placement> {
+    if let Some(index) = images.iter().position(|image| image.url == url) {
+        return Some(Placement::Remote(index));
+    }
+    local_image_index(url)
+        .filter(|index| *index < local_count)
+        .map(Placement::Local)
+}
+
+fn placements(blocks: &[Block], images: &[ImageRef], local_count: usize) -> Vec<Placement> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Image { url } => placement(url, images, local_count),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn message_body(
+    blocks: &[Block],
+    images: &[ImageRef],
+    local_images: &[LocalImage],
+    id: &str,
+    own: bool,
+    directory: &Directory,
+    cx: &App,
+) -> Vec<AnyElement> {
+    if !blocks
+        .iter()
+        .any(|block| matches!(block, Block::Image { .. }))
+    {
+        return vec![render_blocks(blocks, id, own, cx)];
+    }
+    let mut elements = Vec::new();
+    let mut run_start = 0;
+    let render_run = |start: usize, end: usize, elements: &mut Vec<AnyElement>| {
+        if end > start {
+            let part_id = format!("{id}-part-{start}");
+            elements.push(render_blocks(&blocks[start..end], &part_id, own, cx));
+        }
+    };
+    for (index, block) in blocks.iter().enumerate() {
+        let Block::Image { url } = block else {
+            continue;
+        };
+        render_run(run_start, index, &mut elements);
+        run_start = index + 1;
+        match placement(url, images, local_images.len()) {
+            Some(Placement::Remote(position)) => elements.push(image_view(
+                &images[position],
+                format!("{id}-image-{position}"),
+                directory,
+            )),
+            Some(Placement::Local(position)) => elements.push(local_image_view(
+                &local_images[position],
+                format!("{id}-local-image-{position}"),
+            )),
+            None => {}
+        }
+    }
+    render_run(run_start, blocks.len(), &mut elements);
+    elements
+}
+
 pub fn attachments_view(
+    blocks: &[Block],
     images: &[ImageRef],
     local_images: &[LocalImage],
     files: &[FileCard],
@@ -288,7 +371,18 @@ pub fn attachments_view(
     directory: &Directory,
     file_actions: Option<&FileActions>,
 ) -> Option<Div> {
-    if images.is_empty() && local_images.is_empty() && files.is_empty() {
+    let placed = placements(blocks, images, local_images.len());
+    let unplaced_images: Vec<(usize, &ImageRef)> = images
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !placed.contains(&Placement::Remote(*index)))
+        .collect();
+    let unplaced_local: Vec<(usize, &LocalImage)> = local_images
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !placed.contains(&Placement::Local(*index)))
+        .collect();
+    if unplaced_images.is_empty() && unplaced_local.is_empty() && files.is_empty() {
         return None;
     }
     Some(
@@ -296,12 +390,12 @@ pub fn attachments_view(
             .gap(px(6.))
             .items_start()
             .children(
-                images.iter().enumerate().map(|(index, image)| {
+                unplaced_images.into_iter().map(|(index, image)| {
                     image_view(image, format!("{id}-image-{index}"), directory)
                 }),
             )
             .children(
-                local_images.iter().enumerate().map(|(index, image)| {
+                unplaced_local.into_iter().map(|(index, image)| {
                     local_image_view(image, format!("{id}-local-image-{index}"))
                 }),
             )
@@ -313,8 +407,48 @@ pub fn attachments_view(
 
 #[cfg(test)]
 mod tests {
-    use super::{IMAGE_FALLBACK, file_subtitle, fit_image};
-    use teams_core::{FileCard, FileKind};
+    use super::{
+        IMAGE_FALLBACK, Placement, file_subtitle, fit_image, local_image_index, placement,
+        placements,
+    };
+    use crate::render::Block;
+    use teams_core::{FileCard, FileKind, ImageRef};
+
+    fn image_ref(url: &str) -> ImageRef {
+        ImageRef {
+            id: url.into(),
+            url: url.into(),
+            width: None,
+            height: None,
+        }
+    }
+
+    fn image_block(url: &str) -> Block {
+        Block::Image { url: url.into() }
+    }
+
+    #[test]
+    fn hosted_content_urls_map_to_zero_based_local_indices() {
+        assert_eq!(local_image_index("../hostedContents/2/$value"), Some(1));
+        assert_eq!(local_image_index("../hostedContents/0/$value"), None);
+        assert_eq!(local_image_index("https://x/y"), None);
+    }
+
+    #[test]
+    fn placed_images_are_found_by_url_before_local_indices() {
+        let images = [image_ref("a"), image_ref("b")];
+        let blocks = [
+            image_block("b"),
+            image_block("../hostedContents/2/$value"),
+            image_block("../hostedContents/9/$value"),
+            image_block("missing"),
+        ];
+        assert_eq!(
+            placements(&blocks, &images, 2),
+            vec![Placement::Remote(1), Placement::Local(1)]
+        );
+        assert_eq!(placement("a", &images, 0), Some(Placement::Remote(0)));
+    }
 
     #[test]
     fn wide_images_shrink_to_the_max_width_keeping_aspect() {

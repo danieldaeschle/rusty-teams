@@ -146,6 +146,9 @@ pub enum Block {
         rows: Vec<Vec<Inline>>,
     },
     Rule,
+    Image {
+        url: String,
+    },
 }
 
 impl Block {
@@ -187,7 +190,7 @@ impl Block {
                     .join("\n"),
             ),
             Block::Quote(children) => Some(join(children)),
-            Block::Reply(_) | Block::Rule => None,
+            Block::Reply(_) | Block::Rule | Block::Image { .. } => None,
         }
     }
 
@@ -198,7 +201,7 @@ impl Block {
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
             Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
             Block::Quote(children) => children.iter().find_map(Block::first_line),
-            Block::Reply(_) | Block::Rule => None,
+            Block::Reply(_) | Block::Rule | Block::Image { .. } => None,
         }
     }
 
@@ -249,6 +252,10 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
 }
 
 pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
+    layout_blocks_with(spans, true)
+}
+
+fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut current = Inline::default();
     for span in spans {
@@ -262,7 +269,7 @@ pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
             }
             Span::Quote(children) | Span::BlockQuote(children) => {
                 flush(&mut current, &mut blocks, Block::Paragraph);
-                let inner = layout_blocks(children);
+                let inner = layout_blocks_with(children, false);
                 if !inner.is_empty() {
                     blocks.push(match span {
                         Span::Quote(_) => Block::Reply(inner),
@@ -278,7 +285,7 @@ pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
                 flush(&mut current, &mut blocks, Block::Paragraph);
                 let items: Vec<Vec<Block>> = items
                     .iter()
-                    .map(|item| layout_blocks(item))
+                    .map(|item| layout_blocks_with(item, false))
                     .filter(|item| !item.is_empty())
                     .collect();
                 if !items.is_empty() {
@@ -316,6 +323,12 @@ pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
                 flush(&mut current, &mut blocks, Block::Paragraph);
                 blocks.push(Block::Rule);
             }
+            Span::Image { hosted_content_url } if split_images => {
+                flush(&mut current, &mut blocks, Block::Paragraph);
+                blocks.push(Block::Image {
+                    url: hosted_content_url.clone(),
+                });
+            }
             other => append_inline(
                 std::slice::from_ref(other),
                 StyleFlags::default(),
@@ -338,7 +351,7 @@ fn inline_of(spans: &[Span]) -> Inline {
 fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Block) {
     let mut inline = std::mem::take(current);
     inline.trim_end();
-    let leading = inline.text.len() - inline.text.trim_start_matches('\n').len();
+    let leading = inline.text.len() - inline.text.trim_start().len();
     if leading > 0 {
         inline.text.drain(..leading);
         inline.segments.retain_mut(|segment| {
@@ -827,37 +840,97 @@ mod tests {
         assert_eq!(inline.plain_text(), "run x. y");
     }
 
+    fn image(url: &str) -> Span {
+        Span::Image {
+            hosted_content_url: url.into(),
+        }
+    }
+
     #[test]
-    fn image_becomes_placeholder() {
-        let blocks = layout_blocks(&[Span::Image {
-            hosted_content_url: "u".into(),
-        }]);
+    fn top_level_image_is_its_own_block() {
         assert_eq!(
-            blocks,
-            vec![Block::Paragraph(Inline::plain(IMAGE_PLACEHOLDER))]
+            layout_blocks(&[image("u")]),
+            vec![Block::Image { url: "u".into() }]
         );
     }
 
     #[test]
+    fn image_splits_the_paragraph_at_its_position() {
+        let blocks = layout_blocks(&[text("a "), image("u"), text(" b")]);
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Paragraph(Inline::plain("a")),
+                Block::Image { url: "u".into() },
+                Block::Paragraph(Inline::plain("b")),
+            ]
+        );
+    }
+
+    #[test]
+    fn image_inside_a_list_keeps_the_placeholder() {
+        let blocks = layout_blocks(&[Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![vec![text("x "), image("u")]],
+        }]);
+        assert_eq!(
+            blocks,
+            vec![Block::List {
+                ordered: false,
+                start: 1,
+                items: vec![vec![Block::Paragraph(Inline::plain("x [image]"))]],
+            }]
+        );
+    }
+
+    #[test]
+    fn image_inside_a_quote_keeps_the_placeholder() {
+        let blocks = layout_blocks(&[Span::BlockQuote(vec![image("u")])]);
+        assert_eq!(
+            blocks,
+            vec![Block::Quote(vec![Block::Paragraph(Inline::plain(
+                IMAGE_PLACEHOLDER
+            ))])]
+        );
+    }
+
+    #[test]
+    fn image_blocks_have_no_text() {
+        let block = Block::Image { url: "u".into() };
+        assert_eq!(block.markdown(), None);
+        assert_eq!(block.first_line(), None);
+    }
+
+    #[test]
     fn stripping_placeholders_keeps_the_text_around_them() {
-        let blocks = layout_blocks(&[
-            text("look "),
-            Span::Bold(vec![text("here")]),
-            Span::LineBreak,
-            Span::Image {
-                hosted_content_url: "u".into(),
-            },
-        ]);
+        let blocks = layout_blocks(&[Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![vec![
+                text("look "),
+                Span::Bold(vec![text("here")]),
+                Span::LineBreak,
+                image("u"),
+            ]],
+        }]);
         let stripped = strip_image_placeholders(blocks);
-        let Block::Paragraph(inline) = &stripped[0] else {
+        let Block::List { items, .. } = &stripped[0] else {
+            panic!("list expected")
+        };
+        let Block::Paragraph(inline) = &items[0][0] else {
             panic!("paragraph expected")
         };
         assert_eq!(inline.text, "look here");
         assert!(inline.segments.last().unwrap().style.bold);
-        let only_image = layout_blocks(&[Span::Image {
-            hosted_content_url: "u".into(),
-        }]);
+        let only_image = vec![Block::Paragraph(Inline::plain(IMAGE_PLACEHOLDER))];
         assert!(strip_image_placeholders(only_image).is_empty());
+    }
+
+    #[test]
+    fn stripping_placeholders_keeps_image_blocks() {
+        let blocks = vec![Block::Image { url: "u".into() }];
+        assert_eq!(strip_image_placeholders(blocks.clone()), blocks);
     }
 
     #[test]

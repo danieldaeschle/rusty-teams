@@ -69,6 +69,7 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             start,
             items,
         } => render_list(*ordered, *start, items, &id, own, depth, cx),
+        Block::Image { .. } => div().into_any_element(),
         Block::Table { header, rows } => render_table(*header, rows, &id, own, cx),
         Block::Rule => div()
             .w_full()
