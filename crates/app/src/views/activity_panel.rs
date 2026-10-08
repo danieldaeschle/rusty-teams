@@ -20,6 +20,7 @@ const PANEL_MARGIN: f32 = 8.;
 const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 28.;
+const FILTER_KEY: &str = "activity_filter";
 
 pub enum ActivityPanelEvent {
     Close,
@@ -54,10 +55,18 @@ impl ActivityPanel {
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.observe(&activity, |_, _, cx| cx.notify()),
         ];
+        let filter = app
+            .read(cx)
+            .store
+            .meta(FILTER_KEY)
+            .ok()
+            .flatten()
+            .and_then(|key| Filter::from_key(&key))
+            .unwrap_or_default();
         ActivityPanel {
             app,
             activity,
-            filter: Filter::default(),
+            filter,
             focus_handle,
             scroll: ScrollHandle::new(),
             _observations: observations,
@@ -110,6 +119,7 @@ impl ActivityPanel {
                 .child(filter.label())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.filter = filter;
+                    let _ = this.app.read(cx).store.set_meta(FILTER_KEY, filter.key());
                     cx.notify();
                 }))
         });

@@ -43,6 +43,18 @@ pub enum Filter {
 impl Filter {
     pub const ALL: [Filter; 3] = [Filter::All, Filter::Mentions, Filter::Unread];
 
+    pub fn key(self) -> &'static str {
+        match self {
+            Filter::All => "all",
+            Filter::Mentions => "mentions",
+            Filter::Unread => "unread",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Filter> {
+        Filter::ALL.into_iter().find(|filter| filter.key() == key)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Filter::All => "All",
@@ -469,6 +481,14 @@ mod tests {
 
     use super::*;
     use crate::notify::{ChatKind, Preview};
+
+    #[test]
+    fn filters_round_trip_through_their_key() {
+        for filter in Filter::ALL {
+            assert_eq!(Filter::from_key(filter.key()), Some(filter));
+        }
+        assert_eq!(Filter::from_key("other"), None);
+    }
 
     fn at(hour: u32, minute: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 8, hour, minute, 0).unwrap()
