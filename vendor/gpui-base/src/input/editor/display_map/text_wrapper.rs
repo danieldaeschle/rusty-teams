@@ -31,13 +31,14 @@ pub enum WrappingIndent {
 /// Choose Unicode line-break opportunities using the same shaped widths as
 /// painting. Oversized words fall back to complete graphemes, never UTF-8 bytes.
 /// `hanging_indent` is a byte offset continuation rows align under; it wins over `wrapping_indent`.
-/// `atomic` ranges (inline tokens) are never split.
+/// `atomic` ranges (inline tokens) are never split. `forced` offsets (sorted) always end a row.
 fn measured_wrap_boundaries(
     text: &str,
     width: Pixels,
     wrapping_indent: WrappingIndent,
     hanging_indent: Option<usize>,
     atomic: &[Range<usize>],
+    forced: &[usize],
     mut measure: impl FnMut(Range<usize>) -> Pixels,
 ) -> Vec<gpui::Boundary> {
     let mut indent = match hanging_indent {
@@ -76,9 +77,15 @@ fn measured_wrap_boundaries(
         } else {
             width - indent_width
         };
+        let forced_end = forced
+            .get(forced.partition_point(|&ix| ix <= start))
+            .copied();
+        let row_ends = forced_end.map_or(ends.len(), |forced_end| {
+            ends.partition_point(|&ix| ix <= forced_end)
+        });
         // Find the fitting prefix locally. Exponential probing avoids shaping
         // the entire remaining logical line for every visual row of a long paste.
-        let remaining = ends.len() - first;
+        let remaining = row_ends - first;
         let mut low = 0;
         let mut high = 1;
         while measure(start..ends[first + high - 1]) <= available {
@@ -102,11 +109,15 @@ fn measured_wrap_boundaries(
             break;
         }
         let candidate = opportunities.partition_point(|&ix| ix <= fitting_end);
-        let end = candidate
-            .checked_sub(1)
-            .map(|ix| opportunities[ix])
-            .filter(|&ix| ix > start && (start != 0 || ix > indent))
-            .unwrap_or(fitting_end);
+        let end = if Some(fitting_end) == forced_end {
+            fitting_end
+        } else {
+            candidate
+                .checked_sub(1)
+                .map(|ix| opportunities[ix])
+                .filter(|&ix| ix > start && (start != 0 || ix > indent))
+                .unwrap_or(fitting_end)
+        };
         result.push(gpui::Boundary {
             ix: end,
             next_indent: text[..indent].chars().count() as u32,
@@ -187,6 +198,36 @@ fn line_indent_at(line_indents: &[(usize, Pixels)], line_start: usize) -> Pixels
         .map_or(px(0.), |found| line_indents[found].1)
 }
 
+/// An inline token's measured size. `height` is `Some` for a block token: the full height of its own row.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct InlineMetric {
+    pub(crate) range: Range<usize>,
+    pub(crate) width: Pixels,
+    pub(crate) height: Option<Pixels>,
+}
+
+fn block_rows_of(
+    metrics: &[InlineMetric],
+    line_start: usize,
+    line_len: usize,
+    rows: &[Range<usize>],
+) -> Vec<(usize, Pixels)> {
+    let first = metrics.partition_point(|metric| metric.range.end <= line_start);
+    metrics[first..]
+        .iter()
+        .take_while(|metric| metric.range.start < line_start + line_len)
+        .filter_map(|metric| {
+            let height = metric.height?;
+            let range = metric.range.start.checked_sub(line_start)?
+                ..metric.range.end.checked_sub(line_start)?;
+            let row = rows
+                .binary_search_by_key(&range.start, |row| row.start)
+                .ok()?;
+            (rows[row].end == range.end).then_some((row, height))
+        })
+        .collect()
+}
+
 /// Ranges whose entry differs between two sorted span lists.
 fn changed_ranges<T: PartialEq>(
     old: &[(Range<usize>, T)],
@@ -232,6 +273,7 @@ pub(crate) struct LineItem {
     ///
     /// Not contains the line end `\n`.
     pub(crate) wrapped_lines: SmallVec<[Range<usize>; 1]>,
+    pub(crate) blocks: Vec<(usize, Pixels)>,
 }
 
 impl LineItem {
@@ -261,6 +303,8 @@ pub(crate) struct LineSummary {
     max_line_len: usize,
     /// Buffer row (relative to this subtree) of the first line achieving `max_line_len`.
     longest_row: usize,
+    block_rows: usize,
+    block_height: Pixels,
 }
 
 impl sum_tree::Summary for LineSummary {
@@ -273,6 +317,8 @@ impl sum_tree::Summary for LineSummary {
             bytes: 0,
             max_line_len: 0,
             longest_row: 0,
+            block_rows: 0,
+            block_height: px(0.),
         }
     }
 
@@ -285,6 +331,8 @@ impl sum_tree::Summary for LineSummary {
         self.buffer_rows += other.buffer_rows;
         self.wrap_rows += other.wrap_rows;
         self.bytes += other.bytes;
+        self.block_rows += other.block_rows;
+        self.block_height += other.block_height;
     }
 }
 
@@ -298,6 +346,11 @@ impl sum_tree::Item for LineItem {
             bytes: self.len(),
             max_line_len: self.len(),
             longest_row: 0,
+            block_rows: self.blocks.len(),
+            block_height: self
+                .blocks
+                .iter()
+                .fold(px(0.), |height, (_, block_height)| height + *block_height),
         }
     }
 }
@@ -330,6 +383,29 @@ impl<'a> sum_tree::Dimension<'a, LineSummary> for WrapRows {
     }
 }
 
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct BlockExtent {
+    rows: usize,
+    height: Pixels,
+}
+
+impl BlockExtent {
+    fn extra(&self, line_height: Pixels) -> Pixels {
+        self.height - line_height * self.rows as f32
+    }
+}
+
+impl<'a> sum_tree::Dimension<'a, LineSummary> for BlockExtent {
+    fn zero(_: &()) -> Self {
+        BlockExtent::default()
+    }
+
+    fn add_summary(&mut self, summary: &'a LineSummary, _: &()) {
+        self.rows += summary.block_rows;
+        self.height += summary.block_height;
+    }
+}
+
 /// Used to prepare the text with soft wrap to be get lines to displayed in the Editor.
 ///
 /// After use lines to calculate the scroll size of the Editor.
@@ -343,7 +419,7 @@ pub(crate) struct TextWrapper {
     /// The lines by split \n
     pub(crate) lines: SumTree<LineItem>,
 
-    inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    inline_metrics: Rc<[InlineMetric]>,
     /// Sorted, non-overlapping document byte ranges measured in another font.
     font_overrides: Rc<[(Range<usize>, FontOverride)]>,
     /// Sorted list marker ranges, at most one per line; continuation rows start under their end.
@@ -441,6 +517,55 @@ impl TextWrapper {
         }
     }
 
+    fn row_span(&self, wrap_row: usize, line_height: Pixels) -> (Pixels, Pixels) {
+        let mut cursor = self.lines.cursor::<Dimensions<WrapRows, BlockExtent>>(&());
+        cursor.seek(&WrapRows(wrap_row), Bias::Right);
+        let first_row = cursor.start().0.0;
+        let mut extra = cursor.start().1.extra(line_height);
+        let mut height = line_height;
+        if let Some(line) = cursor.item() {
+            for (local_row, block_height) in &line.blocks {
+                match (first_row + local_row).cmp(&wrap_row) {
+                    std::cmp::Ordering::Less => extra += *block_height - line_height,
+                    std::cmp::Ordering::Equal => height = *block_height,
+                    std::cmp::Ordering::Greater => {}
+                }
+            }
+        }
+        (line_height * wrap_row as f32 + extra, height)
+    }
+
+    pub(crate) fn row_top(&self, wrap_row: usize, line_height: Pixels) -> Pixels {
+        self.row_span(wrap_row, line_height).0
+    }
+
+    pub(crate) fn row_height(&self, wrap_row: usize, line_height: Pixels) -> Pixels {
+        self.row_span(wrap_row, line_height).1
+    }
+
+    pub(crate) fn row_at_y(&self, y: Pixels, line_height: Pixels) -> usize {
+        let rows = self.len();
+        if self.lines.summary().block_rows == 0 {
+            return ((y / line_height).floor().max(0.) as usize).min(rows.saturating_sub(1));
+        }
+        let (mut low, mut high) = (0, rows.max(1));
+        while low + 1 < high {
+            let mid = (low + high) / 2;
+            if self.row_top(mid, line_height) <= y {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    }
+
+    pub(crate) fn content_height(&self, line_height: Pixels) -> Pixels {
+        let summary = self.lines.summary();
+        line_height * summary.wrap_rows as f32
+            + (summary.block_height - line_height * summary.block_rows as f32)
+    }
+
     pub(crate) fn set_wrap_width(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         if wrap_width == self.wrap_width {
             return;
@@ -508,8 +633,9 @@ impl TextWrapper {
             new_text,
             &mut |line_str, wrap_width, line_start| {
                 let mut tokens = Vec::new();
-                let first = metrics.partition_point(|(r, _)| r.end <= line_start);
-                for (range, width) in &metrics[first..] {
+                let first = metrics.partition_point(|metric| metric.range.end <= line_start);
+                for metric in &metrics[first..] {
+                    let range = &metric.range;
                     if range.start >= line_start + line_str.len() {
                         break;
                     }
@@ -522,7 +648,10 @@ impl TextWrapper {
                     {
                         continue;
                     }
-                    tokens.push((range, *width));
+                    tokens.push(InlineMetric {
+                        range,
+                        ..metric.clone()
+                    });
                 }
                 let shape = |range: Range<usize>| {
                     if range.is_empty() {
@@ -544,7 +673,13 @@ impl TextWrapper {
                         .layout_line(&line_str[range], font_size, &runs, None)
                         .width
                 };
-                let token_ranges: Vec<_> = tokens.iter().map(|(range, _)| range.clone()).collect();
+                let token_ranges: Vec<_> = tokens.iter().map(|token| token.range.clone()).collect();
+                let mut forced: Vec<usize> = tokens
+                    .iter()
+                    .filter(|token| token.height.is_some())
+                    .flat_map(|token| [token.range.start, token.range.end])
+                    .collect();
+                forced.dedup();
                 let wrap_width =
                     (wrap_width - line_indent_at(&line_indents, line_start)).max(px(1.));
                 let line_indented = line_indent_at(&line_indents, line_start) > px(0.);
@@ -555,13 +690,14 @@ impl TextWrapper {
                     hanging_indent_at(&hanging_indents, line_start, line_str.len())
                         .or(line_indented.then_some(0)),
                     &token_ranges,
+                    &forced,
                     |range| {
                         let mut width = px(0.);
                         let mut offset = range.start;
-                        for (token, token_width) in &tokens {
-                            if token.start >= offset && token.end <= range.end {
-                                width += shape(offset..token.start) + *token_width;
-                                offset = token.end;
+                        for token in &tokens {
+                            if token.range.start >= offset && token.range.end <= range.end {
+                                width += shape(offset..token.range.start) + token.width;
+                                offset = token.range.end;
                             }
                         }
                         width + shape(offset..range.end)
@@ -605,7 +741,12 @@ impl TextWrapper {
         self.inline_metrics = self
             .inline_metrics
             .iter()
-            .filter_map(|(token, width)| Some((shift_span(token, range, new_len)?, *width)))
+            .filter_map(|metric| {
+                Some(InlineMetric {
+                    range: shift_span(&metric.range, range, new_len)?,
+                    ..metric.clone()
+                })
+            })
             .collect();
     }
 
@@ -678,16 +819,18 @@ impl TextWrapper {
         line_indent_at(&self.line_indents, line_start)
     }
 
-    pub(crate) fn set_inline_metrics(
-        &mut self,
-        metrics: Rc<[(Range<usize>, Pixels)]>,
-        cx: &mut App,
-    ) {
+    pub(crate) fn set_inline_metrics(&mut self, metrics: Rc<[InlineMetric]>, cx: &mut App) {
         if self.inline_metrics == metrics {
             return;
         }
+        let as_spans = |metrics: &[InlineMetric]| -> Vec<(Range<usize>, (Pixels, Option<Pixels>))> {
+            metrics
+                .iter()
+                .map(|metric| (metric.range.clone(), (metric.width, metric.height)))
+                .collect()
+        };
         // Only rows whose element geometry changed need another wrap pass.
-        let affected = changed_ranges(&self.inline_metrics, &metrics);
+        let affected = changed_ranges(&as_spans(&self.inline_metrics), &as_spans(&metrics));
         self.inline_metrics = metrics;
         self.rewrap_rows_of(&affected, cx);
     }
@@ -801,10 +944,13 @@ impl TextWrapper {
                 wrapped_lines.push(prev_boundary_ix..line.len());
             }
 
+            let blocks =
+                block_rows_of(&self.inline_metrics, line_start, line.len(), &wrapped_lines);
             new_lines.push(LineItem {
                 len: line.len(),
                 indent: indent_chars,
                 wrapped_lines,
+                blocks,
             });
         }
 
@@ -1006,6 +1152,30 @@ impl LineLayout {
         }
     }
 
+    #[inline]
+    pub(crate) fn row_height(&self, ix: usize, line_height: Pixels) -> Pixels {
+        self.wrapped_lines
+            .get(ix)
+            .and_then(|line| line.height)
+            .unwrap_or(line_height)
+    }
+
+    pub(crate) fn row_top(&self, ix: usize, line_height: Pixels) -> Pixels {
+        (0..ix).fold(px(0.), |top, row| top + self.row_height(row, line_height))
+    }
+
+    pub(crate) fn row_at_y(&self, y: Pixels, line_height: Pixels) -> Option<usize> {
+        let mut top = px(0.);
+        for ix in 0..self.wrapped_lines.len() {
+            let bottom = top + self.row_height(ix, line_height);
+            if y >= top && y < bottom {
+                return Some(ix);
+            }
+            top = bottom;
+        }
+        None
+    }
+
     pub(crate) fn lines(mut self, wrapped_lines: SmallVec<[ShapedLine; 1]>) -> Self {
         self.set_wrapped_lines(wrapped_lines);
         self
@@ -1107,7 +1277,7 @@ impl LineLayout {
             // Always advance by actual line length. The last line gets +1 so the
             // cursor can be placed after the final character.
             acc_len += if is_last { line.len + 1 } else { line.len };
-            offset_y += last_layout.line_height;
+            offset_y += self.row_height(i, last_layout.line_height);
         }
 
         None
@@ -1143,21 +1313,11 @@ impl LineLayout {
         pos: Point<Pixels>,
         last_layout: &LastLayout,
     ) -> Option<(usize, usize, Pixels)> {
-        let mut offset = 0;
-        let mut line_top = px(0.);
         let x_offset = last_layout.alignment_offset(self.longest_width);
+        let i = self.row_at_y(pos.y, last_layout.line_height)?;
+        let offset = self.wrapped_lines.iter().take(i).map(|line| line.len).sum();
 
-        for (i, line) in self.wrapped_lines.iter().enumerate() {
-            let line_bottom = line_top + last_layout.line_height;
-            if pos.y >= line_top && pos.y < line_bottom {
-                return Some((i, offset, pos.x - x_offset - self.line_indent(i)));
-            }
-
-            offset += line.len;
-            line_top = line_bottom;
-        }
-
-        None
+        Some((i, offset, pos.x - x_offset - self.line_indent(i)))
     }
 
     /// Get the index for the given position (x, y) in this line layout.
@@ -1232,7 +1392,7 @@ impl LineLayout {
             .map(|(ix, line)| line.width + self.line_indent(ix))
             .max()
             .unwrap_or(self.longest_width);
-        size(width, self.wrapped_lines.len() * line_height)
+        size(width, self.row_top(self.wrapped_lines.len(), line_height))
     }
 
     /// Paint only the glyph background quads of this line.
@@ -1254,15 +1414,17 @@ impl LineLayout {
             return;
         }
 
+        let mut top = px(0.);
         for (ix, line) in self.wrapped_lines.iter().enumerate() {
             _ = line.paint_background(
-                pos + point(self.line_indent(ix), ix * line_height),
+                pos + point(self.line_indent(ix), top),
                 line_height,
                 text_align,
                 align_width,
                 window,
                 cx,
             );
+            top += self.row_height(ix, line_height);
         }
     }
 
@@ -1275,15 +1437,17 @@ impl LineLayout {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let mut top = px(0.);
         for (ix, line) in self.wrapped_lines.iter().enumerate() {
             _ = line.paint(
-                pos + point(self.line_indent(ix), ix * line_height),
+                pos + point(self.line_indent(ix), top),
                 line_height,
                 text_align,
                 align_width,
                 window,
                 cx,
             );
+            top += self.row_height(ix, line_height);
         }
 
         // Paint whitespace indicators
@@ -1297,7 +1461,7 @@ impl LineLayout {
 
                 let origin = point(
                     pos.x + *x_position + self.line_indent(*line_index),
-                    pos.y + *line_index as f32 * line_height,
+                    pos.y + self.row_top(*line_index, line_height),
                 );
 
                 _ = invisible.paint(origin, line_height, text_align, align_width, window, cx);
@@ -1472,7 +1636,14 @@ mod tests {
             let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
             wrapper.wrapping_indent = WrappingIndent::None;
             wrapper.update(&text, &(0..0), &text, cx);
-            wrapper.set_inline_metrics(Rc::from([(token.clone(), px(32.))]), cx);
+            wrapper.set_inline_metrics(
+                Rc::from([InlineMetric {
+                    range: token.clone(),
+                    width: px(32.),
+                    height: None,
+                }]),
+                cx,
+            );
             let rows = wrapper.line(0).unwrap().wrapped_lines.to_vec();
             assert!(
                 rows.iter()
@@ -1562,6 +1733,7 @@ mod tests {
                         WrappingIndent::None,
                         None,
                         &[],
+                        &[],
                         |range| measure(&line[range]),
                     )
                 },
@@ -1581,7 +1753,7 @@ mod tests {
     #[test]
     fn measured_wrap_preserves_words_graphemes_and_indentation() {
         let wrap = |text: &str, width, indent| {
-            measured_wrap_boundaries(text, px(width), indent, None, &[], |range| {
+            measured_wrap_boundaries(text, px(width), indent, None, &[], &[], |range| {
                 px(text[range].graphemes(true).count() as f32)
             })
             .into_iter()
@@ -1599,6 +1771,123 @@ mod tests {
     }
 
     #[test]
+    fn measured_wrap_gives_forced_ranges_their_own_row() {
+        let wrap = |text: &str, atomic: &[Range<usize>], forced: &[usize]| {
+            measured_wrap_boundaries(
+                text,
+                px(100.),
+                WrappingIndent::None,
+                None,
+                atomic,
+                forced,
+                |range| px(text[range].graphemes(true).count() as f32),
+            )
+            .into_iter()
+            .map(|boundary| boundary.ix)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(wrap("ab[img]cd", &[2..7], &[2, 7]), vec![2, 7]);
+        assert_eq!(wrap("[img]cd", &[0..5], &[0, 5]), vec![5]);
+        assert_eq!(wrap("ab[img]", &[2..7], &[2, 7]), vec![2]);
+        assert!(wrap("[img]", &[0..5], &[0, 5]).is_empty());
+        assert_eq!(wrap("[a][b]", &[0..3, 3..6], &[0, 3, 6]), vec![3]);
+    }
+
+    #[test]
+    fn block_rows_add_their_height_over_line_height() {
+        let line_height = px(20.);
+        let mut wrapper = TextWrapper::new(test_font(), px(14.), None);
+        let line = |len, wrapped_lines: SmallVec<[Range<usize>; 1]>, blocks| LineItem {
+            len,
+            indent: 0,
+            wrapped_lines,
+            blocks,
+        };
+        wrapper.lines = SumTree::from_iter(
+            [
+                line(2, smallvec::smallvec![0..2], Vec::new()),
+                line(
+                    9,
+                    smallvec::smallvec![0..2, 2..7, 7..9],
+                    vec![(1, px(120.))],
+                ),
+                line(1, smallvec::smallvec![0..1], Vec::new()),
+                line(5, smallvec::smallvec![0..5], vec![(0, px(60.))]),
+            ],
+            &(),
+        );
+
+        let tops: Vec<_> = (0..6)
+            .map(|row| wrapper.row_top(row, line_height))
+            .collect();
+        assert_eq!(
+            tops,
+            [0., 20., 40., 160., 180., 200.].map(px).to_vec(),
+            "block rows push every later row down"
+        );
+        let heights: Vec<_> = (0..6)
+            .map(|row| wrapper.row_height(row, line_height))
+            .collect();
+        assert_eq!(heights, [20., 20., 120., 20., 20., 60.].map(px).to_vec());
+        assert_eq!(wrapper.content_height(line_height), px(260.));
+        for (y, row) in [
+            (0., 0),
+            (39., 1),
+            (40., 2),
+            (159., 2),
+            (160., 3),
+            (259., 5),
+            (999., 5),
+        ] {
+            assert_eq!(wrapper.row_at_y(px(y), line_height), row, "y {y}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn block_token_wraps_onto_its_own_row_and_tracks_edits() {
+        let cx = shaping_test_context();
+        cx.update(|cx| {
+            let line_height = px(20.);
+            let block = |range: Range<usize>| InlineMetric {
+                range,
+                width: px(200.),
+                height: Some(px(120.)),
+            };
+            for (value, range, rows) in [
+                ("ab[img]cd", 2..7, vec![0..2, 2..7, 7..9]),
+                ("[img]cd", 0..5, vec![0..5, 5..7]),
+                ("ab[img]", 2..7, vec![0..2, 2..7]),
+                ("[img]", 0..5, vec![0..5]),
+            ] {
+                let text = Rope::from(value);
+                let mut wrapper = TextWrapper::new(test_font(), px(14.), Some(px(1000.)));
+                wrapper.update(&text, &(0..0), &text, cx);
+                assert_eq!(wrapper.len(), 1);
+                wrapper.set_inline_metrics(Rc::from([block(range.clone())]), cx);
+                assert_eq!(wrapper.line(0).unwrap().wrapped_lines.as_slice(), rows);
+                assert_eq!(wrapper.len(), rows.len());
+                assert_eq!(
+                    wrapper.content_height(line_height),
+                    line_height * (rows.len() - 1) as f32 + px(120.)
+                );
+            }
+
+            let text = Rope::from("ab[img]cd");
+            let mut wrapper = TextWrapper::new(test_font(), px(14.), Some(px(1000.)));
+            wrapper.update(&text, &(0..0), &text, cx);
+            wrapper.set_inline_metrics(Rc::from([block(2..7)]), cx);
+            assert_eq!(wrapper.row_top(2, line_height), line_height + px(120.));
+            let removed = Rope::from("abcd");
+            wrapper.adjust_inline_metrics(&(2..7), 0);
+            wrapper.update(&removed, &(2..7), &Rope::new(), cx);
+            assert_eq!(wrapper.line(0).unwrap().wrapped_lines.as_slice(), [0..4]);
+            assert!(wrapper.line(0).unwrap().blocks.is_empty());
+            assert_eq!(wrapper.content_height(line_height), line_height);
+        });
+    }
+
+    #[test]
     fn measured_wrap_hangs_continuation_rows_under_the_marker() {
         let wrap = |text: &str, hanging_indent| {
             measured_wrap_boundaries(
@@ -1606,6 +1895,7 @@ mod tests {
                 px(8.),
                 WrappingIndent::None,
                 hanging_indent,
+                &[],
                 &[],
                 |range| px(text[range].graphemes(true).count() as f32),
             )
@@ -1889,16 +2179,19 @@ mod tests {
                     len: 2,
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..2],
+                    blocks: Vec::new(),
                 },
                 LineItem {
                     len: 4,
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..2, 2..4],
+                    blocks: Vec::new(),
                 },
                 LineItem {
                     len: 1,
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..1],
+                    blocks: Vec::new(),
                 },
             ],
             &(),
@@ -2060,11 +2353,13 @@ mod tests {
                     len: Rope::from("first line").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..10],
+                    blocks: Vec::new(),
                 },
                 LineItem {
                     len: Rope::from("this one wraps").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..9, 9..14],
+                    blocks: Vec::new(),
                 },
             ],
             &(),
@@ -2116,24 +2411,28 @@ mod tests {
                     len: Rope::from("Hello, 世界!\r").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..15],
+                    blocks: Vec::new(),
                 },
                 // range: 16..36
                 LineItem {
                     len: Rope::from("This is second line.\n").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..10, 10..20],
+                    blocks: Vec::new(),
                 },
                 // range: 37..56
                 LineItem {
                     len: Rope::from("This is third line.\n").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..9, 9..15, 15..20],
+                    blocks: Vec::new(),
                 },
                 // range: 57..79
                 LineItem {
                     len: Rope::from("这里是第 4 行。").len(),
                     indent: 0,
                     wrapped_lines: smallvec::smallvec![0..22],
+                    blocks: Vec::new(),
                 },
             ],
             &(),

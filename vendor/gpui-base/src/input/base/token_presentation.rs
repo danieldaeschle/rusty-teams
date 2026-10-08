@@ -1,6 +1,8 @@
 //! Presentation callbacks and measured geometry. None of this enters document history.
 use super::{InlineToken, InlineTokenSpan, InputBaseState, InputModeKind, rope_ext::RopeExt as _};
-use gpui::{AnyElement, App, Bounds, ClickEvent, Font, IntoElement, Pixels, Window};
+use gpui::{AnyElement, App, Bounds, ClickEvent, Font, IntoElement, Pixels, Size, Window};
+
+use crate::input::display_map::InlineMetric;
 use std::{collections::HashMap, ops::Range, rc::Rc};
 
 /// Read-only context for a single inline renderer. Width is the full available row.
@@ -28,6 +30,9 @@ impl InlineTokenContext {
     }
     pub fn is_readonly(&self) -> bool {
         self.readonly
+    }
+    pub fn is_block(&self) -> bool {
+        self.span.token().is_block()
     }
     pub fn line_height(&self) -> Pixels {
         self.line_height
@@ -175,8 +180,8 @@ pub(super) struct TokenLayoutCache {
     pub(super) key: Option<(Font, Pixels, Pixels, Pixels, bool)>,
     pub(super) revision: u64,
     pub(super) unwrapped_width: Pixels,
-    pub(super) metrics: Rc<[(Range<usize>, Pixels)]>,
-    pub(super) widths: HashMap<InlineToken, Pixels>,
+    pub(super) metrics: Rc<[InlineMetric]>,
+    pub(super) sizes: HashMap<InlineToken, Size<Pixels>>,
 }
 
 impl<M: InputModeKind> InputBaseState<M> {

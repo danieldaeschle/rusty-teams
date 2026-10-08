@@ -10,7 +10,7 @@ use gpui::{App, Font, Pixels};
 use ropey::Rope;
 
 use super::fold_map::FoldMap;
-use super::text_wrapper::{LineItem, TextWrapper, WrapDisplayPoint, WrappingIndent};
+use super::text_wrapper::{InlineMetric, LineItem, TextWrapper, WrapDisplayPoint, WrappingIndent};
 use super::{BufferPoint, WrapPoint};
 use crate::input::RopeExt;
 
@@ -117,7 +117,7 @@ impl WrapMap {
     /// Update layout parameters (wrap width or font)
     pub(super) fn set_inline_metrics(
         &mut self,
-        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        metrics: std::rc::Rc<[InlineMetric]>,
         cx: &mut App,
     ) {
         self.wrapper.set_inline_metrics(metrics, cx);

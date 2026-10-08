@@ -21,14 +21,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
-    MentionCandidate, MentionInput, MessageExtras, TypingStyle, UploadedFile, changed_span,
-    has_markdown, link_url, map_offset, reverse_edits,
+    MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, TypingStyle, UploadedFile,
+    changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
 use super::attachment_tray::{
-    AttachmentTray, DoneFile, JobKind, LoadedFile, OutgoingFile, OutgoingImage, PasteAction,
-    UploadJob, UploadResult, discard_uploaded, names_of, paste_action, pasted_image_name,
-    prepare_pasted_image, read_attachment, render_tray,
+    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, OutgoingFile, OutgoingImage,
+    PasteAction, UploadJob, UploadResult, discard_uploaded, inline_preview, names_of, paste_action,
+    pasted_image_name, prepare_pasted_image, read_attachment, render_tray,
 };
 use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
@@ -54,6 +54,7 @@ const DEMO_FAILURE_STEP: u8 = 6;
 const HISTORY_LIMIT: usize = 200;
 const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
 const KEY_CONTEXT: &str = "Composer";
+const IMAGE_TOKEN_PREFIX: &str = "image-";
 
 actions!(
     composer,
@@ -117,7 +118,19 @@ impl Outgoing {
 
     /// The body before mentions become `<at>` tags.
     pub fn html(&self) -> String {
-        self.draft.to_html()
+        let mut html = String::new();
+        let mut placed = 0;
+        for character in self.draft.to_html().chars() {
+            if character != OBJECT_MARK {
+                html.push(character);
+                continue;
+            }
+            placed += 1;
+            if placed <= self.images.len() {
+                html.push_str(&format!("<img src=\"../hostedContents/{placed}/$value\">"));
+            }
+        }
+        html
     }
 
     pub fn has_attachments(&self) -> bool {
@@ -243,6 +256,7 @@ pub struct Composer {
     uploads: HashMap<u64, UploadHandle>,
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
+    pending_anchors: HashMap<u64, usize>,
     _subscriptions: [Subscription; 2],
 }
 
@@ -354,6 +368,14 @@ fn looks_like_url(text: &str) -> bool {
         && !text.contains(char::is_whitespace)
 }
 
+fn image_token(id: u64) -> InlineToken {
+    InlineToken::new(format!("{IMAGE_TOKEN_PREFIX}{id}"), OBJECT_MARK.to_string()).block()
+}
+
+fn image_id(token: &InlineToken) -> Option<u64> {
+    token.id().strip_prefix(IMAGE_TOKEN_PREFIX)?.parse().ok()
+}
+
 fn candidate_key(candidate: &MentionCandidate) -> &str {
     match candidate {
         MentionCandidate::Person(person) => &person.user_id,
@@ -416,6 +438,7 @@ impl Composer {
             uploads: HashMap::new(),
             demo_failed: HashSet::new(),
             carry_images_into: None,
+            pending_anchors: HashMap::new(),
             _subscriptions: [subscription, observer],
         }
     }
@@ -435,7 +458,7 @@ impl Composer {
         }
         let value = input.read(cx).value();
         if submitted_text(event, &value).is_some()
-            || (is_plain_enter(event) && !self.tray.is_empty())
+            || (is_plain_enter(event) && self.has_attachments(cx))
         {
             self.submit_current(window, cx);
         }
@@ -480,6 +503,10 @@ impl Composer {
         let state = self.input.read(cx);
         let (value, input_cursor) = (state.value().to_string(), state.cursor());
         let previous = std::mem::replace(&mut self.previous_value, value.clone());
+        if previous != value {
+            let (start, old_end, new_end) = changed_span(&previous, &value);
+            self.shift_anchors(start, old_end, new_end);
+        }
         if value == self.draft.text() {
             self.refresh_style(cx);
             return;
@@ -636,6 +663,9 @@ impl Composer {
                 state.set_selected_range(selection.clone(), cx);
             }
         });
+        for anchor in self.pending_anchors.values_mut() {
+            *anchor = map_offset(&edits, *anchor);
+        }
         let value = self.input.read(cx).value().to_string();
         if value != self.draft.text() {
             self.draft.apply_edit(&value, selection.end, None);
@@ -643,6 +673,18 @@ impl Composer {
         }
         self.previous_value = value;
         self.refresh_style(cx);
+    }
+
+    fn shift_anchors(&mut self, start: usize, old_end: usize, new_end: usize) {
+        for anchor in self.pending_anchors.values_mut() {
+            *anchor = if *anchor <= start {
+                *anchor
+            } else if *anchor >= old_end {
+                *anchor - old_end + new_end
+            } else {
+                new_end
+            };
+        }
     }
 
     /// Adds the current state as an undo step. Typing and deleting runs merge into one step;
@@ -700,6 +742,9 @@ impl Composer {
             (true, true) => source_selection,
             (true, false) => step.selection.clone(),
         };
+        if start != old_end || start != new_end {
+            self.shift_anchors(start, old_end, new_end);
+        }
         self.draft = draft.clone();
         self.previous_value = draft.text().to_owned();
         self.input.update(cx, |state, cx| {
@@ -761,6 +806,7 @@ impl Composer {
         self.paste_hint = None;
         self.link_editor = None;
         self.toolbar_dismissed = None;
+        self.pending_anchors.clear();
         self.history.clear();
         self.history_index = 0;
         self.record(StepKind::Other, cx);
@@ -1018,8 +1064,16 @@ impl Composer {
         if selection.is_empty() || self.draft.text().get(selection.clone()).is_none() {
             return false;
         }
-        let text = self.draft.text()[selection.clone()].to_owned();
-        let lines = self.draft.slice(selection);
+        let selected = &self.draft.text()[selection.clone()];
+        let text = selected.replace(OBJECT_MARK, "");
+        let lines = if selected.contains(OBJECT_MARK) {
+            self.draft.slice_without_objects(selection)
+        } else {
+            self.draft.slice(selection)
+        };
+        if text.is_empty() {
+            return true;
+        }
         cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
             text.clone(),
             lines.clone(),
@@ -1221,6 +1275,7 @@ impl Composer {
                 self.tray.clear()
             };
             self.discard_uploaded(dropped, cx);
+            self.remove_orphan_image_tokens(window, cx);
             self.reply = None;
             if self.editing.take().is_some() {
                 self.load_draft(Draft::default(), InputContent::new(""), window, cx);
@@ -1263,7 +1318,26 @@ impl Composer {
         if !self.can_send(cx) {
             return None;
         }
-        let mut draft = self.current_draft(cx).trimmed();
+        let mut draft = self.current_draft(cx);
+        let image_spans: Vec<(Range<usize>, u64)> = state
+            .tokens()
+            .iter()
+            .filter_map(|span| Some((span.range(), image_id(span.token())?)))
+            .collect();
+        let image_ids: Vec<u64> = image_spans
+            .iter()
+            .filter(|(_, id)| self.tray.image(*id).is_some())
+            .map(|(_, id)| *id)
+            .collect();
+        for (range, _) in image_spans
+            .iter()
+            .rev()
+            .filter(|(_, id)| self.tray.image(*id).is_none())
+        {
+            draft.replace(range.clone(), "");
+        }
+        draft.take_edits();
+        let mut draft = draft.trimmed();
         let attachments_apply = self.editing.is_none();
         if self.undone_value.as_deref() != Some(state.value().as_ref())
             && let Some((range, glyph)) = emoji::trailing_smiley(draft.text())
@@ -1284,7 +1358,7 @@ impl Composer {
             reply: self.reply.clone(),
             edit: self.editing.clone(),
             images: if attachments_apply {
-                self.tray.outgoing_images()
+                self.tray.images_in(&image_ids)
             } else {
                 Vec::new()
             },
@@ -1311,7 +1385,101 @@ impl Composer {
         if self.editing.is_some() {
             return has_text;
         }
-        (has_text || !self.tray.is_empty()) && !self.tray.blocks_send()
+        (has_text || self.has_attachments(cx)) && !self.tray.blocks_send()
+    }
+
+    fn has_attachments(&self, cx: &App) -> bool {
+        self.tray.has_chips()
+            || self
+                .input
+                .read(cx)
+                .tokens()
+                .iter()
+                .any(|span| image_id(span.token()).is_some_and(|id| self.tray.image(id).is_some()))
+    }
+
+    fn image_token_range(&self, id: u64, cx: &App) -> Option<Range<usize>> {
+        self.input
+            .read(cx)
+            .tokens()
+            .iter()
+            .find(|span| image_id(span.token()) == Some(id))
+            .map(|span| span.range())
+    }
+
+    fn remove_orphan_image_tokens(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let edits: Vec<Edit> = self
+            .input
+            .read(cx)
+            .tokens()
+            .iter()
+            .filter(|span| image_id(span.token()).is_some_and(|id| self.tray.image(id).is_none()))
+            .map(|span| (span.range(), String::new()))
+            .collect();
+        if !edits.is_empty() {
+            self.input
+                .update(cx, |state, cx| state.apply_edits(&edits, window, cx));
+        }
+    }
+
+    fn remove_image_token(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(range) = self.image_token_range(id, cx) else {
+            return;
+        };
+        self.input.update(cx, |state, cx| {
+            state.set_selected_range(range, cx);
+            state.replace("", window, cx);
+        });
+    }
+
+    fn insert_image_token(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.input.read(cx);
+        let value = state.value().to_string();
+        let selection = state.selected_range();
+        let mut offset = self
+            .pending_anchors
+            .remove(&id)
+            .unwrap_or(selection.end)
+            .min(value.len());
+        while !value.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        if value == self.draft.text() && self.draft.in_code(offset) {
+            offset = value.len();
+        }
+        if let Some(span) = state
+            .tokens()
+            .iter()
+            .find(|span| span.range().start < offset && offset < span.range().end)
+        {
+            offset = span.range().end;
+        }
+        let length = OBJECT_MARK.len_utf8();
+        let after = |position: usize| {
+            if position >= offset {
+                position + length
+            } else {
+                position
+            }
+        };
+        let inserted = self.input.update(cx, |state, cx| {
+            let inserted = state
+                .replace_range_with_token(offset..offset, image_token(id), window, cx)
+                .is_ok();
+            if inserted {
+                state.set_selected_range(after(selection.start)..after(selection.end), cx);
+            }
+            inserted
+        });
+        if !inserted {
+            return;
+        }
+        for (other, anchor) in self.pending_anchors.iter_mut() {
+            if *anchor > offset || (*anchor == offset && *other > id) {
+                *anchor += length;
+            }
+        }
+        self.previous_value = self.input.read(cx).value().to_string();
     }
 
     pub fn is_editing(&self) -> bool {
@@ -1330,7 +1498,7 @@ impl Composer {
         }
     }
 
-    pub fn open_picker(&mut self, cx: &mut Context<Self>) {
+    pub fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing.is_some() {
             return;
         }
@@ -1340,46 +1508,69 @@ impl Composer {
             multiple: true,
             prompt: None,
         });
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = receiver.await {
-                this.update(cx, |this, cx| this.add_paths(paths, cx)).ok();
+                this.update_in(cx, |this, window, cx| this.add_paths(paths, window, cx))
+                    .ok();
             }
         })
         .detach();
     }
 
-    pub fn add_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+    pub fn add_paths(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing.is_some() || paths.is_empty() {
             return;
         }
-        let ids = self.tray.add_pending(&names_of(&paths));
+        let ids = self.add_pending(&names_of(&paths), cx);
         for (id, path) in ids.into_iter().zip(paths) {
-            cx.spawn(async move |this, cx| {
+            cx.spawn_in(window, async move |this, cx| {
                 let loaded = cx
                     .background_executor()
                     .spawn(async move { read_attachment(&path) })
                     .await;
-                this.update(cx, |this, cx| this.finish_reading(id, loaded, cx))
-                    .ok();
+                this.update_in(cx, |this, window, cx| {
+                    this.finish_reading(id, loaded, window, cx)
+                })
+                .ok();
             })
             .detach();
         }
         cx.notify();
     }
 
-    fn add_pasted_image(&mut self, pasted: Image, cx: &mut Context<Self>) {
-        let ids = self.tray.add_pending(&[pasted_image_name()]);
+    fn add_pending(&mut self, names: &[String], cx: &App) -> Vec<u64> {
+        if self.tray.items().len() + names.len() > MAX_ATTACHMENTS {
+            let referenced: Vec<u64> = self
+                .input
+                .read(cx)
+                .tokens()
+                .iter()
+                .filter_map(|span| image_id(span.token()))
+                .collect();
+            self.tray.discard_images_except(&referenced);
+        }
+        let ids = self.tray.add_pending(names);
+        let anchor = self.selection(cx).end;
+        self.pending_anchors
+            .extend(ids.iter().map(|id| (*id, anchor)));
+        ids
+    }
+
+    fn add_pasted_image(&mut self, pasted: Image, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.add_pending(&[pasted_image_name()], cx);
         cx.notify();
         let Some(&id) = ids.first() else {
             return;
         };
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let loaded = cx
                 .background_executor()
                 .spawn(async move { prepare_pasted_image(pasted) })
                 .await;
-            this.update(cx, |this, cx| this.finish_reading(id, loaded, cx))
-                .ok();
+            this.update_in(cx, |this, window, cx| {
+                this.finish_reading(id, loaded, window, cx)
+            })
+            .ok();
         })
         .detach();
     }
@@ -1389,11 +1580,11 @@ impl Composer {
             match paste_action(item) {
                 PasteAction::Text => {}
                 PasteAction::Files(paths) => {
-                    self.add_paths(paths, cx);
+                    self.add_paths(paths, window, cx);
                     return true;
                 }
                 PasteAction::Image(pasted) => {
-                    self.add_pasted_image(pasted, cx);
+                    self.add_pasted_image(pasted, window, cx);
                     return true;
                 }
             }
@@ -1401,6 +1592,12 @@ impl Composer {
         let Some(text) = item.text() else {
             return false;
         };
+        if text.contains(OBJECT_MARK) {
+            let cleaned = text.replace(OBJECT_MARK, "");
+            self.input
+                .update(cx, |state, cx| state.replace(cleaned, window, cx));
+            return true;
+        }
         if self.draft.in_code(self.selection(cx).start) {
             return false;
         }
@@ -1417,16 +1614,26 @@ impl Composer {
         &mut self,
         id: u64,
         loaded: Result<LoadedFile, String>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match loaded {
             Ok(loaded) => {
                 let files_allowed = self.files_allowed();
-                if let Some(job) = self.tray.finish_reading(id, loaded, files_allowed) {
+                let job = self.tray.finish_reading(id, loaded, files_allowed);
+                if self.tray.image(id).is_some() {
+                    self.insert_image_token(id, window, cx);
+                } else {
+                    self.pending_anchors.remove(&id);
+                }
+                if let Some(job) = job {
                     self.start_upload(job, cx);
                 }
             }
-            Err(message) => self.tray.fail_reading(id, message),
+            Err(message) => {
+                self.pending_anchors.remove(&id);
+                self.tray.fail_reading(id, message);
+            }
         }
         cx.notify();
     }
@@ -1595,8 +1802,20 @@ impl Composer {
 
     pub fn restore(&mut self, outgoing: &Outgoing, window: &mut Window, cx: &mut Context<Self>) {
         self.mention_inputs.clear();
+        let image_ids = if outgoing.edit.is_none() {
+            self.cancel_uploads();
+            self.tray.restore(&outgoing.images, &outgoing.files)
+        } else {
+            Vec::new()
+        };
         let text = outgoing.draft.text();
         let mut content = InputContent::new(text.to_owned());
+        for ((offset, _), id) in text.match_indices(OBJECT_MARK).zip(image_ids) {
+            let range = offset..offset + OBJECT_MARK.len_utf8();
+            if let Ok(next) = content.clone().with_token(range, image_token(id)) {
+                content = next;
+            }
+        }
         let mut cursor = 0;
         for mention in &outgoing.mentions {
             let needle = format!("@{}", mention.text);
@@ -1616,10 +1835,6 @@ impl Composer {
         self.load_draft(outgoing.draft.clone(), content, window, cx);
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
-        if outgoing.edit.is_none() {
-            self.cancel_uploads();
-            self.tray.restore(&outgoing.images, &outgoing.files);
-        }
         self.close_popup();
         cx.notify();
     }
@@ -1635,8 +1850,8 @@ impl Composer {
         cx.notify();
     }
 
-    pub fn is_empty(&self, _: &App) -> bool {
-        self.draft.is_blank() && self.tray.is_empty()
+    pub fn is_empty(&self, cx: &App) -> bool {
+        self.draft.is_blank() && !self.has_attachments(cx)
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1981,9 +2196,10 @@ impl Render for Composer {
                 .hover(|button| button.bg(theme::row_hover()))
                 .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
                 .child(symbol("attach_file", 20., theme::text_muted()))
-                .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx)))
+                .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
         let composer = cx.weak_entity();
+        let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
             .appearance(false)
             .bordered(false)
@@ -1992,7 +2208,29 @@ impl Render for Composer {
                     .update(cx, |this, cx| this.paste(item, window, cx))
                     .unwrap_or(false)
             })
-            .token(|context, _, _| {
+            .token(move |context, _, cx| {
+                if let Some(id) = context
+                    .is_block()
+                    .then(|| image_id(context.token()))
+                    .flatten()
+                {
+                    let preview = tokens_composer
+                        .read_with(cx, |this, _| this.tray.image(id))
+                        .ok()
+                        .flatten();
+                    let remove_composer = tokens_composer.clone();
+                    return inline_preview(
+                        id,
+                        preview,
+                        context.available_width(),
+                        context.is_selected(),
+                        Rc::new(move |window, cx| {
+                            remove_composer
+                                .update(cx, |this, cx| this.remove_image_token(id, window, cx))
+                                .ok();
+                        }),
+                    );
+                }
                 div()
                     .h(context.line_height())
                     .px(px(5.))
@@ -2005,6 +2243,7 @@ impl Render for Composer {
                     .text_color(theme::mention_text())
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(context.token().label().clone())
+                    .into_any_element()
             });
         let tray = can_attach
             .then(|| {
@@ -2341,6 +2580,53 @@ mod tests {
         assert!(outgoing.has_attachments());
     }
 
+    fn placed_image(width: u32) -> super::OutgoingImage {
+        use std::sync::Arc;
+
+        use gpui_kit::{Image, ImageFormat};
+
+        super::OutgoingImage {
+            name: "pasted-image.png".into(),
+            image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![width as u8])),
+            dimensions: Some((width, width)),
+        }
+    }
+
+    fn outgoing_with(text: &str, images: Vec<super::OutgoingImage>) -> super::Outgoing {
+        super::Outgoing {
+            draft: teams_core::Draft::plain(text),
+            mentions: Vec::new(),
+            reply: None,
+            edit: None,
+            images,
+            files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_image_is_placed_in_the_html_where_its_mark_sits() {
+        let outgoing = outgoing_with("a \u{FFFC} b", vec![placed_image(2)]);
+        assert_eq!(
+            outgoing.html(),
+            "a <img src=\"../hostedContents/1/$value\"> b"
+        );
+        assert_eq!(outgoing.text(), "a b");
+    }
+
+    #[test]
+    fn images_keep_the_order_of_their_marks() {
+        let outgoing = outgoing_with("\u{FFFC}x\u{FFFC}", vec![placed_image(2), placed_image(4)]);
+        assert_eq!(
+            outgoing.html(),
+            "<img src=\"../hostedContents/1/$value\">x<img src=\"../hostedContents/2/$value\">"
+        );
+    }
+
+    #[test]
+    fn a_mark_without_an_image_leaves_no_trace() {
+        assert_eq!(outgoing_with("a\u{FFFC}b", Vec::new()).html(), "ab");
+    }
+
     #[test]
     fn enter_sends_attachments_even_without_text() {
         assert!(super::is_plain_enter(&press(false)));
@@ -2447,6 +2733,201 @@ mod tests {
                 window.render_frame(cx);
             });
             typist
+        }
+
+        fn png_bytes(side: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(side, side)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            bytes
+        }
+
+        fn paste_image(typist: &mut Typist<'_>, side: u32) {
+            typist.cx.write_to_clipboard(gpui_kit::ClipboardItem {
+                entries: vec![gpui_kit::ClipboardEntry::Image(
+                    gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, png_bytes(side)),
+                )],
+            });
+            typist.press("ctrl-v");
+        }
+
+        fn image_tokens(typist: &mut Typist<'_>) -> Vec<(std::ops::Range<usize>, bool)> {
+            let composer = typist.composer.clone();
+            typist.cx.update(|cx| {
+                composer
+                    .read(cx)
+                    .input
+                    .read(cx)
+                    .tokens()
+                    .iter()
+                    .map(|span| (span.range(), span.token().is_block()))
+                    .collect()
+            })
+        }
+
+        #[gpui_kit::test]
+        fn a_pasted_image_sits_at_the_cursor_and_is_sent_there(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("ab");
+            typist.press("left");
+            paste_image(&mut typist, 2);
+            assert_eq!(typist.value(), "a\u{FFFC}b");
+            assert_eq!(image_tokens(&mut typist), vec![(1..4, true)]);
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.images.len(), 1);
+            assert_eq!(
+                outgoing.html(),
+                "a<img src=\"../hostedContents/1/$value\">b"
+            );
+            let composer = typist.composer.clone();
+            assert!(!typist.cx.update(|cx| composer.read(cx).tray.has_chips()));
+        }
+
+        fn wide_png_bytes() -> Vec<u8> {
+            let mut bytes = Vec::new();
+            image::RgbaImage::new(600, 300)
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .unwrap();
+            bytes
+        }
+
+        fn caret_is_visible(typist: &mut Typist<'_>) -> bool {
+            let composer = typist.composer.clone();
+            typist.cx.update(|cx| {
+                let state = composer.read(cx).input.read(cx);
+                let cursor = state.cursor();
+                let caret = state.range_to_bounds(&(cursor..cursor)).unwrap();
+                let viewport = state.input_bounds();
+                caret.origin.y >= viewport.origin.y && caret.bottom() <= viewport.bottom()
+            })
+        }
+
+        #[gpui_kit::test]
+        fn typing_after_a_tall_image_keeps_the_caret_in_view(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("look at this ");
+            typist.cx.write_to_clipboard(gpui_kit::ClipboardItem {
+                entries: vec![gpui_kit::ClipboardEntry::Image(
+                    gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, wide_png_bytes()),
+                )],
+            });
+            typist.press("ctrl-v");
+            typist.act(|window, _| window.refresh());
+            typist.type_text("and then more text");
+            typist.act(|window, _| window.refresh());
+            assert!(caret_is_visible(&mut typist));
+        }
+
+        #[gpui_kit::test]
+        fn deleting_the_token_drops_the_image_and_undo_brings_it_back(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("ab");
+            typist.press("left");
+            paste_image(&mut typist, 2);
+            typist.press("backspace");
+            assert_eq!(typist.value(), "ab");
+            assert!(image_tokens(&mut typist).is_empty());
+            let outgoing = typist.outgoing();
+            assert!(outgoing.images.is_empty());
+            assert_eq!(outgoing.html(), "ab");
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "a\u{FFFC}b");
+            assert_eq!(image_tokens(&mut typist), vec![(1..4, true)]);
+            assert_eq!(typist.outgoing().images.len(), 1);
+        }
+
+        #[gpui_kit::test]
+        fn the_remove_button_drops_the_image_and_one_undo_brings_it_back(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("ab");
+            paste_image(&mut typist, 2);
+            typist.type_text("cd");
+            let composer = typist.composer.clone();
+            let id = typist.cx.update(|cx| {
+                let state = composer.read(cx).input.read(cx);
+                super::super::image_id(state.tokens()[0].token()).unwrap()
+            });
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.remove_image_token(id, window, cx)
+                });
+            });
+            assert_eq!(typist.value(), "abcd");
+            assert!(image_tokens(&mut typist).is_empty());
+            assert!(typist.outgoing().images.is_empty());
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "ab\u{FFFC}cd");
+            assert_eq!(image_tokens(&mut typist), vec![(2..5, true)]);
+            assert_eq!(typist.outgoing().images.len(), 1);
+        }
+
+        #[gpui_kit::test]
+        fn images_are_sent_in_the_order_they_appear_in_the_text(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("x");
+            paste_image(&mut typist, 2);
+            typist.type_text("y");
+            typist.press("ctrl-home");
+            paste_image(&mut typist, 4);
+            assert_eq!(typist.value(), "\u{FFFC}x\u{FFFC}y");
+            let outgoing = typist.outgoing();
+            let dimensions: Vec<_> = outgoing
+                .images
+                .iter()
+                .map(|image| image.dimensions)
+                .collect();
+            assert_eq!(dimensions, [Some((4, 4)), Some((2, 2))]);
+            assert_eq!(
+                outgoing.html(),
+                "<img src=\"../hostedContents/1/$value\">x<img src=\"../hostedContents/2/$value\">y"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn an_image_alone_can_be_sent_and_never_leaks_into_copied_text(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            paste_image(&mut typist, 2);
+            let composer = typist.composer.clone();
+            assert!(typist.cx.update(|cx| composer.read(cx).can_send(cx)));
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.text(), "");
+            assert_eq!(outgoing.images.len(), 1);
+            typist.type_text("hi");
+            typist.press("ctrl-a ctrl-c");
+            let copied = typist.cx.read_from_clipboard().and_then(|item| item.text());
+            assert_eq!(copied.as_deref(), Some("hi"));
+        }
+
+        #[gpui_kit::test]
+        fn pasted_text_loses_object_marks(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string("a\u{FFFC}b".to_owned()));
+            typist.press("ctrl-v");
+            assert_eq!(typist.value(), "ab");
+        }
+
+        #[gpui_kit::test]
+        fn a_restored_outgoing_gets_its_image_tokens_back(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            let outgoing = super::outgoing_with("x\u{FFFC}y", vec![super::placed_image(3)]);
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+            });
+            assert_eq!(typist.value(), "x\u{FFFC}y");
+            assert_eq!(image_tokens(&mut typist), vec![(1..4, true)]);
+            let again = typist.outgoing();
+            assert_eq!(again.images, outgoing.images);
+            assert_eq!(again.html(), "x<img src=\"../hostedContents/1/$value\">y");
         }
 
         #[gpui_kit::test]
@@ -2936,7 +3417,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.set_conversation("demo-chat", "Demo", window, cx);
-                    composer.add_paths(vec![path], cx);
+                    composer.add_paths(vec![path], window, cx);
                 });
             })
             .unwrap();
@@ -2983,7 +3464,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.set_conversation("demo-chat", "Demo", window, cx);
-                    composer.add_paths(vec![path], cx);
+                    composer.add_paths(vec![path], window, cx);
                 });
             })
             .unwrap();
@@ -2994,7 +3475,7 @@ mod tests {
                 });
             })
             .unwrap();
-            cx.update(|cx| assert!(composer.read(cx).tray.is_empty()));
+            cx.update(|cx| assert!(composer.read(cx).tray.items().is_empty()));
         }
 
         fn demo_composer(
@@ -3034,7 +3515,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.set_conversation("demo-chat", "Demo", window, cx);
-                    composer.add_paths(vec![path], cx);
+                    composer.add_paths(vec![path], window, cx);
                 });
             })
             .unwrap();
@@ -3090,7 +3571,7 @@ mod tests {
                 cx.update_window(handle, |_, window, cx| {
                     composer.update(cx, |composer, cx| {
                         composer.set_conversation("", "", window, cx);
-                        composer.add_paths(vec![path.clone()], cx);
+                        composer.add_paths(vec![path.clone()], window, cx);
                     });
                 })
                 .unwrap();
@@ -3120,7 +3601,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.set_conversation("bob-chat", "Bob", window, cx);
-                    composer.add_paths(vec![png, pdf], cx);
+                    composer.add_paths(vec![png, pdf], window, cx);
                 });
             })
             .unwrap();

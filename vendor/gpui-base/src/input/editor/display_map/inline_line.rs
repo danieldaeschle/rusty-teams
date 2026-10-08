@@ -13,6 +13,7 @@ pub(crate) struct InputLine {
     pub(crate) len: usize,
     pub(crate) width: Pixels,
     pub(crate) text: SharedString,
+    pub(crate) height: Option<Pixels>,
     content: Content,
 }
 // Keep the ordinary shaped row inline: boxing it would add an allocation to
@@ -28,6 +29,7 @@ impl From<ShapedLine> for InputLine {
             len: line.len,
             width: line.width,
             text: line.text.clone(),
+            height: None,
             content: Content::Text(line),
         }
     }
@@ -39,8 +41,13 @@ impl InputLine {
             len: text.len(),
             text,
             width,
+            height: None,
             content: Content::Inline(fragments),
         }
+    }
+    pub(crate) fn with_height(mut self, height: Option<Pixels>) -> Self {
+        self.height = height;
+        self
     }
     pub(crate) fn x_for_index(&self, ix: usize) -> Pixels {
         match &self.content {

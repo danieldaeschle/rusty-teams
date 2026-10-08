@@ -96,7 +96,7 @@ Feature parity with the Microsoft Teams desktop client.
 | React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
 | Emoji picker | Partial | For reactions; composer still uses colon codes |
 | Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block |
-| Attach a file, paste or drag an image | Done | Images inline, files via OneDrive or the channel's Files |
+| Attach a file, paste or drag an image | Done | Images sit in the text at the cursor as a large preview and send at that spot; files via OneDrive or the channel's Files |
 | GIFs and stickers | Missing |  |
 | Schedule send | Missing |  |
 | Unsent messages survive a restart | Missing | Pending sends live in memory only |

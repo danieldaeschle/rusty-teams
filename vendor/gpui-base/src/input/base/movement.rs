@@ -155,7 +155,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 if let Some((x, line_end_affinity)) = line.closest_index_for_position(
                     Point {
                         x: preferred_x,
-                        y: next_display_point.local_row * last_layout.line_height,
+                        y: line.row_top(next_display_point.local_row, last_layout.line_height),
                     },
                     last_layout,
                 ) {

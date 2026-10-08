@@ -2,7 +2,7 @@ use crate::input::InputModeKind;
 use std::rc::Rc;
 use std::{cell::RefCell, ops::Range};
 
-use gpui::{Context, Window};
+use gpui::{Context, Pixels, Window};
 use ropey::Rope;
 
 use super::DisplayMap;
@@ -10,6 +10,8 @@ use crate::input::{
     DiagnosticSet, EditorLanguage, InputEdit, InputHighlighter, InputHighlighterFactory,
     LanguageConfig, RopeExt as _, TabSize,
 };
+
+const BLOCK_GROWTH_FACTOR: usize = 2;
 
 /// What changed, handed to the syntax highlighter.
 pub(crate) struct HighlighterUpdate<'a> {
@@ -219,17 +221,27 @@ impl LayoutMode {
         }
     }
 
-    /// Grow the row count to fit the content.
+    /// Grow the row count to fit the content. Block tokens add their height on top of
+    /// `max_rows`, up to `BLOCK_GROWTH_FACTOR` times it.
     ///
     /// Callers gate this on the input being multi-line; a single-line field
     /// keeps its one row. Only auto grow follows the content: in the other
     /// modes `rows` is the configured height.
-    pub(super) fn update_auto_grow(&mut self, display_map: &DisplayMap) {
+    pub(super) fn update_auto_grow(&mut self, display_map: &DisplayMap, line_height: Pixels) {
         if !self.is_auto_grow() {
             return;
         }
-        let wrapped_lines = display_map.wrap_row_count();
-        self.set_rows(wrapped_lines);
+        let content_rows = display_map.content_rows(line_height);
+        let block_rows = content_rows.saturating_sub(display_map.wrap_row_count());
+        if let LayoutMode::AutoGrow {
+            rows,
+            min_rows,
+            max_rows,
+        } = self
+        {
+            let cap = (*max_rows + block_rows).min(*max_rows * BLOCK_GROWTH_FACTOR);
+            *rows = content_rows.clamp(*min_rows, cap.max(*max_rows));
+        }
     }
 
     /// At least 1 row be return.

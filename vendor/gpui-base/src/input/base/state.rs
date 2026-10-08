@@ -927,7 +927,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
             let local_offset = offset.saturating_sub(prev_lines_offset);
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
-                let sub_line_index = (pos.y / line_height) as usize;
+                let sub_line_index = line.row_at_y(pos.y, line_height).unwrap_or(0);
                 let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
             }
@@ -2574,7 +2574,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let display_pos = self
             .display_map
             .buffer_pos_to_display_pos(crate::input::BufferPoint::new(row, point.column));
-        let row_offset_y = line_height * display_pos.row;
+        let row_offset_y = self.display_map.row_top(display_pos.row, line_height);
+        let row_extra = self.display_map.row_height(display_pos.row, line_height) - line_height;
 
         // For Right alignment use 0 margin: the cursor indicator is clamped inside bounds
         // in layout_cursors, so shifting the text here would cause a first-click visual jump.
@@ -2620,9 +2621,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         if row_offset_y - edge_height + line_height < -scroll_offset.y {
             // Scroll up
             scroll_offset.y = -row_offset_y + edge_height - line_height;
-        } else if row_offset_y + edge_height > -scroll_offset.y + bounds.size.height {
+        } else if row_offset_y + row_extra + edge_height > -scroll_offset.y + bounds.size.height {
             // Scroll down
-            scroll_offset.y = -(row_offset_y - bounds.size.height + edge_height);
+            scroll_offset.y = -(row_offset_y + row_extra - bounds.size.height + edge_height);
         }
 
         // Avoid necessary scroll, when it was already in the correct position.
@@ -3162,7 +3163,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             .zip(last_line_pos)
             .zip(last_layout.visible_line_byte_offsets.last())
             .map(|((line_layout, pos), line_start)| {
-                let last_row_top = (line_layout.size(line_height).height - line_height).max(px(0.));
+                let last_row_top = line_layout.row_top(
+                    line_layout.wrapped_lines.len().saturating_sub(1),
+                    line_height,
+                );
                 let pos = point(pos.x, last_row_top);
                 (
                     self.resolve_index(line_start + line_layout.len()),
@@ -3625,7 +3629,8 @@ impl<M: InputModeKind> InputBaseState<M> {
 
                 self.display_map.on_layout_changed(wrap_width, cx);
                 if self.is_multi_line() {
-                    self.mode.update_auto_grow(&self.display_map);
+                    self.mode
+                        .update_auto_grow(&self.display_map, self.line_height().unwrap_or(px(1.)));
                 }
                 cx.notify();
             }
@@ -3889,7 +3894,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.update_preferred_column();
         self.dismiss_touch_selection(cx);
         if self.is_multi_line() {
-            self.mode.update_auto_grow(&self.display_map);
+            self.mode
+                .update_auto_grow(&self.display_map, self.line_height().unwrap_or(px(1.)));
         }
         if self.emit_events {
             cx.emit(InputEvent::Change);
@@ -4213,7 +4219,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         self.update_search(cx);
         self.dismiss_touch_selection(cx);
         if self.is_multi_line() {
-            self.mode.update_auto_grow(&self.display_map);
+            self.mode
+                .update_auto_grow(&self.display_map, self.line_height().unwrap_or(px(1.)));
         }
         if !self.silent_replace_text {
             M::on_text_typed(self, &range, &new_text, window, cx);
@@ -4332,7 +4339,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             self.set_selection(new_range.start, new_range.end);
         }
         if self.is_multi_line() {
-            self.mode.update_auto_grow(&self.display_map);
+            self.mode
+                .update_auto_grow(&self.display_map, self.line_height().unwrap_or(px(1.)));
         }
         if self.push_history(
             &old_text,
@@ -4369,6 +4377,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let range = self.range_from_utf16(&range_utf16);
 
         let mut start_origin = None;
+        let mut start_height = line_height;
         let mut end_origin = None;
         let line_number_origin = point(line_number_width, px(0.));
         let mut y_offset = last_layout.visible_top;
@@ -4387,6 +4396,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                     false,
                 ) {
                     start_origin = Some(p + point(px(0.), y_offset));
+                    start_height = line
+                        .row_at_y(p.y, line_height)
+                        .map_or(line_height, |ix| line.row_height(ix, line_height));
                 }
             }
 
@@ -4414,8 +4426,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         Some(Bounds::from_corners(
             bounds.origin + line_number_origin + start_origin,
-            // + line_height for show IME panel under the cursor line.
-            bounds.origin + line_number_origin + point(end_origin.x, end_origin.y + line_height),
+            // + row height for show IME panel under the cursor line.
+            bounds.origin + line_number_origin + point(end_origin.x, end_origin.y + start_height),
         ))
     }
 
@@ -4721,6 +4733,331 @@ mod tests {
         visual.update(|window, cx| window.draw(cx).clear(cx));
         view.input.read_with(&visual, |state, _| {
             assert_eq!(state.display_map.wrap_row_count(), 1)
+        });
+    }
+
+    fn build_block_view(
+        cx: &mut TestAppContext,
+        value: &'static str,
+        token_range: Range<usize>,
+    ) -> (InputView<TextareaMode>, VisualTestContext) {
+        use crate::input::{InlineToken, InlineTokenPresentation};
+        let view =
+            InputView::build_textarea(cx, move |state| state.auto_grow(1, 40).default_value(value));
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state.set_token_presentation(
+                        InlineTokenPresentation::default()
+                            .token(|_, _, _| div().w(px(200.)).h(px(120.))),
+                    );
+                    state
+                        .replace_range_with_token(
+                            token_range,
+                            InlineToken::new("img", "[img]").block(),
+                            window,
+                            cx,
+                        )
+                        .unwrap();
+                });
+            })
+            .unwrap();
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        (view, visual)
+    }
+
+    #[gpui::test]
+    fn test_block_token_row_height_feeds_row_top_and_auto_grow(cx: &mut TestAppContext) {
+        let (view, visual) = build_block_view(cx, "ab[img]cd", 2..7);
+        view.input.read_with(&visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            assert_eq!(
+                state.display_map.line(0).unwrap().wrapped_lines.as_slice(),
+                [0..2, 2..7, 7..9]
+            );
+            assert_eq!(
+                state.display_map.row_top(2, line_height),
+                line_height + px(120.)
+            );
+            assert_eq!(
+                state.display_map.content_height(line_height),
+                line_height * 2. + px(120.)
+            );
+            assert_eq!(state.display_map.row_at_y(px(119.), line_height), 1);
+            assert_eq!(state.display_map.row_at_y(px(1000.), line_height), 2);
+            assert!(state.mode.rows() > state.display_map.wrap_row_count());
+            assert_eq!(
+                state.mode.rows(),
+                state.display_map.content_rows(line_height)
+            );
+        });
+    }
+
+    struct GrowingRoot(Entity<InputBaseState<TextareaMode>>);
+
+    impl Render for GrowingRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .flex()
+                .items_end()
+                .child(div().w(px(600.)).child(self.0.clone()))
+        }
+    }
+
+    fn build_growing_view(
+        cx: &mut TestAppContext,
+        max_rows: usize,
+    ) -> (Entity<InputBaseState<TextareaMode>>, VisualTestContext) {
+        use crate::input::InlineTokenPresentation;
+        let mut input = None;
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.set_global(Theme::default());
+                super::super::init(cx);
+                let state = cx.new(|cx| {
+                    let mut state =
+                        crate::input::TextareaState::new(window, cx).auto_grow(1, max_rows);
+                    state.set_token_presentation(
+                        InlineTokenPresentation::default()
+                            .token(|_, _, _| div().w(px(200.)).h(px(120.))),
+                    );
+                    state
+                });
+                input = Some(state.clone());
+                cx.new(|_| GrowingRoot(state))
+            })
+            .unwrap()
+        });
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        (input.unwrap(), visual)
+    }
+
+    fn draw_twice(visual: &mut VisualTestContext) {
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn load_block_content(
+        input: &Entity<InputBaseState<TextareaMode>>,
+        visual: &mut VisualTestContext,
+        before: &str,
+        after: &str,
+    ) {
+        use crate::input::InlineToken;
+        let before = before.to_owned();
+        let after = after.to_owned();
+        visual.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                let text = format!("{before}[img]{after}");
+                let range = before.len()..before.len() + 5;
+                let content = crate::input::InputContent::new(text.clone())
+                    .with_token(range, InlineToken::new("img", "[img]").block())
+                    .unwrap();
+                state.set_value(content, window, cx);
+                state.set_selected_range(text.len()..text.len(), cx);
+            })
+        });
+        draw_twice(visual);
+    }
+
+    fn assert_cursor_row_in_view(
+        input: &Entity<InputBaseState<TextareaMode>>,
+        visual: &VisualTestContext,
+    ) {
+        input.read_with(visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            let content = state.display_map.content_height(line_height);
+            let viewport = state.input_bounds.size.height;
+            assert!(
+                content > viewport,
+                "content {content:?} viewport {viewport:?}"
+            );
+            assert_eq!(state.scroll_handle.offset().y, viewport - content);
+        });
+    }
+
+    #[gpui::test]
+    fn test_typing_after_a_block_token_scrolls_the_cursor_row_into_view(cx: &mut TestAppContext) {
+        let (input, mut visual) = build_growing_view(cx, 4);
+        load_block_content(
+            &input,
+            &mut visual,
+            "ab\ncd\nef\ngh\nij\nkl\nmn\nop\nqr\n",
+            "",
+        );
+        for character in ["x", "y"] {
+            visual.update(|window, cx| {
+                input.update(cx, |state, cx| state.insert(character, window, cx))
+            });
+        }
+        draw_twice(&mut visual);
+        assert_cursor_row_in_view(&input, &visual);
+    }
+
+    #[gpui::test]
+    fn test_loading_content_with_a_block_token_scrolls_the_cursor_row_into_view(
+        cx: &mut TestAppContext,
+    ) {
+        let (input, mut visual) = build_growing_view(cx, 4);
+        load_block_content(
+            &input,
+            &mut visual,
+            "ab\ncd\nef\ngh\nij\nkl\nmn\nop\nqr\n",
+            "cd",
+        );
+        assert_cursor_row_in_view(&input, &visual);
+    }
+
+    #[gpui::test]
+    fn test_block_tokens_add_their_rows_on_top_of_max_rows_up_to_twice_of_it(
+        cx: &mut TestAppContext,
+    ) {
+        let (input, mut visual) = build_growing_view(cx, 4);
+        load_block_content(&input, &mut visual, "ab", "cd");
+        let rows_with_one_image = input.read_with(&visual, |state, _| state.mode.rows());
+        assert!(rows_with_one_image > 4, "{rows_with_one_image}");
+        input.read_with(&visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            assert_eq!(
+                state.input_bounds.size.height,
+                line_height * rows_with_one_image as f32
+            );
+            assert!(
+                state.display_map.content_height(line_height) <= state.input_bounds.size.height
+            );
+        });
+        load_block_content(
+            &input,
+            &mut visual,
+            "ab\ncd\nef\ngh\nij\nkl\nmn\nop\nqr\n",
+            "cd",
+        );
+        assert_eq!(input.read_with(&visual, |state, _| state.mode.rows()), 8);
+    }
+
+    #[gpui::test]
+    fn test_block_token_caret_spans_the_row(cx: &mut TestAppContext) {
+        let (view, mut visual) = build_block_view(cx, "ab[img]cd", 2..7);
+        view.input.read_with(&visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            let layout = state.last_layout.as_ref().unwrap();
+            let line = &layout.lines[0];
+            let before = line.position_for_index(2, layout, false).unwrap();
+            let after = line.position_for_index(7, layout, true).unwrap();
+            assert_eq!((before.x, after.x), (px(0.), px(200.)));
+            assert_eq!(before.y, line.row_top(1, line_height));
+            assert_eq!(after.y, before.y);
+        });
+        view.input
+            .update(&mut visual, |state, cx| state.set_selected_range(2..2, cx));
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        let before = view
+            .input
+            .read_with(&visual, |state, _| state.cursor_layout().unwrap().0);
+        assert_eq!(before.size.height, px(120.));
+        view.input.update(&mut visual, |state, cx| {
+            state.set_selected_range(7..7, cx);
+            state.cursor_line_end_affinity = true;
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        let after = view
+            .input
+            .read_with(&visual, |state, _| state.cursor_layout().unwrap().0);
+        assert_eq!(after.size.height, px(120.));
+        assert_eq!(after.origin.y, before.origin.y);
+        assert_eq!(after.origin.x - before.origin.x, px(200.));
+    }
+
+    #[gpui::test]
+    fn test_block_token_click_beside_the_image_lands_on_its_edge(cx: &mut TestAppContext) {
+        let (view, visual) = build_block_view(cx, "ab[img]cd", 2..7);
+        view.input.read_with(&visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            let bounds = state.last_bounds.unwrap();
+            let layout = state.last_layout.as_ref().unwrap();
+            let row_top = layout.visible_top + layout.lines[0].row_top(1, line_height);
+            let at =
+                |x: f32| bounds.origin + point(layout.line_number_width + px(x), row_top + px(60.));
+            assert_eq!(state.resolve_mouse_position(at(500.)).0, 7);
+            assert_eq!(state.resolve_mouse_position(at(150.)).0, 7);
+            assert_eq!(state.resolve_mouse_position(at(10.)).0, 2);
+        });
+    }
+
+    #[gpui::test]
+    fn test_block_token_vertical_movement_visits_its_row(cx: &mut TestAppContext) {
+        let (view, mut visual) = build_block_view(cx, "ab[img]cd", 2..7);
+        let row = |view: &InputView<TextareaMode>, visual: &VisualTestContext| {
+            view.input.read_with(visual, |state, _| {
+                state
+                    .display_map
+                    .offset_to_wrap_display_point_with_affinity(
+                        state.cursor(),
+                        state.cursor_line_end_affinity,
+                    )
+                    .row
+            })
+        };
+        view.input
+            .update(&mut visual, |state, _| state.set_cursor_to(0));
+        for expected_row in [1, 2] {
+            visual.update(|window, cx| {
+                view.input
+                    .update(cx, |state, cx| state.down(&MoveDown, window, cx))
+            });
+            assert_eq!(row(&view, &visual), expected_row);
+        }
+        for expected_row in [1, 0] {
+            visual.update(|window, cx| {
+                view.input
+                    .update(cx, |state, cx| state.up(&MoveUp, window, cx))
+            });
+            assert_eq!(row(&view, &visual), expected_row);
+        }
+    }
+
+    #[gpui::test]
+    fn test_block_token_scroll_to_brings_its_rows_into_view(cx: &mut TestAppContext) {
+        let value: &'static str =
+            Box::leak(format!("{}[img]cd", "x\n".repeat(60)).into_boxed_str());
+        let token_start = 120;
+        let (view, mut visual) = build_block_view(cx, value, token_start..token_start + 5);
+        for (offset, row) in [(token_start, 60), (token_start + 5, 61)] {
+            view.input.update(&mut visual, |state, cx| {
+                state.scroll_to(offset, None, cx);
+                let line_height = state.line_height().unwrap();
+                let scrolled = -state.deferred_scroll_offset.unwrap().y;
+                let top = state.display_map.row_top(row, line_height);
+                let height = state.display_map.row_height(row, line_height);
+                assert!(top >= scrolled, "row {row} top is above the viewport");
+                assert!(
+                    top + height <= scrolled + state.input_bounds.size.height,
+                    "row {row} bottom is below the viewport"
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn test_block_token_undo_restores_uniform_rows(cx: &mut TestAppContext) {
+        let (view, mut visual) = build_block_view(cx, "ab[img]cd", 2..7);
+        visual.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.undo(&Undo, window, cx))
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        view.input.read_with(&visual, |state, _| {
+            let line_height = state.line_height().unwrap();
+            assert!(state.tokens().is_empty());
+            assert!(state.display_map.line(0).unwrap().blocks.is_empty());
+            assert_eq!(
+                state.display_map.content_height(line_height),
+                line_height * state.display_map.wrap_row_count() as f32
+            );
+            assert_eq!(state.mode.rows(), state.display_map.wrap_row_count());
         });
     }
 
@@ -8830,8 +9167,9 @@ mod tests {
         let view = InputView::build_textarea(cx, move |state| state.rows(4).default_value(text));
         let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
         visual.update(|_, cx| {
-            view.input
-                .update(cx, |state, cx| state.set_line_indents(vec![(0, px(10.))], cx))
+            view.input.update(cx, |state, cx| {
+                state.set_line_indents(vec![(0, px(10.))], cx)
+            })
         });
         visual.update(|window, cx| window.draw(cx).clear(cx));
         view.input.read_with(&visual, |state, _| {

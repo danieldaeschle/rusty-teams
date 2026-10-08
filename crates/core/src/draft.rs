@@ -8,6 +8,7 @@ use crate::markdown::escape_html;
 use crate::spans::Span;
 
 pub const MAX_DEPTH: u8 = 2;
+pub const OBJECT_MARK: char = '\u{FFFC}';
 const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
@@ -350,13 +351,15 @@ impl Draft {
         self.plain_text().trim().is_empty()
     }
 
-    /// The text without list and quote markers.
+    /// The text without list and quote markers and object marks.
     pub fn plain_text(&self) -> String {
         self.slice(0..self.text.len())
             .into_iter()
             .map(|line| line.content)
             .collect::<Vec<_>>()
             .join("\n")
+            .replace(&format!(" {OBJECT_MARK} "), " ")
+            .replace(OBJECT_MARK, "")
     }
 
     pub fn line_ranges(&self) -> Vec<Range<usize>> {
@@ -857,6 +860,19 @@ impl Draft {
             });
         }
         lines
+    }
+
+    pub fn slice_without_objects(&self, range: Range<usize>) -> Vec<DraftLine> {
+        let mut copy = Draft::from_lines(&self.slice(range));
+        let marks: Vec<usize> = copy
+            .text
+            .match_indices(OBJECT_MARK)
+            .map(|(index, _)| index)
+            .collect();
+        for index in marks.into_iter().rev() {
+            copy.replace(index..index + OBJECT_MARK.len_utf8(), "");
+        }
+        copy.slice(0..usize::MAX)
     }
 
     /// Puts `lines` in place of `range`. Returns the offset after the inserted content.
@@ -1902,6 +1918,30 @@ mod tests {
             typing = draft.convert_typed(cursor).map(|(_, style)| style);
             draft.take_edits();
         }
+    }
+
+    #[test]
+    fn object_marks_stay_in_the_html_and_leave_the_plain_text() {
+        let draft = Draft::plain("a \u{FFFC} b");
+        assert_eq!(draft.plain_text(), "a b");
+        assert_eq!(draft.to_html(), "a \u{FFFC} b");
+        assert!(Draft::plain("\u{FFFC}").is_blank());
+    }
+
+    #[test]
+    fn slices_without_objects_keep_the_formatting_of_the_rest() {
+        let mut draft = Draft::plain("ab\u{FFFC}cd");
+        draft.toggle(0..draft.text().len(), MarkKind::Bold);
+        let lines = draft.slice_without_objects(0..draft.text().len());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].content, "abcd");
+        assert_eq!(
+            lines[0].marks,
+            [Mark {
+                range: 0..4,
+                kind: MarkKind::Bold
+            }]
+        );
     }
 
     fn typed_draft(text: &str) -> Draft {

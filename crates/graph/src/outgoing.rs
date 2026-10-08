@@ -91,9 +91,10 @@ fn extras_html(html: &str, extras: &MessageExtras) -> String {
     let mut content = extras.kept_html();
     content.push_str(html);
     for index in 1..=extras.images.len() {
-        content.push_str(&format!(
-            "<p><img src=\"../hostedContents/{index}/$value\"></p>"
-        ));
+        let tag = format!("<img src=\"../hostedContents/{index}/$value\">");
+        if !html.contains(&tag) {
+            content.push_str(&format!("<p>{tag}</p>"));
+        }
     }
     content.push_str(&extras.files_html());
     content
@@ -262,6 +263,21 @@ mod tests {
             ])
         );
         assert!(body.get("attachments").is_none());
+    }
+
+    #[test]
+    fn images_already_placed_in_the_text_are_not_appended_again() {
+        let extras = MessageExtras {
+            kept: Vec::new(),
+            images: vec![image("image/png", &[1]), image("image/png", &[2])],
+            files: Vec::new(),
+        };
+        let body = message_body("a <img src=\"../hostedContents/2/$value\"> b", &[], &extras);
+        assert_eq!(
+            body["body"]["content"],
+            "a <img src=\"../hostedContents/2/$value\"> b<p><img src=\"../hostedContents/1/$value\"></p>"
+        );
+        assert_eq!(body["hostedContents"].as_array().unwrap().len(), 2);
     }
 
     #[test]

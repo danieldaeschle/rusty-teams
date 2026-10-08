@@ -1601,7 +1601,7 @@ impl ConversationView {
             card: false,
             time: chrono::Local::now().format("%H:%M").to_string(),
             day_header: None,
-            blocks: if outgoing.draft.is_blank() {
+            blocks: if outgoing.draft.is_blank() && outgoing.images.is_empty() {
                 Vec::new()
             } else {
                 layout_blocks(&teams_core::html_to_spans(&outgoing.html()))
@@ -2202,10 +2202,10 @@ impl ConversationView {
                     }
                 }),
             )
-            .on_drop(cx.listener(|this, dropped: &ExternalPaths, _, cx| {
+            .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
                 let paths = dropped.paths().to_vec();
                 this.composer
-                    .update(cx, |composer, cx| composer.add_paths(paths, cx));
+                    .update(cx, |composer, cx| composer.add_paths(paths, window, cx));
             }))
             .child(
                 div()

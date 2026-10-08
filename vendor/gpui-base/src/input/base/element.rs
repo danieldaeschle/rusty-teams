@@ -22,7 +22,7 @@ use crate::{
         RopeExt as _,
         blink_cursor::CURSOR_WIDTH,
         decorations::font_override_spans,
-        display_map::{LineLayout, split_run_by_font_overrides},
+        display_map::{InlineMetric, LineLayout, split_run_by_font_overrides},
     },
 };
 
@@ -562,9 +562,12 @@ impl<M: InputModeKind> TextElement<M> {
 
         // Resolve a cursor or selection endpoint to a content-space position.
         let visible_buffer_lines = &last_layout.visible_buffer_lines;
-        let caret_for = |row: usize, offset: usize, affinity: bool| -> Point<Pixels> {
+        let caret_for = |row: usize, offset: usize, affinity: bool| -> (Point<Pixels>, Pixels) {
             // y of the top of buffer line `row` in content space.
-            let top = line_height * state.display_map.buffer_line_to_display_row(row);
+            let top = state.display_map.row_top(
+                state.display_map.buffer_line_to_display_row(row),
+                line_height,
+            );
             let line_origin = point(px(0.), top);
 
             if let Some(vi) = visible_buffer_lines.iter().position(|&bl| bl == row) {
@@ -572,13 +575,14 @@ impl<M: InputModeKind> TextElement<M> {
                 let line_start = last_layout.visible_line_byte_offsets[vi];
                 let local = offset.saturating_sub(line_start);
                 if let Some(pos) = line.position_for_index(local, last_layout, affinity) {
-                    return line_origin + pos;
+                    let row_height = line
+                        .row_at_y(pos.y, line_height)
+                        .map_or(line_height, |ix| line.row_height(ix, line_height));
+                    return (line_origin + pos, row_height);
                 }
             }
-            line_origin
+            (line_origin, line_height)
         };
-
-        let cursor_height = 0.85 * line_height;
 
         for selection in state.selections.iter() {
             let is_active = selection.id == active_id;
@@ -613,16 +617,25 @@ impl<M: InputModeKind> TextElement<M> {
             }
 
             let affinity = is_active && state.cursor_line_end_affinity;
-            let cursor_pos = caret_for(cursor_row, cursor, affinity);
-            let cursor_start = caret_for(sel_start_row, selected_range.start, false);
-            let cursor_end = caret_for(sel_end_row, selected_range.end, false);
+            let (cursor_pos, row_height) = caret_for(cursor_row, cursor, affinity);
+            let (cursor_start, _) = caret_for(sel_start_row, selected_range.start, false);
+            let (cursor_end, _) = caret_for(sel_end_row, selected_range.end, false);
+            let cursor_height = if row_height == line_height {
+                0.85 * line_height
+            } else {
+                row_height
+            };
 
             if is_active {
                 current_row = Some(cursor_row);
 
                 let selection_changed = state.last_selected_range != Some(selected_range);
                 let auto_scrolling = state.auto_scroll.is_active();
-                if selection_changed && !is_selected_all {
+                let viewport_changed = state.mode.is_auto_grow()
+                    && state
+                        .last_bounds
+                        .is_some_and(|last| last.size.height != bounds.size.height);
+                if (selection_changed || viewport_changed) && !is_selected_all {
                     // For Right alignment use 0 margin: cursor is clamped to bounds separately,
                     // so we never scroll the text for cursor-at-edge, avoiding a first-click jump.
                     let safety_margin = match last_layout.text_align {
@@ -695,7 +708,7 @@ impl<M: InputModeKind> TextElement<M> {
                 bounds: Bounds::new(
                     point(
                         cursor_x,
-                        bounds.top() + cursor_pos.y + ((line_height - cursor_height) / 2.),
+                        bounds.top() + cursor_pos.y + ((row_height - cursor_height) / 2.),
                     ),
                     size(CURSOR_WIDTH, cursor_height),
                 ),
@@ -789,15 +802,16 @@ impl<M: InputModeKind> TextElement<M> {
                         } else {
                             shaped.x_for_index(end_ix - offset)
                         };
+                    let bottom = y + line.row_height(row, last_layout.line_height);
                     corners.push(Corners {
                         top_left: point(left, y),
                         top_right: point(right, y),
-                        bottom_left: point(left, y + last_layout.line_height),
-                        bottom_right: point(right, y + last_layout.line_height),
+                        bottom_left: point(left, bottom),
+                        bottom_right: point(right, bottom),
                     });
                 }
                 offset = end;
-                y += last_layout.line_height;
+                y += line.row_height(row, last_layout.line_height);
             }
         }
         (!corners.is_empty()).then_some(corners)
@@ -929,8 +943,10 @@ impl<M: InputModeKind> TextElement<M> {
                         .iter()
                         .zip(last_layout.lines.iter())
                     {
-                        let height =
-                            last_layout.line_height * line.wrapped_lines.len().max(1) as f32;
+                        let height = line
+                            .size(last_layout.line_height)
+                            .height
+                            .max(last_layout.line_height);
                         let covered = (range.start..=range.end).contains(&line_start);
                         if covered {
                             top.get_or_insert(y);
@@ -1125,7 +1141,6 @@ impl<M: InputModeKind> TextElement<M> {
             return (0..1, vec![0], px(0.));
         }
 
-        let total_lines = state.display_map.wrap_row_count();
         let display_count = state.display_map.display_row_count();
         let buffer_line_count = state.display_map.buffer_line_count();
         if display_count == 0 || buffer_line_count == 0 {
@@ -1140,19 +1155,24 @@ impl<M: InputModeKind> TextElement<M> {
         scroll_top = clamp_auto_grow_vertical_scroll_offset(
             &state.mode,
             scroll_top,
-            line_height * total_lines,
+            state.display_map.content_height(line_height),
             input_height,
         );
 
-        // Display rows are uniformly `line_height` tall, so the visible window maps
-        // directly to a display-row range.
         let viewport_top = (-scroll_top).max(px(0.));
         let viewport_bottom = viewport_top + input_height;
-        let line_height_f = f32::from(line_height);
-        let first_display =
-            ((f32::from(viewport_top) / line_height_f).floor() as usize).min(display_count - 1);
+        let first_display = state
+            .display_map
+            .row_at_y(viewport_top, line_height)
+            .min(display_count - 1);
+        let bottom_row = state.display_map.row_at_y(viewport_bottom, line_height);
         let last_display =
-            ((f32::from(viewport_bottom) / line_height_f).ceil() as usize).min(display_count - 1);
+            if state.display_map.row_top(bottom_row, line_height) < viewport_bottom {
+                bottom_row + 1
+            } else {
+                bottom_row
+            }
+            .min(display_count - 1);
 
         let start_line = state.display_map.display_row_to_buffer_line(first_display);
         let end_line = state.display_map.display_row_to_buffer_line(last_display);
@@ -1162,8 +1182,8 @@ impl<M: InputModeKind> TextElement<M> {
             .display_map
             .buffer_line_to_display_row_range(start_line)
         {
-            Some(range) => line_height * range.start,
-            None => line_height * first_display,
+            Some(range) => state.display_map.row_top(range.start, line_height),
+            None => state.display_map.row_top(first_display, line_height),
         };
 
         let visible_range = start_line..(end_line + 1 + extra_rows).min(buffer_line_count);
@@ -1586,7 +1606,7 @@ impl<M: InputModeKind> TextElement<M> {
             .id(id)
             .flex()
             .items_center()
-            .h(token.line_height())
+            .when(!token.is_block(), |this| this.h(token.line_height()))
             .max_w(token.available_width())
             .overflow_hidden()
             // A token is an object, not text: the arrow, never the I-beam.
@@ -1718,6 +1738,20 @@ impl<M: InputModeKind> TextElement<M> {
             .into_any_element()
     }
 
+    fn token_available_space(
+        token: &super::InlineTokenContext,
+        line_height: Pixels,
+    ) -> Size<gpui::AvailableSpace> {
+        size(
+            gpui::AvailableSpace::MaxContent,
+            if token.is_block() {
+                gpui::AvailableSpace::MinContent
+            } else {
+                gpui::AvailableSpace::Definite(line_height)
+            },
+        )
+    }
+
     fn measure_tokens(
         &self,
         width: Pixels,
@@ -1766,31 +1800,18 @@ impl<M: InputModeKind> TextElement<M> {
         }
         let revision = state.document_revision;
         let cache = state.token_layout_cache.as_ref();
-        let all = cache.is_none_or(|cache| {
-            cache.key.as_ref() != Some(&key)
-                || cache.revision != revision
-                || state
-                    .token_spans()
-                    .iter()
-                    .any(|span| !cache.widths.contains_key(span.token()))
-        });
         let (visible, _, _) = self.calculate_visible_range(state, line_height, viewport);
         let start = state.text.line_start_offset(visible.start);
         let end = state.text.line_end_offset(visible.end.saturating_sub(1));
         let spans = state.token_spans();
-        let first = if all {
-            0
-        } else {
-            spans.partition_point(|s| s.range().end <= start)
-        };
-        let contexts: Vec<_> = spans[first..]
+        let contexts: Vec<_> = spans
             .iter()
-            .take_while(|s| all || s.range().start <= end)
             .filter(|span| {
                 let range = span.range();
-                (range.start <= end && range.end >= start)
+                span.token().is_block()
+                    || (range.start <= end && range.end >= start)
                     || cache.is_none_or(|cache| {
-                        cache.key.as_ref() != Some(&key) || !cache.widths.contains_key(span.token())
+                        cache.key.as_ref() != Some(&key) || !cache.sizes.contains_key(span.token())
                     })
             })
             .map(|span| state.token_context(span, line_height, width))
@@ -1800,39 +1821,46 @@ impl<M: InputModeKind> TextElement<M> {
         for token in contexts {
             let mut element = self.token_element(&token, window, cx);
             let size = element.layout_as_root(
-                size(
-                    gpui::AvailableSpace::MaxContent,
-                    gpui::AvailableSpace::Definite(line_height),
-                ),
+                Self::token_available_space(&token, line_height),
                 window,
                 cx,
             );
-            measured.push((token.token().clone(), size.width.min(width).max(px(1.))));
+            measured.push((
+                token.token().clone(),
+                gpui::Size {
+                    width: size.width.min(width).max(px(1.)),
+                    height: size.height.max(px(1.)),
+                },
+            ));
             elements.insert(token.range().start, (element, size));
         }
         self.state.update(cx, |state, cx| {
             let mut cache = state.token_layout_cache.take().unwrap_or_default();
             let mut changed = cache.key.as_ref() != Some(&key) || cache.revision != revision;
             if cache.key.as_ref() != Some(&key) {
-                cache.widths.clear();
+                cache.sizes.clear();
             }
-            for (token, width) in measured {
-                changed |= cache.widths.get(&token) != Some(&width);
-                cache.widths.insert(token, width);
+            for (token, token_size) in measured {
+                changed |= cache.sizes.get(&token) != Some(&token_size);
+                cache.sizes.insert(token, token_size);
             }
             cache.key = Some(key);
             if changed {
                 let spans = state.token_spans();
                 let tokens: std::collections::HashSet<_> =
                     spans.iter().map(|s| s.token()).collect();
-                cache.widths.retain(|token, _| tokens.contains(token));
+                cache.sizes.retain(|token, _| tokens.contains(token));
                 cache.metrics = spans
                     .iter()
                     .filter_map(|span| {
                         cache
-                            .widths
+                            .sizes
                             .get(span.token())
-                            .map(|width| (span.range(), *width))
+                            .map(|token_size| InlineMetric {
+                                range: span.range(),
+                                width: token_size.width,
+                                height: span.token().is_block().then_some(token_size.height),
+                            })
                     })
                     .collect();
                 cache.revision = revision;
@@ -1867,8 +1895,10 @@ impl<M: InputModeKind> TextElement<M> {
                                         None,
                                     )
                                     .width;
-                                width +=
-                                    cache.widths.get(span.token()).copied().unwrap_or_default();
+                                width += cache
+                                    .sizes
+                                    .get(span.token())
+                                    .map_or(px(0.), |token_size| token_size.width);
                                 offset = local.end;
                             }
                             let part = &text[offset..];
@@ -1892,7 +1922,7 @@ impl<M: InputModeKind> TextElement<M> {
             state.display_map.set_inline_metrics(metrics, cx);
             if state.mode.is_auto_grow() {
                 let rows = state.mode.rows();
-                state.mode.update_auto_grow(&state.display_map);
+                state.mode.update_auto_grow(&state.display_map, line_height);
                 if state.mode.rows() != rows {
                     cx.notify();
                 }
@@ -1934,6 +1964,7 @@ impl<M: InputModeKind> TextElement<M> {
                 let mut lines: SmallVec<[InputLine; 1]> = SmallVec::new();
                 for range in ranges {
                     let mut fragments = Vec::new();
+                    let mut block_height = None;
                     let mut offset = range.start;
                     let mut x = px(0.);
                     let first =
@@ -1960,7 +1991,11 @@ impl<M: InputModeKind> TextElement<M> {
                             });
                             x += width;
                         }
-                        let width = cache.widths.get(span.token()).copied().unwrap_or_default();
+                        let token_size = cache.sizes.get(span.token()).copied().unwrap_or_default();
+                        let width = token_size.width;
+                        if span.token().is_block() && local == range {
+                            block_height = Some(token_size.height);
+                        }
                         fragments.push(InlineFragment {
                             range: local.start - range.start..local.end - range.start,
                             x,
@@ -1986,7 +2021,10 @@ impl<M: InputModeKind> TextElement<M> {
                             text: Some(shaped),
                         });
                     }
-                    lines.push(InputLine::inline(text[range].to_owned().into(), fragments));
+                    lines.push(
+                        InputLine::inline(text[range].to_owned().into(), fragments)
+                            .with_height(block_height),
+                    );
                 }
                 let indent = state.display_map.line(row).map_or(0, |line| line.indent);
                 let wrap_indent = if indent > 0 && lines.len() > 1 {
@@ -2061,10 +2099,7 @@ impl<M: InputModeKind> TextElement<M> {
                 None => {
                     let mut element = self.token_element(&token, window, cx);
                     let element_size = element.layout_as_root(
-                        size(
-                            gpui::AvailableSpace::MaxContent,
-                            gpui::AvailableSpace::Definite(layout.line_height),
-                        ),
+                        Self::token_available_space(&token, layout.line_height),
                         window,
                         cx,
                     );
@@ -2613,8 +2648,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
             style.flex_grow = 1.0;
             style.size.height = relative(1.).into();
             // At least `rows` tall (auto grow: the content's rows, capped at
-            // `max_rows`); a taller parent still fills it.
-            let rows = state.mode.max_rows().min(state.mode.rows());
+            // `max_rows` plus the rows of block tokens); a taller parent still fills it.
+            let rows = state.mode.rows();
             style.min_size.height = (rows * line_height).into();
         } else {
             // For single-line inputs, the minimum height should be the line height
@@ -2923,7 +2958,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let ghost_line_count = ghost_lines.len();
         let ghost_lines_height = ghost_line_count as f32 * line_height;
 
-        let total_wrapped_lines = state.display_map.wrap_row_count();
         let empty_bottom_height = empty_bottom_height(
             state.is_code_editor(),
             state.scroll_beyond_last_line,
@@ -2940,7 +2974,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             } else {
                 longest_line_width
             },
-            (total_wrapped_lines as f32 * line_height
+            (state.display_map.content_height(line_height)
                 + empty_bottom_height.max(ghost_lines_height))
             .max(bounds.size.height),
         );
@@ -3887,6 +3921,69 @@ mod tests {
             assert_eq!(quads[1].bounds.size.height, line_height * 2.);
             assert_eq!(quads[2].bounds.size.width, px(3.));
             assert_eq!(quads[2].bounds.size.height, line_height);
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn block_token_selection_and_block_decoration_span_the_row_height() {
+        use crate::input::{InlineToken, InlineTokenPresentation};
+        let platform = gpui_platform::current_platform(true);
+        let mut cx = TestAppContext::build_with_text_system(
+            gpui::TestDispatcher::new(0),
+            None,
+            platform.text_system(),
+        );
+        cx.update(crate::init);
+        let mut textarea = None;
+        let window = cx.open_window(size(px(400.), px(300.)), |window, cx| {
+            let state = cx.new(|cx| {
+                crate::input::TextareaState::new(window, cx)
+                    .rows(4)
+                    .default_value("ab[img]cd")
+            });
+            textarea = Some(state.clone());
+            TextareaHarness(state)
+        });
+        let textarea = textarea.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), &mut cx);
+        cx.update(|window, cx| {
+            textarea.update(cx, |state, cx| {
+                state.set_token_presentation(
+                    InlineTokenPresentation::default()
+                        .token(|_, _, _| div().w(px(200.)).h(px(120.))),
+                );
+                state
+                    .replace_range_with_token(
+                        2..7,
+                        InlineToken::new("img", "[img]").block(),
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                state.create_range_decorations_collection(
+                    vec![RangeDecoration::new(0..0).with_style(RangeDecorationStyle::Block)],
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let state = textarea.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let line_height = layout.line_height;
+            let corners =
+                TextElement::<crate::input::TextareaMode>::layout_range_corners(&(2..7), layout)
+                    .unwrap();
+            assert_eq!(corners.len(), 1);
+            assert_eq!(corners[0].top_left.y, layout.visible_top + line_height);
+            assert_eq!(corners[0].bottom_left.y - corners[0].top_left.y, px(120.));
+            assert_eq!(
+                (corners[0].top_left.x, corners[0].top_right.x),
+                (px(0.), px(200.))
+            );
+            let element = TextElement::new(textarea.clone());
+            let quads = element.layout_range_decoration_quads(layout, &state.input_bounds, cx);
+            assert_eq!(quads[0].bounds.size.height, line_height * 2. + px(120.));
         });
     }
 

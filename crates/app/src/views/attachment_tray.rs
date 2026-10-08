@@ -1,5 +1,6 @@
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::assets::IconName;
@@ -19,7 +20,9 @@ pub const INLINE_TOTAL_MAX_BYTES: u64 = 5 * 512 * 1024;
 pub const MAX_FILE_BYTES: u64 = 250 * 1024 * 1024;
 pub const FILES_LATER_NOTICE: &str = "Files can be added once the chat exists.";
 const PASTED_IMAGE_STEM: &str = "pasted-image";
-const THUMB_SIZE: f32 = 72.;
+const PREVIEW_HEIGHT: f32 = 120.;
+const PREVIEW_GAP: f32 = 4.;
+const PREVIEW_RADIUS: f32 = 10.;
 const CHIP_WIDTH: f32 = 220.;
 const CHIP_HEIGHT: f32 = 48.;
 const CHIP_BADGE_SIZE: f32 = 30.;
@@ -193,6 +196,14 @@ impl TrayItem {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PreviewImage {
+    pub image: Arc<Image>,
+    pub dimensions: Option<(u32, u32)>,
+}
+
+pub type RemoveImage = Rc<dyn Fn(&mut Window, &mut App)>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutgoingImage {
     pub name: String,
@@ -254,8 +265,20 @@ impl AttachmentTray {
         &self.items
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+    pub fn has_chips(&self) -> bool {
+        self.items
+            .iter()
+            .any(|item| !matches!(item.kind, ItemKind::Image { .. }))
+    }
+
+    pub fn image(&self, id: u64) -> Option<PreviewImage> {
+        self.items.iter().find_map(|item| match &item.kind {
+            ItemKind::Image { image, dimensions } if item.id == id => Some(PreviewImage {
+                image: image.clone(),
+                dimensions: *dimensions,
+            }),
+            _ => None,
+        })
     }
 
     pub fn notice(&self) -> Option<&str> {
@@ -465,18 +488,21 @@ impl AttachmentTray {
             .sum()
     }
 
-    pub fn restore(&mut self, images: &[OutgoingImage], files: &[OutgoingFile]) {
+    pub fn restore(&mut self, images: &[OutgoingImage], files: &[OutgoingFile]) -> Vec<u64> {
         self.clear();
-        for image in images {
-            self.push(
-                image.name.clone(),
-                image.image.bytes.len() as u64,
-                ItemKind::Image {
-                    image: image.image.clone(),
-                    dimensions: image.dimensions,
-                },
-            );
-        }
+        let image_ids = images
+            .iter()
+            .map(|image| {
+                self.push(
+                    image.name.clone(),
+                    image.image.bytes.len() as u64,
+                    ItemKind::Image {
+                        image: image.image.clone(),
+                        dimensions: image.dimensions,
+                    },
+                )
+            })
+            .collect();
         for file in files {
             self.push(
                 file.name.clone(),
@@ -491,20 +517,28 @@ impl AttachmentTray {
                 },
             );
         }
+        image_ids
     }
 
-    pub fn outgoing_images(&self) -> Vec<OutgoingImage> {
-        self.items
-            .iter()
-            .filter_map(|item| match &item.kind {
-                ItemKind::Image { image, dimensions } => Some(OutgoingImage {
-                    name: item.name.clone(),
-                    image: image.clone(),
-                    dimensions: *dimensions,
-                }),
-                _ => None,
+    pub fn images_in(&self, ids: &[u64]) -> Vec<OutgoingImage> {
+        ids.iter()
+            .filter_map(|id| {
+                let item = self.items.iter().find(|item| item.id == *id)?;
+                match &item.kind {
+                    ItemKind::Image { image, dimensions } => Some(OutgoingImage {
+                        name: item.name.clone(),
+                        image: image.clone(),
+                        dimensions: *dimensions,
+                    }),
+                    _ => None,
+                }
             })
             .collect()
+    }
+
+    pub fn discard_images_except(&mut self, kept: &[u64]) {
+        self.items
+            .retain(|item| !matches!(item.kind, ItemKind::Image { .. }) || kept.contains(&item.id));
     }
 
     pub fn outgoing_files(&self) -> Vec<OutgoingFile> {
@@ -695,13 +729,8 @@ pub fn chip_state(item: &TrayItem) -> ChipState {
 
 type ItemAction<T> = fn(&mut T, u64, &mut Window, &mut Context<T>);
 
-fn remove_button<T: 'static>(
-    id: u64,
-    over_image: bool,
-    remove: ItemAction<T>,
-    cx: &mut Context<T>,
-) -> Stateful<Div> {
-    let button = div()
+fn remove_button<T: 'static>(id: u64, remove: ItemAction<T>, cx: &mut Context<T>) -> Stateful<Div> {
+    div()
         .id(ElementId::Name(format!("attachment-remove-{id}").into()))
         .size(px(REMOVE_SIZE))
         .flex_none()
@@ -709,42 +738,98 @@ fn remove_button<T: 'static>(
         .items_center()
         .justify_center()
         .rounded_full()
-        .cursor_pointer();
-    let button = if over_image {
-        button
-            .bg(black().opacity(0.6))
-            .hover(|button| button.bg(black().opacity(0.85)))
-            .child(icon(IconName::Close, 10., white()))
-    } else {
-        button
-            .hover(|button| button.bg(theme::row_hover()))
-            .child(icon(IconName::Close, 10., theme::text_muted()))
-    };
-    button.on_click(cx.listener(move |this, _, window, cx| remove(this, id, window, cx)))
+        .cursor_pointer()
+        .hover(|button| button.bg(theme::row_hover()))
+        .child(icon(IconName::Close, 10., theme::text_muted()))
+        .on_click(cx.listener(move |this, _, window, cx| remove(this, id, window, cx)))
 }
 
-fn thumbnail<T: 'static>(
-    item: &TrayItem,
-    image: &Arc<Image>,
-    remove: ItemAction<T>,
-    cx: &mut Context<T>,
+pub fn preview_size(dimensions: Option<(u32, u32)>, available_width: f32) -> (f32, f32) {
+    let (width, height) = dimensions
+        .filter(|(width, height)| *width > 0 && *height > 0)
+        .map_or((PREVIEW_HEIGHT, PREVIEW_HEIGHT), |(width, height)| {
+            (width as f32, height as f32)
+        });
+    let scale = (PREVIEW_HEIGHT / height)
+        .min(available_width / width)
+        .clamp(0., 1.);
+    (
+        (width * scale).round().max(1.),
+        (height * scale).round().max(1.),
+    )
+}
+
+pub fn preview_row_height(height: f32) -> f32 {
+    height + 2. * PREVIEW_GAP
+}
+
+pub fn inline_preview(
+    id: u64,
+    preview: Option<PreviewImage>,
+    available_width: Pixels,
+    selected: bool,
+    remove: RemoveImage,
 ) -> AnyElement {
-    div()
-        .id(ElementId::Name(format!("attachment-{}", item.id).into()))
+    let dimensions = preview.as_ref().and_then(|preview| preview.dimensions);
+    let (width, height) = preview_size(dimensions, f32::from(available_width));
+    let group = SharedString::from(format!("image-preview-{id}"));
+    let frame = div()
         .relative()
-        .size(px(THUMB_SIZE))
-        .flex_none()
-        .rounded(px(8.))
+        .size_full()
+        .rounded(px(PREVIEW_RADIUS))
         .overflow_hidden()
         .border_1()
         .border_color(theme::border_strong())
-        .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
+        .bg(theme::surface_raised());
+    let frame = match preview {
+        Some(preview) => frame.child(
+            img(preview.image)
+                .size_full()
+                .rounded(px(PREVIEW_RADIUS))
+                .object_fit(ObjectFit::Cover),
+        ),
+        None => frame,
+    };
+    div()
+        .group(group.clone())
+        .w(px(width))
+        .h(px(preview_row_height(height)))
+        .py(px(PREVIEW_GAP))
         .child(
-            div()
-                .absolute()
-                .top(px(4.))
-                .right(px(4.))
-                .child(remove_button(item.id, true, remove, cx)),
+            frame
+                .when(selected, |frame| {
+                    frame.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .rounded(px(PREVIEW_RADIUS))
+                            .border_2()
+                            .border_color(theme::accent()),
+                    )
+                })
+                .child(
+                    div()
+                        .id(ElementId::Name(format!("image-remove-{id}").into()))
+                        .absolute()
+                        .top(px(6.))
+                        .right(px(6.))
+                        .size(px(REMOVE_SIZE))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .cursor_pointer()
+                        .bg(black().opacity(0.6))
+                        .opacity(0.)
+                        .group_hover(group, |button| button.opacity(1.))
+                        .hover(|button| button.bg(black().opacity(0.85)))
+                        .child(icon(IconName::Close, 10., white()))
+                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        })
+                        .on_click(move |_, window, cx| remove(window, cx)),
+                ),
         )
         .into_any_element()
 }
@@ -813,7 +898,7 @@ fn chip<T: 'static>(
                     .on_click(cx.listener(move |this, _, window, cx| retry(this, id, window, cx))),
             )
         })
-        .child(remove_button(id, false, remove, cx))
+        .child(remove_button(id, remove, cx))
         .when_some(state.progress, |chip, percent| {
             chip.child(
                 div()
@@ -834,16 +919,14 @@ pub fn render_tray<T: 'static>(
     retry: ItemAction<T>,
     cx: &mut Context<T>,
 ) -> Option<Div> {
-    if tray.is_empty() {
+    if !tray.has_chips() {
         return None;
     }
     let elements: Vec<AnyElement> = tray
         .items()
         .iter()
-        .map(|item| match &item.kind {
-            ItemKind::Image { image, .. } => thumbnail(item, image, remove, cx),
-            _ => chip(item, remove, retry, cx),
-        })
+        .filter(|item| !matches!(item.kind, ItemKind::Image { .. }))
+        .map(|item| chip(item, remove, retry, cx))
         .collect();
     Some(
         h_flex()
@@ -870,7 +953,7 @@ mod tests {
         AttachmentTray, Classification, DoneFile, FILES_LATER_NOTICE, INLINE_IMAGE_MAX_BYTES,
         INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS, PasteAction,
         Tone, UploadResult, chip_state, classify, limit_notice, paste_action, pasted_image_name,
-        prepare_pasted_image, read_attachment, sniff_inline_format,
+        prepare_pasted_image, preview_size, read_attachment, sniff_inline_format,
     };
 
     const PNG_HEADER: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -1242,7 +1325,7 @@ mod tests {
         let (mut tray, id) = tray_with_file();
         tray.remove(id);
         tray.finish_upload(id, done("plan.pdf"));
-        assert!(tray.is_empty());
+        assert!(tray.items().is_empty());
     }
 
     #[test]
@@ -1264,13 +1347,40 @@ mod tests {
         source.finish_reading(ids[0], LoadedFile::new(png(4, 2)), true);
         source.finish_reading(ids[1], LoadedFile::new(b"%PDF".to_vec()), true);
         source.finish_upload(ids[1], done("b.pdf"));
-        let (images, files) = (source.outgoing_images(), source.outgoing_files());
+        let (images, files) = (source.images_in(&ids[..1]), source.outgoing_files());
 
         let mut restored = AttachmentTray::default();
-        restored.restore(&images, &files);
-        assert_eq!(restored.outgoing_images(), images);
+        let image_ids = restored.restore(&images, &files);
+        assert_eq!(image_ids.len(), 1);
+        assert_eq!(restored.images_in(&image_ids), images);
         assert_eq!(restored.outgoing_files(), files);
         assert!(!restored.blocks_send());
+    }
+
+    #[test]
+    fn images_come_back_in_the_order_asked_for_and_only_when_known() {
+        let mut tray = AttachmentTray::default();
+        let ids = tray.add_pending(&["a.png".to_owned(), "b.png".to_owned()]);
+        tray.finish_reading(ids[0], LoadedFile::new(png(2, 2)), true);
+        tray.finish_reading(ids[1], LoadedFile::new(png(4, 4)), true);
+        let images = tray.images_in(&[ids[1], 99, ids[0]]);
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].dimensions, Some((4, 4)));
+        assert_eq!(images[1].dimensions, Some((2, 2)));
+        assert!(!tray.has_chips());
+        tray.discard_images_except(&[ids[1]]);
+        assert_eq!(tray.items().len(), 1);
+        assert!(tray.image(ids[1]).is_some());
+        assert!(tray.image(ids[0]).is_none());
+    }
+
+    #[test]
+    fn previews_are_at_most_120_high_and_fit_the_row() {
+        assert_eq!(preview_size(Some((400, 300)), 800.), (160., 120.));
+        assert_eq!(preview_size(Some((40, 30)), 800.), (40., 30.));
+        assert_eq!(preview_size(Some((1000, 100)), 250.), (250., 25.));
+        assert_eq!(preview_size(None, 800.), (120., 120.));
+        assert_eq!(preview_size(Some((400, 300)), 0.), (1., 1.));
     }
 
     #[test]
@@ -1289,7 +1399,7 @@ mod tests {
         let mut tray = AttachmentTray::default();
         let id = tray.add_pending(&["gone.txt".to_owned()])[0];
         tray.fail_reading(id, "Could not read gone.txt.".to_owned());
-        assert!(tray.is_empty());
+        assert!(tray.items().is_empty());
         assert_eq!(tray.notice(), Some("Could not read gone.txt."));
     }
 

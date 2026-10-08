@@ -12,7 +12,7 @@ use ropey::Rope;
 use super::fold_map::FoldMap;
 use super::folding::FoldRange;
 pub use super::text_wrapper::WrappingIndent;
-use super::text_wrapper::{LineItem, WrapDisplayPoint};
+use super::text_wrapper::{InlineMetric, LineItem, WrapDisplayPoint};
 use super::wrap_map::WrapMap;
 use super::{BufferPoint, DisplayPoint};
 use crate::input::Point as TreeSitterPoint;
@@ -228,7 +228,7 @@ impl DisplayMap {
     /// Update layout parameters (wrap width or font)
     pub(crate) fn set_inline_metrics(
         &mut self,
-        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        metrics: std::rc::Rc<[InlineMetric]>,
         cx: &mut App,
     ) {
         self.wrap_map.set_inline_metrics(metrics, cx);
@@ -375,6 +375,28 @@ impl DisplayMap {
         self.wrap_map
             .wrapper()
             .display_point_to_offset(WrapDisplayPoint::new(wrap_row, 0, column))
+    }
+
+    pub(crate) fn row_top(&self, display_row: usize, line_height: Pixels) -> Pixels {
+        self.wrap_map.wrapper().row_top(display_row, line_height)
+    }
+
+    pub(crate) fn row_height(&self, display_row: usize, line_height: Pixels) -> Pixels {
+        self.wrap_map.wrapper().row_height(display_row, line_height)
+    }
+
+    pub(crate) fn row_at_y(&self, y: Pixels, line_height: Pixels) -> usize {
+        self.wrap_map.wrapper().row_at_y(y, line_height)
+    }
+
+    pub(crate) fn content_height(&self, line_height: Pixels) -> Pixels {
+        self.wrap_map.wrapper().content_height(line_height)
+    }
+
+    pub(crate) fn content_rows(&self, line_height: Pixels) -> usize {
+        let rows = self.wrap_row_count();
+        let extra = self.content_height(line_height) - line_height * rows as f32;
+        rows + (extra / line_height).ceil().max(0.) as usize
     }
 
     /// Get the longest row index (by byte length).

@@ -13,6 +13,7 @@ pub struct InlineToken {
     id: SharedString,
     text: SharedString,
     label: SharedString,
+    block: bool,
 }
 
 impl InlineToken {
@@ -22,11 +23,20 @@ impl InlineToken {
             id: id.into(),
             label: text.clone(),
             text,
+            block: false,
         }
     }
     pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = label.into();
         self
+    }
+    /// Show the token alone on its own row, as tall as its rendered element.
+    pub fn block(mut self) -> Self {
+        self.block = true;
+        self
+    }
+    pub fn is_block(&self) -> bool {
+        self.block
     }
     pub fn id(&self) -> &SharedString {
         &self.id

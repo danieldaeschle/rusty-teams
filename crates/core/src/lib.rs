@@ -30,8 +30,8 @@ pub use adaptive_card::{
 };
 pub use avatars::Avatar;
 pub use draft::{
-    Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, TypingStyle,
-    changed_span, has_markdown, link_url, map_offset, reverse_edits,
+    Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
+    TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
