@@ -1,5 +1,13 @@
 use scraper::{ElementRef, Html, Node};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSize {
+    Small,
+    Large,
+    Hidden,
+    Pixels(u16),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Span {
     Text(String),
@@ -19,6 +27,9 @@ pub enum Span {
         id: Option<String>,
     },
     Strike(Vec<Span>),
+    Superscript(Vec<Span>),
+    Subscript(Vec<Span>),
+    Sized(FontSize, Vec<Span>),
     Underline(Vec<Span>),
     Colored {
         color: Option<u32>,
@@ -111,6 +122,8 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         }),
         "i" | "em" => spans.push(Span::Italic(convert_children(element))),
         "s" | "strike" | "del" => spans.push(Span::Strike(convert_children(element))),
+        "sup" => spans.push(Span::Superscript(convert_children(element))),
+        "sub" => spans.push(Span::Subscript(convert_children(element))),
         "u" | "ins" => spans.push(Span::Underline(convert_children(element))),
         "span" | "font" | "mark" => push_colored(element, spans),
         "ul" | "ol" => spans.push(list(element)),
@@ -214,15 +227,37 @@ fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .or_else(|| style_value(style, "background"))
         .and_then(parse_color)
         .or((value.name() == "mark").then_some(MARK_BACKGROUND));
-    let children = convert_children(element);
-    if color.is_none() && background.is_none() {
-        spans.extend(children);
-    } else {
-        spans.push(Span::Colored {
+    let size = style_value(style, "font-size").and_then(parse_font_size);
+    let mut children = convert_children(element);
+    if color.is_some() || background.is_some() {
+        children = vec![Span::Colored {
             color,
             background,
             children,
-        });
+        }];
+    }
+    match size {
+        Some(size) => spans.push(Span::Sized(size, children)),
+        None => spans.extend(children),
+    }
+}
+
+fn parse_font_size(value: &str) -> Option<FontSize> {
+    let value = value.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "xx-small" | "x-small" | "small" | "smaller" => Some(FontSize::Small),
+        "large" | "x-large" | "xx-large" | "larger" => Some(FontSize::Large),
+        "0" => Some(FontSize::Hidden),
+        _ => {
+            let pixels: f32 = value.strip_suffix("px")?.trim().parse().ok()?;
+            if pixels <= 0. {
+                Some(FontSize::Hidden)
+            } else {
+                Some(FontSize::Pixels(
+                    pixels.round().min(f32::from(u16::MAX)) as u16
+                ))
+            }
+        }
     }
 }
 
@@ -371,6 +406,9 @@ fn tidy(spans: &mut Vec<Span>) {
             Span::Bold(children)
             | Span::Italic(children)
             | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }

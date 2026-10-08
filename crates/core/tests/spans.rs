@@ -1,6 +1,6 @@
 use serde_json::json;
 use store::MessageRecord;
-use teams_core::{Span, card_content_text, html_to_spans, message_spans};
+use teams_core::{FontSize, Span, card_content_text, html_to_spans, message_spans};
 
 fn text(value: &str) -> Span {
     Span::Text(value.to_owned())
@@ -405,4 +405,66 @@ fn card_text_matches_the_golden_output() {
             golden.content
         );
     }
+}
+
+#[test]
+fn superscript_and_subscript() {
+    assert_eq!(
+        html_to_spans("<p>x<sup>2</sup> H<sub>2</sub>O</p>"),
+        vec![
+            text("x"),
+            Span::Superscript(vec![text("2")]),
+            text(" H"),
+            Span::Subscript(vec![text("2")]),
+            text("O"),
+        ]
+    );
+}
+
+#[test]
+fn font_sizes_map_to_small_large_and_pixels() {
+    let sized =
+        |value: &str| html_to_spans(&format!("<span style=\"font-size:{value};\">t</span>"));
+    for value in ["xx-small", "x-small", "small"] {
+        assert_eq!(
+            sized(value),
+            vec![Span::Sized(FontSize::Small, vec![text("t")])]
+        );
+    }
+    for value in ["large", "x-large", "xx-large"] {
+        assert_eq!(
+            sized(value),
+            vec![Span::Sized(FontSize::Large, vec![text("t")])]
+        );
+    }
+    assert_eq!(
+        sized("12px"),
+        vec![Span::Sized(FontSize::Pixels(12), vec![text("t")])]
+    );
+    assert_eq!(
+        sized("0"),
+        vec![Span::Sized(FontSize::Hidden, vec![text("t")])]
+    );
+    assert_eq!(
+        sized("0px"),
+        vec![Span::Sized(FontSize::Hidden, vec![text("t")])]
+    );
+    for value in ["inherit", "medium"] {
+        assert_eq!(sized(value), vec![text("t")]);
+    }
+}
+
+#[test]
+fn sized_text_nests_with_bold_and_color() {
+    assert_eq!(
+        html_to_spans("<span style=\"font-size:x-large;color:#ff0000\"><b>big</b></span>"),
+        vec![Span::Sized(
+            FontSize::Large,
+            vec![Span::Colored {
+                color: Some(0xff0000),
+                background: None,
+                children: vec![Span::Bold(vec![text("big")])],
+            }]
+        )]
+    );
 }

@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui_kit::component::input::{RangeDecoration, RangeDecorationStyle, TextDecoration};
 use gpui_kit::*;
-use teams_core::{Draft, LineKind, MarkKind};
+use teams_core::{Draft, LineKind, MarkKind, SizeStep};
 
 use crate::theme;
 
@@ -60,6 +60,10 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
                 color: None,
             });
         }
+        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(SizeStep::Small) => {
+            style.color = Some(theme::text_soft());
+        }
+        MarkKind::Size(SizeStep::Large) => style.font_weight = Some(FontWeight::SEMIBOLD),
         MarkKind::Code => style.color = Some(theme::text_strong()),
         MarkKind::Link(_) => {
             style.color = Some(theme::accent_text());

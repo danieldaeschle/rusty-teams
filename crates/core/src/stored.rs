@@ -339,6 +339,9 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
             Span::Bold(children)
             | Span::Italic(children)
             | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Quote(children)
@@ -483,6 +486,9 @@ fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec
             Span::Bold(children)
             | Span::Italic(children)
             | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
@@ -526,6 +532,9 @@ fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
             Span::Bold(children)
             | Span::Italic(children)
             | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }

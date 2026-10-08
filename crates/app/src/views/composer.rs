@@ -21,8 +21,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
-    MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, TypingStyle, UploadedFile,
-    changed_span, has_markdown, link_url, map_offset, reverse_edits,
+    MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
+    UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
 use super::attachment_tray::{
@@ -63,6 +63,8 @@ actions!(
         ToggleItalic,
         ToggleUnderline,
         ToggleStrike,
+        ToggleSuperscript,
+        ToggleSubscript,
         ToggleCode,
         EditLink
     ]
@@ -74,6 +76,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-i", ToggleItalic, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-u", ToggleUnderline, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-shift-x", ToggleStrike, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-shift-=", ToggleSuperscript, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-=", ToggleSubscript, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-shift-c", ToggleCode, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-k", EditLink, Some(KEY_CONTEXT)),
         #[cfg(target_os = "macos")]
@@ -876,6 +880,40 @@ impl Composer {
         cx.notify();
     }
 
+    fn set_size(&mut self, size: Option<SizeStep>, cx: &mut Context<Self>) {
+        let selection = self.selection(cx);
+        if selection.is_empty() {
+            let cursor = selection.start;
+            let mut pending = self
+                .pending_style
+                .take()
+                .filter(|pending| pending.at == cursor)
+                .unwrap_or(TypingStyle {
+                    at: cursor,
+                    ..TypingStyle::default()
+                });
+            pending.set_size(size, &self.draft.style_at(cursor));
+            self.pending_style = (!pending.is_empty()).then_some(pending);
+        } else {
+            self.draft.set_size(selection, size);
+            self.draft.take_edits();
+            self.record(StepKind::Other, cx);
+            self.refresh_style(cx);
+        }
+        cx.notify();
+    }
+
+    fn normal_size_state(&self, range: Range<usize>) -> FormatState {
+        let sized = [SizeStep::Small, SizeStep::Large]
+            .into_iter()
+            .any(|step| self.draft.state(range.clone(), &MarkKind::Size(step)) != FormatState::Off);
+        if sized {
+            FormatState::Off
+        } else {
+            FormatState::On
+        }
+    }
+
     fn toggle_lines(&mut self, kind: LineKind, window: &mut Window, cx: &mut Context<Self>) {
         let selection = self.selection(cx);
         self.draft.toggle_lines(selection, kind);
@@ -889,6 +927,11 @@ impl Composer {
             FormatButton::Italic => self.toggle_mark(MarkKind::Italic, cx),
             FormatButton::Underline => self.toggle_mark(MarkKind::Underline, cx),
             FormatButton::Strike => self.toggle_mark(MarkKind::Strike, cx),
+            FormatButton::Superscript => self.toggle_mark(MarkKind::Superscript, cx),
+            FormatButton::Subscript => self.toggle_mark(MarkKind::Subscript, cx),
+            FormatButton::SizeSmall => self.set_size(Some(SizeStep::Small), cx),
+            FormatButton::SizeNormal => self.set_size(None, cx),
+            FormatButton::SizeLarge => self.set_size(Some(SizeStep::Large), cx),
             FormatButton::Code => self.toggle_mark(MarkKind::Code, cx),
             FormatButton::Link => self.open_link_editor(window, cx),
             FormatButton::Bulleted => self.toggle_lines(LineKind::Bullet(0), window, cx),
@@ -904,6 +947,11 @@ impl Composer {
             FormatButton::Italic => self.draft.state(range, &MarkKind::Italic),
             FormatButton::Underline => self.draft.state(range, &MarkKind::Underline),
             FormatButton::Strike => self.draft.state(range, &MarkKind::Strike),
+            FormatButton::Superscript => self.draft.state(range, &MarkKind::Superscript),
+            FormatButton::Subscript => self.draft.state(range, &MarkKind::Subscript),
+            FormatButton::SizeSmall => self.draft.state(range, &MarkKind::Size(SizeStep::Small)),
+            FormatButton::SizeLarge => self.draft.state(range, &MarkKind::Size(SizeStep::Large)),
+            FormatButton::SizeNormal => self.normal_size_state(range),
             FormatButton::Code => self.draft.state(range, &MarkKind::Code),
             FormatButton::Link => self.draft.state(range, &MarkKind::Link(String::new())),
             FormatButton::Bulleted => self.draft.line_state(range, &LineKind::Bullet(0)),
@@ -2293,6 +2341,16 @@ impl Render for Composer {
                     this.toggle_mark(MarkKind::Strike, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &ToggleSuperscript, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Superscript, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSubscript, _, cx| {
+                if this.link_editor.is_none() {
+                    this.toggle_mark(MarkKind::Subscript, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleCode, _, cx| {
                 if this.link_editor.is_none() {
                     this.toggle_mark(MarkKind::Code, cx);
@@ -3113,6 +3171,61 @@ mod tests {
             typist.press("end ctrl-i");
             typist.type_text("!");
             assert_eq!(typist.outgoing().html(), "hello<i>!</i>");
+        }
+
+        #[gpui_kit::test]
+        fn script_shortcuts_exclude_each_other_and_send_teams_html(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("x2");
+            typist.press("shift-left ctrl-shift-=");
+            assert_eq!(typist.outgoing().html(), "x<sup>2</sup>");
+            typist.press("ctrl-=");
+            assert_eq!(typist.outgoing().html(), "x<sub>2</sub>");
+        }
+
+        #[gpui_kit::test]
+        fn the_toolbar_state_follows_the_selection(cx: &mut TestAppContext) {
+            use teams_core::FormatState;
+
+            use super::super::FormatButton;
+
+            let mut typist = typist(cx);
+            typist.type_text("big small");
+            typist.press("shift-left shift-left shift-left shift-left shift-left");
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.press_format(FormatButton::SizeSmall, window, cx)
+                })
+            });
+            let states = |typist: &mut Typist<'_>, range: std::ops::Range<usize>| {
+                let composer = typist.composer.clone();
+                typist.cx.update(|cx| {
+                    let composer = composer.read(cx);
+                    [
+                        FormatButton::SizeSmall,
+                        FormatButton::SizeNormal,
+                        FormatButton::SizeLarge,
+                    ]
+                    .map(|button| composer.format_state(button, &range))
+                })
+            };
+            assert_eq!(
+                states(&mut typist, 4..9),
+                [FormatState::On, FormatState::Off, FormatState::Off]
+            );
+            assert_eq!(
+                states(&mut typist, 0..9),
+                [FormatState::Mixed, FormatState::Off, FormatState::Off]
+            );
+            assert_eq!(
+                states(&mut typist, 0..3),
+                [FormatState::Off, FormatState::On, FormatState::Off]
+            );
+            assert_eq!(
+                typist.outgoing().html(),
+                "big <span style=\"font-size:xx-small;\">small</span>"
+            );
         }
 
         #[gpui_kit::test]

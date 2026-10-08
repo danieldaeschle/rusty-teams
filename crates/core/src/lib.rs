@@ -41,7 +41,7 @@ pub use card_inputs::{
 pub use chatsvc::ChatApp;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
-    TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
+    SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
@@ -60,7 +60,7 @@ pub use presence::{Availability, Presence};
 pub use preview::preview_text;
 pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
-pub use spans::{Span, html_to_spans};
+pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, QuoteInfo, ReactionInfo,

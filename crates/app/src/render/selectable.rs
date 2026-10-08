@@ -9,17 +9,40 @@ use gpui_kit::*;
 
 use super::blocks::CODE_PADDING;
 
-const TIME_ROOM: char = '\u{2007}';
-const HIT_SLOP: f32 = 12.;
+pub(super) const TIME_ROOM: char = '\u{2007}';
+pub(super) const HIT_SLOP: f32 = 12.;
 
 #[derive(Clone)]
 pub struct Participant {
-    handle: TextSelectionHandle,
-    copied: Rc<RefCell<String>>,
+    pub(super) handle: TextSelectionHandle,
+    pub(super) copied: Rc<RefCell<String>>,
 }
 
-const PILL_OUTSET: f32 = 3.;
-const PILL_INSET_Y: f32 = 1.;
+impl Participant {
+    pub(super) fn retained(
+        global_id: Option<&GlobalElementId>,
+        text: &SharedString,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Participant {
+        window.with_element_state(
+            global_id.expect("selectable text has an element id"),
+            |retained: Option<Participant>, _| {
+                let participant = retained.unwrap_or_else(|| {
+                    let handle = TextSelectionHandle::new(text.clone(), cx);
+                    let copied = Rc::new(RefCell::new(String::new()));
+                    let source = copied.clone();
+                    handle.copy_with(move |_| source.borrow().clone(), cx);
+                    Participant { handle, copied }
+                });
+                (participant.clone(), participant)
+            },
+        )
+    }
+}
+
+pub(super) const PILL_OUTSET: f32 = 3.;
+pub(super) const PILL_INSET_Y: f32 = 1.;
 
 #[derive(Clone, Debug)]
 pub struct Pill {
@@ -219,19 +242,7 @@ impl Element for SelectableRichText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let participant = window.with_element_state(
-            global_id.expect("SelectableRichText has an element id"),
-            |retained: Option<Participant>, _| {
-                let participant = retained.unwrap_or_else(|| {
-                    let handle = TextSelectionHandle::new(self.text.clone(), cx);
-                    let copied = Rc::new(RefCell::new(String::new()));
-                    let source = copied.clone();
-                    handle.copy_with(move |_| source.borrow().clone(), cx);
-                    Participant { handle, copied }
-                });
-                (participant.clone(), participant)
-            },
-        );
+        let participant = Participant::retained(global_id, &self.text, window, cx);
         let (layout_id, ()) = self
             .styled_text
             .request_layout(global_id, inspector_id, window, cx);

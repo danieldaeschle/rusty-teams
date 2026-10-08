@@ -1,11 +1,23 @@
 use std::ops::Range;
 
-use teams_core::Span;
+use teams_core::{FontSize, Span};
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
 pub const CODE_PADDING: &str = "\u{2004}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
+const BASE_FONT_PIXELS: f32 = 14.;
+const SMALL_SCALE: f32 = 0.75;
+const LARGE_SCALE: f32 = 1.5;
+const SCRIPT_SCALE: f32 = 0.75;
+const SUPERSCRIPT_RAISE: f32 = 0.35;
+const SUBSCRIPT_DROP: f32 = 0.2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Script {
+    Super,
+    Sub,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StyleFlags {
@@ -16,6 +28,8 @@ pub struct StyleFlags {
     pub link: bool,
     pub strike: bool,
     pub underline: bool,
+    pub script: Option<Script>,
+    pub size: Option<FontSize>,
     pub color: Option<u32>,
     pub background: Option<u32>,
 }
@@ -23,6 +37,31 @@ pub struct StyleFlags {
 impl StyleFlags {
     pub fn is_plain(&self) -> bool {
         *self == StyleFlags::default()
+    }
+
+    pub fn is_flowed(&self) -> bool {
+        self.script.is_some() || self.size.is_some()
+    }
+
+    pub fn baseline_raise(&self) -> f32 {
+        match self.script {
+            Some(Script::Super) => SUPERSCRIPT_RAISE,
+            Some(Script::Sub) => -SUBSCRIPT_DROP,
+            None => 0.,
+        }
+    }
+
+    pub fn font_scale(&self) -> f32 {
+        let size = match self.size {
+            Some(FontSize::Small) => SMALL_SCALE,
+            Some(FontSize::Large) => LARGE_SCALE,
+            Some(FontSize::Pixels(pixels)) => f32::from(pixels) / BASE_FONT_PIXELS,
+            Some(FontSize::Hidden) | None => 1.,
+        };
+        match self.script {
+            Some(_) => size * SCRIPT_SCALE,
+            None => size,
+        }
     }
 }
 
@@ -432,6 +471,34 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 link,
                 out,
             ),
+            Span::Superscript(children) => append_inline(
+                children,
+                StyleFlags {
+                    script: Some(Script::Super),
+                    ..style
+                },
+                link,
+                out,
+            ),
+            Span::Subscript(children) => append_inline(
+                children,
+                StyleFlags {
+                    script: Some(Script::Sub),
+                    ..style
+                },
+                link,
+                out,
+            ),
+            Span::Sized(FontSize::Hidden, _) => {}
+            Span::Sized(size, children) => append_inline(
+                children,
+                StyleFlags {
+                    size: Some(*size),
+                    ..style
+                },
+                link,
+                out,
+            ),
             Span::Colored {
                 color,
                 background,
@@ -809,6 +876,29 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn script_and_size_become_flags_with_a_font_scale() {
+        let inline = paragraph_inline(&[
+            Span::Superscript(vec![text("2")]),
+            Span::Sized(FontSize::Large, vec![text("big")]),
+            Span::Sized(FontSize::Small, vec![Span::Subscript(vec![text("s")])]),
+            Span::Sized(FontSize::Pixels(21), vec![text("p")]),
+            Span::Sized(FontSize::Hidden, vec![text("secret")]),
+        ]);
+        let styles: Vec<StyleFlags> = inline
+            .segments
+            .iter()
+            .map(|segment| segment.style)
+            .collect();
+        assert_eq!(inline.text, "2bigsp");
+        assert_eq!(styles[0].script, Some(Script::Super));
+        assert_eq!(styles[0].font_scale(), 0.75);
+        assert_eq!(styles[1].font_scale(), 1.5);
+        assert_eq!(styles[2].script, Some(Script::Sub));
+        assert_eq!(styles[2].font_scale(), 0.5625);
+        assert_eq!(styles[3].font_scale(), 1.5);
     }
 
     #[test]

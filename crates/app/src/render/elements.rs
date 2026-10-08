@@ -3,6 +3,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::blocks::{Block, Inline, StyleFlags};
+use super::flow_text::{FlowSegment, FlowText};
 use super::selectable::{Pill, SelectableRichText};
 use super::syntax::{self, Token};
 use crate::theme;
@@ -315,6 +316,32 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .iter()
         .filter_map(|segment| pill_for(segment.range.clone(), segment.style, own))
         .collect();
+    if inline
+        .segments
+        .iter()
+        .any(|segment| segment.style.is_flowed())
+    {
+        let segments = inline
+            .segments
+            .iter()
+            .map(|segment| FlowSegment {
+                range: segment.range.clone(),
+                highlight: highlight_for(segment.style, own),
+                family: segment.style.code.then(|| mono.clone()),
+                scale: segment.style.font_scale(),
+                raise: segment.style.baseline_raise(),
+            })
+            .collect();
+        return div()
+            .w_full()
+            .text_color(theme::text())
+            .child(
+                FlowText::new(ElementId::Name(id.into()), inline.text.clone(), segments)
+                    .links(inline.links())
+                    .pills(pills),
+            )
+            .into_any_element();
+    }
     div()
         .w_full()
         .text_color(theme::text())

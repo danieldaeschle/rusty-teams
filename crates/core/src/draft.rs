@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::markdown::escape_html;
-use crate::spans::Span;
+use crate::spans::{FontSize, Span};
 
 pub const MAX_DEPTH: u8 = 2;
 pub const OBJECT_MARK: char = '\u{FFFC}';
@@ -22,6 +22,21 @@ static TYPED_LINK: LazyLock<Regex> =
 static LINK_AT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\[([^\]\n]+)\]\(([^)\s]+)\)").unwrap());
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum SizeStep {
+    Small,
+    Large,
+}
+
+impl SizeStep {
+    fn css(self) -> &'static str {
+        match self {
+            SizeStep::Small => "xx-small",
+            SizeStep::Large => "x-large",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum MarkKind {
     Link(String),
@@ -29,6 +44,9 @@ pub enum MarkKind {
     Italic,
     Underline,
     Strike,
+    Superscript,
+    Subscript,
+    Size(SizeStep),
     Code,
 }
 
@@ -37,10 +55,31 @@ impl MarkKind {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 
+    fn covers(&self, other: &MarkKind) -> bool {
+        match (self, other) {
+            (MarkKind::Size(left), MarkKind::Size(right)) => left == right,
+            _ => self.same_format(other),
+        }
+    }
+
+    fn opposite_script(&self) -> Option<MarkKind> {
+        match self {
+            MarkKind::Superscript => Some(MarkKind::Subscript),
+            MarkKind::Subscript => Some(MarkKind::Superscript),
+            _ => None,
+        }
+    }
+
     fn continues_at_end(&self) -> bool {
         matches!(
             self,
-            MarkKind::Bold | MarkKind::Italic | MarkKind::Underline | MarkKind::Strike
+            MarkKind::Bold
+                | MarkKind::Italic
+                | MarkKind::Underline
+                | MarkKind::Strike
+                | MarkKind::Superscript
+                | MarkKind::Subscript
+                | MarkKind::Size(_)
         )
     }
 
@@ -51,6 +90,9 @@ impl MarkKind {
             MarkKind::Italic => "<i>".to_owned(),
             MarkKind::Underline => "<u>".to_owned(),
             MarkKind::Strike => "<s>".to_owned(),
+            MarkKind::Superscript => "<sup>".to_owned(),
+            MarkKind::Subscript => "<sub>".to_owned(),
+            MarkKind::Size(step) => format!("<span style=\"font-size:{};\">", step.css()),
             MarkKind::Code => "<code>".to_owned(),
         }
     }
@@ -62,6 +104,9 @@ impl MarkKind {
             MarkKind::Italic => "</i>",
             MarkKind::Underline => "</u>",
             MarkKind::Strike => "</s>",
+            MarkKind::Superscript => "</sup>",
+            MarkKind::Subscript => "</sub>",
+            MarkKind::Size(_) => "</span>",
             MarkKind::Code => "</code>",
         }
     }
@@ -142,9 +187,35 @@ impl TypingStyle {
         self.remove.retain(|removed| !removed.same_format(&kind));
         let inherited = active.iter().any(|existing| existing.same_format(&kind));
         match (is_active, inherited) {
-            (true, true) => self.remove.push(kind),
-            (false, false) => self.add.push(kind),
+            (true, true) => self.remove.push(kind.clone()),
+            (false, false) => self.add.push(kind.clone()),
             _ => {}
+        }
+        if let Some(opposite) = kind.opposite_script()
+            && self.add.contains(&kind)
+        {
+            self.add.retain(|added| !added.same_format(&opposite));
+            self.remove
+                .retain(|removed| !removed.same_format(&opposite));
+            if active
+                .iter()
+                .any(|existing| existing.same_format(&opposite))
+            {
+                self.remove.push(opposite);
+            }
+        }
+    }
+
+    /// `None` is the normal size.
+    pub fn set_size(&mut self, size: Option<SizeStep>, active: &[MarkKind]) {
+        let marker = MarkKind::Size(SizeStep::Small);
+        self.add.retain(|added| !added.same_format(&marker));
+        self.remove.retain(|removed| !removed.same_format(&marker));
+        if active.iter().any(|existing| existing.same_format(&marker)) {
+            self.remove.push(marker);
+        }
+        if let Some(step) = size {
+            self.add.push(MarkKind::Size(step));
         }
     }
 
@@ -417,7 +488,7 @@ impl Draft {
                 let mut ranges: Vec<Range<usize>> = self
                     .marks
                     .iter()
-                    .filter(|mark| mark.kind.same_format(kind))
+                    .filter(|mark| mark.kind.covers(kind))
                     .map(|mark| mark.range.start.max(part.start)..mark.range.end.min(part.end))
                     .filter(|range| !range.is_empty())
                     .collect();
@@ -482,10 +553,30 @@ impl Draft {
         if self.state(range.clone(), &kind) == FormatState::On {
             self.remove_marks(range, &kind);
         } else {
+            if let Some(opposite) = kind.opposite_script() {
+                self.remove_marks(range.clone(), &opposite);
+            }
             for part in self.content_parts(range) {
                 self.add_mark(part, kind.clone());
             }
         }
+    }
+
+    /// `None` is the normal size: any size mark on `range` is removed.
+    pub fn set_size(&mut self, range: Range<usize>, size: Option<SizeStep>) {
+        self.journal = Journal::default();
+        self.remove_marks(range.clone(), &MarkKind::Size(SizeStep::Small));
+        if let Some(step) = size {
+            for part in self.content_parts(range) {
+                self.add_mark(part, MarkKind::Size(step));
+            }
+        }
+    }
+
+    pub fn size_in(&self, range: Range<usize>) -> Option<SizeStep> {
+        [SizeStep::Small, SizeStep::Large]
+            .into_iter()
+            .find(|step| self.state(range.clone(), &MarkKind::Size(*step)) == FormatState::On)
     }
 
     /// An empty `url` removes the link; one `link_url` refuses changes nothing.
@@ -1814,6 +1905,17 @@ impl SpanLines {
                 Span::Italic(children) => self.walk(children, kind, &with(MarkKind::Italic)),
                 Span::Strike(children) => self.walk(children, kind, &with(MarkKind::Strike)),
                 Span::Underline(children) => self.walk(children, kind, &with(MarkKind::Underline)),
+                Span::Superscript(children) => {
+                    self.walk(children, kind, &with(MarkKind::Superscript))
+                }
+                Span::Subscript(children) => self.walk(children, kind, &with(MarkKind::Subscript)),
+                Span::Sized(FontSize::Small, children) => {
+                    self.walk(children, kind, &with(MarkKind::Size(SizeStep::Small)))
+                }
+                Span::Sized(FontSize::Large, children) => {
+                    self.walk(children, kind, &with(MarkKind::Size(SizeStep::Large)))
+                }
+                Span::Sized(_, children) => self.walk(children, kind, marks),
                 Span::Colored { children, .. } => self.walk(children, kind, marks),
                 Span::Code(text) => self.append(text, kind, &with(MarkKind::Code)),
                 Span::Link { url, children } => {
@@ -2366,6 +2468,84 @@ mod tests {
              <ol><li>x</li><li>y</li></ol>\
              <pre class=\"language-py\">print(1)</pre>"
         );
+    }
+
+    #[test]
+    fn script_and_size_marks_export_teams_html() {
+        let mut draft = Draft::plain("x2 H2O big tiny");
+        draft.toggle(1..2, MarkKind::Superscript);
+        draft.toggle(4..5, MarkKind::Subscript);
+        draft.set_size(7..10, Some(SizeStep::Large));
+        draft.set_size(11..15, Some(SizeStep::Small));
+        assert_eq!(
+            draft.to_html(),
+            "x<sup>2</sup> H<sub>2</sub>O <span style=\"font-size:x-large;\">big</span> \
+             <span style=\"font-size:xx-small;\">tiny</span>"
+        );
+    }
+
+    #[test]
+    fn script_and_size_marks_round_trip_through_html() {
+        let mut source = Draft::plain("x2 H2O big tiny");
+        source.toggle(1..2, MarkKind::Superscript);
+        source.toggle(4..5, MarkKind::Subscript);
+        source.toggle(7..10, MarkKind::Bold);
+        source.set_size(7..10, Some(SizeStep::Large));
+        source.set_size(11..15, Some(SizeStep::Small));
+        let back = Draft::from_spans(&html_to_spans(&source.to_html()));
+        assert_eq!(back.text(), source.text());
+        assert_eq!(back.marks(), source.marks());
+    }
+
+    #[test]
+    fn inherit_and_pixel_sizes_import_without_a_size_mark() {
+        let spans = html_to_spans(
+            "<span style=\"font-size:inherit;\">a</span><span style=\"font-size:14px\">b</span>",
+        );
+        assert!(Draft::from_spans(&spans).marks().is_empty());
+    }
+
+    #[test]
+    fn superscript_and_subscript_exclude_each_other() {
+        let mut draft = Draft::plain("abcdef");
+        draft.toggle(0..4, MarkKind::Superscript);
+        draft.toggle(2..6, MarkKind::Subscript);
+        assert_eq!(
+            draft.marks(),
+            [
+                mark(0..2, MarkKind::Superscript),
+                mark(2..6, MarkKind::Subscript)
+            ]
+        );
+    }
+
+    #[test]
+    fn typing_style_switches_between_script_marks() {
+        let mut style = TypingStyle::default();
+        style.toggle(MarkKind::Subscript, &[MarkKind::Superscript]);
+        assert_eq!(
+            style.apply(vec![MarkKind::Superscript]),
+            vec![MarkKind::Subscript]
+        );
+    }
+
+    #[test]
+    fn size_changes_on_a_partial_range_split_the_mark() {
+        let mut draft = Draft::plain("abcdef");
+        draft.set_size(0..6, Some(SizeStep::Large));
+        draft.set_size(2..4, Some(SizeStep::Small));
+        assert_eq!(
+            draft.marks(),
+            [
+                mark(2..4, MarkKind::Size(SizeStep::Small)),
+                mark(0..2, MarkKind::Size(SizeStep::Large)),
+                mark(4..6, MarkKind::Size(SizeStep::Large)),
+            ]
+        );
+        assert_eq!(draft.size_in(2..4), Some(SizeStep::Small));
+        assert_eq!(draft.size_in(0..6), None);
+        draft.set_size(0..6, None);
+        assert!(draft.marks().is_empty());
     }
 
     #[test]

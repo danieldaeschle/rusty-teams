@@ -20,6 +20,11 @@ const ARROW_MARGIN: f32 = 12.;
 const LINK_FIELD_WIDTH: f32 = 240.;
 const APPLY_WIDTH: f32 = 64.;
 const ACTIVE_ALPHA: f32 = 0.22;
+const SMALL_LETTER: f32 = 11.;
+const NORMAL_LETTER: f32 = 15.;
+const LARGE_LETTER: f32 = 19.;
+const SCRIPT_LETTER: f32 = 10.;
+const SCRIPT_SHIFT: f32 = 4.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatButton {
@@ -27,6 +32,11 @@ pub enum FormatButton {
     Italic,
     Underline,
     Strike,
+    Superscript,
+    Subscript,
+    SizeSmall,
+    SizeNormal,
+    SizeLarge,
     Code,
     Link,
     Bulleted,
@@ -34,12 +44,18 @@ pub enum FormatButton {
     Quote,
 }
 
-pub const GROUPS: [&[FormatButton]; 3] = [
+pub const GROUPS: [&[FormatButton]; 5] = [
     &[
         FormatButton::Bold,
         FormatButton::Italic,
         FormatButton::Underline,
         FormatButton::Strike,
+    ],
+    &[FormatButton::Superscript, FormatButton::Subscript],
+    &[
+        FormatButton::SizeSmall,
+        FormatButton::SizeNormal,
+        FormatButton::SizeLarge,
     ],
     &[FormatButton::Code, FormatButton::Link],
     &[
@@ -56,6 +72,11 @@ impl FormatButton {
             FormatButton::Italic => "Italic (Ctrl+I)",
             FormatButton::Underline => "Underline (Ctrl+U)",
             FormatButton::Strike => "Strikethrough (Ctrl+Shift+X)",
+            FormatButton::Superscript => "Superscript (Ctrl+Shift+=)",
+            FormatButton::Subscript => "Subscript (Ctrl+=)",
+            FormatButton::SizeSmall => "Small text",
+            FormatButton::SizeNormal => "Normal text",
+            FormatButton::SizeLarge => "Large text",
             FormatButton::Code => "Code (Ctrl+Shift+C)",
             FormatButton::Link => "Link (Ctrl+K)",
             FormatButton::Bulleted => "Bulleted list",
@@ -71,6 +92,11 @@ impl FormatButton {
             FormatButton::Italic => letter("I").italic().into_any_element(),
             FormatButton::Underline => letter("U").underline().into_any_element(),
             FormatButton::Strike => letter("S").line_through().into_any_element(),
+            FormatButton::Superscript => script("x", "2", true, color),
+            FormatButton::Subscript => script("x", "2", false, color),
+            FormatButton::SizeSmall => sized_letter(SMALL_LETTER, color),
+            FormatButton::SizeNormal => sized_letter(NORMAL_LETTER, color),
+            FormatButton::SizeLarge => sized_letter(LARGE_LETTER, color),
             FormatButton::Code => symbol("code", 18., color).into_any_element(),
             FormatButton::Link => symbol("link", 18., color).into_any_element(),
             FormatButton::Bulleted => symbol("format_list_bulleted", 18., color).into_any_element(),
@@ -78,6 +104,29 @@ impl FormatButton {
             FormatButton::Quote => symbol("format_quote", 18., color).into_any_element(),
         }
     }
+}
+
+fn script(base: &'static str, mark: &'static str, raised: bool, color: Hsla) -> AnyElement {
+    h_flex()
+        .items_baseline()
+        .text_color(color)
+        .child(div().text_size(px(15.)).child(base))
+        .child(
+            div()
+                .text_size(px(SCRIPT_LETTER))
+                .when(raised, |mark| mark.mb(px(SCRIPT_SHIFT)))
+                .when(!raised, |mark| mark.mt(px(SCRIPT_SHIFT)))
+                .child(mark),
+        )
+        .into_any_element()
+}
+
+fn sized_letter(size: f32, color: Hsla) -> AnyElement {
+    div()
+        .text_size(px(size))
+        .text_color(color)
+        .child("A")
+        .into_any_element()
 }
 
 pub fn bar_width() -> f32 {
@@ -332,8 +381,8 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_holds_nine_buttons_in_three_groups() {
-        assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 9);
-        assert!(bar_width() > 9. * BUTTON);
+    fn the_bar_holds_fourteen_buttons_in_five_groups() {
+        assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 14);
+        assert!(bar_width() > 14. * BUTTON);
     }
 }
