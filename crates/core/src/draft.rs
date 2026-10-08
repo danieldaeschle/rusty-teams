@@ -10,9 +10,6 @@ use crate::spans::Span;
 pub const MAX_DEPTH: u8 = 2;
 const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
-const INDENT: &str = "\u{2003}\u{2003}";
-const QUOTE_MARKER: &str = "\u{2003}";
-const CODE_MARKER: &str = "\u{2003}";
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 const FENCE: &str = "```";
 const MARKDOWN_INDENT: usize = 2;
@@ -622,8 +619,7 @@ impl Draft {
             LineKind::Quote => {
                 self.splice(cursor..cursor, "\n", &[]);
                 self.lines[index + 1] = LineKind::Quote;
-                self.splice(cursor + 1..cursor + 1, QUOTE_MARKER, &[]);
-                Some(cursor + 1 + QUOTE_MARKER.len())
+                Some(cursor + 1)
             }
             LineKind::Code(_) => {
                 let last_of_block = self.lines.get(index + 1) != Some(&kind);
@@ -632,7 +628,7 @@ impl Draft {
                     return Some(self.set_line_kind(index, LineKind::Text, None, cursor));
                 }
                 self.splice(cursor..cursor, "\n", &[]);
-                Some(self.repair(cursor + 1))
+                Some(cursor + 1)
             }
             list => {
                 if self.text[content.clone()].trim().is_empty() {
@@ -687,32 +683,6 @@ impl Draft {
         Some(self.repair(cursor))
     }
 
-    /// The text of `range` without list, quote and code markers in front of whole lines
-    /// and without code padding, for the plain clipboard.
-    pub fn plain_slice(&self, range: Range<usize>) -> String {
-        let mut plain = String::with_capacity(range.len());
-        for (index, line) in self.line_ranges().into_iter().enumerate() {
-            if line.end < range.start || line.start > range.end {
-                continue;
-            }
-            let marker = self.marker_range(index);
-            let skip_marker = matches!(self.lines[index], LineKind::Code(_));
-            let start = if skip_marker {
-                range.start.max(marker.end)
-            } else {
-                range.start.max(line.start)
-            };
-            let end = range.end.min(line.end);
-            if start < end {
-                plain.push_str(&self.text[start..end]);
-            }
-            if line.end < range.end && line.end < self.text.len() {
-                plain.push('\n');
-            }
-        }
-        plain
-    }
-
     /// Backspace at the start of a formatted line drops (or lifts) its format.
     pub fn backspace_at_start(&mut self, cursor: usize) -> Option<usize> {
         self.journal = Journal::default();
@@ -722,21 +692,24 @@ impl Draft {
         let content = self.content_range(index);
         match &kind {
             LineKind::Text => None,
-            LineKind::Code(_) if cursor > line.start && cursor <= content.start => {
+            LineKind::Code(_) => {
                 let first_of_block = index == 0 || self.lines[index - 1] != kind;
-                if first_of_block {
-                    return Some(self.set_line_kind(index, LineKind::Text, None, cursor));
-                }
-                self.splice(line.start - 1..content.start, "", &[]);
-                Some(self.repair(line.start - 1))
+                (cursor == line.start && first_of_block).then(|| {
+                    self.lines[index] = LineKind::Text;
+                    cursor
+                })
             }
+            LineKind::Quote => (cursor == line.start).then(|| {
+                self.lines[index] = LineKind::Text;
+                cursor
+            }),
             _ if cursor == line.start && index > 0 => {
                 self.splice(line.start - 1..content.start, "", &[]);
                 Some(self.repair(line.start - 1))
             }
             _ if cursor > line.start && cursor <= content.start => {
                 let lifted = match kind.depth() {
-                    depth if kind.is_list() && depth > 0 => kind.with_depth(depth - 1),
+                    depth if depth > 0 => kind.with_depth(depth - 1),
                     _ => LineKind::Text,
                 };
                 let cursor = self.set_line_kind(index, lifted, None, cursor);
@@ -808,8 +781,8 @@ impl Draft {
                 LineKind::Text
             };
             let number = match kind {
-                LineKind::Numbered(depth) => {
-                    numbered_marker(&self.text[line.clone()], depth).map(|(_, number)| number)
+                LineKind::Numbered(_) => {
+                    numbered_marker(&self.text[line.clone()]).map(|(_, number)| number)
                 }
                 _ => None,
             };
@@ -1050,7 +1023,15 @@ impl Draft {
         let breaks = replacement.matches('\n').count();
         let kind = self.lines[first_line].clone();
         let mut new_kinds = Vec::with_capacity(breaks + 1);
-        if breaks > 0 && start == line_start && old_end == start {
+        let pushes_line_down = breaks > 0
+            && start == line_start
+            && old_end == start
+            && !matches!(kind, LineKind::Code(_))
+            && self.text[start..]
+                .chars()
+                .next()
+                .is_some_and(|next| next != '\n');
+        if pushes_line_down {
             new_kinds.extend(std::iter::repeat_n(LineKind::Text, breaks));
             new_kinds.push(kind);
         } else {
@@ -1124,7 +1105,7 @@ impl Draft {
         for previous in (0..index).rev() {
             match &self.lines[previous] {
                 LineKind::Numbered(previous_depth) if *previous_depth == depth => {
-                    return numbered_marker(&self.text[ranges[previous].clone()], depth)
+                    return numbered_marker(&self.text[ranges[previous].clone()])
                         .map(|(_, number)| number);
                 }
                 kind if kind.is_list() && kind.depth() > depth => continue,
@@ -1142,7 +1123,7 @@ impl Draft {
                 None => own_number
                     .or_else(|| {
                         let line = self.line_ranges()[index].clone();
-                        numbered_marker(&self.text[line], *depth).map(|(_, number)| number)
+                        numbered_marker(&self.text[line]).map(|(_, number)| number)
                     })
                     .unwrap_or(1),
             },
@@ -1178,37 +1159,11 @@ impl Draft {
         }
     }
 
-    /// Padding merged into a code line's content by a join or a cross-line delete.
-    fn drop_stray_padding(&mut self, index: usize, mut cursor: usize) -> usize {
-        loop {
-            let content = self.content_range(index);
-            let Some(offset) = self.text[content.clone()].find(CODE_MARKER) else {
-                return cursor;
-            };
-            let stray = content.start + offset..content.start + offset + CODE_MARKER.len();
-            self.splice(stray.clone(), "", &[]);
-            if cursor >= stray.end {
-                cursor -= CODE_MARKER.len();
-            } else if cursor > stray.start {
-                cursor = stray.start;
-            }
-        }
-    }
-
-    /// Lines whose marker was edited away become text; numbered items are renumbered; code
-    /// lines get their padding back.
+    /// List items whose marker was edited away become text; numbered items are renumbered.
     fn repair(&mut self, mut cursor: usize) -> usize {
         for index in 0..self.lines.len() {
             let kind = self.lines[index].clone();
-            if kind == LineKind::Text {
-                continue;
-            }
-            if matches!(kind, LineKind::Code(_)) {
-                let line = self.line_ranges()[index].clone();
-                if !self.text[line.start..].starts_with(CODE_MARKER) {
-                    cursor = self.replace_marker(line.start..line.start, CODE_MARKER, cursor);
-                }
-                cursor = self.drop_stray_padding(index, cursor);
+            if !kind.is_list() {
                 continue;
             }
             let line = self.line_ranges()[index].clone();
@@ -1217,7 +1172,7 @@ impl Draft {
             if current.starts_with(&expected) {
                 continue;
             }
-            match numbered_marker(current, kind.depth()) {
+            match numbered_marker(current) {
                 Some((length, _)) if matches!(kind, LineKind::Numbered(_)) => {
                     cursor =
                         self.replace_marker(line.start..line.start + length, &expected, cursor);
@@ -1234,20 +1189,14 @@ fn overlaps(left: &Range<usize>, right: &Range<usize>) -> bool {
 }
 
 fn bullet_marker(depth: u8) -> String {
-    format!(
-        "{}{} ",
-        INDENT.repeat(depth as usize),
-        BULLETS[depth as usize % BULLETS.len()]
-    )
+    format!("{} ", BULLETS[depth as usize % BULLETS.len()])
 }
 
 fn marker_text(kind: &LineKind, number: u32) -> String {
     match kind {
         LineKind::Bullet(depth) => bullet_marker(*depth),
-        LineKind::Numbered(depth) => format!("{}{number}. ", INDENT.repeat(*depth as usize)),
-        LineKind::Quote => QUOTE_MARKER.to_owned(),
-        LineKind::Code(_) => CODE_MARKER.to_owned(),
-        LineKind::Text => String::new(),
+        LineKind::Numbered(_) => format!("{number}. "),
+        LineKind::Text | LineKind::Quote | LineKind::Code(_) => String::new(),
     }
 }
 
@@ -1261,22 +1210,18 @@ fn marker_len(kind: &LineKind, line: &str) -> usize {
                 0
             }
         }
-        LineKind::Numbered(depth) => numbered_marker(line, *depth).map_or(0, |(length, _)| length),
-        LineKind::Quote if line.starts_with(QUOTE_MARKER) => QUOTE_MARKER.len(),
-        LineKind::Code(_) if line.starts_with(CODE_MARKER) => CODE_MARKER.len(),
+        LineKind::Numbered(_) => numbered_marker(line).map_or(0, |(length, _)| length),
         _ => 0,
     }
 }
 
-/// Byte length and number of a `1. ` marker at `depth`.
-fn numbered_marker(line: &str, depth: u8) -> Option<(usize, u32)> {
-    let indent = INDENT.repeat(depth as usize);
-    let rest = line.strip_prefix(indent.as_str())?;
-    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    if digits == 0 || digits > 9 || !rest[digits..].starts_with(". ") {
+/// Byte length and number of a `1. ` marker.
+fn numbered_marker(line: &str) -> Option<(usize, u32)> {
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 || digits > 9 || !line[digits..].starts_with(". ") {
         return None;
     }
-    Some((indent.len() + digits + 2, rest[..digits].parse().ok()?))
+    Some((digits + 2, line[..digits].parse().ok()?))
 }
 
 fn line_shortcut(before: &str) -> Option<(LineKind, u32)> {
@@ -1324,9 +1269,8 @@ pub fn link_url(text: &str) -> Option<String> {
         return Some(text.to_owned());
     }
     let scheme = text.split_once(':').filter(|(scheme, rest)| {
-        let host_and_port = scheme.contains('.')
-            || scheme.eq_ignore_ascii_case("localhost")
-            || rest.starts_with(|character: char| character.is_ascii_digit());
+        let host = scheme.contains('.') || scheme.eq_ignore_ascii_case("localhost");
+        let host_and_port = host && rest.starts_with(|character: char| character.is_ascii_digit());
         !host_and_port
             && scheme.starts_with(|character: char| character.is_ascii_alphabetic())
             && scheme
@@ -1553,7 +1497,7 @@ fn markdown_lines(text: &str) -> Vec<DraftLine> {
             .find_map(|bullet| trimmed.strip_prefix(bullet))
         {
             (LineKind::Bullet(depth), None, rest)
-        } else if let Some((length, number)) = numbered_marker(trimmed, 0) {
+        } else if let Some((length, number)) = numbered_marker(trimmed) {
             (LineKind::Numbered(depth), Some(number), &trimmed[length..])
         } else if let Some(rest) = trimmed
             .strip_prefix("> ")
@@ -1936,7 +1880,7 @@ mod tests {
         assert_eq!(numbered.text(), "1. one");
         assert_eq!(numbered.lines(), [LineKind::Numbered(0)]);
         let quote = typed_draft("> said");
-        assert_eq!(quote.text(), format!("{QUOTE_MARKER}said"));
+        assert_eq!(quote.text(), "said");
         assert_eq!(quote.lines(), [LineKind::Quote]);
     }
 
@@ -1969,7 +1913,7 @@ mod tests {
         let mut draft = Draft::from_markdown("- a\n- b");
         assert!(draft.indent(6..6, false));
         assert_eq!(draft.lines(), [LineKind::Bullet(0), LineKind::Bullet(1)]);
-        assert_eq!(draft.text(), format!("• a\n{INDENT}◦ b"));
+        assert_eq!(draft.text(), "• a\n◦ b");
         assert!(draft.indent(draft.text().len()..draft.text().len(), true));
         assert!(draft.indent(draft.text().len()..draft.text().len(), true));
         assert_eq!(draft.text(), "• a\nb");
@@ -1979,10 +1923,7 @@ mod tests {
     #[test]
     fn nested_numbering_counts_per_level() {
         let draft = Draft::from_markdown("1. a\n  1. x\n  2. y\n2. b");
-        assert_eq!(
-            draft.text(),
-            format!("1. a\n{INDENT}1. x\n{INDENT}2. y\n2. b")
-        );
+        assert_eq!(draft.text(), "1. a\n1. x\n2. y\n2. b");
     }
 
     #[test]
@@ -2020,15 +1961,12 @@ mod tests {
     fn fence_and_enter_open_a_code_block_that_enter_continues() {
         let mut draft = typed_draft("```rust");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
-        assert_eq!((draft.text(), cursor), (CODE_MARKER, CODE_MARKER.len()));
+        assert_eq!((draft.text(), cursor), ("", 0));
         assert_eq!(draft.lines(), [LineKind::Code(Some("rust".into()))]);
         typed(&mut draft, "fn x() {}");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
         assert_eq!(draft.lines().len(), 2);
-        assert_eq!(
-            draft.break_line(cursor, false),
-            Some(cursor - CODE_MARKER.len())
-        );
+        assert_eq!(draft.break_line(cursor, false), Some(cursor));
         assert_eq!(draft.lines()[1], LineKind::Text);
         assert_eq!(
             draft.to_html(),
@@ -2040,9 +1978,9 @@ mod tests {
     fn markdown_inside_code_stays_literal() {
         let mut draft = typed_draft("```");
         let cursor = draft.break_line(3, false).unwrap();
-        assert_eq!(cursor, CODE_MARKER.len());
+        assert_eq!(cursor, 0);
         typed(&mut draft, "a **b**");
-        assert_eq!(draft.text(), format!("{CODE_MARKER}a **b**"));
+        assert_eq!(draft.text(), "a **b**");
         assert!(draft.marks().is_empty());
     }
 
@@ -2191,19 +2129,13 @@ mod tests {
     }
 
     #[test]
-    fn code_lines_carry_padding_that_survives_edits_and_stays_out_of_html() {
-        let mut draft = Draft::from_markdown("```\nlet a = 1;\nlet b = 2;\n```");
-        assert_eq!(
-            draft.text(),
-            format!("{CODE_MARKER}let a = 1;\n{CODE_MARKER}let b = 2;")
-        );
-        assert_eq!(draft.to_html(), "<pre>let a = 1;\nlet b = 2;</pre>");
-        let second = draft.content_range(1).start;
-        let cursor = draft.backspace_at_start(second).unwrap();
-        assert_eq!(draft.text(), format!("{CODE_MARKER}let a = 1;let b = 2;"));
-        assert_eq!(cursor, CODE_MARKER.len() + "let a = 1;".len());
-        let cursor = draft.backspace_at_start(CODE_MARKER.len()).unwrap();
-        assert_eq!((draft.lines()[0].clone(), cursor), (LineKind::Text, 0));
+    fn code_lines_hold_only_their_content() {
+        let mut draft = Draft::from_markdown("```\nlet a = 1;\n\u{2003}b\n```");
+        assert_eq!(draft.text(), "let a = 1;\n\u{2003}b");
+        assert_eq!(draft.to_html(), "<pre>let a = 1;\n\u{2003}b</pre>");
+        assert_eq!(draft.backspace_at_start(draft.line_ranges()[1].start), None);
+        assert_eq!(draft.backspace_at_start(0), Some(0));
+        assert_eq!(draft.lines()[0], LineKind::Text);
     }
 
     #[test]
@@ -2228,32 +2160,20 @@ mod tests {
             "<pre class=\"language-py\">def f():\n    return 1</pre>"
         );
         let mut split = Draft::from_markdown("```\n   a    b\n```");
-        let after_a = CODE_MARKER.len() + "   a".len();
+        let after_a = "   a".len();
         split.break_line(after_a, false).unwrap();
         assert_eq!(split.to_html(), "<pre>   a\n    b</pre>");
     }
 
     #[test]
-    fn delete_never_moves_padding_into_code() {
-        let mut draft = Draft::from_markdown("```\nlet a = 1;\nlet b = 2;\n```");
+    fn delete_at_a_line_end_joins_the_next_item_without_its_bullet() {
+        let mut draft = Draft::from_markdown("- a\n- b");
         let end_of_first = draft.line_ranges()[0].end;
         assert_eq!(draft.delete_forward(end_of_first), Some(end_of_first));
-        assert_eq!(draft.to_html(), "<pre>let a = 1;let b = 2;</pre>");
-        let cursor = draft.delete_forward(0).unwrap();
-        assert_eq!(cursor, CODE_MARKER.len());
-        assert_eq!(draft.to_html(), "<pre>et a = 1;let b = 2;</pre>");
-        let mut selected = Draft::from_markdown("```\nx = 1\ny = 2\n```");
-        let second = selected.line_ranges()[1].start;
-        let mut next = selected.text().to_owned();
-        next.replace_range(0..second + CODE_MARKER.len(), "");
-        selected.apply_edit(&next, 0, None);
-        assert_eq!(selected.to_html(), "<pre>y = 2</pre>");
-    }
-
-    #[test]
-    fn plain_copies_leave_code_padding_out() {
-        let draft = Draft::from_markdown("```\n  a\nb\n```");
-        assert_eq!(draft.plain_slice(0..draft.text().len()), "  a\nb");
+        assert_eq!(draft.text(), "• ab");
+        assert_eq!(draft.delete_forward(0), Some(bullet_marker(0).len()));
+        assert_eq!(draft.text(), "• b");
+        assert_eq!(Draft::plain("a\nb").delete_forward(1), None);
     }
 
     #[test]
@@ -2267,6 +2187,7 @@ mod tests {
             Some("https://example.com:8080/x".into())
         );
         assert_eq!(link_url("javascript:alert(1)"), None);
+        assert_eq!(link_url("tel:0123456"), None);
     }
 
     #[test]

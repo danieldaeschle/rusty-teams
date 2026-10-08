@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -51,7 +51,7 @@ const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
-const SNAPSHOT_LIMIT: usize = 100;
+const HISTORY_LIMIT: usize = 200;
 const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
 const KEY_CONTEXT: &str = "Composer";
 
@@ -184,10 +184,26 @@ struct Conversion {
     restore: Vec<Edit>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepKind {
+    Typing { after_space: bool },
+    Deleting,
+    Other,
+}
+
+/// One state of the composer's own undo history: text, tokens, formatting and selection.
+struct HistoryStep {
+    draft: Draft,
+    tokens: Vec<(Range<usize>, InlineToken)>,
+    selection: Range<usize>,
+    kind: StepKind,
+}
+
 struct LinkEditor {
     range: Range<usize>,
     field: Entity<InputState>,
     refused: bool,
+    _edits: Subscription,
 }
 
 type DraftDecorations = (
@@ -214,10 +230,8 @@ pub struct Composer {
     draft: Draft,
     decorations: DraftDecorations,
     pending_style: Option<TypingStyle>,
-    snapshots: VecDeque<Draft>,
-    format_undo: Vec<(Draft, Draft)>,
-    format_redo: Vec<(Draft, Draft)>,
-    replaying_history: bool,
+    history: Vec<HistoryStep>,
+    history_index: usize,
     pasted_markdown: Option<String>,
     paste_hint: Option<Task<()>>,
     copied: Option<(String, Vec<DraftLine>)>,
@@ -291,6 +305,27 @@ fn candidate_subtitle(candidate: &MentionCandidate) -> String {
     }
 }
 
+fn step_kind(previous: &str, value: &str, cursor: usize) -> StepKind {
+    if let Some(typed) = emoji::typed_char(previous, value, cursor).filter(|typed| *typed != '\n') {
+        return StepKind::Typing {
+            after_space: typed.is_whitespace(),
+        };
+    }
+    let removed = previous.len().saturating_sub(value.len());
+    let one_char_removed = removed > 0
+        && previous.is_char_boundary(cursor)
+        && previous
+            .get(cursor..cursor + removed)
+            .is_some_and(|gone| gone.chars().count() == 1 && gone != "\n")
+        && previous.get(..cursor) == value.get(..cursor)
+        && previous.get(cursor + removed..) == value.get(cursor..);
+    if one_char_removed {
+        StepKind::Deleting
+    } else {
+        StepKind::Other
+    }
+}
+
 fn looks_like_url(text: &str) -> bool {
     ["https://", "http://", "www."]
         .iter()
@@ -342,10 +377,13 @@ impl Composer {
             draft: Draft::default(),
             decorations,
             pending_style: None,
-            snapshots: VecDeque::new(),
-            format_undo: Vec::new(),
-            format_redo: Vec::new(),
-            replaying_history: false,
+            history: vec![HistoryStep {
+                draft: Draft::default(),
+                tokens: Vec::new(),
+                selection: 0..0,
+                kind: StepKind::Other,
+            }],
+            history_index: 0,
             pasted_markdown: None,
             paste_hint: None,
             copied: None,
@@ -419,27 +457,18 @@ impl Composer {
 
     fn on_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.input.read(cx);
-        let (value, cursor) = (state.value().to_string(), state.cursor());
+        let (value, input_cursor) = (state.value().to_string(), state.cursor());
         let previous = std::mem::replace(&mut self.previous_value, value.clone());
-        let replaying = std::mem::take(&mut self.replaying_history);
         if value == self.draft.text() {
             self.refresh_style(cx);
             return;
         }
-        self.format_undo.clear();
-        self.format_redo.clear();
-        if replaying && let Some(snapshot) = self.snapshot_for(&value) {
-            self.draft = snapshot;
-            self.pending_style = None;
-            self.refresh_style(cx);
-            return;
-        }
+        let kind = step_kind(&previous, &value, input_cursor);
         let typing = self.pending_style.take();
-        let cursor = self.draft.apply_edit(&value, cursor, typing.as_ref());
-        self.commit(Some(cursor), window, cx);
-        if replaying {
-            return;
-        }
+        let cursor = self.draft.apply_edit(&value, input_cursor, typing.as_ref());
+        let edits = self.draft.take_edits();
+        self.apply_to_input(edits, cursor..cursor, window, cx);
+        self.record(kind, cx);
         if let Some(pasted) = self.pasted_markdown.take()
             && self.convert_paste(&pasted, cursor, window, cx)
         {
@@ -504,6 +533,7 @@ impl Composer {
         let edits = self.draft.take_edits();
         let restore = reverse_edits(&edits, before.text());
         self.apply_to_input(edits, cursor..cursor, window, cx);
+        self.record(StepKind::Other, cx);
         self.conversion = Some(Conversion {
             value: self.draft.text().to_owned(),
             cursor,
@@ -550,6 +580,7 @@ impl Composer {
             None => map_offset(&edits, selection.start)..map_offset(&edits, selection.end),
         };
         self.apply_to_input(edits, selection, window, cx);
+        self.record(StepKind::Other, cx);
     }
 
     fn apply_to_input(
@@ -559,10 +590,6 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !edits.is_empty() {
-            self.format_undo.clear();
-            self.format_redo.clear();
-        }
         self.input.update(cx, |state, cx| {
             let edited = !edits.is_empty();
             if edited {
@@ -578,30 +605,80 @@ impl Composer {
             self.draft.take_edits();
         }
         self.previous_value = value;
-        self.remember_snapshot();
         self.refresh_style(cx);
     }
 
-    fn remember_snapshot(&mut self) {
-        if self
-            .snapshots
-            .back()
-            .is_some_and(|last| last.text() == self.draft.text())
-        {
-            self.snapshots.pop_back();
+    /// Adds the current state as an undo step. Typing and deleting runs merge into one step;
+    /// a typed space ends a typing step.
+    fn record(&mut self, kind: StepKind, cx: &App) {
+        let state = self.input.read(cx);
+        let step = HistoryStep {
+            draft: self.draft.clone(),
+            tokens: state
+                .tokens()
+                .iter()
+                .map(|span| (span.range(), span.token().clone()))
+                .collect(),
+            selection: state.selected_range(),
+            kind,
+        };
+        let at_end = self.history_index + 1 == self.history.len();
+        let merges = at_end
+            && match (self.history.last().map(|last| last.kind), kind) {
+                (Some(StepKind::Typing { after_space: false }), StepKind::Typing { .. }) => true,
+                (
+                    Some(StepKind::Typing { after_space: true }),
+                    StepKind::Typing { after_space },
+                ) => after_space,
+                (Some(StepKind::Deleting), StepKind::Deleting) => true,
+                _ => false,
+            };
+        if merges {
+            if let Some(last) = self.history.last_mut() {
+                *last = step;
+            }
+            return;
         }
-        self.snapshots.push_back(self.draft.clone());
-        if self.snapshots.len() > SNAPSHOT_LIMIT {
-            self.snapshots.pop_front();
+        self.history.truncate(self.history_index + 1);
+        self.history.push(step);
+        if self.history.len() > HISTORY_LIMIT {
+            self.history.remove(0);
         }
+        self.history_index = self.history.len() - 1;
     }
 
-    fn snapshot_for(&self, value: &str) -> Option<Draft> {
-        self.snapshots
-            .iter()
-            .rev()
-            .find(|snapshot| snapshot.text() == value)
-            .cloned()
+    /// Ctrl+Z / Ctrl+Y move through the composer's own history; the input's is never used.
+    fn step_history(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let target = if back {
+            self.history_index.checked_sub(1)
+        } else {
+            Some(self.history_index + 1).filter(|index| *index < self.history.len())
+        };
+        let Some(target) = target else {
+            return;
+        };
+        self.history_index = target;
+        let step = &self.history[target];
+        let mut content = InputContent::new(step.draft.text().to_owned());
+        for (range, token) in &step.tokens {
+            if let Ok(next) = content.clone().with_token(range.clone(), token.clone()) {
+                content = next;
+            }
+        }
+        let (draft, selection) = (step.draft.clone(), step.selection.clone());
+        self.input.update(cx, |state, cx| {
+            state.set_value(content, window, cx);
+            state.set_selected_range(selection, cx);
+        });
+        self.previous_value = draft.text().to_owned();
+        self.draft = draft;
+        self.pending_style = None;
+        self.conversion = None;
+        self.paste_hint = None;
+        self.refresh_style(cx);
+        self.update_emoji(cx);
+        self.update_mention(cx);
+        cx.notify();
     }
 
     fn refresh_style(&mut self, cx: &mut Context<Self>) {
@@ -609,8 +686,10 @@ impl Composer {
         let (text, ranges) = &self.decorations;
         text.set(style.text, cx);
         ranges.set(style.ranges, cx);
-        self.input
-            .update(cx, |state, cx| state.set_hanging_indents(style.markers, cx));
+        self.input.update(cx, |state, cx| {
+            state.set_line_indents(style.indents, cx);
+            state.set_hanging_indents(style.markers, cx);
+        });
     }
 
     fn load_draft(
@@ -633,10 +712,9 @@ impl Composer {
         self.paste_hint = None;
         self.link_editor = None;
         self.toolbar_dismissed = None;
-        self.snapshots.clear();
-        self.format_undo.clear();
-        self.format_redo.clear();
-        self.remember_snapshot();
+        self.history.clear();
+        self.history_index = 0;
+        self.record(StepKind::Other, cx);
         self.refresh_style(cx);
     }
 
@@ -670,62 +748,10 @@ impl Composer {
         self.draft = conversion.before;
         self.pending_style = None;
         self.apply_to_input(conversion.restore, cursor..cursor, window, cx);
+        self.record(StepKind::Other, cx);
         self.undone_value = Some(self.input.read(cx).value().to_string());
         self.update_emoji(cx);
         true
-    }
-
-    /// A format-only change is an undo step of its own; the input's history has no record of it.
-    fn record_format(&mut self, before: Draft, cx: &mut Context<Self>) {
-        if before != self.draft {
-            self.format_undo.push((before, self.draft.clone()));
-            if self.format_undo.len() > SNAPSHOT_LIMIT {
-                self.format_undo.remove(0);
-            }
-            self.format_redo.clear();
-        }
-        self.remember_snapshot();
-        self.refresh_style(cx);
-    }
-
-    fn step_format(&mut self, undo: bool, cx: &mut Context<Self>) -> bool {
-        let (from, to) = if undo {
-            (&mut self.format_undo, &mut self.format_redo)
-        } else {
-            (&mut self.format_redo, &mut self.format_undo)
-        };
-        let matches = from
-            .last()
-            .is_some_and(|(before, after)| *(if undo { after } else { before }) == self.draft);
-        if !matches {
-            return false;
-        }
-        let Some(step) = from.pop() else {
-            return false;
-        };
-        self.draft = if undo { step.0.clone() } else { step.1.clone() };
-        to.push(step);
-        self.pending_style = None;
-        self.remember_snapshot();
-        self.refresh_style(cx);
-        cx.notify();
-        true
-    }
-
-    /// Undo and Redo set `replaying_history` for the Change they cause; a second deferral runs
-    /// after that Change, so the flag never outlives an undo with nothing to undo.
-    fn begin_history_replay(&mut self, cx: &mut Context<Self>) {
-        self.replaying_history = true;
-        self.conversion = None;
-        self.paste_hint = None;
-        let composer = cx.entity().downgrade();
-        cx.defer(move |cx| {
-            cx.defer(move |cx| {
-                composer
-                    .update(cx, |this, _| this.replaying_history = false)
-                    .ok();
-            });
-        });
     }
 
     fn selection(&self, cx: &App) -> Range<usize> {
@@ -747,10 +773,10 @@ impl Composer {
             pending.toggle(kind, &self.draft.style_at(cursor));
             self.pending_style = (!pending.is_empty()).then_some(pending);
         } else {
-            let before = self.draft.clone();
             self.draft.toggle(selection, kind);
             self.draft.take_edits();
-            self.record_format(before, cx);
+            self.record(StepKind::Other, cx);
+            self.refresh_style(cx);
         }
         cx.notify();
     }
@@ -823,10 +849,19 @@ impl Composer {
             state.focus(window, cx);
             state.select_all(window, cx);
         });
+        let edits = cx.subscribe(&field, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change)
+                && let Some(editor) = this.link_editor.as_mut()
+            {
+                editor.refused = false;
+                cx.notify();
+            }
+        });
         self.link_editor = Some(LinkEditor {
             range,
             field,
             refused: false,
+            _edits: edits,
         });
         cx.notify();
     }
@@ -855,13 +890,13 @@ impl Composer {
                 self.commit(Some(end), window, cx);
             }
         } else {
-            let before = self.draft.clone();
             self.draft.set_link(editor.range.clone(), &url);
             self.draft.take_edits();
-            self.record_format(before, cx);
+            self.refresh_style(cx);
             self.input.update(cx, |state, cx| {
                 state.set_selected_range(editor.range.clone(), cx)
             });
+            self.record(StepKind::Other, cx);
             self.toolbar_dismissed = Some(editor.range);
         }
         cx.notify();
@@ -933,7 +968,7 @@ impl Composer {
         if selection.is_empty() || self.draft.text().get(selection.clone()).is_none() {
             return false;
         }
-        let text = self.draft.plain_slice(selection.clone());
+        let text = self.draft.text()[selection.clone()].to_owned();
         let lines = self.draft.slice(selection);
         cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
             text.clone(),
@@ -1973,20 +2008,16 @@ impl Render for Composer {
                 }
             }))
             .on_action(cx.listener(|this, _: &EditLink, window, cx| this.edit_link(window, cx)))
-            .capture_action(cx.listener(|this, _: &Undo, _, cx| {
-                if this.link_editor.is_some() {
-                } else if this.step_format(true, cx) {
+            .capture_action(cx.listener(|this, _: &Undo, window, cx| {
+                if this.link_editor.is_none() {
+                    this.step_history(true, window, cx);
                     cx.stop_propagation();
-                } else {
-                    this.begin_history_replay(cx);
                 }
             }))
-            .capture_action(cx.listener(|this, _: &Redo, _, cx| {
-                if this.link_editor.is_some() {
-                } else if this.step_format(false, cx) {
+            .capture_action(cx.listener(|this, _: &Redo, window, cx| {
+                if this.link_editor.is_none() {
+                    this.step_history(false, window, cx);
                     cx.stop_propagation();
-                } else {
-                    this.begin_history_replay(cx);
                 }
             }))
             .capture_action(cx.listener(|this, _: &Copy, _, cx| {
@@ -2415,7 +2446,7 @@ mod tests {
             typist.type_text("- a");
             typist.press("enter tab");
             typist.type_text("b");
-            assert_eq!(typist.value(), "• a\n\u{2003}\u{2003}◦ b");
+            assert_eq!(typist.value(), "• a\n◦ b");
             typist.press("shift-tab");
             assert_eq!(typist.value(), "• a\n• b");
         }
@@ -2579,6 +2610,51 @@ mod tests {
                     .is_some_and(|editor| editor.refused)
             }));
             assert!(typist.draft().marks().is_empty());
+            typist.type_text("x");
+            assert!(typist.cx.update(|cx| {
+                composer
+                    .read(cx)
+                    .link_editor
+                    .as_ref()
+                    .is_some_and(|editor| !editor.refused)
+            }));
+        }
+
+        #[gpui_kit::test]
+        fn undo_takes_back_a_list_toggle_then_the_bold_before_it(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, LineKind, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("ctrl-a ctrl-b");
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.press_format(super::super::FormatButton::Bulleted, window, cx)
+                })
+            });
+            assert_eq!(typist.value(), "• hello");
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "hello");
+            assert_eq!(typist.draft().state(0..5, &MarkKind::Bold), FormatState::On);
+            typist.press("ctrl-z");
+            assert!(typist.draft().marks().is_empty());
+            assert_eq!(typist.draft().lines(), [LineKind::Text]);
+        }
+
+        #[gpui_kit::test]
+        fn redo_brings_back_typing_and_bold_in_order(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("ctrl-a ctrl-b ctrl-z ctrl-z");
+            assert_eq!(typist.value(), "");
+            typist.press("ctrl-y");
+            assert_eq!(typist.value(), "hello");
+            assert!(typist.draft().marks().is_empty());
+            typist.press("ctrl-y");
+            assert_eq!(typist.draft().state(0..5, &MarkKind::Bold), FormatState::On);
         }
 
         #[gpui_kit::test]
@@ -2599,7 +2675,7 @@ mod tests {
                 .cx
                 .write_to_clipboard(gpui_kit::ClipboardItem::new_string("**x**".to_owned()));
             typist.press("ctrl-v");
-            assert_eq!(typist.value(), "\u{2003}:) **x**");
+            assert_eq!(typist.value(), ":) **x**");
             let composer = typist.composer.clone();
             assert!(
                 typist

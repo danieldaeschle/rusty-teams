@@ -9,12 +9,27 @@ use crate::theme;
 const CODE_PILL_RADIUS: f32 = 4.;
 const CODE_BLOCK_RADIUS: f32 = 6.;
 const QUOTE_BAR_WIDTH: f32 = 3.;
+const QUOTE_INDENT: f32 = 12.;
+const CODE_INDENT: f32 = 10.;
+const LIST_LEVEL_INDENT: f32 = 18.;
 
 /// How the composer paints a draft: text styles, fills and the list markers to hang under.
 pub struct DraftStyle {
     pub text: Vec<TextDecoration>,
     pub ranges: Vec<RangeDecoration>,
     pub markers: Vec<Range<usize>>,
+    pub indents: Vec<(usize, Pixels)>,
+}
+
+fn line_indent(kind: &LineKind) -> f32 {
+    match kind {
+        LineKind::Text => 0.,
+        LineKind::Quote => QUOTE_INDENT,
+        LineKind::Code(_) => CODE_INDENT,
+        LineKind::Bullet(depth) | LineKind::Numbered(depth) => {
+            LIST_LEVEL_INDENT * f32::from(*depth)
+        }
+    }
 }
 
 fn color(color: Hsla) -> HighlightStyle {
@@ -65,6 +80,13 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
     let mut text = Vec::new();
     let mut ranges = Vec::new();
     let mut markers = Vec::new();
+    let indents = draft
+        .line_ranges()
+        .into_iter()
+        .zip(draft.lines())
+        .map(|(line, kind)| (line.start, px(line_indent(kind))))
+        .filter(|(_, indent)| *indent > px(0.))
+        .collect();
     for mark in draft.marks() {
         let decoration = TextDecoration::new(mark.range.clone(), mark_style(&mark.kind));
         if mark.kind == MarkKind::Code {
@@ -134,6 +156,7 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
         text,
         ranges,
         markers,
+        indents,
     }
 }
 
@@ -157,10 +180,7 @@ mod tests {
     fn list_markers_hang_and_code_gets_a_pill() {
         let draft = Draft::from_markdown("- one `x`\n```\nfn\n```");
         let style = draft_style(&draft, "Mono".into());
-        assert_eq!(
-            style.markers,
-            [draft.marker_range(0), draft.marker_range(1)]
-        );
+        assert_eq!(style.markers, [draft.marker_range(0)]);
         assert_eq!(
             style
                 .ranges
@@ -169,6 +189,22 @@ mod tests {
                 .collect::<Vec<_>>(),
             [RangeDecorationStyle::Pill, RangeDecorationStyle::Block]
         );
+    }
+
+    #[test]
+    fn nesting_quotes_and_code_become_line_indents() {
+        let draft = Draft::from_markdown("- a\n  - b\n> q\n```\nx\n```");
+        let style = draft_style(&draft, "Mono".into());
+        let starts = draft.line_ranges();
+        assert_eq!(
+            style.indents,
+            [
+                (starts[1].start, gpui_kit::px(18.)),
+                (starts[2].start, gpui_kit::px(12.)),
+                (starts[3].start, gpui_kit::px(10.)),
+            ]
+        );
+        assert!(!draft.text().contains('\u{2003}'));
     }
 
     #[test]
