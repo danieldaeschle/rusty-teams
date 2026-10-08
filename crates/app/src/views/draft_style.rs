@@ -54,20 +54,11 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
     style
 }
 
-/// A range the block or bar decoration paints over every line of `lines`; `None` when the
-/// block is one empty line it cannot address yet.
-fn block_range(draft: &Draft, lines: Range<usize>) -> Option<Range<usize>> {
+/// From the start of the first line of `lines` to the end of the last; Block and Bar cover
+/// every line starting inside it, ends included, so empty lines count too.
+fn block_range(draft: &Draft, lines: Range<usize>) -> Range<usize> {
     let line_ranges = draft.line_ranges();
-    let start = line_ranges[lines.start].start;
-    let end = line_ranges[lines.end - 1].end;
-    if end > start {
-        return Some(start..end);
-    }
-    if end < draft.text().len() {
-        return Some(start..start + 1);
-    }
-    let previous_has_text = lines.start > 0 && !line_ranges[lines.start - 1].is_empty();
-    previous_has_text.then(|| start - 1..start)
+    line_ranges[lines.start].start..line_ranges[lines.end - 1].end
 }
 
 pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
@@ -122,18 +113,18 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
             }
         }
         let block = match kind {
-            LineKind::Code(_) => block_range(draft, index..run_end).map(|range| {
-                RangeDecoration::new(range)
+            LineKind::Code(_) => Some(
+                RangeDecoration::new(block_range(draft, index..run_end))
                     .with_style(RangeDecorationStyle::Block)
                     .with_color(theme::code_surface())
-                    .with_radius(px(CODE_BLOCK_RADIUS))
-            }),
-            LineKind::Quote => block_range(draft, index..run_end).map(|range| {
-                RangeDecoration::new(range)
+                    .with_radius(px(CODE_BLOCK_RADIUS)),
+            ),
+            LineKind::Quote => Some(
+                RangeDecoration::new(block_range(draft, index..run_end))
                     .with_style(RangeDecorationStyle::Bar)
                     .with_color(theme::border_strong())
-                    .with_radius(px(QUOTE_BAR_WIDTH))
-            }),
+                    .with_radius(px(QUOTE_BAR_WIDTH)),
+            ),
             _ => None,
         };
         ranges.extend(block);
@@ -153,11 +144,23 @@ mod tests {
 
     use super::{block_range, draft_style};
 
+    fn line(kind: LineKind, content: &str) -> DraftLine {
+        DraftLine {
+            kind,
+            number: None,
+            content: content.into(),
+            marks: Vec::new(),
+        }
+    }
+
     #[test]
     fn list_markers_hang_and_code_gets_a_pill() {
         let draft = Draft::from_markdown("- one `x`\n```\nfn\n```");
         let style = draft_style(&draft, "Mono".into());
-        assert_eq!(style.markers, [draft.marker_range(0)]);
+        assert_eq!(
+            style.markers,
+            [draft.marker_range(0), draft.marker_range(1)]
+        );
         assert_eq!(
             style
                 .ranges
@@ -169,21 +172,23 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_code_line_at_the_end_still_gets_its_block() {
+    fn a_code_block_covers_its_empty_last_line_before_text() {
         let draft = Draft::from_lines(&[
-            DraftLine {
-                kind: LineKind::Text,
-                number: None,
-                content: "intro".into(),
-                marks: Vec::new(),
-            },
-            DraftLine {
-                kind: LineKind::Code(None),
-                number: None,
-                content: String::new(),
-                marks: Vec::new(),
-            },
+            line(LineKind::Code(None), "x"),
+            line(LineKind::Code(None), ""),
+            line(LineKind::Text, "after"),
         ]);
-        assert_eq!(block_range(&draft, 1..2), Some(5..6));
+        let block = block_range(&draft, 0..2);
+        let empty_line_start = draft.line_ranges()[1].start;
+        assert!(block.contains(&empty_line_start) || block.end == empty_line_start);
+        assert!(block.end < draft.line_ranges()[2].start);
+    }
+
+    #[test]
+    fn a_lone_code_line_still_gets_a_block() {
+        let draft = Draft::from_lines(&[line(LineKind::Code(None), "")]);
+        let style = draft_style(&draft, "Mono".into());
+        assert_eq!(style.ranges.len(), 1);
+        assert_eq!(style.ranges[0].style(), RangeDecorationStyle::Block);
     }
 }

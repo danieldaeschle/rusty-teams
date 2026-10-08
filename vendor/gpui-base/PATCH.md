@@ -18,7 +18,7 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | `src/input/editor/decorations.rs` | `TextDecorationCollection<M = EditorMode>`, `RangeDecorationCollection<M = EditorMode>`, `create_*_collection` on `impl<M: DecoratedMode>`; `DecorationCollections` / `TrackedDecoration` `pub` + `#[doc(hidden)]` | same API on textarea and editor; default type param keeps editor code unchanged |
 | `src/input/editor/mod.rs`, `src/input/mod.rs` | doc no longer says decorations are editor-only; export `DecoratedMode`, `TextareaExtras` | docs, API |
 | `src/input/editor/display_map/text_wrapper.rs` | lines with inline tokens wrap through `measured_wrap_boundaries` too (`atomic` token ranges, token width + shaped text segments) instead of gpui's `LineWrapper` | mention lines honour font overrides and hanging indent |
-| `src/input/editor/decorations.rs` | `RangeDecorationStyle::{Pill, Block, Bar}`, `RangeDecoration::with_border()` / `with_radius()` | rounded inline code pills, full-width code block fill, quote bar |
+| `src/input/editor/decorations.rs` | `RangeDecorationStyle::{Pill, Block, Bar}`, `RangeDecoration::with_border()` / `with_radius()`; Block and Bar keep empty ranges (`TrackedDecoration::keeps_empty`) and the index finds them | rounded inline code pills, full-width code block fill, quote bar; a block over one empty line |
 | `src/input/base/element.rs` | `layout_range_decoration_quads()` paints pills, blocks and bars as quads below the fills | rounded corners and borders, which paths cannot draw |
 | `src/input/base/state.rs` | `apply_edits(&[(Range, String)])` on all states | several edits in one undo step without touching inline tokens between them |
 

@@ -886,14 +886,13 @@ impl<M: InputModeKind> TextElement<M> {
     ) -> Vec<PaintQuad> {
         let state = self.state.read(cx);
         let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
-        let text_end = state.text.len();
         let mut visible_spans: Vec<Range<usize>> = Vec::new();
         for (&offset, line) in last_layout
             .visible_line_byte_offsets
             .iter()
             .zip(last_layout.lines.iter())
         {
-            let end = (offset + line.len() + 1).min(last_layout.visible_range_offset.end);
+            let end = (offset + line.len() + 1).min(last_layout.visible_range_offset.end + 1);
             if let Some(previous) = visible_spans.last_mut().filter(|span| span.end == offset) {
                 previous.end = end;
             } else if offset < end {
@@ -932,8 +931,7 @@ impl<M: InputModeKind> TextElement<M> {
                     {
                         let height =
                             last_layout.line_height * line.wrapped_lines.len().max(1) as f32;
-                        let covered = range.contains(&line_start)
-                            || (line_start == range.end && range.end == text_end);
+                        let covered = (range.start..=range.end).contains(&line_start);
                         if covered {
                             top.get_or_insert(y);
                             bottom = y + height;
@@ -3858,7 +3856,7 @@ mod tests {
                             .with_style(RangeDecorationStyle::Pill)
                             .with_radius(px(4.)),
                         RangeDecoration::new(3..8).with_style(RangeDecorationStyle::Block),
-                        RangeDecoration::new(8..9)
+                        RangeDecoration::new(9..9)
                             .with_style(RangeDecorationStyle::Bar)
                             .with_radius(px(3.)),
                     ],

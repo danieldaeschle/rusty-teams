@@ -22,7 +22,7 @@ pub enum RangeDecorationStyle {
     /// A rounded box per visual row around the glyphs, e.g. an inline code pill.
     Pill,
     /// One rounded box across the full text width of every line whose start lies in
-    /// `range.start..=range.end`, e.g. a code block background.
+    /// `range.start..=range.end`, e.g. a code block background. The range may be empty.
     Block,
     /// A bar at the left edge of the lines a [`Self::Block`] would cover, e.g. a quote.
     Bar,
@@ -312,6 +312,10 @@ impl<M: DecoratedMode> RangeDecorationCollection<M> {
 pub trait TrackedDecoration {
     fn range(&self) -> &Range<usize>;
     fn range_mut(&mut self) -> &mut Range<usize>;
+    /// An empty range still means something, e.g. a block over one empty line.
+    fn keeps_empty(&self) -> bool {
+        false
+    }
 }
 
 impl TrackedDecoration for TextDecoration {
@@ -329,6 +333,12 @@ impl TrackedDecoration for RangeDecoration {
     }
     fn range_mut(&mut self) -> &mut Range<usize> {
         &mut self.range
+    }
+    fn keeps_empty(&self) -> bool {
+        matches!(
+            self.style,
+            RangeDecorationStyle::Block | RangeDecorationStyle::Bar
+        )
     }
 }
 
@@ -378,14 +388,16 @@ impl DecorationIndex {
             return 0;
         }
         let mid = span.start + span.len() / 2;
-        if self.max_ends[mid] <= range.start {
+        if self.max_ends[mid] < range.start {
             return 1;
         }
         let mut visited = 1 + self.query(decorations, span.start..mid, range, matches);
         let ix = self.indices[mid];
         let candidate = decorations[ix].range();
         if candidate.start < range.end {
-            if candidate.end > range.start {
+            if candidate.end > range.start
+                || (candidate.is_empty() && candidate.start == range.start)
+            {
                 matches.push(ix);
             }
             visited += self.query(decorations, mid + 1..span.end, range, matches);
@@ -467,7 +479,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
             entry.decorations.retain_mut(|decoration| {
                 *decoration.range_mut() =
                     adjust_range_for_edit(decoration.range(), edited_range, inserted_len);
-                let keep = !decoration.range().is_empty();
+                let keep = !decoration.range().is_empty() || decoration.keeps_empty();
                 remap.push(if keep { retained } else { usize::MAX });
                 retained += usize::from(keep);
                 keep
@@ -670,12 +682,13 @@ fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
         .filter_map(|mut decoration| {
             // Reject reversed ranges before clipping, which could otherwise turn a
             // reversed pair within a multibyte character into a nonempty range.
-            if decoration.range().is_empty() {
+            let reversed = decoration.range().start > decoration.range().end;
+            if reversed || (decoration.range().is_empty() && !decoration.keeps_empty()) {
                 return None;
             }
             let range = text.clip_offset(decoration.range().start, Bias::Left)
                 ..text.clip_offset(decoration.range().end, Bias::Right);
-            if range.is_empty() {
+            if range.is_empty() && !decoration.keeps_empty() {
                 return None;
             }
             *decoration.range_mut() = range;

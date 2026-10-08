@@ -22,7 +22,7 @@ use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
     MentionCandidate, MentionInput, MessageExtras, TypingStyle, UploadedFile, has_markdown,
-    map_offset, reverse_edits,
+    link_url, map_offset, reverse_edits,
 };
 
 use super::attachment_tray::{
@@ -214,6 +214,8 @@ pub struct Composer {
     decorations: DraftDecorations,
     pending_style: Option<TypingStyle>,
     snapshots: VecDeque<Draft>,
+    format_undo: Vec<(Draft, Draft)>,
+    format_redo: Vec<(Draft, Draft)>,
     replaying_history: bool,
     pasted_markdown: Option<String>,
     paste_hint: Option<Task<()>>,
@@ -295,15 +297,6 @@ fn looks_like_url(text: &str) -> bool {
         && !text.contains(char::is_whitespace)
 }
 
-fn normalized_url(text: &str) -> String {
-    let text = text.trim();
-    if text.is_empty() || text.contains("://") || text.starts_with("mailto:") {
-        text.to_owned()
-    } else {
-        format!("https://{text}")
-    }
-}
-
 fn candidate_key(candidate: &MentionCandidate) -> &str {
     match candidate {
         MentionCandidate::Person(person) => &person.user_id,
@@ -349,6 +342,8 @@ impl Composer {
             decorations,
             pending_style: None,
             snapshots: VecDeque::new(),
+            format_undo: Vec::new(),
+            format_redo: Vec::new(),
             replaying_history: false,
             pasted_markdown: None,
             paste_hint: None,
@@ -477,6 +472,9 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.draft.in_code(cursor) {
+            return;
+        }
         let value = self.draft.text();
         let found = match typed {
             Some(':') => emoji::closing_code(value, cursor)
@@ -629,6 +627,8 @@ impl Composer {
         self.link_editor = None;
         self.toolbar_dismissed = None;
         self.snapshots.clear();
+        self.format_undo.clear();
+        self.format_redo.clear();
         self.remember_snapshot();
         self.refresh_style(cx);
     }
@@ -668,6 +668,59 @@ impl Composer {
         true
     }
 
+    /// A format-only change is an undo step of its own; the input's history has no record of it.
+    fn record_format(&mut self, before: Draft, cx: &mut Context<Self>) {
+        if before != self.draft {
+            self.format_undo.push((before, self.draft.clone()));
+            if self.format_undo.len() > SNAPSHOT_LIMIT {
+                self.format_undo.remove(0);
+            }
+            self.format_redo.clear();
+        }
+        self.remember_snapshot();
+        self.refresh_style(cx);
+    }
+
+    fn step_format(&mut self, undo: bool, cx: &mut Context<Self>) -> bool {
+        let (from, to) = if undo {
+            (&mut self.format_undo, &mut self.format_redo)
+        } else {
+            (&mut self.format_redo, &mut self.format_undo)
+        };
+        let matches = from
+            .last()
+            .is_some_and(|(before, after)| *(if undo { after } else { before }) == self.draft);
+        if !matches {
+            return false;
+        }
+        let Some(step) = from.pop() else {
+            return false;
+        };
+        self.draft = if undo { step.0.clone() } else { step.1.clone() };
+        to.push(step);
+        self.pending_style = None;
+        self.remember_snapshot();
+        self.refresh_style(cx);
+        cx.notify();
+        true
+    }
+
+    /// Undo and Redo set `replaying_history` for the Change they cause; a second deferral runs
+    /// after that Change, so the flag never outlives an undo with nothing to undo.
+    fn begin_history_replay(&mut self, cx: &mut Context<Self>) {
+        self.replaying_history = true;
+        self.conversion = None;
+        self.paste_hint = None;
+        let composer = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            cx.defer(move |cx| {
+                composer
+                    .update(cx, |this, _| this.replaying_history = false)
+                    .ok();
+            });
+        });
+    }
+
     fn selection(&self, cx: &App) -> Range<usize> {
         self.input.read(cx).selected_range()
     }
@@ -687,10 +740,10 @@ impl Composer {
             pending.toggle(kind, &self.draft.style_at(cursor));
             self.pending_style = (!pending.is_empty()).then_some(pending);
         } else {
+            let before = self.draft.clone();
             self.draft.toggle(selection, kind);
             self.draft.take_edits();
-            self.remember_snapshot();
-            self.refresh_style(cx);
+            self.record_format(before, cx);
         }
         cx.notify();
     }
@@ -771,7 +824,15 @@ impl Composer {
         let Some(editor) = self.link_editor.take() else {
             return;
         };
-        let url = normalized_url(&editor.field.read(cx).value());
+        let typed = editor.field.read(cx).value().trim().to_owned();
+        let url = if typed.is_empty() {
+            String::new()
+        } else if let Some(url) = link_url(&typed) {
+            url
+        } else {
+            self.link_editor = Some(editor);
+            return;
+        };
         self.focus(window, cx);
         if editor.range.is_empty() {
             if !url.is_empty() {
@@ -779,10 +840,10 @@ impl Composer {
                 self.commit(Some(end), window, cx);
             }
         } else {
+            let before = self.draft.clone();
             self.draft.set_link(editor.range.clone(), &url);
             self.draft.take_edits();
-            self.remember_snapshot();
-            self.refresh_style(cx);
+            self.record_format(before, cx);
             self.input.update(cx, |state, cx| {
                 state.set_selected_range(editor.range.clone(), cx)
             });
@@ -888,7 +949,8 @@ impl Composer {
 
     fn update_emoji(&mut self, cx: &mut Context<Self>) {
         let state = self.input.read(cx);
-        let found = emoji::active_query(&state.value(), state.cursor());
+        let found = emoji::active_query(&state.value(), state.cursor())
+            .filter(|_| !self.draft.in_code(state.cursor()));
         if found.as_ref().map(|(range, _)| range.start) != self.emoji_dismissed_at {
             self.emoji_dismissed_at = None;
         }
@@ -1093,6 +1155,7 @@ impl Composer {
         let attachments_apply = self.editing.is_none();
         if self.undone_value.as_deref() != Some(state.value().as_ref())
             && let Some((range, glyph)) = emoji::trailing_smiley(draft.text())
+            && !draft.in_code(range.end - 1)
         {
             draft.replace(range, glyph);
             draft.take_edits();
@@ -1226,6 +1289,9 @@ impl Composer {
         let Some(text) = item.text() else {
             return false;
         };
+        if self.draft.in_code(self.selection(cx).start) {
+            return false;
+        }
         if let Some(lines) = self.copied_lines(item, &text) {
             let cursor = self.draft.insert_lines(self.selection(cx), &lines);
             self.commit(Some(cursor), window, cx);
@@ -1879,17 +1945,20 @@ impl Render for Composer {
                 }
             }))
             .on_action(cx.listener(|this, _: &EditLink, window, cx| this.edit_link(window, cx)))
-            .capture_action(cx.listener(|this, _: &Undo, _, _| {
-                if this.link_editor.is_none() {
-                    this.replaying_history = true;
-                    this.conversion = None;
-                    this.paste_hint = None;
+            .capture_action(cx.listener(|this, _: &Undo, _, cx| {
+                if this.link_editor.is_some() {
+                } else if this.step_format(true, cx) {
+                    cx.stop_propagation();
+                } else {
+                    this.begin_history_replay(cx);
                 }
             }))
-            .capture_action(cx.listener(|this, _: &Redo, _, _| {
-                if this.link_editor.is_none() {
-                    this.replaying_history = true;
-                    this.conversion = None;
+            .capture_action(cx.listener(|this, _: &Redo, _, cx| {
+                if this.link_editor.is_some() {
+                } else if this.step_format(false, cx) {
+                    cx.stop_propagation();
+                } else {
+                    this.begin_history_replay(cx);
                 }
             }))
             .capture_action(cx.listener(|this, _: &Copy, _, cx| {
@@ -2407,6 +2476,56 @@ mod tests {
                 typist.outgoing().html(),
                 "see <a href=\"https://example.com\">docs</a>"
             );
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_z_takes_back_bold_before_the_typing_and_ctrl_y_redoes_it(cx: &mut TestAppContext) {
+            use teams_core::{FormatState, MarkKind};
+
+            let mut typist = typist(cx);
+            typist.type_text("hello");
+            typist.press("shift-left shift-left ctrl-b");
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "hello");
+            assert!(typist.draft().marks().is_empty());
+            typist.press("ctrl-y");
+            assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
+            typist.press("end");
+            typist.type_text(" x");
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "hello");
+            assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
+            typist.press("ctrl-z");
+            assert!(typist.draft().marks().is_empty());
+        }
+
+        #[gpui_kit::test]
+        fn an_undo_with_nothing_to_undo_leaves_conversions_working(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.press("ctrl-z");
+            typist.type_text("**a**");
+            assert_eq!(typist.value(), "a");
+        }
+
+        #[gpui_kit::test]
+        fn code_blocks_take_markdown_and_smileys_literally(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("```");
+            typist.press("enter");
+            typist.type_text(":) ");
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string("**x**".to_owned()));
+            typist.press("ctrl-v");
+            assert_eq!(typist.value(), "   :) **x**");
+            let composer = typist.composer.clone();
+            assert!(
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).paste_hint.is_none())
+            );
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.html(), "<pre>:) **x**</pre>");
         }
 
         #[gpui_kit::test]

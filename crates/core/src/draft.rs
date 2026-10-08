@@ -12,6 +12,8 @@ const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
 const INDENT: &str = "\u{2003}\u{2003}";
 const QUOTE_MARKER: &str = "\u{2003}";
+const CODE_MARKER: &str = "   ";
+const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 const FENCE: &str = "```";
 const MARKDOWN_INDENT: usize = 2;
 
@@ -388,6 +390,14 @@ impl Draft {
         self.marker_range(index).end..line.end
     }
 
+    /// Inside a code block line, or strictly inside inline code.
+    pub fn in_code(&self, offset: usize) -> bool {
+        matches!(self.lines[self.line_at(offset)], LineKind::Code(_))
+            || self.marks.iter().any(|mark| {
+                mark.kind == MarkKind::Code && mark.range.start < offset && offset < mark.range.end
+            })
+    }
+
     /// Formats that text typed at `offset` takes on.
     pub fn style_at(&self, offset: usize) -> Vec<MarkKind> {
         self.style_for_insertion(offset, offset)
@@ -429,8 +439,18 @@ impl Draft {
         }
     }
 
+    /// A line the selection only touches at its start does not count.
+    fn selected_lines(&self, range: &Range<usize>) -> std::ops::RangeInclusive<usize> {
+        let first = self.line_at(range.start);
+        let mut last = self.line_at(range.end);
+        if last > first && self.line_ranges()[last].start == range.end {
+            last -= 1;
+        }
+        first..=last
+    }
+
     pub fn line_state(&self, range: Range<usize>, kind: &LineKind) -> FormatState {
-        let lines = self.line_at(range.start)..=self.line_at(range.end);
+        let lines = self.selected_lines(&range);
         let count = lines.clone().count();
         let matching = lines
             .filter(|index| self.lines[*index].same_format(kind))
@@ -466,9 +486,13 @@ impl Draft {
         }
     }
 
-    /// An empty `url` removes the link.
+    /// An empty `url` removes the link; one `link_url` refuses changes nothing.
     pub fn set_link(&mut self, range: Range<usize>, url: &str) {
         self.journal = Journal::default();
+        let url = url.trim();
+        if !url.is_empty() && link_url(url).is_none() {
+            return;
+        }
         let link = MarkKind::Link(url.to_owned());
         self.remove_marks(range.clone(), &link);
         if !url.is_empty() {
@@ -478,7 +502,7 @@ impl Draft {
         }
     }
 
-    /// Returns the offset after the inserted link text.
+    /// Returns the offset after the inserted link text; plain text when `link_url` refuses `url`.
     pub fn insert_link(&mut self, offset: usize, text: &str, url: &str) -> usize {
         self.journal = Journal::default();
         self.splice(offset..offset, text, &[]);
@@ -592,8 +616,7 @@ impl Draft {
             LineKind::Text => {
                 let language = fence_language(&self.text[content.clone()])?;
                 self.splice(content.clone(), "", &[]);
-                self.lines[index] = LineKind::Code(language);
-                Some(content.start)
+                Some(self.set_line_kind(index, LineKind::Code(language), None, content.start))
             }
             LineKind::Quote if !shift => None,
             LineKind::Quote => {
@@ -606,11 +629,10 @@ impl Draft {
                 let last_of_block = self.lines.get(index + 1) != Some(&kind);
                 let block_continues_above = index > 0 && self.lines[index - 1] == kind;
                 if content.is_empty() && last_of_block && block_continues_above && !shift {
-                    self.lines[index] = LineKind::Text;
-                    return Some(cursor);
+                    return Some(self.set_line_kind(index, LineKind::Text, None, cursor));
                 }
                 self.splice(cursor..cursor, "\n", &[]);
-                Some(cursor + 1)
+                Some(self.repair(cursor + 1))
             }
             list => {
                 if self.text[content.clone()].trim().is_empty() {
@@ -639,12 +661,13 @@ impl Draft {
         let content = self.content_range(index);
         match &kind {
             LineKind::Text => None,
-            LineKind::Code(_) => {
+            LineKind::Code(_) if cursor > line.start && cursor <= content.start => {
                 let first_of_block = index == 0 || self.lines[index - 1] != kind;
-                (cursor == content.start && first_of_block).then(|| {
-                    self.lines[index] = LineKind::Text;
-                    cursor
-                })
+                if first_of_block {
+                    return Some(self.set_line_kind(index, LineKind::Text, None, cursor));
+                }
+                self.splice(line.start - 1..content.start, "", &[]);
+                Some(self.repair(line.start - 1))
             }
             _ if cursor == line.start && index > 0 => {
                 self.splice(line.start - 1..content.start, "", &[]);
@@ -665,7 +688,7 @@ impl Draft {
     /// Tab / Shift+Tab on list lines. `false` when a selected line is not a list item.
     pub fn indent(&mut self, range: Range<usize>, outdent: bool) -> bool {
         self.journal = Journal::default();
-        let lines = self.line_at(range.start)..=self.line_at(range.end);
+        let lines = self.selected_lines(&range);
         if !lines.clone().all(|index| self.lines[index].is_list()) {
             return false;
         }
@@ -686,7 +709,7 @@ impl Draft {
     /// All selected lines `kind` already: back to text. Otherwise all become `kind`.
     pub fn toggle_lines(&mut self, range: Range<usize>, kind: LineKind) {
         self.journal = Journal::default();
-        let lines = self.line_at(range.start)..=self.line_at(range.end);
+        let lines = self.selected_lines(&range);
         let all = lines
             .clone()
             .all(|index| self.lines[index].same_format(&kind));
@@ -777,6 +800,7 @@ impl Draft {
             }
             offset += line.content.len() + 1;
         }
+        let length_before_markers = self.text.len();
         for (position, line) in lines.iter().enumerate() {
             let first_and_kept = position == 0 && !line_was_empty;
             if first_and_kept || line.kind == self.lines[index + position] {
@@ -784,9 +808,8 @@ impl Draft {
             }
             self.set_line_kind(index + position, line.kind.clone(), line.number, 0);
         }
-        let last = index + lines.len().saturating_sub(1);
         let end =
-            self.content_range(last).start + lines.last().map_or(0, |line| line.content.len());
+            (range.start + joined.len() + self.text.len()).saturating_sub(length_before_markers);
         self.repair(end)
     }
 
@@ -892,7 +915,15 @@ impl Draft {
             .collect()
     }
 
+    /// Links with a scheme other than http, https or mailto stay plain text.
     fn add_mark(&mut self, range: Range<usize>, kind: MarkKind) {
+        let kind = match kind {
+            MarkKind::Link(url) => match link_url(&url) {
+                Some(url) => MarkKind::Link(url),
+                None => return,
+            },
+            other => other,
+        };
         if !range.is_empty() {
             self.marks.push(Mark { range, kind });
             self.normalize_marks();
@@ -1086,11 +1117,19 @@ impl Draft {
         }
     }
 
-    /// Lines whose marker was edited away become text; numbered items are renumbered.
+    /// Lines whose marker was edited away become text; numbered items are renumbered; code
+    /// lines get their padding back.
     fn repair(&mut self, mut cursor: usize) -> usize {
         for index in 0..self.lines.len() {
             let kind = self.lines[index].clone();
-            if matches!(kind, LineKind::Text | LineKind::Code(_)) {
+            if kind == LineKind::Text {
+                continue;
+            }
+            if matches!(kind, LineKind::Code(_)) {
+                let start = self.line_ranges()[index].start;
+                if !self.text[start..].starts_with(CODE_MARKER) {
+                    cursor = self.replace_marker(start..start, CODE_MARKER, cursor);
+                }
                 continue;
             }
             let line = self.line_ranges()[index].clone();
@@ -1128,7 +1167,8 @@ fn marker_text(kind: &LineKind, number: u32) -> String {
         LineKind::Bullet(depth) => bullet_marker(*depth),
         LineKind::Numbered(depth) => format!("{}{number}. ", INDENT.repeat(*depth as usize)),
         LineKind::Quote => QUOTE_MARKER.to_owned(),
-        LineKind::Text | LineKind::Code(_) => String::new(),
+        LineKind::Code(_) => CODE_MARKER.to_owned(),
+        LineKind::Text => String::new(),
     }
 }
 
@@ -1144,6 +1184,7 @@ fn marker_len(kind: &LineKind, line: &str) -> usize {
         }
         LineKind::Numbered(depth) => numbered_marker(line, *depth).map_or(0, |(length, _)| length),
         LineKind::Quote if line.starts_with(QUOTE_MARKER) => QUOTE_MARKER.len(),
+        LineKind::Code(_) if line.starts_with(CODE_MARKER) => CODE_MARKER.len(),
         _ => 0,
     }
 }
@@ -1193,6 +1234,28 @@ fn word_before(text: &str) -> bool {
         .is_some_and(|character| character.is_alphanumeric())
 }
 
+/// `https://` added when there is no scheme. `None` for any scheme but http, https and mailto.
+pub fn link_url(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() || text.contains(char::is_whitespace) {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    if LINK_SCHEMES.iter().any(|scheme| lower.starts_with(scheme)) {
+        return Some(text.to_owned());
+    }
+    let scheme = text
+        .split_once(':')
+        .map(|(scheme, _)| scheme)
+        .filter(|scheme| {
+            scheme.starts_with(|character: char| character.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || "+.-".contains(character))
+        });
+    scheme.is_none().then(|| format!("https://{text}"))
+}
+
 /// The markers of a format closed by the last typed character, relative to `before`.
 fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> {
     let end = before.len();
@@ -1203,7 +1266,7 @@ fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> 
         return Some((
             whole.start()..whole.start() + 1,
             label.end()..end,
-            MarkKind::Link(captures[2].to_owned()),
+            MarkKind::Link(link_url(&captures[2])?),
         ));
     }
     for (marker, kind) in [("**", MarkKind::Bold), ("~~", MarkKind::Strike)] {
@@ -1476,7 +1539,7 @@ fn inline_at(rest: &str, previous: Option<char>) -> Option<(&str, usize, MarkKin
         return Some((
             label.as_str(),
             captures.get(0)?.end(),
-            MarkKind::Link(captures[2].to_owned()),
+            MarkKind::Link(link_url(&captures[2])?),
         ));
     }
     for (marker, kind) in [("**", MarkKind::Bold), ("~~", MarkKind::Strike)] {
@@ -1727,7 +1790,10 @@ mod tests {
         assert_eq!(converted.marks(), [mark(0..1, MarkKind::Bold)]);
         let mut linked = typed_draft("[a](u)");
         typed(&mut linked, "b");
-        assert_eq!(linked.marks(), [mark(0..1, MarkKind::Link("u".into()))]);
+        assert_eq!(
+            linked.marks(),
+            [mark(0..1, MarkKind::Link("https://u".into()))]
+        );
     }
 
     #[test]
@@ -1874,12 +1940,15 @@ mod tests {
     fn fence_and_enter_open_a_code_block_that_enter_continues() {
         let mut draft = typed_draft("```rust");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
-        assert_eq!((draft.text(), cursor), ("", 0));
+        assert_eq!((draft.text(), cursor), (CODE_MARKER, CODE_MARKER.len()));
         assert_eq!(draft.lines(), [LineKind::Code(Some("rust".into()))]);
         typed(&mut draft, "fn x() {}");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
         assert_eq!(draft.lines().len(), 2);
-        assert_eq!(draft.break_line(cursor, false), Some(cursor));
+        assert_eq!(
+            draft.break_line(cursor, false),
+            Some(cursor - CODE_MARKER.len())
+        );
         assert_eq!(draft.lines()[1], LineKind::Text);
         assert_eq!(
             draft.to_html(),
@@ -1891,9 +1960,9 @@ mod tests {
     fn markdown_inside_code_stays_literal() {
         let mut draft = typed_draft("```");
         let cursor = draft.break_line(3, false).unwrap();
-        assert_eq!(cursor, 0);
+        assert_eq!(cursor, CODE_MARKER.len());
         typed(&mut draft, "a **b**");
-        assert_eq!(draft.text(), "a **b**");
+        assert_eq!(draft.text(), format!("{CODE_MARKER}a **b**"));
         assert!(draft.marks().is_empty());
     }
 
@@ -1987,6 +2056,83 @@ mod tests {
         inline.insert_lines(2..7, &lines);
         assert_eq!(inline.text(), "x b");
         assert_eq!(inline.marks(), [mark(2..3, MarkKind::Bold)]);
+    }
+
+    #[test]
+    fn a_paste_inside_a_line_puts_the_cursor_after_the_pasted_text() {
+        let lines = Draft::from_markdown("**big**").slice(0..usize::MAX);
+        let mut plain = Draft::plain("hello world");
+        assert_eq!(plain.insert_lines(6..6, &lines), 9);
+        assert_eq!(plain.text(), "hello bigworld");
+        let mut item = Draft::from_markdown("- item one");
+        let before_one = bullet_marker(0).len() + "item ".len();
+        assert_eq!(
+            item.insert_lines(before_one..before_one, &lines),
+            before_one + 3
+        );
+    }
+
+    #[test]
+    fn a_selection_ending_at_the_next_line_start_leaves_that_line_alone() {
+        let mut draft = Draft::plain("first\nsecond");
+        assert_eq!(
+            draft.line_state(0..6, &LineKind::Bullet(0)),
+            FormatState::Off
+        );
+        draft.toggle_lines(0..6, LineKind::Bullet(0));
+        assert_eq!(draft.lines(), [LineKind::Bullet(0), LineKind::Text]);
+        let end_of_first = draft.line_ranges()[1].start;
+        assert_eq!(
+            draft.line_state(0..end_of_first, &LineKind::Bullet(0)),
+            FormatState::On
+        );
+        assert!(draft.indent(0..end_of_first, false));
+        assert_eq!(draft.lines()[1], LineKind::Text);
+    }
+
+    #[test]
+    fn links_only_take_http_https_and_mailto() {
+        assert_eq!(link_url("example.com"), Some("https://example.com".into()));
+        assert_eq!(link_url("mailto:a@b.test"), Some("mailto:a@b.test".into()));
+        assert_eq!(link_url("javascript:alert(1)"), None);
+        assert_eq!(link_url("data:text/html,x"), None);
+        let typed = typed_draft("[x](javascript:alert)");
+        assert!(typed.marks().is_empty());
+        let pasted = Draft::from_markdown("[x](javascript:alert) [y](example.com)");
+        assert_eq!(
+            pasted.marks(),
+            [mark(22..23, MarkKind::Link("https://example.com".into()))]
+        );
+        let mut set = Draft::plain("go");
+        set.set_link(0..2, "javascript:alert(1)");
+        assert!(set.marks().is_empty());
+        let spans = Draft::from_spans(&html_to_spans("<a href=\"javascript:x\">bad</a>"));
+        assert!(spans.marks().is_empty());
+    }
+
+    #[test]
+    fn code_lines_carry_padding_that_survives_edits_and_stays_out_of_html() {
+        let mut draft = Draft::from_markdown("```\nlet a = 1;\nlet b = 2;\n```");
+        assert_eq!(
+            draft.text(),
+            format!("{CODE_MARKER}let a = 1;\n{CODE_MARKER}let b = 2;")
+        );
+        assert_eq!(draft.to_html(), "<pre>let a = 1;\nlet b = 2;</pre>");
+        let second = draft.content_range(1).start;
+        let cursor = draft.backspace_at_start(second).unwrap();
+        assert_eq!(draft.text(), format!("{CODE_MARKER}let a = 1;let b = 2;"));
+        assert_eq!(cursor, CODE_MARKER.len() + "let a = 1;".len());
+        let cursor = draft.backspace_at_start(CODE_MARKER.len()).unwrap();
+        assert_eq!((draft.lines()[0].clone(), cursor), (LineKind::Text, 0));
+    }
+
+    #[test]
+    fn in_code_covers_code_lines_and_the_inside_of_inline_code() {
+        let draft = Draft::from_markdown("a `cd` e\n```\nx\n```");
+        assert!(!draft.in_code(2));
+        assert!(draft.in_code(3));
+        assert!(!draft.in_code(4));
+        assert!(draft.in_code(draft.text().len()));
     }
 
     #[test]
