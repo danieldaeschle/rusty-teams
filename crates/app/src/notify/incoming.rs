@@ -93,10 +93,17 @@ pub fn build_incoming(
         sender_name: record.sender_name.clone().unwrap_or_default(),
         preview: preview_of(record),
         mentions_me: mentions_me(record, my_user_id),
-        muted: false,
+        muted: is_muted_chat(sidebar, &record.conversation_id),
         signals,
         created_at: record.created_at,
     })
+}
+
+fn is_muted_chat(sidebar: &Sidebar, conversation_id: &str) -> bool {
+    sidebar
+        .chats
+        .iter()
+        .any(|chat| chat.id == conversation_id && chat.muted)
 }
 
 fn chat_context(sidebar: &Sidebar, conversation_id: &str) -> Option<(ChatKind, String)> {
@@ -272,6 +279,19 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
         }
+    }
+
+    #[test]
+    fn incoming_in_a_muted_chat_is_marked_muted() {
+        let mut quiet = sidebar();
+        quiet.chats[1].muted = true;
+        let message = record("group", "u1", Utc::now(), "hi");
+        let store = Store::open_in_memory().unwrap();
+        let build = |sidebar: &Sidebar| {
+            build_incoming(&message, &store, sidebar, &HashSet::new(), Some("me")).unwrap()
+        };
+        assert!(build(&quiet).muted);
+        assert!(!build(&sidebar()).muted);
     }
 
     #[test]

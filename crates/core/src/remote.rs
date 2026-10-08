@@ -1,6 +1,6 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, InvokeRequest, InvokeResponse, MemberHorizon, Messages,
-    Receipts,
+    CardActions, ChatApp, ConversationRef, Conversations, InvokeRequest, InvokeResponse,
+    MemberHorizon, Messages, Receipts,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -106,6 +106,18 @@ pub trait Remote {
         extras: &MessageExtras,
     ) -> Result<Message>;
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
+    async fn mark_chat_unread(
+        &self,
+        chat_id: &str,
+        user_id: &str,
+        tenant_id: &str,
+        last_read_at: DateTime<Utc>,
+    ) -> Result<()>;
+    async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
+    async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
+    async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()>;
+    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>>;
+    async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
     async fn edit_message(
@@ -360,6 +372,40 @@ impl Remote for Graph {
 
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
         Ok(Graph::mark_chat_read(self, chat_id, user_id, tenant_id).await?)
+    }
+
+    async fn mark_chat_unread(
+        &self,
+        chat_id: &str,
+        user_id: &str,
+        tenant_id: &str,
+        last_read_at: DateTime<Utc>,
+    ) -> Result<()> {
+        Ok(Graph::mark_chat_unread(self, chat_id, user_id, tenant_id, last_read_at).await?)
+    }
+
+    async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        Ok(Graph::hide_chat(self, chat_id, user_id, tenant_id).await?)
+    }
+
+    async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        Ok(Graph::unhide_chat(self, chat_id, user_id, tenant_id).await?)
+    }
+
+    async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        Ok(Graph::leave_chat(self, chat_id, user_id).await?)
+    }
+
+    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>> {
+        Ok(Conversations::new(self.session())
+            .conversation_mute_states()
+            .await?)
+    }
+
+    async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_alerts(chat_id, !muted)
+            .await?)
     }
 
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {

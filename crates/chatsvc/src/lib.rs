@@ -1,4 +1,5 @@
 pub mod cards;
+pub mod conversations;
 mod error;
 mod mask;
 pub mod messages;
@@ -10,6 +11,7 @@ pub mod receipts;
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
+pub use conversations::Conversations;
 pub use error::{Error, Result};
 pub use mask::mask_conversation_id;
 pub use messages::{ConversationRef, Messages};

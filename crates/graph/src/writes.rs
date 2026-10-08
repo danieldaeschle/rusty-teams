@@ -1,9 +1,10 @@
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 use session::{GRAPH, Method, Scope};
 
 use crate::client::Graph;
-use crate::error::Result;
-use crate::models::{Chat, Message};
+use crate::error::{Error, Result};
+use crate::models::{Chat, Member, Message};
 use crate::outgoing::{MessageExtras, OutgoingMention, message_body};
 use crate::target::MessageTarget;
 use crate::urls;
@@ -14,6 +15,24 @@ fn conversation_member(user_id: &str) -> Value {
         "roles": ["owner"],
         "user@odata.bind": format!("{GRAPH}/v1.0/users('{user_id}')"),
     })
+}
+
+fn user_body(user_id: &str, tenant_id: &str) -> Value {
+    json!({"user": {"id": user_id, "tenantId": tenant_id}})
+}
+
+fn mark_unread_body(user_id: &str, tenant_id: &str, last_read_at: DateTime<Utc>) -> Value {
+    json!({
+        "user": {"id": user_id, "tenantId": tenant_id},
+        "lastMessageReadDateTime": last_read_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+    })
+}
+
+fn own_membership_id<'a>(members: &'a [Member], user_id: &str) -> Option<&'a str> {
+    members
+        .iter()
+        .find(|member| member.user_id.as_deref() == Some(user_id))
+        .and_then(|member| member.id.as_deref())
 }
 
 impl Graph {
@@ -101,12 +120,60 @@ impl Graph {
         user_id: &str,
         tenant_id: &str,
     ) -> Result<()> {
-        let body = json!({"user": {"id": user_id, "tenantId": tenant_id}});
         self.write(
             Method::Post,
             &urls::mark_chat_read(chat_id),
             "Chat.ReadWrite",
+            Some(user_body(user_id, tenant_id)),
+        )
+        .await
+    }
+
+    pub async fn mark_chat_unread(
+        &self,
+        chat_id: &str,
+        user_id: &str,
+        tenant_id: &str,
+        last_read_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let body = mark_unread_body(user_id, tenant_id, last_read_at);
+        self.write(
+            Method::Post,
+            &urls::mark_chat_unread(chat_id),
+            "Chat.ReadWrite",
             Some(body),
+        )
+        .await
+    }
+
+    pub async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        self.write(
+            Method::Post,
+            &urls::hide_chat(chat_id),
+            "Chat.ReadWrite",
+            Some(user_body(user_id, tenant_id)),
+        )
+        .await
+    }
+
+    pub async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        self.write(
+            Method::Post,
+            &urls::unhide_chat(chat_id),
+            "Chat.ReadWrite",
+            Some(user_body(user_id, tenant_id)),
+        )
+        .await
+    }
+
+    pub async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        let members = self.chat_members(chat_id).await?;
+        let membership_id = own_membership_id(&members, user_id).ok_or(Error::NotAMember)?;
+        self.write(
+            Method::Delete,
+            &urls::chat_member(chat_id, membership_id),
+            "Chat.ReadWrite",
+            None,
         )
         .await
     }
@@ -221,5 +288,38 @@ impl Graph {
             .request(method, url, &Scope::graph(scope), body)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    fn member(id: &str, user_id: &str) -> Member {
+        Member {
+            id: Some(id.to_owned()),
+            user_id: Some(user_id.to_owned()),
+            tenant_id: None,
+            display_name: None,
+            email: None,
+        }
+    }
+
+    #[test]
+    fn own_membership_is_found_by_user_id() {
+        let members = [member("m1", "u1"), member("m2", "u2")];
+        assert_eq!(own_membership_id(&members, "u2"), Some("m2"));
+        assert_eq!(own_membership_id(&members, "u3"), None);
+    }
+
+    #[test]
+    fn mark_unread_body_carries_the_read_horizon() {
+        let at = Utc.with_ymd_and_hms(2026, 10, 6, 9, 0, 0).unwrap();
+        let body = mark_unread_body("u1", "t1", at);
+        assert_eq!(body["user"]["id"], "u1");
+        assert_eq!(body["user"]["tenantId"], "t1");
+        assert_eq!(body["lastMessageReadDateTime"], "2026-10-06T09:00:00.000Z");
     }
 }

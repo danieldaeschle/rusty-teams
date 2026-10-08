@@ -2,8 +2,10 @@ use std::collections::HashSet;
 
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::DialogFooter;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::{WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelRecord, SidebarTeam, TeamRecord};
@@ -11,8 +13,10 @@ use store::{ChannelRecord, SidebarTeam, TeamRecord};
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::widgets::{count_badge, dot, icon, symbol, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, FolderKind};
 use crate::format;
+use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section, SectionInput,
     SectionKind, any_unread_channel, build_sections, unread_chat_count,
@@ -34,6 +38,8 @@ const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 34.;
+const MENU_ICON_SIZE: f32 = 15.;
+const MUTED_ICON_SIZE: f32 = 13.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SidebarTab {
@@ -66,11 +72,185 @@ impl Render for DragGhost {
     }
 }
 
+struct ChatMenuTarget {
+    id: String,
+    title: String,
+    pinned: bool,
+    unread: bool,
+    muted: bool,
+    is_group: bool,
+    member_count: usize,
+}
+
 #[derive(Clone)]
 struct MenuContext {
     state: Entity<AppState>,
     folders: Vec<(String, String)>,
     favorites_id: Option<String>,
+}
+
+fn menu_icon(name: IconName) -> gpui_kit::component::Icon {
+    icon(name, MENU_ICON_SIZE, theme::text_muted())
+}
+
+fn chat_menu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    context: &MenuContext,
+    target: &ChatMenuTarget,
+) -> PopupMenu {
+    let pinned = target.pinned;
+    let pin_state = context.state.clone();
+    let pin_id = target.id.clone();
+    let mut popup = popup.item(
+        PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
+            .icon(menu_icon(if pinned {
+                IconName::PinOff
+            } else {
+                IconName::Pin
+            }))
+            .on_click(move |_, _, cx| {
+                pin_state.update(cx, |state, cx| {
+                    if pinned {
+                        state.move_chat(&pin_id, None, cx);
+                    } else {
+                        state.pin_chat(&pin_id, cx);
+                    }
+                });
+            }),
+    );
+    if !context.folders.is_empty() {
+        let folders = context.folders.clone();
+        let move_state = context.state.clone();
+        let move_id = target.id.clone();
+        popup = popup.submenu_with_icon(
+            Some(menu_icon(IconName::Folder)),
+            "Move to folder",
+            window,
+            cx,
+            move |submenu, _, _| {
+                folders.iter().fold(submenu, |submenu, (folder_id, name)| {
+                    let (state, chat_id, folder_id) =
+                        (move_state.clone(), move_id.clone(), folder_id.clone());
+                    submenu.item(PopupMenuItem::new(name.clone()).on_click(move |_, _, cx| {
+                        state.update(cx, |state, cx| {
+                            state.move_chat(&chat_id, Some(&folder_id), cx)
+                        });
+                    }))
+                })
+            },
+        );
+    }
+    let read_state = context.state.clone();
+    let read_id = target.id.clone();
+    let unread = target.unread;
+    let mute_state = context.state.clone();
+    let mute_id = target.id.clone();
+    let muted = target.muted;
+    let hide_state = context.state.clone();
+    let hide_id = target.id.clone();
+    popup = popup
+        .separator()
+        .item(
+            PopupMenuItem::new(if unread {
+                "Mark as read"
+            } else {
+                "Mark as unread"
+            })
+            .icon(menu_icon(if unread {
+                IconName::MailOpen
+            } else {
+                IconName::Mail
+            }))
+            .on_click(move |_, _, cx| {
+                read_state.update(cx, |state, cx| {
+                    if unread {
+                        state.mark_chat_read(&read_id, cx);
+                    } else {
+                        state.mark_chat_unread(&read_id, cx);
+                    }
+                });
+            }),
+        )
+        .item(
+            PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
+                .icon(menu_icon(if muted {
+                    IconName::Bell
+                } else {
+                    IconName::BellOff
+                }))
+                .on_click(move |_, _, cx| {
+                    mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new("Hide")
+                .icon(menu_icon(IconName::EyeOff))
+                .on_click(move |_, _, cx| {
+                    hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
+                }),
+        );
+    if target.is_group {
+        let leave_state = context.state.clone();
+        let leave_id = target.id.clone();
+        let title = target.title.clone();
+        let member_count = target.member_count;
+        popup = popup.item(
+            PopupMenuItem::element(|_, _| {
+                div().text_color(theme::red_soft()).child("Leave chat...")
+            })
+            .icon(icon(IconName::LogOut, MENU_ICON_SIZE, theme::red_soft()))
+            .on_click(move |_, window, cx| {
+                confirm_leave(&leave_state, &leave_id, &title, member_count, window, cx);
+            }),
+        );
+    }
+    popup
+}
+
+fn leave_description(member_count: usize) -> String {
+    let who = match member_count {
+        0 | 1 => "The other members".to_owned(),
+        2 => "The other member".to_owned(),
+        count => format!("The {} other members", count - 1),
+    };
+    let verb = if member_count == 2 { "sees" } else { "see" };
+    format!("{who} {verb} that you left. You can only come back if someone adds you.")
+}
+
+fn confirm_leave(
+    state: &Entity<AppState>,
+    chat_id: &str,
+    title: &str,
+    member_count: usize,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let state = state.clone();
+    let chat_id = chat_id.to_owned();
+    let heading = format!("Leave \"{}\"?", truncated(title, TITLE_LIMIT));
+    let description = leave_description(member_count);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let state = state.clone();
+        let chat_id = chat_id.clone();
+        let cancel = Button::new("leave-cancel")
+            .label("Cancel")
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let leave = Button::new("leave-confirm")
+            .label("Leave")
+            .danger()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |state, cx| state.leave_chat(&chat_id, cx));
+                window.close_dialog(cx);
+            });
+        alert
+            .title(heading.clone())
+            .description(description.clone())
+            .footer(DialogFooter::new().child(cancel).child(leave))
+            .on_ok(|_, _, _| false)
+    });
 }
 
 pub struct SidebarView {
@@ -362,15 +542,31 @@ impl SidebarView {
             })
             .text_color(theme::text())
             .child(item.title.clone());
-        let time = div()
+        let time = h_flex()
             .flex_none()
+            .gap(px(4.))
+            .items_center()
             .text_size(px(11.))
             .text_color(if unread {
                 theme::accent_text()
             } else {
                 theme::text_muted()
             })
+            .when(item.muted, |time| {
+                time.child(icon(
+                    IconName::BellOff,
+                    MUTED_ICON_SIZE,
+                    theme::text_faint(),
+                ))
+            })
             .child(item.time_label.clone());
+        let preview_color = if item.muted {
+            theme::text_faint()
+        } else if unread {
+            theme::text_strong()
+        } else {
+            theme::text_muted()
+        };
         let preview = preview_text(&item.preview).map(|(text, italic)| {
             let glyph = preview_icon(&text);
             h_flex()
@@ -381,22 +577,8 @@ impl SidebarView {
                 .items_center()
                 .text_size(px(12.5))
                 .when(italic, |preview| preview.italic())
-                .text_color(if unread {
-                    theme::text_strong()
-                } else {
-                    theme::text_muted()
-                })
-                .children(glyph.map(|name| {
-                    icon(
-                        name,
-                        12.,
-                        if unread {
-                            theme::text_strong()
-                        } else {
-                            theme::text_muted()
-                        },
-                    )
-                }))
+                .text_color(preview_color)
+                .children(glyph.map(|name| icon(name, 12., preview_color)))
                 .child(div().truncate().child(text))
         });
         let lines = v_flex()
@@ -416,7 +598,7 @@ impl SidebarView {
                     .gap(px(8.))
                     .items_center()
                     .child(preview.unwrap_or_else(|| div().flex_1()))
-                    .children(unread_marker(item.unread)),
+                    .children(unread_marker(item.unread, item.muted)),
             );
         let state = self.state.clone();
         let chat_id = item.id.clone();
@@ -426,7 +608,15 @@ impl SidebarView {
         };
         let pinned = menu.favorites_id.is_some() && item.folder_id == menu.favorites_id;
         let menu_context = menu.clone();
-        let menu_chat_id = item.id.clone();
+        let target = ChatMenuTarget {
+            id: item.id.clone(),
+            title: item.title.clone(),
+            pinned,
+            unread,
+            muted: item.muted,
+            is_group: item.is_group,
+            member_count: item.member_count,
+        };
         h_flex()
             .id(SharedString::from(format!("chat-{}", item.id)))
             .mx(px(8.))
@@ -449,49 +639,7 @@ impl SidebarView {
                 state.update(cx, |state, cx| state.select(selection, cx));
             })
             .context_menu(move |popup, window, cx| {
-                let context = menu_context.clone();
-                let chat_id = menu_chat_id.clone();
-                let pin_state = context.state.clone();
-                let pin_id = chat_id.clone();
-                let mut popup = popup.item(
-                    PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" }).on_click(
-                        move |_, _, cx| {
-                            pin_state.update(cx, |state, cx| {
-                                if pinned {
-                                    state.move_chat(&pin_id, None, cx);
-                                } else {
-                                    state.pin_chat(&pin_id, cx);
-                                }
-                            });
-                        },
-                    ),
-                );
-                if !context.folders.is_empty() {
-                    let folders = context.folders.clone();
-                    let move_state = context.state.clone();
-                    let move_id = chat_id.clone();
-                    popup = popup.submenu("Move to folder", window, cx, move |submenu, _, _| {
-                        folders.iter().fold(submenu, |submenu, (folder_id, name)| {
-                            let (state, chat_id, folder_id) =
-                                (move_state.clone(), move_id.clone(), folder_id.clone());
-                            submenu.item(PopupMenuItem::new(name.clone()).on_click(
-                                move |_, _, cx| {
-                                    state.update(cx, |state, cx| {
-                                        state.move_chat(&chat_id, Some(&folder_id), cx)
-                                    });
-                                },
-                            ))
-                        })
-                    });
-                }
-                let read_state = context.state.clone();
-                popup.item(
-                    PopupMenuItem::new("Mark as read")
-                        .disabled(!unread)
-                        .on_click(move |_, _, cx| {
-                            read_state.update(cx, |state, cx| state.mark_chat_read(&chat_id, cx));
-                        }),
-                )
+                chat_menu(popup, window, cx, &menu_context, &target)
             })
             .into_any_element()
     }
@@ -1082,5 +1230,20 @@ impl Render for SidebarView {
             .overflow_hidden()
             .child(self.tab_bar(unread_chats, channel_dot, cx))
             .child(body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::leave_description;
+
+    #[test]
+    fn leave_text_counts_the_other_members() {
+        assert_eq!(
+            leave_description(4),
+            "The 3 other members see that you left. You can only come back if someone adds you."
+        );
+        assert!(leave_description(2).starts_with("The other member sees"));
+        assert!(leave_description(0).starts_with("The other members see"));
     }
 }

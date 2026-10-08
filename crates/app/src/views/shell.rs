@@ -301,6 +301,10 @@ impl Render for AppShell {
             state,
             &self.update,
             cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
+            cx.listener(|this, _, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.run_notice_action(cx))
+            }),
         );
         let title_bar = render_title_bar(
             &state.directory,

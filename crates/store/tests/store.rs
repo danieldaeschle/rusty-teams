@@ -395,11 +395,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 8);
+        assert_eq!(store.schema_version().unwrap(), 9);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 8);
+    assert_eq!(reopened.schema_version().unwrap(), 9);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -431,7 +431,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 8);
+    assert_eq!(store.schema_version().unwrap(), 9);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -497,7 +497,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 8);
+    assert_eq!(store.schema_version().unwrap(), 9);
 }
 
 #[test]
@@ -729,6 +729,7 @@ fn migration_indexes_rows_that_predate_search() {
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
                  DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
+                 ALTER TABLE chats DROP COLUMN muted;
                  PRAGMA user_version = 3;",
             )
             .unwrap();
@@ -827,6 +828,64 @@ fn sync_does_not_resurrect_a_locally_read_chat() {
         .upsert_chats(&[chat("chat-1", "Planning", Some(at(12)))])
         .unwrap();
     assert!(store.chat("chat-1").unwrap().unwrap().unread);
+}
+
+#[test]
+fn mark_chat_unread_sets_the_flag_and_horizon() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5)))])
+        .unwrap();
+    store.mark_chat_read("chat-1", at(10)).unwrap();
+
+    store.mark_chat_unread("chat-1", at(4)).unwrap();
+    let unread = store.chat("chat-1").unwrap().unwrap();
+    assert!(unread.unread);
+    assert_eq!(unread.last_read_at, Some(at(4)));
+}
+
+#[test]
+fn muted_flag_survives_a_chat_refresh() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[chat("a", "A", Some(at(1))), chat("b", "B", Some(at(2)))])
+        .unwrap();
+    assert!(!store.chat("a").unwrap().unwrap().muted);
+
+    store.set_chat_muted("a", true).unwrap();
+    store
+        .upsert_chats(&[chat("a", "A", Some(at(3))), chat("b", "B", Some(at(2)))])
+        .unwrap();
+    assert!(store.chat("a").unwrap().unwrap().muted);
+    assert!(!store.chat("b").unwrap().unwrap().muted);
+
+    store.set_chat_muted("a", false).unwrap();
+    assert!(!store.chat("a").unwrap().unwrap().muted);
+}
+
+#[test]
+fn muted_states_touch_only_the_listed_chats() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_chats(&[
+            chat("a", "A", Some(at(1))),
+            chat("b", "B", Some(at(2))),
+            chat("c", "C", Some(at(3))),
+        ])
+        .unwrap();
+    store.set_chat_muted("a", true).unwrap();
+    store.set_chat_muted("c", true).unwrap();
+
+    store
+        .apply_muted_states(&[
+            ("a".to_owned(), false),
+            ("b".to_owned(), true),
+            ("gone".to_owned(), true),
+        ])
+        .unwrap();
+    assert!(!store.chat("a").unwrap().unwrap().muted);
+    assert!(store.chat("b").unwrap().unwrap().muted);
+    assert!(store.chat("c").unwrap().unwrap().muted);
 }
 
 #[test]

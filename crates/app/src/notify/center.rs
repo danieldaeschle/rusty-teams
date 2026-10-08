@@ -521,7 +521,8 @@ impl NotificationCenter {
     }
 
     fn refresh_badge(&mut self, cx: &mut Context<Self>) {
-        let (count, still_unread) = unread_summary(&self.app.read(cx).sidebar);
+        let (count, still_unread) =
+            unread_summary(&self.app.read(cx).sidebar, &self.unread_mentions);
         self.unread_mentions
             .retain(|conversation_id| still_unread.contains(conversation_id));
         let badge = badge_for(count);
@@ -838,18 +839,31 @@ pub fn selection_for(sidebar: &Sidebar, conversation_id: &str) -> Option<Selecti
         .then(|| Selection::Channel(conversation_id.to_owned()))
 }
 
-pub fn unread_summary(sidebar: &Sidebar) -> (usize, HashSet<String>) {
+pub fn unread_summary(
+    sidebar: &Sidebar,
+    unread_mentions: &HashSet<String>,
+) -> (usize, HashSet<String>) {
     let chats = sidebar.chats.iter().filter(|chat| chat.unread);
     let channels = sidebar
         .teams
         .iter()
         .flat_map(|team| team.channels.iter())
         .filter(|channel| channel.unread);
+    let silenced_chat_ids: HashSet<&str> = sidebar
+        .chats
+        .iter()
+        .filter(|chat| chat.muted && !unread_mentions.contains(&chat.id))
+        .map(|chat| chat.id.as_str())
+        .collect();
     let ids: HashSet<String> = chats
         .map(|chat| chat.id.clone())
         .chain(channels.map(|channel| channel.id.clone()))
         .collect();
-    (ids.len(), ids)
+    let counted = ids
+        .iter()
+        .filter(|id| !silenced_chat_ids.contains(id.as_str()))
+        .count();
+    (counted, ids)
 }
 
 fn demo_incoming() -> Vec<Incoming> {
@@ -922,6 +936,8 @@ fn demo_incoming() -> Vec<Incoming> {
 mod tests {
     use store::{ChannelRecord, ChatRecord, SidebarTeam, TeamRecord};
 
+    use std::collections::HashSet;
+
     use super::{preview_lines, selection_for, unread_summary};
     use crate::app_state::Selection;
     use store::Sidebar;
@@ -961,9 +977,20 @@ mod tests {
 
     #[test]
     fn unread_summary_counts_chats_and_channels() {
-        let (count, ids) = unread_summary(&sidebar());
+        let (count, ids) = unread_summary(&sidebar(), &HashSet::new());
         assert_eq!(count, 2);
         assert!(ids.contains("a") && ids.contains("ch"));
+    }
+
+    #[test]
+    fn muted_chats_only_count_with_an_unread_mention() {
+        let mut quiet = sidebar();
+        quiet.chats[0].muted = true;
+        let (count, ids) = unread_summary(&quiet, &HashSet::new());
+        assert_eq!(count, 1);
+        assert!(ids.contains("a"));
+        let (count, _) = unread_summary(&quiet, &HashSet::from(["a".to_owned()]));
+        assert_eq!(count, 2);
     }
 
     #[test]

@@ -10,6 +10,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 ## Features
 
 - Chats and channels, with the Teams pin order, chat folders and hidden teams
+- Chat menu: pin, move to folder, mark as unread, mute, hide, leave
 - Live updates over the Teams realtime socket, no polling
 - Send, edit, delete, react, quote-reply, @mentions
 - Rich text composer: format bar over a selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code; Markdown converts as you type or paste

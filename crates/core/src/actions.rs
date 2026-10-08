@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use graph::{
     FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
 };
@@ -342,6 +342,59 @@ impl<R: Remote> SyncEngine<R> {
             .mark_chat_read(conversation_id, &user_id, &tenant_id)
             .await?;
         self.store.mark_chat_read(conversation_id, Utc::now())?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn mark_unread(&self, chat_id: &str) -> Result<()> {
+        let last_message_at = self
+            .store
+            .chat(chat_id)?
+            .and_then(|chat| chat.last_message_at)
+            .ok_or(Error::Unsupported(
+                "marking a chat without messages as unread",
+            ))?;
+        let last_read_at = last_message_at - Duration::milliseconds(1);
+        let user_id = self.my_user_id().await?;
+        let tenant_id = self.my_tenant_id(chat_id).await?;
+        self.remote
+            .mark_chat_unread(chat_id, &user_id, &tenant_id, last_read_at)
+            .await?;
+        self.store.mark_chat_unread(chat_id, last_read_at)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
+        self.remote.set_chat_muted(chat_id, muted).await?;
+        self.store.set_chat_muted(chat_id, muted)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn hide_chat(&self, chat_id: &str) -> Result<()> {
+        let user_id = self.my_user_id().await?;
+        let tenant_id = self.my_tenant_id(chat_id).await?;
+        self.remote.hide_chat(chat_id, &user_id, &tenant_id).await?;
+        self.store.remove_chats(&[chat_id.to_owned()])?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn unhide_chat(&self, chat_id: &str) -> Result<()> {
+        let user_id = self.my_user_id().await?;
+        let tenant_id = self.my_tenant_id(chat_id).await?;
+        self.remote
+            .unhide_chat(chat_id, &user_id, &tenant_id)
+            .await?;
+        self.refresh_sidebar_full().await?;
+        Ok(())
+    }
+
+    pub async fn leave_chat(&self, chat_id: &str) -> Result<()> {
+        let user_id = self.my_user_id().await?;
+        self.remote.leave_chat(chat_id, &user_id).await?;
+        self.store.remove_chats(&[chat_id.to_owned()])?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }

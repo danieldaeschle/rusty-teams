@@ -2,19 +2,19 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 59 %** (48 done, 4 partial, 33 missing of 85). Partial counts half.
+**Parity: 64 %** (52 done, 4 partial, 29 missing of 85). Partial counts half.
 
 ## By area
 
 | Area | Parity | Done | Partial | Missing |
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
-| [Chat list](#chat-list) | 60 % | 6 | 0 | 4 |
+| [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
 | [Reading](#reading) | 71 % | 13 | 1 | 5 |
 | [Writing](#writing) | 75 % | 10 | 1 | 3 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
-| [Notifications](#notifications) | 75 % | 6 | 0 | 2 |
+| [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
 | [Search and navigation](#search-and-navigation) | 75 % | 3 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
@@ -26,11 +26,10 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | 1 | Channel: new post with subject, post cards |  |
 | 2 | Sign in on Linux without Chrome on a debug port |  |
-| 3 | Chat menu: mark as unread, mute, hide, leave | Unlocks quiet muted chats and the Muted section |
-| 4 | Emoji picker in the composer | Reaction picker exists |
-| 5 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
-| 6 | Typing indicator |  |
-| 7 | Unsent messages survive a restart |  |
+| 3 | Emoji picker in the composer | Reaction picker exists |
+| 4 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 5 | Typing indicator |  |
+| 6 | Unsent messages survive a restart |  |
 
 ## Sign-in and app
 
@@ -53,9 +52,9 @@ Feature parity with the Microsoft Teams desktop client.
 | Hidden teams | Done |  |
 | Unread bold, unread count, mention marker | Done |  |
 | New chat: 1:1 and group with title | Done |  |
-| Mark as unread | Missing |  |
-| Mute chat | Missing |  |
-| Hide chat, leave chat | Missing |  |
+| Mark as unread | Done | Keeps the open chat unread until you switch |
+| Mute chat | Done | Synced with Teams, muted rows stay in place with a bell |
+| Hide chat, leave chat | Done | Hide has Undo; leave only for group chats, with a confirmation |
 | Muted and Meeting chat sections | Missing | Teams rollout Aug-Sep 2026 |
 
 ## Reading
@@ -132,7 +131,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Quiet during Do not disturb, Focus Assist, calls | Done |  |
 | Mentions-only mode, preview off | Done |  |
 | Stack of 3, queue, Hide all, fade-out | Done |  |
-| Muted chats stay quiet | Missing | Needs Mute chat |
+| Muted chats stay quiet | Done | Toast, sound and taskbar badge only for @mentions |
 | Notifications on Linux | Missing |  |
 
 ## Search and navigation

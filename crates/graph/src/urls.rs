@@ -162,6 +162,29 @@ pub fn mark_chat_read(chat_id: &str) -> String {
     )
 }
 
+pub fn mark_chat_unread(chat_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/chats/{}/markChatUnreadForUser",
+        segment(chat_id)
+    )
+}
+
+pub fn hide_chat(chat_id: &str) -> String {
+    format!("{GRAPH}/v1.0/chats/{}/hideForUser", segment(chat_id))
+}
+
+pub fn unhide_chat(chat_id: &str) -> String {
+    format!("{GRAPH}/v1.0/chats/{}/unhideForUser", segment(chat_id))
+}
+
+pub fn chat_member(chat_id: &str, membership_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/chats/{}/members/{}",
+        segment(chat_id),
+        segment(membership_id)
+    )
+}
+
 pub fn joined_teams() -> String {
     format!("{GRAPH}/v1.0/me/joinedTeams?$select=id,displayName")
 }
@@ -281,6 +304,26 @@ mod tests {
         assert_eq!(
             folder_upload_session("b!d", "01F", "a.pdf"),
             "https://graph.microsoft.com/v1.0/drives/b%21d/items/01F:/a.pdf:/createUploadSession"
+        );
+    }
+
+    #[test]
+    fn chat_state_write_urls() {
+        assert_eq!(
+            mark_chat_unread("19:abc@thread.v2"),
+            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/markChatUnreadForUser"
+        );
+        assert_eq!(
+            hide_chat("19:abc@thread.v2"),
+            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/hideForUser"
+        );
+        assert_eq!(
+            unhide_chat("19:abc@thread.v2"),
+            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/unhideForUser"
+        );
+        assert_eq!(
+            chat_member("19:abc@thread.v2", "MTox"),
+            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/members/MTox"
         );
     }
 

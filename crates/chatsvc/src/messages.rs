@@ -247,7 +247,7 @@ fn edit_body(message_id: &str, html: &str) -> Value {
     })
 }
 
-fn ensure_success(answer: &ApiResponse) -> Result<()> {
+pub(crate) fn ensure_success(answer: &ApiResponse) -> Result<()> {
     if answer.is_success() {
         Ok(())
     } else {

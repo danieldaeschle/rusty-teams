@@ -10,6 +10,7 @@ use teams_core::{ChatApp, CoreEvent, ImageRef};
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::notice::Notice;
 use crate::notify;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
@@ -67,6 +68,9 @@ pub struct AppState {
     pub task_dialog: Option<TaskDialogState>,
     pub bot_apps: HashMap<String, Vec<ChatApp>>,
     pub bot_apps_pending: HashSet<String>,
+    pub notice: Option<Notice>,
+    pub notice_count: u64,
+    pub keep_unread: Option<String>,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -133,6 +137,9 @@ impl AppState {
             task_dialog: None,
             bot_apps: HashMap::new(),
             bot_apps_pending: HashSet::new(),
+            notice: None,
+            notice_count: 0,
+            keep_unread: None,
         };
         state.collapsed = state.load_collapsed();
         state.followed_channels = notify::load_followed_channels(&state.store);
@@ -378,6 +385,9 @@ impl AppState {
     }
 
     pub fn mark_chat_read(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if self.keeps_unread(conversation_id) {
+            self.keep_unread = None;
+        }
         if self.mode.demo {
             if let Some(chat) = self
                 .sidebar
@@ -428,6 +438,7 @@ impl AppState {
             return;
         }
         self.selection = Some(selection);
+        self.keep_unread = None;
         cx.emit(AppEvent::Selection);
         cx.notify();
     }

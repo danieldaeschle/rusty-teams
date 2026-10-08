@@ -9,7 +9,7 @@ use crate::store::{Store, json_ids};
 use crate::time::{optional_from_millis, optional_to_millis, to_millis};
 
 const CHAT_COLUMNS: &str = "id, kind, title, member_summary, last_message_at, last_read_at, unread, \
-     last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted";
+     last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted, muted";
 
 impl Store {
     pub fn upsert_chats(&self, chats: &[ChatRecord]) -> Result<()> {
@@ -116,6 +116,38 @@ impl Store {
         Ok(())
     }
 
+    pub fn mark_chat_unread(&self, chat_id: &str, last_read_at: DateTime<Utc>) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE chats SET unread = 1, last_read_at = ?2 WHERE id = ?1",
+            params![chat_id, to_millis(last_read_at)],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE chats SET muted = ?2 WHERE id = ?1",
+            params![chat_id, muted],
+        )?;
+        Ok(())
+    }
+
+    pub fn apply_muted_states(&self, states: &[(String, bool)]) -> Result<()> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        {
+            let mut update =
+                transaction.prepare_cached("UPDATE chats SET muted = ?2 WHERE id = ?1")?;
+            for (chat_id, muted) in states {
+                update.execute(params![chat_id, muted])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Applies the preview only when the message is at least as new as the cached last message and differs. Returns whether the row changed.
     pub fn update_chat_preview(
         &self,
@@ -180,6 +212,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         last_message_sender_id: row.get(8)?,
         last_message_sender_name: row.get(9)?,
         last_message_deleted: row.get(10)?,
+        muted: row.get(11)?,
         last_event_system: false,
     })
 }

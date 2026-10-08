@@ -32,6 +32,7 @@ use crate::backend::Engine;
 use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
+use crate::notice::short_error;
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
 use crate::render::layout_blocks;
@@ -50,7 +51,6 @@ const CHANNEL_OPEN_LIMIT: usize = 300;
 const GROWTH_HEADROOM: usize = 20;
 const META_USER_ID: &str = "me_user_id";
 const PENDING_KEY_PREFIX: &str = "pending-";
-const MAX_NOTICE_CHARS: usize = 140;
 const DEMO_DOWNLOAD_STEPS: u8 = 10;
 const DEMO_DOWNLOAD_STEP: Duration = Duration::from_millis(100);
 const JUMP_SCAN_LIMIT: usize = 5000;
@@ -182,10 +182,6 @@ fn drop_overlay_text(title: &str, target: DropTarget, count: usize) -> (String, 
             ),
         ),
     }
-}
-
-fn short_error(error: &dyn std::fmt::Display) -> String {
-    error.to_string().chars().take(MAX_NOTICE_CHARS).collect()
 }
 
 enum DownloadEvent {
@@ -1448,7 +1444,8 @@ impl ConversationView {
             .sidebar
             .chats
             .iter()
-            .any(|chat| chat.id == chat_id && chat.unread);
+            .any(|chat| chat.id == chat_id && chat.unread)
+            && !state.keeps_unread(&chat_id);
         let Some(plan) = plan_read(self.window_active, unread, trigger) else {
             return;
         };
@@ -2205,8 +2202,9 @@ impl ConversationView {
     }
 
     fn show_notice(&mut self, message: &str, cx: &mut Context<Self>) {
-        self.notice = Some(message.to_owned());
-        cx.notify();
+        self.app.update(cx, |state, cx| {
+            state.raise_notice(message.to_owned(), None, cx)
+        });
     }
 
     fn report_failure(

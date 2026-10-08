@@ -41,6 +41,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0008_activity.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0009_muted.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

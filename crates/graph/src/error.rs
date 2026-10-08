@@ -10,6 +10,8 @@ pub enum Error {
     ForeignNextLink,
     #[error("cannot decode a binary answer: {0}")]
     Decode(String),
+    #[error("you are not a member of this chat")]
+    NotAMember,
     #[error("cannot upload an empty file")]
     EmptyUpload,
     #[error("upload failed: {0}")]

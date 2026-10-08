@@ -15,6 +15,7 @@ pub const OTHERS_ID: &str = "others";
 pub const EMPTY_FOLDER_HINT: &str = "Empty. Drag chats here.";
 pub const DELETED_PREVIEW: &str = "Message deleted";
 const OWN_PREFIX: &str = "You";
+const GROUP_KIND: &str = "group";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Preview {
@@ -58,6 +59,9 @@ pub struct ChatItem {
     pub time_label: String,
     pub preview: Preview,
     pub unread: Unread,
+    pub muted: bool,
+    pub is_group: bool,
+    pub member_count: usize,
     pub avatar: AvatarSpec,
     pub presence_user: Option<String>,
     pub folder_id: Option<String>,
@@ -176,6 +180,9 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
             .unwrap_or_default(),
         preview: preview_for(chat, me),
         unread,
+        muted: chat.muted,
+        is_group: chat.kind == GROUP_KIND,
+        member_count: chat.members.len(),
         avatar: avatar_for(chat, me),
         presence_user,
         folder_id: folder_id.map(str::to_owned),
@@ -183,7 +190,10 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
 }
 
 pub fn unread_chat_count(chats: &[ChatRecord]) -> u32 {
-    chats.iter().filter(|chat| chat.unread).count() as u32
+    chats
+        .iter()
+        .filter(|chat| chat.unread && !chat.muted)
+        .count() as u32
 }
 
 pub fn any_unread_channel(sidebar: &Sidebar) -> bool {
@@ -238,6 +248,23 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
     sections
 }
 
+pub fn next_chat_id(sections: &[Section], removed_id: &str) -> Option<String> {
+    let visible: Vec<&str> = sections
+        .iter()
+        .filter(|section| !section.collapsed)
+        .flat_map(|section| section.items.iter().map(|item| item.id.as_str()))
+        .collect();
+    let position = visible.iter().position(|id| *id == removed_id)?;
+    visible
+        .get(position + 1)
+        .or_else(|| {
+            position
+                .checked_sub(1)
+                .and_then(|previous| visible.get(previous))
+        })
+        .map(|id| (*id).to_owned())
+}
+
 fn section(
     id: String,
     name: String,
@@ -246,7 +273,10 @@ fn section(
     input: &SectionInput<'_>,
 ) -> Section {
     let collapsed = input.collapsed.contains(&id);
-    let unread_chats = items.iter().filter(|item| item.unread.is_unread()).count() as u32;
+    let unread_chats = items
+        .iter()
+        .filter(|item| item.unread.is_unread() && !item.muted)
+        .count() as u32;
     Section {
         collapsed,
         count: items.len(),
@@ -320,6 +350,38 @@ mod tests {
             now: Utc.with_ymd_and_hms(2026, 10, 7, 12, 0, 0).unwrap(),
             offset: FixedOffset::east_opt(0).unwrap(),
         }
+    }
+
+    #[test]
+    fn next_chat_is_the_following_row_then_the_previous_one() {
+        let chats = [
+            chat("a", "group", false),
+            chat("b", "group", false),
+            chat("c", "group", false),
+        ];
+        let directory = Directory::default();
+        let collapsed = HashSet::new();
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        assert_eq!(next_chat_id(&sections, "a"), Some("b".to_owned()));
+        assert_eq!(next_chat_id(&sections, "c"), Some("b".to_owned()));
+        assert_eq!(next_chat_id(&sections, "zzz"), None);
+        let single = [chat("a", "group", false)];
+        let sections = build_sections(&input(&single, &directory, &collapsed));
+        assert_eq!(next_chat_id(&sections, "a"), None);
+    }
+
+    #[test]
+    fn muted_chats_stay_out_of_unread_counts() {
+        let mut quiet = chat("a", "group", true);
+        quiet.muted = true;
+        let chats = [quiet, chat("b", "group", true)];
+        assert_eq!(unread_chat_count(&chats), 1);
+        let directory = Directory::default();
+        let collapsed = HashSet::new();
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        assert_eq!(sections[0].unread_chats, 1);
+        assert!(sections[0].items[0].muted);
+        assert!(sections[0].items[0].unread.is_unread());
     }
 
     #[test]

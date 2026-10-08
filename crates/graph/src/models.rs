@@ -15,6 +15,7 @@ pub struct User {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
+    pub id: Option<String>,
     pub user_id: Option<String>,
     pub tenant_id: Option<String>,
     pub display_name: Option<String>,

@@ -52,6 +52,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
         last_read_at,
         unread: !last_event_system
             && is_unread(chat.last_message_time(), last_read_at, last_from_me),
+        muted: false,
         members: chat
             .members
             .iter()

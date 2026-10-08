@@ -91,6 +91,8 @@ struct Fake {
     app_calls: Mutex<usize>,
     invokes: Mutex<Vec<chatsvc::InvokeRequest>>,
     invoke_answer: Mutex<Option<chatsvc::InvokeResponse>>,
+    muted_states: Mutex<Vec<(String, bool)>>,
+    muted_fails: Mutex<bool>,
 }
 
 impl Fake {
@@ -379,6 +381,47 @@ impl Remote for Handle {
 
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
         self.record(format!("mark_read {chat_id} {user_id} {tenant_id}"));
+        Ok(())
+    }
+
+    async fn mark_chat_unread(
+        &self,
+        chat_id: &str,
+        user_id: &str,
+        tenant_id: &str,
+        last_read_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.record(format!(
+            "mark_unread {chat_id} {user_id} {tenant_id} {}",
+            last_read_at.timestamp_millis()
+        ));
+        Ok(())
+    }
+
+    async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        self.record(format!("hide {chat_id} {user_id} {tenant_id}"));
+        Ok(())
+    }
+
+    async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
+        self.record(format!("unhide {chat_id} {user_id} {tenant_id}"));
+        Ok(())
+    }
+
+    async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        self.record(format!("leave {chat_id} {user_id}"));
+        Ok(())
+    }
+
+    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>> {
+        if *self.muted_fails.lock().unwrap() {
+            return Err(Error::Unsupported("forced failure"));
+        }
+        Ok(self.muted_states.lock().unwrap().clone())
+    }
+
+    async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
+        self.record(format!("mute {chat_id} {muted}"));
         Ok(())
     }
 
@@ -679,6 +722,107 @@ async fn refresh_sidebar_fills_chats_teams_and_channels() {
     assert_eq!(sidebar.chats[0].kind, "oneOnOne");
     assert_eq!(sidebar.chats[1].member_summary, "Ada Example");
     assert_eq!(sidebar.teams[0].channels[0].name, "General");
+}
+
+#[tokio::test]
+async fn refresh_sidebar_marks_muted_chats_and_keeps_flags_when_the_lookup_fails() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    fake.muted_states
+        .lock()
+        .unwrap()
+        .push((CHAT.to_owned(), true));
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats[0].muted);
+
+    *fake.muted_fails.lock().unwrap() = true;
+    fake.muted_states.lock().unwrap().clear();
+    let mut events = engine.subscribe();
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats[0].muted);
+    let mut reported = false;
+    while let Ok(event) = events.try_recv() {
+        reported |= matches!(event, CoreEvent::Error { .. });
+    }
+    assert!(reported);
+
+    *fake.muted_fails.lock().unwrap() = false;
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats[0].muted);
+
+    fake.muted_states
+        .lock()
+        .unwrap()
+        .push((CHAT.to_owned(), false));
+    engine.refresh_sidebar().await.unwrap();
+    assert!(!engine.sidebar().unwrap().chats[0].muted);
+}
+
+#[tokio::test]
+async fn chat_state_actions_call_remote_and_update_the_store() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+
+    engine.mark_unread(CHAT).await.unwrap();
+    let last_message_millis = (base() + Duration::minutes(5)).timestamp_millis();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!(
+            "mark_unread {CHAT} {ME} tenant-1 {}",
+            last_message_millis - 1
+        )
+    );
+    let unread = engine.sidebar().unwrap().chats[0].clone();
+    assert!(unread.unread);
+    assert_eq!(
+        unread.last_read_at.unwrap().timestamp_millis(),
+        last_message_millis - 1
+    );
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+
+    engine.set_chat_muted(CHAT, true).await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), &format!("mute {CHAT} true"));
+    assert!(engine.sidebar().unwrap().chats[0].muted);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+    engine.set_chat_muted(CHAT, false).await.unwrap();
+    assert!(!engine.sidebar().unwrap().chats[0].muted);
+}
+
+#[tokio::test]
+async fn hide_removes_the_chat_and_unhide_brings_it_back() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+
+    engine.hide_chat(CHAT).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("hide {CHAT} {ME} tenant-1")
+    );
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+
+    engine.unhide_chat(CHAT).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("unhide {CHAT} {ME} tenant-1")
+    );
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+}
+
+#[tokio::test]
+async fn leave_removes_the_chat() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+
+    engine.leave_chat(CHAT).await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), &format!("leave {CHAT} {ME}"));
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 
 #[tokio::test]

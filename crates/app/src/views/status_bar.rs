@@ -59,6 +59,7 @@ pub fn render_status_bar(
     state: &AppState,
     update: &UpdateStatus,
     on_restart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_notice_action: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let (connection, connection_tone) = connection_text(&state.connection, state.mode);
     let item = |label: String, tone: Tone| {
@@ -114,6 +115,29 @@ pub fn render_status_bar(
                     .child(format!("Update failed: {message}")),
             )
         }
+    }
+    if let Some(notice) = &state.notice {
+        bar = bar.child(
+            h_flex()
+                .min_w_0()
+                .gap(px(8.))
+                .items_center()
+                .text_color(theme::amber())
+                .child(div().min_w_0().truncate().child(notice.text.clone()))
+                .children(notice.action.as_ref().map(|action| {
+                    div()
+                        .id("notice-action")
+                        .flex_none()
+                        .px(px(6.))
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::accent_text())
+                        .hover(|button| button.bg(theme::row_hover()))
+                        .child(action.label.clone())
+                        .on_click(on_notice_action)
+                })),
+        );
     }
     let full_version = updater::running_version();
     bar.child(

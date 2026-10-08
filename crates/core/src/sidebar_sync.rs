@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use store::ChatRecord;
 
 use crate::engine::{SidebarSummary, SyncEngine};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::mapping::{channel_record, chat_record, team_record};
 use crate::remote::{ChatsPage, Remote};
@@ -81,6 +81,7 @@ impl<R: Remote> SyncEngine<R> {
             page = self.remote.chats_at(&link).await?;
         }
         self.store.remove_chats(&hidden_ids)?;
+        self.refresh_muted_chats().await;
         if full {
             if complete {
                 self.store.remove_chats_except(&kept_ids)?;
@@ -88,6 +89,16 @@ impl<R: Remote> SyncEngine<R> {
             self.store.set_meta_time(META_CHATS_FULL_AT, Utc::now())?;
         }
         Ok(refresh)
+    }
+
+    async fn refresh_muted_chats(&self) {
+        let outcome = match self.remote.muted_chat_states().await {
+            Ok(states) => self.store.apply_muted_states(&states).map_err(Error::from),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = outcome {
+            self.report(format!("cannot refresh muted chats: {error}"));
+        }
     }
 
     fn chat_refresh_is_full(&self) -> Result<bool> {
