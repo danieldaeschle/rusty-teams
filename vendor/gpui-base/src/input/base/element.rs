@@ -780,7 +780,7 @@ impl<M: InputModeKind> TextElement<M> {
                 // A wrap boundary is not a newline and must not get such a cell.
                 let newline = is_last && range.start <= end && range.end > end;
                 if start_ix < end_ix || newline {
-                    let indent = if row == 0 { px(0.) } else { line.wrap_indent };
+                    let indent = line.line_indent(row);
                     let left = alignment + indent + shaped.x_for_index(start_ix.min(end) - offset);
                     let right = alignment
                         + indent
@@ -2002,6 +2002,7 @@ impl<M: InputModeKind> TextElement<M> {
                 LineLayout::new()
                     .inline_lines(lines)
                     .wrap_indent(wrap_indent)
+                    .first_indent(state.display_map.line_indent(line_start))
             })
             .collect()
     }
@@ -2199,6 +2200,11 @@ impl<M: InputModeKind> TextElement<M> {
             let line_layout = LineLayout::new()
                 .lines(wrapped_lines)
                 .wrap_indent(wrap_indent)
+                .first_indent(
+                    state
+                        .display_map
+                        .line_indent(last_layout.visible_line_byte_offsets[vi]),
+                )
                 .with_background(line_has_background)
                 .with_whitespaces(whitespace_indicators.clone());
             lines.push(line_layout);

@@ -110,6 +110,7 @@ impl WrapMap {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
         self.wrapper.adjust_font_overrides(range, new_text.len());
         self.wrapper.adjust_hanging_indents(range, new_text.len());
+        self.wrapper.adjust_line_indents(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
@@ -136,6 +137,18 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.set_hanging_indents(hanging_indents, cx);
+    }
+
+    pub(super) fn set_line_indents(
+        &mut self,
+        line_indents: std::rc::Rc<[(usize, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_line_indents(line_indents, cx);
+    }
+
+    pub(super) fn line_indent(&self, line_start: usize) -> Pixels {
+        self.wrapper.line_indent(line_start)
     }
 
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {

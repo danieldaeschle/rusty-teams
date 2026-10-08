@@ -180,6 +180,13 @@ fn hanging_indent_at(
         .then(|| marker.end.min(line_start + line_len) - line_start)
 }
 
+/// The indent of every row of the line starting at `line_start`.
+fn line_indent_at(line_indents: &[(usize, Pixels)], line_start: usize) -> Pixels {
+    line_indents
+        .binary_search_by_key(&line_start, |(start, _)| *start)
+        .map_or(px(0.), |found| line_indents[found].1)
+}
+
 /// Ranges whose entry differs between two sorted span lists.
 fn changed_ranges<T: PartialEq>(
     old: &[(Range<usize>, T)],
@@ -341,6 +348,8 @@ pub(crate) struct TextWrapper {
     font_overrides: Rc<[(Range<usize>, FontOverride)]>,
     /// Sorted list marker ranges, at most one per line; continuation rows start under their end.
     hanging_indents: Rc<[Range<usize>]>,
+    /// Sorted `(line start, indent)`: every row of that line starts `indent` further right.
+    line_indents: Rc<[(usize, Pixels)]>,
     _initialized: bool,
 }
 
@@ -357,6 +366,7 @@ impl TextWrapper {
             inline_metrics: Rc::from([]),
             font_overrides: Rc::from([]),
             hanging_indents: Rc::from([]),
+            line_indents: Rc::from([]),
             _initialized: false,
         }
     }
@@ -487,6 +497,7 @@ impl TextWrapper {
         let metrics = self.inline_metrics.clone();
         let font_overrides = self.font_overrides.clone();
         let hanging_indents = self.hanging_indents.clone();
+        let line_indents = self.line_indents.clone();
         let text_system = gpui::WindowTextSystem::new(cx.text_system().clone());
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -534,6 +545,8 @@ impl TextWrapper {
                         .width
                 };
                 let token_ranges: Vec<_> = tokens.iter().map(|(range, _)| range.clone()).collect();
+                let wrap_width =
+                    (wrap_width - line_indent_at(&line_indents, line_start)).max(px(1.));
                 measured_wrap_boundaries(
                     line_str,
                     wrap_width,
@@ -624,6 +637,45 @@ impl TextWrapper {
         self.rewrap_rows_of(&affected, cx);
     }
 
+    pub(crate) fn adjust_line_indents(&mut self, range: &Range<usize>, new_len: usize) {
+        if self.line_indents.is_empty() {
+            return;
+        }
+        let shift = new_len as isize - range.len() as isize;
+        self.line_indents = self
+            .line_indents
+            .iter()
+            .filter_map(|(start, indent)| {
+                if *start <= range.start {
+                    Some((*start, *indent))
+                } else if *start >= range.end {
+                    Some((start.checked_add_signed(shift)?, *indent))
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+
+    pub(crate) fn set_line_indents(&mut self, line_indents: Rc<[(usize, Pixels)]>, cx: &mut App) {
+        if self.line_indents == line_indents {
+            return;
+        }
+        let as_spans = |indents: &[(usize, Pixels)]| -> Vec<(Range<usize>, Pixels)> {
+            indents
+                .iter()
+                .map(|(start, indent)| (*start..*start, *indent))
+                .collect()
+        };
+        let affected = changed_ranges(&as_spans(&self.line_indents), &as_spans(&line_indents));
+        self.line_indents = line_indents;
+        self.rewrap_rows_of(&affected, cx);
+    }
+
+    pub(crate) fn line_indent(&self, line_start: usize) -> Pixels {
+        line_indent_at(&self.line_indents, line_start)
+    }
+
     pub(crate) fn set_inline_metrics(
         &mut self,
         metrics: Rc<[(Range<usize>, Pixels)]>,
@@ -692,7 +744,9 @@ impl TextWrapper {
             let line = changed_text.slice_line(row);
             let line_start = changed_text.line_start_offset(row);
             let wrapping_indent =
-                if hanging_indent_at(&self.hanging_indents, line_start, line.len()).is_some() {
+                if hanging_indent_at(&self.hanging_indents, line_start, line.len()).is_some()
+                    || line_indent_at(&self.line_indents, line_start) > px(0.)
+                {
                     WrappingIndent::Same
                 } else {
                     self.wrapping_indent
@@ -896,6 +950,8 @@ pub(crate) struct LineLayout {
     /// Extra left offset applied to continuation wrapped lines, used to reserve the first line's
     /// indentation when [`WrappingIndent::Same`] is used.
     pub(crate) wrap_indent: Pixels,
+    /// Left offset of every visual line, from a whole-line indent.
+    pub(crate) first_indent: Pixels,
     pub(crate) longest_width: Pixels,
     pub(crate) whitespace_indicators: Option<WhitespaceIndicators>,
     /// Whitespace indicators: (line_index, x_position, is_tab)
@@ -912,6 +968,7 @@ impl LineLayout {
             longest_width: px(0.),
             wrapped_lines: SmallVec::new(),
             wrap_indent: px(0.),
+            first_indent: px(0.),
             whitespace_chars: Vec::new(),
             whitespace_indicators: None,
             has_background: false,
@@ -930,14 +987,20 @@ impl LineLayout {
         self
     }
 
-    /// The pixel indent applied to the given visual line, relative to the line's
-    /// leading text. Only continuation lines (index > 0) are indented.
+    /// Set the left offset of every visual line.
+    pub(crate) fn first_indent(mut self, first_indent: Pixels) -> Self {
+        self.first_indent = first_indent;
+        self
+    }
+
+    /// The pixel indent applied to the given visual line: the whole-line indent, plus the
+    /// continuation indent for lines after the first.
     #[inline]
-    fn line_indent(&self, line_index: usize) -> Pixels {
+    pub(crate) fn line_indent(&self, line_index: usize) -> Pixels {
         if line_index == 0 {
-            px(0.)
+            self.first_indent
         } else {
-            self.wrap_indent
+            self.first_indent + self.wrap_indent
         }
     }
 

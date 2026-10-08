@@ -8764,6 +8764,64 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_line_indent_shifts_every_row_and_combines_with_a_hanging_indent(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let text = format!("top\n• {}", "a ".repeat(300));
+        let view = InputView::build_textarea(cx, move |state| state.rows(4).default_value(text));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        let plain_rows = view.input.read_with(&visual, |state, _| {
+            state.last_layout.as_ref().unwrap().lines[1]
+                .wrapped_lines
+                .iter()
+                .map(|row| row.len)
+                .collect::<Vec<_>>()
+        });
+        let indent = px(18.);
+        visual.update(|_, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_line_indents(vec![(4, indent), (2, px(30.))], cx);
+                state.set_hanging_indents(vec![4..8], cx);
+            })
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                let layout = state.last_layout.as_ref().unwrap();
+                assert_eq!(layout.lines[0].first_indent, px(0.));
+                let line = &layout.lines[1];
+                assert_eq!(line.first_indent, indent);
+                assert!(line.wrapped_lines[0].len < plain_rows[0]);
+                for row in line.wrapped_lines.iter() {
+                    assert!(row.width + indent <= layout.wrap_width.unwrap() + px(1.));
+                }
+                let marker_x = line.wrapped_lines[0].x_for_index(4);
+                assert_eq!(
+                    line.position_for_index(0, layout, false),
+                    Some(point(indent, px(0.)))
+                );
+                let row_start = line.wrapped_lines[0].len;
+                assert_eq!(
+                    line.position_for_index(row_start, layout, false),
+                    Some(point(indent + marker_x, layout.line_height))
+                );
+                let (hit, _) = line
+                    .closest_index_for_position(
+                        point(indent + marker_x + px(1.), layout.line_height + px(1.)),
+                        layout,
+                    )
+                    .unwrap();
+                assert_eq!(hit, row_start);
+                state.set_selected_range(4 + row_start..4 + row_start, cx);
+                state.up(&MoveUp, window, cx);
+                assert_eq!(state.cursor(), 8);
+            });
+        });
+    }
+
+    #[gpui::test]
     fn test_editor_decorations_follow_typing(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
@@ -10785,6 +10843,27 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
         markers.sort_by_key(|marker| marker.start);
         markers.dedup_by_key(|marker| self.text.offset_to_point(marker.start).row);
         self.display_map.set_hanging_indents(markers.into(), cx);
+        cx.notify();
+    }
+
+    /// Every row of the line starting at each byte offset starts `indent` further right,
+    /// and wraps that much earlier. Combines with a hanging indent on the same line.
+    /// Entries for offsets that are not line starts are ignored; set them again on change.
+    pub fn set_line_indents(&mut self, indents: Vec<(usize, Pixels)>, cx: &mut Context<Self>) {
+        let mut indents: Vec<(usize, Pixels)> = indents
+            .into_iter()
+            .filter(|(start, indent)| {
+                *indent > px(0.)
+                    && *start <= self.text.len()
+                    && self
+                        .text
+                        .line_start_offset(self.text.offset_to_point(*start).row)
+                        == *start
+            })
+            .collect();
+        indents.sort_by_key(|(start, _)| *start);
+        indents.dedup_by_key(|(start, _)| *start);
+        self.display_map.set_line_indents(indents.into(), cx);
         cx.notify();
     }
 }

@@ -255,6 +255,20 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Start every row of each line at its indent.
+    pub(crate) fn set_line_indents(
+        &mut self,
+        line_indents: std::rc::Rc<[(usize, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_line_indents(line_indents, cx);
+        self.rebuild_fold_projection();
+    }
+
+    pub(crate) fn line_indent(&self, line_start: usize) -> Pixels {
+        self.wrap_map.line_indent(line_start)
+    }
+
     pub fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrap_map.on_layout_changed(wrap_width, cx);
         self.rebuild_fold_projection();
