@@ -6,13 +6,16 @@ use std::time::{Duration, Instant};
 use gpui_kit::{Image, ImageFormat};
 use store::{ChatRecord, Store};
 
-use teams_core::Availability;
+use teams_core::{Availability, ChatSectionSettings};
 use tokio::sync::oneshot;
 
 use crate::backend::Engine;
 use crate::runtime;
 
 const FAVORITES_KIND_MARKER: &str = "favorite";
+const RECENT_KIND_MARKER: &str = "recent";
+const MEETING_KIND_MARKER: &str = "meeting";
+const MUTED_KIND_MARKER: &str = "muted";
 const PRESENCE_MAX_AGE: Duration = Duration::from_secs(60);
 const PUSHED_PRESENCE_MAX_AGE: Duration = Duration::from_secs(5 * 60);
 const MEMBER_FACE_LIMIT: usize = 2;
@@ -27,6 +30,9 @@ pub struct Person {
 pub enum FolderKind {
     Favorites,
     UserCreated,
+    Recent,
+    Meeting,
+    Muted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +40,7 @@ pub struct FolderInfo {
     pub id: String,
     pub name: String,
     pub kind: FolderKind,
+    pub expanded: Option<bool>,
     pub conversation_ids: Vec<String>,
 }
 
@@ -115,6 +122,7 @@ pub struct ImageEntry {
 pub struct Directory {
     pub me: Option<Person>,
     pub folders: Vec<FolderInfo>,
+    pub section_settings: ChatSectionSettings,
     pub pinned_channels: Vec<String>,
     pub unread_counts: HashMap<String, u32>,
     pub(crate) avatars: HashMap<String, AvatarState>,
@@ -346,21 +354,29 @@ pub fn me(store: &Store) -> Option<Person> {
     })
 }
 
+fn folder_kind(kind: &str) -> FolderKind {
+    let lowered = kind.to_ascii_lowercase();
+    if lowered.contains(FAVORITES_KIND_MARKER) {
+        FolderKind::Favorites
+    } else if lowered.contains(RECENT_KIND_MARKER) {
+        FolderKind::Recent
+    } else if lowered.contains(MEETING_KIND_MARKER) {
+        FolderKind::Meeting
+    } else if lowered.contains(MUTED_KIND_MARKER) {
+        FolderKind::Muted
+    } else {
+        FolderKind::UserCreated
+    }
+}
+
 pub fn folders(store: &Store, pinned_ids: &[String]) -> Vec<FolderInfo> {
     let stored: Vec<FolderInfo> = store
         .folders()
         .unwrap_or_default()
         .into_iter()
         .map(|record| FolderInfo {
-            kind: if record
-                .kind
-                .to_ascii_lowercase()
-                .contains(FAVORITES_KIND_MARKER)
-            {
-                FolderKind::Favorites
-            } else {
-                FolderKind::UserCreated
-            },
+            kind: folder_kind(&record.kind),
+            expanded: Some(record.expanded),
             id: record.id,
             name: record.name,
             conversation_ids: record.conversation_ids,
@@ -373,6 +389,7 @@ pub fn folders(store: &Store, pinned_ids: &[String]) -> Vec<FolderInfo> {
         id: "favorites".to_owned(),
         name: String::new(),
         kind: FolderKind::Favorites,
+        expanded: None,
         conversation_ids: pinned_ids.to_vec(),
     }]
 }
@@ -492,6 +509,7 @@ mod tests {
             id: id.into(),
             name: id.into(),
             kind,
+            expanded: None,
             conversation_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
         }
     }

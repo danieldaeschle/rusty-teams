@@ -2,14 +2,14 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 82 %** (71 done, 1 partial, 15 missing of 87). Partial counts half.
+**Parity: 83 %** (72 done, 1 partial, 14 missing of 87). Partial counts half.
 
 ## By area
 
 | Area | Parity | Done | Partial | Missing |
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
-| [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
+| [Chat list](#chat-list) | 100 % | 10 | 0 | 0 |
 | [Reading](#reading) | 89 % | 17 | 0 | 2 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
@@ -51,7 +51,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Mark as unread | Done | Keeps the open chat unread until you switch |
 | Mute chat | Done | Synced with Teams, muted rows stay in place with a bell |
 | Hide chat, leave chat | Done | Hide has Undo; leave only for group chats, with a confirmation |
-| Muted and Meeting chat sections | Missing | Teams rollout Aug-Sep 2026 |
+| Muted and Meeting chat sections | Done | Own sections like Teams, 5 chats plus See more, switches in the avatar menu under Chat list (synced with Teams settings), collapse synced with Teams |
 
 ## Reading
 

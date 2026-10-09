@@ -50,7 +50,7 @@ pub fn dot(size: f32) -> Div {
 
 pub fn unread_marker(unread: Unread, muted: bool) -> Option<Div> {
     match unread {
-        Unread::None => None,
+        Unread::None | Unread::Silent => None,
         Unread::Dot if muted => Some(dot(8.).bg(theme::badge_muted())),
         Unread::Dot => Some(dot(8.)),
         Unread::Count(count) => Some(count_badge(count, muted)),

@@ -37,6 +37,7 @@ pub struct FolderRecord {
     pub id: String,
     pub name: String,
     pub kind: String,
+    pub expanded: bool,
     pub conversation_ids: Vec<String>,
 }
 

@@ -6,11 +6,15 @@ use super::chats::{FOLDER_QUERY, NO_OP_CODES, api_error, ensure_success};
 use super::state::error_code;
 use super::transport::CsaTransport;
 use crate::error::{Error, Result};
+use crate::messages::encode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FolderKind {
     Favorites,
     UserCreated,
+    Recent,
+    Meeting,
+    Muted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +22,7 @@ pub struct Folder {
     pub id: String,
     pub name: String,
     pub kind: FolderKind,
+    pub expanded: bool,
     pub conversation_ids: Vec<String>,
 }
 
@@ -74,6 +79,9 @@ fn parse_folder(folder: &Value) -> Option<Folder> {
     let kind = match folder.get("folderType").and_then(Value::as_str)? {
         "Favorites" => FolderKind::Favorites,
         "UserCreated" => FolderKind::UserCreated,
+        "RecentChats" => FolderKind::Recent,
+        "MeetingChats" => FolderKind::Meeting,
+        "MutedChats" => FolderKind::Muted,
         _ => return None,
     };
     Some(Folder {
@@ -84,6 +92,10 @@ fn parse_folder(folder: &Value) -> Option<Folder> {
             .unwrap_or_default()
             .to_owned(),
         kind,
+        expanded: folder
+            .get("isExpanded")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         conversation_ids: folder
             .get("conversationFolderItems")
             .and_then(Value::as_array)
@@ -95,6 +107,15 @@ fn parse_folder(folder: &Value) -> Option<Folder> {
                     .collect()
             })
             .unwrap_or_default(),
+    })
+}
+
+fn expanded_body(hierarchy_version: i64, expanded: bool) -> Value {
+    json!({
+        "folderHierarchyVersion": hierarchy_version,
+        "supportsAdditionalSystemGeneratedFolders": true,
+        "supportsSliceItems": true,
+        "isExpanded": expanded,
     })
 }
 
@@ -165,6 +186,34 @@ impl<T: CsaTransport> Pins<T> {
         .await
     }
 
+    pub async fn set_folder_expanded(&self, folder_id: &str, expanded: bool) -> Result<()> {
+        let mut hierarchy_version = self.folders().await?.hierarchy_version;
+        for attempt in 0..2 {
+            let url = format!(
+                "{}/conversationFolders/{}?{FOLDER_QUERY}",
+                self.base_url,
+                encode(folder_id)
+            );
+            let body = expanded_body(hierarchy_version, expanded);
+            let answer = self
+                .transport
+                .send(Request::with_body(Method::Put, url, body))
+                .await?;
+            match answer.status {
+                200..=299 => return Ok(()),
+                412 if attempt == 0 => {
+                    hierarchy_version = match parse_folders(&answer.body) {
+                        Ok(current) => current.hierarchy_version,
+                        Err(_) => self.folders().await?.hierarchy_version,
+                    };
+                }
+                412 => return Err(Error::VersionConflict),
+                _ => return Err(api_error(&answer)),
+            }
+        }
+        Err(Error::VersionConflict)
+    }
+
     async fn write_folders(
         &self,
         plan: impl Fn(&Folders) -> Result<Vec<Value>>,
@@ -210,7 +259,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keeps_favorites_and_user_folders_in_server_order() {
+    fn keeps_folders_in_server_order() {
         let body = json!({
             "folderHierarchyVersion": 5,
             "conversationFolderOrder": ["b", "a", "r"],
@@ -227,8 +276,51 @@ mod tests {
             .iter()
             .map(|folder| folder.id.as_str())
             .collect();
-        assert_eq!(ids, ["b", "a"]);
+        assert_eq!(ids, ["b", "a", "r"]);
         assert_eq!(parsed.folders[1].conversation_ids, ["c1", "c2"]);
         assert_eq!(parsed.folders[0].kind, FolderKind::Favorites);
+    }
+
+    #[test]
+    fn keeps_system_folders_with_id_order_and_expanded_state() {
+        let body = json!({
+            "folderHierarchyVersion": 5,
+            "conversationFolderOrder": ["m", "f", "r", "u"],
+            "conversationFolders": [
+                {"id": "r", "folderType": "RecentChats", "isExpanded": true, "conversationFolderItems": []},
+                {"id": "u", "folderType": "MutedChats", "isExpanded": false, "conversationFolderItems": []},
+                {"id": "m", "folderType": "MeetingChats", "conversationFolderItems": []},
+                {"id": "f", "name": "Pins", "folderType": "Favorites", "conversationFolderItems": []},
+                {"id": "q", "folderType": "QuickViews", "conversationFolderItems": []}
+            ]
+        });
+        let parsed = parse_folders(&body).unwrap();
+        let summary: Vec<(&str, FolderKind, bool)> = parsed
+            .folders
+            .iter()
+            .map(|folder| (folder.id.as_str(), folder.kind, folder.expanded))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("m", FolderKind::Meeting, true),
+                ("f", FolderKind::Favorites, true),
+                ("r", FolderKind::Recent, true),
+                ("u", FolderKind::Muted, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn expanded_body_carries_only_the_flag_and_the_lock() {
+        assert_eq!(
+            expanded_body(7, false),
+            json!({
+                "folderHierarchyVersion": 7,
+                "supportsAdditionalSystemGeneratedFolders": true,
+                "supportsSliceItems": true,
+                "isExpanded": false,
+            })
+        );
     }
 }

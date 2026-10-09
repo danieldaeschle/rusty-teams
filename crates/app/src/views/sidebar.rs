@@ -31,6 +31,7 @@ const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
 const HINT_HEIGHT: f32 = 26.;
+const SEE_MORE_HEIGHT: f32 = 28.;
 const FALLBACK_VIEWPORT: f32 = 900.;
 const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
@@ -507,7 +508,8 @@ impl SidebarView {
     }
 
     fn section_header(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
-        let drop_target = (section.kind != SectionKind::Others).then(|| section.id.clone());
+        let drop_target = matches!(section.kind, SectionKind::Favorites | SectionKind::Folder)
+            .then(|| section.id.clone());
         let toggle_id = section.id.clone();
         h_flex()
             .id(SharedString::from(format!("section-{}", section.id)))
@@ -566,6 +568,33 @@ impl SidebarView {
                 let id = toggle_id.clone();
                 this.state
                     .update(cx, |state, cx| state.toggle_collapsed(&id, cx));
+            }))
+    }
+
+    fn see_more_row(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
+        let toggle_id = section.id.clone();
+        let label = if section.hidden_count > 0 {
+            format!("See more ({})", section.hidden_count)
+        } else {
+            "See less".to_owned()
+        };
+        div()
+            .id(SharedString::from(format!("see-more-{}", section.id)))
+            .mx(px(8.))
+            .pl(px(54.))
+            .h(px(SEE_MORE_HEIGHT))
+            .flex()
+            .items_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .text_size(px(12.5))
+            .text_color(theme::accent_text())
+            .hover(|row| row.bg(theme::row_hover()))
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let id = toggle_id.clone();
+                this.state
+                    .update(cx, |state, cx| state.toggle_list_expanded(&id, cx));
             }))
     }
 
@@ -720,6 +749,7 @@ impl SidebarView {
                 chats: &state.sidebar.chats,
                 directory: &state.directory,
                 collapsed: &state.collapsed,
+                expanded_lists: &state.expanded_lists,
                 typing: &state.typing,
                 now,
                 offset,
@@ -794,6 +824,11 @@ impl SidebarView {
                     skipped_height += ROW_HEIGHT;
                 }
                 y += ROW_HEIGHT;
+            }
+            if section.hidden_count > 0 || section.list_expanded {
+                list = with_spacer(list, &mut skipped_height);
+                list = list.child(self.see_more_row(section, cx));
+                y += SEE_MORE_HEIGHT;
             }
             if section.show_empty_hint {
                 list = with_spacer(list, &mut skipped_height);

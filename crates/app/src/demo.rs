@@ -9,8 +9,8 @@ use store::{
     TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    CardActionOutcome, ChatApp, Gif, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
-    PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
+    CardActionOutcome, ChatApp, ChatSection, Gif, LinkPreview, MentionCandidate, PersonCandidate,
+    PersonSource, PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -137,6 +137,14 @@ const FAVORITES_ID: &str = "demo-folder-favorites";
 const CUSTOMERS_FOLDER: &str = "demo-folder-customers";
 const ATLAS_FOLDER: &str = "demo-folder-atlas";
 const TODO_FOLDER: &str = "demo-folder-todo";
+const MUTED_CHATS: [&str; 6] = [
+    "demo-chat-muted-lunch",
+    "demo-chat-muted-offsite",
+    "demo-chat-muted-kudos",
+    "demo-chat-muted-bikes",
+    "demo-chat-muted-book",
+    "demo-chat-muted-games",
+];
 
 fn member(user_id: &str, name: &str) -> MemberRecord {
     MemberRecord {
@@ -325,6 +333,86 @@ fn demo_chats() -> Vec<DemoChat> {
             time: at(4, 11, 0),
             unread: false,
             preview: Some((LEA_ID, "Lea Schneider", "Draft attached")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-meeting-standup",
+            kind: "meeting",
+            title: "Daily standup",
+            members: group(&[(JONAS_ID, "Jonas Ortega"), (PRIYA_ID, "Priya Nair")]),
+            time: at(0, 9, 45),
+            unread: true,
+            preview: Some((JONAS_ID, "Jonas Ortega", "Recording is available")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-meeting-retro",
+            kind: "meeting",
+            title: "Sprint retrospective",
+            members: group(&[(MARA_ID, "Mara Lindqvist"), (TOBIAS_ID, "Tobias Klein")]),
+            time: at(3, 15, 30),
+            unread: false,
+            preview: Some((MARA_ID, "Mara Lindqvist", "Notes are in the wiki")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-lunch",
+            kind: "group",
+            title: "Lunch crew",
+            members: group(&[(JONAS_ID, "Jonas Ortega"), (LEA_ID, "Lea Schneider")]),
+            time: at(0, 12, 5),
+            unread: true,
+            preview: Some((JONAS_ID, "Jonas Ortega", "Pizza on Friday?")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-offsite",
+            kind: "group",
+            title: "Team offsite 2027",
+            members: group(&[(LEA_ID, "Lea Schneider"), (LEA_ID, "Lea Schneider")]),
+            time: at(1, 16, 20),
+            unread: false,
+            preview: Some((LEA_ID, "Lea Schneider", "Voting closes tomorrow")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-kudos",
+            kind: "group",
+            title: "Kudos corner",
+            members: group(&[(MARA_ID, "Mara Lindqvist"), (LEA_ID, "Lea Schneider")]),
+            time: at(2, 10, 0),
+            unread: false,
+            preview: Some((MARA_ID, "Mara Lindqvist", "Thanks for the release!")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-bikes",
+            kind: "group",
+            title: "Bike to work",
+            members: group(&[(TOBIAS_ID, "Tobias Klein"), (LEA_ID, "Lea Schneider")]),
+            time: at(4, 8, 15),
+            unread: false,
+            preview: Some((TOBIAS_ID, "Tobias Klein", "Route map attached")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-book",
+            kind: "group",
+            title: "Book club",
+            members: group(&[(PRIYA_ID, "Priya Nair"), (LEA_ID, "Lea Schneider")]),
+            time: at(6, 19, 40),
+            unread: false,
+            preview: Some((PRIYA_ID, "Priya Nair", "Next pick: Dune")),
+            deleted: false,
+        },
+        DemoChat {
+            id: "demo-chat-muted-games",
+            kind: "group",
+            title: "Board game night",
+            members: group(&[(JONAS_ID, "Jonas Ortega"), (LEA_ID, "Lea Schneider")]),
+            time: at(9, 18, 0),
+            unread: false,
+            preview: Some((JONAS_ID, "Jonas Ortega", "Who brings the snacks?")),
             deleted: false,
         },
     ]
@@ -562,6 +650,9 @@ pub fn seed(store: &Store) {
         })
         .collect();
     let _ = store.upsert_chats(&chats);
+    for chat_id in MUTED_CHATS {
+        let _ = store.set_chat_muted(chat_id, true);
+    }
     let teams: Vec<TeamRecord> = DEMO_TEAMS
         .iter()
         .map(|(id, name, _)| TeamRecord {
@@ -613,12 +704,14 @@ pub fn seed_directory(state: &mut AppState) {
             id: FAVORITES_ID.to_owned(),
             name: String::new(),
             kind: FolderKind::Favorites,
+            expanded: None,
             conversation_ids: ids(&["demo-chat-mara", RELEASE_CHAT]),
         },
         FolderInfo {
             id: CUSTOMERS_FOLDER.to_owned(),
             name: "Customers".to_owned(),
             kind: FolderKind::UserCreated,
+            expanded: None,
             conversation_ids: ids(&[
                 "demo-chat-customer-1",
                 "demo-chat-customer-2",
@@ -630,12 +723,14 @@ pub fn seed_directory(state: &mut AppState) {
             id: ATLAS_FOLDER.to_owned(),
             name: "Project Atlas".to_owned(),
             kind: FolderKind::UserCreated,
+            expanded: None,
             conversation_ids: ids(&["demo-chat-atlas", "demo-chat-jonas"]),
         },
         FolderInfo {
             id: TODO_FOLDER.to_owned(),
             name: "To do".to_owned(),
             kind: FolderKind::UserCreated,
+            expanded: None,
             conversation_ids: Vec::new(),
         },
     ];
@@ -688,6 +783,10 @@ pub fn seed_directory(state: &mut AppState) {
         Instant::now(),
         Utc::now(),
     );
+    state
+        .directory
+        .section_settings
+        .set(ChatSection::Meeting, true);
     state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
     state.last_sync = Some(Utc::now());
     state.apply_bot_titles();
@@ -845,7 +944,11 @@ fn bot_messages() -> Vec<MessageRecord> {
     let mut messages = vec![
         bot_card_message("b1", at(0, 13, 45), &card),
         bot_card_message("b2", at(0, 13, 52), &input_card()),
-        bot_card_message("b3", at(0, 13, 58), &crate::demo_input_cards::all_inputs_card()),
+        bot_card_message(
+            "b3",
+            at(0, 13, 58),
+            &crate::demo_input_cards::all_inputs_card(),
+        ),
     ];
     messages.extend(
         crate::demo_cards::behaviour_cards()
@@ -853,14 +956,11 @@ fn bot_messages() -> Vec<MessageRecord> {
             .zip(0u32..)
             .map(|(card, index)| bot_card_message(&format!("g{index}"), at(0, 14, index), card)),
     );
-    messages.extend(
-        crate::demo_chart_cards::cards()
-            .iter()
-            .zip(0..)
-            .map(|(chart_card, minute)| {
-                bot_card_message(&format!("c{minute}"), at(0, 15, minute), chart_card)
-            }),
-    );
+    messages.extend(crate::demo_chart_cards::cards().iter().zip(0..).map(
+        |(chart_card, minute)| {
+            bot_card_message(&format!("c{minute}"), at(0, 15, minute), chart_card)
+        },
+    ));
     messages
 }
 

@@ -10,9 +10,9 @@ use graph::{
 use serde_json::json;
 use store::{ChannelLayoutRecord, ChannelRecord, Store, TeamLayoutRecord, TeamRecord};
 use teams_core::{
-    Availability, BoxFuture, ChatFolder, ChatsPage, CoreEvent, DeltaPage, Error, FolderKind,
-    FolderSource, MentionCandidate, MentionInput, MentionTarget, PersonSource, Remote, RemotePage,
-    Result, SyncConfig, SyncEngine,
+    Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
+    DeltaPage, Error, FolderKind, FolderSource, MentionCandidate, MentionInput, MentionTarget,
+    PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
 };
 
 const ME: &str = "user-me";
@@ -2142,6 +2142,7 @@ struct FakeFolders {
     state: Mutex<Vec<ChatFolder>>,
     channels: Vec<String>,
     layout: Vec<TeamLayoutRecord>,
+    settings: ChatSectionSettings,
     calls: Mutex<Vec<String>>,
 }
 
@@ -2151,6 +2152,7 @@ impl FakeFolders {
             id: id.to_owned(),
             name: id.to_owned(),
             kind,
+            expanded: true,
             conversation_ids: ids(items),
         };
         Arc::new(FakeFolders {
@@ -2160,6 +2162,7 @@ impl FakeFolders {
             ]),
             channels: ids(&["ch1", "ch2"]),
             layout: Vec::new(),
+            settings: ChatSectionSettings::default(),
             calls: Mutex::new(Vec::new()),
         })
     }
@@ -2176,6 +2179,38 @@ impl FolderSource for FakeFolders {
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
         Box::pin(async { Ok(self.layout.clone()) })
+    }
+
+    fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
+        Box::pin(async { Ok(self.settings) })
+    }
+
+    fn set_section_enabled(
+        &self,
+        section: ChatSection,
+        enabled: bool,
+    ) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("section {section:?} {enabled}"));
+            Ok(())
+        })
+    }
+
+    fn set_folder_expanded<'a>(
+        &'a self,
+        folder_id: &'a str,
+        expanded: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("expanded {folder_id} {expanded}"));
+            Ok(())
+        })
     }
 
     fn move_to_folder<'a>(
@@ -2262,6 +2297,38 @@ async fn folders_refresh_move_and_remove_go_through_the_source_and_cache() {
     assert_eq!(
         *source.calls.lock().unwrap(),
         ["move a work", "remove a work"]
+    );
+}
+
+#[tokio::test]
+async fn collapse_and_section_settings_go_through_the_source() {
+    let fake = Arc::new(Fake::default());
+    let mut source = FakeFolders::new();
+    Arc::get_mut(&mut source).unwrap().settings = ChatSectionSettings {
+        muted: Some(false),
+        meeting: Some(true),
+    };
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    let mut events = engine.subscribe();
+    engine.refresh_folders().await.unwrap();
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::FoldersChanged);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::FoldersChanged);
+    assert_eq!(
+        teams_core::stored_section_settings(engine.store()),
+        ChatSectionSettings {
+            muted: Some(false),
+            meeting: Some(true),
+        }
+    );
+
+    engine.set_folder_expanded("work", false).await.unwrap();
+    engine
+        .set_section_enabled(ChatSection::Meeting, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        *source.calls.lock().unwrap(),
+        ["expanded work false", "section Meeting false"]
     );
 }
 

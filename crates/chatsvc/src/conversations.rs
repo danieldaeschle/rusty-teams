@@ -6,6 +6,7 @@ use crate::messages::{MessageTransport, SessionMessageTransport, encode, ensure_
 use crate::pins::DEFAULT_REGION;
 
 const PAGE_SIZE: usize = 200;
+const MAX_PAGES: usize = 100;
 const ALERTS_OFF: &str = "false";
 
 pub struct Conversations<T: MessageTransport = SessionMessageTransport> {
@@ -46,9 +47,18 @@ impl<T: MessageTransport> Conversations<T> {
             "{}?view=msnp24Equivalent&pageSize={PAGE_SIZE}",
             self.base_url
         );
-        let answer = self.transport.send(Request::get(&url)).await?;
-        ensure_success(&answer)?;
-        mute_states_in_page(&answer.body)
+        let mut states = Vec::new();
+        let mut next_url = Some(url);
+        for _ in 0..MAX_PAGES {
+            let Some(url) = next_url.take() else {
+                break;
+            };
+            let answer = self.transport.send(Request::get(&url)).await?;
+            ensure_success(&answer)?;
+            states.extend(mute_states_in_page(&answer.body)?);
+            next_url = backward_link(&answer.body).filter(|link| *link != url);
+        }
+        Ok(states)
     }
 
     pub async fn set_alerts(&self, conversation_id: &str, enabled: bool) -> Result<()> {
@@ -63,6 +73,13 @@ impl<T: MessageTransport> Conversations<T> {
             .await?;
         ensure_success(&answer)
     }
+}
+
+fn backward_link(body: &Value) -> Option<String> {
+    body.pointer("/_metadata/backwardLink")
+        .and_then(Value::as_str)
+        .filter(|link| !link.is_empty())
+        .map(str::to_owned)
 }
 
 fn mute_states_in_page(body: &Value) -> Result<Vec<(String, bool)>> {
@@ -126,7 +143,6 @@ mod tests {
                     {"id": "19:c", "properties": {}},
                     {"id": "19:d"},
                 ],
-                "_metadata": {"backwardLink": "https://example.test/next"},
             }),
         )]);
         let states = Conversations::with_transport(&transport, "emea")
@@ -148,6 +164,46 @@ mod tests {
             requests[0].url,
             format!("{BASE}?view=msnp24Equivalent&pageSize=200")
         );
+    }
+
+    #[tokio::test]
+    async fn mute_states_follow_the_backward_link_through_every_page() {
+        let transport = canned(vec![
+            (
+                200,
+                json!({
+                    "conversations": [{"id": "19:a", "properties": {"alerts": "true"}}],
+                    "_metadata": {"backwardLink": "https://example.test/page2"},
+                }),
+            ),
+            (
+                200,
+                json!({
+                    "conversations": [{"id": "19:old", "properties": {"alerts": "false"}}],
+                    "_metadata": {"backwardLink": "https://example.test/page3"},
+                }),
+            ),
+            (200, json!({"conversations": [{"id": "19:oldest"}]})),
+        ]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_mute_states()
+            .await
+            .unwrap();
+        assert_eq!(
+            states,
+            vec![
+                ("19:a".to_owned(), false),
+                ("19:old".to_owned(), true),
+                ("19:oldest".to_owned(), false),
+            ]
+        );
+        let requests = transport.requests.lock().unwrap();
+        let urls: Vec<&str> = requests
+            .iter()
+            .map(|request| request.url.as_str())
+            .collect();
+        assert_eq!(urls[1], "https://example.test/page2");
+        assert_eq!(urls[2], "https://example.test/page3");
     }
 
     #[tokio::test]

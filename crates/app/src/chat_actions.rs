@@ -210,6 +210,7 @@ impl AppState {
             chats: &self.sidebar.chats,
             directory: &self.directory,
             collapsed: &self.collapsed,
+            expanded_lists: &self.expanded_lists,
             typing: &self.typing,
             now: Utc::now(),
             offset: Local::now().offset().fix(),

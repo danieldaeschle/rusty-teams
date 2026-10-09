@@ -7,8 +7,9 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
+use teams_core::{ChatSection, ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
 use super::avatar::{person_avatar, with_presence};
 use super::widgets::{icon, symbol};
@@ -27,6 +28,11 @@ const RING_WIDTH: f32 = 2.;
 const MENU_ICON_SIZE: f32 = 14.;
 const ICON_COLUMN: f32 = 16.;
 const HEADER_INSET: f32 = 24.;
+const SWITCH_WIDTH: f32 = 28.;
+const SWITCH_HEIGHT: f32 = 16.;
+const SWITCH_THUMB: f32 = 12.;
+const SWITCH_PADDING: f32 = 2.;
+const TOGGLE_LABEL_WIDTH: f32 = 270.;
 
 #[derive(Clone)]
 struct MenuContext {
@@ -194,6 +200,7 @@ fn status_menu(
                 }),
         )
         .separator()
+        .item(chat_list_item(context, window, cx))
         .item(
             PopupMenuItem::new("Notification settings")
                 .icon(menu_icon(IconName::Settings))
@@ -201,6 +208,74 @@ fn status_menu(
                     settings_app.update(cx, |state, cx| state.open_notification_settings(cx));
                 }),
         )
+}
+
+fn chat_list_item(
+    context: &MenuContext,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenuItem {
+    let app = context.app.clone();
+    let submenu = PopupMenu::build(window, cx, move |menu, _, cx| {
+        let settings = app.read(cx).directory.section_settings;
+        menu.item(section_toggle(
+            &app,
+            ChatSection::Muted,
+            "Show muted chats in own section",
+            settings.enabled(ChatSection::Muted),
+        ))
+        .item(section_toggle(
+            &app,
+            ChatSection::Meeting,
+            "Show meeting chats in own section",
+            settings.enabled(ChatSection::Meeting),
+        ))
+    });
+    PopupMenuItem::submenu("Chat list", submenu).icon(menu_icon(IconName::LayoutList))
+}
+
+fn section_toggle(
+    app: &Entity<AppState>,
+    section: ChatSection,
+    label: &'static str,
+    enabled: bool,
+) -> PopupMenuItem {
+    let app = app.clone();
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .w(px(TOGGLE_LABEL_WIDTH))
+            .gap(px(12.))
+            .items_center()
+            .justify_between()
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .child(switch(enabled))
+    })
+    .on_click(move |_, _, cx| {
+        app.update(cx, |state, cx| {
+            state.set_chat_section(section, !enabled, cx)
+        });
+    })
+}
+
+fn switch(enabled: bool) -> Div {
+    let thumb = div()
+        .size(px(SWITCH_THUMB))
+        .rounded_full()
+        .bg(theme::text_strong());
+    h_flex()
+        .w(px(SWITCH_WIDTH))
+        .h(px(SWITCH_HEIGHT))
+        .flex_none()
+        .p(px(SWITCH_PADDING))
+        .items_center()
+        .rounded_full()
+        .bg(if enabled {
+            theme::accent()
+        } else {
+            theme::badge_muted()
+        })
+        .when(enabled, |track| track.justify_end())
+        .child(thumb)
 }
 
 fn work_location_icon(kind: Option<WorkLocationKind>) -> gpui_kit::component::Icon {

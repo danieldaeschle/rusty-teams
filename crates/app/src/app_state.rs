@@ -6,7 +6,10 @@ use chatsvc::TypingEvent;
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
-use teams_core::{ChatApp, CoreEvent, ImageRef, PinnedMessage, PresenceStatus, ScheduledDraft};
+use teams_core::{
+    ChatApp, ChatSection, ChatSectionSettings, CoreEvent, ImageRef, PinnedMessage, PresenceStatus,
+    ScheduledDraft,
+};
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
@@ -77,6 +80,7 @@ pub struct AppState {
     pub mode: Mode,
     pub directory: Directory,
     pub collapsed: HashSet<String>,
+    pub expanded_lists: HashSet<String>,
     pub followed_channels: HashSet<String>,
     pub start_on_channels: bool,
     pub pending_jump: Option<(String, String)>,
@@ -160,6 +164,7 @@ impl AppState {
             mode,
             directory: Directory::default(),
             collapsed: HashSet::new(),
+            expanded_lists: HashSet::new(),
             followed_channels: HashSet::new(),
             start_on_channels: false,
             pending_jump: None,
@@ -219,12 +224,95 @@ impl AppState {
     }
 
     pub fn toggle_collapsed(&mut self, section_id: &str, cx: &mut Context<Self>) {
-        if !self.collapsed.remove(section_id) {
-            self.collapsed.insert(section_id.to_owned());
+        let now_collapsed = self.collapsed.insert(section_id.to_owned());
+        if !now_collapsed {
+            self.collapsed.remove(section_id);
         }
+        self.save_collapsed();
+        self.sync_folder_expanded(section_id, !now_collapsed);
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn toggle_list_expanded(&mut self, section_id: &str, cx: &mut Context<Self>) {
+        if !self.expanded_lists.remove(section_id) {
+            self.expanded_lists.insert(section_id.to_owned());
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    fn save_collapsed(&self) {
         let mut ids: Vec<&str> = self.collapsed.iter().map(String::as_str).collect();
         ids.sort_unstable();
         let _ = self.store.set_meta(COLLAPSED_META_KEY, &ids.join("\n"));
+    }
+
+    fn sync_folder_expanded(&mut self, folder_id: &str, expanded: bool) {
+        let Some(folder) = self
+            .directory
+            .folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id && folder.expanded.is_some())
+        else {
+            return;
+        };
+        folder.expanded = Some(expanded);
+        let _ = self.store.set_folder_expanded(folder_id, expanded);
+        if let Some(engine) = self.engine.clone().filter(|_| !self.mode.read_only) {
+            let folder_id = folder_id.to_owned();
+            drop(crate::runtime::spawn(async move {
+                engine.set_folder_expanded(&folder_id, expanded).await
+            }));
+        }
+    }
+
+    fn adopt_folder_expanded(&mut self) {
+        let snapshot = self.collapsed.clone();
+        for folder in &self.directory.folders {
+            match folder.expanded {
+                Some(true) => {
+                    self.collapsed.remove(&folder.id);
+                }
+                Some(false) => {
+                    self.collapsed.insert(folder.id.clone());
+                }
+                None => {}
+            }
+        }
+        if self.collapsed != snapshot {
+            self.save_collapsed();
+        }
+    }
+
+    pub fn set_chat_section(
+        &mut self,
+        section: ChatSection,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous = self.directory.section_settings;
+        let mut updated = previous;
+        updated.set(section, enabled);
+        self.apply_section_settings(updated, cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Chat list setting",
+            async move { engine.set_section_enabled(section, enabled).await },
+            move |state, cx| state.apply_section_settings(previous, cx),
+            |_, _| {},
+            cx,
+        );
+    }
+
+    fn apply_section_settings(&mut self, settings: ChatSectionSettings, cx: &mut Context<Self>) {
+        self.directory.section_settings = settings;
+        let _ = teams_core::store_section_settings(&self.store, &settings);
         cx.emit(AppEvent::Sidebar);
         cx.notify();
     }
@@ -238,6 +326,8 @@ impl AppState {
             .flatten()
             .unwrap_or_default();
         self.directory.folders = data::folders(&self.store, &self.favorite_ids);
+        self.directory.section_settings = teams_core::stored_section_settings(&self.store);
+        self.adopt_folder_expanded();
         self.directory.pinned_channels = data::pinned_channels(&self.store);
         if self.directory.pinned_channels.is_empty() {
             let known: HashSet<&str> = self

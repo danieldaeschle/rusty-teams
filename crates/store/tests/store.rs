@@ -140,7 +140,9 @@ fn an_upsert_without_links_keeps_the_stored_links() {
         links_json: r#"[{"url":"https://b.example"}]"#.to_owned(),
         ..message("c1", "m1", 1)
     };
-    store.upsert_messages(std::slice::from_ref(&replaced)).unwrap();
+    store
+        .upsert_messages(std::slice::from_ref(&replaced))
+        .unwrap();
     let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
     assert_eq!(found["m1"].links_json, replaced.links_json);
 }
@@ -467,11 +469,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 13);
+        assert_eq!(store.schema_version().unwrap(), 14);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 13);
+    assert_eq!(reopened.schema_version().unwrap(), 14);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -503,7 +505,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 13);
+    assert_eq!(store.schema_version().unwrap(), 14);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -569,7 +571,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 13);
+    assert_eq!(store.schema_version().unwrap(), 14);
 }
 
 #[test]
@@ -586,6 +588,7 @@ fn migration_to_v13_clears_channel_delta_links_only() {
                  INSERT INTO channels (id, team_id, name) VALUES ('ch', 't', 'C');
                  INSERT INTO sync_state (conversation_id, delta_link) VALUES ('ch', 'link'), ('chat', 'link');
                  ALTER TABLE messages DROP COLUMN subject;
+                 ALTER TABLE folders DROP COLUMN expanded;
                  PRAGMA user_version = 12",
             )
             .unwrap();
@@ -593,7 +596,12 @@ fn migration_to_v13_clears_channel_delta_links_only() {
     let store = Store::open(&path).unwrap();
     assert_eq!(store.sync_state("ch").unwrap().unwrap().delta_link, None);
     assert_eq!(
-        store.sync_state("chat").unwrap().unwrap().delta_link.as_deref(),
+        store
+            .sync_state("chat")
+            .unwrap()
+            .unwrap()
+            .delta_link
+            .as_deref(),
         Some("link")
     );
 }
@@ -667,17 +675,21 @@ fn folders_and_pinned_channels_are_replaced_in_order() {
         id: id.into(),
         name: id.into(),
         kind: kind.into(),
+        expanded: kind != "MutedChats",
         conversation_ids: items.iter().map(|item| item.to_string()).collect(),
     };
     let first = [
         folder("f1", "Favorites", &["b", "a"]),
         folder("f2", "UserCreated", &[]),
+        folder("f4", "MutedChats", &[]),
     ];
     store
         .replace_folders(&first, &["c2".into(), "c1".into()])
         .unwrap();
     assert_eq!(store.folders().unwrap(), first);
     assert_eq!(store.pinned_channel_ids().unwrap(), ["c2", "c1"]);
+    store.set_folder_expanded("f2", false).unwrap();
+    assert!(!store.folders().unwrap()[1].expanded);
     store
         .replace_folders(&[folder("f3", "UserCreated", &["z"])], &[])
         .unwrap();
@@ -831,6 +843,7 @@ fn migration_indexes_rows_that_predate_search() {
                  ALTER TABLE messages DROP COLUMN links_json;
                  ALTER TABLE messages DROP COLUMN subject;
                  ALTER TABLE chats DROP COLUMN muted;
+                 ALTER TABLE folders DROP COLUMN expanded;
                  PRAGMA user_version = 3;",
             )
             .unwrap();

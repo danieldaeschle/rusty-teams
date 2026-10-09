@@ -33,7 +33,7 @@
 ## Features
 
 **Chats and channels**
-- Teams pin order, chat folders, hidden teams
+- Teams pin order, chat folders, hidden teams, Muted and Meeting chats sections
 - Channel posts like Teams: one card per post, newest activity on top, last 3 replies, inline reply, new post with a subject, full conversation view
 - Chat menu: pin, move to folder, mark as unread, mute, hide, leave
 - Read receipts, typing indicator with faces, presence, unread jump

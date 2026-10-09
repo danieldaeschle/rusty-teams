@@ -13,6 +13,7 @@ pub mod reactions;
 pub mod realtime;
 pub mod receipts;
 pub mod saved;
+pub mod settings;
 
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
@@ -40,3 +41,4 @@ pub use realtime::{
 };
 pub use receipts::{MemberHorizon, Receipts};
 pub use saved::SavedMessage;
+pub use settings::{ChatSection, ChatSectionSettings, UserSettings};

@@ -75,6 +75,7 @@ pub use chatsvc::{
     ChatApp, ForcedAvailability, ForcedKind, ForwardResult, Gif, PinnedMessage, PresenceStatus,
     SavedMessage, ScheduledDraft, StatusNote, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
+pub use chatsvc::{ChatSection, ChatSectionSettings};
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -83,7 +84,10 @@ pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
 pub use events::CoreEvent;
 pub use external_image::external_image_url;
-pub use folders::{BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource};
+pub use folders::{
+    BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource, store_section_settings,
+    stored_section_settings,
+};
 pub use graph::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, SharedFile,
     UploadedFile,

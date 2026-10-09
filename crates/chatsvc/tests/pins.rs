@@ -460,3 +460,60 @@ async fn remove_from_folder_sends_remove_item_and_skips_when_absent() {
     pins(&idle).remove_from_folder("c", "t~u~A").await.unwrap();
     assert_eq!(sent(&idle).len(), 1);
 }
+
+#[tokio::test]
+async fn collapse_puts_only_the_flag_and_the_lock_on_the_folder_url() {
+    let mock = Mock::new(vec![(200, folders(10, &[])), (200, json!({}))]);
+    pins(&mock)
+        .set_folder_expanded("t~u~MutedChats", false)
+        .await
+        .unwrap();
+    let requests = sent(&mock);
+    assert_eq!(requests[1].0, "PUT");
+    assert_eq!(
+        requests[1].1,
+        "https://teams.cloud.microsoft/api/csa/emea/api/v1/teams/users/me/conversationFolders/t~u~MutedChats?supportsAdditionalSystemGeneratedFolders=true&supportsSliceItems=true"
+    );
+    assert_eq!(
+        requests[1].2,
+        Some(json!({
+            "folderHierarchyVersion": 10,
+            "supportsAdditionalSystemGeneratedFolders": true,
+            "supportsSliceItems": true,
+            "isExpanded": false,
+        }))
+    );
+}
+
+#[tokio::test]
+async fn collapse_retries_once_with_the_version_from_the_412_body() {
+    let mock = Mock::new(vec![
+        (200, folders(10, &[])),
+        (412, folders(15, &[])),
+        (200, json!({})),
+    ]);
+    pins(&mock)
+        .set_folder_expanded("t~u~MutedChats", true)
+        .await
+        .unwrap();
+    let requests = sent(&mock);
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[2].2.as_ref().unwrap()["folderHierarchyVersion"],
+        15
+    );
+    assert_eq!(requests[2].2.as_ref().unwrap()["isExpanded"], true);
+}
+
+#[tokio::test]
+async fn collapse_gives_up_after_a_second_version_mismatch() {
+    let mock = Mock::new(vec![
+        (200, folders(10, &[])),
+        (412, folders(11, &[])),
+        (412, folders(12, &[])),
+    ]);
+    let outcome = pins(&mock)
+        .set_folder_expanded("t~u~MutedChats", true)
+        .await;
+    assert!(matches!(outcome, Err(Error::VersionConflict)));
+}
