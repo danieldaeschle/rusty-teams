@@ -10,8 +10,7 @@ use store::{
 };
 use teams_core::{
     CardActionOutcome, ChatApp, Gif, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
-    TaskDialog,
-    TaskDialogKind,
+    TaskDialog, TaskDialogKind,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -713,7 +712,13 @@ fn message(
         attachments_json: "[]".to_owned(),
         reactions_json: reactions_json.to_owned(),
         mentions_json: "[]".to_owned(),
+        subject: None,
     }
+}
+
+fn with_subject(mut record: MessageRecord, subject: &str) -> MessageRecord {
+    record.subject = Some(subject.to_owned());
+    record
 }
 
 fn with_attachments(mut record: MessageRecord, attachments_json: &str) -> MessageRecord {
@@ -1231,11 +1236,52 @@ fn demo_team_layout(channels: &[ChannelRecord]) -> Vec<TeamLayoutRecord> {
         .collect()
 }
 
+const ROLLOUT_REPLIES: [(&str, &str); 12] = [
+    (MARA_ID, "Staging looks good on my side."),
+    (JONAS_ID, "Smoke tests passed, no regressions."),
+    (PRIYA_ID, "Docs for the new settings page are merged."),
+    (LEA_ID, "Support is briefed, nothing blocking."),
+    (MARA_ID, "Can we keep the old export for one more release?"),
+    (JONAS_ID, "Yes, behind a flag. I will add it today."),
+    (PRIYA_ID, "Changelog draft is ready for review."),
+    (LEA_ID, "Customer success wants a heads-up the day before."),
+    (MARA_ID, "I will send that mail on Thursday."),
+    (JONAS_ID, "Flag is in, rebuilding staging now."),
+    (PRIYA_ID, "Rollback steps are in the runbook."),
+    (LEA_ID, "All green from QA. Go for Friday."),
+];
+
 fn channel_messages() -> Vec<MessageRecord> {
     let channel = "demo-channel-1-1";
     let mara = (MARA_ID, "Mara Lindqvist");
     let tobias = (TOBIAS_ID, "Tobias Klein");
-    vec![
+    let people = [
+        (MARA_ID, "Mara Lindqvist"),
+        (JONAS_ID, "Jonas Ortega"),
+        (PRIYA_ID, "Priya Nair"),
+        (LEA_ID, "Lea Schneider"),
+    ];
+    let rollout_replies = ROLLOUT_REPLIES
+        .iter()
+        .enumerate()
+        .map(|(index, (sender, text))| {
+            let sender = people
+                .iter()
+                .copied()
+                .find(|(id, _)| id == sender)
+                .expect("known person");
+            message(
+                channel,
+                &format!("t3r{}", index + 1),
+                Some("t3"),
+                sender,
+                at(0, 9, 40) + Duration::minutes(6 * index as i64),
+                &format!("<p>{text}</p>"),
+                "[]",
+                false,
+            )
+        });
+    let mut records = vec![
         message(
             channel,
             "t1",
@@ -1256,22 +1302,25 @@ fn channel_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
-        message(
-            channel,
-            "t3",
-            None,
-            tobias,
-            at(0, 11, 30),
-            "<p>Release build 42 is green, deploying to staging now.</p>",
-            "[]",
-            false,
+        with_subject(
+            message(
+                channel,
+                "t3",
+                None,
+                tobias,
+                at(0, 9, 30),
+                "<p>Release build 42 is green, deploying to staging now.</p>",
+                "[]",
+                false,
+            ),
+            "Release 42 rollout",
         ),
         message(
             channel,
             "t2",
             None,
             tobias,
-            at(0, 11, 0),
+            at(0, 10, 0),
             "<p>Who owns the on-call handover?</p>",
             "[]",
             false,
@@ -1296,7 +1345,9 @@ fn channel_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
-    ]
+    ];
+    records.extend(rollout_replies);
+    records
 }
 
 fn crc32(bytes: &[u8]) -> u32 {

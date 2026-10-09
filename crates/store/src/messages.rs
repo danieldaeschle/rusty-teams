@@ -10,7 +10,7 @@ use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
 
 const MESSAGE_COLUMNS: &str = "conversation_id, message_id, reply_to_id, sender_id, sender_name, created_at, \
-     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json";
+     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json, subject";
 
 impl Store {
     pub fn upsert_messages(&self, messages: &[MessageRecord]) -> Result<()> {
@@ -19,7 +19,7 @@ impl Store {
         {
             let mut upsert = transaction.prepare_cached(&format!(
                 "INSERT INTO messages ({MESSAGE_COLUMNS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT (conversation_id, message_id) DO UPDATE SET
                     reply_to_id = excluded.reply_to_id, sender_id = excluded.sender_id,
                     sender_name = excluded.sender_name, created_at = excluded.created_at,
@@ -27,6 +27,7 @@ impl Store {
                     attachments_json = excluded.attachments_json, reactions_json = excluded.reactions_json,
                     mentions_json = excluded.mentions_json,
                     sender_application_id = excluded.sender_application_id,
+                    subject = COALESCE(excluded.subject, messages.subject),
                     links_json = CASE WHEN excluded.links_json IN ('', '[]')
                         THEN messages.links_json ELSE excluded.links_json END"
             ))?;
@@ -46,6 +47,7 @@ impl Store {
                     message.mentions_json,
                     message.sender_application_id,
                     message.links_json,
+                    message.subject,
                 ])?;
                 index_message(&transaction, message)?;
             }
@@ -132,6 +134,24 @@ impl Store {
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         messages.reverse();
+        Ok(messages)
+    }
+
+    /// Oldest-first root and replies of one channel thread.
+    pub fn thread_messages(
+        &self,
+        conversation_id: &str,
+        root_id: &str,
+    ) -> Result<Vec<MessageRecord>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages
+             WHERE conversation_id = ?1 AND (message_id = ?2 OR reply_to_id = ?2)
+             ORDER BY created_at ASC, message_id ASC"
+        ))?;
+        let messages = statement
+            .query_map(params![conversation_id, root_id], message_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(messages)
     }
 
@@ -229,5 +249,6 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         mentions_json: row.get(11)?,
         sender_application_id: row.get(12)?,
         links_json: row.get(13)?,
+        subject: row.get(14)?,
     })
 }

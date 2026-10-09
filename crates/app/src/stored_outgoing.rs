@@ -49,6 +49,8 @@ struct StoredPreview {
 #[derive(Serialize, Deserialize)]
 struct Payload {
     lines: Vec<DraftLine>,
+    #[serde(default)]
+    subject: Option<String>,
     mentions: Vec<MentionInput>,
     reply: Option<ReplyPreview>,
     files: Vec<OutgoingFile>,
@@ -92,6 +94,7 @@ pub fn encode(outgoing: &Outgoing) -> Option<StoredOutgoing> {
     }
     let payload = serde_json::to_string(&Payload {
         lines: outgoing.draft.to_lines(),
+        subject: outgoing.subject.clone(),
         mentions: outgoing.mentions.clone(),
         reply: outgoing.reply.clone(),
         files: outgoing.files.clone(),
@@ -133,6 +136,7 @@ fn remote_image(kind: RemoteKind, stored: StoredRemote) -> OutgoingImage {
 pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
     let Payload {
         lines,
+        subject,
         mentions,
         reply,
         files,
@@ -150,6 +154,7 @@ pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
         .collect();
     Some(Outgoing {
         draft: Draft::from_lines(&lines),
+        subject,
         mentions,
         reply,
         edit: None,
@@ -178,6 +183,7 @@ mod tests {
         draft.take_edits();
         Outgoing {
             draft,
+            subject: Some("Release plan".to_owned()),
             mentions: vec![MentionInput::user("user-1", "Ada Lovelace")],
             reply: Some(ReplyPreview {
                 message_id: "message-1".to_owned(),
@@ -229,6 +235,7 @@ mod tests {
         assert_eq!(restored.draft.text(), original.draft.text());
         assert_eq!(restored.draft.to_html(), original.draft.to_html());
         assert!(restored.draft.to_html().contains("<b>"));
+        assert_eq!(restored.subject, original.subject);
         assert_eq!(restored.mentions, original.mentions);
         assert_eq!(restored.reply, original.reply);
         assert_eq!(restored.images, original.images);

@@ -10,10 +10,12 @@ use super::{ConversationView, HoverSlot, ViewMode};
 use crate::backend::Engine;
 use crate::notice::{short_error, truncated};
 use crate::outbox::{deliver, new_outbox_id, outbox_record};
-use crate::rows::{MessageRow, Row};
+use crate::rows::MessageRow;
 use crate::runtime;
 use crate::scheduled::{conversation_of, thread_root_of};
-use crate::scheduled_rows::{draft_id_of, draft_key, scheduled_outgoing, scheduled_rows};
+use crate::scheduled_rows::{
+    draft_id_of, draft_key, scheduled_feed_rows, scheduled_outgoing, scheduled_rows,
+};
 use crate::views::composer::{EditPreview, Outgoing};
 use crate::views::message_actions::{Action, HoverChange};
 use crate::views::message_row::{DeliveryActions, RowAction};
@@ -61,7 +63,7 @@ impl ConversationView {
         })
     }
 
-    pub(super) fn scheduled_rows(&self, my_user_id: Option<&str>, cx: &App) -> Vec<Row> {
+    pub(super) fn scheduled_rows(&self, my_user_id: Option<&str>, cx: &App) -> Vec<MessageRow> {
         let (Some(inner_thread_id), Some(conversation_id)) =
             (self.scheduled_thread_id(), self.conversation_id())
         else {
@@ -71,17 +73,24 @@ impl ConversationView {
             .scheduled_failure
             .as_ref()
             .map(|failure| failure.draft_id.as_str());
+        let drafts = &self.app.read(cx).scheduled;
+        if self.in_feed() {
+            return scheduled_feed_rows(
+                drafts,
+                &conversation_id,
+                my_user_id,
+                Utc::now(),
+                change_failed,
+            );
+        }
         scheduled_rows(
-            &self.app.read(cx).scheduled,
+            drafts,
             &inner_thread_id,
             &conversation_id,
             my_user_id,
             Utc::now(),
             change_failed,
         )
-        .into_iter()
-        .map(|row| Row::Message(Box::new(row)))
-        .collect()
     }
 
     fn scheduled_draft(&self, draft_id: &str, cx: &App) -> Option<ScheduledDraft> {
@@ -115,6 +124,13 @@ impl ConversationView {
         else {
             return;
         };
+        if self.in_feed() && self.has_subject(cx) {
+            self.notice = Some("Can't schedule a post with a subject yet".to_owned());
+            self.composer
+                .update(cx, |composer, cx| composer.fail_schedule(cx));
+            cx.notify();
+            return;
+        }
         let html = outgoing.html();
         if self.app.read(cx).mode.demo {
             let draft = demo_draft(&inner_thread_id, &html, send_at);
@@ -164,9 +180,14 @@ impl ConversationView {
         self.composer.update(cx, |composer, cx| {
             composer.finish_schedule(conversation_id, window, cx)
         });
+        if self.in_feed() {
+            self.close_new_post(cx);
+        }
         self.rebuild(false, cx);
-        self.scroller
-            .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
+        if !self.in_feed() {
+            self.scroller
+                .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
+        }
     }
 
     fn fail_scheduling(&mut self, error: &str, cx: &mut Context<Self>) {
@@ -201,6 +222,7 @@ impl ConversationView {
             excerpt,
             scheduled: Some(draft.send_at),
         });
+        self.show_main_composer(cx);
         self.composer
             .update(cx, |composer, cx| composer.begin_edit(outgoing, window, cx));
     }

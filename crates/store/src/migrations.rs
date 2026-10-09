@@ -57,6 +57,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0012_outbox_drafts.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0013_message_subject.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

@@ -65,7 +65,44 @@ fn message(conversation_id: &str, message_id: &str, minute: u32) -> MessageRecor
         mentions_json: "[]".to_owned(),
         sender_application_id: None,
         links_json: "[]".to_owned(),
+        subject: None,
     }
+}
+
+#[test]
+fn subject_round_trips_and_survives_an_upsert_without_one() {
+    let store = Store::open_in_memory().unwrap();
+    let post = MessageRecord {
+        subject: Some("Release plan".to_owned()),
+        ..message("c1", "m1", 1)
+    };
+    store.upsert_messages(std::slice::from_ref(&post)).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"], post);
+
+    store.upsert_messages(&[message("c1", "m1", 1)]).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"].subject.as_deref(), Some("Release plan"));
+}
+
+#[test]
+fn thread_messages_return_root_and_replies_oldest_first_beyond_any_page() {
+    let store = Store::open_in_memory().unwrap();
+    let reply = |id: &str, minute: u32, root: &str| MessageRecord {
+        reply_to_id: Some(root.to_owned()),
+        ..message("c1", id, minute)
+    };
+    store
+        .upsert_messages(&[
+            reply("r2", 30, "root"),
+            message("c1", "root", 1),
+            message("c1", "other", 2),
+            reply("r1", 10, "root"),
+            reply("o1", 11, "other"),
+        ])
+        .unwrap();
+    let thread = store.thread_messages("c1", "root").unwrap();
+    assert_eq!(ids(&thread), ["root", "r1", "r2"]);
 }
 
 #[test]
@@ -430,11 +467,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 12);
+    assert_eq!(reopened.schema_version().unwrap(), 13);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -466,7 +503,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 12);
+    assert_eq!(store.schema_version().unwrap(), 13);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -532,7 +569,33 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 12);
+    assert_eq!(store.schema_version().unwrap(), 13);
+}
+
+#[test]
+fn migration_to_v13_clears_channel_delta_links_only() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        drop(store);
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO teams (id, name) VALUES ('t', 'T');
+                 INSERT INTO channels (id, team_id, name) VALUES ('ch', 't', 'C');
+                 INSERT INTO sync_state (conversation_id, delta_link) VALUES ('ch', 'link'), ('chat', 'link');
+                 ALTER TABLE messages DROP COLUMN subject;
+                 PRAGMA user_version = 12",
+            )
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.sync_state("ch").unwrap().unwrap().delta_link, None);
+    assert_eq!(
+        store.sync_state("chat").unwrap().unwrap().delta_link.as_deref(),
+        Some("link")
+    );
 }
 
 #[test]
@@ -766,6 +829,7 @@ fn migration_indexes_rows_that_predate_search() {
                  DROP INDEX messages_by_sender; DROP INDEX chat_members_by_user;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
                  ALTER TABLE messages DROP COLUMN links_json;
+                 ALTER TABLE messages DROP COLUMN subject;
                  ALTER TABLE chats DROP COLUMN muted;
                  PRAGMA user_version = 3;",
             )

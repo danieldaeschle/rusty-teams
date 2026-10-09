@@ -8,7 +8,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::{ChannelRecord, SidebarTeam, TeamRecord};
+use store::{ChannelRecord, SidebarTeam, Store, TeamRecord};
 
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::widgets::{count_badge, dot, icon, symbol, unread_marker};
@@ -24,6 +24,7 @@ use crate::sidebar_model::{
 };
 use crate::theme;
 
+const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
 pub const SIDEBAR_WIDTH: f32 = 312.;
 const ROW_HEIGHT: f32 = 54.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;
@@ -257,7 +258,7 @@ fn confirm_leave(
 pub struct SidebarView {
     state: Entity<AppState>,
     tab: SidebarTab,
-    expanded_teams: HashSet<String>,
+    collapsed_teams: HashSet<String>,
     revealed_channel_teams: HashSet<String>,
     hidden_teams_open: bool,
     chats_scroll: ScrollHandle,
@@ -316,8 +317,11 @@ fn local_preview_row(preview: &LocalPreview, color: Hsla) -> Div {
 impl SidebarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
-            if matches!(event, AppEvent::Selection) && state.read(cx).new_chat {
-                this.tab = SidebarTab::Chats;
+            if matches!(event, AppEvent::Selection) {
+                if state.read(cx).new_chat {
+                    this.tab = SidebarTab::Chats;
+                }
+                this.expand_team_of_selection(cx);
             }
             if matches!(
                 event,
@@ -335,15 +339,39 @@ impl SidebarView {
         } else {
             SidebarTab::Chats
         };
+        let collapsed_teams = load_collapsed_teams(&state.read(cx).store);
         SidebarView {
             state,
             tab,
-            expanded_teams: HashSet::new(),
+            collapsed_teams,
             revealed_channel_teams: HashSet::new(),
             hidden_teams_open: false,
             chats_scroll: ScrollHandle::new(),
             channels_scroll: ScrollHandle::new(),
             _subscription: subscription,
+        }
+    }
+
+    fn expand_team_of_selection(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        let Some(Selection::Channel(channel_id)) = state.selection.clone() else {
+            return;
+        };
+        let team_id = state
+            .sidebar
+            .teams
+            .iter()
+            .find(|entry| {
+                entry
+                    .channels
+                    .iter()
+                    .any(|channel| channel.id == channel_id)
+            })
+            .map(|entry| entry.team.id.clone());
+        if let Some(team_id) = team_id
+            && self.collapsed_teams.remove(&team_id)
+        {
+            save_collapsed_teams(&self.state.read(cx).store, &self.collapsed_teams);
         }
     }
 
@@ -935,7 +963,7 @@ impl SidebarView {
     ) -> Div {
         let followed = self.state.read(cx).followed_channels.clone();
         let team_id = entry.team.id.clone();
-        let expanded = team_holds(entry, selected) || self.expanded_teams.contains(&team_id);
+        let expanded = team_expanded(&team_id, &self.collapsed_teams);
         let unread = entry.channels.iter().any(|channel| channel.unread);
         let toggle_id = team_id.clone();
         list = list.child(
@@ -975,9 +1003,10 @@ impl SidebarView {
                 )
                 .when(unread && !expanded, |row| row.child(dot(7.)))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.expanded_teams.remove(&toggle_id) {
-                        this.expanded_teams.insert(toggle_id.clone());
+                    if !this.collapsed_teams.remove(&toggle_id) {
+                        this.collapsed_teams.insert(toggle_id.clone());
                     }
+                    save_collapsed_teams(&this.state.read(cx).store, &this.collapsed_teams);
                     cx.notify();
                 })),
         );
@@ -1219,6 +1248,36 @@ fn follow_item(state: Entity<AppState>, channel_id: String, followed: bool) -> P
         })
 }
 
+fn team_expanded(team_id: &str, collapsed_teams: &HashSet<String>) -> bool {
+    !collapsed_teams.contains(team_id)
+}
+
+fn load_collapsed_teams(store: &Store) -> HashSet<String> {
+    store
+        .meta(COLLAPSED_TEAMS_META_KEY)
+        .ok()
+        .flatten()
+        .map(|value| parse_collapsed_teams(&value))
+        .unwrap_or_default()
+}
+
+fn save_collapsed_teams(store: &Store, collapsed_teams: &HashSet<String>) {
+    let _ = store.set_meta(
+        COLLAPSED_TEAMS_META_KEY,
+        &serialize_collapsed_teams(collapsed_teams),
+    );
+}
+
+fn serialize_collapsed_teams(collapsed_teams: &HashSet<String>) -> String {
+    let mut team_ids: Vec<&String> = collapsed_teams.iter().collect();
+    team_ids.sort_unstable();
+    serde_json::to_string(&team_ids).unwrap_or_default()
+}
+
+fn parse_collapsed_teams(value: &str) -> HashSet<String> {
+    serde_json::from_str(value).unwrap_or_default()
+}
+
 fn team_holds(entry: &SidebarTeam, selected: Option<&Selection>) -> bool {
     entry
         .channels
@@ -1282,7 +1341,32 @@ impl Render for SidebarView {
 
 #[cfg(test)]
 mod tests {
-    use super::leave_description;
+    use std::collections::HashSet;
+
+    use super::{
+        leave_description, parse_collapsed_teams, serialize_collapsed_teams, team_expanded,
+    };
+
+    #[test]
+    fn teams_start_expanded() {
+        assert!(team_expanded("t1", &HashSet::new()));
+    }
+
+    #[test]
+    fn collapsed_team_stays_closed() {
+        let collapsed = HashSet::from(["t1".to_owned()]);
+        assert!(!team_expanded("t1", &collapsed));
+        assert!(team_expanded("t2", &collapsed));
+    }
+
+    #[test]
+    fn collapsed_teams_round_trip_as_json() {
+        let collapsed = HashSet::from(["b".to_owned(), "a".to_owned()]);
+        let json = serialize_collapsed_teams(&collapsed);
+        assert_eq!(json, r#"["a","b"]"#);
+        assert_eq!(parse_collapsed_teams(&json), collapsed);
+        assert!(parse_collapsed_teams("garbage").is_empty());
+    }
 
     #[test]
     fn leave_text_counts_the_other_members() {

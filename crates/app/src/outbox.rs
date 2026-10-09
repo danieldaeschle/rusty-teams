@@ -74,7 +74,13 @@ pub async fn deliver(
         }
         (OutboxTarget::Post, None) => {
             engine
-                .post_to_channel_with_extras(conversation_id, &html, None, mentions, &extras)
+                .post_to_channel_with_extras(
+                    conversation_id,
+                    &html,
+                    outgoing.subject.as_deref(),
+                    mentions,
+                    &extras,
+                )
                 .await
         }
         (OutboxTarget::Thread, None) => {

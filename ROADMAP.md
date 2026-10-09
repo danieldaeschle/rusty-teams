@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 72 %** (60 done, 3 partial, 22 missing of 85). Partial counts half.
+**Parity: 74 %** (63 done, 2 partial, 21 missing of 86). Partial counts half.
 
 ## By area
 
@@ -13,9 +13,9 @@ Feature parity with the Microsoft Teams desktop client.
 | [Reading](#reading) | 87 % | 16 | 1 | 2 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
-| [Channels](#channels) | 36 % | 2 | 1 | 4 |
+| [Channels](#channels) | 57 % | 4 | 0 | 3 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
-| [Search and navigation](#search-and-navigation) | 75 % | 3 | 0 | 1 |
+| [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
 | [Calls and meetings](#calls-and-meetings) | 0 % | 0 | 0 | 5 |
@@ -24,9 +24,8 @@ Feature parity with the Microsoft Teams desktop client.
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | Channel: new post with subject, post cards |  |
-| 2 | Sign in on Linux without Chrome on a debug port |  |
-| 3 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 1 | Sign in on Linux without Chrome on a debug port |  |
+| 2 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
 
 ## Sign-in and app
 
@@ -111,9 +110,9 @@ Feature parity with the Microsoft Teams desktop client.
 | Feature | State | Note |
 |---|---|---|
 | Teams and channels tree | Done |  |
-| Thread list, open a thread, reply | Done |  |
-| New post with subject | Partial | Backend takes a subject, UI sends none |
-| Post cards like Teams | Missing |  |
+| Posts feed, open a conversation, reply | Done | Newest activity on top, inline reply in the card |
+| New post with subject | Done | Subject is stored with the message |
+| Post cards like Teams | Done | One card per post: root and the last 3 replies |
 | Follow a channel, per-channel notifications | Missing |  |
 | Channel tabs: tab bar, website and app tabs | Missing | Plan: each tab's Teams Web page in a WebView2 |
 | Files tab | Missing | Plan: native, the channel's SharePoint folder via Graph |
@@ -138,7 +137,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Ctrl+K switcher over chats, channels, people | Done |  |
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
-| Keyboard: Ctrl+1..9, Alt+Up/Down, Esc closes thread | Missing |  |
+| Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
+| Keyboard: Ctrl+1..9, Alt+Up/Down | Missing |  |
 
 ## Presence and people
 

@@ -265,6 +265,7 @@ mod tests {
 
     fn record(conversation: &str, sender: &str, at: DateTime<Utc>, html: &str) -> MessageRecord {
         MessageRecord {
+            subject: None,
             conversation_id: conversation.into(),
             message_id: format!("{conversation}-{}", at.timestamp_millis()),
             reply_to_id: None,

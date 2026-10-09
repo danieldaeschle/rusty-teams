@@ -4,6 +4,7 @@ use teams_core::{Draft, ScheduledDraft, html_to_spans};
 use crate::pending_rows::pending_row;
 use crate::rows::{Delivery, MessageRow, ScheduledState};
 use crate::schedule_time::describe;
+use crate::scheduled::{conversation_of, thread_root_of};
 use crate::views::composer::Outgoing;
 
 pub const SCHEDULED_KEY_PREFIX: &str = "scheduled-";
@@ -27,6 +28,7 @@ pub fn draft_id_of(key: &str) -> Option<&str> {
 pub fn scheduled_outgoing(html: &str) -> Outgoing {
     Outgoing {
         draft: Draft::from_spans(&html_to_spans(html)).trimmed(),
+        subject: None,
         mentions: Vec::new(),
         reply: None,
         edit: None,
@@ -52,9 +54,44 @@ pub fn scheduled_rows(
     now: DateTime<Utc>,
     change_failed: Option<&str>,
 ) -> Vec<MessageRow> {
+    rows_where(
+        drafts,
+        |draft| draft.inner_thread_id == inner_thread_id,
+        conversation_id,
+        my_user_id,
+        now,
+        change_failed,
+    )
+}
+
+pub fn scheduled_feed_rows(
+    drafts: &[ScheduledDraft],
+    conversation_id: &str,
+    my_user_id: Option<&str>,
+    now: DateTime<Utc>,
+    change_failed: Option<&str>,
+) -> Vec<MessageRow> {
+    rows_where(
+        drafts,
+        |draft| conversation_of(&draft.inner_thread_id) == conversation_id,
+        conversation_id,
+        my_user_id,
+        now,
+        change_failed,
+    )
+}
+
+fn rows_where(
+    drafts: &[ScheduledDraft],
+    keep: impl Fn(&ScheduledDraft) -> bool,
+    conversation_id: &str,
+    my_user_id: Option<&str>,
+    now: DateTime<Utc>,
+    change_failed: Option<&str>,
+) -> Vec<MessageRow> {
     let mut shown: Vec<&ScheduledDraft> = drafts
         .iter()
-        .filter(|draft| draft.inner_thread_id == inner_thread_id && is_visible(draft, now))
+        .filter(|draft| keep(draft) && is_visible(draft, now))
         .collect();
     shown.sort_by_key(|draft| draft.send_at);
     shown
@@ -76,6 +113,7 @@ pub fn scheduled_rows(
                 Delivery::Scheduled(state),
             );
             row.time = format!("Scheduled {}", scheduled_label(draft.send_at, now));
+            row.reply_root = thread_root_of(&draft.inner_thread_id).map(str::to_owned);
             row
         })
         .collect()
@@ -121,6 +159,24 @@ mod tests {
         assert_eq!(keys, ["scheduled-soon", "scheduled-late"]);
         let replies = rows(&drafts, "chan;messageid=m1", None);
         assert_eq!(replies.len(), 1);
+    }
+
+    #[test]
+    fn feed_rows_cover_posts_and_replies_of_the_channel_only() {
+        let drafts = [
+            draft("post", "chan", 60, false),
+            draft("reply", "chan;messageid=m1", 30, false),
+            draft("elsewhere", "other;messageid=m1", 30, false),
+        ];
+        let shown = scheduled_feed_rows(&drafts, "chan", Some("me"), now(), None);
+        let roots: Vec<_> = shown
+            .iter()
+            .map(|row| (row.key.as_str(), row.reply_root.as_deref()))
+            .collect();
+        assert_eq!(
+            roots,
+            [("scheduled-reply", Some("m1")), ("scheduled-post", None)]
+        );
     }
 
     #[test]

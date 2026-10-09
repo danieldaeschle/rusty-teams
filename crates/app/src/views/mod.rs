@@ -15,6 +15,7 @@ pub mod fun_picker;
 pub mod message_actions;
 pub mod message_row;
 pub mod new_chat;
+pub mod post_card;
 pub mod reaction_picker;
 pub mod reaction_pills;
 pub mod scheduled_toolbar;

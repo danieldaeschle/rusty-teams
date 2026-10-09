@@ -78,6 +78,7 @@ struct Fake {
     team_calls: Mutex<usize>,
     calls: Mutex<Vec<String>>,
     delta_items: Mutex<Vec<Message>>,
+    thread_replies: Mutex<Vec<Message>>,
     delta_fails: Mutex<bool>,
     photos: Mutex<HashMap<String, Vec<u8>>>,
     photo_requests: Mutex<Vec<Vec<String>>>,
@@ -342,7 +343,17 @@ impl Remote for Handle {
         _channel_id: &str,
         root_ids: &[String],
     ) -> Result<Vec<Result<Vec<Message>>>> {
-        Ok(root_ids.iter().map(|_| Ok(Vec::new())).collect())
+        let replies = self.thread_replies.lock().unwrap().clone();
+        Ok(root_ids
+            .iter()
+            .map(|root_id| {
+                Ok(replies
+                    .iter()
+                    .filter(|reply| reply.reply_to_id.as_deref() == Some(root_id.as_str()))
+                    .cloned()
+                    .collect())
+            })
+            .collect())
     }
 
     async fn send_chat_message(
@@ -1236,6 +1247,30 @@ async fn channel_engine(fake: &Arc<Fake>) -> SyncEngine<Handle> {
     let engine = engine_with(fake, small_pages());
     engine.refresh_sidebar().await.unwrap();
     engine
+}
+
+#[tokio::test]
+async fn refreshing_a_thread_stores_every_reply_of_that_root() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.fetch_newer(CHANNEL).await.unwrap();
+    let root_id = engine.open_conversation(CHANNEL).unwrap()[0]
+        .message_id
+        .clone();
+    let reply = |id: u32, minute: i64, root: &str| -> Message {
+        let mut reply = message(id, minute, &format!("<p>reply {id}</p>"));
+        reply.reply_to_id = Some(root.to_owned());
+        reply
+    };
+    *fake.thread_replies.lock().unwrap() = vec![
+        reply(7001, 90, &root_id),
+        reply(7002, 91, &root_id),
+        reply(7003, 92, "other-root"),
+    ];
+    let delta = engine.refresh_thread(CHANNEL, &root_id).await.unwrap();
+    assert_eq!(delta.added.len(), 2);
+    let thread = engine.store().thread_messages(CHANNEL, &root_id).unwrap();
+    assert_eq!(thread.len(), 4);
 }
 
 #[tokio::test]

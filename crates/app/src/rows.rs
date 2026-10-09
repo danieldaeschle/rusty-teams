@@ -15,9 +15,8 @@ use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
 use crate::render::blocks::{Inline, strip_image_placeholders};
 use crate::render::{Block, layout_blocks};
-use crate::sidebar_model::Face;
 
-const REPLY_FACE_LIMIT: usize = 3;
+const POST_VISIBLE_REPLIES: usize = 3;
 
 pub const LOAD_OLDER_KEY: &str = "load-older";
 const UNKNOWN_AUTHOR: &str = "Unknown";
@@ -127,7 +126,6 @@ pub struct MessageRow {
     pub application_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub series: Series,
-    pub card: bool,
     pub time: String,
     pub day_header: Option<String>,
     pub blocks: Vec<Block>,
@@ -139,12 +137,9 @@ pub struct MessageRow {
     pub files: Vec<FileCard>,
     pub link_preview: Option<LinkPreview>,
     pub adaptive_cards: Vec<AdaptiveCard>,
-    pub reply_count: Option<usize>,
+    pub subject: Option<String>,
     pub new_marker: bool,
-    pub reply_faces: Vec<Face>,
-    pub last_reply_time: Option<String>,
-    pub open_thread: Option<String>,
-    pub is_reply: bool,
+    pub reply_root: Option<String>,
     pub delivery: Delivery,
     pub own: bool,
     pub receipt: Receipt,
@@ -164,6 +159,7 @@ pub enum Row {
     Start(StartInfo),
     Skeleton(Skeleton),
     Message(Box<MessageRow>),
+    Post(Box<PostRow>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -213,9 +209,7 @@ fn sender_key(row: &MessageRow) -> &str {
 }
 
 fn continues_series(previous: &MessageRow, next: &MessageRow) -> bool {
-    !previous.card
-        && !next.card
-        && next.day_header.is_none()
+    next.day_header.is_none()
         && !next.new_marker
         && sender_key(previous) == sender_key(next)
         && next.created_at - previous.created_at < Duration::minutes(SERIES_GAP_MINUTES)
@@ -254,8 +248,67 @@ impl Row {
             Row::Start(_) => START_KEY,
             Row::Skeleton(skeleton) => skeleton.key,
             Row::Message(message) => &message.key,
+            Row::Post(post) => &post.root.key,
         }
     }
+
+    pub fn messages(&self) -> Box<dyn Iterator<Item = &MessageRow> + '_> {
+        match self {
+            Row::Message(message) => Box::new(std::iter::once(message.as_ref())),
+            Row::Post(post) => Box::new(post.messages()),
+            Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => Box::new(std::iter::empty()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PostRow {
+    pub root: MessageRow,
+    pub replies: Vec<MessageRow>,
+    pub hidden_reply_count: usize,
+    pub hidden_repliers: Vec<String>,
+}
+
+impl PostRow {
+    pub fn local(root: MessageRow) -> Self {
+        PostRow {
+            root,
+            replies: Vec::new(),
+            hidden_reply_count: 0,
+            hidden_repliers: Vec::new(),
+        }
+    }
+
+    pub fn messages(&self) -> impl Iterator<Item = &MessageRow> {
+        std::iter::once(&self.root).chain(&self.replies)
+    }
+
+    pub fn hidden_replies_label(&self) -> Option<String> {
+        (self.hidden_reply_count > 0)
+            .then(|| replies_label(self.hidden_reply_count, &self.hidden_repliers))
+    }
+}
+
+fn first_name(name: &str) -> &str {
+    name.split_whitespace().next().unwrap_or(name)
+}
+
+pub fn replies_label(count: usize, repliers: &[String]) -> String {
+    let noun = if count == 1 { "reply" } else { "replies" };
+    let mut names: Vec<&str> = Vec::new();
+    for name in repliers.iter().map(|name| first_name(name)) {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let people = match names.as_slice() {
+        [] => return format!("{count} {noun}"),
+        [only] => (*only).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        [first, second, third] => format!("{first}, {second} and {third}"),
+        [first, second, rest @ ..] => format!("{first}, {second} and {} others", rest.len()),
+    };
+    format!("{count} {noun} from {people}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -488,7 +541,6 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         application_id: record.sender_application_id.clone(),
         created_at: record.created_at,
         series: Series::default(),
-        card: false,
         author: record
             .sender_name
             .clone()
@@ -507,12 +559,9 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
             Some(replaced) if replaced.basis == record.attachments_json => replaced.cards.clone(),
             _ => adaptive_cards(record),
         },
-        reply_count: None,
+        subject: record.subject.clone(),
         new_marker: false,
-        reply_faces: Vec::new(),
-        last_reply_time: None,
-        open_thread: None,
-        is_reply: record.reply_to_id.is_some(),
+        reply_root: record.reply_to_id.clone(),
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
         own: context.my_user_id.is_some() && record.sender_id == context.my_user_id,
@@ -573,6 +622,45 @@ fn last_activity(thread: &Thread, by_id: &BTreeMap<&str, &MessageRecord>) -> Dat
         .unwrap_or_default()
 }
 
+fn post_message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
+    let mut row = message_row(record, context);
+    row.day_header = None;
+    row.time = format::post_time_label(record.created_at, context.today, context.offset);
+    row
+}
+
+fn distinct_names<'a>(records: impl Iterator<Item = &'a MessageRecord>) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for record in records {
+        let name = record
+            .sender_name
+            .clone()
+            .unwrap_or_else(|| UNKNOWN_AUTHOR.to_owned());
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+fn post_row(
+    root: &MessageRecord,
+    mut replies: Vec<&MessageRecord>,
+    context: &RowContext,
+) -> PostRow {
+    replies.sort_by_key(|reply| reply.created_at);
+    let hidden = replies.len().saturating_sub(POST_VISIBLE_REPLIES);
+    PostRow {
+        root: post_message_row(root, context),
+        hidden_reply_count: hidden,
+        hidden_repliers: distinct_names(replies[..hidden].iter().copied()),
+        replies: replies[hidden..]
+            .iter()
+            .map(|reply| post_message_row(reply, context))
+            .collect(),
+    }
+}
+
 pub fn thread_list_rows(
     records: &[MessageRecord],
     context: &RowContext,
@@ -583,58 +671,42 @@ pub fn thread_list_rows(
         .map(|record| (record.message_id.as_str(), record))
         .collect();
     let mut threads = group_threads(records);
-    threads.sort_by_key(|thread| last_activity(thread, &by_id));
-    let mut rows = Vec::with_capacity(threads.len() + 1);
+    threads.sort_by_key(|thread| std::cmp::Reverse(last_activity(thread, &by_id)));
+    let mut rows: Vec<Row> = threads
+        .iter()
+        .filter_map(|thread| {
+            let root = by_id.get(thread.root_id.as_str())?;
+            let replies = thread
+                .reply_ids
+                .iter()
+                .filter_map(|id| by_id.get(id.as_str()).copied())
+                .collect();
+            Some(Row::Post(Box::new(post_row(root, replies, context))))
+        })
+        .collect();
     if has_older {
         rows.push(Row::LoadOlder);
     }
-    let mut previous_day: Option<NaiveDate> = None;
-    for thread in threads {
-        let Some(root) = by_id.get(thread.root_id.as_str()) else {
+    rows
+}
+
+pub fn place_local_rows(rows: &mut Vec<Row>, local: Vec<MessageRow>) {
+    for message in local {
+        let Some(root_id) = message.reply_root.clone() else {
+            rows.insert(0, Row::Post(Box::new(PostRow::local(message))));
             continue;
         };
-        let mut row = message_row(root, context);
-        let day = last_activity(&thread, &by_id)
-            .with_timezone(&context.offset)
-            .date_naive();
-        row.day_header = (previous_day != Some(day)).then(|| format::day_label(day, context.today));
-        previous_day = Some(day);
-        row.card = true;
-        row.time = format::post_time_label(root.created_at, context.today, context.offset);
-        row.reply_count = Some(thread.reply_ids.len());
-        let replies: Vec<&&MessageRecord> = thread
-            .reply_ids
+        let position = rows
             .iter()
-            .filter_map(|id| by_id.get(id.as_str()))
-            .collect();
-        for reply in &replies {
-            let face = Face {
-                user_id: reply.sender_id.clone(),
-                name: reply
-                    .sender_name
-                    .clone()
-                    .unwrap_or_else(|| UNKNOWN_AUTHOR.to_owned()),
-            };
-            if row.reply_faces.len() < REPLY_FACE_LIMIT && !row.reply_faces.contains(&face) {
-                row.reply_faces.push(face);
+            .position(|row| matches!(row, Row::Post(post) if post.root.key == root_id));
+        if let Some(position) = position {
+            let mut row = rows.remove(position);
+            if let Row::Post(post) = &mut row {
+                post.replies.push(message);
             }
+            rows.insert(0, row);
         }
-        row.last_reply_time = replies
-            .iter()
-            .map(|reply| reply.created_at)
-            .max()
-            .map(|time| {
-                let local = time.with_timezone(&context.offset);
-                format!(
-                    "{} {}",
-                    format::day_label(local.date_naive(), context.today),
-                    clock_label(time, context.offset)
-                )
-            });
-        row.open_thread = Some(thread.root_id.clone());
-        rows.push(Row::Message(Box::new(row)));
     }
-    rows
 }
 
 pub fn thread_rows(records: &[MessageRecord], root_id: &str, context: &RowContext) -> Vec<Row> {
@@ -720,6 +792,7 @@ mod tests {
             attachments_json: "[]".into(),
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
+            subject: None,
         }
     }
 
@@ -860,7 +933,7 @@ mod tests {
             .iter()
             .map(|row| match row {
                 Row::Message(message) => message.day_header.clone(),
-                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => None,
+                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) | Row::Post(_) => None,
             })
             .collect();
         assert_eq!(
@@ -894,20 +967,152 @@ mod tests {
         assert!(threads[1].reply_ids.is_empty());
     }
 
+    fn post_of(row: &Row) -> &PostRow {
+        let Row::Post(post) = row else {
+            panic!("post expected")
+        };
+        post
+    }
+
+    fn reply_by(id: &str, root: &str, sender: &str, hour: u32) -> MessageRecord {
+        let mut reply = record(id, Some(root), hour, 6);
+        reply.sender_name = Some(sender.into());
+        reply
+    }
+
     #[test]
-    fn thread_list_orders_by_last_activity_with_reply_count() {
+    fn feed_orders_posts_by_last_activity_newest_first() {
         let records = vec![
             record("r1", None, 8, 6),
             record("r2", None, 9, 6),
-            record("x1", Some("r1"), 10, 6),
+            record("r3", None, 10, 6),
+            record("x1", Some("r1"), 11, 6),
         ];
         let rows = thread_list_rows(&records, &context(), false);
-        assert_eq!(keys(&rows), vec!["r2", "r1"]);
-        let Row::Message(last) = &rows[1] else {
-            panic!("message expected")
-        };
-        assert_eq!(last.reply_count, Some(1));
-        assert_eq!(last.open_thread.as_deref(), Some("r1"));
+        assert_eq!(keys(&rows), vec!["r1", "r3", "r2"]);
+    }
+
+    #[test]
+    fn feed_puts_load_older_at_the_bottom() {
+        let records = vec![record("r1", None, 8, 6), record("r2", None, 9, 6)];
+        let rows = thread_list_rows(&records, &context(), true);
+        assert_eq!(keys(&rows), vec!["r2", "r1", LOAD_OLDER_KEY]);
+    }
+
+    #[test]
+    fn post_shows_the_last_three_replies_oldest_first() {
+        let mut records = vec![record("r1", None, 1, 6)];
+        for hour in 2..=6 {
+            records.push(reply_by(&format!("x{hour}"), "r1", "Ada Lovelace", hour));
+        }
+        records.reverse();
+        let rows = thread_list_rows(&records, &context(), false);
+        let post = post_of(&rows[0]);
+        let shown: Vec<&str> = post
+            .replies
+            .iter()
+            .map(|reply| reply.key.as_str())
+            .collect();
+        assert_eq!(shown, vec!["x4", "x5", "x6"]);
+        assert_eq!(post.hidden_reply_count, 2);
+        assert_eq!(post.hidden_repliers, vec!["Ada Lovelace"]);
+    }
+
+    #[test]
+    fn post_without_hidden_replies_has_no_link() {
+        let records = vec![
+            record("r1", None, 1, 6),
+            reply_by("x1", "r1", "Ada", 2),
+            reply_by("x2", "r1", "Ben", 3),
+            reply_by("x3", "r1", "Cy", 4),
+        ];
+        let rows = thread_list_rows(&records, &context(), false);
+        assert_eq!(post_of(&rows[0]).hidden_replies_label(), None);
+        assert_eq!(post_of(&rows[0]).replies.len(), 3);
+    }
+
+    fn label_for(repliers: &[&str]) -> String {
+        let mut records = vec![record("r1", None, 1, 6)];
+        for (index, name) in repliers.iter().enumerate() {
+            records.push(reply_by(&format!("h{index}"), "r1", name, 2 + index as u32));
+        }
+        for index in 0..POST_VISIBLE_REPLIES {
+            records.push(reply_by(
+                &format!("v{index}"),
+                "r1",
+                "Shown",
+                20 + index as u32,
+            ));
+        }
+        let rows = thread_list_rows(&records, &context(), false);
+        post_of(&rows[0]).hidden_replies_label().unwrap()
+    }
+
+    #[test]
+    fn replies_label_names_one_to_three_people() {
+        assert_eq!(label_for(&["Anna Meier"]), "1 reply from Anna");
+        assert_eq!(
+            label_for(&["Anna Meier", "Anna Meier", "Ben Roth"]),
+            "3 replies from Anna and Ben"
+        );
+        assert_eq!(
+            label_for(&["Anna Meier", "Ben Roth", "Clara Voss", "Ben Roth"]),
+            "4 replies from Anna, Ben and Clara"
+        );
+    }
+
+    #[test]
+    fn replies_label_counts_the_others_beyond_three_people() {
+        assert_eq!(
+            label_for(&["Anna Meier", "Ben Roth", "Clara Voss", "Dan Fox", "Eve Ray"]),
+            "5 replies from Anna, Ben and 3 others"
+        );
+        assert_eq!(
+            label_for(&["Anna Meier", "Ben Roth", "Clara Voss", "Dan Fox"]),
+            "4 replies from Anna, Ben and 2 others"
+        );
+    }
+
+    #[test]
+    fn local_reply_lands_in_its_post_and_local_post_on_top() {
+        let records = vec![
+            record("r1", None, 8, 6),
+            record("r2", None, 9, 6),
+            reply_by("x1", "r1", "Ada", 10),
+        ];
+        let mut rows = thread_list_rows(&records, &context(), true);
+        let mut pending_reply = message_row(&record("pending-1", Some("r2"), 12, 6), &context());
+        pending_reply.reply_root = Some("r2".into());
+        let pending_post = message_row(&record("pending-2", None, 12, 6), &context());
+        place_local_rows(&mut rows, vec![pending_reply, pending_post]);
+        assert_eq!(keys(&rows), vec!["pending-2", "r2", "r1", LOAD_OLDER_KEY]);
+        let replies: Vec<&str> = post_of(&rows[1])
+            .replies
+            .iter()
+            .map(|reply| reply.key.as_str())
+            .collect();
+        assert_eq!(replies, vec!["pending-1"]);
+    }
+
+    #[test]
+    fn local_reply_to_an_unloaded_post_is_not_shown() {
+        let mut rows = thread_list_rows(&[record("r1", None, 8, 6)], &context(), false);
+        let mut orphan = message_row(&record("pending-1", Some("gone"), 12, 6), &context());
+        orphan.reply_root = Some("gone".into());
+        place_local_rows(&mut rows, vec![orphan]);
+        assert_eq!(keys(&rows), vec!["r1"]);
+    }
+
+    #[test]
+    fn subject_reaches_the_post_root() {
+        let mut with_subject = record("r1", None, 8, 6);
+        with_subject.subject = Some("Release plan".into());
+        let rows = thread_list_rows(&[with_subject, record("r2", None, 7, 6)], &context(), false);
+        assert_eq!(
+            post_of(&rows[0]).root.subject.as_deref(),
+            Some("Release plan")
+        );
+        assert_eq!(post_of(&rows[1]).root.subject, None);
     }
 
     #[test]
@@ -989,7 +1194,7 @@ mod tests {
         rows.iter()
             .filter_map(|row| match row {
                 Row::Message(message) => Some((message.series.has_prev, message.series.has_next)),
-                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => None,
+                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) | Row::Post(_) => None,
             })
             .collect()
     }
@@ -1038,16 +1243,6 @@ mod tests {
             record_by("b", "ada", 0, 1, 7),
         ];
         let rows = flat_rows(&records, &context(), false);
-        assert_eq!(series_of(&rows), vec![(false, false), (false, false)]);
-    }
-
-    #[test]
-    fn thread_list_rows_never_join() {
-        let records = vec![
-            record_by("a", "ada", 9, 0, 7),
-            record_by("b", "ada", 9, 1, 7),
-        ];
-        let rows = thread_list_rows(&records, &context(), false);
         assert_eq!(series_of(&rows), vec![(false, false), (false, false)]);
     }
 

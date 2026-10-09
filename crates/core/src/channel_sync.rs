@@ -180,6 +180,27 @@ impl<R: Remote> SyncEngine<R> {
         Ok(records)
     }
 
+    pub(crate) async fn refresh_channel_thread(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        root_id: &str,
+    ) -> Result<Delta> {
+        let listings = self
+            .remote
+            .channel_replies(team_id, channel_id, &[root_id.to_owned()])
+            .await?;
+        let mut records = Vec::new();
+        for listing in listings {
+            records.extend(
+                listing?
+                    .iter()
+                    .filter_map(|reply| message_record(channel_id, reply)),
+            );
+        }
+        self.ingest(channel_id, records)
+    }
+
     pub(crate) async fn load_older_channel(
         &self,
         channel_id: &str,

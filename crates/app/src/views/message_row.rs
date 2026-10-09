@@ -1,4 +1,3 @@
-use gpui_kit::base::TextSelection;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -6,7 +5,7 @@ use std::time::Duration;
 
 use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, attachments_view, message_body};
-use super::avatar::{bot_avatar, member_stack, person_avatar};
+use super::avatar::{bot_avatar, person_avatar};
 use super::link_preview::link_preview_card;
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
@@ -25,11 +24,9 @@ pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 const AVATAR_SIZE: f32 = 28.;
 const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
-const BODY_SIZE: f32 = 13.5;
+pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
-const CARD_AVATAR_SIZE: f32 = 32.;
-const CARD_GAP: f32 = 12.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
@@ -44,7 +41,6 @@ pub struct DeliveryActions {
 
 pub struct RowActions {
     pub bot: Option<BotIdentity>,
-    pub open_thread: RowAction,
     pub delivery: DeliveryActions,
     pub reply: RowAction,
     pub hovered: Option<HoverChange>,
@@ -364,7 +360,7 @@ fn with_meta_room(blocks: &[Block], room: usize) -> Option<Vec<Block>> {
     Some(padded)
 }
 
-fn has_text(row: &MessageRow) -> bool {
+pub(super) fn has_text(row: &MessageRow) -> bool {
     !row.blocks.is_empty()
         || (row.images.is_empty()
             && row.local_images.is_empty()
@@ -384,7 +380,7 @@ fn delivery_link(index: usize, name: &str, label: &'static str, action: RowActio
         })
 }
 
-fn delivery_note(
+pub(super) fn delivery_note(
     row: &MessageRow,
     delivery: DeliveryActions,
     index: usize,
@@ -425,173 +421,6 @@ fn delivery_note(
     }
 }
 
-fn edited_marker() -> Div {
-    div()
-        .text_size(px(11.))
-        .italic()
-        .text_color(theme::text_muted())
-        .child("Edited")
-}
-
-fn post_card(
-    row: &MessageRow,
-    index: usize,
-    directory: &Directory,
-    files: Option<&FileActions>,
-    cx: &App,
-) -> Div {
-    let header = h_flex()
-        .gap(px(10.))
-        .items_center()
-        .child(person_avatar(
-            directory,
-            row.sender_id.as_deref(),
-            &row.author,
-            CARD_AVATAR_SIZE,
-        ))
-        .child(
-            v_flex()
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .child(row.author.clone()),
-                )
-                .child(
-                    h_flex()
-                        .gap(px(6.))
-                        .text_size(px(11.))
-                        .text_color(theme::text_muted())
-                        .child(row.time.clone())
-                        .when(row.edited, |line| line.child(edited_marker())),
-                ),
-        );
-    let count = row.reply_count.unwrap_or(0);
-    let footer = h_flex()
-        .gap(px(8.))
-        .items_center()
-        .pt(px(8.))
-        .border_t_1()
-        .border_color(theme::border())
-        .when(count > 0, |line| {
-            line.child(member_stack(
-                directory,
-                &row.reply_faces,
-                row.reply_faces.len(),
-            ))
-        })
-        .child(
-            div()
-                .text_size(px(12.5))
-                .font_weight(if count > 0 {
-                    FontWeight::SEMIBOLD
-                } else {
-                    FontWeight::NORMAL
-                })
-                .text_color(if count > 0 {
-                    theme::accent_text()
-                } else {
-                    theme::text_muted()
-                })
-                .child(match count {
-                    0 => "No replies".to_owned(),
-                    1 => "1 reply".to_owned(),
-                    count => format!("{count} replies"),
-                }),
-        )
-        .children(row.last_reply_time.as_ref().map(|time| {
-            div()
-                .text_size(px(11.5))
-                .text_color(theme::text_muted())
-                .child(format!("Last reply {time}"))
-        }))
-        .child(div().flex_1())
-        .child(
-            div()
-                .text_size(px(12.5))
-                .text_color(theme::text_soft())
-                .child("Reply"),
-        );
-    let mut body = v_flex().gap(px(8.)).child(header);
-    if row.deleted {
-        body = body.child(
-            div()
-                .text_size(px(13.))
-                .italic()
-                .text_color(theme::text_muted())
-                .child(DELETED_PREVIEW),
-        );
-    } else {
-        if has_text(row) {
-            body = body.child(
-                v_flex()
-                    .gap(px(6.))
-                    .text_size(px(BODY_SIZE))
-                    .line_height(relative(1.45))
-                    .text_color(theme::text_strong())
-                    .children(message_body(
-                        &row.blocks,
-                        &row.images,
-                        &row.local_images,
-                        &format!("message-{index}"),
-                        false,
-                        directory,
-                        cx,
-                    )),
-            );
-        }
-        body = body.children(attachments_view(
-            &row.blocks,
-            &row.images,
-            &row.local_images,
-            &row.files,
-            &format!("message-{index}"),
-            directory,
-            files,
-        ));
-        body = body.children(row.link_preview.as_ref().map(|preview| {
-            link_preview_card(
-                preview,
-                format!("message-{index}-link"),
-                directory,
-                false,
-                None,
-            )
-        }));
-        body = body.children(cards_view(
-            &row.adaptive_cards,
-            &row.conversation_id,
-            &row.key,
-            cx,
-        ));
-        if !row.reactions.is_empty() {
-            body = body.child(reaction_pills(
-                &row.reactions,
-                index,
-                false,
-                directory,
-                None,
-                None,
-            ));
-        }
-    }
-    v_flex()
-        .w_full()
-        .gap(px(8.))
-        .p(px(12.))
-        .rounded(px(10.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
-        .hover(|card| {
-            card.border_color(theme::border_strong())
-                .bg(theme::row_hover())
-        })
-        .child(body)
-        .child(footer)
-}
-
 fn others_row(
     row: &MessageRow,
     index: usize,
@@ -622,9 +451,9 @@ fn others_row(
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
     }
-    let lead = if let Some(bot) = bot.filter(|_| first || row.card) {
+    let lead = if let Some(bot) = bot.filter(|_| first) {
         bot_avatar(bot, AVATAR_SIZE)
-    } else if first || row.card {
+    } else if first {
         person_avatar(
             directory,
             row.sender_id.as_deref(),
@@ -671,7 +500,6 @@ pub fn render_message_row(
 ) -> AnyElement {
     let RowActions {
         bot,
-        open_thread,
         delivery,
         reply,
         hovered,
@@ -682,7 +510,6 @@ pub fn render_message_row(
         files,
         highlighted,
     } = actions;
-    let card_hover = hovered.clone().filter(|_| row.card);
     let extras = BubbleExtras {
         hover: hovered,
         menu,
@@ -691,10 +518,8 @@ pub fn render_message_row(
         controls: reaction_controls,
         files,
     };
-    let own = row.own && !row.card;
-    let spacing = if row.card {
-        px(CARD_GAP)
-    } else if row.series.has_prev {
+    let own = row.own;
+    let spacing = if row.series.has_prev {
         px(2.)
     } else {
         px(SERIES_START_GAP)
@@ -706,9 +531,7 @@ pub fn render_message_row(
     if row.new_marker {
         container = container.child(new_marker());
     }
-    let body = if row.card {
-        post_card(row, index, directory, extras.files.as_ref(), cx)
-    } else if own {
+    let body = if own {
         own_row(row, index, directory, delivery, extras, cx)
     } else {
         others_row(row, index, directory, bot.as_ref(), delivery, extras, cx)
@@ -719,16 +542,6 @@ pub fn render_message_row(
                 .id(ElementId::Name(format!("row-{index}").into()))
                 .w_full()
                 .pt(spacing)
-                .when_some(open_thread, |element, open| {
-                    element.cursor_pointer().on_click(move |_, window, cx| {
-                        if TextSelection::selected_text(window, cx).is_empty() {
-                            open(cx);
-                        }
-                    })
-                })
-                .when_some(card_hover, |element, hovered| {
-                    element.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
-                })
                 .when_some(reply, |element, reply| {
                     element.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))
                 })

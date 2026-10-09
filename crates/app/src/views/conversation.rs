@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::Escape,
+    input::{Escape, InputState},
     message_scroller::{MessageScroller, MessageScrollerState},
     tooltip::Tooltip,
     v_flex,
@@ -17,17 +17,19 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{MessageRecord, OutboxState, OutboxTarget};
-use teams_core::{FileCard, ImageRef, LinkPreview};
+use teams_core::{FileCard, LinkPreview};
 
+mod feed;
+mod render_env;
 mod scheduled;
 
-use super::adaptive_card::ensure_cards_inputs;
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
-use super::message_row::{DeliveryActions, RowActions, render_message_row, render_skeleton_row};
+use super::message_row::{render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
+use super::post_card::render_post;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
@@ -45,13 +47,15 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
-    has_own_reaction, message_draft, message_text, placeholder_rows, reaction_glyph, reply_excerpt,
-    set_own_reaction, thread_list_rows, thread_rows,
+    has_own_reaction, message_draft, message_text, place_local_rows, placeholder_rows,
+    reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
 use crate::typing::typing_tooltip;
+use feed::{FeedStash, subject_input};
+use render_env::RenderEnv;
 
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -129,6 +133,13 @@ pub struct ConversationView {
     app: Entity<AppState>,
     scroller: Entity<MessageScrollerState>,
     composer: Entity<Composer>,
+    subject: Entity<InputState>,
+    new_post_open: bool,
+    reply_composer: Option<Entity<Composer>>,
+    reply_root: Option<String>,
+    feed_stash: Option<FeedStash>,
+    feed_rows_seen: Rc<Cell<usize>>,
+    feed_at_top: bool,
     draft: Entity<NewChatDraft>,
     draft_active: bool,
     draft_created: Option<(Vec<String>, String)>,
@@ -192,6 +203,17 @@ fn drop_overlay_text(title: &str, target: DropTarget, count: usize) -> (String, 
                 "{files}. Images go into the message. Files can be added once the chat exists."
             ),
         ),
+    }
+}
+
+fn shown_in_view(mode: &ViewMode, record: &store::OutboxRecord) -> bool {
+    match mode {
+        ViewMode::Flat => record.target == OutboxTarget::Flat,
+        ViewMode::ThreadList => matches!(record.target, OutboxTarget::Post | OutboxTarget::Thread),
+        ViewMode::Thread(root_id) => {
+            record.target == OutboxTarget::Thread
+                && record.thread_root_id.as_deref() == Some(root_id.as_str())
+        }
     }
 }
 
@@ -334,6 +356,7 @@ impl ConversationView {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
+        let subject = subject_input(window, cx);
         let recent = cx.new(|cx| emoji::Recent::load(&app.read(cx).store));
         let picker = cx.new(|cx| ReactionPicker::new(app.clone(), recent.clone(), window, cx));
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
@@ -341,6 +364,7 @@ impl ConversationView {
             cx.subscribe_in(&app, window, Self::on_app_event),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
+            cx.subscribe_in(&subject, window, Self::on_subject_event),
             cx.observe_window_activation(window, Self::on_window_activation),
             cx.on_app_quit(|this, cx| {
                 this.composer
@@ -357,6 +381,13 @@ impl ConversationView {
             app,
             scroller,
             composer,
+            subject,
+            new_post_open: false,
+            reply_composer: None,
+            reply_root: None,
+            feed_stash: None,
+            feed_rows_seen: Rc::new(Cell::new(usize::MAX)),
+            feed_at_top: true,
             draft,
             draft_active: false,
             draft_created: None,
@@ -510,21 +541,7 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            ComposerEvent::Submit(outgoing) if self.draft_active => {
-                self.send_new_chat((**outgoing).clone(), window, cx)
-            }
-            ComposerEvent::Submit(outgoing)
-                if outgoing
-                    .edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.scheduled.is_some()) =>
-            {
-                self.send_scheduled_edit((**outgoing).clone(), window, cx)
-            }
-            ComposerEvent::Submit(outgoing) if outgoing.edit.is_some() => {
-                self.send_edit((**outgoing).clone(), window, cx)
-            }
-            ComposerEvent::Submit(outgoing) => self.send((**outgoing).clone(), window, cx),
+            ComposerEvent::Submit(outgoing) => self.submit_main((**outgoing).clone(), window, cx),
             ComposerEvent::Schedule { outgoing, send_at } => {
                 self.schedule((**outgoing).clone(), *send_at, window, cx)
             }
@@ -533,25 +550,43 @@ impl ConversationView {
         }
     }
 
-    fn typing_target(&self) -> Option<(String, Option<String>)> {
-        let current = self.current.as_ref().filter(|_| !self.draft_active)?;
-        let thread_root_id = match &current.mode {
-            ViewMode::Thread(root_id) => Some(root_id.clone()),
-            ViewMode::Flat | ViewMode::ThreadList => None,
-        };
-        Some((
-            current.selection.conversation_id().to_owned(),
-            thread_root_id,
-        ))
+    fn submit_main(&mut self, mut outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        if self.draft_active {
+            return self.send_new_chat(outgoing, window, cx);
+        }
+        let in_feed = self.in_feed();
+        if in_feed && outgoing.edit.is_none() {
+            outgoing.subject = self.take_subject(window, cx);
+        }
+        if in_feed {
+            self.close_new_post(cx);
+        }
+        match &outgoing.edit {
+            Some(edit) if edit.scheduled.is_some() => {
+                self.send_scheduled_edit(outgoing, window, cx)
+            }
+            Some(_) => self.send_edit(outgoing, window, cx),
+            None => self.send(outgoing, window, cx),
+        }
+    }
+
+    fn typing_root(&self) -> Option<String> {
+        match self.current.as_ref().map(|current| &current.mode) {
+            Some(ViewMode::Thread(root_id)) => Some(root_id.clone()),
+            _ => None,
+        }
     }
 
     fn send_typing(&self, active: bool, cx: &App) {
+        self.send_typing_in(self.typing_root(), active, cx);
+    }
+
+    fn send_typing_in(&self, thread_root_id: Option<String>, active: bool, cx: &App) {
         let state = self.app.read(cx);
-        if state.mode.demo || state.mode.read_only {
+        if state.mode.demo || state.mode.read_only || self.draft_active {
             return;
         }
-        let (Some(engine), Some((conversation_id, thread_root_id))) =
-            (state.engine.clone(), self.typing_target())
+        let (Some(engine), Some(conversation_id)) = (state.engine.clone(), self.conversation_id())
         else {
             return;
         };
@@ -611,6 +646,11 @@ impl ConversationView {
 
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
         self.stop_typing(cx);
+        self.stop_reply_typing(cx);
+        self.new_post_open = false;
+        self.feed_stash = None;
+        self.feed_at_top = true;
+        self.restore_subject(None, window, cx);
         self.toolbar_hovered = None;
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
@@ -655,7 +695,8 @@ impl ConversationView {
         self.composer.update(cx, |composer, cx| {
             composer.set_conversation(&target.0, &target.1, window, cx);
         });
-        if !self.draft_active {
+        self.sync_reply_composer(window, cx);
+        if !self.draft_active && !self.in_feed() {
             self.composer
                 .update(cx, |composer, cx| composer.focus(window, cx));
         }
@@ -767,19 +808,17 @@ impl ConversationView {
             .borrow()
             .iter()
             .enumerate()
-            .filter_map(|(index, row)| match row {
-                Row::Message(message)
-                    if message.images.iter().any(|image| keys.contains(&image.url))
+            .filter(|(_, row)| {
+                row.messages().any(|message| {
+                    message.images.iter().any(|image| keys.contains(&image.url))
                         || message
                             .link_preview
                             .as_ref()
                             .and_then(LinkPreview::image)
-                            .is_some_and(|image| keys.contains(&image.url)) =>
-                {
-                    Some(index)
-                }
-                _ => None,
+                            .is_some_and(|image| keys.contains(&image.url))
+                })
             })
+            .map(|(index, _)| index)
             .collect();
         self.scroller.update(cx, |scroller, cx| {
             for index in indices {
@@ -803,10 +842,11 @@ impl ConversationView {
             .borrow()
             .iter()
             .enumerate()
-            .filter_map(|(index, row)| match row {
-                Row::Message(message) if !message.adaptive_cards.is_empty() => Some(index),
-                _ => None,
+            .filter(|(_, row)| {
+                row.messages()
+                    .any(|message| !message.adaptive_cards.is_empty())
             })
+            .map(|(index, _)| index)
             .collect();
         self.scroller.update(cx, |scroller, cx| {
             for index in indices {
@@ -867,13 +907,23 @@ impl ConversationView {
             .loaded_limit
             .max(messages_from_target + JUMP_CONTEXT_MESSAGES);
         current.first_unread = None;
-        if matches!(current.selection, Selection::Channel(_)) {
-            current.mode = match record.reply_to_id {
-                Some(root_id) => ViewMode::Thread(root_id),
-                None => ViewMode::ThreadList,
-            };
+        let in_channel = matches!(current.selection, Selection::Channel(_));
+        if in_channel {
+            match record.reply_to_id.clone() {
+                Some(root_id) => {
+                    self.enter_thread_mode(root_id.clone(), cx);
+                    self.refresh_thread(root_id, cx);
+                }
+                None => {
+                    self.enter_feed_mode();
+                }
+            }
         }
-        let target_key = if matches!(current.mode, ViewMode::Thread(_)) {
+        let in_thread = self
+            .current
+            .as_ref()
+            .is_some_and(|current| matches!(current.mode, ViewMode::Thread(_)));
+        let target_key = if in_thread {
             message_id.to_owned()
         } else {
             row_key
@@ -916,10 +966,14 @@ impl ConversationView {
     }
 
     pub fn reply_to_latest_from_others(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = self.rows.borrow().iter().rev().find_map(|row| match row {
-            Row::Message(message) if !message.own => Some(message.key.clone()),
-            _ => None,
-        });
+        let key = self
+            .rows
+            .borrow()
+            .iter()
+            .rev()
+            .flat_map(Row::messages)
+            .find(|message| !message.own)
+            .map(|message| message.key.clone());
         if let Some(key) = key {
             self.begin_reply(&key, window, cx);
         }
@@ -956,6 +1010,15 @@ impl ConversationView {
                 .unwrap_or_else(|| "Unknown".to_owned()),
             excerpt: reply_excerpt(&record),
         };
+        if self.in_feed() {
+            let root_id = record
+                .reply_to_id
+                .clone()
+                .unwrap_or_else(|| record.message_id.clone());
+            let quote = record.reply_to_id.is_some().then_some(preview);
+            self.open_reply_editor(root_id, quote, window, cx);
+            return;
+        }
         self.composer.update(cx, |composer, cx| {
             composer.set_reply(Some(preview), cx);
             composer.focus(window, cx);
@@ -996,10 +1059,7 @@ impl ConversationView {
         self.rows
             .borrow()
             .iter()
-            .filter_map(|row| match row {
-                Row::Message(message) => Some(message),
-                _ => None,
-            })
+            .flat_map(Row::messages)
             .flat_map(|message| message.reactions.iter())
             .flat_map(|chip| chip.reactors.iter())
             .filter(|reactor| reactor.name == UNKNOWN_REACTOR)
@@ -1025,19 +1085,30 @@ impl ConversationView {
         let Some(details) = self.reaction_details.as_ref() else {
             return;
         };
-        let present = self.rows.borrow().iter().any(|row| {
-            matches!(row, Row::Message(message) if message.key == details.message_key
-                && message.reactions.iter().any(|chip| chip.glyph() == details.anchor_glyph))
-        });
+        let present = self
+            .rows
+            .borrow()
+            .iter()
+            .flat_map(Row::messages)
+            .any(|message| {
+                message.key == details.message_key
+                    && message
+                        .reactions
+                        .iter()
+                        .any(|chip| chip.glyph() == details.anchor_glyph)
+            });
         if !present {
             self.reaction_details = None;
         }
     }
 
     fn open_reaction_details(&mut self, message_key: &str, glyph: &str, cx: &mut Context<Self>) {
-        let multiple_kinds = self.rows.borrow().iter().any(|row| {
-            matches!(row, Row::Message(message) if message.key == message_key && message.reactions.len() > 1)
-        });
+        let multiple_kinds = self
+            .rows
+            .borrow()
+            .iter()
+            .flat_map(Row::messages)
+            .any(|message| message.key == message_key && message.reactions.len() > 1);
         self.reaction_details = Some(ReactionDetails {
             message_key: message_key.to_owned(),
             anchor_glyph: glyph.to_owned(),
@@ -1135,9 +1206,15 @@ impl ConversationView {
                 .max(current.loaded_count + GROWTH_HEADROOM)
         };
         let store = self.app.read(cx).store.clone();
-        let records: Vec<MessageRecord> = store
-            .messages(&conversation_id, None, limit)
-            .unwrap_or_default();
+        let thread_root = match &current.mode {
+            ViewMode::Thread(root_id) => Some(root_id.clone()),
+            ViewMode::Flat | ViewMode::ThreadList => None,
+        };
+        let records: Vec<MessageRecord> = match &thread_root {
+            Some(root_id) => store.thread_messages(&conversation_id, root_id),
+            None => store.messages(&conversation_id, None, limit),
+        }
+        .unwrap_or_default();
         let sync_has_more = store
             .sync_state(&conversation_id)
             .ok()
@@ -1167,11 +1244,14 @@ impl ConversationView {
         let current = self.current.as_mut().expect("checked above");
         let first_unread = current.first_unread.clone();
         current.loaded_limit = limit;
-        current.loaded_count = records.len();
+        if thread_root.is_none() {
+            current.loaded_count = records.len();
+        }
         let has_older = sync_has_more && !current.older_blocked && can_load_older;
         let placeholders = current.sync.messages
             && records.is_empty()
             && !matches!(current.mode, ViewMode::Thread(_));
+        let in_feed = current.mode == ViewMode::ThreadList;
         let mut rows = match &current.mode {
             _ if placeholders => {
                 current.has_older = false;
@@ -1194,13 +1274,17 @@ impl ConversationView {
                 thread_rows(&records, root_id, &context)
             }
         };
-        rows.extend(
-            self.pending
-                .iter()
-                .cloned()
-                .map(|row| Row::Message(Box::new(row))),
-        );
-        rows.extend(self.scheduled_rows(context.my_user_id.as_deref(), cx));
+        let local: Vec<MessageRow> = self
+            .pending
+            .iter()
+            .cloned()
+            .chain(self.scheduled_rows(context.my_user_id.as_deref(), cx))
+            .collect();
+        if in_feed {
+            place_local_rows(&mut rows, local);
+        } else {
+            rows.extend(local.into_iter().map(|row| Row::Message(Box::new(row))));
+        }
         let receipts = self.receipts(&records, cx);
         for row in rows.iter_mut() {
             if let Row::Message(message) = row
@@ -1226,14 +1310,20 @@ impl ConversationView {
         let old_rows = std::mem::replace(&mut *self.rows.borrow_mut(), new_rows);
         self.drop_stale_reaction_details();
         let new_len = self.rows.borrow().len();
+        let in_feed = self.in_feed();
         if reset {
             let marker_index = self
                 .rows
                 .borrow()
                 .iter()
                 .position(|row| matches!(row, Row::Message(message) if message.new_marker));
+            self.feed_at_top = true;
             self.scroller.update(cx, |scroller, cx| {
                 scroller.reset(new_len, cx);
+                if in_feed {
+                    scroller.scroll_to_item(0, cx);
+                    return;
+                }
                 match marker_index {
                     Some(index) if !scroller.scroll_to_item(index, cx) => {
                         scroller.scroll_to_end(cx)
@@ -1254,11 +1344,18 @@ impl ConversationView {
                 changed_indices(&old_rows, &new_rows),
             )
         };
+        let top_changed = splice
+            .as_ref()
+            .is_some_and(|splice| splice.range.start == 0);
+        let keep_top = in_feed && (old_rows.is_empty() || (self.feed_at_top && top_changed));
         self.scroller.update(cx, |scroller, cx| {
             if let Some(splice) = splice
                 && !scroller.splice(splice.range, splice.count, cx)
             {
                 scroller.reset(new_len, cx);
+            }
+            if keep_top {
+                scroller.scroll_to_item(0, cx);
             }
             for index in changed {
                 scroller.remeasure_items(index..index + 1, cx);
@@ -1281,12 +1378,14 @@ impl ConversationView {
         }
         current.fetched = true;
         let is_chat = matches!(current.selection, Selection::Chat(_));
-        let newest_cached = self.rows.borrow().iter().rev().find_map(|row| match row {
-            Row::Message(message) if !message.key.starts_with(PENDING_KEY_PREFIX) => {
-                Some(message.created_at)
-            }
-            _ => None,
-        });
+        let newest_cached = self
+            .rows
+            .borrow()
+            .iter()
+            .flat_map(Row::messages)
+            .filter(|message| !message.key.starts_with(PENDING_KEY_PREFIX))
+            .map(|message| message.created_at)
+            .max();
         let current = self.current.as_mut().expect("checked above");
         if current.sync.failed {
             self.notice = None;
@@ -1632,7 +1731,10 @@ impl ConversationView {
         self.pending_outgoing.clear();
     }
 
-    fn outbox_route(&self) -> (OutboxTarget, Option<String>) {
+    fn outbox_route(&self, reply_root: Option<String>) -> (OutboxTarget, Option<String>) {
+        if let Some(root_id) = reply_root {
+            return (OutboxTarget::Thread, Some(root_id));
+        }
         match self.current.as_ref().map(|current| &current.mode) {
             Some(ViewMode::Thread(root_id)) => (OutboxTarget::Thread, Some(root_id.clone())),
             Some(ViewMode::ThreadList) => (OutboxTarget::Post, None),
@@ -1654,9 +1756,9 @@ impl ConversationView {
             return;
         };
         let my_user_id = state.store.meta(META_USER_ID).ok().flatten();
-        let route = self.outbox_route();
+        let mut pending = Vec::new();
         for record in records {
-            if (record.target, record.thread_root_id.clone()) != route {
+            if !shown_in_view(&current.mode, &record) {
                 continue;
             }
             let Some(outgoing) = outgoing_of(&record) else {
@@ -1666,15 +1768,20 @@ impl ConversationView {
                 OutboxState::Sending => Delivery::Sending,
                 OutboxState::Failed => Delivery::Failed(record.last_error.unwrap_or_default()),
             };
-            self.pending.push(pending_row(
+            let mut row = pending_row(
                 record.id.clone(),
                 conversation_id.clone(),
                 my_user_id.clone(),
                 record.created_at,
                 &outgoing,
                 delivery,
-            ));
-            self.pending_outgoing.insert(record.id, outgoing);
+            );
+            row.reply_root = record.thread_root_id.clone();
+            pending.push((row, record.id, outgoing));
+        }
+        for (row, id, outgoing) in pending {
+            self.pending.push(row);
+            self.pending_outgoing.insert(id, outgoing);
         }
     }
 
@@ -1691,32 +1798,25 @@ impl ConversationView {
         self.rebuild(false, cx);
     }
 
-    fn open_thread(&mut self, root_id: String, cx: &mut Context<Self>) {
-        self.stop_typing(cx);
-        if let Some(current) = self.current.as_mut() {
-            current.mode = ViewMode::Thread(root_id);
-        }
-        self.reload_pending(cx);
-        self.rebuild(true, cx);
-    }
-
-    fn back_to_threads(&mut self, cx: &mut Context<Self>) {
-        self.stop_typing(cx);
-        if let Some(current) = self.current.as_mut() {
-            current.mode = ViewMode::ThreadList;
-        }
-        self.reload_pending(cx);
-        self.rebuild(true, cx);
-    }
-
     fn send(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
-        self.send_as(new_outbox_id(), outgoing, window, cx);
+        self.send_as(new_outbox_id(), outgoing, None, window, cx);
+    }
+
+    fn send_in_thread(
+        &mut self,
+        root_id: String,
+        outgoing: Outgoing,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_as(new_outbox_id(), outgoing, Some(root_id), window, cx);
     }
 
     fn send_as(
         &mut self,
         id: String,
         outgoing: Outgoing,
+        reply_root: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1726,18 +1826,36 @@ impl ConversationView {
             return;
         };
         if mode.read_only || mode.demo {
-            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
+            self.restore_unsent(
+                "Read-only mode: nothing was sent",
+                &outgoing,
+                reply_root.as_deref(),
+                window,
+                cx,
+            );
             return;
         }
         let Some(engine) = engine else {
             self.discard_outbox_row(&id, cx);
-            self.restore_unsent("Not connected yet: nothing was sent", &outgoing, window, cx);
+            self.restore_unsent(
+                "Not connected yet: nothing was sent",
+                &outgoing,
+                reply_root.as_deref(),
+                window,
+                cx,
+            );
             return;
         };
         let conversation_id = current.selection.conversation_id().to_owned();
-        let (target, thread_root_id) = self.outbox_route();
+        let (target, thread_root_id) = self.outbox_route(reply_root);
         let created_at = Utc::now();
-        self.push_pending(id.clone(), created_at, &outgoing, cx);
+        self.push_pending(
+            id.clone(),
+            created_at,
+            &outgoing,
+            thread_root_id.clone(),
+            cx,
+        );
         if let Some(record) = outbox_record(
             &id,
             &conversation_id,
@@ -1750,8 +1868,13 @@ impl ConversationView {
         }
         self.notice = None;
         self.rebuild(false, cx);
-        self.scroller
-            .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
+        if self.in_feed() {
+            self.scroller
+                .update(cx, |scroller, cx| scroller.scroll_to_item(0, cx));
+        } else {
+            self.scroller
+                .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
+        }
 
         let receiver = runtime::spawn(async move {
             deliver(
@@ -1775,12 +1898,22 @@ impl ConversationView {
         &mut self,
         message: &str,
         outgoing: &Outgoing,
+        reply_root: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.notice = Some(message.to_owned());
-        self.composer
-            .update(cx, |composer, cx| composer.restore(outgoing, window, cx));
+        if let (Some(root_id), true) = (reply_root, self.in_feed()) {
+            self.open_reply_editor(root_id.to_owned(), outgoing.reply.clone(), window, cx);
+            if let Some(composer) = self.reply_composer.clone() {
+                composer.update(cx, |composer, cx| composer.restore(outgoing, window, cx));
+            }
+        } else {
+            self.show_main_composer(cx);
+            self.restore_subject(outgoing.subject.as_deref(), window, cx);
+            self.composer
+                .update(cx, |composer, cx| composer.restore(outgoing, window, cx));
+        }
         cx.notify();
     }
 
@@ -1794,6 +1927,7 @@ impl ConversationView {
         key: String,
         created_at: DateTime<Utc>,
         outgoing: &Outgoing,
+        reply_root: Option<String>,
         cx: &App,
     ) {
         let my_user_id = self.row_context(cx).my_user_id;
@@ -1802,14 +1936,16 @@ impl ConversationView {
             .as_ref()
             .map(|current| current.selection.conversation_id().to_owned())
             .unwrap_or_default();
-        self.pending.push(pending_row(
+        let mut row = pending_row(
             key.clone(),
             conversation_id,
             my_user_id,
             created_at,
             outgoing,
             Delivery::Sending,
-        ));
+        );
+        row.reply_root = reply_root;
+        self.pending.push(row);
         self.pending_outgoing.insert(key, outgoing.clone());
     }
 
@@ -1820,7 +1956,7 @@ impl ConversationView {
             (draft.chips().to_vec(), topic)
         };
         if recipients.is_empty() {
-            self.restore_unsent("Add at least one person first", &outgoing, window, cx);
+            self.restore_unsent("Add at least one person first", &outgoing, None, window, cx);
             self.draft
                 .update(cx, |draft, cx| draft.focus_query(window, cx));
             return;
@@ -1830,17 +1966,29 @@ impl ConversationView {
             .iter()
             .any(|row| matches!(row.delivery, Delivery::Sending))
         {
-            self.restore_unsent("Still creating the chat", &outgoing, window, cx);
+            self.restore_unsent("Still creating the chat", &outgoing, None, window, cx);
             return;
         }
         let state = self.app.read(cx);
         let (mode, engine) = (state.mode, state.engine.clone());
         if mode.read_only {
-            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
+            self.restore_unsent(
+                "Read-only mode: nothing was sent",
+                &outgoing,
+                None,
+                window,
+                cx,
+            );
             return;
         }
         if mode.demo && outgoing.has_attachments() {
-            self.restore_unsent("Read-only mode: nothing was sent", &outgoing, window, cx);
+            self.restore_unsent(
+                "Read-only mode: nothing was sent",
+                &outgoing,
+                None,
+                window,
+                cx,
+            );
             return;
         }
         if mode.demo {
@@ -1848,7 +1996,13 @@ impl ConversationView {
             return;
         }
         let Some(engine) = engine else {
-            self.restore_unsent("Not connected yet: nothing was sent", &outgoing, window, cx);
+            self.restore_unsent(
+                "Not connected yet: nothing was sent",
+                &outgoing,
+                None,
+                window,
+                cx,
+            );
             return;
         };
         let user_ids: Vec<String> = recipients.into_iter().map(|pick| pick.user_id).collect();
@@ -1863,7 +2017,7 @@ impl ConversationView {
         self.draft_error = None;
         self.notice = None;
         let key = self.next_pending_key();
-        self.push_pending(key.clone(), Utc::now(), &outgoing, cx);
+        self.push_pending(key.clone(), Utc::now(), &outgoing, None, cx);
         self.rebuild(true, cx);
         let recipients_for_finish = user_ids.clone();
         let receiver = runtime::spawn(async move {
@@ -2202,6 +2356,7 @@ impl ConversationView {
         };
         let draft = Outgoing {
             draft: message_draft(&record),
+            subject: None,
             mentions,
             reply: None,
             edit: Some(edit),
@@ -2209,6 +2364,7 @@ impl ConversationView {
             files: Vec::new(),
             link_preview: None,
         };
+        self.show_main_composer(cx);
         self.composer
             .update(cx, |composer, cx| composer.begin_edit(draft, window, cx));
     }
@@ -2217,16 +2373,16 @@ impl ConversationView {
         if self.draft_active {
             return;
         }
-        let key = self.rows.borrow().iter().rev().find_map(|row| match row {
-            Row::Message(message)
-                if message.own
-                    && !message.deleted
-                    && !message.key.starts_with(PENDING_KEY_PREFIX) =>
-            {
-                Some(message.key.clone())
-            }
-            _ => None,
-        });
+        let key = self
+            .rows
+            .borrow()
+            .iter()
+            .flat_map(Row::messages)
+            .filter(|message| {
+                message.own && !message.deleted && !message.key.starts_with(PENDING_KEY_PREFIX)
+            })
+            .max_by_key(|message| message.created_at)
+            .map(|message| message.key.clone());
         if let Some(key) = key {
             self.begin_edit(&key, window, cx);
         }
@@ -2252,6 +2408,7 @@ impl ConversationView {
         }
         let Some(engine) = engine.filter(|_| !mode.read_only) else {
             self.notice = Some("Read-only mode: edit not saved".to_owned());
+            self.show_main_composer(cx);
             self.composer
                 .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
             cx.notify();
@@ -2272,6 +2429,7 @@ impl ConversationView {
             let failed = !matches!(receiver.await, Ok(Ok(())));
             this.update_in(cx, |this, window, cx| {
                 if failed {
+                    this.show_main_composer(cx);
                     if this.composer.read(cx).is_empty(cx) {
                         this.notice =
                             Some("Edit failed: your text is back in the composer".to_owned());
@@ -2414,11 +2572,16 @@ impl ConversationView {
         let Some(outgoing) = self.pending_outgoing.remove(key) else {
             return;
         };
+        let reply_root = self
+            .pending
+            .iter()
+            .find(|row| row.key == key)
+            .and_then(|row| row.reply_root.clone());
         self.pending.retain(|row| row.key != key);
         if self.draft_active {
             self.send_new_chat(outgoing, window, cx);
         } else {
-            self.send_as(key.to_owned(), outgoing, window, cx);
+            self.send_as(key.to_owned(), outgoing, reply_root, window, cx);
         }
     }
 
@@ -2624,17 +2787,29 @@ impl ConversationView {
             .border_color(theme::border());
         if matches!(current.mode, ViewMode::Thread(_)) {
             header = header.child(
-                Button::new("back-to-threads")
-                    .ghost()
-                    .compact()
-                    .label("Threads")
-                    .on_click(cx.listener(|this, _, _, cx| this.back_to_threads(cx))),
+                h_flex()
+                    .id("back-to-channel")
+                    .flex_none()
+                    .gap(px(2.))
+                    .pl(px(4.))
+                    .pr(px(8.))
+                    .py(px(4.))
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::accent_text())
+                    .hover(|button| button.bg(theme::row_hover()))
+                    .on_click(cx.listener(|this, _, _, cx| this.back_to_threads(cx)))
+                    .child(icon(IconName::ChevronLeft, 16., theme::accent_text()))
+                    .child("Back to channel"),
             );
         }
         let channel_note = match current.mode {
             ViewMode::Flat => None,
-            ViewMode::ThreadList => Some("Threads"),
-            ViewMode::Thread(_) => Some("Thread"),
+            ViewMode::ThreadList => Some("Posts"),
+            ViewMode::Thread(_) => Some("Conversation"),
         };
         if let Some(note) = channel_note {
             subline = note.to_owned();
@@ -2686,7 +2861,7 @@ impl ConversationView {
 }
 
 impl Render for ConversationView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = theme::background();
         let mut root = v_flex().flex_1().min_w_0().h_full().bg(background);
         let drafting = self.draft_active;
@@ -2698,209 +2873,40 @@ impl Render for ConversationView {
                 .child("Select a chat or channel")
                 .into_any_element();
         }
+        let in_feed = self.in_feed();
+        let rows_seen = self.feed_rows_seen.replace(usize::MAX);
+        if in_feed && rows_seen != usize::MAX {
+            self.feed_at_top = rows_seen == 0;
+        }
         let rows = self.rows.clone();
-        let view = cx.weak_entity();
-        let app = self.app.clone();
-        let highlighted = self.highlighted_message.clone();
+        let rows_seen = self.feed_rows_seen.clone();
+        let env = RenderEnv {
+            view: cx.weak_entity(),
+            app: self.app.clone(),
+            highlighted: self.highlighted_message.clone(),
+            drafting,
+            reply_editor: self.reply_root.clone().zip(self.reply_composer.clone()),
+        };
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
             move |index, window, cx| {
+                rows_seen.set(rows_seen.get().min(index));
                 let rows = rows.borrow();
                 match rows.get(index) {
                     Some(Row::Message(message)) => {
-                        let open_thread = message.open_thread.clone().map(|root_id| {
-                            let view = view.clone();
-                            Box::new(move |cx: &mut App| {
-                                let root_id = root_id.clone();
-                                view.update(cx, |this, cx| this.open_thread(root_id, cx))
-                                    .ok();
-                            }) as Box<dyn Fn(&mut App)>
-                        });
-                        let retry = matches!(message.delivery, Delivery::Failed(_)).then(|| {
-                            let (view, key, handle) =
-                                (view.clone(), message.key.clone(), window.window_handle());
-                            Box::new(move |cx: &mut App| {
-                                let (view, key) = (view.clone(), key.clone());
-                                handle
-                                    .update(cx, move |_, window, cx| {
-                                        view.update(cx, |this, cx| this.retry(&key, window, cx))
-                                            .ok();
-                                    })
-                                    .ok();
-                            }) as Box<dyn Fn(&mut App)>
-                        });
-                        let scheduled = view.upgrade().and_then(|entity| {
-                            entity
-                                .read(cx)
-                                .scheduled_row_actions(message, &view, window, cx)
-                        });
-                        let delete = matches!(message.delivery, Delivery::Failed(_)).then(|| {
-                            let (view, key) = (view.clone(), message.key.clone());
-                            Box::new(move |cx: &mut App| {
-                                view.update(cx, |this, cx| this.delete_pending(&key, cx))
-                                    .ok();
-                            }) as Box<dyn Fn(&mut App)>
-                        });
-                        let senders: Vec<String> = (!message.own && !message.series.has_prev)
-                            .then(|| message.sender_id.clone())
-                            .flatten()
-                            .into_iter()
-                            .chain(
-                                message
-                                    .reactions
-                                    .iter()
-                                    .flat_map(|chip| chip.reactors.iter())
-                                    .filter_map(|reactor| reactor.user_id.clone()),
-                            )
-                            .filter(|sender| app.read(cx).directory.avatar(sender).is_none())
-                            .collect();
-                        if !senders.is_empty() {
-                            let app = app.clone();
-                            cx.defer(move |cx| {
-                                app.update(cx, |state, cx| state.request_avatars(senders, cx));
-                            });
-                        }
-                        let missing_images: Vec<ImageRef> = message
-                            .images
-                            .iter()
-                            .cloned()
-                            .chain(message.link_preview.as_ref().and_then(LinkPreview::image))
-                            .filter(|image| app.read(cx).directory.image(&image.url).is_none())
-                            .collect();
-                        if !missing_images.is_empty() {
-                            let app = app.clone();
-                            cx.defer(move |cx| {
-                                app.update(cx, |state, cx| {
-                                    state.request_images(missing_images, cx)
-                                });
-                            });
-                        }
-                        let is_real = !drafting
-                            && !message.key.starts_with(PENDING_KEY_PREFIX)
-                            && scheduled.is_none();
-                        let hovered = is_real.then(|| {
-                            let (view, key) = (view.clone(), message.key.clone());
-                            Rc::new(move |hovered: bool, cx: &mut App| {
-                                view.update(cx, |this, cx| {
-                                    this.set_hover(HoverSlot::Row, &key, hovered, cx)
-                                })
-                                .ok();
-                            }) as Rc<dyn Fn(bool, &mut App)>
-                        });
-                        let (delivery, scheduled_menu, hovered) = match scheduled {
-                            Some(actions) => (actions.delivery, actions.menu, Some(actions.hovered)),
-                            None => (
-                                DeliveryActions {
-                                    retry,
-                                    delete,
-                                    send_now: None,
-                                },
-                                None,
-                                hovered,
-                            ),
-                        };
-                        let actionable = is_real && !message.deleted && !message.card;
-                        let (menu, react, reaction_controls) = view
-                            .upgrade()
-                            .filter(|_| actionable)
-                            .map(|entity| {
-                                let this = entity.read(cx);
-                                let mine = message
-                                    .reactions
-                                    .iter()
-                                    .filter(|chip| chip.mine)
-                                    .map(|chip| chip.glyph())
-                                    .collect();
-                                let menu = this.message_menu(
-                                    &message.key,
-                                    message.own,
-                                    mine,
-                                    view.clone(),
-                                    cx,
-                                );
-                                let react = menu.react.clone();
-                                let visible = this.toolbar_visible(&message.key);
-                                let controls = (!message.reactions.is_empty())
-                                    .then(|| this.reaction_controls(&message.key, view.clone()));
-                                (visible.then_some(menu), Some(react), controls)
-                            })
-                            .unwrap_or((None, None, None));
-                        let reply = (is_real && !message.deleted).then(|| {
-                            let (view, key, handle) =
-                                (view.clone(), message.key.clone(), window.window_handle());
-                            Box::new(move |cx: &mut App| {
-                                let (view, key) = (view.clone(), key.clone());
-                                handle
-                                    .update(cx, move |_, window, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.begin_reply(&key, window, cx)
-                                        })
-                                        .ok();
-                                    })
-                                    .ok();
-                            }) as Box<dyn Fn(&mut App)>
-                        });
-                        let files = (is_real && !message.deleted && !message.files.is_empty())
-                            .then(|| view.upgrade())
-                            .flatten()
-                            .map(|entity| {
-                                entity.read(cx).file_actions(
-                                    &message.key,
-                                    &message.files,
-                                    view.clone(),
-                                )
-                            });
-                        let bot = message
-                            .application_id
-                            .as_deref()
-                            .and_then(|application_id| {
-                                let known = app
-                                    .read(cx)
-                                    .bot_identity(&message.conversation_id, application_id);
-                                if known.is_none() {
-                                    let (app, conversation_id) =
-                                        (app.clone(), message.conversation_id.clone());
-                                    cx.defer(move |cx| {
-                                        app.update(cx, |state, cx| {
-                                            state.request_chat_apps(&conversation_id, cx)
-                                        });
-                                    });
-                                }
-                                known
-                            });
-                        ensure_cards_inputs(
-                            &app,
-                            &message.adaptive_cards,
-                            &message.conversation_id,
-                            &message.key,
-                            window,
-                            cx,
-                        );
-                        let state = app.read(cx);
-                        render_message_row(
-                            message,
-                            index,
-                            RowActions {
-                                bot,
-                                open_thread,
-                                delivery,
-                                reply,
-                                hovered,
-                                menu,
-                                scheduled_menu,
-                                react,
-                                reaction_controls,
-                                files,
-                                highlighted: highlighted.as_deref() == Some(message.key.as_str()),
-                            },
-                            &state.directory,
-                            cx,
-                        )
+                        let actions = env.message_actions(message, window, cx);
+                        let state = env.app.read(cx);
+                        render_message_row(message, index, actions, &state.directory, cx)
+                    }
+                    Some(Row::Post(post)) => {
+                        let actions = env.post_actions(post, window, cx);
+                        let state = env.app.read(cx);
+                        render_post(post, index, actions, &state.directory, cx)
                     }
                     Some(Row::Skeleton(skeleton)) => render_skeleton_row(skeleton, index),
                     Some(Row::LoadOlder) => {
-                        let view = view.clone();
+                        let view = env.view.clone();
                         cx.defer(move |cx| {
                             view.update(cx, |this, cx| this.request_older(cx)).ok();
                         });
@@ -2916,7 +2922,7 @@ impl Render for ConversationView {
                             .into_any_element()
                     }
                     Some(Row::Start(start)) => {
-                        let state = app.read(cx);
+                        let state = env.app.read(cx);
                         v_flex()
                             .w_full()
                             .items_center()
@@ -2949,6 +2955,7 @@ impl Render for ConversationView {
             },
         )
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
+        .jump_button(!in_feed)
         .with_bottom_fade(background);
 
         root = match self.current.as_ref().filter(|_| !drafting) {
@@ -2981,11 +2988,8 @@ impl Render for ConversationView {
                     }),
             );
         }
-        let empty_channel = self
-            .current
-            .as_ref()
-            .is_some_and(|current| current.mode == ViewMode::ThreadList)
-            && self.rows.borrow().is_empty();
+        let empty_channel = in_feed && self.rows.borrow().is_empty();
+        let new_post = self.render_new_post(window, cx);
         let body = if drafting && self.current.is_none() && self.rows.borrow().is_empty() {
             let draft = self.draft.read(cx);
             let group_name = draft.group_name(cx);
@@ -3008,6 +3012,7 @@ impl Render for ConversationView {
                 .relative()
                 .flex_1()
                 .min_h_0()
+                .children(new_post)
                 .child(
                     div()
                         .flex_1()
@@ -3018,8 +3023,11 @@ impl Render for ConversationView {
                         .child(body),
                 )
                 .children(self.render_draft_error(cx))
-                .child(self.render_typing_line(cx))
-                .child(self.composer.clone())
+                .when(!in_feed, |column| {
+                    column
+                        .child(self.render_typing_line(cx))
+                        .child(self.composer.clone())
+                })
                 .child(self.render_drop_overlay(cx)),
         )
         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
@@ -3028,13 +3036,15 @@ impl Render for ConversationView {
                 cx.stop_propagation();
             }
         }))
-        .when(drafting, |root| {
-            root.on_action(cx.listener(|this, _: &Escape, window, cx| {
+        .on_action(cx.listener(|this, _: &Escape, window, cx| {
+            if this.draft_active {
                 if this.draft.read(cx).has_focus(window, cx) {
                     this.draft.update(cx, |draft, cx| draft.escape(cx));
                 }
-            }))
-        })
+            } else if !this.on_escape(window, cx) {
+                cx.propagate();
+            }
+        }))
         .into_any_element()
     }
 }

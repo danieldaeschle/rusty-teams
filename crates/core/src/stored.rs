@@ -591,6 +591,7 @@ mod tests {
 
     fn record(body_html: &str, attachments_json: &str) -> MessageRecord {
         MessageRecord {
+            subject: None,
             conversation_id: "c".to_owned(),
             message_id: "m".to_owned(),
             reply_to_id: None,

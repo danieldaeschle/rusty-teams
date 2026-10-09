@@ -127,6 +127,7 @@ pub struct EditPreview {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outgoing {
     pub draft: Draft,
+    pub subject: Option<String>,
     pub mentions: Vec<MentionInput>,
     pub reply: Option<ReplyPreview>,
     pub edit: Option<EditPreview>,
@@ -266,6 +267,7 @@ pub struct Composer {
     app: Entity<AppState>,
     input: Entity<TextareaState>,
     conversation_id: Option<String>,
+    inline: bool,
     reply: Option<ReplyPreview>,
     editing: Option<EditPreview>,
     mention_inputs: HashMap<String, MentionInput>,
@@ -457,6 +459,7 @@ impl Composer {
             app,
             input,
             conversation_id: None,
+            inline: false,
             reply: None,
             editing: None,
             mention_inputs: HashMap::new(),
@@ -1456,6 +1459,11 @@ impl Composer {
         cx.notify();
     }
 
+    pub fn inline(mut self) -> Self {
+        self.inline = true;
+        self
+    }
+
     pub fn set_placeholder(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let text = text.to_owned();
         self.input
@@ -1522,7 +1530,7 @@ impl Composer {
         self.focus(window, cx);
     }
 
-    fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
         self.set_text("", window, cx);
     }
@@ -1569,6 +1577,7 @@ impl Composer {
             .collect();
         Outgoing {
             draft,
+            subject: None,
             mentions,
             reply: self.reply.clone(),
             edit: self.editing.clone(),
@@ -2569,12 +2578,17 @@ impl Render for Composer {
                 .child(notice.to_owned())
         });
         let composer_bounds = self.composer_bounds.clone();
+        let (inset, top, bottom) = if self.inline {
+            (0., 0., 0.)
+        } else {
+            (24., 8., 12.)
+        };
         v_flex()
             .w_full()
             .flex_none()
-            .px(px(24.))
-            .pt(px(8.))
-            .pb(px(12.))
+            .px(px(inset))
+            .pt(px(top))
+            .pb(px(bottom))
             .key_context(KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &ToggleBold, _, cx| {
                 if this.link_editor.is_none() {
@@ -2888,6 +2902,7 @@ mod tests {
 
         let outgoing = Outgoing {
             draft: teams_core::Draft::default(),
+            subject: None,
             mentions: Vec::new(),
             link_preview: None,
             reply: None,
@@ -2941,6 +2956,7 @@ mod tests {
     fn outgoing_with(text: &str, images: Vec<super::OutgoingImage>) -> super::Outgoing {
         super::Outgoing {
             draft: teams_core::Draft::plain(text),
+            subject: None,
             mentions: Vec::new(),
             link_preview: None,
             reply: None,
@@ -4003,6 +4019,7 @@ mod tests {
                 composer.update(cx, |composer, cx| {
                     let draft = Outgoing {
                         draft: teams_core::Draft::plain("old"),
+                        subject: None,
                         mentions: Vec::new(),
                         link_preview: None,
                         reply: None,

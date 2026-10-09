@@ -55,7 +55,7 @@ impl Composer {
         self.conversation_id
             .clone()
             .filter(|conversation_id| !conversation_id.is_empty())
-            .filter(|_| self.editing.is_none())
+            .filter(|_| self.editing.is_none() && !self.inline)
     }
 
     fn storable_draft(&self, cx: &App) -> Option<Outgoing> {
@@ -117,7 +117,7 @@ impl Composer {
         cx: &mut Context<Self>,
     ) {
         let stored = Some(conversation_id)
-            .filter(|conversation_id| !conversation_id.is_empty())
+            .filter(|conversation_id| !conversation_id.is_empty() && !self.inline)
             .and_then(|conversation_id| self.app.read(cx).store.draft(conversation_id).ok())
             .flatten()
             .and_then(|record| decode(&record.payload, &record.images));

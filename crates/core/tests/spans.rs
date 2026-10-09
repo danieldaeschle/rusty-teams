@@ -358,6 +358,7 @@ fn card_text_lists_texts_and_facts_in_document_order() {
 
 fn record_with(body_html: &str, attachments_json: &str) -> MessageRecord {
     MessageRecord {
+        subject: None,
         conversation_id: "c".to_owned(),
         message_id: "m".to_owned(),
         reply_to_id: None,

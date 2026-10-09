@@ -22,7 +22,6 @@ pub fn pending_row(
         application_id: None,
         created_at,
         series: Series::default(),
-        card: false,
         time: created_at.with_timezone(&Local).format("%H:%M").to_string(),
         day_header: None,
         blocks: if outgoing.draft.is_blank() && outgoing.images.is_empty() {
@@ -65,12 +64,9 @@ pub fn pending_row(
                 open_url: file.reference.content_url.clone(),
             })
             .collect(),
-        reply_count: None,
+        subject: outgoing.subject.clone(),
         new_marker: false,
-        reply_faces: Vec::new(),
-        last_reply_time: None,
-        open_thread: None,
-        is_reply: false,
+        reply_root: None,
         delivery,
         receipt: Receipt::Hidden,
         own: true,

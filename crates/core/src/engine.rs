@@ -195,6 +195,17 @@ impl<R: Remote> SyncEngine<R> {
         Ok(delta)
     }
 
+    pub async fn refresh_thread(&self, conversation_id: &str, root_id: &str) -> Result<Delta> {
+        let Conversation::Channel { team_id } = self.resolve(conversation_id)? else {
+            return Err(Error::Unsupported("refreshing a thread of a chat"));
+        };
+        let delta = self
+            .refresh_channel_thread(&team_id, conversation_id, root_id)
+            .await?;
+        self.announce(conversation_id, !delta.is_empty());
+        Ok(delta)
+    }
+
     pub async fn load_older(&self, conversation_id: &str) -> Result<Vec<MessageRecord>> {
         let conversation = self.resolve(conversation_id)?;
         if self.store.sync_state(conversation_id)?.is_none() {

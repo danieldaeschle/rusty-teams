@@ -75,6 +75,8 @@ impl Composer {
         let outgoing = self.compose(cx);
         if state.mode.read_only && !state.mode.demo {
             Some("Read-only mode")
+        } else if self.inline {
+            Some("Open the conversation to schedule a reply")
         } else if conversation_id == NOTES_CHAT_ID {
             Some("Not available in your notes")
         } else if conversation_id.is_empty() {

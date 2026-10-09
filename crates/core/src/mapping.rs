@@ -167,6 +167,12 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
                 .collect::<Vec<_>>(),
         ),
         links_json: EMPTY_LINKS.to_owned(),
+        subject: message
+            .subject
+            .as_deref()
+            .map(str::trim)
+            .filter(|subject| !subject.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -324,6 +330,26 @@ mod tests {
         let record = chat_record(&chat, "me").unwrap();
         assert!(record.unread);
         assert!(!record.last_event_system);
+    }
+
+    fn record_with_subject(subject: serde_json::Value) -> Option<String> {
+        let message: Message = serde_json::from_value(json!({
+            "id": "1",
+            "createdDateTime": "2026-10-06T09:00:00Z",
+            "subject": subject,
+        }))
+        .unwrap();
+        message_record("c", &message).unwrap().subject
+    }
+
+    #[test]
+    fn subject_is_kept_trimmed_and_blank_ones_are_dropped() {
+        assert_eq!(
+            record_with_subject(json!("  Release plan ")).as_deref(),
+            Some("Release plan")
+        );
+        assert_eq!(record_with_subject(json!("   ")), None);
+        assert_eq!(record_with_subject(json!(null)), None);
     }
 
     fn mentions_of(mentioned: serde_json::Value) -> Vec<MentionInfo> {
