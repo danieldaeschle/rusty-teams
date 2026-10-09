@@ -217,7 +217,13 @@ async fn realtime_loop(
                                 receipt_engine.handle_receipt_status(&receipt_status).await
                             });
                         }
-                        RealtimeEvent::Presence(updates) => engine.apply_presence(&updates),
+                        RealtimeEvent::Presence(updates) => {
+                            engine.apply_presence(&updates);
+                            if engine.concerns_me(&updates) {
+                                let engine = engine.clone();
+                                tokio::spawn(async move { engine.refresh_own_status().await });
+                            }
+                        }
                         RealtimeEvent::Endpoint(endpoint) => {
                             let engine = engine.clone();
                             tokio::spawn(async move { engine.presence_endpoint(endpoint).await });

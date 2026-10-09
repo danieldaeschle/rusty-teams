@@ -436,6 +436,53 @@ pub fn message_spans(record: &MessageRecord) -> Vec<Span> {
     spans_with_mentions(record, &mentions(record))
 }
 
+pub const PROFILE_LINK_PREFIX: &str = "teams-profile:";
+
+/// Like `message_spans`, with the id of each user mention replaced by a profile link.
+pub fn linked_message_spans(record: &MessageRecord) -> Vec<Span> {
+    let infos = mentions(record);
+    let mut spans = spans_with_mentions(record, &infos);
+    link_user_mentions(&mut spans, &infos);
+    spans
+}
+
+fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
+    for span in spans {
+        match span {
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Heading { children, .. }
+            | Span::Quote(children)
+            | Span::BlockQuote(children)
+            | Span::Link { children, .. } => link_user_mentions(children, infos),
+            Span::List { items, .. } => items
+                .iter_mut()
+                .for_each(|item| link_user_mentions(item, infos)),
+            Span::Table { rows, .. } => rows
+                .iter_mut()
+                .flatten()
+                .for_each(|cell| link_user_mentions(cell, infos)),
+            Span::Mention { id, .. } => {
+                let parsed: Option<i64> = id.as_deref().and_then(|id| id.parse().ok());
+                let user_id = infos
+                    .iter()
+                    .find(|info| parsed.is_some() && info.id == parsed)
+                    .and_then(|info| info.user_id.as_deref());
+                if let Some(user_id) = user_id {
+                    *id = Some(format!("{PROFILE_LINK_PREFIX}{user_id}"));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
     let mut spans = html_to_spans(&with_inline_quotes(record));
     merge_split_mentions(&mut spans, infos);
@@ -823,6 +870,23 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn user_mentions_link_to_their_profile_and_groups_do_not() {
+        let json = r#"[
+            {"user_id":"U1","name":"Ada","id":0,"target_id":"U1"},
+            {"user_id":null,"name":"Team","id":1,"target_id":"T1"}
+        ]"#;
+        let html = r#"<at id="0">Ada</at> <at id="1">Team</at>"#;
+        let ids: Vec<Option<String>> = linked_message_spans(&with_mentions(html, json))
+            .into_iter()
+            .filter_map(|span| match span {
+                Span::Mention { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec![Some("teams-profile:U1".to_owned()), Some("1".to_owned())]);
     }
 
     #[test]

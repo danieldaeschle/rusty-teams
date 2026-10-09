@@ -1,3 +1,5 @@
+use chatsvc::PresenceStatus;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreEvent {
     SidebarChanged,
@@ -8,5 +10,6 @@ pub enum CoreEvent {
     ImagesChanged { keys: Vec<String> },
     FoldersChanged,
     PresenceChanged,
+    PresenceStatusChanged(PresenceStatus),
     Error { message: String },
 }

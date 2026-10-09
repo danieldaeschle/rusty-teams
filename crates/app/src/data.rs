@@ -409,17 +409,21 @@ pub fn unread_counts(engine: &Engine, chats: &[ChatRecord]) -> HashMap<String, u
         .collect()
 }
 
+pub fn presence_kind_of(availability: Availability) -> PresenceKind {
+    match availability {
+        Availability::Available => PresenceKind::Available,
+        Availability::Busy => PresenceKind::Busy,
+        Availability::DoNotDisturb => PresenceKind::DoNotDisturb,
+        Availability::Away => PresenceKind::Away,
+        Availability::Offline => PresenceKind::Offline,
+        Availability::Unknown => PresenceKind::Unknown,
+    }
+}
+
 pub fn presence_kind(engine: &Engine, user_id: &str) -> Option<PresenceKind> {
     engine
         .presence(user_id)
-        .map(|presence| match presence.availability {
-            Availability::Available => PresenceKind::Available,
-            Availability::Busy => PresenceKind::Busy,
-            Availability::DoNotDisturb => PresenceKind::DoNotDisturb,
-            Availability::Away => PresenceKind::Away,
-            Availability::Offline => PresenceKind::Offline,
-            Availability::Unknown => PresenceKind::Unknown,
-        })
+        .map(|presence| presence_kind_of(presence.availability))
 }
 
 pub fn in_call(engine: &Engine, user_id: &str) -> bool {

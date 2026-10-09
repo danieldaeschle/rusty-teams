@@ -6,7 +6,7 @@ use chatsvc::TypingEvent;
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
-use teams_core::{ChatApp, CoreEvent, ImageRef, PinnedMessage, ScheduledDraft};
+use teams_core::{ChatApp, CoreEvent, ImageRef, PinnedMessage, PresenceStatus, ScheduledDraft};
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
@@ -15,6 +15,7 @@ use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
 use crate::notice::Notice;
 use crate::notify;
+use crate::profile_state::{ProfileCache, ProfileRequest};
 use crate::typing::TypingState;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
@@ -51,6 +52,9 @@ pub enum AppEvent {
     Pins(String),
     Saved,
     Forward,
+    StatusMessage,
+    NotificationSettings,
+    Profile,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -91,6 +95,12 @@ pub struct AppState {
     pub saved: SavedSet,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub forward_request: Option<ForwardSource>,
+    pub own_status: PresenceStatus,
+    pub own_email: String,
+    pub status_menu_open: bool,
+    pub status_message_request: bool,
+    pub profiles: ProfileCache,
+    pub profile_request: Option<ProfileRequest>,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -168,6 +178,12 @@ impl AppState {
             saved: SavedSet::default(),
             pins: HashMap::new(),
             forward_request: None,
+            own_status: PresenceStatus::default(),
+            own_email: String::new(),
+            status_menu_open: false,
+            status_message_request: false,
+            profiles: ProfileCache::new(),
+            profile_request: None,
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -215,6 +231,12 @@ impl AppState {
 
     pub fn reload_directory(&mut self) {
         self.directory.me = data::me(&self.store);
+        self.own_email = self
+            .store
+            .meta("me_email")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         self.directory.folders = data::folders(&self.store, &self.favorite_ids);
         self.directory.pinned_channels = data::pinned_channels(&self.store);
         if self.directory.pinned_channels.is_empty() {
@@ -582,6 +604,7 @@ impl AppState {
                 self.refresh_scheduled(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
+                self.refresh_own_status(cx);
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar(cx),
@@ -616,6 +639,10 @@ impl AppState {
                 self.directory.save_presence(&self.store, &changed);
                 cx.emit(AppEvent::Directory);
                 cx.notify();
+            }
+            BackendEvent::Core(CoreEvent::PresenceStatusChanged(status)) => {
+                self.apply_own_status(status, cx);
+                self.reload_directory();
             }
             BackendEvent::Core(_) => {
                 if !self.mode.demo {

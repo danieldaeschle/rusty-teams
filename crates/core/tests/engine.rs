@@ -103,6 +103,9 @@ struct Fake {
     links_put: Mutex<Vec<(String, String)>>,
     link_info_calls: Mutex<usize>,
     scheduled: Mutex<Vec<ScheduledCall>>,
+    own_status_answer: Mutex<chatsvc::PresenceStatus>,
+    availability_puts: Mutex<Vec<Option<chatsvc::ForcedAvailability>>>,
+    note_puts: Mutex<Vec<Option<chatsvc::StatusNote>>>,
 }
 
 impl Fake {
@@ -767,6 +770,20 @@ impl Remote for Handle {
             user_ids.to_vec(),
             purge,
         ));
+        Ok(())
+    }
+
+    async fn own_status(&self, _user_id: &str) -> Result<chatsvc::PresenceStatus> {
+        Ok(self.own_status_answer.lock().unwrap().clone())
+    }
+
+    async fn set_availability(&self, forced: Option<&chatsvc::ForcedAvailability>) -> Result<()> {
+        self.availability_puts.lock().unwrap().push(forced.copied());
+        Ok(())
+    }
+
+    async fn set_status_note(&self, note: Option<&chatsvc::StatusNote>) -> Result<()> {
+        self.note_puts.lock().unwrap().push(note.cloned());
         Ok(())
     }
 
@@ -2017,6 +2034,40 @@ async fn presence_maps_availability_and_announces_changes_once() {
     assert_eq!(events.try_recv().unwrap(), CoreEvent::PresenceChanged);
     engine.refresh_presence(&wanted).await.unwrap();
     assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn setting_own_availability_writes_then_reads_back_and_announces() {
+    let fake = Arc::new(Fake::default());
+    *fake.own_status_answer.lock().unwrap() = chatsvc::PresenceStatus {
+        availability: "Busy".into(),
+        ..chatsvc::PresenceStatus::default()
+    };
+    let engine = engine_with(&fake, SyncConfig::default());
+    let mut events = engine.subscribe();
+    let forced = chatsvc::ForcedAvailability {
+        kind: chatsvc::ForcedKind::Busy,
+        expires_at: None,
+    };
+    engine.set_own_availability(Some(forced)).await.unwrap();
+    assert_eq!(*fake.availability_puts.lock().unwrap(), vec![Some(forced)]);
+    assert_eq!(
+        engine.presence(ME).unwrap().availability,
+        Availability::Busy
+    );
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        CoreEvent::PresenceStatusChanged(status) if status.availability == "Busy"
+    ));
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::PresenceChanged);
+}
+
+#[tokio::test]
+async fn setting_the_own_note_forwards_the_note() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.set_own_status_note(None).await.unwrap();
+    assert_eq!(*fake.note_puts.lock().unwrap(), vec![None]);
 }
 
 fn trouter_endpoint(endpoint_id: &str) -> chatsvc::TrouterEndpoint {

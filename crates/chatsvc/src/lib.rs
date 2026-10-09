@@ -8,6 +8,7 @@ pub mod links;
 mod mask;
 pub mod messages;
 pub mod pins;
+pub mod presence;
 pub mod reactions;
 pub mod realtime;
 pub mod receipts;
@@ -27,6 +28,10 @@ pub use messages::{ConversationRef, Messages};
 pub use pins::{
     ChannelLayout, Folder, FolderKind, Folders, PinnedChannels, PinnedChats, PinnedMessage, Pins,
     TeamLayout,
+};
+pub use presence::{
+    ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote, WorkLocation,
+    WorkLocationKind, WorkLocationSource,
 };
 pub use reactions::{emotion_key, emotion_keys};
 pub use realtime::{

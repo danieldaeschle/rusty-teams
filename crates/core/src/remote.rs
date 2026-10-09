@@ -1,7 +1,8 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, Conversations, ForwardResult, Gif, Gifs, InvokeRequest,
-    InvokeResponse, LinkInfo, MemberHorizon, MessageLinks, Messages, PinnedMessage, Pins, Receipts,
-    SavedMessage, ScheduledDraft, ScheduledDrafts,
+    CardActions, ChatApp, ConversationRef, Conversations, ForcedAvailability, ForwardResult, Gif,
+    Gifs, InvokeRequest, InvokeResponse, LinkInfo, MemberHorizon, MessageLinks, Messages,
+    PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts, SavedMessage, ScheduledDraft,
+    ScheduledDrafts, StatusNote, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -10,6 +11,7 @@ use graph::{
 };
 
 use crate::error::{Error, Result};
+use crate::profile::PersonProfile;
 
 pub const CHATSVC_CHAT_WRITES: bool = false;
 
@@ -201,6 +203,10 @@ pub trait Remote {
         Err(Error::Unsupported("presence"))
     }
 
+    async fn person_profile(&self, _user_id: &str) -> Result<PersonProfile> {
+        Err(Error::Unsupported("profile cards"))
+    }
+
     async fn subscribe_presence(
         &self,
         _endpoint_id: &str,
@@ -209,6 +215,25 @@ pub trait Remote {
         _purge: bool,
     ) -> Result<()> {
         Err(Error::Unsupported("presence subscriptions"))
+    }
+
+    async fn own_status(&self, _user_id: &str) -> Result<PresenceStatus> {
+        Err(Error::Unsupported("own status"))
+    }
+
+    async fn set_availability(&self, _forced: Option<&ForcedAvailability>) -> Result<()> {
+        Err(Error::Unsupported("setting availability"))
+    }
+
+    async fn set_status_note(&self, _note: Option<&StatusNote>) -> Result<()> {
+        Err(Error::Unsupported("setting the status message"))
+    }
+
+    async fn set_work_location(
+        &self,
+        _location: Option<(WorkLocationKind, DateTime<Utc>)>,
+    ) -> Result<()> {
+        Err(Error::Unsupported("setting the work location"))
     }
 
     async fn consumption_horizons(&self, _conversation_id: &str) -> Result<Vec<MemberHorizon>> {
@@ -650,6 +675,10 @@ impl Remote for Graph {
         Ok(Graph::presences(self, user_ids).await?)
     }
 
+    async fn person_profile(&self, user_id: &str) -> Result<PersonProfile> {
+        crate::profile::load_profile(self, user_id).await
+    }
+
     async fn subscribe_presence(
         &self,
         endpoint_id: &str,
@@ -658,6 +687,29 @@ impl Remote for Graph {
         purge: bool,
     ) -> Result<()> {
         Ok(Graph::subscribe_presence(self, endpoint_id, trouter_uri, user_ids, purge).await?)
+    }
+
+    async fn own_status(&self, user_id: &str) -> Result<PresenceStatus> {
+        Ok(PresenceService::new(self.session()).status(user_id).await?)
+    }
+
+    async fn set_availability(&self, forced: Option<&ForcedAvailability>) -> Result<()> {
+        Ok(PresenceService::new(self.session())
+            .set_availability(forced)
+            .await?)
+    }
+
+    async fn set_status_note(&self, note: Option<&StatusNote>) -> Result<()> {
+        Ok(PresenceService::new(self.session()).set_note(note).await?)
+    }
+
+    async fn set_work_location(
+        &self,
+        location: Option<(WorkLocationKind, DateTime<Utc>)>,
+    ) -> Result<()> {
+        Ok(PresenceService::new(self.session())
+            .set_work_location(location)
+            .await?)
     }
 
     async fn consumption_horizons(&self, conversation_id: &str) -> Result<Vec<MemberHorizon>> {

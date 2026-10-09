@@ -6,6 +6,7 @@ mod models;
 mod outgoing;
 mod page;
 mod people;
+mod profile;
 mod target;
 mod urls;
 mod writes;
@@ -26,4 +27,5 @@ pub use outgoing::{
 };
 pub use page::Page;
 pub use people::MAX_PRESENCE_IDS;
+pub use profile::{OrgPerson, ProfileDetails, UserProfile};
 pub use target::MessageTarget;

@@ -5,9 +5,12 @@ use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
+use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::sidebar::SidebarView;
 use super::status_bar::render_status_bar;
+use super::status_menu::own_status_button;
+use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
@@ -55,6 +58,8 @@ pub struct AppShell {
     activity_panel: Option<Entity<ActivityPanel>>,
     saved_panel: Option<Entity<SavedPanel>>,
     forward_dialog: Option<Entity<ForwardDialog>>,
+    status_dialog: Option<Entity<StatusMessageDialog>>,
+    profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
@@ -80,6 +85,16 @@ impl AppShell {
                 if matches!(event, AppEvent::Forward) {
                     this.open_forward_dialog(window, cx);
                 }
+                if matches!(event, AppEvent::StatusMessage) {
+                    this.open_status_dialog(window, cx);
+                }
+                if matches!(event, AppEvent::NotificationSettings) {
+                    this.notifications
+                        .update(cx, |center, cx| center.open_settings(cx));
+                }
+                if matches!(event, AppEvent::Profile) {
+                    this.open_profile_card(window, cx);
+                }
                 cx.notify();
             });
         let focus_handle = cx.focus_handle();
@@ -99,6 +114,8 @@ impl AppShell {
             activity_panel: None,
             saved_panel: None,
             forward_dialog: None,
+            status_dialog: None,
+            profile_card: None,
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
@@ -333,6 +350,60 @@ impl AppShell {
         cx.notify();
     }
 
+    fn open_status_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self
+            .state
+            .update(cx, |state, _| state.take_status_message_request())
+        {
+            return;
+        }
+        self.switcher = None;
+        self.activity_panel = None;
+        self.saved_panel = None;
+        let app = self.state.clone();
+        let dialog = cx.new(|cx| StatusMessageDialog::new(app, window, cx));
+        cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, _: &StatusMessageDialogEvent, window, cx| {
+                this.status_dialog = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.status_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    fn open_profile_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self
+            .state
+            .update(cx, |state, _| state.take_profile_request())
+        else {
+            return;
+        };
+        if let Some(card) = &self.profile_card {
+            card.update(cx, |card, cx| card.move_to(request.user_id, request.anchor, cx));
+            return;
+        }
+        let app = self.state.clone();
+        let card =
+            cx.new(|cx| ProfileCard::new(app, request.user_id, request.anchor, window, cx));
+        cx.subscribe_in(
+            &card,
+            window,
+            |this, _, _: &ProfileCardEvent, window, cx| {
+                this.profile_card = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.profile_card = Some(card);
+        cx.notify();
+    }
+
     fn open_forward_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(source) = self
             .state
@@ -403,7 +474,7 @@ impl Render for AppShell {
             }),
         );
         let title_bar = render_title_bar(
-            &state.directory,
+            own_status_button(&self.state, state),
             self.activity.read(cx).feed().unread_count(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
             cx.listener(|this, _, window, cx| this.toggle_saved_panel(window, cx)),
@@ -449,6 +520,8 @@ impl Render for AppShell {
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())
+            .children(self.status_dialog.clone())
+            .children(self.profile_card.clone())
             .child(crate::frame_log::probe("last"))
     }
 }

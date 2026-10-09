@@ -9,6 +9,7 @@ use super::attachments::{FileActions, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::link_preview::link_preview_card;
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
+use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
@@ -461,6 +462,7 @@ fn others_row(
 ) -> Div {
     let first = !row.series.has_prev;
     let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
+    let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
     let mut column = v_flex()
         .gap(px(2.))
         .max_w(relative(MAX_WIDTH_RATIO))
@@ -468,7 +470,10 @@ fn others_row(
     if first {
         column = column.child(
             h_flex().gap(px(8.)).items_baseline().pl(px(2.)).child(
-                div()
+                opens_profile(
+                    div().id(ElementId::Name(format!("author-{index}").into())),
+                    profile_user,
+                )
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
@@ -496,7 +501,15 @@ fn others_row(
         .w_full()
         .gap(px(AVATAR_GAP))
         .items_start()
-        .child(div().w(px(AVATAR_SIZE)).flex_none().child(lead))
+        .child(
+            opens_profile(
+                div().id(ElementId::Name(format!("author-avatar-{index}").into())),
+                profile_user.filter(|_| first),
+            )
+            .w(px(AVATAR_SIZE))
+            .flex_none()
+            .child(lead),
+        )
         .child(column)
 }
 

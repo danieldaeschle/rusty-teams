@@ -10,11 +10,12 @@ use crate::data::{AvatarState, Directory, Presence, PresenceKind};
 use crate::format;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
+use crate::views::profile_card::opens_profile;
 use crate::views::widgets::icon;
 
 const PAIR_RATIO: f32 = 24. / 36.;
 const PRESENCE_MIN: f32 = 10.;
-const PRESENCE_MAX: f32 = 14.;
+const PRESENCE_MAX: f32 = 15.;
 const PRESENCE_RATIO: f32 = 0.38;
 const PRESENCE_RING: f32 = 2.;
 const PRESENCE_SPIN_PERIOD: Duration = Duration::from_millis(1600);
@@ -250,7 +251,10 @@ pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div 
     let mut stack = div().flex().flex_none().w(px(width)).items_center();
     for (index, face) in faces.iter().take(LIMIT).enumerate() {
         stack = stack.child(
-            div()
+            opens_profile(
+                div().id(ElementId::Name(format!("member-face-{index}").into())),
+                face.user_id.as_deref(),
+            )
                 .when(index > 0, |element| element.ml(px(-OVERLAP)))
                 .size(px(SIZE))
                 .flex_none()

@@ -23,6 +23,32 @@ pub fn user_photo(user_id: &str) -> String {
     )
 }
 
+pub fn user_profile(user_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/users/{}?$select=id,displayName,jobTitle,department,companyName,\
+         officeLocation,mail,userPrincipalName,businessPhones,mobilePhone",
+        segment(user_id)
+    )
+}
+
+pub fn user_manager(user_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/users/{}/manager?$select=id,displayName,jobTitle",
+        segment(user_id)
+    )
+}
+
+pub fn user_direct_reports(user_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/users/{}/directReports?$select=id,displayName,jobTitle",
+        segment(user_id)
+    )
+}
+
+pub fn get_schedule() -> String {
+    format!("{GRAPH}/v1.0/me/calendar/getSchedule")
+}
+
 pub fn chats(top: usize) -> String {
     format!(
         "{GRAPH}/v1.0/me/chats?$expand=members,lastMessagePreview\

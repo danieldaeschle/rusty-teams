@@ -5,16 +5,13 @@ use gpui_kit::component::{TitleBar, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::avatar::{person_avatar, with_presence};
 use super::widgets::{count_badge, icon, symbol};
-use crate::data::Directory;
 use crate::theme;
 
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
 const SEARCH_WIDTH: f32 = 380.;
 const SEARCH_HINT: &str = "Search chats, people and channels";
 const SHORTCUT_HINT: &str = "Ctrl K";
-const OWN_AVATAR_SIZE: f32 = 26.;
 const APP_ICON_SIZE: f32 = 18.;
 const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icon/teams-fast-256.png");
 
@@ -25,7 +22,7 @@ fn app_icon() -> Arc<Image> {
 }
 
 pub fn render_title_bar(
-    directory: &Directory,
+    own: Option<AnyElement>,
     activity_unread: usize,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_saved: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -99,20 +96,6 @@ pub fn render_title_bar(
                 .child(SHORTCUT_HINT),
         )
         .on_click(on_search);
-    let own = directory.me.as_ref().map(|me| {
-        let avatar = person_avatar(
-            directory,
-            Some(&me.user_id),
-            &me.display_name,
-            OWN_AVATAR_SIZE,
-        );
-        with_presence(
-            avatar,
-            directory.presence_of(&me.user_id),
-            OWN_AVATAR_SIZE,
-            theme::background(),
-        )
-    });
     TitleBar::new()
         .h(px(TITLE_BAR_HEIGHT))
         .bg(theme::background())

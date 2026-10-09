@@ -6,6 +6,7 @@ use gpui_kit::*;
 use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
+use super::profile_card::opens_profile;
 use super::link_preview::link_preview_card;
 use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
@@ -130,12 +131,21 @@ fn message_content(
     content
 }
 
-fn message_header(row: &MessageRow, author: String, saved: bool) -> Div {
+fn message_header(
+    row: &MessageRow,
+    index: usize,
+    author: String,
+    profile_user: Option<&str>,
+    saved: bool,
+) -> Div {
     h_flex()
         .gap(px(6.))
         .items_center()
         .child(
-            div()
+            opens_profile(
+                div().id(ElementId::Name(format!("post-author-{index}").into())),
+                profile_user,
+            )
                 .text_size(px(13.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
@@ -177,6 +187,7 @@ fn message_block(
         Some(bot) => bot_avatar(bot, size),
         None => person_avatar(directory, row.sender_id.as_deref(), &row.author, size),
     };
+    let profile_user = row.sender_id.as_deref().filter(|_| actions.bot.is_none());
     let content = message_content(row, index, directory, &actions, cx);
     let saved = actions.saved;
     let RowActions {
@@ -193,7 +204,7 @@ fn message_block(
         .flex_1()
         .min_w_0()
         .gap(px(6.))
-        .child(message_header(row, author, saved))
+        .child(message_header(row, index, author, profile_user, saved))
         .when_some(
             row.subject.clone().filter(|_| role == Role::Root),
             |column, subject| {
@@ -230,7 +241,15 @@ fn message_block(
             h_flex()
                 .items_start()
                 .gap(px(if role == Role::Root { AVATAR_GAP } else { 8. }))
-                .child(div().w(px(size)).flex_none().child(avatar))
+                .child(
+                    opens_profile(
+                        div().id(ElementId::Name(format!("post-avatar-{index}").into())),
+                        profile_user,
+                    )
+                    .w(px(size))
+                    .flex_none()
+                    .child(avatar),
+                )
                 .child(body),
         )
         .when_some(menu, |block, menu| {

@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 80 %** (69 done, 1 partial, 17 missing of 87). Partial counts half.
+**Parity: 82 %** (71 done, 1 partial, 15 missing of 87). Partial counts half.
 
 ## By area
 
@@ -16,7 +16,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Channels](#channels) | 57 % | 4 | 0 | 3 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
 | [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
-| [Presence and people](#presence-and-people) | 50 % | 2 | 0 | 2 |
+| [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
 | [Calls and meetings](#calls-and-meetings) | 0 % | 0 | 0 | 5 |
 
@@ -147,8 +147,8 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | Presence dots (live push) | Done |  |
 | Last known presence at start | Done |  |
-| Set own status and status message | Missing |  |
-| Profile card | Missing |  |
+| Set own status and status message | Done | Avatar menu like Teams: 6 states with duration, reset, status message with clear-after and "show when people message me", work location Office or Remote for today |
+| Profile card | Done | Click a name, avatar or mention: presence, status message or out of office, work location, local time, contact, manager and direct reports; Chat, Email, Copy email |
 
 ## Look and settings
 

@@ -7,7 +7,7 @@ use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
     AdaptiveCard, Draft, FileCard, ImageRef, LinkPreview, ReactionInfo, Span, adaptive_cards,
-    card_texts, files, images, link_preview, message_spans, reactions,
+    card_texts, files, images, link_preview, linked_message_spans, message_spans, reactions,
 };
 
 use crate::card_state::CardOverride;
@@ -529,7 +529,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
     let blocks = if record.deleted {
         vec![Block::Paragraph(Inline::plain(DELETED_TEXT))]
     } else {
-        layout_blocks(&message_spans(record))
+        layout_blocks(&linked_message_spans(record))
     };
     let blocks = if images.is_empty() {
         blocks

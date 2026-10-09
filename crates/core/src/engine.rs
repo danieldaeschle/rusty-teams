@@ -23,6 +23,7 @@ const EVENT_CAPACITY: usize = 64;
 pub(crate) const META_USER_ID: &str = "me_user_id";
 const META_TENANT_ID: &str = "me_tenant_id";
 const META_DISPLAY_NAME: &str = "me_display_name";
+const META_EMAIL: &str = "me_email";
 
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -263,7 +264,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub(crate) async fn ensure_display_name(&self) -> Result<()> {
-        if self.store.meta(META_DISPLAY_NAME)?.is_none() {
+        if self.store.meta(META_DISPLAY_NAME)?.is_none() || self.store.meta(META_EMAIL)?.is_none() {
             self.remember_me().await?;
         }
         Ok(())
@@ -275,6 +276,8 @@ impl<R: Remote> SyncEngine<R> {
         if let Some(name) = user.display_name.as_deref() {
             self.store.set_meta(META_DISPLAY_NAME, name)?;
         }
+        let email = user.mail.as_deref().or(user.user_principal_name.as_deref());
+        self.store.set_meta(META_EMAIL, email.unwrap_or_default())?;
         Ok(user.id)
     }
 

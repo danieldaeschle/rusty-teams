@@ -37,6 +37,7 @@
 - Channel posts like Teams: one card per post, newest activity on top, last 3 replies, inline reply, new post with a subject, full conversation view
 - Chat menu: pin, move to folder, mark as unread, mute, hide, leave
 - Read receipts, typing indicator with faces, presence, unread jump
+- Own status, status message and work location from the avatar menu; profile cards with org chart
 - Activity bell: new messages, @mentions and reactions, kept for 14 days
 
 **Messages**

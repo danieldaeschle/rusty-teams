@@ -25,6 +25,7 @@ mod render_env;
 mod scheduled;
 
 use super::attachments::FileActions;
+use super::profile_card::opens_profile;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
@@ -507,7 +508,12 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
-            AppEvent::TaskDialog | AppEvent::LocalPreviews | AppEvent::Forward => {}
+            AppEvent::TaskDialog
+            | AppEvent::LocalPreviews
+            | AppEvent::Forward
+            | AppEvent::StatusMessage
+            | AppEvent::NotificationSettings
+            | AppEvent::Profile => {}
             AppEvent::Saved => cx.notify(),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
@@ -2803,11 +2809,16 @@ impl ConversationView {
                         let user_id = first.as_ref().and_then(|face| face.user_id.as_deref());
                         let avatar = person_avatar(directory, user_id, name, 36.);
                         let presence = user_id.map(|id| directory.presence_of(id));
-                        lead = Some(match presence {
+                        let avatar = match presence {
                             Some(kind) => with_presence(avatar, kind, 36., theme::background())
                                 .into_any_element(),
                             None => avatar,
-                        });
+                        };
+                        lead = Some(
+                            opens_profile(div().id("header-avatar").flex_none(), user_id)
+                                .child(avatar)
+                                .into_any_element(),
+                        );
                         subline = presence
                             .map(|presence| presence.kind().label().to_owned())
                             .unwrap_or_default();

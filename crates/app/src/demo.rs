@@ -24,6 +24,7 @@ static SEARCHABLE_GIFS: OnceLock<Vec<Gif>> = OnceLock::new();
 
 pub const DEMO_USER_ID: &str = "demo-me";
 const DEMO_USER_NAME: &str = "Dana Demo";
+const DEMO_USER_EMAIL: &str = "dana.demo@example.com";
 const PHOTO_SIZE: usize = 48;
 const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
@@ -99,11 +100,11 @@ const TOBIAS: Palette = Palette {
     shirt: [0x0f, 0x76, 0x6e],
 };
 
-const MARA_ID: &str = "demo-mara";
-const JONAS_ID: &str = "demo-jonas";
-const PRIYA_ID: &str = "demo-priya";
-const LEA_ID: &str = "demo-lea";
-const TOBIAS_ID: &str = "demo-tobias";
+pub const MARA_ID: &str = "demo-mara";
+pub const JONAS_ID: &str = "demo-jonas";
+pub const PRIYA_ID: &str = "demo-priya";
+pub const LEA_ID: &str = "demo-lea";
+pub const TOBIAS_ID: &str = "demo-tobias";
 
 const DEMO_TEAMS: [(&str, &str, [&str; 3]); 4] = [
     (
@@ -599,6 +600,8 @@ fn photo(palette: &Palette) -> Arc<Image> {
 }
 
 pub fn seed_directory(state: &mut AppState) {
+    state.own_status = crate::own_status::demo_status();
+    state.own_email = DEMO_USER_EMAIL.to_owned();
     let directory = &mut state.directory;
     directory.me = Some(Person {
         user_id: DEMO_USER_ID.to_owned(),

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use teams_core::{FontSize, Span};
+use teams_core::{FontSize, PROFILE_LINK_PREFIX, Span};
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
 pub const CODE_PADDING: &str = "\u{2004}";
@@ -551,15 +551,18 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 Some(url.as_str()),
                 out,
             ),
-            Span::Mention { name, .. } => {
+            Span::Mention { name, id } => {
                 let label = format!("@{}", name.trim_start_matches('@'));
+                let profile_link = id
+                    .as_deref()
+                    .filter(|id| id.starts_with(PROFILE_LINK_PREFIX));
                 out.push(
                     &label,
                     StyleFlags {
                         mention: true,
                         ..style
                     },
-                    link,
+                    profile_link.or(link),
                 );
             }
             Span::LineBreak | Span::Rule => out.push("\n", style, link),

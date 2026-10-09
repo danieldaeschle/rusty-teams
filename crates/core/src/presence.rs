@@ -1,7 +1,12 @@
-use chatsvc::{PresenceUpdate, TrouterEndpoint};
+use chatsvc::{
+    ForcedAvailability, PresenceStatus, PresenceUpdate, StatusNote, TrouterEndpoint,
+    WorkLocationKind,
+};
 use graph::MAX_PRESENCE_IDS;
 
-use crate::engine::SyncEngine;
+use chrono::{DateTime, Utc};
+
+use crate::engine::{META_USER_ID, SyncEngine};
 use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::receipts::locked;
@@ -81,6 +86,52 @@ impl<R: Remote> SyncEngine<R> {
         if changed {
             let _ = self.events.send(CoreEvent::PresenceChanged);
         }
+    }
+
+    pub fn concerns_me(&self, updates: &[PresenceUpdate]) -> bool {
+        let my_user_id = self.store.meta(META_USER_ID).ok().flatten();
+        updates
+            .iter()
+            .any(|update| my_user_id.as_deref() == Some(update.user_id.as_str()))
+    }
+
+    pub async fn refresh_own_status(&self) -> Result<PresenceStatus> {
+        let _ = self.ensure_display_name().await;
+        let my_user_id = self.my_user_id().await?;
+        let status = self.remote.own_status(&my_user_id).await?;
+        let changed = self.record_presences(std::iter::once((
+            &my_user_id,
+            status.availability.as_str(),
+            status.activity.as_deref(),
+        )));
+        let _ = self
+            .events
+            .send(CoreEvent::PresenceStatusChanged(status.clone()));
+        if changed {
+            let _ = self.events.send(CoreEvent::PresenceChanged);
+        }
+        Ok(status)
+    }
+
+    pub async fn set_own_availability(&self, forced: Option<ForcedAvailability>) -> Result<()> {
+        self.remote.set_availability(forced.as_ref()).await?;
+        let _ = self.refresh_own_status().await;
+        Ok(())
+    }
+
+    pub async fn set_own_status_note(&self, note: Option<StatusNote>) -> Result<()> {
+        self.remote.set_status_note(note.as_ref()).await?;
+        let _ = self.refresh_own_status().await;
+        Ok(())
+    }
+
+    pub async fn set_own_work_location(
+        &self,
+        location: Option<(WorkLocationKind, DateTime<Utc>)>,
+    ) -> Result<()> {
+        self.remote.set_work_location(location).await?;
+        let _ = self.refresh_own_status().await;
+        Ok(())
     }
 
     pub async fn watch_presence(&self, user_ids: &[String]) -> Result<()> {
