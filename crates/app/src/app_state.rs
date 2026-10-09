@@ -472,13 +472,20 @@ impl AppState {
             return;
         }
         if event.active {
+            let display_name = match event.display_name.trim() {
+                "" => crate::people::resolve_names(self, std::slice::from_ref(&event.user_id))
+                    .remove(&event.user_id)
+                    .unwrap_or_default(),
+                _ => event.display_name.clone(),
+            };
             self.typing.start(
                 &event.conversation_id,
                 &event.user_id,
-                &event.display_name,
+                &display_name,
                 Instant::now(),
                 event.received_at,
             );
+            self.request_avatars(vec![event.user_id.clone()], cx);
             self.schedule_typing_expiry(cx);
         } else {
             self.typing.clear(&event.conversation_id, &event.user_id);
@@ -631,7 +638,9 @@ mod tests {
     use chatsvc::TypingEvent;
     use chrono::{Duration, Utc};
     use gpui_kit::{AppContext as _, TestAppContext};
-    use store::{ChannelRecord, ChatRecord, MessageRecord, SidebarTeam, Store, TeamRecord};
+    use store::{
+        ChannelRecord, ChatRecord, MemberRecord, MessageRecord, SidebarTeam, Store, TeamRecord,
+    };
     use teams_core::CoreEvent;
 
     use super::{AppState, Mode, Selection, chat_title, selection_title};
@@ -751,5 +760,41 @@ mod tests {
             })
         });
         assert!(names(cx).is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn typing_without_a_display_name_uses_the_chat_member_name(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| {
+            cx.new(|_| {
+                let mut state = AppState::new(store.clone(), Mode::default());
+                let mut member_chat = chat("c1", "First", false);
+                member_chat.members = vec![MemberRecord {
+                    user_id: Some("ada".into()),
+                    display_name: "Ada Lovelace".into(),
+                }];
+                state.sidebar.chats = vec![member_chat];
+                state
+            })
+        });
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(
+                    BackendEvent::Typing(TypingEvent {
+                        conversation_id: "c1".into(),
+                        user_id: "ada".into(),
+                        display_name: String::new(),
+                        active: true,
+                        received_at: Utc::now(),
+                    }),
+                    cx,
+                )
+            })
+        });
+        assert_eq!(
+            cx.update(|cx| app.read(cx).typing.names("c1")),
+            vec!["Ada Lovelace".to_owned()]
+        );
     }
 }

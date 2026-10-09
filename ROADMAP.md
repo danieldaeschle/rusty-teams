@@ -73,7 +73,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Read receipts | Done |  |
 | Select and copy message text | Done |  |
 | Adaptive Cards | Partial | Buttons work (submit, execute, show card, toggle, task dialog card). Input fields work in messages and card dialogs (text, number, date, time, toggle, choice set) with validation. URL task dialogs run in a hosted window on Windows (Teams JS SDK host, see docs/research/card-actions.md), in the browser on Linux. Date and time are plain text fields, no picker |
-| Typing indicator | Done | Shows who types in the chat, thread and list preview; sends your own typing |
+| Typing indicator | Done | Shows who types as avatars above the composer (names on hover) and in the list preview; sends your own typing |
 | Link previews | Done | One card per message from the chat service, see docs/research/link-previews.md |
 | Loop components | Missing |  |
 | Translate a message | Missing |  |

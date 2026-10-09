@@ -4,11 +4,11 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 
 use crate::format::first_name;
+use crate::sidebar_model::Face;
 
 pub const SEND_INTERVAL: Duration = Duration::from_secs(20);
 pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(22);
 const UNKNOWN_NAME: &str = "Someone";
-const LISTED_FIRST_NAMES: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Typer {
@@ -86,13 +86,23 @@ impl TypingState {
     }
 
     pub fn names(&self, conversation_id: &str) -> Vec<String> {
+        self.faces(conversation_id)
+            .into_iter()
+            .map(|face| face.name)
+            .collect()
+    }
+
+    pub fn faces(&self, conversation_id: &str) -> Vec<Face> {
         self.conversations
             .get(conversation_id)
             .into_iter()
             .flatten()
-            .map(|typer| match typer.name.trim() {
-                "" => UNKNOWN_NAME.to_owned(),
-                name => name.to_owned(),
+            .map(|typer| Face {
+                user_id: Some(typer.user_id.clone()),
+                name: match typer.name.trim() {
+                    "" => UNKNOWN_NAME.to_owned(),
+                    name => name.to_owned(),
+                },
             })
             .collect()
     }
@@ -115,25 +125,12 @@ impl TypingState {
     }
 }
 
-pub fn typing_label(names: &[String]) -> String {
+pub fn typing_tooltip(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [only] => format!("{only} is typing"),
-        [first, second] => {
-            format!("{first} and {second} are typing")
-        }
-        [first, second, third] => format!(
-            "{}, {}, and {} are typing",
-            first_name(first),
-            first_name(second),
-            first_name(third)
-        ),
-        _ => format!(
-            "{}, {}, and {} others are typing",
-            first_name(&names[0]),
-            first_name(&names[1]),
-            names.len() - LISTED_FIRST_NAMES
-        ),
+        [first, second] => format!("{first} and {second} are typing"),
+        _ => format!("Typing\n{}", names.join("\n")),
     }
 }
 
@@ -188,33 +185,42 @@ mod tests {
     }
 
     #[test]
-    fn label_has_four_forms() {
-        assert_eq!(typing_label(&[]), "");
+    fn tooltip_names_one_or_two_in_a_sentence_and_more_as_a_list() {
+        assert_eq!(typing_tooltip(&[]), "");
         assert_eq!(
-            typing_label(&names(&["Ada Lovelace"])),
+            typing_tooltip(&names(&["Ada Lovelace"])),
             "Ada Lovelace is typing"
         );
         assert_eq!(
-            typing_label(&names(&["Ada Lovelace", "Alan Turing"])),
+            typing_tooltip(&names(&["Ada Lovelace", "Alan Turing"])),
             "Ada Lovelace and Alan Turing are typing"
         );
         assert_eq!(
-            typing_label(&names(&["Ada Lovelace", "Alan Turing", "Grace Hopper"])),
-            "Ada, Alan, and Grace are typing"
+            typing_tooltip(&names(&["A B", "C D", "E F", "G H", "I J"])),
+            "Typing\nA B\nC D\nE F\nG H\nI J"
         );
+    }
+
+    #[test]
+    fn faces_keep_order_and_fall_back_to_someone() {
+        let mut state = TypingState::default();
+        let now = Instant::now();
+        state.start("c", "u1", "Ada", now, at(0));
+        state.start("c", "u2", " ", now, at(0));
         assert_eq!(
-            typing_label(&names(&[
-                "Ada Lovelace",
-                "Alan Turing",
-                "Grace Hopper",
-                "Linus T"
-            ])),
-            "Ada, Alan, and 2 others are typing"
+            state.faces("c"),
+            vec![
+                Face {
+                    user_id: Some("u1".into()),
+                    name: "Ada".into()
+                },
+                Face {
+                    user_id: Some("u2".into()),
+                    name: "Someone".into()
+                },
+            ]
         );
-        assert_eq!(
-            typing_label(&names(&["A B", "C D", "E F", "G H", "I J"])),
-            "A, C, and 3 others are typing"
-        );
+        assert!(state.faces("other").is_empty());
     }
 
     #[test]

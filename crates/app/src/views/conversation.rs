@@ -11,6 +11,7 @@ use gpui_kit::component::{
     h_flex,
     input::Escape,
     message_scroller::{MessageScroller, MessageScrollerState},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -50,7 +51,7 @@ use crate::rows::{
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
-use crate::typing::typing_label;
+use crate::typing::typing_tooltip;
 
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -68,7 +69,7 @@ const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
 const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
 const PROGRESS_BAR_WIDTH: f32 = 0.35;
-const TYPING_LINE_HEIGHT: f32 = 20.;
+const TYPING_LINE_HEIGHT: f32 = 22.;
 const TYPING_DOT_SIZE: f32 = 5.;
 const TYPING_DOT_COUNT: usize = 3;
 const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
@@ -578,33 +579,35 @@ impl ConversationView {
     }
 
     fn render_typing_line(&self, cx: &App) -> impl IntoElement {
-        let names = self
+        let app = self.app.read(cx);
+        let faces = self
             .current
             .as_ref()
             .filter(|_| !self.draft_active)
-            .map(|current| {
-                self.app
-                    .read(cx)
-                    .typing
-                    .names(current.selection.conversation_id())
-            })
+            .map(|current| app.typing.faces(current.selection.conversation_id()))
             .unwrap_or_default();
+        let tooltip_text = typing_tooltip(
+            &faces
+                .iter()
+                .map(|face| face.name.clone())
+                .collect::<Vec<_>>(),
+        );
         h_flex()
             .h(px(TYPING_LINE_HEIGHT))
             .flex_none()
             .px(px(24.))
             .gap(px(6.))
             .items_center()
-            .text_size(px(12.))
-            .text_color(theme::text_muted())
-            .when(!names.is_empty(), |line| {
-                line.child(typing_dots()).child(
+            .when(!faces.is_empty(), |line| {
+                line.child(
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .child(typing_label(&names)),
+                        .id("typing-faces")
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(tooltip_text.clone()).build(window, cx)
+                        })
+                        .child(member_stack(&app.directory, &faces, faces.len())),
                 )
+                .child(typing_dots())
             })
     }
 
