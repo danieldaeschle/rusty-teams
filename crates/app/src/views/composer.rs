@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{
@@ -63,6 +63,9 @@ const MENTION_QUERY_MAX_WORDS: usize = 3;
 const POPUP_WIDTH: f32 = 380.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
+const COMPOSER_ICON_SIZE: f32 = 20.;
+/// gpui-kit draws a `Size::Size` button's icon at this fraction of the button size.
+const BUTTON_ICON_SCALE: f32 = 0.75;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
 const HISTORY_LIMIT: usize = 200;
@@ -2469,9 +2472,10 @@ impl Render for Composer {
                 .trigger(
                     Button::new("composer-fun")
                         .ghost()
+                        .with_size(px(COMPOSER_ICON_SIZE / BUTTON_ICON_SCALE))
                         .size(px(32.))
                         .tooltip("Emoji, GIFs und Sticker")
-                        .icon(symbol("mood", 20., theme::text_muted())),
+                        .icon(symbol("mood", COMPOSER_ICON_SIZE, theme::text_muted())),
                 )
                 .on_open_change(move |open, window, cx| {
                     if *open {
@@ -2496,7 +2500,7 @@ impl Render for Composer {
                 .cursor_pointer()
                 .hover(|button| button.bg(theme::row_hover()))
                 .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
-                .child(symbol("attach_file", 20., theme::text_muted()))
+                .child(symbol("attach_file", COMPOSER_ICON_SIZE, theme::text_muted()))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
         let composer = cx.weak_entity();
