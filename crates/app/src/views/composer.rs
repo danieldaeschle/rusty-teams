@@ -2471,7 +2471,7 @@ impl Render for Composer {
                         .ghost()
                         .size(px(32.))
                         .tooltip("Emoji, GIFs und Sticker")
-                        .child(symbol("mood", 20., theme::text_muted())),
+                        .icon(symbol("mood", 20., theme::text_muted())),
                 )
                 .on_open_change(move |open, window, cx| {
                     if *open {
