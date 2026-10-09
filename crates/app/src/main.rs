@@ -149,6 +149,7 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
             Some(directory) => directory.join(WEBVIEW_FOLDER),
             None => data_path(WEBVIEW_FOLDER),
         };
+        embedded_web::configure(user_data_folder.clone());
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),

@@ -14,7 +14,7 @@ use crate::channel_files::{
     library_file, shared_items, sorted_entries,
 };
 use crate::downloads::DownloadKey;
-use crate::embedded_web::{self, EmbeddedWeb, EmbeddedWebEvent, Overlays};
+use crate::embedded_web::{self, EmbeddedWeb, EmbeddedWebEvent};
 use crate::notice::short_error;
 use crate::runtime;
 use crate::views::attachment_tray::{display_name, read_attachment};
@@ -121,10 +121,6 @@ impl ConversationView {
                     .ok();
             })
         };
-        let menu_toggled = Rc::new(move |open: bool, window: &mut Window, cx: &mut App| {
-            Overlays::update(cx, |overlays| overlays.tab_menu = open);
-            window.refresh();
-        });
         let active_tab_id = self
             .web
             .as_ref()
@@ -139,7 +135,6 @@ impl ConversationView {
             &TabBarActions {
                 select,
                 open,
-                menu_toggled,
             },
         ))
     }
@@ -178,7 +173,9 @@ impl ConversationView {
             cx.open_url(&url);
             return;
         };
-        let web = cx.new(|cx| EmbeddedWeb::new(tab_id, url, native, events, cx));
+        let web = cx.new(|cx| {
+            EmbeddedWeb::new(tab_id, url, native, events, self.focus_handle.clone(), cx)
+        });
         self.web_subscription =
             Some(cx.subscribe(&web, |this, _, event: &EmbeddedWebEvent, cx| {
                 let EmbeddedWebEvent::Closed { start_url } = event;

@@ -23,7 +23,6 @@ use windows::core::{HSTRING, Interface, PCWSTR, PWSTR, w};
 
 use crate::fanout::Subscribers;
 use crate::host_dialog::{self, Dialog};
-use crate::host_embed::{self, Embed};
 use crate::transport::{HostState, UiRequest, WebViewTransport};
 use crate::{BROWSER_ARGUMENTS, FORWARDED_EVENTS};
 
@@ -55,7 +54,6 @@ pub(crate) struct Shared {
     views: RefCell<HashMap<App, View>>,
     pub(crate) environment: RefCell<Option<ICoreWebView2Environment>>,
     pub(crate) dialogs: RefCell<HashMap<u64, Dialog>>,
-    pub(crate) embeds: RefCell<HashMap<u64, Embed>>,
     subscribers: RefCell<Subscribers>,
     state: watch::Sender<HostState>,
     requests: mpsc::Receiver<UiRequest>,
@@ -116,7 +114,6 @@ fn run(
         views: RefCell::new(HashMap::new()),
         environment: RefCell::new(None),
         dialogs: RefCell::new(HashMap::new()),
-        embeds: RefCell::new(HashMap::new()),
         subscribers: RefCell::new(Subscribers::default()),
         state,
         requests,
@@ -191,15 +188,19 @@ fn create_views(shared: &Rc<Shared>) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn create_environment(
-    user_data_folder: &std::path::Path,
-) -> std::result::Result<ICoreWebView2Environment, String> {
+pub(crate) fn environment_options() -> ICoreWebView2EnvironmentOptions {
     let options = CoreWebView2EnvironmentOptions::default();
     unsafe {
         options.set_additional_browser_arguments(BROWSER_ARGUMENTS.to_owned());
         options.set_allow_single_sign_on_using_os_primary_account(true);
     }
-    let options: ICoreWebView2EnvironmentOptions = options.into();
+    options.into()
+}
+
+fn create_environment(
+    user_data_folder: &std::path::Path,
+) -> std::result::Result<ICoreWebView2Environment, String> {
+    let options = environment_options();
     let folder = HSTRING::from(user_data_folder.as_os_str());
     let (sender, receiver) = mpsc::channel();
     CreateCoreWebView2EnvironmentCompletedHandler::wait_for_async_operation(
@@ -434,8 +435,6 @@ fn drain(shared: &Rc<Shared>) {
                 host_dialog::open(shared, id, spec, events)
             }
             UiRequest::Dialog { id, command } => host_dialog::run(shared, id, command),
-            UiRequest::OpenEmbed { id, spec, events } => host_embed::open(shared, id, spec, events),
-            UiRequest::Embed { id, command } => host_embed::run(shared, id, command),
         }
     }
 }
@@ -525,7 +524,6 @@ fn restart(shared: &Rc<Shared>) {
     shared.state.send_modify(|state| state.ready = false);
     shared.subscribers.borrow_mut().clear();
     host_dialog::close_all(shared);
-    host_embed::close_all(shared);
     let views: Vec<View> = shared
         .views
         .borrow_mut()

@@ -6,6 +6,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub enum NativeEvent {
     Navigated(String),
     NewWindow(String),
+    Loaded,
     Closed,
 }
 

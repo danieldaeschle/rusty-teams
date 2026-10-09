@@ -15,7 +15,7 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
-use crate::embedded_web::Overlays;
+use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
 use crate::theme;
@@ -100,6 +100,7 @@ impl AppShell {
             });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
+        cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_observation = cx.observe(&activity, |_, _, cx| cx.notify());

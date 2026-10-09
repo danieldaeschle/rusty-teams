@@ -16,6 +16,8 @@ mod native_stub;
 #[cfg(not(windows))]
 use native_stub as native;
 
+#[cfg(windows)]
+pub use native::configure;
 pub use native::{Native, NativeEvent, available};
 
 const BAR_HEIGHT: f32 = 28.;
@@ -25,7 +27,6 @@ const OPEN_LABEL: &str = "Open in browser \u{2197}";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Overlays {
     pub panels: bool,
-    pub tab_menu: bool,
 }
 
 impl Global for Overlays {}
@@ -42,20 +43,37 @@ impl Overlays {
             cx.set_global(next);
         }
     }
+}
 
-    pub fn any(self) -> bool {
-        self.panels || self.tab_menu
-    }
+pub struct RootFocus(pub FocusHandle);
+
+impl Global for RootFocus {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusSpot {
+    Nowhere,
+    Page,
+    Elsewhere,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Visibility {
     pub overlays: Overlays,
     pub has_area: bool,
+    pub focus: FocusSpot,
 }
 
 pub fn embed_visible(visibility: Visibility) -> bool {
-    visibility.has_area && !visibility.overlays.any()
+    visibility.has_area && !visibility.overlays.panels && visibility.focus != FocusSpot::Elsewhere
+}
+
+pub fn focus_spot<T: PartialEq>(focused: Option<T>, inside_pane: bool, page: &[T]) -> FocusSpot {
+    match focused {
+        None => FocusSpot::Nowhere,
+        Some(_) if inside_pane => FocusSpot::Page,
+        Some(handle) if page.contains(&handle) => FocusSpot::Page,
+        Some(_) => FocusSpot::Elsewhere,
+    }
 }
 
 pub fn url_bar_text(url: &str) -> String {
@@ -72,6 +90,8 @@ pub struct EmbeddedWeb {
     start_url: String,
     url: String,
     native: Native,
+    focus_handle: FocusHandle,
+    container_focus: FocusHandle,
     _events: Task<()>,
 }
 
@@ -83,6 +103,7 @@ impl EmbeddedWeb {
         start_url: String,
         native: Native,
         mut events: UnboundedReceiver<NativeEvent>,
+        container_focus: FocusHandle,
         cx: &mut Context<Self>,
     ) -> Self {
         let task = cx.spawn(async move |this, cx| {
@@ -98,6 +119,8 @@ impl EmbeddedWeb {
             url: start_url.clone(),
             start_url,
             native,
+            focus_handle: cx.focus_handle(),
+            container_focus,
             _events: task,
         }
     }
@@ -113,6 +136,7 @@ impl EmbeddedWeb {
                 cx.notify();
             }
             NativeEvent::NewWindow(url) => cx.open_url(&url),
+            NativeEvent::Loaded => {}
             NativeEvent::Closed => cx.emit(EmbeddedWebEvent::Closed {
                 start_url: self.start_url.clone(),
             }),
@@ -129,9 +153,12 @@ impl Drop for EmbeddedWeb {
 impl Render for EmbeddedWeb {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let native = self.native.clone();
+        let pane_focus = self.focus_handle.clone();
+        let container_focus = self.container_focus.clone();
         let open_url = self.url.clone();
         v_flex()
             .size_full()
+            .track_focus(&self.focus_handle)
             .child(
                 h_flex()
                     .h(px(BAR_HEIGHT))
@@ -170,10 +197,19 @@ impl Render for EmbeddedWeb {
                     .child(
                         canvas(
                             move |bounds, window, cx| {
+                                let mut page = vec![container_focus.clone()];
+                                page.extend(
+                                    cx.try_global::<RootFocus>().map(|root| root.0.clone()),
+                                );
                                 let visible = embed_visible(Visibility {
                                     overlays: Overlays::read(cx),
                                     has_area: bounds.size.width > px(0.)
                                         && bounds.size.height > px(0.),
+                                    focus: focus_spot(
+                                        window.focused(cx),
+                                        pane_focus.contains_focused(window, cx),
+                                        &page,
+                                    ),
                                 });
                                 native.place(bounds, window.scale_factor(), visible);
                             },
@@ -187,21 +223,40 @@ impl Render for EmbeddedWeb {
 
 #[cfg(test)]
 mod tests {
-    use super::{Overlays, Visibility, embed_visible, url_bar_text};
+    use super::{FocusSpot, Overlays, Visibility, embed_visible, focus_spot, url_bar_text};
 
-    fn visibility(panels: bool, tab_menu: bool, has_area: bool) -> Visibility {
+    fn visibility(panels: bool, focus: FocusSpot, has_area: bool) -> Visibility {
         Visibility {
-            overlays: Overlays { panels, tab_menu },
+            overlays: Overlays { panels },
             has_area,
+            focus,
         }
     }
 
     #[test]
-    fn the_page_shows_only_without_overlays_and_with_room() {
-        assert!(embed_visible(visibility(false, false, true)));
-        assert!(!embed_visible(visibility(true, false, true)));
-        assert!(!embed_visible(visibility(false, true, true)));
-        assert!(!embed_visible(visibility(false, false, false)));
+    fn the_page_shows_only_with_room_and_no_panel() {
+        assert!(embed_visible(visibility(false, FocusSpot::Page, true)));
+        assert!(!embed_visible(visibility(true, FocusSpot::Page, true)));
+        assert!(!embed_visible(visibility(false, FocusSpot::Page, false)));
+    }
+
+    #[test]
+    fn focus_outside_the_page_hides_it() {
+        assert!(!embed_visible(visibility(
+            false,
+            FocusSpot::Elsewhere,
+            true
+        )));
+        assert!(embed_visible(visibility(false, FocusSpot::Nowhere, true)));
+    }
+
+    #[test]
+    fn focus_is_classified_against_the_page_handles() {
+        assert_eq!(focus_spot(None, false, &[1, 2]), FocusSpot::Nowhere);
+        assert_eq!(focus_spot(Some(2), false, &[1, 2]), FocusSpot::Page);
+        assert_eq!(focus_spot(Some(9), true, &[1, 2]), FocusSpot::Page);
+        assert_eq!(focus_spot(Some(9), false, &[1, 2]), FocusSpot::Elsewhere);
+        assert_eq!(focus_spot(Some(9), false, &[]), FocusSpot::Elsewhere);
     }
 
     #[test]

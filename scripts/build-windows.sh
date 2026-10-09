@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cross-build a GPUI crate to a Windows .exe from WSL/Linux. No admin, no Visual Studio.
-# Usage: scripts/build-windows.sh [crate-dir, default spikes/gpui-list] [binary-name, default: the crate's only binary]
+# Usage: scripts/build-windows.sh [crate-dir, default spikes/gpui-list] [binary-or-example-name, default: the crate's only binary]
 set -euo pipefail
 repoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crateDir="$(realpath "${1:-$repoRoot/spikes/gpui-list}")"
@@ -40,7 +40,13 @@ PY
 
 cd "$crateDir"
 binaryArguments=()
-[ -n "$binaryName" ] && binaryArguments=(--bin "$binaryName")
+outputDir="$CARGO_TARGET_DIR/$targetName/release"
+if [ -n "$binaryName" ] && [ -f "$crateDir/examples/$binaryName.rs" ]; then
+  binaryArguments=(--example "$binaryName")
+  outputDir="$outputDir/examples"
+elif [ -n "$binaryName" ]; then
+  binaryArguments=(--bin "$binaryName")
+fi
 cargo xwin build --release --target "$targetName" "${binaryArguments[@]}" \
   --config "patch.crates-io.gpui-pre-windows.path=\"$patchedDir\""
-ls -la "$CARGO_TARGET_DIR/$targetName/release/"*.exe
+ls -la "$outputDir/"*.exe

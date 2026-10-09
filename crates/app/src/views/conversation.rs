@@ -180,6 +180,7 @@ pub struct ConversationView {
     channel_tabs: Vec<ChannelTabRecord>,
     tab_links: HashMap<String, String>,
     web: Option<Entity<EmbeddedWeb>>,
+    focus_handle: FocusHandle,
     web_subscription: Option<Subscription>,
     shared: SharedState,
     demo_library: DemoLibrary,
@@ -450,6 +451,7 @@ impl ConversationView {
             channel_tabs: Vec::new(),
             tab_links: HashMap::new(),
             web: None,
+            focus_handle: cx.focus_handle(),
             web_subscription: None,
             shared: SharedState::default(),
             demo_library: DemoLibrary::default(),
@@ -2980,7 +2982,12 @@ impl Render for ConversationView {
             self.close_web();
         }
         let background = theme::background();
-        let mut root = v_flex().flex_1().min_w_0().h_full().bg(background);
+        let mut root = v_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .bg(background)
+            .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
         if self.current.is_none() && !drafting {
             return root

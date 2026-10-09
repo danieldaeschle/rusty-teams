@@ -17,10 +17,6 @@ pub fn install_host(transport: Arc<WebViewTransport>) {
     let _ = HOST.set(transport);
 }
 
-pub fn host() -> Option<Arc<WebViewTransport>> {
-    HOST.get().cloned()
-}
-
 pub fn open(dialog: UrlDialog, engine: Option<Arc<Engine>>, cx: &mut App) {
     let Some(host) = HOST.get().cloned() else {
         cx.open_url(&dialog.fallback_url);

@@ -13,7 +13,6 @@ use tokio::sync::{
 };
 
 use crate::dialog::{DialogCommand, DialogEvent, DialogHandle, DialogSpec};
-use crate::embed::{EmbedCommand, EmbedEvent, EmbedHandle, EmbedSpec};
 
 const ENDPOINT_NAME: &str = "WebView2";
 const READY_WAIT: Duration = Duration::from_secs(30);
@@ -40,15 +39,6 @@ pub(crate) enum UiRequest {
         id: u64,
         command: DialogCommand,
     },
-    OpenEmbed {
-        id: u64,
-        spec: EmbedSpec,
-        events: UnboundedSender<EmbedEvent>,
-    },
-    Embed {
-        id: u64,
-        command: EmbedCommand,
-    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,7 +54,6 @@ pub struct WebViewTransport {
     state: watch::Receiver<HostState>,
     ready_wait: Duration,
     next_dialog: AtomicU64,
-    next_embed: AtomicU64,
 }
 
 impl WebViewTransport {
@@ -79,7 +68,6 @@ impl WebViewTransport {
             state,
             ready_wait: READY_WAIT,
             next_dialog: AtomicU64::new(1),
-            next_embed: AtomicU64::new(1),
         }
     }
 
@@ -92,18 +80,6 @@ impl WebViewTransport {
             waker: self.waker.clone(),
         };
         let _ = self.send(UiRequest::OpenDialog { id, spec, events });
-        (handle, receiver)
-    }
-
-    pub fn open_embed(&self, spec: EmbedSpec) -> (EmbedHandle, UnboundedReceiver<EmbedEvent>) {
-        let id = self.next_embed.fetch_add(1, Ordering::Relaxed);
-        let (events, receiver) = unbounded_channel();
-        let handle = EmbedHandle {
-            id,
-            requests: self.requests.clone(),
-            waker: self.waker.clone(),
-        };
-        let _ = self.send(UiRequest::OpenEmbed { id, spec, events });
         (handle, receiver)
     }
 

@@ -1,8 +1,18 @@
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("probe runs on Windows only");
+    std::process::exit(2);
+}
+
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use session::{App, Method, Scope, Session, SessionConfig};
 
+#[cfg(windows)]
 #[tokio::main]
 async fn main() {
     let folder = std::env::args().nth(1).map(PathBuf::from).expect("usage: probe <user-data-folder> [hold-seconds]");
@@ -32,6 +42,7 @@ async fn main() {
     presence_call(&session, "after hold").await;
 }
 
+#[cfg(windows)]
 async fn presence_call(session: &Session, phase: &str) {
     let me = match session.request(Method::Get, "https://graph.microsoft.com/v1.0/me?$select=id", &Scope::graph("User.Read"), None).await {
         Ok(response) => response.body["id"].as_str().unwrap_or_default().to_owned(),
@@ -51,6 +62,7 @@ async fn presence_call(session: &Session, phase: &str) {
     }
 }
 
+#[cfg(windows)]
 async fn graph_calls(session: &Session, phase: &str) {
     for (label, url, scope) in [
         ("graph me", "https://graph.microsoft.com/v1.0/me?$select=id", Scope::graph("User.Read")),

@@ -11,7 +11,7 @@ mod hosted;
 mod sdk;
 
 #[cfg(windows)]
-pub use hosted::{host, install_host};
+pub use hosted::install_host;
 
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq)]

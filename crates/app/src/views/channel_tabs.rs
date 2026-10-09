@@ -33,13 +33,11 @@ pub enum ChannelPane {
 
 pub type SelectPane = Rc<dyn Fn(ChannelPane, &mut App)>;
 pub type OpenTab = Rc<dyn Fn(usize, &mut Window, &mut App)>;
-pub type MenuToggled = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub struct TabBarActions {
     pub select: SelectPane,
     pub open: OpenTab,
-    pub menu_toggled: MenuToggled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,7 +135,6 @@ fn overflow_button(
 ) -> impl IntoElement {
     let entries = hidden.to_vec();
     let open = actions.open.clone();
-    let menu_toggled = actions.menu_toggled.clone();
     Button::new("channel-tab-overflow")
         .ghost()
         .compact()
@@ -156,7 +153,6 @@ fn overflow_button(
                 )
             })
         })
-        .on_open_change(move |open, window, cx| menu_toggled(*open, window, cx))
 }
 
 pub fn render_tab_bar(
