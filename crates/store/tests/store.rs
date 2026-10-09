@@ -1,8 +1,9 @@
 use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::Connection;
 use store::{
-    AvatarRecord, ChannelRecord, ChatPreview, ChatRecord, FolderRecord, MemberRecord,
-    MessageRecord, Store, SyncState, TeamRecord,
+    AvatarRecord, ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications,
+    ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord, MemberRecord,
+    MessageRecord, Store, SyncState, TeamLayoutRecord, TeamRecord,
 };
 
 #[test]
@@ -469,11 +470,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 16);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 14);
+    assert_eq!(reopened.schema_version().unwrap(), 16);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -502,10 +503,10 @@ fn old_schema_is_upgraded_in_place() {
     let path = directory.path().join("cache.sqlite3");
     drop(Store::open(&path).unwrap());
     let connection = rusqlite_open(&path);
-    connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; PRAGMA user_version = 0").unwrap();
+    connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 14);
+    assert_eq!(store.schema_version().unwrap(), 16);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -571,7 +572,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 14);
+    assert_eq!(store.schema_version().unwrap(), 16);
 }
 
 #[test]
@@ -589,6 +590,9 @@ fn migration_to_v13_clears_channel_delta_links_only() {
                  INSERT INTO sync_state (conversation_id, delta_link) VALUES ('ch', 'link'), ('chat', 'link');
                  ALTER TABLE messages DROP COLUMN subject;
                  ALTER TABLE folders DROP COLUMN expanded;
+                 DROP TABLE channel_tabs;
+                 ALTER TABLE channel_layout DROP COLUMN notification_level;
+                 ALTER TABLE channel_layout DROP COLUMN include_replies;
                  PRAGMA user_version = 12",
             )
             .unwrap();
@@ -837,7 +841,7 @@ fn migration_indexes_rows_that_predate_search() {
                 "DROP TRIGGER chats_title_insert; DROP TRIGGER chats_title_update; DROP TRIGGER chats_title_delete;
                  DROP TRIGGER channels_title_insert; DROP TRIGGER channels_title_update; DROP TRIGGER channels_title_delete;
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
-                 DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images;
+                 DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images;
                  DROP INDEX messages_by_sender; DROP INDEX chat_members_by_user;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
                  ALTER TABLE messages DROP COLUMN links_json;
@@ -1094,4 +1098,96 @@ fn display_names_prefer_members_then_latest_sender_name() {
     assert_eq!(names["user-ada"], "Ada Example");
     assert_eq!(names["user-sam"], "Sam New");
     assert!(store.display_names(&[]).unwrap().is_empty());
+}
+
+#[test]
+fn channel_tabs_keep_their_saved_order_and_are_replaced_on_refresh() {
+    let store = Store::open_in_memory().unwrap();
+    let tab = |tab_id: &str, open_url: Option<&str>| ChannelTabRecord {
+        tab_id: tab_id.to_owned(),
+        name: format!("Tab {tab_id}"),
+        definition_id: "com.microsoft.teamspace.tab.web".to_owned(),
+        open_url: open_url.map(str::to_owned),
+    };
+    let layout = |tabs: Vec<ChannelTabRecord>| {
+        vec![TeamLayoutRecord {
+            team_id: "team".to_owned(),
+            hidden: false,
+            channels: vec![ChannelLayoutRecord {
+                channel_id: "channel".to_owned(),
+                general: false,
+                hidden: false,
+                tabs,
+                notifications: ChannelNotifications::default(),
+            }],
+        }]
+    };
+    store
+        .replace_team_layout(&layout(vec![
+            tab("b", Some("https://b.example")),
+            tab("a", None),
+        ]))
+        .unwrap();
+    let tabs = store.channel_tabs("channel").unwrap();
+    let ids: Vec<&str> = tabs.iter().map(|tab| tab.tab_id.as_str()).collect();
+    assert_eq!(ids, ["b", "a"]);
+    assert_eq!(tabs[0].open_url.as_deref(), Some("https://b.example"));
+    assert!(store.channel_tabs("other").unwrap().is_empty());
+    store.replace_team_layout(&layout(Vec::new())).unwrap();
+    assert!(store.channel_tabs("channel").unwrap().is_empty());
+}
+
+#[test]
+fn channel_notifications_default_to_feed_and_survive_layout_and_local_writes() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_teams(&[TeamRecord {
+            id: "t1".to_owned(),
+            name: "Alpha".to_owned(),
+        }])
+        .unwrap();
+    let channel = |id: &str, name: &str| ChannelRecord {
+        id: id.to_owned(),
+        team_id: "t1".to_owned(),
+        name: name.to_owned(),
+        membership_type: None,
+        last_message_at: None,
+        unread: false,
+    };
+    store
+        .upsert_channels(&[channel("c1", "General"), channel("c2", "Random")])
+        .unwrap();
+    let team = || store.sidebar().unwrap().teams.remove(0);
+    assert_eq!(
+        team().channel_notifications("c2"),
+        ChannelNotifications::default()
+    );
+
+    let banner = ChannelNotifications {
+        level: ChannelNotificationLevel::BannerAndFeed,
+        include_replies: true,
+    };
+    store.set_channel_notifications("c2", banner).unwrap();
+    let sidebar_team = team();
+    assert_eq!(sidebar_team.channel_notifications("c2"), banner);
+    assert_eq!(sidebar_team.channels[0].name, "General");
+
+    let off = ChannelNotifications {
+        level: ChannelNotificationLevel::Off,
+        include_replies: false,
+    };
+    store
+        .replace_team_layout(&[TeamLayoutRecord {
+            team_id: "t1".to_owned(),
+            hidden: false,
+            channels: vec![ChannelLayoutRecord {
+                channel_id: "c2".to_owned(),
+                general: false,
+                hidden: false,
+                tabs: Vec::new(),
+                notifications: off,
+            }],
+        }])
+        .unwrap();
+    assert_eq!(team().channel_notifications("c2"), off);
 }

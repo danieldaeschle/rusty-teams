@@ -2,7 +2,7 @@ use std::future::Future;
 
 use chrono::{DateTime, Duration, Local, Offset, Utc};
 use gpui_kit::*;
-use store::ChatRecord;
+use store::{ChannelNotifications, ChatRecord};
 
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::notice::{NoticeAction, short_error, truncated};
@@ -91,6 +91,55 @@ impl AppState {
             |_, _| {},
             cx,
         );
+    }
+
+    pub fn set_channel_notifications(
+        &mut self,
+        channel_id: &str,
+        notifications: ChannelNotifications,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(previous) = self.channel_notifications(channel_id) else {
+            return;
+        };
+        if previous == notifications {
+            return;
+        }
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let _ = self
+            .store
+            .set_channel_notifications(channel_id, notifications);
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        let owned_id = channel_id.to_owned();
+        let revert_id = owned_id.clone();
+        self.run_chat_action(
+            "Change notifications",
+            async move {
+                engine
+                    .set_channel_notifications(&owned_id, notifications)
+                    .await
+            },
+            move |state, cx| {
+                let _ = state.store.set_channel_notifications(&revert_id, previous);
+                state.reload_sidebar(cx);
+            },
+            |_, _| {},
+            cx,
+        );
+    }
+
+    pub fn channel_notifications(&self, channel_id: &str) -> Option<ChannelNotifications> {
+        self.sidebar.teams.iter().find_map(|team| {
+            team.channels
+                .iter()
+                .any(|channel| channel.id == channel_id)
+                .then(|| team.channel_notifications(channel_id))
+        })
     }
 
     pub fn hide_chat(&mut self, chat_id: &str, cx: &mut Context<Self>) {

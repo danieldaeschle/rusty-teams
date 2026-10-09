@@ -402,6 +402,20 @@ impl<R: Remote> SyncEngine<R> {
         Ok(())
     }
 
+    pub async fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: store::ChannelNotifications,
+    ) -> Result<()> {
+        self.remote
+            .set_channel_notifications(channel_id, notifications)
+            .await?;
+        self.store
+            .set_channel_notifications(channel_id, notifications)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
     pub async fn hide_chat(&self, chat_id: &str) -> Result<()> {
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;

@@ -16,9 +16,13 @@ pub struct SessionTransport {
 
 impl SessionTransport {
     pub fn new(session: &Session) -> Self {
+        SessionTransport::with_scope(session, Scope::new(CSA_RESOURCE, CSA_SCOPE))
+    }
+
+    pub fn with_scope(session: &Session, scope: Scope) -> Self {
         SessionTransport {
             session: session.clone(),
-            scope: Scope::new(CSA_RESOURCE, CSA_SCOPE),
+            scope,
         }
     }
 }

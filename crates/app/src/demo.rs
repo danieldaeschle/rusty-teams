@@ -5,8 +5,8 @@ use std::time::Instant;
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use gpui_kit::Image;
 use store::{
-    ChannelLayoutRecord, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store,
-    TeamLayoutRecord, TeamRecord,
+    ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
+    ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
     CardActionOutcome, ChatApp, ChatSection, Gif, LinkPreview, MentionCandidate, PersonCandidate,
@@ -127,6 +127,20 @@ const DEMO_TEAMS: [(&str, &str, [&str; 3]); 4] = [
 const DEMO_TEAM_ORDER: [&str; 4] = ["demo-team-2", "demo-team-1", "demo-team-3", "demo-team-4"];
 const DEMO_HIDDEN_TEAM: &str = "demo-team-4";
 const DEMO_HIDDEN_CHANNEL: &str = "demo-channel-3-3";
+const DEMO_CHANNEL_NOTIFICATIONS: [(&str, ChannelNotificationLevel, bool); 4] = [
+    (
+        "demo-channel-1-1",
+        ChannelNotificationLevel::BannerAndFeed,
+        false,
+    ),
+    (
+        "demo-channel-1-2",
+        ChannelNotificationLevel::BannerAndFeed,
+        true,
+    ),
+    ("demo-channel-1-3", ChannelNotificationLevel::Off, false),
+    ("demo-channel-2-2", ChannelNotificationLevel::Off, false),
+];
 
 const UNREAD_CHAT: &str = "demo-chat-atlas";
 const RELEASE_CHAT: &str = "demo-chat-release";
@@ -1415,6 +1429,64 @@ fn unread_messages() -> Vec<MessageRecord> {
         .collect()
 }
 
+const DEMO_EXTRA_TABS_CHANNEL: &str = "demo-channel-1-2";
+const DEMO_EXTRA_TABS: [&str; 6] = [
+    "Incident dashboard",
+    "Postmortems",
+    "Escalation policy",
+    "Status page",
+    "Vendor contacts",
+    "On-call calendar",
+];
+
+fn demo_tab(
+    channel_id: &str,
+    name: &str,
+    definition_id: &str,
+    open_url: Option<&str>,
+) -> ChannelTabRecord {
+    ChannelTabRecord {
+        tab_id: format!("{channel_id}-{}", name.to_lowercase().replace(' ', "-")),
+        name: name.to_owned(),
+        definition_id: definition_id.to_owned(),
+        open_url: open_url.map(str::to_owned),
+    }
+}
+
+fn demo_channel_tabs(channel_id: &str) -> Vec<ChannelTabRecord> {
+    let mut tabs = vec![
+        demo_tab(
+            channel_id,
+            "Runbook",
+            "com.microsoft.teamspace.tab.web",
+            Some("https://wiki.example.com/display/TEAM/Runbook"),
+        ),
+        demo_tab(
+            channel_id,
+            "Sprint board",
+            "com.microsoft.teamspace.tab.planner",
+            None,
+        ),
+        demo_tab(
+            channel_id,
+            "Team notes",
+            "0d820ecd-def2-4297-adad-78056cde7c78",
+            Some("https://onenote.example.com/notes"),
+        ),
+    ];
+    if channel_id == DEMO_EXTRA_TABS_CHANNEL {
+        tabs.extend(DEMO_EXTRA_TABS.iter().map(|name| {
+            demo_tab(
+                channel_id,
+                name,
+                "com.microsoft.teamspace.tab.web",
+                Some("https://wiki.example.com/display/TEAM/Page"),
+            )
+        }));
+    }
+    tabs
+}
+
 fn demo_team_layout(channels: &[ChannelRecord]) -> Vec<TeamLayoutRecord> {
     DEMO_TEAM_ORDER
         .iter()
@@ -1428,6 +1500,15 @@ fn demo_team_layout(channels: &[ChannelRecord]) -> Vec<TeamLayoutRecord> {
                     channel_id: channel.id.clone(),
                     general: channel.name == "General",
                     hidden: channel.id == DEMO_HIDDEN_CHANNEL,
+                    tabs: demo_channel_tabs(&channel.id),
+                    notifications: DEMO_CHANNEL_NOTIFICATIONS
+                        .iter()
+                        .find(|(id, _, _)| *id == channel.id)
+                        .map(|(_, level, include_replies)| ChannelNotifications {
+                            level: *level,
+                            include_replies: *include_replies,
+                        })
+                        .unwrap_or_default(),
                 })
                 .collect(),
         })
@@ -1545,7 +1626,80 @@ fn channel_messages() -> Vec<MessageRecord> {
         ),
     ];
     records.extend(rollout_replies);
+    records.extend(shared_channel_messages(channel, mara, tobias));
     records
+}
+
+fn shared_channel_messages(
+    channel: &str,
+    mara: (&str, &str),
+    tobias: (&str, &str),
+) -> Vec<MessageRecord> {
+    let priya = (PRIYA_ID, "Priya Nair");
+    let jonas = (JONAS_ID, "Jonas Ortega");
+    let reference = |name: &str, size: u64| {
+        format!(
+            r#"{{"content_type":"reference","name":"{name}","url":"https://demo.sharepoint.example/sites/demo/{name}","text":null,"size":{size}}}"#
+        )
+    };
+    vec![
+        with_attachments(
+            with_subject(
+                message(
+                    channel,
+                    "t5",
+                    None,
+                    priya,
+                    at(1, 14, 5),
+                    "<p>Roadmap deck and checklist for Q4 are attached.</p>",
+                    "[]",
+                    false,
+                ),
+                "Q4 planning files",
+            ),
+            &format!(
+                "[{},{}]",
+                reference("Roadmap-Q4.pptx", 3_412_000),
+                reference("Release-Checklist-Q4.xlsx", 48_213)
+            ),
+        ),
+        message(
+            channel,
+            "t5r1",
+            Some("t5"),
+            jonas,
+            at(1, 14, 30),
+            "<p>Rollback steps are here: <a href=\"https://docs.example.org/runbooks/rollback\">https://docs.example.org/runbooks/rollback</a></p>",
+            "[]",
+            false,
+        ),
+        with_attachments(
+            message(
+                channel,
+                "t6",
+                None,
+                mara,
+                at(12, 10, 0),
+                "<p>Postmortem draft for the September outage. Status page: <a href=\"https://status.example.com/incidents/2026-09\">https://status.example.com/incidents/2026-09</a></p>",
+                "[]",
+                false,
+            ),
+            &format!("[{}]", reference("Postmortem-Draft.docx", 91_400)),
+        ),
+        with_attachments(
+            message(
+                channel,
+                "t7",
+                None,
+                tobias,
+                at(20, 9, 0),
+                "<p>Rollout plan for the new export, please review.</p>",
+                "[]",
+                false,
+            ),
+            &format!("[{}]", reference("Rollout-Plan.pdf", 2_306_867)),
+        ),
+    ]
 }
 
 fn crc32(bytes: &[u8]) -> u32 {

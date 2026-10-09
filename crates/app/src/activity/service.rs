@@ -144,7 +144,6 @@ impl ActivityCenter {
         let found = self.tracker.collect(
             &state.store,
             &state.sidebar,
-            &state.followed_channels,
             my_user_id.as_deref(),
             conversation_id,
         );

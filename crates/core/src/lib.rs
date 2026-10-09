@@ -21,6 +21,7 @@ mod gifs;
 mod image_size;
 mod images;
 mod italic;
+mod library;
 mod link_sync;
 mod links;
 mod mapping;
@@ -89,15 +90,18 @@ pub use folders::{
     stored_section_settings,
 };
 pub use graph::{
-    FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, SharedFile,
-    UploadedFile,
+    DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
+    MessageExtras, SharedFile, UploadedFile,
 };
+pub use download::LibraryFile;
 pub use images::StoredImage;
-pub use links::{LinkPreview, first_public_link, is_public_link, link_preview};
+pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
 pub use mapping::{chat_record, message_record};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
 pub use mentions::MentionInput;
-pub use message_link::{ChannelLinkInput, channel_message_link, chat_message_link};
+pub use message_link::{
+    ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
+};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
 pub use presence::{Availability, Presence};
 pub use preview::preview_text;

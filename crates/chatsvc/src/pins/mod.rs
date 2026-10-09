@@ -11,7 +11,7 @@ use session::Session;
 pub use folders::{Folder, FolderKind, Folders};
 pub use pinbar::PinnedMessage;
 pub use state::{PinnedChannels, PinnedChats};
-pub use teams::{ChannelLayout, TeamLayout};
+pub use teams::{ChannelLayout, ChannelTab, TeamLayout};
 pub use transport::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, SessionTransport};
 
 pub const DEFAULT_REGION: &str = "emea";

@@ -1,11 +1,15 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use chatsvc::{ChatSection, ChatSectionSettings, Pins, UserSettings, pins::SessionTransport};
+use chatsvc::{
+    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
+    ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
+};
 use chrono::Utc;
 use session::Session;
-use store::{ChannelLayoutRecord, FolderRecord, Store, TeamLayoutRecord};
+use store::{ChannelLayoutRecord, ChannelTabRecord, FolderRecord, Store, TeamLayoutRecord};
 
 use crate::engine::SyncEngine;
 use crate::error::{Error, Result};
@@ -59,6 +63,7 @@ pub trait FolderSource: Send + Sync {
 pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
     settings: UserSettings,
+    channel_settings: ChannelSettings,
 }
 
 impl ChatsvcFolderSource {
@@ -66,6 +71,7 @@ impl ChatsvcFolderSource {
         ChatsvcFolderSource {
             pins: Pins::new(session),
             settings: UserSettings::new(session),
+            channel_settings: ChannelSettings::new(session),
         }
     }
 }
@@ -81,12 +87,24 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
         Box::pin(async {
-            Ok(self
-                .pins
-                .team_layout()
-                .await?
+            let layout = self.pins.team_layout().await?;
+            let unknown: Vec<String> = layout
+                .iter()
+                .flat_map(|team| &team.channels)
+                .filter(|channel| channel.notifications.is_none())
+                .map(|channel| channel.channel_id.clone())
+                .collect();
+            let fallback = if unknown.is_empty() {
+                HashMap::new()
+            } else {
+                self.channel_settings
+                    .fetch(&unknown)
+                    .await
+                    .unwrap_or_default()
+            };
+            Ok(layout
                 .into_iter()
-                .map(layout_record)
+                .map(|team| layout_record(team, &fallback))
                 .collect())
         })
     }
@@ -160,7 +178,48 @@ fn convert(folders: chatsvc::Folders) -> Vec<ChatFolder> {
         .collect()
 }
 
-fn layout_record(team: chatsvc::TeamLayout) -> TeamLayoutRecord {
+fn resolve_notifications(
+    channel: &chatsvc::ChannelLayout,
+    fallback: &HashMap<String, ChannelNotifications>,
+) -> ChannelNotifications {
+    channel
+        .notifications
+        .or_else(|| fallback.get(&channel.channel_id).copied())
+        .unwrap_or_else(|| ChannelNotifications::from_followed(channel.followed))
+}
+
+fn notification_record(notifications: ChannelNotifications) -> store::ChannelNotifications {
+    store::ChannelNotifications {
+        level: match notifications.level {
+            ChannelNotificationLevel::BannerAndFeed => {
+                store::ChannelNotificationLevel::BannerAndFeed
+            }
+            ChannelNotificationLevel::Feed => store::ChannelNotificationLevel::Feed,
+            ChannelNotificationLevel::Off => store::ChannelNotificationLevel::Off,
+        },
+        include_replies: notifications.include_replies,
+    }
+}
+
+pub(crate) fn chatsvc_notifications(
+    notifications: store::ChannelNotifications,
+) -> ChannelNotifications {
+    ChannelNotifications {
+        level: match notifications.level {
+            store::ChannelNotificationLevel::BannerAndFeed => {
+                ChannelNotificationLevel::BannerAndFeed
+            }
+            store::ChannelNotificationLevel::Feed => ChannelNotificationLevel::Feed,
+            store::ChannelNotificationLevel::Off => ChannelNotificationLevel::Off,
+        },
+        include_replies: notifications.include_replies,
+    }
+}
+
+fn layout_record(
+    team: chatsvc::TeamLayout,
+    fallback: &HashMap<String, ChannelNotifications>,
+) -> TeamLayoutRecord {
     TeamLayoutRecord {
         team_id: team.team_id,
         hidden: team.hidden,
@@ -168,9 +227,20 @@ fn layout_record(team: chatsvc::TeamLayout) -> TeamLayoutRecord {
             .channels
             .into_iter()
             .map(|channel| ChannelLayoutRecord {
+                notifications: notification_record(resolve_notifications(&channel, fallback)),
                 channel_id: channel.channel_id,
                 general: channel.general,
                 hidden: channel.hidden,
+                tabs: channel
+                    .tabs
+                    .into_iter()
+                    .map(|tab| ChannelTabRecord {
+                        tab_id: tab.id,
+                        name: tab.name,
+                        definition_id: tab.definition_id,
+                        open_url: tab.open_url,
+                    })
+                    .collect(),
             })
             .collect(),
     }
@@ -344,5 +414,54 @@ impl<R: Remote> SyncEngine<R> {
             let _ = self.events.send(CoreEvent::FoldersChanged);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(
+        notifications: Option<ChannelNotifications>,
+        followed: bool,
+    ) -> chatsvc::ChannelLayout {
+        chatsvc::ChannelLayout {
+            channel_id: "19:a".into(),
+            general: false,
+            hidden: false,
+            tabs: Vec::new(),
+            notifications,
+            followed,
+        }
+    }
+
+    fn level(level: ChannelNotificationLevel, include_replies: bool) -> ChannelNotifications {
+        ChannelNotifications {
+            level,
+            include_replies,
+        }
+    }
+
+    #[test]
+    fn channel_value_beats_the_notification_service_beats_the_followed_flag() {
+        let off = level(ChannelNotificationLevel::Off, false);
+        let banner = level(ChannelNotificationLevel::BannerAndFeed, true);
+        let fallback = HashMap::from([("19:a".to_owned(), banner)]);
+        assert_eq!(
+            resolve_notifications(&channel(Some(off), true), &fallback),
+            off
+        );
+        assert_eq!(
+            resolve_notifications(&channel(None, false), &fallback),
+            banner
+        );
+        assert_eq!(
+            resolve_notifications(&channel(None, true), &HashMap::new()),
+            banner
+        );
+        assert_eq!(
+            resolve_notifications(&channel(None, false), &HashMap::new()),
+            ChannelNotifications::default()
+        );
     }
 }

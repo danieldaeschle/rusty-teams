@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -103,6 +105,64 @@ pub struct SidebarTeam {
     pub channels: Vec<ChannelRecord>,
     pub hidden: bool,
     pub hidden_channel_ids: Vec<String>,
+    pub notifications: HashMap<String, ChannelNotifications>,
+}
+
+impl SidebarTeam {
+    pub fn channel_notifications(&self, channel_id: &str) -> ChannelNotifications {
+        self.notifications
+            .get(channel_id)
+            .copied()
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChannelNotificationLevel {
+    BannerAndFeed,
+    #[default]
+    Feed,
+    Off,
+}
+
+impl ChannelNotificationLevel {
+    pub fn key(self) -> &'static str {
+        match self {
+            ChannelNotificationLevel::BannerAndFeed => "banner",
+            ChannelNotificationLevel::Feed => "feed",
+            ChannelNotificationLevel::Off => "off",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "banner" => ChannelNotificationLevel::BannerAndFeed,
+            "off" => ChannelNotificationLevel::Off,
+            _ => ChannelNotificationLevel::Feed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChannelNotifications {
+    pub level: ChannelNotificationLevel,
+    pub include_replies: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelTabRecord {
+    pub tab_id: String,
+    pub name: String,
+    pub definition_id: String,
+    pub open_url: Option<String>,
+}
+
+const WEBSITE_DEFINITION_ID: &str = "com.microsoft.teamspace.tab.web";
+
+impl ChannelTabRecord {
+    pub fn is_website(&self) -> bool {
+        self.definition_id == WEBSITE_DEFINITION_ID && self.open_url.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +170,8 @@ pub struct ChannelLayoutRecord {
     pub channel_id: String,
     pub general: bool,
     pub hidden: bool,
+    pub tabs: Vec<ChannelTabRecord>,
+    pub notifications: ChannelNotifications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

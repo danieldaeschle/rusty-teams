@@ -1,4 +1,5 @@
 pub mod cards;
+pub mod channel_notifications;
 pub mod conversations;
 pub mod drafts;
 mod error;
@@ -18,6 +19,7 @@ pub mod settings;
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
+pub use channel_notifications::{ChannelNotificationLevel, ChannelNotifications, ChannelSettings};
 pub use conversations::Conversations;
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use error::{Error, Result};
@@ -27,8 +29,8 @@ pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
 pub use messages::{ConversationRef, Messages};
 pub use pins::{
-    ChannelLayout, Folder, FolderKind, Folders, PinnedChannels, PinnedChats, PinnedMessage, Pins,
-    TeamLayout,
+    ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,
+    PinnedMessage, Pins, TeamLayout,
 };
 pub use presence::{
     ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote, WorkLocation,

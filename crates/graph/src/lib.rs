@@ -2,11 +2,13 @@ mod client;
 mod content;
 mod error;
 mod files;
+mod library;
 mod models;
 mod outgoing;
 mod page;
 mod people;
 mod profile;
+mod tabs;
 mod target;
 mod urls;
 mod writes;
@@ -18,6 +20,7 @@ pub use files::{
     UploadedFile, chunk_range_at, chunk_ranges, download_ranges, etag_guid, next_expected_start,
     percent_done, share_id,
 };
+pub use library::DriveEntry;
 pub use models::{
     Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message, Photo,
     Presence, Reaction, Sender, Team, User,

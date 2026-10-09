@@ -10,7 +10,7 @@ use crate::outgoing::FileReference;
 use crate::people::decode_binary;
 use crate::urls;
 
-const FILES_SCOPE: &str = "Files.ReadWrite";
+pub(crate) const FILES_SCOPE: &str = "Files.ReadWrite";
 const CHUNK_UNIT_BYTES: u64 = 327_680;
 pub const UPLOAD_CHUNK_BYTES: u64 = 4 * CHUNK_UNIT_BYTES;
 pub const DOWNLOAD_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
@@ -90,6 +90,22 @@ impl DriveItem {
     fn drive_id(&self) -> Option<String> {
         self.parent_reference.as_ref()?.drive_id.clone()
     }
+}
+
+fn shared_file(body: serde_json::Value) -> Result<SharedFile> {
+    let item: SharedItem = serde_json::from_value(body)?;
+    let download_url = item
+        .download_url
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| Error::Download("the file has no download link".into()))?;
+    let size = item
+        .size
+        .ok_or_else(|| Error::Download("size unknown".into()))?;
+    Ok(SharedFile {
+        name: item.name,
+        size,
+        download_url,
+    })
 }
 
 /// `"{GUID},3"` becomes `GUID`.
@@ -351,19 +367,20 @@ impl Graph {
                 None,
             )
             .await?;
-        let item: SharedItem = serde_json::from_value(answer.body)?;
-        let download_url = item
-            .download_url
-            .filter(|url| !url.is_empty())
-            .ok_or_else(|| Error::Download("the file has no download link".into()))?;
-        let size = item
-            .size
-            .ok_or_else(|| Error::Download("size unknown".into()))?;
-        Ok(SharedFile {
-            name: item.name,
-            size,
-            download_url,
-        })
+        shared_file(answer.body)
+    }
+
+    pub async fn resolve_drive_item(&self, drive_id: &str, item_id: &str) -> Result<SharedFile> {
+        let answer = self
+            .session()
+            .request(
+                Method::Get,
+                &urls::drive_item(drive_id, item_id),
+                &Scope::graph(FILES_SCOPE),
+                None,
+            )
+            .await?;
+        shared_file(answer.body)
     }
 
     pub async fn download_range(
@@ -496,6 +513,22 @@ mod tests {
     fn range_header_is_inclusive() {
         assert_eq!(range_header(0, Some(4_194_303)), "bytes=0-4194303");
         assert_eq!(range_header(8_388_608, None), "bytes=8388608-");
+    }
+
+    #[test]
+    fn share_and_item_lookups_keep_the_download_url_by_not_selecting_fields() {
+        assert!(!urls::shared_drive_item("u!abc").contains("$select"));
+        assert!(!urls::drive_item("b!d", "01ABC").contains("$select"));
+    }
+
+    #[test]
+    fn a_file_without_a_download_link_is_an_error() {
+        assert!(shared_file(json!({"name": "a", "size": 1})).is_err());
+        let shared = shared_file(json!({
+            "name": "a", "size": 1, "@microsoft.graph.downloadUrl": "https://dl.example/a"
+        }))
+        .unwrap();
+        assert_eq!(shared.download_url, "https://dl.example/a");
     }
 
     #[test]

@@ -158,6 +158,33 @@ pub fn channel_files_folder(team_id: &str, channel_id: &str) -> String {
     )
 }
 
+pub fn channel_tab(team_id: &str, channel_id: &str, tab_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/channels/{}/tabs/{}",
+        segment(team_id),
+        segment(channel_id),
+        segment(tab_id)
+    )
+}
+
+pub const CHILDREN_PAGE_SIZE: usize = 200;
+
+pub fn folder_children(drive_id: &str, folder_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}/children?$top={CHILDREN_PAGE_SIZE}",
+        segment(drive_id),
+        segment(folder_id)
+    )
+}
+
+pub fn folder_create(drive_id: &str, folder_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}/children",
+        segment(drive_id),
+        segment(folder_id)
+    )
+}
+
 pub fn drive_item(drive_id: &str, item_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/drives/{}/items/{}",
@@ -168,7 +195,7 @@ pub fn drive_item(drive_id: &str, item_id: &str) -> String {
 
 pub fn shared_drive_item(share_id: &str) -> String {
     format!(
-        "{GRAPH}/v1.0/shares/{}/driveItem?$select=id,name,size,@microsoft.graph.downloadUrl",
+        "{GRAPH}/v1.0/shares/{}/driveItem",
         segment(share_id)
     )
 }

@@ -1,9 +1,13 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use rusqlite::params;
 
 use crate::error::Result;
-use crate::models::{ChannelRecord, Sidebar, SidebarTeam, TeamLayoutRecord, TeamRecord};
+use crate::models::{
+    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, ChannelTabRecord, Sidebar,
+    SidebarTeam, TeamLayoutRecord, TeamRecord,
+};
 use crate::store::Store;
 use crate::teams::channel_from_row;
 
@@ -19,6 +23,7 @@ struct ChannelRow {
     channel: ChannelRecord,
     general: bool,
     hidden: bool,
+    notifications: ChannelNotifications,
 }
 
 impl Store {
@@ -54,7 +59,9 @@ impl Store {
         let mut channel_rows: Vec<ChannelRow> = connection
             .prepare_cached(
                 "SELECT id, team_id, name, membership_type, last_message_at, unread,
-                        COALESCE(channel_layout.general, name = ?1), COALESCE(channel_layout.hidden, 0)
+                        COALESCE(channel_layout.general, name = ?1), COALESCE(channel_layout.hidden, 0),
+                        COALESCE(channel_layout.notification_level, 'feed'),
+                        COALESCE(channel_layout.include_replies, 0)
                  FROM channels LEFT JOIN channel_layout ON channel_layout.channel_id = channels.id",
             )?
             .query_map(params![GENERAL_FALLBACK_NAME], |row| {
@@ -62,6 +69,10 @@ impl Store {
                     channel: channel_from_row(row)?,
                     general: row.get(6)?,
                     hidden: row.get(7)?,
+                    notifications: ChannelNotifications {
+                        level: ChannelNotificationLevel::from_key(&row.get::<_, String>(8)?),
+                        include_replies: row.get(9)?,
+                    },
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -79,6 +90,7 @@ impl Store {
                 channels: Vec::new(),
                 hidden: row.hidden,
                 hidden_channel_ids: Vec::new(),
+                notifications: HashMap::new(),
             })
             .collect();
         for row in channel_rows {
@@ -88,6 +100,10 @@ impl Store {
             {
                 if row.hidden {
                     team.hidden_channel_ids.push(row.channel.id.clone());
+                }
+                if row.notifications != ChannelNotifications::default() {
+                    team.notifications
+                        .insert(row.channel.id.clone(), row.notifications);
                 }
                 team.channels.push(row.channel);
             }
@@ -100,12 +116,19 @@ impl Store {
         let transaction = connection.transaction()?;
         transaction.execute("DELETE FROM team_layout", [])?;
         transaction.execute("DELETE FROM channel_layout", [])?;
+        transaction.execute("DELETE FROM channel_tabs", [])?;
         {
             let mut team_insert = transaction.prepare_cached(
                 "INSERT OR REPLACE INTO team_layout (team_id, position, hidden) VALUES (?1, ?2, ?3)",
             )?;
             let mut channel_insert = transaction.prepare_cached(
-                "INSERT OR REPLACE INTO channel_layout (channel_id, general, hidden) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO channel_layout
+                    (channel_id, general, hidden, notification_level, include_replies)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            let mut tab_insert = transaction.prepare_cached(
+                "INSERT OR REPLACE INTO channel_tabs (channel_id, position, tab_id, name, definition_id, open_url)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for (position, team) in layout.iter().enumerate() {
                 team_insert.execute(params![team.team_id, position as i64, team.hidden])?;
@@ -113,12 +136,66 @@ impl Store {
                     channel_insert.execute(params![
                         channel.channel_id,
                         channel.general,
-                        channel.hidden
+                        channel.hidden,
+                        channel.notifications.level.key(),
+                        channel.notifications.include_replies
                     ])?;
+                    for (tab_position, tab) in channel.tabs.iter().enumerate() {
+                        tab_insert.execute(params![
+                            channel.channel_id,
+                            tab_position as i64,
+                            tab.tab_id,
+                            tab.name,
+                            tab.definition_id,
+                            tab.open_url
+                        ])?;
+                    }
                 }
             }
         }
         Ok(transaction.commit()?)
+    }
+
+    pub fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: ChannelNotifications,
+    ) -> Result<()> {
+        self.lock()?.execute(
+            "INSERT INTO channel_layout (channel_id, general, notification_level, include_replies)
+             SELECT id, name = ?2, ?3, ?4 FROM channels WHERE id = ?1
+             ON CONFLICT (channel_id) DO UPDATE SET
+                 notification_level = excluded.notification_level,
+                 include_replies = excluded.include_replies",
+            params![
+                channel_id,
+                GENERAL_FALLBACK_NAME,
+                notifications.level.key(),
+                notifications.include_replies
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+impl Store {
+    pub fn channel_tabs(&self, channel_id: &str) -> Result<Vec<ChannelTabRecord>> {
+        let connection = self.lock()?;
+        let tabs = connection
+            .prepare_cached(
+                "SELECT tab_id, name, definition_id, open_url FROM channel_tabs
+                 WHERE channel_id = ?1 ORDER BY position",
+            )?
+            .query_map(params![channel_id], |row| {
+                Ok(ChannelTabRecord {
+                    tab_id: row.get(0)?,
+                    name: row.get(1)?,
+                    definition_id: row.get(2)?,
+                    open_url: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(tabs)
     }
 }
 

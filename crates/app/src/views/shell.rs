@@ -15,6 +15,7 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::embedded_web::Overlays;
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
 use crate::theme;
@@ -384,12 +385,13 @@ impl AppShell {
             return;
         };
         if let Some(card) = &self.profile_card {
-            card.update(cx, |card, cx| card.move_to(request.user_id, request.anchor, cx));
+            card.update(cx, |card, cx| {
+                card.move_to(request.user_id, request.anchor, cx)
+            });
             return;
         }
         let app = self.state.clone();
-        let card =
-            cx.new(|cx| ProfileCard::new(app, request.user_id, request.anchor, window, cx));
+        let card = cx.new(|cx| ProfileCard::new(app, request.user_id, request.anchor, window, cx));
         cx.subscribe_in(
             &card,
             window,
@@ -463,6 +465,17 @@ impl Render for AppShell {
                 });
             });
         }
+        let panels = self.switcher.is_some()
+            || self.activity_panel.is_some()
+            || self.saved_panel.is_some()
+            || self.forward_dialog.is_some()
+            || self.status_dialog.is_some()
+            || self.profile_card.is_some()
+            || {
+                let state = self.state.read(cx);
+                state.task_dialog.is_some() || state.status_menu_open
+            };
+        Overlays::update(cx, |overlays| overlays.panels = panels);
         let state = self.state.read(cx);
         let status = render_status_bar(
             state,

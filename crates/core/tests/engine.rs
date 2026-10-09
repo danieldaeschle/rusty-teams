@@ -448,6 +448,19 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: store::ChannelNotifications,
+    ) -> Result<()> {
+        self.record(format!(
+            "channel notifications {channel_id} {} {}",
+            notifications.level.key(),
+            notifications.include_replies
+        ));
+        Ok(())
+    }
+
     async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
         self.record(format!(
             "typing {} {active}",
@@ -569,6 +582,15 @@ impl Remote for Handle {
             } else {
                 "https://dl.example/big".into()
             },
+        })
+    }
+
+    async fn resolve_drive_item(&self, drive_id: &str, item_id: &str) -> Result<SharedFile> {
+        self.record(format!("resolve item {drive_id}/{item_id}"));
+        Ok(SharedFile {
+            name: "big.bin".into(),
+            size: 2 * graph::DOWNLOAD_CHUNK_BYTES + 3,
+            download_url: "https://dl.example/fresh".into(),
         })
     }
 
@@ -1591,6 +1613,45 @@ async fn download_streams_every_chunk_and_reports_progress() {
 }
 
 #[tokio::test]
+async fn library_download_uses_the_listing_url_and_refetches_the_item_without_one() {
+    let library_file = |cached_url: Option<&str>| teams_core::LibraryFile {
+        drive_id: "drive".into(),
+        item_id: "item".into(),
+        name: "big.bin".into(),
+        size: 2 * graph::DOWNLOAD_CHUNK_BYTES + 3,
+        cached_url: cached_url.map(str::to_owned),
+    };
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine
+        .download_library_file(
+            &library_file(Some("https://dl.example/listed")),
+            |_| Ok(()),
+            |_| {},
+        )
+        .await
+        .unwrap();
+    let calls = fake.calls();
+    assert!(!calls.iter().any(|call| call.starts_with("resolve")));
+    assert!(
+        calls
+            .iter()
+            .any(|call| call.starts_with("range https://dl.example/listed "))
+    );
+    engine
+        .download_library_file(&library_file(None), |_| Ok(()), |_| {})
+        .await
+        .unwrap();
+    let calls = fake.calls();
+    assert!(calls.contains(&"resolve item drive/item".to_owned()));
+    assert!(
+        calls
+            .iter()
+            .any(|call| call.starts_with("range https://dl.example/fresh "))
+    );
+}
+
+#[tokio::test]
 async fn download_keeps_a_file_that_grew_past_the_reported_size() {
     let fake = Arc::new(Fake::default());
     let engine = chat_engine(&fake, small_pages()).await;
@@ -2344,6 +2405,8 @@ async fn team_layout_from_teams_orders_and_hides_the_sidebar() {
                 channel_id: "zeta-old".into(),
                 general: false,
                 hidden: true,
+                tabs: Vec::new(),
+                notifications: Default::default(),
             }],
         },
         TeamLayoutRecord {
@@ -2388,6 +2451,48 @@ async fn team_layout_from_teams_orders_and_hides_the_sidebar() {
     assert_eq!(teams[0].hidden_channel_ids, ids(&["zeta-old"]));
     let received: Vec<CoreEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(received.contains(&CoreEvent::SidebarChanged));
+}
+
+#[tokio::test]
+async fn channel_notifications_go_to_the_service_then_the_store() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine
+        .store()
+        .upsert_teams(&[TeamRecord {
+            id: "alpha".into(),
+            name: "alpha".into(),
+        }])
+        .unwrap();
+    engine
+        .store()
+        .upsert_channels(&[ChannelRecord {
+            id: "alpha-news".into(),
+            team_id: "alpha".into(),
+            name: "News".into(),
+            membership_type: None,
+            last_message_at: None,
+            unread: false,
+        }])
+        .unwrap();
+    let mut events = engine.subscribe();
+    let banner = store::ChannelNotifications {
+        level: store::ChannelNotificationLevel::BannerAndFeed,
+        include_replies: true,
+    };
+
+    engine
+        .set_channel_notifications("alpha-news", banner)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        "channel notifications alpha-news banner true"
+    );
+    let teams = engine.store().sidebar().unwrap().teams;
+    assert_eq!(teams[0].channel_notifications("alpha-news"), banner);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 
 #[tokio::test]

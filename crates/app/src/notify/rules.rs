@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use store::{ChannelNotificationLevel, ChannelNotifications};
 
 pub const SOUND_THROTTLE: Duration = Duration::from_secs(10);
 
@@ -104,7 +105,8 @@ pub struct ChannelSignals {
     pub mentions_channel: bool,
     pub in_my_thread: bool,
     pub hidden: bool,
-    pub followed: bool,
+    pub is_reply: bool,
+    pub notifications: ChannelNotifications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,7 +149,25 @@ pub fn channel_alerts(incoming: &Incoming) -> bool {
         return true;
     }
     let signals = incoming.signals;
-    !signals.hidden && (signals.mentions_channel || signals.in_my_thread || signals.followed)
+    if signals.hidden {
+        return false;
+    }
+    if signals.mentions_channel || signals.in_my_thread {
+        return true;
+    }
+    let notifications = signals.notifications;
+    notifications.level != ChannelNotificationLevel::Off
+        && (!signals.is_reply || notifications.include_replies)
+}
+
+fn channel_toasts(incoming: &Incoming) -> bool {
+    if !matches!(incoming.kind, ChatKind::Channel { .. }) || incoming.mentions_me {
+        return true;
+    }
+    let signals = incoming.signals;
+    signals.mentions_channel
+        || signals.in_my_thread
+        || signals.notifications.level == ChannelNotificationLevel::BannerAndFeed
 }
 
 const SILENT: Decision = Decision {
@@ -157,6 +177,7 @@ const SILENT: Decision = Decision {
 
 pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment) -> Decision {
     let suppressed = !channel_alerts(incoming)
+        || !channel_toasts(incoming)
         || environment.chat_in_foreground
         || environment.system_quiet
         || environment.own_do_not_disturb
@@ -302,35 +323,94 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(decide(&settings, &group(), Environment::default()), SILENT);
-        assert!(decide(&settings, &incoming(ChatKind::Direct), Environment::default()).toast);
+        assert!(
+            decide(
+                &settings,
+                &incoming(ChatKind::Direct),
+                Environment::default()
+            )
+            .toast
+        );
         let mut mention = group();
         mention.mentions_me = true;
         assert!(decide(&settings, &mention, Environment::default()).toast);
     }
 
-    #[test]
-    fn plain_channel_post_is_silent() {
-        assert!(!channel_alerts(&channel()));
-        assert_eq!(
-            decide(&Settings::default(), &channel(), Environment::default()),
-            SILENT
-        );
+    fn channel_with(level: ChannelNotificationLevel, include_replies: bool) -> Incoming {
+        let mut message = channel();
+        message.signals.notifications = ChannelNotifications {
+            level,
+            include_replies,
+        };
+        message
+    }
+
+    fn toast_of(incoming: &Incoming) -> bool {
+        decide(&Settings::default(), incoming, Environment::default()).toast
     }
 
     #[test]
-    fn channel_alerts_for_each_trigger() {
-        let triggers: [fn(&mut Incoming); 4] = [
+    fn banner_and_activity_posts_toast_and_feed() {
+        let post = channel_with(ChannelNotificationLevel::BannerAndFeed, false);
+        assert!(channel_alerts(&post));
+        assert!(toast_of(&post));
+    }
+
+    #[test]
+    fn activity_only_posts_feed_without_a_toast() {
+        let post = channel_with(ChannelNotificationLevel::Feed, false);
+        assert!(channel_alerts(&post));
+        assert_eq!(
+            decide(&Settings::default(), &post, Environment::default()),
+            SILENT
+        );
+        assert!(channel_alerts(&channel()));
+    }
+
+    #[test]
+    fn off_channel_stays_silent_except_for_mentions_and_my_threads() {
+        let mut post = channel_with(ChannelNotificationLevel::Off, true);
+        assert!(!channel_alerts(&post));
+        assert_eq!(
+            decide(&Settings::default(), &post, Environment::default()),
+            SILENT
+        );
+        post.signals.is_reply = true;
+        assert!(!channel_alerts(&post));
+        let triggers: [fn(&mut Incoming); 3] = [
             |incoming| incoming.mentions_me = true,
             |incoming| incoming.signals.mentions_channel = true,
             |incoming| incoming.signals.in_my_thread = true,
-            |incoming| incoming.signals.followed = true,
         ];
         for trigger in triggers {
-            let mut message = channel();
-            trigger(&mut message);
-            assert!(channel_alerts(&message));
-            assert!(decide(&Settings::default(), &message, Environment::default()).toast);
+            let mut mention = channel_with(ChannelNotificationLevel::Off, false);
+            trigger(&mut mention);
+            assert!(channel_alerts(&mention));
+            assert!(toast_of(&mention));
         }
+    }
+
+    #[test]
+    fn replies_need_include_replies_or_my_thread() {
+        for level in [
+            ChannelNotificationLevel::Feed,
+            ChannelNotificationLevel::BannerAndFeed,
+        ] {
+            let mut reply = channel_with(level, false);
+            reply.signals.is_reply = true;
+            assert!(!channel_alerts(&reply));
+            reply.signals.in_my_thread = true;
+            assert!(channel_alerts(&reply));
+            let mut included = channel_with(level, true);
+            included.signals.is_reply = true;
+            assert!(channel_alerts(&included));
+        }
+        let mut banner_reply = channel_with(ChannelNotificationLevel::BannerAndFeed, true);
+        banner_reply.signals.is_reply = true;
+        assert!(toast_of(&banner_reply));
+        let mut feed_reply = channel_with(ChannelNotificationLevel::Feed, true);
+        feed_reply.signals.is_reply = true;
+        assert!(!toast_of(&feed_reply));
     }
 
     #[test]
@@ -338,7 +418,9 @@ mod tests {
         let triggers: [fn(&mut Incoming); 3] = [
             |incoming| incoming.signals.mentions_channel = true,
             |incoming| incoming.signals.in_my_thread = true,
-            |incoming| incoming.signals.followed = true,
+            |incoming| {
+                incoming.signals.notifications.level = ChannelNotificationLevel::BannerAndFeed
+            },
         ];
         for trigger in triggers {
             let mut message = channel();

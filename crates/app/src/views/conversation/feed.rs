@@ -16,6 +16,7 @@ use crate::notice::short_error;
 use crate::rows::Row;
 use crate::runtime;
 use crate::theme;
+use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::widgets::icon;
 
@@ -214,7 +215,7 @@ impl ConversationView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.in_feed() {
+        if !self.in_feed() || self.pane != ChannelPane::Posts {
             return None;
         }
         if !self.new_post_open {
@@ -314,6 +315,9 @@ impl ConversationView {
     }
 
     pub(super) fn on_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.close_new_folder(cx) {
+            return true;
+        }
         if self.reply_root.is_some() {
             self.close_reply_editor(cx);
             return true;

@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use store::{MessageRecord, Sidebar, Store};
+use store::{ChannelNotifications, MessageRecord, Sidebar, Store};
 
 use super::rules::{ChannelSignals, ChatKind, Incoming, Preview};
 use crate::app_state::chat_title;
@@ -26,14 +26,13 @@ impl IncomingTracker {
         &mut self,
         store: &Store,
         sidebar: &Sidebar,
-        followed: &HashSet<String>,
         my_user_id: Option<&str>,
         conversation_id: &str,
     ) -> Vec<Incoming> {
         let Ok(records) = store.messages(conversation_id, None, RECENT_WINDOW) else {
             return Vec::new();
         };
-        self.fresh(records, store, sidebar, followed, my_user_id)
+        self.fresh(records, store, sidebar, my_user_id)
     }
 
     fn fresh(
@@ -41,7 +40,6 @@ impl IncomingTracker {
         records: Vec<MessageRecord>,
         store: &Store,
         sidebar: &Sidebar,
-        followed: &HashSet<String>,
         my_user_id: Option<&str>,
     ) -> Vec<Incoming> {
         let mut incoming = Vec::new();
@@ -60,7 +58,7 @@ impl IncomingTracker {
             if record.deleted || is_own(&record, my_user_id) {
                 continue;
             }
-            if let Some(entry) = build_incoming(&record, store, sidebar, followed, my_user_id) {
+            if let Some(entry) = build_incoming(&record, store, sidebar, my_user_id) {
                 incoming.push(entry);
             }
         }
@@ -76,12 +74,11 @@ pub fn build_incoming(
     record: &MessageRecord,
     store: &Store,
     sidebar: &Sidebar,
-    followed: &HashSet<String>,
     my_user_id: Option<&str>,
 ) -> Option<Incoming> {
     let (kind, chat_name) = chat_context(sidebar, &record.conversation_id)?;
     let signals = match kind {
-        ChatKind::Channel { .. } => channel_signals(record, store, sidebar, followed, my_user_id),
+        ChatKind::Channel { .. } => channel_signals(record, store, sidebar, my_user_id),
         _ => ChannelSignals::default(),
     };
     Some(Incoming {
@@ -137,7 +134,6 @@ fn channel_signals(
     record: &MessageRecord,
     store: &Store,
     sidebar: &Sidebar,
-    followed: &HashSet<String>,
     my_user_id: Option<&str>,
 ) -> ChannelSignals {
     let in_my_thread = match (record.reply_to_id.as_deref(), my_user_id) {
@@ -152,8 +148,22 @@ fn channel_signals(
             .any(|mention| mention.group),
         in_my_thread,
         hidden: channel_hidden(sidebar, &record.conversation_id),
-        followed: followed.contains(&record.conversation_id),
+        is_reply: record.reply_to_id.is_some(),
+        notifications: channel_notifications(sidebar, &record.conversation_id),
     }
+}
+
+fn channel_notifications(sidebar: &Sidebar, conversation_id: &str) -> ChannelNotifications {
+    sidebar
+        .teams
+        .iter()
+        .find(|team| {
+            team.channels
+                .iter()
+                .any(|channel| channel.id == conversation_id)
+        })
+        .map(|team| team.channel_notifications(conversation_id))
+        .unwrap_or_default()
 }
 
 fn channel_hidden(sidebar: &Sidebar, conversation_id: &str) -> bool {
@@ -194,7 +204,9 @@ pub fn preview_of(record: &MessageRecord) -> Preview {
 #[cfg(test)]
 mod tests {
     use chrono::Duration;
-    use store::{ChannelRecord, ChatRecord, MemberRecord, SidebarTeam, TeamRecord};
+    use store::{
+        ChannelNotificationLevel, ChannelRecord, ChatRecord, MemberRecord, SidebarTeam, TeamRecord,
+    };
 
     use super::*;
 
@@ -255,12 +267,12 @@ mod tests {
                 .iter()
                 .map(|id| (*id).to_owned())
                 .collect(),
+            notifications: HashMap::new(),
         }
     }
 
-    fn collect_one(message: MessageRecord, store: &Store, followed: &[&str]) -> Incoming {
-        let followed: HashSet<String> = followed.iter().map(|id| (*id).to_owned()).collect();
-        build_incoming(&message, store, &sidebar(), &followed, Some("me")).unwrap()
+    fn collect_one(message: MessageRecord, store: &Store) -> Incoming {
+        build_incoming(&message, store, &sidebar(), Some("me")).unwrap()
     }
 
     fn record(conversation: &str, sender: &str, at: DateTime<Utc>, html: &str) -> MessageRecord {
@@ -289,9 +301,8 @@ mod tests {
         quiet.chats[1].muted = true;
         let message = record("group", "u1", Utc::now(), "hi");
         let store = Store::open_in_memory().unwrap();
-        let build = |sidebar: &Sidebar| {
-            build_incoming(&message, &store, sidebar, &HashSet::new(), Some("me")).unwrap()
-        };
+        let build =
+            |sidebar: &Sidebar| build_incoming(&message, &store, sidebar, Some("me")).unwrap();
         assert!(build(&quiet).muted);
         assert!(!build(&sidebar()).muted);
     }
@@ -306,7 +317,6 @@ mod tests {
             vec![old, new],
             &Store::open_in_memory().unwrap(),
             &sidebar(),
-            &HashSet::new(),
             Some("me"),
         );
         assert_eq!(found.len(), 1);
@@ -319,12 +329,12 @@ mod tests {
         let mut tracker = IncomingTracker::new(start);
         let message = record("direct", "u1", start + Duration::seconds(5), "neu");
         let store = Store::open_in_memory().unwrap();
-        let (sidebar, followed) = (sidebar(), HashSet::new());
-        let first = tracker.fresh(vec![message.clone()], &store, &sidebar, &followed, None);
+        let sidebar = sidebar();
+        let first = tracker.fresh(vec![message.clone()], &store, &sidebar, None);
         assert_eq!(first.len(), 1);
         assert!(
             tracker
-                .fresh(vec![message], &store, &sidebar, &followed, None)
+                .fresh(vec![message], &store, &sidebar, None)
                 .is_empty()
         );
     }
@@ -335,7 +345,7 @@ mod tests {
         let mut tracker = IncomingTracker::new(start);
         let own = record("direct", "me", start + Duration::seconds(5), "ich");
         let store = Store::open_in_memory().unwrap();
-        let found = tracker.fresh(vec![own], &store, &sidebar(), &HashSet::new(), Some("me"));
+        let found = tracker.fresh(vec![own], &store, &sidebar(), Some("me"));
         assert!(found.is_empty());
     }
 
@@ -349,14 +359,13 @@ mod tests {
             "<at>Me</at> hi",
         );
         message.mentions_json = r#"[{"user_id":"me","name":"Me"}]"#.into();
-        let found = collect_one(message.clone(), &Store::open_in_memory().unwrap(), &[]);
+        let found = collect_one(message.clone(), &Store::open_in_memory().unwrap());
         assert!(found.mentions_me);
         assert_eq!(found.kind, ChatKind::Group { member_count: 5 });
         let other = build_incoming(
             &message,
             &Store::open_in_memory().unwrap(),
             &sidebar(),
-            &HashSet::new(),
             Some("other"),
         );
         assert!(!other.unwrap().mentions_me);
@@ -370,7 +379,6 @@ mod tests {
                 &message,
                 &Store::open_in_memory().unwrap(),
                 &sidebar(),
-                &HashSet::new(),
                 None
             )
             .is_none()
@@ -384,7 +392,6 @@ mod tests {
             &message,
             &Store::open_in_memory().unwrap(),
             &sidebar(),
-            &HashSet::new(),
             None,
         )
         .unwrap();
@@ -398,12 +405,12 @@ mod tests {
         message.mentions_json =
             r#"[{"user_id":null,"name":"channel","target_id":"channel-open","group":true}]"#.into();
         assert!(
-            collect_one(message.clone(), &store, &[])
+            collect_one(message.clone(), &store)
                 .signals
                 .mentions_channel
         );
         message.mentions_json = r#"[{"user_id":null,"name":"bot","target_id":"bot-1"}]"#.into();
-        assert!(!collect_one(message, &store, &[]).signals.mentions_channel);
+        assert!(!collect_one(message, &store).signals.mentions_channel);
     }
 
     #[test]
@@ -415,32 +422,53 @@ mod tests {
         store.upsert_messages(&[root]).unwrap();
         let mut reply = record("channel-open", "u1", start + Duration::seconds(1), "reply");
         reply.reply_to_id = Some("root".into());
-        assert!(collect_one(reply.clone(), &store, &[]).signals.in_my_thread);
+        assert!(collect_one(reply.clone(), &store).signals.in_my_thread);
         reply.reply_to_id = Some("unknown-root".into());
-        assert!(!collect_one(reply, &store, &[]).signals.in_my_thread);
+        assert!(!collect_one(reply, &store).signals.in_my_thread);
         let top_level = record("channel-open", "u1", start, "post");
-        assert!(!collect_one(top_level, &store, &[]).signals.in_my_thread);
+        assert!(!collect_one(top_level, &store).signals.in_my_thread);
     }
 
     #[test]
-    fn followed_and_hidden_channels_are_flagged() {
+    fn hidden_channels_are_flagged() {
         let store = Store::open_in_memory().unwrap();
-        let now = Utc::now();
-        let signals = |channel: &str, followed: &[&str]| {
-            collect_one(record(channel, "u1", now, "x"), &store, followed).signals
+        let signals =
+            |channel: &str| collect_one(record(channel, "u1", Utc::now(), "x"), &store).signals;
+        assert!(!signals("channel-open").hidden);
+        assert!(signals("channel-in-hidden-team").hidden);
+        assert!(signals("channel-hidden").hidden);
+        assert!(!signals("channel-shown").hidden);
+    }
+
+    #[test]
+    fn channel_notifications_and_reply_flag_come_from_the_sidebar() {
+        let store = Store::open_in_memory().unwrap();
+        let banner = ChannelNotifications {
+            level: ChannelNotificationLevel::BannerAndFeed,
+            include_replies: true,
         };
-        assert!(signals("channel-open", &["channel-open"]).followed);
-        assert!(!signals("channel-open", &[]).followed);
-        assert!(!signals("channel-open", &[]).hidden);
-        assert!(signals("channel-in-hidden-team", &[]).hidden);
-        assert!(signals("channel-hidden", &[]).hidden);
-        assert!(!signals("channel-shown", &[]).hidden);
+        let mut configured = sidebar();
+        configured.teams[0]
+            .notifications
+            .insert("channel-open".into(), banner);
+        let mut reply = record("channel-open", "u1", Utc::now(), "x");
+        let build = |message: &MessageRecord| {
+            build_incoming(message, &store, &configured, Some("me"))
+                .unwrap()
+                .signals
+        };
+        assert_eq!(build(&reply).notifications, banner);
+        assert!(!build(&reply).is_reply);
+        reply.reply_to_id = Some("root".into());
+        assert!(build(&reply).is_reply);
+        let other = record("channel-shown", "u1", Utc::now(), "x");
+        assert_eq!(build(&other).notifications, ChannelNotifications::default());
     }
 
     #[test]
     fn chats_carry_no_channel_signals() {
         let store = Store::open_in_memory().unwrap();
-        let found = collect_one(record("group", "u1", Utc::now(), "x"), &store, &["group"]);
+        let found = collect_one(record("group", "u1", Utc::now(), "x"), &store);
         assert_eq!(found.signals, ChannelSignals::default());
     }
 }

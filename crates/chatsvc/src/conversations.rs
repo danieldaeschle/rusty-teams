@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use session::{Method, Request, Session};
 
+use crate::channel_notifications::{ChannelNotifications, PROPERTY_NAME};
 use crate::error::{Error, Result};
 use crate::messages::{MessageTransport, SessionMessageTransport, encode, ensure_success};
 use crate::pins::DEFAULT_REGION;
@@ -70,6 +71,24 @@ impl<T: MessageTransport> Conversations<T> {
                 self.alerts_url(conversation_id),
                 body,
             ))
+            .await?;
+        ensure_success(&answer)
+    }
+
+    pub async fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: ChannelNotifications,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/{}/properties?name={PROPERTY_NAME}",
+            self.base_url,
+            encode(channel_id)
+        );
+        let body = json!({ PROPERTY_NAME: notifications.property_value() });
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Put, url, body))
             .await?;
         ensure_success(&answer)
     }

@@ -1,12 +1,15 @@
 #![cfg(windows)]
 
 mod dialog;
+mod embed;
 mod fanout;
 mod host;
 mod host_dialog;
+mod host_embed;
 mod transport;
 
 pub use dialog::{DialogEvent, DialogHandle, DialogSpec};
+pub use embed::{EmbedBounds, EmbedEvent, EmbedHandle, EmbedSpec};
 pub use host::{HostConfig, start};
 pub use transport::{HostState, WebViewTransport};
 

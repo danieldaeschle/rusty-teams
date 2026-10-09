@@ -159,6 +159,29 @@ pub fn first_public_link(html: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+pub fn public_links(record: &MessageRecord) -> Vec<String> {
+    let Ok(selector) = Selector::parse("a[href]") else {
+        return Vec::new();
+    };
+    if record.deleted {
+        return Vec::new();
+    }
+    let mut links: Vec<String> = Vec::new();
+    for anchor in Html::parse_fragment(&record.body_html).select(&selector) {
+        let Some(href) = anchor
+            .value()
+            .attr("href")
+            .filter(|href| is_public_link(href))
+        else {
+            continue;
+        };
+        if !links.iter().any(|known| known == href) {
+            links.push(href.to_owned());
+        }
+    }
+    links
+}
+
 pub fn is_public_link(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
@@ -208,6 +231,38 @@ mod tests {
 
     fn links(entries: Value) -> String {
         entries.to_string()
+    }
+
+    #[test]
+    fn public_links_lists_each_external_link_once() {
+        let record = MessageRecord {
+            body_html: "<p><a href=\"https://a.example/x\">x</a> <a href=\"https://contoso.sharepoint.com/f\">f</a> <a href=\"https://a.example/x\">again</a> <a href=\"https://b.example\">b</a></p>".to_owned(),
+            ..demo_record()
+        };
+        assert_eq!(
+            public_links(&record),
+            ["https://a.example/x", "https://b.example"]
+        );
+    }
+
+    fn demo_record() -> MessageRecord {
+        MessageRecord {
+            conversation_id: "c".to_owned(),
+            message_id: "m".to_owned(),
+            reply_to_id: None,
+            sender_id: None,
+            sender_name: None,
+            created_at: chrono::Utc::now(),
+            edited_at: None,
+            deleted: false,
+            body_html: String::new(),
+            attachments_json: "[]".to_owned(),
+            reactions_json: "[]".to_owned(),
+            mentions_json: "[]".to_owned(),
+            sender_application_id: None,
+            links_json: "[]".to_owned(),
+            subject: None,
+        }
     }
 
     #[test]

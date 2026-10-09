@@ -6,7 +6,7 @@ use chatsvc::{
 };
 use chrono::{DateTime, Utc};
 use graph::{
-    Channel, Chat, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
+    Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
     OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
 };
 
@@ -121,6 +121,11 @@ pub trait Remote {
     async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()>;
     async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>>;
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
+    async fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: store::ChannelNotifications,
+    ) -> Result<()>;
     async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()>;
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()>;
@@ -156,6 +161,27 @@ pub trait Remote {
         Err(Error::Unsupported("a channel files folder"))
     }
 
+    async fn channel_files_root(&self, _team_id: &str, _channel_id: &str) -> Result<DriveEntry> {
+        Err(Error::Unsupported("a channel library"))
+    }
+
+    async fn channel_tab_web_url(
+        &self,
+        _team_id: &str,
+        _channel_id: &str,
+        _tab_id: &str,
+    ) -> Result<Option<String>> {
+        Err(Error::Unsupported("a channel tab link"))
+    }
+
+    async fn list_children(&self, _folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
+        Err(Error::Unsupported("a folder listing"))
+    }
+
+    async fn create_folder(&self, _parent: &DriveFolder, _name: &str) -> Result<DriveEntry> {
+        Err(Error::Unsupported("creating a folder"))
+    }
+
     async fn upload_file(
         &self,
         _destination: &UploadDestination,
@@ -176,6 +202,10 @@ pub trait Remote {
 
     async fn resolve_share(&self, _open_url: &str) -> Result<SharedFile> {
         Err(Error::Unsupported("resolving a shared file"))
+    }
+
+    async fn resolve_drive_item(&self, _drive_id: &str, _item_id: &str) -> Result<SharedFile> {
+        Err(Error::Unsupported("resolving a drive item"))
     }
 
     async fn download_range(
@@ -527,6 +557,19 @@ impl Remote for Graph {
             .await?)
     }
 
+    async fn set_channel_notifications(
+        &self,
+        channel_id: &str,
+        notifications: store::ChannelNotifications,
+    ) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_channel_notifications(
+                channel_id,
+                crate::folders::chatsvc_notifications(notifications),
+            )
+            .await?)
+    }
+
     async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
         Ok(Messages::new(self.session())
             .send_typing(conversation, active)
@@ -617,6 +660,27 @@ impl Remote for Graph {
         Ok(Graph::channel_files_folder(self, team_id, channel_id).await?)
     }
 
+    async fn channel_files_root(&self, team_id: &str, channel_id: &str) -> Result<DriveEntry> {
+        Ok(Graph::channel_files_root(self, team_id, channel_id).await?)
+    }
+
+    async fn channel_tab_web_url(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        tab_id: &str,
+    ) -> Result<Option<String>> {
+        Ok(Graph::channel_tab_web_url(self, team_id, channel_id, tab_id).await?)
+    }
+
+    async fn list_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
+        Ok(Graph::list_children(self, folder).await?)
+    }
+
+    async fn create_folder(&self, parent: &DriveFolder, name: &str) -> Result<DriveEntry> {
+        Ok(Graph::create_folder(self, parent, name).await?)
+    }
+
     async fn upload_file(
         &self,
         destination: &UploadDestination,
@@ -637,6 +701,10 @@ impl Remote for Graph {
 
     async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
         Ok(Graph::resolve_share(self, open_url).await?)
+    }
+
+    async fn resolve_drive_item(&self, drive_id: &str, item_id: &str) -> Result<SharedFile> {
+        Ok(Graph::resolve_drive_item(self, drive_id, item_id).await?)
     }
 
     async fn download_range(

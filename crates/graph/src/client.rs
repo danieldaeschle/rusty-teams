@@ -234,7 +234,7 @@ impl Graph {
         Ok(Some(self.get_page(link, page.scope.clone()).await?))
     }
 
-    async fn get(&self, url: &str, scope: &Scope) -> Result<Value> {
+    pub(crate) async fn get(&self, url: &str, scope: &Scope) -> Result<Value> {
         ensure_graph_url(url)?;
         Ok(self
             .session
@@ -266,7 +266,11 @@ impl Graph {
         Ok(items)
     }
 
-    async fn get_all<T: DeserializeOwned>(&self, url: &str, scope: Scope) -> Result<Vec<T>> {
+    pub(crate) async fn get_all<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        scope: Scope,
+    ) -> Result<Vec<T>> {
         let mut page: Page<T> = self.get_page(url, scope).await?;
         let mut items = std::mem::take(&mut page.items);
         while let Some(mut next) = self.next_page(&page).await? {

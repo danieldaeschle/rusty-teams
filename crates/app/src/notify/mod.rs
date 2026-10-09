@@ -1,7 +1,6 @@
 #[cfg_attr(not(windows), allow(dead_code))]
 mod badge;
 mod center;
-mod followed;
 mod incoming;
 mod layout;
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -14,7 +13,6 @@ mod text;
 mod toast;
 
 pub use center::{NotificationCenter, selection_for};
-pub use followed::{load as load_followed_channels, save as save_followed_channels};
 pub use incoming::{IncomingTracker, preview_of};
 pub use rules::{Incoming, Preview, channel_alerts};
 #[cfg(test)]

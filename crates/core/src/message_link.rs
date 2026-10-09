@@ -60,6 +60,14 @@ pub fn channel_message_link(input: &ChannelLinkInput) -> String {
     )
 }
 
+pub fn channel_tab_link(channel_id: &str, tab_id: &str, label: &str) -> String {
+    format!(
+        "{LINK_HOST}/l/channel/{channel_id}/tab%3A%3A{}?label={}",
+        encode(tab_id),
+        encode(label)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +103,14 @@ mod tests {
         assert_eq!(
             channel_message_link(&input),
             "https://teams.microsoft.com/l/message/19:chan@thread.tacv2/1791368000555?tenantId=tenant-1&groupId=group-1&parentMessageId=1791368000000&teamName=R%26D%20Team&channelName=General%3A%20News&createdTime=1791368000555"
+        );
+    }
+
+    #[test]
+    fn tab_link_points_at_the_tab_in_its_channel() {
+        assert_eq!(
+            channel_tab_link("19:chan@thread.tacv2", "a1-b2", "Sprint board"),
+            "https://teams.microsoft.com/l/channel/19:chan@thread.tacv2/tab%3A%3Aa1-b2?label=Sprint%20board"
         );
     }
 }

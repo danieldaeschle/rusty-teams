@@ -616,7 +616,7 @@ impl AttachmentTray {
     }
 }
 
-fn display_name(path: &Path) -> String {
+pub fn display_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned())

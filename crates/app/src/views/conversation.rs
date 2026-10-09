@@ -16,30 +16,35 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::{MessageRecord, OutboxState, OutboxTarget};
+use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget};
 use teams_core::{ExecuteAction, FileCard, LinkPreview};
 
 mod feed;
 mod pins;
 mod render_env;
 mod scheduled;
+mod shared;
 
 use super::attachments::FileActions;
-use super::profile_card::opens_profile;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
+use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
+use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
 use crate::card_state::CardScope;
+use crate::channel_files::DownloadSource;
 use crate::data::{is_one_on_one, others};
+use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
+use crate::embedded_web::EmbeddedWeb;
 use crate::emoji;
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
@@ -59,6 +64,7 @@ use crate::theme;
 use crate::typing::typing_tooltip;
 use feed::{FeedStash, subject_input};
 use render_env::RenderEnv;
+use shared::SharedState;
 
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -170,6 +176,14 @@ pub struct ConversationView {
     drag_file_count: usize,
     sync_generation: u64,
     window_active: bool,
+    pane: ChannelPane,
+    channel_tabs: Vec<ChannelTabRecord>,
+    tab_links: HashMap<String, String>,
+    web: Option<Entity<EmbeddedWeb>>,
+    web_subscription: Option<Subscription>,
+    shared: SharedState,
+    demo_library: DemoLibrary,
+    new_folder_input: Option<Entity<InputState>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -184,6 +198,7 @@ fn open_limit(selection: &Selection) -> usize {
 enum DropTarget {
     Chat,
     Channel,
+    Library,
     NewChat,
 }
 
@@ -201,6 +216,10 @@ fn drop_overlay_text(title: &str, target: DropTarget, count: usize) -> (String, 
         DropTarget::Channel => (
             format!("Drop to attach to {title}"),
             format!("{files}. Images go into the message, other files to the channel's Files."),
+        ),
+        DropTarget::Library => (
+            format!("Drop to upload to {title}"),
+            format!("{files}. Files go into the folder you have open."),
         ),
         DropTarget::NewChat => (
             "Drop to attach to the new chat".to_owned(),
@@ -230,20 +249,20 @@ enum DownloadEvent {
 async fn save_file(
     engine: &Engine,
     card: &FileCard,
+    source: &DownloadSource,
     events: &tokio::sync::mpsc::UnboundedSender<DownloadEvent>,
 ) -> Result<PathBuf, String> {
     let mut part = PartFile::create(&downloads::downloads_directory(), &card.name)
         .map_err(|error| short_error(&error))?;
-    engine
-        .download_file(
-            &card.open_url,
-            |bytes| part.write(bytes),
-            |percent| {
-                let _ = events.send(DownloadEvent::Progress(percent));
-            },
-        )
-        .await
-        .map_err(|error| short_error(&error))?;
+    let write = |bytes: &[u8]| part.write(bytes);
+    let progress = |percent| {
+        let _ = events.send(DownloadEvent::Progress(percent));
+    };
+    match source {
+        DownloadSource::Share => engine.download_file(&card.open_url, write, progress).await,
+        DownloadSource::Library(file) => engine.download_library_file(file, write, progress).await,
+    }
+    .map_err(|error| short_error(&error))?;
     part.finish().map_err(|error| short_error(&error))
 }
 
@@ -268,7 +287,7 @@ impl ConversationView {
                 let key = key.clone();
                 let conversation_id = conversation_id.clone();
                 view.update(cx, |this, cx| {
-                    this.activate_file(&conversation_id, &key, card, cx)
+                    this.activate_file(&conversation_id, &key, card, DownloadSource::Share, cx)
                 })
                 .ok();
             }),
@@ -280,12 +299,13 @@ impl ConversationView {
         conversation_id: &str,
         message_key: &str,
         card: FileCard,
+        source: DownloadSource,
         cx: &mut Context<Self>,
     ) {
         let key = DownloadKey::new(conversation_id, message_key, &card.open_url);
         match downloads::click_action(self.downloads.state(&key)) {
             ClickAction::Ignore => {}
-            ClickAction::Start => self.start_download(key, card, cx),
+            ClickAction::Start => self.start_download(key, card, source, cx),
             ClickAction::Reveal(path) => {
                 let folder = path
                     .parent()
@@ -299,7 +319,13 @@ impl ConversationView {
         }
     }
 
-    fn start_download(&mut self, key: DownloadKey, card: FileCard, cx: &mut Context<Self>) {
+    fn start_download(
+        &mut self,
+        key: DownloadKey,
+        card: FileCard,
+        source: DownloadSource,
+        cx: &mut Context<Self>,
+    ) {
         if !self.downloads.begin(&key) {
             return;
         }
@@ -336,7 +362,7 @@ impl ConversationView {
             return;
         };
         drop(runtime::spawn(async move {
-            let outcome = save_file(&engine, &card, &sender).await;
+            let outcome = save_file(&engine, &card, &source, &sender).await;
             let _ = sender.send(DownloadEvent::Finished(outcome));
         }));
         cx.spawn(async move |this, cx| {
@@ -420,6 +446,14 @@ impl ConversationView {
             drag_file_count: 0,
             sync_generation: 0,
             window_active: window.is_window_active(),
+            pane: ChannelPane::Posts,
+            channel_tabs: Vec::new(),
+            tab_links: HashMap::new(),
+            web: None,
+            web_subscription: None,
+            shared: SharedState::default(),
+            demo_library: DemoLibrary::default(),
+            new_folder_input: None,
             _subscriptions: subscriptions,
         };
         if let Some(selection) = view.app.read(cx).selection.clone() {
@@ -488,6 +522,9 @@ impl ConversationView {
                     .as_ref()
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
+                    if self.shared_active() {
+                        self.refresh_shared_items(cx);
+                    }
                     self.rebuild(false, cx);
                     self.mark_read(ReadTrigger::Incoming, cx);
                     self.on_pins_changed(conversation_id, cx);
@@ -529,6 +566,7 @@ impl ConversationView {
                 }
             }
             AppEvent::Sidebar => {
+                self.reload_channel_tabs(cx);
                 self.mark_read(ReadTrigger::Incoming, cx);
                 self.refresh_reactor_names(cx);
                 if self.draft_active {
@@ -689,11 +727,11 @@ impl ConversationView {
             sync: SyncProgress::default(),
         });
         self.sync_generation += 1;
+        self.reset_channel_tabs(cx);
         self.reload_pending(cx);
         self.notice = None;
         self.scheduled_failure = None;
-        self.app
-            .update(cx, |state, cx| state.refresh_scheduled(cx));
+        self.app.update(cx, |state, cx| state.refresh_scheduled(cx));
         self.rebuild(true, cx);
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
@@ -929,6 +967,8 @@ impl ConversationView {
         current.first_unread = None;
         let in_channel = matches!(current.selection, Selection::Channel(_));
         if in_channel {
+            self.pane = ChannelPane::Posts;
+            self.close_web();
             match record.reply_to_id.clone() {
                 Some(root_id) => {
                     self.enter_thread_mode(root_id.clone(), cx);
@@ -2683,6 +2723,7 @@ impl ConversationView {
     fn render_drop_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let target = match self.current.as_ref().map(|current| &current.selection) {
             Some(Selection::Chat(_)) => DropTarget::Chat,
+            Some(Selection::Channel(_)) if self.shared_active() => DropTarget::Library,
             Some(Selection::Channel(_)) => DropTarget::Channel,
             None => DropTarget::NewChat,
         };
@@ -2719,6 +2760,10 @@ impl ConversationView {
             )
             .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
                 let paths = dropped.paths().to_vec();
+                if this.shared_active() {
+                    this.upload_paths(paths, cx);
+                    return;
+                }
                 this.composer
                     .update(cx, |composer, cx| composer.add_paths(paths, window, cx));
             }))
@@ -2931,6 +2976,9 @@ impl ConversationView {
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.web.is_some() && !self.web_active() {
+            self.close_web();
+        }
         let background = theme::background();
         let mut root = v_flex().flex_1().min_w_0().h_full().bg(background);
         let drafting = self.draft_active;
@@ -3031,6 +3079,7 @@ impl Render for ConversationView {
             Some(current) => root.child(self.render_header(current, cx)),
             None => root.child(self.draft.clone()),
         };
+        root = root.children(self.render_tab_bar(window, cx).filter(|_| !drafting));
         root = root.children(self.render_pin_banner(cx).filter(|_| !drafting));
         let sync_failed = self
             .current
@@ -3064,6 +3113,10 @@ impl Render for ConversationView {
             let draft = self.draft.read(cx);
             let group_name = draft.group_name(cx);
             draft.render_empty(&self.app.read(cx).directory, &group_name)
+        } else if self.shared_active() {
+            self.render_shared(cx)
+        } else if let Some(web) = self.web.clone().filter(|_| self.web_active()) {
+            web.into_any_element()
         } else if empty_channel {
             div()
                 .size_full()

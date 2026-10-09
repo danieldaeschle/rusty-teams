@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 83 %** (72 done, 1 partial, 14 missing of 87). Partial counts half.
+**Parity: 87 %** (75 done, 1 partial, 11 missing of 87). Partial counts half.
 
 ## By area
 
@@ -13,7 +13,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Reading](#reading) | 89 % | 17 | 0 | 2 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
-| [Channels](#channels) | 57 % | 4 | 0 | 3 |
+| [Channels](#channels) | 100 % | 7 | 0 | 0 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
 | [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
@@ -114,9 +114,9 @@ Feature parity with the Microsoft Teams desktop client.
 | Posts feed, open a conversation, reply | Done | Newest activity on top, inline reply in the card |
 | New post with subject | Done | Subject is stored with the message |
 | Post cards like Teams | Done | One card per post: root and the last 3 replies |
-| Follow a channel, per-channel notifications | Missing |  |
-| Channel tabs: tab bar, website and app tabs | Missing | Plan: each tab's Teams Web page in a WebView2 |
-| Files tab | Missing | Plan: native, the channel's SharePoint folder via Graph |
+| Follow a channel, per-channel notifications | Done | Right-click > Notifications: banner and activity, activity only, off, include thread replies; synced with Teams; bell icons in the sidebar |
+| Channel tabs: tab bar, website and app tabs | Done | Posts, Shared, then the channel's tabs with overflow; website tabs embedded on Windows (WebView2), browser on Linux; app tabs open in Teams web |
+| Files tab | Done | "Shared" like Teams: In library (folders, upload, drag and drop, new folder, open in SharePoint) and In messages (files and links from posts) |
 
 ## Notifications
 

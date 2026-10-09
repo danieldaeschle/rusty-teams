@@ -8,10 +8,12 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::{ChannelRecord, SidebarTeam, Store, TeamRecord};
+use store::{
+    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
+};
 
 use super::avatar::{spec_avatar, square_avatar, with_presence};
-use super::widgets::{count_badge, dot, icon, symbol, unread_marker};
+use super::widgets::{count_badge, dot, icon, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, FolderKind};
@@ -43,6 +45,7 @@ const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 34.;
 const MENU_ICON_SIZE: f32 = 15.;
 const MUTED_ICON_SIZE: f32 = 13.;
+const NOTIFICATION_ICON_SIZE: f32 = 13.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SidebarTab {
@@ -883,7 +886,7 @@ impl SidebarView {
         team: &TeamRecord,
         channel: &ChannelRecord,
         selected: bool,
-        followed: bool,
+        notifications: ChannelNotifications,
     ) -> AnyElement {
         let unread = channel.unread;
         let state = self.state.clone();
@@ -933,7 +936,7 @@ impl SidebarView {
                                     .text_color(theme::text())
                                     .child(format!("{} / {}", team.name, channel.name)),
                             )
-                            .when(followed, |line| line.child(followed_bell()))
+                            .children(notification_badge(notifications.level))
                             .child(
                                 div()
                                     .flex_none()
@@ -966,12 +969,15 @@ impl SidebarView {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
             })
-            .context_menu(move |popup, _, _| {
-                popup.item(follow_item(
+            .context_menu(move |popup, window, cx| {
+                channel_menu(
+                    popup,
+                    window,
+                    cx,
                     menu_state.clone(),
-                    menu_channel_id.clone(),
-                    followed,
-                ))
+                    &menu_channel_id,
+                    notifications,
+                )
             })
             .into_any_element()
     }
@@ -996,7 +1002,6 @@ impl SidebarView {
         selected: Option<&Selection>,
         cx: &mut Context<Self>,
     ) -> Div {
-        let followed = self.state.read(cx).followed_channels.clone();
         let team_id = entry.team.id.clone();
         let expanded = team_expanded(&team_id, &self.collapsed_teams);
         let unread = entry.channels.iter().any(|channel| channel.unread);
@@ -1059,7 +1064,7 @@ impl SidebarView {
             list = list.child(self.team_channel_row(
                 channel,
                 is_selected(channel),
-                followed.contains(&channel.id),
+                entry.channel_notifications(&channel.id),
             ));
         }
         let hidden: Vec<&ChannelRecord> = entry
@@ -1089,7 +1094,7 @@ impl SidebarView {
                 list = list.child(self.team_channel_row(
                     channel,
                     false,
-                    followed.contains(&channel.id),
+                    entry.channel_notifications(&channel.id),
                 ));
             }
         }
@@ -1137,7 +1142,7 @@ impl SidebarView {
         &self,
         channel: &ChannelRecord,
         is_selected: bool,
-        followed: bool,
+        notifications: ChannelNotifications,
     ) -> impl IntoElement {
         let state = self.state.clone();
         let menu_state = self.state.clone();
@@ -1180,33 +1185,35 @@ impl SidebarView {
                     .text_color(theme::text())
                     .child(channel.name.clone()),
             )
-            .when(followed, |row| row.child(followed_bell()))
+            .children(notification_badge(notifications.level))
             .when(channel.unread, |row| row.child(dot(7.)))
             .on_click(move |_, _, cx| {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
             })
-            .context_menu(move |popup, _, _| {
-                popup.item(follow_item(
+            .context_menu(move |popup, window, cx| {
+                channel_menu(
+                    popup,
+                    window,
+                    cx,
                     menu_state.clone(),
-                    menu_channel_id.clone(),
-                    followed,
-                ))
+                    &menu_channel_id,
+                    notifications,
+                )
             })
     }
 
     fn channels_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (sidebar, pinned_ids, followed, selected) = {
+        let (sidebar, pinned_ids, selected) = {
             let state = self.state.read(cx);
             (
                 state.sidebar.clone(),
                 state.directory.pinned_channels.clone(),
-                state.followed_channels.clone(),
                 state.selection.clone().filter(|_| !state.new_chat),
             )
         };
         let mut list = v_flex().w_full().pb(px(12.));
-        let pinned: Vec<(&TeamRecord, &ChannelRecord)> = pinned_ids
+        let pinned: Vec<(&SidebarTeam, &ChannelRecord)> = pinned_ids
             .iter()
             .filter_map(|id| {
                 sidebar.teams.iter().find_map(|entry| {
@@ -1214,20 +1221,20 @@ impl SidebarView {
                         .channels
                         .iter()
                         .find(|channel| &channel.id == id)
-                        .map(|channel| (&entry.team, channel))
+                        .map(|channel| (entry, channel))
                 })
             })
             .collect();
         if !pinned.is_empty() {
             list = list.child(self.plain_header(PINNED_LABEL));
-            for (team, channel) in pinned {
+            for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
                 list = list.child(self.channel_row(
                     &channel.id,
-                    team,
+                    &entry.team,
                     channel,
                     is_selected,
-                    followed.contains(&channel.id),
+                    entry.channel_notifications(&channel.id),
                 ));
             }
         }
@@ -1269,18 +1276,70 @@ impl SidebarView {
     }
 }
 
-fn followed_bell() -> impl IntoElement {
-    symbol("notifications", 12., theme::text_muted())
+fn notification_badge(level: ChannelNotificationLevel) -> Option<impl IntoElement> {
+    let name = match level {
+        ChannelNotificationLevel::BannerAndFeed => IconName::Bell,
+        ChannelNotificationLevel::Off => IconName::BellOff,
+        ChannelNotificationLevel::Feed => return None,
+    };
+    Some(icon(name, NOTIFICATION_ICON_SIZE, theme::text_muted()))
 }
 
-fn follow_item(state: Entity<AppState>, channel_id: String, followed: bool) -> PopupMenuItem {
-    PopupMenuItem::new("Notify on all posts")
-        .checked(followed)
-        .on_click(move |_, _, cx| {
-            state.update(cx, |state, cx| {
-                state.toggle_followed_channel(&channel_id, cx)
-            });
-        })
+fn channel_menu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    state: Entity<AppState>,
+    channel_id: &str,
+    notifications: ChannelNotifications,
+) -> PopupMenu {
+    let channel_id = channel_id.to_owned();
+    popup.submenu_with_icon(
+        Some(menu_icon(IconName::Bell)),
+        "Notifications",
+        window,
+        cx,
+        move |submenu, _, _| {
+            let level_item = |label: &'static str, level: ChannelNotificationLevel| {
+                let (state, channel_id) = (state.clone(), channel_id.clone());
+                PopupMenuItem::new(label)
+                    .checked(notifications.level == level)
+                    .on_click(move |_, _, cx| {
+                        let changed = ChannelNotifications {
+                            level,
+                            include_replies: notifications.include_replies
+                                && level != ChannelNotificationLevel::Off,
+                        };
+                        state.update(cx, |state, cx| {
+                            state.set_channel_notifications(&channel_id, changed, cx)
+                        });
+                    })
+            };
+            let (replies_state, replies_id) = (state.clone(), channel_id.clone());
+            submenu
+                .item(level_item(
+                    "Banner and activity",
+                    ChannelNotificationLevel::BannerAndFeed,
+                ))
+                .item(level_item("Activity only", ChannelNotificationLevel::Feed))
+                .item(level_item("Off", ChannelNotificationLevel::Off))
+                .separator()
+                .item(
+                    PopupMenuItem::new("Include thread replies")
+                        .checked(notifications.include_replies)
+                        .disabled(notifications.level == ChannelNotificationLevel::Off)
+                        .on_click(move |_, _, cx| {
+                            let changed = ChannelNotifications {
+                                level: notifications.level,
+                                include_replies: !notifications.include_replies,
+                            };
+                            replies_state.update(cx, |state, cx| {
+                                state.set_channel_notifications(&replies_id, changed, cx)
+                            });
+                        }),
+                )
+        },
+    )
 }
 
 fn team_expanded(team_id: &str, collapsed_teams: &HashSet<String>) -> bool {
