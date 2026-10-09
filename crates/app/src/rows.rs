@@ -6,8 +6,8 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
-    AdaptiveCard, Draft, FileCard, ImageRef, ReactionInfo, Span, adaptive_cards, card_texts, files,
-    images, message_spans, reactions,
+    AdaptiveCard, Draft, FileCard, ImageRef, LinkPreview, ReactionInfo, Span, adaptive_cards,
+    card_texts, files, images, link_preview, message_spans, reactions,
 };
 
 use crate::card_state::CardOverride;
@@ -129,6 +129,7 @@ pub struct MessageRow {
     pub images: Vec<ImageRef>,
     pub local_images: Vec<LocalImage>,
     pub files: Vec<FileCard>,
+    pub link_preview: Option<LinkPreview>,
     pub adaptive_cards: Vec<AdaptiveCard>,
     pub reply_count: Option<usize>,
     pub new_marker: bool,
@@ -504,6 +505,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         images,
         local_images: Vec::new(),
         files: files(record),
+        link_preview: link_preview(record),
         adaptive_cards: match context.card_overrides.get(&record.message_id) {
             Some(replaced) if replaced.basis == record.attachments_json => replaced.cards.clone(),
             _ => adaptive_cards(record),
@@ -713,6 +715,7 @@ mod tests {
             sender_id: Some("u".into()),
             sender_name: Some("Author".into()),
             sender_application_id: None,
+            links_json: "[]".to_owned(),
             created_at: Utc.with_ymd_and_hms(2026, 10, day, hour, 0, 0).unwrap(),
             edited_at: None,
             deleted: false,

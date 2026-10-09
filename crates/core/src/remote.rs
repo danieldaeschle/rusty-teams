@@ -1,6 +1,6 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, Conversations, InvokeRequest, InvokeResponse,
-    MemberHorizon, Messages, Receipts,
+    CardActions, ChatApp, ConversationRef, Conversations, InvokeRequest, InvokeResponse, LinkInfo,
+    MemberHorizon, MessageLinks, Messages, Receipts,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -216,6 +216,22 @@ pub trait Remote {
 
     async fn invoke_card(&self, _invoke: InvokeRequest) -> Result<InvokeResponse> {
         Err(Error::Unsupported("card actions"))
+    }
+
+    async fn message_links(
+        &self,
+        _conversation: &ConversationRef,
+        _page_size: usize,
+    ) -> Result<Vec<MessageLinks>> {
+        Err(Error::Unsupported("link previews"))
+    }
+
+    async fn set_message_links(&self, _target: &MessageTarget, _links_json: &str) -> Result<()> {
+        Err(Error::Unsupported("link previews"))
+    }
+
+    async fn link_info(&self, _url: &str) -> Result<LinkInfo> {
+        Err(Error::Unsupported("link previews"))
     }
 }
 
@@ -531,6 +547,13 @@ impl Remote for Graph {
     }
 
     async fn hosted_content(&self, url: &str) -> Result<Photo> {
+        if chatsvc::is_link_image_url(url) {
+            let image = Messages::new(self.session()).link_image(url).await?;
+            return Ok(Photo {
+                bytes: image.bytes,
+                content_type: image.content_type,
+            });
+        }
         Ok(Graph::download_hosted_content(self, url).await?)
     }
 
@@ -568,6 +591,26 @@ impl Remote for Graph {
 
     async fn invoke_card(&self, invoke: InvokeRequest) -> Result<InvokeResponse> {
         Ok(CardActions::new(self.session()).invoke(invoke).await?)
+    }
+
+    async fn message_links(
+        &self,
+        conversation: &ConversationRef,
+        page_size: usize,
+    ) -> Result<Vec<MessageLinks>> {
+        Ok(Messages::new(self.session())
+            .list_message_links(conversation, page_size)
+            .await?)
+    }
+
+    async fn set_message_links(&self, target: &MessageTarget, links_json: &str) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_links(&conversation_ref(target), target.message_id(), links_json)
+            .await?)
+    }
+
+    async fn link_info(&self, url: &str) -> Result<LinkInfo> {
+        Ok(Messages::new(self.session()).link_info(url).await?)
     }
 }
 

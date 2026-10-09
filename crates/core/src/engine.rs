@@ -11,6 +11,7 @@ use tokio::sync::{OnceCell, broadcast};
 use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::folders::FolderSource;
+use crate::links::{LinkPreview, has_stored_links};
 use crate::mapping::{flatten_thread, message_record};
 use crate::people::DirectoryCache;
 use crate::presence::Presence;
@@ -123,6 +124,8 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) receipts: ReceiptCache,
     pub(crate) channel_folders: Mutex<HashMap<String, DriveFolder>>,
     pub(crate) chat_apps: Mutex<HashMap<String, Vec<ChatApp>>>,
+    pub(crate) link_previews: Mutex<HashMap<String, Option<LinkPreview>>>,
+    pub(crate) links_backfilled: Mutex<HashSet<String>>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -151,6 +154,8 @@ impl<R: Remote> SyncEngine<R> {
             receipts: ReceiptCache::default(),
             channel_folders: Mutex::new(HashMap::new()),
             chat_apps: Mutex::new(HashMap::new()),
+            link_previews: Mutex::new(HashMap::new()),
+            links_backfilled: Mutex::new(HashSet::new()),
         }
     }
 
@@ -178,13 +183,15 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn fetch_newer(&self, conversation_id: &str) -> Result<Delta> {
-        let delta = match self.resolve(conversation_id)? {
+        let mut delta = match self.resolve(conversation_id)? {
             Conversation::Chat => self.fetch_newer_chat(conversation_id).await?,
             Conversation::Channel { team_id } => {
                 self.fetch_newer_channel(&team_id, conversation_id).await?
             }
         };
-        self.announce(conversation_id, !delta.is_empty());
+        let links_changed = self.attach_delta_links(conversation_id, &mut delta).await
+            | self.backfill_links(conversation_id).await;
+        self.announce(conversation_id, !delta.is_empty() || links_changed);
         Ok(delta)
     }
 
@@ -379,13 +386,20 @@ impl<R: Remote> SyncEngine<R> {
     pub(crate) fn ingest(
         &self,
         conversation_id: &str,
-        records: Vec<MessageRecord>,
+        mut records: Vec<MessageRecord>,
     ) -> Result<Delta> {
         let ids: Vec<String> = records
             .iter()
             .map(|record| record.message_id.clone())
             .collect();
         let existing = self.store.messages_by_id(conversation_id, &ids)?;
+        for record in &mut records {
+            if let Some(cached) = existing.get(&record.message_id)
+                && !has_stored_links(&record.links_json)
+            {
+                record.links_json.clone_from(&cached.links_json);
+            }
+        }
         self.store.upsert_messages(&records)?;
         self.update_chat_preview(&records)?;
         let mut delta = Delta::default();

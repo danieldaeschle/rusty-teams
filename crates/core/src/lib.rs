@@ -12,6 +12,8 @@ mod events;
 mod folders;
 mod image_size;
 mod images;
+mod link_sync;
+mod links;
 mod mapping;
 mod markdown;
 mod mentions;
@@ -52,6 +54,7 @@ pub use graph::{
     UploadedFile,
 };
 pub use images::StoredImage;
+pub use links::{LinkPreview, first_public_link, is_public_link, link_preview};
 pub use mapping::{chat_record, message_record};
 pub use markdown::{escape_html, markdown_to_html, plain_text_to_html};
 pub use mentions::MentionInput;

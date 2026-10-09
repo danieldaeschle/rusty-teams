@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 65 %** (53 done, 4 partial, 28 missing of 85). Partial counts half.
+**Parity: 66 %** (54 done, 4 partial, 27 missing of 85). Partial counts half.
 
 ## By area
 
@@ -10,7 +10,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
-| [Reading](#reading) | 76 % | 14 | 1 | 4 |
+| [Reading](#reading) | 82 % | 15 | 1 | 3 |
 | [Writing](#writing) | 75 % | 10 | 1 | 3 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
@@ -76,7 +76,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Select and copy message text | Done |  |
 | Adaptive Cards | Partial | Buttons work (submit, execute, show card, toggle, task dialog card). Input fields work in messages and card dialogs (text, number, date, time, toggle, choice set) with validation. URL task dialogs run in a hosted window on Windows (Teams JS SDK host, see docs/research/card-actions.md), in the browser on Linux. Date and time are plain text fields, no picker |
 | Typing indicator | Done | Shows who types in the chat, thread and list preview; sends your own typing |
-| Link previews | Missing |  |
+| Link previews | Done | One card per message from the chat service, see docs/research/link-previews.md |
 | Loop components | Missing |  |
 | Translate a message | Missing |  |
 

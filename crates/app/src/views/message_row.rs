@@ -7,6 +7,7 @@ use std::time::Duration;
 use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, attachments_view, message_body};
 use super::avatar::{bot_avatar, member_stack, person_avatar};
+use super::link_preview::link_preview_card;
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
@@ -146,6 +147,15 @@ fn bubble(
         directory,
         extras.files.as_ref(),
     ));
+    content = content.children(row.link_preview.as_ref().map(|preview| {
+        link_preview_card(
+            preview,
+            format!("message-{index}-link"),
+            directory,
+            false,
+            None,
+        )
+    }));
     content = content.children(cards_view(
         &row.adaptive_cards,
         &row.conversation_id,
@@ -478,6 +488,15 @@ fn post_card(
             directory,
             files,
         ));
+        body = body.children(row.link_preview.as_ref().map(|preview| {
+            link_preview_card(
+                preview,
+                format!("message-{index}-link"),
+                directory,
+                false,
+                None,
+            )
+        }));
         body = body.children(cards_view(
             &row.adaptive_cards,
             &row.conversation_id,

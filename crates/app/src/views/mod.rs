@@ -10,6 +10,7 @@ pub mod dialog_overlay;
 pub mod draft_style;
 pub mod emoji_popup;
 pub mod format_toolbar;
+pub mod link_preview;
 pub mod message_actions;
 pub mod message_row;
 pub mod new_chat;

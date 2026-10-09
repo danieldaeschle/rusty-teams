@@ -271,6 +271,7 @@ mod tests {
             sender_id: Some(sender.into()),
             sender_name: Some("Sender".into()),
             sender_application_id: None,
+            links_json: "[]".to_owned(),
             created_at: at,
             edited_at: None,
             deleted: false,

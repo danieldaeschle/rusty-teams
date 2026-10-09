@@ -16,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageRecord;
-use teams_core::{FileCard, ImageRef};
+use teams_core::{FileCard, ImageRef, LinkPreview};
 
 use super::adaptive_card::ensure_cards_inputs;
 use super::attachments::FileActions;
@@ -731,7 +731,12 @@ impl ConversationView {
             .enumerate()
             .filter_map(|(index, row)| match row {
                 Row::Message(message)
-                    if message.images.iter().any(|image| keys.contains(&image.url)) =>
+                    if message.images.iter().any(|image| keys.contains(&image.url))
+                        || message
+                            .link_preview
+                            .as_ref()
+                            .and_then(LinkPreview::image)
+                            .is_some_and(|image| keys.contains(&image.url)) =>
                 {
                     Some(index)
                 }
@@ -1647,7 +1652,7 @@ impl ConversationView {
             let Outgoing {
                 mentions, reply, ..
             } = &sent;
-            match (&view_mode, reply) {
+            let record = match (&view_mode, reply) {
                 (_, Some(reply)) => {
                     engine
                         .reply_to_with_extras(
@@ -1686,8 +1691,13 @@ impl ConversationView {
                         )
                         .await
                 }
+            }?;
+            if let Some(preview) = &sent.link_preview {
+                let _ = engine
+                    .attach_link_preview(&conversation_id, &record.message_id, preview)
+                    .await;
             }
-            .map(|_| ())
+            Ok(())
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = receiver.await;
@@ -1749,6 +1759,7 @@ impl ConversationView {
                 })
                 .collect(),
             adaptive_cards: Vec::new(),
+            link_preview: outgoing.link_preview.clone(),
             files: outgoing
                 .files
                 .iter()
@@ -1848,6 +1859,11 @@ impl ConversationView {
                     &outgoing.extras(),
                 )
                 .await;
+            if let (Ok(record), Some(preview)) = (&sent, &outgoing.link_preview) {
+                let _ = engine
+                    .attach_link_preview(&chat_id, &record.message_id, preview)
+                    .await;
+            }
             (Some(chat_id), sent.err().map(|error| short_error(&error)))
         });
         cx.spawn_in(window, async move |this, cx| {
@@ -2160,6 +2176,7 @@ impl ConversationView {
             edit: Some(edit),
             images: Vec::new(),
             files: Vec::new(),
+            link_preview: None,
         };
         self.composer
             .update(cx, |composer, cx| composer.begin_edit(draft, window, cx));
@@ -2699,8 +2716,9 @@ impl Render for ConversationView {
                         let missing_images: Vec<ImageRef> = message
                             .images
                             .iter()
-                            .filter(|image| app.read(cx).directory.image(&image.url).is_none())
                             .cloned()
+                            .chain(message.link_preview.as_ref().and_then(LinkPreview::image))
+                            .filter(|image| app.read(cx).directory.image(&image.url).is_none())
                             .collect();
                         if !missing_images.is_empty() {
                             let app = app.clone();

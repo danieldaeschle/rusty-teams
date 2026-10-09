@@ -94,6 +94,10 @@ struct Fake {
     invoke_answer: Mutex<Option<chatsvc::InvokeResponse>>,
     muted_states: Mutex<Vec<(String, bool)>>,
     muted_fails: Mutex<bool>,
+    link_pages: Mutex<Vec<chatsvc::MessageLinks>>,
+    link_page_calls: Mutex<Vec<String>>,
+    links_put: Mutex<Vec<(String, String)>>,
+    link_info_calls: Mutex<usize>,
 }
 
 impl Fake {
@@ -623,6 +627,35 @@ impl Remote for Handle {
             .unwrap()
             .clone()
             .unwrap_or(chatsvc::InvokeResponse::Empty))
+    }
+
+    async fn message_links(
+        &self,
+        conversation: &chatsvc::ConversationRef,
+        _page_size: usize,
+    ) -> Result<Vec<chatsvc::MessageLinks>> {
+        self.link_page_calls
+            .lock()
+            .unwrap()
+            .push(conversation.conversation_id());
+        Ok(self.link_pages.lock().unwrap().clone())
+    }
+
+    async fn set_message_links(&self, target: &MessageTarget, links_json: &str) -> Result<()> {
+        self.links_put
+            .lock()
+            .unwrap()
+            .push((describe(target), links_json.to_owned()));
+        Ok(())
+    }
+
+    async fn link_info(&self, url: &str) -> Result<chatsvc::LinkInfo> {
+        *self.link_info_calls.lock().unwrap() += 1;
+        Ok(chatsvc::LinkInfo {
+            url: url.to_owned(),
+            title: Some("Example".into()),
+            ..chatsvc::LinkInfo::default()
+        })
     }
 
     async fn presences(&self, user_ids: &[String]) -> Result<Vec<Presence>> {
@@ -3054,4 +3087,105 @@ async fn bot_messages_remember_their_application() {
     let record = engine.open_conversation(CHAT).unwrap().remove(0);
     assert_eq!(record.sender_application_id.as_deref(), Some(BOT_GUID));
     assert_eq!(record.sender_id, None);
+}
+
+const PREVIEW_LINKS: &str =
+    r#"[{"url":"https://a.example/x","preview":{"title":"Example"},"previewenabled":true}]"#;
+
+#[tokio::test]
+async fn links_from_the_chat_service_survive_the_next_graph_sync() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(
+        1,
+        1,
+        "<p><a href=\"https://a.example/x\">link</a></p>",
+    )]);
+    *fake.link_pages.lock().unwrap() = vec![chatsvc::MessageLinks {
+        message_id: "m0001".into(),
+        links_json: PREVIEW_LINKS.into(),
+    }];
+
+    let delta = engine.fetch_newer(CHAT).await.unwrap();
+    assert_eq!(delta.added[0].links_json, PREVIEW_LINKS);
+    assert_eq!(
+        engine.open_conversation(CHAT).unwrap()[0].links_json,
+        PREVIEW_LINKS
+    );
+    assert_eq!(*fake.link_page_calls.lock().unwrap(), [CHAT]);
+
+    let again = engine.fetch_newer(CHAT).await.unwrap();
+    assert!(again.is_empty());
+    assert_eq!(
+        engine.open_conversation(CHAT).unwrap()[0].links_json,
+        PREVIEW_LINKS
+    );
+}
+
+#[tokio::test]
+async fn messages_without_anchors_do_not_ask_the_chat_service() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(1, 1, "<p>plain</p>")]);
+    engine.fetch_newer(CHAT).await.unwrap();
+    assert!(fake.link_page_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_failing_chat_service_leaves_no_preview() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(1, 1, "<a href=\"https://a.example\">x</a>")]);
+    let delta = engine.fetch_newer(CHAT).await.unwrap();
+    assert_eq!(delta.added[0].links_json, "[]");
+}
+
+#[tokio::test]
+async fn attaching_a_preview_puts_the_links_and_keeps_them_locally() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let sent = engine
+        .send_message_with_mentions(CHAT, "see https://a.example/x", None, &[])
+        .await
+        .unwrap();
+    let preview = engine
+        .link_preview_for("https://a.example/x")
+        .await
+        .unwrap()
+        .unwrap();
+
+    engine
+        .attach_link_preview(CHAT, &sent.message_id, &preview)
+        .await
+        .unwrap();
+
+    let put = fake.links_put.lock().unwrap().clone();
+    assert_eq!(put.len(), 1);
+    assert_eq!(put[0].0, sent.message_id);
+    assert!(put[0].1.contains("\"itemid\":\"0\""));
+    let stored = engine
+        .store()
+        .messages_by_id(CHAT, std::slice::from_ref(&sent.message_id))
+        .unwrap();
+    assert_eq!(stored[&sent.message_id].links_json, put[0].1);
+}
+
+#[tokio::test]
+async fn link_infos_are_fetched_once_per_url_and_internal_links_never() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    for _ in 0..2 {
+        engine
+            .link_preview_for("https://a.example/x")
+            .await
+            .unwrap();
+    }
+    assert!(
+        engine
+            .link_preview_for("https://contoso.sharepoint.com/x")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(*fake.link_info_calls.lock().unwrap(), 1);
 }

@@ -9,7 +9,8 @@ use store::{
     TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    CardActionOutcome, ChatApp, MentionCandidate, PersonCandidate, PersonSource, TaskDialog,
+    CardActionOutcome, ChatApp, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
+    TaskDialog,
     TaskDialogKind,
 };
 
@@ -24,6 +25,9 @@ const PHOTO_SIZE: usize = 48;
 const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
 const STAGING_SIZE: (usize, usize) = (960, 540);
+const LINK_IMAGE_KEY: &str =
+    "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/image/Thumbnail?url=demo";
+const LINK_IMAGE_SIZE: (u32, u32) = (320, 180);
 const PRIORITY_CHAT: &str = "demo-chat-priya";
 const BOT_CHAT: &str = "demo-chat-wiki-bot";
 const BOT_NAME: &str = "Wiki Bot";
@@ -649,6 +653,7 @@ pub fn seed_directory(state: &mut AppState) {
         let png = encode_rgb(STAGING_SIZE.0, STAGING_SIZE.1, staging_pixel);
         if std::fs::write(&path, png).is_ok() {
             state.directory.set_image(STAGING_IMAGE_KEY, &path);
+            state.directory.set_image(LINK_IMAGE_KEY, &path);
         }
     }
     state.typing.start(
@@ -681,6 +686,7 @@ fn message(
         sender_id: Some(sender.0.to_owned()),
         sender_name: Some(sender.1.to_owned()),
         sender_application_id: None,
+        links_json: "[]".to_owned(),
         created_at: time,
         edited_at: edited.then_some(time + Duration::minutes(2)),
         deleted: false,
@@ -694,6 +700,25 @@ fn message(
 fn with_attachments(mut record: MessageRecord, attachments_json: &str) -> MessageRecord {
     record.attachments_json = attachments_json.to_owned();
     record
+}
+
+fn with_links(mut record: MessageRecord, links_json: String) -> MessageRecord {
+    record.links_json = links_json;
+    record
+}
+
+pub fn link_preview(url: &str) -> Option<LinkPreview> {
+    Some(LinkPreview {
+        url: url.to_owned(),
+        title: Some("Release checklist Q4".to_owned()),
+        description: Some(
+            "Everything that has to be green before the release candidate goes out on Friday."
+                .to_owned(),
+        ),
+        image_url: Some(LINK_IMAGE_KEY.to_owned()),
+        image_width: Some(LINK_IMAGE_SIZE.0),
+        image_height: Some(LINK_IMAGE_SIZE.1),
+    })
 }
 
 fn bot_messages() -> Vec<MessageRecord> {
@@ -975,6 +1000,21 @@ fn release_messages() -> Vec<MessageRecord> {
             &likes,
             false,
         ),
+        with_links(
+            message(
+                chat,
+                "m2a",
+                None,
+                mara,
+                at(1, 16, 23),
+                "<p><a href=\"https://example.com/checklist\">https://example.com/checklist</a></p>",
+                "[]",
+                false,
+            ),
+            link_preview("https://example.com/checklist")
+                .map(|preview| preview.links_json())
+                .unwrap_or_default(),
+        ),
         message(
             chat,
             "m2b",
@@ -1070,6 +1110,27 @@ fn release_messages() -> Vec<MessageRecord> {
             "<p>Build 42 is green, see <a href=\"https://example.com/build/42\">pipeline</a>.</p>",
             &many,
             false,
+        ),
+        with_links(
+            message(
+                chat,
+                "m7a",
+                None,
+                me,
+                at(0, 13, 37),
+                "<p>Notes are in <a href=\"https://example.com/notes\">https://example.com/notes</a></p>",
+                "[]",
+                false,
+            ),
+            LinkPreview {
+                url: "https://example.com/notes".to_owned(),
+                title: Some("Release notes 0.2".to_owned()),
+                description: None,
+                image_url: None,
+                image_width: None,
+                image_height: None,
+            }
+            .links_json(),
         ),
         message(
             chat,

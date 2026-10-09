@@ -64,6 +64,7 @@ fn message(conversation_id: &str, message_id: &str, minute: u32) -> MessageRecor
         reactions_json: "[]".to_owned(),
         mentions_json: "[]".to_owned(),
         sender_application_id: None,
+        links_json: "[]".to_owned(),
     }
 }
 
@@ -79,6 +80,40 @@ fn sender_application_round_trips() {
         .unwrap();
     let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
     assert_eq!(found["m1"], bot_message);
+}
+
+#[test]
+fn an_upsert_without_links_keeps_the_stored_links() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_messages(&[message("c1", "m1", 1)]).unwrap();
+    let links = r#"[{"url":"https://a.example"}]"#;
+    assert!(store.set_message_links("c1", "m1", links).unwrap());
+    assert!(!store.set_message_links("c1", "m1", links).unwrap());
+
+    let edited = MessageRecord {
+        body_html: "<p>edited</p>".to_owned(),
+        ..message("c1", "m1", 1)
+    };
+    store.upsert_messages(&[edited]).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"].links_json, links);
+    assert_eq!(found["m1"].body_html, "<p>edited</p>");
+
+    let replaced = MessageRecord {
+        links_json: r#"[{"url":"https://b.example"}]"#.to_owned(),
+        ..message("c1", "m1", 1)
+    };
+    store.upsert_messages(std::slice::from_ref(&replaced)).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"].links_json, replaced.links_json);
+}
+
+#[test]
+fn new_messages_start_without_links() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_messages(&[message("c1", "m1", 1)]).unwrap();
+    let found = store.messages_by_id("c1", &["m1".to_owned()]).unwrap();
+    assert_eq!(found["m1"].links_json, "[]");
 }
 
 fn ids(messages: &[MessageRecord]) -> Vec<&str> {
@@ -395,11 +430,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 10);
+        assert_eq!(store.schema_version().unwrap(), 11);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 10);
+    assert_eq!(reopened.schema_version().unwrap(), 11);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -431,7 +466,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 10);
+    assert_eq!(store.schema_version().unwrap(), 11);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -497,7 +532,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 10);
+    assert_eq!(store.schema_version().unwrap(), 11);
 }
 
 #[test]
@@ -730,6 +765,7 @@ fn migration_indexes_rows_that_predate_search() {
                  DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE presence; DROP TABLE activity;
                  DROP INDEX messages_by_sender; DROP INDEX chat_members_by_user;
                  ALTER TABLE messages DROP COLUMN sender_application_id;
+                 ALTER TABLE messages DROP COLUMN links_json;
                  ALTER TABLE chats DROP COLUMN muted;
                  PRAGMA user_version = 3;",
             )

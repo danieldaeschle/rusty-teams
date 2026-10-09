@@ -597,6 +597,7 @@ mod tests {
             sender_id: Some("u".to_owned()),
             sender_name: None,
             sender_application_id: None,
+            links_json: "[]".to_owned(),
             created_at: Utc::now(),
             edited_at: None,
             deleted: false,

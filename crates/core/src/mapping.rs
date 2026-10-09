@@ -3,6 +3,7 @@ use graph::{Attachment, Chat, Mention, Message, Reaction};
 use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, TeamRecord};
 
 use crate::adaptive_card::card_content_text;
+use crate::links::EMPTY_LINKS;
 use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
 use crate::stored::{AttachmentInfo, MentionInfo, QuoteInfo, ReactionInfo};
@@ -165,6 +166,7 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
                 .filter_map(mention_info)
                 .collect::<Vec<_>>(),
         ),
+        links_json: EMPTY_LINKS.to_owned(),
     })
 }
 

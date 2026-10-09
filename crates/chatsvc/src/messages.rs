@@ -95,8 +95,8 @@ impl MessageTransport for SessionMessageTransport {
 }
 
 pub struct Messages<T: MessageTransport = SessionMessageTransport> {
-    transport: T,
-    base_url: String,
+    pub(crate) transport: T,
+    pub(crate) base_url: String,
     retry_delay: Duration,
 }
 

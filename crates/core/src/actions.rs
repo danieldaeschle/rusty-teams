@@ -7,6 +7,7 @@ use store::MessageRecord;
 
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::{Error, Result};
+use crate::links::LinkPreview;
 use crate::mapping::{chat_record, message_record};
 use crate::markdown::markdown_to_html;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
@@ -328,9 +329,29 @@ impl<R: Remote> SyncEngine<R> {
         let Some(record) = message_record(conversation_id, &message) else {
             return Ok(None);
         };
+        let mut record = record;
         let delta = self.ingest(conversation_id, vec![record.clone()])?;
-        self.announce(conversation_id, !delta.is_empty());
+        let links_changed = self.attach_links(conversation_id, &mut [&mut record]).await;
+        self.announce(conversation_id, !delta.is_empty() || links_changed);
         Ok(Some(record))
+    }
+
+    pub async fn attach_link_preview(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        preview: &LinkPreview,
+    ) -> Result<()> {
+        let target = self.message_target(conversation_id, message_id)?;
+        let links_json = preview.links_json();
+        self.remote.set_message_links(&target, &links_json).await?;
+        if self
+            .store
+            .set_message_links(conversation_id, message_id, &links_json)?
+        {
+            self.announce(conversation_id, true);
+        }
+        Ok(())
     }
 
     pub async fn mark_read(&self, conversation_id: &str) -> Result<()> {

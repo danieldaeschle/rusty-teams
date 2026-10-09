@@ -21,7 +21,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
-    MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
+    LinkPreview, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
@@ -34,6 +34,7 @@ use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
 use super::format_toolbar::{self, FormatButton};
+use super::link_preview::{ComposeLink, draft_link, link_preview_card};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
@@ -45,6 +46,7 @@ const MIN_ROWS: usize = 1;
 const MAX_ROWS: usize = 8;
 const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 const MENTION_LIMIT: usize = 8;
+const LINK_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(600);
 const MENTION_QUERY_MAX_CHARS: usize = 32;
 const MENTION_QUERY_MAX_WORDS: usize = 3;
 const POPUP_WIDTH: f32 = 380.;
@@ -113,6 +115,7 @@ pub struct Outgoing {
     pub edit: Option<EditPreview>,
     pub images: Vec<OutgoingImage>,
     pub files: Vec<OutgoingFile>,
+    pub link_preview: Option<LinkPreview>,
 }
 
 impl Outgoing {
@@ -264,7 +267,8 @@ pub struct Composer {
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
     pending_anchors: HashMap<u64, usize>,
-    _subscriptions: [Subscription; 2],
+    link: ComposeLink,
+    _subscriptions: [Subscription; 3],
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -401,6 +405,11 @@ impl Composer {
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
         let observer = cx.observe(&input, |_, _, cx| cx.notify());
+        let image_observer = cx.observe(&app, |this, _, cx| {
+            if this.link_image_pending(cx) {
+                cx.notify();
+            }
+        });
         let decorations = input.update(cx, |state, cx| {
             (
                 state.create_decorations_collection(Vec::new(), cx),
@@ -447,7 +456,8 @@ impl Composer {
             demo_failed: HashSet::new(),
             carry_images_into: None,
             pending_anchors: HashMap::new(),
-            _subscriptions: [subscription, observer],
+            link: ComposeLink::default(),
+            _subscriptions: [subscription, observer, image_observer],
         }
     }
 
@@ -463,6 +473,7 @@ impl Composer {
             self.on_change(window, cx);
             self.update_emoji(cx);
             self.update_mention(cx);
+            self.update_link_preview(cx);
         }
         let value = input.read(cx).value();
         if submitted_text(event, &value).is_some()
@@ -1262,6 +1273,86 @@ impl Composer {
         cx.notify();
     }
 
+    fn update_link_preview(&mut self, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            self.link.reset();
+            return;
+        }
+        let draft = self.current_draft(cx);
+        if let Some(url) = self.link.observe(draft_link(&draft), draft.is_blank()) {
+            self.fetch_link_preview(url, cx);
+        }
+        cx.notify();
+    }
+
+    fn fetch_link_preview(&mut self, url: String, cx: &mut Context<Self>) {
+        let (demo, engine) = {
+            let state = self.app.read(cx);
+            (state.mode.demo, state.engine.clone())
+        };
+        if demo {
+            let preview = crate::demo::link_preview(&url);
+            self.finish_link_preview(&url, preview, cx);
+            return;
+        }
+        let Some(engine) = engine else {
+            return;
+        };
+        self.link.lookup = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(LINK_PREVIEW_DEBOUNCE)
+                .await;
+            let task_url = url.clone();
+            let receiver =
+                runtime::spawn(async move { engine.link_preview_for(&task_url).await });
+            if let Ok(Ok(preview)) = receiver.await {
+                this.update(cx, |this, cx| this.finish_link_preview(&url, preview, cx))
+                    .ok();
+            }
+        }));
+    }
+
+    fn finish_link_preview(&mut self, url: &str, preview: Option<LinkPreview>, cx: &mut Context<Self>) {
+        let image = preview.as_ref().and_then(LinkPreview::image);
+        if !self.link.apply(url, preview) {
+            return;
+        }
+        if let Some(image) = image {
+            self.app
+                .update(cx, |state, cx| state.request_images(vec![image], cx));
+        }
+        cx.notify();
+    }
+
+    fn link_image_pending(&self, cx: &App) -> bool {
+        self.link
+            .shown()
+            .and_then(LinkPreview::image)
+            .is_some_and(|image| self.app.read(cx).directory.image(&image.url).is_none())
+    }
+
+    fn render_link_preview(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let preview = self.link.shown()?;
+        let composer = cx.weak_entity();
+        let close: super::link_preview::CloseHandler = Rc::new(move |_, cx| {
+            composer
+                .update(cx, |this, cx| {
+                    this.link.dismiss();
+                    cx.notify();
+                })
+                .ok();
+        });
+        Some(
+            div().w_full().mb(px(6.)).child(link_preview_card(
+                preview,
+                "composer-link-preview".to_owned(),
+                &self.app.read(cx).directory,
+                true,
+                Some(close),
+            )),
+        )
+    }
+
     fn popup_is_open(&self) -> bool {
         self.emoji_popup.is_some()
             || self
@@ -1345,6 +1436,7 @@ impl Composer {
             self.discard_uploaded(dropped, cx);
             self.remove_orphan_image_tokens(window, cx);
             self.reply = None;
+            self.link.reset();
             if self.editing.take().is_some() {
                 self.load_draft(Draft::default(), InputContent::new(""), window, cx);
             }
@@ -1425,6 +1517,7 @@ impl Composer {
             mentions,
             reply: self.reply.clone(),
             edit: self.editing.clone(),
+            link_preview: self.link.shown().filter(|_| attachments_apply).cloned(),
             images: if attachments_apply {
                 self.tray.images_in(&image_ids)
             } else {
@@ -1864,6 +1957,7 @@ impl Composer {
         }
         self.reply = None;
         self.editing = None;
+        self.link.reset();
         self.close_popup();
         cx.emit(ComposerEvent::Submit(Box::new(outgoing)));
         cx.notify();
@@ -1904,6 +1998,7 @@ impl Composer {
         self.load_draft(outgoing.draft.clone(), content, window, cx);
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
+        self.link.restore(outgoing.link_preview.clone());
         self.close_popup();
         cx.notify();
     }
@@ -1916,6 +2011,7 @@ impl Composer {
         self.mention_inputs.clear();
         self.update_emoji(cx);
         self.update_mention(cx);
+        self.update_link_preview(cx);
         cx.notify();
     }
 
@@ -2480,6 +2576,7 @@ impl Render for Composer {
             .children(notice)
             .children(self.render_reply_strip(cx))
             .children(self.render_edit_strip(cx))
+            .children(self.render_link_preview(cx))
             .child(
                 div()
                     .relative()
@@ -2633,6 +2730,7 @@ mod tests {
         let outgoing = Outgoing {
             draft: teams_core::Draft::default(),
             mentions: Vec::new(),
+            link_preview: None,
             reply: None,
             edit: None,
             images: vec![OutgoingImage {
@@ -2675,6 +2773,7 @@ mod tests {
         super::Outgoing {
             draft: teams_core::Draft::plain(text),
             mentions: Vec::new(),
+            link_preview: None,
             reply: None,
             edit: None,
             images,
@@ -3662,6 +3761,7 @@ mod tests {
                     let draft = Outgoing {
                         draft: teams_core::Draft::plain("old"),
                         mentions: Vec::new(),
+                        link_preview: None,
                         reply: None,
                         edit: Some(EditPreview {
                             message_id: "m1".into(),

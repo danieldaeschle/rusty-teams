@@ -291,3 +291,78 @@ async fn send_typing_addresses_a_channel_reply_thread() {
         format!("{BASE}/19%3Ac%40thread.tacv2%3Bmessageid%3D99/messages")
     );
 }
+
+#[tokio::test]
+async fn set_links_puts_the_array_as_a_string() {
+    let mock = Mock::new(&[200]);
+    let links = r#"[{"itemid":"0","url":"https://a.example"}]"#;
+    messages(&mock)
+        .set_links(&ConversationRef::chat("19:a@thread.v2"), "m1", links)
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests[0].method, Method::Put);
+    assert_eq!(
+        requests[0].url,
+        format!("{BASE}/19%3Aa%40thread.v2/messages/m1/properties?name=links")
+    );
+    assert_eq!(requests[0].body.as_ref().unwrap()["links"], links);
+}
+
+#[tokio::test]
+async fn set_links_in_a_channel_reply_targets_the_thread_conversation() {
+    let mock = Mock::new(&[200]);
+    messages(&mock)
+        .set_links(
+            &ConversationRef::channel_reply("19:c@thread.tacv2", "root1"),
+            "r1",
+            "[]",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.requests()[0].url,
+        format!(
+            "{BASE}/19%3Ac%40thread.tacv2%3Bmessageid%3Droot1/messages/r1/properties?name=links"
+        )
+    );
+}
+
+#[tokio::test]
+async fn link_info_encodes_the_url_for_the_preview_service() {
+    let mock = Mock::new(&[200]);
+    messages(&mock)
+        .link_info("https://a.example/x?y=1&z=2")
+        .await
+        .unwrap();
+    assert_eq!(mock.requests()[0].method, Method::Get);
+    assert_eq!(
+        mock.requests()[0].url,
+        "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/info?url=https%3A%2F%2Fa.example%2Fx%3Fy%3D1%26z%3D2"
+    );
+}
+
+#[tokio::test]
+async fn link_images_outside_the_preview_service_are_refused_without_a_request() {
+    let mock = Mock::new(&[]);
+    assert!(
+        messages(&mock)
+            .link_image("https://evil.example/a.png")
+            .await
+            .is_err()
+    );
+    assert!(mock.requests().is_empty());
+}
+
+#[tokio::test]
+async fn list_message_links_asks_for_the_msnp24_view() {
+    let mock = Mock::new(&[200]);
+    messages(&mock)
+        .list_message_links(&ConversationRef::channel_root("19:c@thread.tacv2"), 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.requests()[0].url,
+        format!("{BASE}/19%3Ac%40thread.tacv2/messages?view=msnp24Equivalent&pageSize=50")
+    );
+}
