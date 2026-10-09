@@ -145,10 +145,9 @@ It signs you in through a real Teams web page and lets that page make the API ca
 
 </details>
 
-## Docs
+## Roadmap
 
-- [ROADMAP.md](ROADMAP.md) - open and finished features by priority
-- `docs/` - local research notes and mockups, not in git
+Open and finished features by priority: [ROADMAP.md](ROADMAP.md)
 
 ## License
 
