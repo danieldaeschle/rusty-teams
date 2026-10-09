@@ -24,7 +24,7 @@
 
 | | Rusty Teams |
 |---|---|
-| 🏢 Works in company tenants | No app registration, no admin consent: it runs on the Teams web app your account may already use |
+| 🏢 Works in company tenants | No app registration, no admin consent: it runs on the Teams web app your account is already allowed to use |
 | ⚡ Starts instantly | Renders from a local SQLite cache before the network answers |
 | 🔒 No tokens stored | Signs in through a real Teams web page; tokens never leave it |
 | 📡 Live, no polling | Realtime socket pushes every change |
