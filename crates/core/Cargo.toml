@@ -13,6 +13,7 @@ chatsvc.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 graph.workspace = true
+percent-encoding.workspace = true
 regex.workspace = true
 scraper.workspace = true
 session.workspace = true

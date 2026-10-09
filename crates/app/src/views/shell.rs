@@ -4,12 +4,15 @@ use gpui_kit::*;
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
+use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
+use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::sidebar::SidebarView;
 use super::status_bar::render_status_bar;
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
@@ -50,6 +53,8 @@ pub struct AppShell {
     notifications: Entity<NotificationCenter>,
     activity: Entity<ActivityCenter>,
     activity_panel: Option<Entity<ActivityPanel>>,
+    saved_panel: Option<Entity<SavedPanel>>,
+    forward_dialog: Option<Entity<ForwardDialog>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
@@ -67,12 +72,16 @@ impl AppShell {
     ) -> Self {
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
-        let subscription = cx.subscribe(&state, |this, _, event: &AppEvent, cx| {
-            if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
-                this.apply_open_target(cx);
-            }
-            cx.notify();
-        });
+        let subscription =
+            cx.subscribe_in(&state, window, |this, _, event: &AppEvent, window, cx| {
+                if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
+                    this.apply_open_target(cx);
+                }
+                if matches!(event, AppEvent::Forward) {
+                    this.open_forward_dialog(window, cx);
+                }
+                cx.notify();
+            });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
@@ -88,6 +97,8 @@ impl AppShell {
             notifications,
             activity,
             activity_panel: None,
+            saved_panel: None,
+            forward_dialog: None,
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
@@ -204,6 +215,7 @@ impl AppShell {
             return;
         }
         self.activity_panel = None;
+        self.saved_panel = None;
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let switcher = cx.new(|cx| Switcher::new(app, candidates, initial_query, window, cx));
@@ -245,6 +257,7 @@ impl AppShell {
             return;
         }
         self.switcher = None;
+        self.saved_panel = None;
         let (app, activity) = (self.state.clone(), self.activity.clone());
         let panel = cx.new(|cx| ActivityPanel::new(app, activity, window, cx));
         cx.subscribe_in(
@@ -281,6 +294,78 @@ impl AppShell {
         )
         .detach();
         self.activity_panel = Some(panel);
+        cx.notify();
+    }
+    fn toggle_saved_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saved_panel.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+            return;
+        }
+        self.switcher = None;
+        self.activity_panel = None;
+        let app = self.state.clone();
+        let panel = cx.new(|cx| SavedPanel::new(app, window, cx));
+        cx.subscribe_in(
+            &panel,
+            window,
+            |this, _, event: &SavedPanelEvent, window, cx| {
+                this.saved_panel = None;
+                window.focus(&this.focus_handle, cx);
+                if let SavedPanelEvent::Open {
+                    conversation_id,
+                    message_id,
+                } = event
+                {
+                    let selection = selection_for(&this.state.read(cx).sidebar, conversation_id);
+                    if let Some(selection) = selection {
+                        let message_id = message_id.clone();
+                        this.state.update(cx, |state, cx| {
+                            state.jump_to_message(selection, message_id, cx)
+                        });
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+        self.saved_panel = Some(panel);
+        cx.notify();
+    }
+
+    fn open_forward_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(source) = self
+            .state
+            .update(cx, |state, _| state.take_forward_request())
+        else {
+            return;
+        };
+        self.switcher = None;
+        self.activity_panel = None;
+        self.saved_panel = None;
+        let candidates = candidates_from(self.state.read(cx));
+        let app = self.state.clone();
+        let dialog = cx.new(|cx| ForwardDialog::new(app, source, candidates, window, cx));
+        cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, event: &ForwardDialogEvent, window, cx| {
+                this.forward_dialog = None;
+                window.focus(&this.focus_handle, cx);
+                if let ForwardDialogEvent::Sent { target, title } = event {
+                    let target = target.clone();
+                    let open = NoticeAction::new("Open", move |state, cx| {
+                        state.select(target.clone(), cx)
+                    });
+                    this.state.update(cx, |state, cx| {
+                        state.raise_notice(format!("Forwarded to {title}"), Some(open), cx)
+                    });
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+        self.forward_dialog = Some(dialog);
         cx.notify();
     }
 }
@@ -321,6 +406,7 @@ impl Render for AppShell {
             &state.directory,
             self.activity.read(cx).feed().unread_count(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
+            cx.listener(|this, _, window, cx| this.toggle_saved_panel(window, cx)),
             cx.listener(|this, _, window, cx| this.toggle_activity_panel(window, cx)),
         );
         div()
@@ -359,8 +445,10 @@ impl Render for AppShell {
                     .child(status),
             )
             .children(self.activity_panel.clone())
+            .children(self.saved_panel.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
+            .children(self.forward_dialog.clone())
             .child(crate::frame_log::probe("last"))
     }
 }

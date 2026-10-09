@@ -16,7 +16,7 @@ use teams_core::{HIGHLIGHT_END, HIGHLIGHT_START};
 use super::avatar::{person_avatar, spec_avatar, square_avatar};
 use super::widgets::icon;
 use crate::app_state::{AppState, Selection, chat_title};
-use crate::data::is_one_on_one;
+use crate::data::{Directory, is_one_on_one};
 use crate::format;
 use crate::fuzzy;
 use crate::sidebar_model::{AvatarSpec, avatar_for};
@@ -162,6 +162,20 @@ pub fn candidates_from(state: &AppState) -> Vec<(String, Candidate)> {
         })
     });
     chats.chain(channels).collect()
+}
+
+pub fn candidate_avatar(
+    directory: &Directory,
+    avatar: &CandidateAvatar,
+    size: f32,
+    ring: Hsla,
+) -> AnyElement {
+    match avatar {
+        CandidateAvatar::Chat(spec) => spec_avatar(directory, spec, size, ring),
+        CandidateAvatar::Team { name, key } => {
+            square_avatar(name, key, size, size / 4.).into_any_element()
+        }
+    }
 }
 
 pub fn clamp_highlight(current: usize, delta: isize, length: usize) -> usize {
@@ -315,12 +329,7 @@ impl Render for Switcher {
                 rows.push(group_header(last_group));
             }
             let selection = candidate.selection.clone();
-            let avatar = match &candidate.avatar {
-                CandidateAvatar::Chat(spec) => spec_avatar(directory, spec, 28., theme::surface()),
-                CandidateAvatar::Team { name, key } => {
-                    square_avatar(name, key, 28., 7.).into_any_element()
-                }
-            };
+            let avatar = candidate_avatar(directory, &candidate.avatar, 28., theme::surface());
             let kind_icon = match candidate.selection {
                 Selection::Chat(_) => IconName::MessageCircle,
                 Selection::Channel(_) => IconName::Hash,

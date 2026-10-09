@@ -1,3 +1,4 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -11,7 +12,7 @@ use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
-use super::widgets::symbol;
+use super::widgets::{icon, symbol};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
@@ -29,6 +30,8 @@ const MAX_WIDTH_RATIO: f32 = 0.7;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
+const SAVED_MARK_SIZE: f32 = 12.;
+const FORWARDED_SIZE: f32 = 11.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
@@ -50,6 +53,7 @@ pub struct RowActions {
     pub reaction_controls: Option<ReactionControls>,
     pub files: Option<FileActions>,
     pub highlighted: bool,
+    pub saved: bool,
 }
 
 const TOOLBAR_LIFT: f32 = 22.;
@@ -137,11 +141,15 @@ fn bubble(
                 })
         });
     let has_reactions = !row.reactions.is_empty();
+    let saved = extras.saved;
     let mut content = v_flex().gap(px(6.));
+    if row.forwarded {
+        content = content.child(forwarded_header());
+    }
     let padded_blocks = if has_reactions {
         None
     } else {
-        with_meta_room(&row.blocks, meta_room(row, own))
+        with_meta_room(&row.blocks, meta_room(row, own, saved))
     };
     let meta_inline = has_text(row) && padded_blocks.is_some();
     if has_text(row) {
@@ -200,11 +208,11 @@ fn bubble(
                         .h(px(REACTION_FOOTER_HEIGHT))
                         .flex_none()
                         .items_center()
-                        .child(bubble_meta(row, own)),
+                        .child(bubble_meta(row, own, saved)),
                 ),
         );
     } else if !meta_inline {
-        content = content.child(h_flex().justify_end().child(bubble_meta(row, own)));
+        content = content.child(h_flex().justify_end().child(bubble_meta(row, own, saved)));
     }
     element = element.child(content);
     if meta_inline {
@@ -213,7 +221,7 @@ fn bubble(
                 .absolute()
                 .right(px(9.))
                 .bottom(px(5.))
-                .child(bubble_meta(row, own)),
+                .child(bubble_meta(row, own, saved)),
         );
     }
     if let Some(menu) = extras.menu {
@@ -245,9 +253,20 @@ struct BubbleExtras {
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
+    saved: bool,
 }
 
-fn bubble_meta(row: &MessageRow, own: bool) -> Div {
+pub(super) fn forwarded_header() -> Div {
+    h_flex()
+        .gap(px(4.))
+        .items_center()
+        .text_size(px(FORWARDED_SIZE))
+        .text_color(theme::text_muted())
+        .child(icon(IconName::Forward, FORWARDED_SIZE, theme::text_muted()))
+        .child("Forwarded")
+}
+
+fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
     let tint = if own {
         theme::own_meta()
     } else {
@@ -261,6 +280,13 @@ fn bubble_meta(row: &MessageRow, own: bool) -> Div {
         .italic()
         .text_color(tint)
         .when(row.edited, |meta| meta.child("Edited"))
+        .when(saved, |meta| {
+            meta.child(icon(
+                IconName::Bookmark,
+                SAVED_MARK_SIZE,
+                theme::accent_text(),
+            ))
+        })
         .child(row.time.clone())
         .when(own && row.delivery == Delivery::Sending, |meta| {
             meta.child(symbol("schedule", META_CHECK_SIZE, tint))
@@ -342,8 +368,11 @@ pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
         .into_any_element()
 }
 
-fn meta_room(row: &MessageRow, own: bool) -> usize {
+fn meta_room(row: &MessageRow, own: bool, saved: bool) -> usize {
     let mut width = 12. + row.time.chars().count() as f32 * 6.;
+    if saved {
+        width += SAVED_MARK_SIZE + 4.;
+    }
     if row.edited {
         width += 56.;
     }
@@ -509,6 +538,7 @@ pub fn render_message_row(
         reaction_controls,
         files,
         highlighted,
+        saved,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -517,6 +547,7 @@ pub fn render_message_row(
         react,
         controls: reaction_controls,
         files,
+        saved,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

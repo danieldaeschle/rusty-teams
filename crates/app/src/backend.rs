@@ -196,6 +196,7 @@ async fn realtime_loop(
                             let _ = events.send(BackendEvent::Live(LiveState::Live));
                             let receipt_engine = engine.clone();
                             let receipt_event = message.clone();
+                            engine.handle_pin_event(&message);
                             tokio::spawn(async move {
                                 receipt_engine.handle_receipt_event(&receipt_event).await
                             });

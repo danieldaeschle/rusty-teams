@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 74 %** (63 done, 2 partial, 21 missing of 86). Partial counts half.
+**Parity: 79 %** (68 done, 2 partial, 17 missing of 87). Partial counts half.
 
 ## By area
 
@@ -12,7 +12,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
 | [Reading](#reading) | 87 % | 16 | 1 | 2 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
-| [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
+| [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 57 % | 4 | 0 | 3 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
 | [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
@@ -100,10 +100,11 @@ Feature parity with the Microsoft Teams desktop client.
 
 | Feature | State | Note |
 |---|---|---|
-| Forward a message | Missing |  |
-| Copy link to a message | Missing |  |
-| Save a message, saved list | Missing |  |
-| Pin a message in a chat | Missing |  |
+| Forward a message | Done | Dialog with chat and channel search, optional comment, "Forwarded" header on received forwards |
+| Copy link to a message | Done | Teams deep link to the clipboard |
+| Save a message, saved list | Done | Bookmark mark on saved messages, Saved panel next to the bell, synced with Teams |
+| Pin a message in a chat | Done | Banner under the chat header, several pins cycle, unpin from the banner. Chats only |
+| Mark as unread from a message | Done | Unread from the chosen message on |
 
 ## Channels
 

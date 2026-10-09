@@ -201,6 +201,10 @@ impl RenderEnv {
             reaction_controls,
             files,
             highlighted: self.highlighted.as_deref() == Some(message.key.as_str()),
+            saved: self
+                .app
+                .read(cx)
+                .is_saved(&message.conversation_id, &message.key),
         }
     }
 

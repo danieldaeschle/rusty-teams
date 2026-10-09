@@ -28,8 +28,22 @@ pub fn render_title_bar(
     directory: &Directory,
     activity_unread: usize,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_saved: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_notifications: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let saved = div()
+        .id("title-saved")
+        .occlude()
+        .size(px(28.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .hover(|button| button.bg(theme::surface()))
+        .child(icon(IconName::Bookmark, 18., theme::text_muted()))
+        .on_click(on_saved);
     let notifications = div()
         .id("title-notifications")
         .relative()
@@ -117,6 +131,7 @@ pub fn render_title_bar(
                         .child(crate::APP_NAME),
                 )
                 .child(div().flex_1().flex().justify_center().child(search))
+                .child(saved)
                 .child(notifications)
                 .children(own)
                 .child(div().w(px(4.))),

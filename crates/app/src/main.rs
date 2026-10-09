@@ -23,6 +23,7 @@ mod frame_log;
 mod fuzzy;
 mod gifs;
 mod local_previews;
+mod message_actions;
 mod notice;
 mod notify;
 mod outbox;

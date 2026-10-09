@@ -7980,6 +7980,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "graph",
+ "percent-encoding",
  "regex",
  "scraper",
  "serde",

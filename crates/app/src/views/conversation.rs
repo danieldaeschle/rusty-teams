@@ -20,6 +20,7 @@ use store::{MessageRecord, OutboxState, OutboxTarget};
 use teams_core::{FileCard, LinkPreview};
 
 mod feed;
+mod pins;
 mod render_env;
 mod scheduled;
 
@@ -159,6 +160,8 @@ pub struct ConversationView {
     picker: Entity<ReactionPicker>,
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
+    pin_index: usize,
+    pin_previews: HashMap<String, pins::PinPreview>,
     notice: Option<String>,
     scheduled_failure: Option<scheduled::ScheduledFailure>,
     scheduled_in_flight: HashSet<String>,
@@ -407,6 +410,8 @@ impl ConversationView {
             picker,
             reaction_details: None,
             highlighted_message: None,
+            pin_index: 0,
+            pin_previews: HashMap::new(),
             notice: None,
             scheduled_failure: None,
             scheduled_in_flight: HashSet::new(),
@@ -483,6 +488,7 @@ impl ConversationView {
                 if is_current {
                     self.rebuild(false, cx);
                     self.mark_read(ReadTrigger::Incoming, cx);
+                    self.on_pins_changed(conversation_id, cx);
                 }
             }
             AppEvent::Images(keys) => self.remeasure_images(keys, cx),
@@ -500,7 +506,9 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
-            AppEvent::TaskDialog | AppEvent::LocalPreviews => {}
+            AppEvent::TaskDialog | AppEvent::LocalPreviews | AppEvent::Forward => {}
+            AppEvent::Saved => cx.notify(),
+            AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
             AppEvent::Scheduled => self.rebuild(false, cx),
             AppEvent::Outbox(conversation_id) => {
@@ -682,6 +690,11 @@ impl ConversationView {
         self.rebuild(true, cx);
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
+        self.refresh_pin_previews(cx);
+        if let Some(chat_id) = self.chat_id() {
+            self.app
+                .update(cx, |state, cx| state.refresh_pins(&chat_id, cx));
+        }
         let target = self
             .current
             .as_ref()
@@ -2550,15 +2563,32 @@ impl ConversationView {
                     .ok();
             })
         };
+        let chat_id = self.chat_id();
+        let state = self.app.read(cx);
+        let saved = self
+            .conversation_id()
+            .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
+        let pinned = chat_id
+            .as_deref()
+            .is_some_and(|chat_id| state.is_pinned(chat_id, key));
+        let in_chat = chat_id.is_some();
         MessageMenu {
             key: key.to_owned(),
             react,
             reply: Some(action(|this, key, window, cx| {
                 this.begin_reply(key, window, cx)
             })),
+            forward: Some(action(|this, key, _, cx| this.forward_message(key, cx))),
+            copy_link: Some(action(|this, key, _, cx| this.copy_link(key, cx))),
             copy: action(|this, key, _, cx| this.copy_text(key, cx)),
+            save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
+            saved,
+            toggle_pinned: in_chat.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
+            mark_unread: (in_chat && !own)
+                .then(|| action(|this, key, _, cx| this.mark_unread_from(key, cx))),
             pin,
             hover,
             picker: self.picker.clone(),
@@ -2962,6 +2992,7 @@ impl Render for ConversationView {
             Some(current) => root.child(self.render_header(current, cx)),
             None => root.child(self.draft.clone()),
         };
+        root = root.children(self.render_pin_banner(cx).filter(|_| !drafting));
         let sync_failed = self
             .current
             .as_ref()

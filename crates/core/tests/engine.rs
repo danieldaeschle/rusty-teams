@@ -634,6 +634,51 @@ impl Remote for Handle {
         Ok(self.horizons.lock().unwrap().clone())
     }
 
+    async fn forward_messages(
+        &self,
+        source_conversation_id: &str,
+        target_conversation_id: &str,
+        message_ids: &[String],
+        comment_html: &str,
+    ) -> Result<chatsvc::ForwardResult> {
+        self.record(format!(
+            "forward {source_conversation_id} {target_conversation_id} {} {comment_html}",
+            message_ids.join(",")
+        ));
+        Ok(chatsvc::ForwardResult {
+            thread_id: target_conversation_id.to_owned(),
+            message_id: "99".to_owned(),
+        })
+    }
+
+    async fn set_saved(
+        &self,
+        conversation_id: &str,
+        root_id: &str,
+        message_id: &str,
+        saved: bool,
+    ) -> Result<()> {
+        self.record(format!(
+            "save {conversation_id} {root_id} {message_id} {saved}"
+        ));
+        Ok(())
+    }
+
+    async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        self.record(format!("pin {chat_id} {message_id}"));
+        Ok(())
+    }
+
+    async fn unpin_message(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<()> {
+        self.record(format!("unpin {chat_id} {message_id} {parent_id:?}"));
+        Ok(())
+    }
+
     async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<chatsvc::ChatApp>> {
         *self.app_calls.lock().unwrap() += 1;
         Ok(self.apps.lock().unwrap().clone())
@@ -3327,4 +3372,143 @@ async fn schedule_message_rejects_notes_and_chat_threads() {
         Err(Error::Unsupported(_))
     ));
     assert!(fake.scheduled.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mark_unread_from_a_message_backs_up_one_millisecond() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let created_at = base() + Duration::minutes(2);
+    engine.mark_unread_from(CHAT, created_at).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!(
+            "mark_unread {CHAT} {ME} tenant-1 {}",
+            created_at.timestamp_millis() - 1
+        )
+    );
+}
+
+#[tokio::test]
+async fn forward_converts_the_comment_and_fetches_the_target() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(1, 1, "<p>one</p>")]);
+    let ids = vec!["m0001".to_owned(), "m0002".to_owned()];
+    let result = engine
+        .forward_messages("19:source@thread.v2", CHAT, &ids, "**fyi**")
+        .await
+        .unwrap();
+    assert_eq!(result.message_id, "99");
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!(
+            "forward 19:source@thread.v2 {CHAT} m0001,m0002 {}",
+            teams_core::markdown_to_html("**fyi**")
+        )
+    );
+    assert_eq!(engine.open_conversation(CHAT).unwrap().len(), 1);
+    engine
+        .forward_messages("19:source@thread.v2", CHAT, &ids, "")
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("forward 19:source@thread.v2 {CHAT} m0001,m0002 ")
+    );
+}
+
+#[tokio::test]
+async fn save_uses_the_message_id_as_root_in_chats() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.set_saved(CHAT, "5", None, true).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("save {CHAT} 5 5 true")
+    );
+    engine
+        .set_saved(CHANNEL, "7", Some("3"), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("save {CHANNEL} 3 7 false")
+    );
+}
+
+#[tokio::test]
+async fn pinning_announces_and_is_refused_in_channels() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    engine.refresh_sidebar().await.unwrap();
+    let mut events = engine.subscribe();
+    engine.pin_message(CHAT, "5").await.unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        CoreEvent::PinsChanged {
+            conversation_id: CHAT.to_owned()
+        }
+    );
+    engine
+        .unpin_message(CHAT, "5", Some("folder-1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("unpin {CHAT} 5 Some(\"folder-1\")")
+    );
+    assert!(matches!(
+        engine.pin_message(CHANNEL, "5").await,
+        Err(Error::Unsupported(_))
+    ));
+}
+
+#[tokio::test]
+async fn pin_events_become_core_events() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+    let mut event = read_event(Some(CHAT));
+    engine.handle_pin_event(&event);
+    assert!(events.try_recv().is_err());
+    event.kind = chatsvc::EventKind::PinsChanged;
+    engine.handle_pin_event(&event);
+    assert_eq!(
+        events.try_recv().unwrap(),
+        CoreEvent::PinsChanged {
+            conversation_id: CHAT.to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn message_links_resolve_chat_notes_and_channel() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(
+        engine.message_link(CHAT, "5").await.unwrap(),
+        teams_core::chat_message_link(CHAT, "5", None)
+    );
+    engine.fetch_newer(CHANNEL).await.unwrap();
+    let root = engine.open_conversation(CHANNEL).unwrap()[0].clone();
+    assert_eq!(
+        engine
+            .message_link(CHANNEL, &root.message_id)
+            .await
+            .unwrap(),
+        teams_core::channel_message_link(&teams_core::ChannelLinkInput {
+            tenant_id: "tenant-1".into(),
+            group_id: "team-1".into(),
+            channel_id: CHANNEL.into(),
+            team_name: "Squad".into(),
+            channel_name: "General".into(),
+            root_id: root.message_id.clone(),
+            message_id: root.message_id.clone(),
+            created_ms: root.created_at.timestamp_millis(),
+        })
+    );
 }

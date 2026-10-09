@@ -41,6 +41,7 @@
 
 **Messages**
 - Send, edit, delete, react, quote-reply, @mentions
+- Forward, copy link, save (Saved panel), pin to the chat banner, mark unread from here
 - Inline images, file cards, link previews
 - Adaptive Cards: layout, links, images, buttons, inputs, task dialogs
 - GIFs and stickers in messages

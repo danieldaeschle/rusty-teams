@@ -16,6 +16,7 @@ pub enum EventKind {
     ThreadUpdate,
     Typing,
     ReadReceipt,
+    PinsChanged,
     ThreadActivity,
     Control,
     #[serde(other)]
@@ -256,6 +257,16 @@ mod tests {
         assert_eq!(event.conversation_id.as_deref(), Some("19:abc@thread.v2"));
         assert_eq!(event.message_id.as_deref(), Some("1791368146075"));
         assert_eq!(event.received_at.timestamp_millis(), 1791368146999);
+    }
+
+    #[test]
+    fn decodes_pins_changed_kind() {
+        let payload = r#"{"channel":"event","resourceType":"NewMessage","eventKind":"pins_changed",
+            "conversationId":"19:abc@thread.v2","receivedAt":1}"#;
+        let RealtimeEvent::Message(event) = decode_payload(payload).unwrap() else {
+            panic!("expected message")
+        };
+        assert_eq!(event.kind, EventKind::PinsChanged);
     }
 
     #[test]

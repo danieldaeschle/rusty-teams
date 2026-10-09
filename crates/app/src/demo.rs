@@ -10,7 +10,7 @@ use store::{
 };
 use teams_core::{
     CardActionOutcome, ChatApp, Gif, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
-    TaskDialog, TaskDialogKind,
+    PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -18,6 +18,7 @@ use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
 use crate::demo_gifs;
+use crate::message_actions::ForwardSource;
 
 static SEARCHABLE_GIFS: OnceLock<Vec<Gif>> = OnceLock::new();
 
@@ -128,6 +129,9 @@ const DEMO_HIDDEN_CHANNEL: &str = "demo-channel-3-3";
 
 const UNREAD_CHAT: &str = "demo-chat-atlas";
 const RELEASE_CHAT: &str = "demo-chat-release";
+const PINNED_MESSAGE: &str = "m5b";
+const SAVED_MESSAGES: [&str; 2] = ["m4", "m5c"];
+const FORWARD_ITEMTYPE: &str = "http://schema.skype.com/Forward";
 const FAVORITES_ID: &str = "demo-folder-favorites";
 const CUSTOMERS_FOLDER: &str = "demo-folder-customers";
 const ATLAS_FOLDER: &str = "demo-folder-atlas";
@@ -684,6 +688,61 @@ pub fn seed_directory(state: &mut AppState) {
     state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
     state.last_sync = Some(Utc::now());
     state.apply_bot_titles();
+    seed_message_actions(state);
+}
+
+fn seed_message_actions(state: &mut AppState) {
+    state.pins.insert(
+        RELEASE_CHAT.to_owned(),
+        vec![PinnedMessage {
+            message_id: PINNED_MESSAGE.to_owned(),
+            pinned_at: Some(at(0, 11, 30)),
+            parent_id: None,
+        }],
+    );
+    let ids: Vec<String> = SAVED_MESSAGES.iter().map(|id| (*id).to_owned()).collect();
+    let records = state
+        .store
+        .messages_by_id(RELEASE_CHAT, &ids)
+        .unwrap_or_default();
+    let saved = SAVED_MESSAGES
+        .iter()
+        .enumerate()
+        .filter_map(|(position, id)| {
+            let record = records.get(*id)?;
+            Some(SavedMessage {
+                conversation_id: record.conversation_id.clone(),
+                message_id: record.message_id.clone(),
+                root_id: record.message_id.clone(),
+                author_id: record.sender_id.clone(),
+                author_name: record.sender_name.clone(),
+                preview: crate::rows::reply_excerpt(record),
+                saved_at: at(position as i64, 15, 20),
+                topic: None,
+            })
+        })
+        .collect();
+    state.saved.replace(saved);
+}
+
+pub fn forwarded_message(
+    chat: &ChatRecord,
+    source: &ForwardSource,
+    comment: &str,
+    now: DateTime<Utc>,
+) -> (ChatRecord, MessageRecord) {
+    let comment_html = if comment.is_empty() {
+        String::new()
+    } else {
+        format!("<p>{}</p>", teams_core::escape_html(comment))
+    };
+    let html = format!(
+        "{comment_html}<blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"{}\"><strong>{}</strong><p>{}</p></blockquote>",
+        teams_core::escape_html(&source.message_id),
+        teams_core::escape_html(&source.author),
+        teams_core::escape_html(&source.text),
+    );
+    send_in_chat(chat, &source.text, &html, now)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1112,6 +1171,18 @@ fn release_messages() -> Vec<MessageRecord> {
             jonas,
             at(0, 11, 5),
             "<h2>Release notes 0.2</h2><p>The <s>old sync path</s> <u>is gone</u>.</p><table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr><tr><td>Render</td><td>Jonas</td></tr></tbody></table><hr><blockquote>Measure twice, cut once.</blockquote><p><span style=\"background-color: rgb(255, 255, 0)\">Important:</span> <span style=\"color: #c00000\">backup first</span>.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m5d",
+            None,
+            (PRIYA_ID, priya_name),
+            at(0, 12, 20),
+            &format!(
+                "<p>FYI, the customer asked for this.</p><blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"1790000000000\"><strong>Tobias Klein</strong><p>Can we move the freeze to Thursday? The customer demo is on Friday morning.</p></blockquote>"
+            ),
             "[]",
             false,
         ),

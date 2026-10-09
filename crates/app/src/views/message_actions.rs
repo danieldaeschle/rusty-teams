@@ -29,9 +29,16 @@ pub struct MessageMenu {
     pub key: String,
     pub react: PickHandler,
     pub reply: Option<Action>,
+    pub forward: Option<Action>,
+    pub copy_link: Option<Action>,
     pub copy: Action,
+    pub save: Option<Action>,
+    pub saved: bool,
+    pub toggle_pinned: Option<Action>,
+    pub pinned: bool,
     pub edit: Option<Action>,
     pub delete: Option<Action>,
+    pub mark_unread: Option<Action>,
     pub pin: OpenChange,
     pub hover: HoverChange,
     pub picker: Entity<ReactionPicker>,
@@ -106,13 +113,19 @@ fn picker_button(menu: &MessageMenu) -> AnyElement {
 }
 
 fn more_button(menu: &MessageMenu) -> AnyElement {
-    let (reply, copy, edit, delete, pin) = (
+    let (reply, forward, copy_link, copy, save, toggle_pinned, edit, delete, mark_unread, pin) = (
         menu.reply.clone(),
+        menu.forward.clone(),
+        menu.copy_link.clone(),
         menu.copy.clone(),
+        menu.save.clone(),
+        menu.toggle_pinned.clone(),
         menu.edit.clone(),
         menu.delete.clone(),
+        menu.mark_unread.clone(),
         menu.pin.clone(),
     );
+    let (saved, pinned) = (menu.saved, menu.pinned);
     Button::new(element_id("message-more", &menu.key))
         .icon(IconName::Ellipsis)
         .ghost()
@@ -128,7 +141,27 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
             if let Some(reply) = reply.clone() {
                 popup = popup.item(item("Reply with quote", IconName::Reply, reply));
             }
+            if let Some(forward) = forward.clone() {
+                popup = popup.item(item("Forward", IconName::Forward, forward));
+            }
+            if let Some(copy_link) = copy_link.clone() {
+                popup = popup.item(item("Copy link", IconName::Link, copy_link));
+            }
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
+            if let Some(save) = save.clone() {
+                popup = popup.item(if saved {
+                    item("Unsave message", IconName::BookmarkOff, save)
+                } else {
+                    item("Save message", IconName::Bookmark, save)
+                });
+            }
+            if let Some(toggle_pinned) = toggle_pinned.clone() {
+                popup = popup.item(if pinned {
+                    item("Unpin", IconName::PinOff, toggle_pinned)
+                } else {
+                    item("Pin", IconName::Pin, toggle_pinned)
+                });
+            }
             if let Some(edit) = edit.clone() {
                 popup = popup.item(item("Edit", IconName::Pencil, edit));
             }
@@ -136,6 +169,10 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
                 popup = popup
                     .separator()
                     .item(item("Delete", IconName::Trash, delete));
+            }
+            if let Some(mark_unread) = mark_unread.clone() {
+                let entry = item("Mark as unread", IconName::EyeOff, mark_unread);
+                popup = popup.separator().item(entry);
             }
             popup
         })

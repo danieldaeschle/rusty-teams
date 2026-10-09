@@ -8,7 +8,7 @@ use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::link_preview::link_preview_card;
 use super::message_actions::message_toolbar;
-use super::message_row::{BODY_SIZE, RowActions, delivery_note, has_text};
+use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
 use super::reaction_pills::reaction_pills;
 use super::scheduled_toolbar::scheduled_toolbar;
 use super::widgets::{icon, symbol};
@@ -72,6 +72,9 @@ fn message_content(
                 .child(DELETED_PREVIEW),
         );
     }
+    if row.forwarded {
+        content = content.child(forwarded_header());
+    }
     if has_text(row) {
         content = content.child(
             v_flex()
@@ -127,7 +130,7 @@ fn message_content(
     content
 }
 
-fn message_header(row: &MessageRow, author: String) -> Div {
+fn message_header(row: &MessageRow, author: String, saved: bool) -> Div {
     h_flex()
         .gap(px(6.))
         .items_center()
@@ -145,6 +148,9 @@ fn message_header(row: &MessageRow, author: String) -> Div {
                 .child(row.time.clone()),
         )
         .when(row.edited, |line| line.child(edited_marker()))
+        .when(saved, |line| {
+            line.child(icon(IconName::Bookmark, 12., theme::accent_text()))
+        })
         .when(row.delivery == Delivery::Sending, |line| {
             line.child(symbol("schedule", 13., theme::text_muted()))
         })
@@ -172,6 +178,7 @@ fn message_block(
         None => person_avatar(directory, row.sender_id.as_deref(), &row.author, size),
     };
     let content = message_content(row, index, directory, &actions, cx);
+    let saved = actions.saved;
     let RowActions {
         delivery,
         reply,
@@ -186,7 +193,7 @@ fn message_block(
         .flex_1()
         .min_w_0()
         .gap(px(6.))
-        .child(message_header(row, author))
+        .child(message_header(row, author, saved))
         .when_some(
             row.subject.clone().filter(|_| role == Role::Root),
             |column, subject| {

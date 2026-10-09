@@ -143,6 +143,7 @@ pub struct MessageRow {
     pub delivery: Delivery,
     pub own: bool,
     pub receipt: Receipt,
+    pub forwarded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +447,7 @@ fn reactor_name(reaction: &ReactionInfo, context: &RowContext) -> String {
 }
 
 const REPLY_EXCERPT_CHARS: usize = 90;
+const FORWARD_ITEMTYPE: &str = "schema.skype.com/Forward";
 
 pub fn message_text(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
@@ -565,7 +567,12 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
         own: context.my_user_id.is_some() && record.sender_id == context.my_user_id,
+        forwarded: !record.deleted && is_forwarded(&record.body_html),
     }
+}
+
+pub fn is_forwarded(body_html: &str) -> bool {
+    body_html.contains(FORWARD_ITEMTYPE)
 }
 
 pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: bool) -> Vec<Row> {
@@ -868,6 +875,23 @@ mod tests {
         assert_eq!(reaction_glyph("heart"), reaction_glyph("\u{2764}\u{FE0F}"));
         assert_eq!(api_reaction(&reaction_glyph("heart")), "\u{2764}\u{FE0F}");
         assert_eq!(api_reaction(&reaction_glyph("like")), "\u{1F44D}");
+    }
+
+    #[test]
+    fn forwarded_messages_are_detected_by_the_forward_blockquote() {
+        assert!(is_forwarded(
+            r#"<p>fyi</p><blockquote itemscope="" itemtype="http://schema.skype.com/Forward" itemid="1">text</blockquote>"#
+        ));
+        assert!(!is_forwarded(
+            r#"<blockquote itemtype="http://schema.skype.com/Reply">text</blockquote>"#
+        ));
+        assert!(!is_forwarded("<p>plain</p>"));
+        let mut forwarded = record("f", None, 8, 6);
+        forwarded.body_html =
+            r#"<blockquote itemtype="http://schema.skype.com/Forward">text</blockquote>"#.into();
+        assert!(message_row(&forwarded, &context()).forwarded);
+        forwarded.deleted = true;
+        assert!(!message_row(&forwarded, &context()).forwarded);
     }
 
     #[test]

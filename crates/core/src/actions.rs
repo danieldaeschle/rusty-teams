@@ -1,5 +1,5 @@
 use chatsvc::ConversationRef;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use graph::{
     FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
 };
@@ -376,7 +376,15 @@ impl<R: Remote> SyncEngine<R> {
             .ok_or(Error::Unsupported(
                 "marking a chat without messages as unread",
             ))?;
-        let last_read_at = last_message_at - Duration::milliseconds(1);
+        self.mark_unread_from(chat_id, last_message_at).await
+    }
+
+    pub async fn mark_unread_from(
+        &self,
+        chat_id: &str,
+        message_created_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let last_read_at = message_created_at - Duration::milliseconds(1);
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;
         self.remote

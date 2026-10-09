@@ -1,7 +1,7 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, Conversations, Gif, Gifs, InvokeRequest, InvokeResponse,
-    LinkInfo, MemberHorizon, MessageLinks, Messages, Receipts, ScheduledDraft,
-    ScheduledDrafts,
+    CardActions, ChatApp, ConversationRef, Conversations, ForwardResult, Gif, Gifs, InvokeRequest,
+    InvokeResponse, LinkInfo, MemberHorizon, MessageLinks, Messages, PinnedMessage, Pins, Receipts,
+    SavedMessage, ScheduledDraft, ScheduledDrafts,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -213,6 +213,47 @@ pub trait Remote {
 
     async fn consumption_horizons(&self, _conversation_id: &str) -> Result<Vec<MemberHorizon>> {
         Err(Error::Unsupported("read receipts"))
+    }
+
+    async fn forward_messages(
+        &self,
+        _source_conversation_id: &str,
+        _target_conversation_id: &str,
+        _message_ids: &[String],
+        _comment_html: &str,
+    ) -> Result<ForwardResult> {
+        Err(Error::Unsupported("forwarding messages"))
+    }
+
+    async fn set_saved(
+        &self,
+        _conversation_id: &str,
+        _root_id: &str,
+        _message_id: &str,
+        _saved: bool,
+    ) -> Result<()> {
+        Err(Error::Unsupported("saving messages"))
+    }
+
+    async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
+        Err(Error::Unsupported("saved messages"))
+    }
+
+    async fn chat_pins(&self, _chat_id: &str) -> Result<Vec<PinnedMessage>> {
+        Err(Error::Unsupported("pinned messages"))
+    }
+
+    async fn pin_message(&self, _chat_id: &str, _message_id: &str) -> Result<()> {
+        Err(Error::Unsupported("pinning messages"))
+    }
+
+    async fn unpin_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _parent_id: Option<&str>,
+    ) -> Result<()> {
+        Err(Error::Unsupported("pinning messages"))
     }
 
     async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<ChatApp>> {
@@ -622,6 +663,60 @@ impl Remote for Graph {
     async fn consumption_horizons(&self, conversation_id: &str) -> Result<Vec<MemberHorizon>> {
         Ok(Receipts::new(self.session())
             .consumption_horizons(conversation_id)
+            .await?)
+    }
+
+    async fn forward_messages(
+        &self,
+        source_conversation_id: &str,
+        target_conversation_id: &str,
+        message_ids: &[String],
+        comment_html: &str,
+    ) -> Result<ForwardResult> {
+        Ok(Messages::new(self.session())
+            .forward_messages(
+                source_conversation_id,
+                target_conversation_id,
+                message_ids,
+                comment_html,
+            )
+            .await?)
+    }
+
+    async fn set_saved(
+        &self,
+        conversation_id: &str,
+        root_id: &str,
+        message_id: &str,
+        saved: bool,
+    ) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_saved(conversation_id, root_id, message_id, saved)
+            .await?)
+    }
+
+    async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
+        Ok(Messages::new(self.session()).list_saved().await?)
+    }
+
+    async fn chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {
+        Ok(Pins::new(self.session()).chat_pins(chat_id).await?)
+    }
+
+    async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        Ok(Pins::new(self.session())
+            .pin_message(chat_id, message_id)
+            .await?)
+    }
+
+    async fn unpin_message(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<()> {
+        Ok(Pins::new(self.session())
+            .unpin_message(chat_id, message_id, parent_id)
             .await?)
     }
 

@@ -6,12 +6,13 @@ use chatsvc::TypingEvent;
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
-use teams_core::{ChatApp, CoreEvent, ImageRef, ScheduledDraft};
+use teams_core::{ChatApp, CoreEvent, ImageRef, PinnedMessage, ScheduledDraft};
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 use crate::local_previews::{LocalPreview, load_local_previews};
+use crate::message_actions::{ForwardSource, SavedSet};
 use crate::notice::Notice;
 use crate::notify;
 use crate::typing::TypingState;
@@ -47,6 +48,9 @@ pub enum AppEvent {
     LocalPreviews,
     Outbox(String),
     Scheduled,
+    Pins(String),
+    Saved,
+    Forward,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -84,6 +88,9 @@ pub struct AppState {
     pub local_previews: HashMap<String, LocalPreview>,
     pub scheduled: Vec<ScheduledDraft>,
     pub scheduled_polling: bool,
+    pub saved: SavedSet,
+    pub pins: HashMap<String, Vec<PinnedMessage>>,
+    pub forward_request: Option<ForwardSource>,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -158,6 +165,9 @@ impl AppState {
             local_previews: HashMap::new(),
             scheduled: Vec::new(),
             scheduled_polling: false,
+            saved: SavedSet::default(),
+            pins: HashMap::new(),
+            forward_request: None,
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -582,6 +592,9 @@ impl AppState {
                 self.clear_typists_who_sent(&conversation_id, cx);
                 cx.emit(AppEvent::Messages(conversation_id));
             }
+            BackendEvent::Core(CoreEvent::PinsChanged { conversation_id }) => {
+                self.refresh_pins(&conversation_id, cx);
+            }
             BackendEvent::Core(CoreEvent::ImagesChanged { keys }) => {
                 if let Some(engine) = &self.engine {
                     for key in &keys {
@@ -623,6 +636,9 @@ impl AppState {
                 cx.emit(AppEvent::Sidebar);
             }
             BackendEvent::Synced(time) => {
+                if self.last_sync.is_none() {
+                    self.refresh_saved(cx);
+                }
                 self.last_sync = Some(time);
                 cx.emit(AppEvent::Status);
             }

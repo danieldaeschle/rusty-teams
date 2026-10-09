@@ -63,6 +63,7 @@
     if (resourceType === 'NewMessage') {
       if (/^Control\/(Clear)?Typing/.test(messageType)) return 'typing';
       if (messageType === 'ThreadActivity/MemberConsumptionHorizonUpdate') return 'read_receipt';
+      if (messageType === 'ThreadActivity/PinnedItemsUpdate') return 'pins_changed';
       if (/^ThreadActivity\//.test(messageType)) return 'thread_activity';
       return /^Control\//.test(messageType) ? 'control' : 'new_message';
     }

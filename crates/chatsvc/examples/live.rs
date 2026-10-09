@@ -75,6 +75,7 @@ fn kind_name(kind: EventKind) -> &'static str {
         EventKind::ThreadUpdate => "thread_update",
         EventKind::Typing => "typing",
         EventKind::ReadReceipt => "read_receipt",
+        EventKind::PinsChanged => "pins_changed",
         EventKind::ThreadActivity => "thread_activity",
         EventKind::Control => "control",
         EventKind::Other => "other",

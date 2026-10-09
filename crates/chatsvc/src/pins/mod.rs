@@ -1,6 +1,7 @@
 mod channels;
 mod chats;
 mod folders;
+mod pinbar;
 mod state;
 mod teams;
 mod transport;
@@ -8,6 +9,7 @@ mod transport;
 use session::Session;
 
 pub use folders::{Folder, FolderKind, Folders};
+pub use pinbar::PinnedMessage;
 pub use state::{PinnedChannels, PinnedChats};
 pub use teams::{ChannelLayout, TeamLayout};
 pub use transport::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, SessionTransport};
@@ -17,6 +19,7 @@ pub const DEFAULT_REGION: &str = "emea";
 pub struct Pins<T: CsaTransport = SessionTransport> {
     transport: T,
     base_url: String,
+    api_url: String,
 }
 
 impl Pins<SessionTransport> {
@@ -36,6 +39,7 @@ impl<T: CsaTransport> Pins<T> {
             base_url: format!(
                 "https://teams.cloud.microsoft/api/csa/{region}/api/v1/teams/users/me"
             ),
+            api_url: format!("https://teams.cloud.microsoft/api/csa/{region}/api/v1"),
         }
     }
 }

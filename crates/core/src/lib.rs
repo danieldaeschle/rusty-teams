@@ -8,8 +8,8 @@ mod download;
 mod draft;
 mod engine;
 mod error;
-mod external_image;
 mod events;
+mod external_image;
 mod folders;
 mod gifs;
 mod image_size;
@@ -19,6 +19,8 @@ mod links;
 mod mapping;
 mod markdown;
 mod mentions;
+mod message_actions;
+mod message_link;
 mod people;
 mod presence;
 mod preview;
@@ -43,7 +45,7 @@ pub use card_inputs::{
     MomentInput, NumberInput, TIME_PLACEHOLDER, TextInput, TextStyle, ToggleInput,
     collect_input_values, merge_input_data,
 };
-pub use chatsvc::{ChatApp, Gif, ScheduledDraft};
+pub use chatsvc::{ChatApp, ForwardResult, Gif, PinnedMessage, SavedMessage, ScheduledDraft};
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -51,17 +53,18 @@ pub use draft::{
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
 pub use events::CoreEvent;
+pub use external_image::external_image_url;
 pub use folders::{BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource};
 pub use graph::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, SharedFile,
     UploadedFile,
 };
-pub use external_image::external_image_url;
 pub use images::StoredImage;
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview};
 pub use mapping::{chat_record, message_record};
 pub use markdown::{escape_html, markdown_to_html, plain_text_to_html};
 pub use mentions::MentionInput;
+pub use message_link::{ChannelLinkInput, channel_message_link, chat_message_link};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
 pub use presence::{Availability, Presence};
 pub use preview::preview_text;

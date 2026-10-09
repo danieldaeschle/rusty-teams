@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use chrono::{Duration, Local, Offset, Utc};
+use chrono::{DateTime, Duration, Local, Offset, Utc};
 use gpui_kit::*;
 use store::ChatRecord;
 
@@ -16,6 +16,15 @@ impl AppState {
     }
 
     pub fn mark_chat_unread(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        self.mark_chat_unread_from(chat_id, None, cx);
+    }
+
+    pub fn mark_chat_unread_from(
+        &mut self,
+        chat_id: &str,
+        message_created_at: Option<DateTime<Utc>>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(chat) = self.chat_record(chat_id) else {
             return;
         };
@@ -25,7 +34,8 @@ impl AppState {
         let Some(engine_or_demo) = self.chat_action_engine(cx) else {
             return;
         };
-        let last_read_at = last_message_at - Duration::milliseconds(1);
+        let last_read_at =
+            message_created_at.unwrap_or(last_message_at) - Duration::milliseconds(1);
         let _ = self.store.mark_chat_unread(chat_id, last_read_at);
         if self.selection == Some(Selection::Chat(chat_id.to_owned())) {
             self.keep_unread = Some(chat_id.to_owned());
@@ -39,7 +49,12 @@ impl AppState {
         let restored_read_at = chat.last_read_at.unwrap_or(last_message_at);
         self.run_chat_action(
             "Mark as unread",
-            async move { engine.mark_unread(&owned_id).await },
+            async move {
+                match message_created_at {
+                    Some(created_at) => engine.mark_unread_from(&owned_id, created_at).await,
+                    None => engine.mark_unread(&owned_id).await,
+                }
+            },
             move |state, cx| {
                 let _ = state.store.mark_chat_read(&revert_id, restored_read_at);
                 if state.keep_unread.as_deref() == Some(revert_id.as_str()) {
@@ -149,7 +164,7 @@ impl AppState {
     }
 
     /// `None` stops the action. `Some(None)` is demo mode, which only changes the local store.
-    fn chat_action_engine(
+    pub(crate) fn chat_action_engine(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<Option<std::sync::Arc<crate::backend::Engine>>> {
@@ -202,7 +217,7 @@ impl AppState {
         next_chat_id(&build_sections(&input), chat_id)
     }
 
-    fn run_chat_action(
+    pub(crate) fn run_chat_action(
         &mut self,
         label: &'static str,
         call: impl Future<Output = teams_core::Result<()>> + Send + 'static,
