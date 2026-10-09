@@ -28,6 +28,7 @@ mod read_state;
 mod render;
 mod rows;
 mod runtime;
+mod single_instance;
 mod sidebar_model;
 mod task_dialog;
 mod theme;
@@ -53,6 +54,7 @@ const WINDOW_WIDTH: f32 = 1240.;
 const WINDOW_HEIGHT: f32 = 820.;
 const WINDOW_MIN_WIDTH: f32 = 640.;
 const WINDOW_MIN_HEIGHT: f32 = 480.;
+const SINGLE_INSTANCE_NAME: &str = "rusty-teams";
 const DATABASE_FILE: &str = "cache.sqlite3";
 #[cfg(windows)]
 const WEBVIEW_FOLDER: &str = "WebView2";
@@ -141,6 +143,14 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
 fn main() {
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
     let arguments = parse_arguments();
+    if !arguments.demo && arguments.database.is_none() {
+        let relaunched = std::env::var_os(updater::RELAUNCH_ENV).is_some();
+        if single_instance::claim(SINGLE_INSTANCE_NAME, relaunched)
+            == single_instance::Claim::Forwarded
+        {
+            return;
+        }
+    }
     #[cfg(windows)]
     updater::clean_up_old_binary();
     let mode = Mode {

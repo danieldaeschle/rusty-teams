@@ -12,6 +12,7 @@ const UPDATE_DIRECTORY: &str = "update";
 const EXE_NAME: &str = "teams.exe";
 const OLD_EXE_NAME: &str = "teams.old.exe";
 const VERSION_FILE_NAME: &str = "version.txt";
+pub const RELAUNCH_ENV: &str = "RUSTY_TEAMS_RELAUNCH";
 const CLEANUP_ATTEMPTS: u32 = 30;
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -165,6 +166,7 @@ pub fn install_and_relaunch(paths: &UpdatePaths) -> Result<(), String> {
     let completed = apply_plan(&files, &swap_plan(paths))?;
     match Command::new(&paths.exe)
         .args(std::env::args_os().skip(1))
+        .env(RELAUNCH_ENV, "1")
         .spawn()
     {
         Ok(_) => Ok(()),

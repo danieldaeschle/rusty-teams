@@ -23,6 +23,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 - Activity bell: feed of new messages, @mentions and reactions to your messages, kept for 14 days
 - Dark theme, opens instantly from the local cache
 - Self-update from an update folder
+- Single instance: a second start brings the running window to the front
 
 ## Status
 

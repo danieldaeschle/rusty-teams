@@ -23,6 +23,7 @@ use super::toast::{PillView, ToastView};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
+use crate::single_instance;
 
 const TICK: Duration = Duration::from_millis(33);
 const SLIDE_DURATION: Duration = Duration::from_millis(180);
@@ -471,6 +472,9 @@ impl NotificationCenter {
             cx.notify();
         }
         self.poll_tray(cx);
+        if single_instance::take_activation() {
+            self.raise_main_window(cx);
+        }
     }
 
     fn poll_tray(&mut self, cx: &mut Context<Self>) {

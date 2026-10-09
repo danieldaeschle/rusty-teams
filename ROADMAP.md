@@ -2,13 +2,13 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 67 %** (55 done, 4 partial, 26 missing of 85). Partial counts half.
+**Parity: 68 %** (56 done, 4 partial, 25 missing of 85). Partial counts half.
 
 ## By area
 
 | Area | Parity | Done | Partial | Missing |
 |---|---|---|---|---|
-| [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
+| [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
 | [Reading](#reading) | 87 % | 16 | 1 | 2 |
 | [Writing](#writing) | 75 % | 10 | 1 | 3 |
@@ -39,7 +39,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Self-update | Done |  |
 | Tray icon, close to tray | Done |  |
 | Sign in on Linux without starting Chrome by hand | Partial | Works with a Chrome on a debug port |
-| Single instance, second start brings the window to front | Missing |  |
+| Single instance, second start brings the window to front | Done |  |
 
 ## Chat list
 
