@@ -12,11 +12,13 @@ mod inline_line;
 pub(crate) use inline_line::{InlineFragment, InputLine};
 mod fold_map;
 mod folding;
+mod scaled_text;
 mod text_wrapper;
 mod wrap_map;
 
 // Re-export public API
 pub use self::display_map::{DisplayMap, WrappingIndent};
+pub(crate) use self::scaled_text::{ScaledRow, scaled_row};
 pub(crate) use self::text_wrapper::{InlineMetric, LineLayout, split_run_by_font_overrides};
 
 // Re-export FoldRange and extract_fold_ranges

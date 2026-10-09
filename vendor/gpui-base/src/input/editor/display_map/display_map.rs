@@ -245,6 +245,11 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    pub(crate) fn set_line_height(&mut self, line_height: Pixels, cx: &mut App) {
+        self.wrap_map.set_line_height(line_height, cx);
+        self.rebuild_fold_projection();
+    }
+
     /// Hang continuation rows of each marker's line under the marker's end.
     pub(crate) fn set_hanging_indents(
         &mut self,
@@ -395,8 +400,13 @@ impl DisplayMap {
 
     pub(crate) fn content_rows(&self, line_height: Pixels) -> usize {
         let rows = self.wrap_row_count();
-        let extra = self.content_height(line_height) - line_height * rows as f32;
+        let extra =
+            self.content_height(line_height) - self.scaled_extra() - line_height * rows as f32;
         rows + (extra / line_height).ceil().max(0.) as usize
+    }
+
+    pub(crate) fn scaled_extra(&self) -> Pixels {
+        self.wrap_map.wrapper().scaled_extra()
     }
 
     /// Get the longest row index (by byte length).

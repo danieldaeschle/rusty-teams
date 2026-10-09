@@ -108,6 +108,10 @@ pub struct TextDecoration {
     pub style: HighlightStyle,
     /// Font family override. It, `style.font_weight` and `style.font_style` change soft wrapping.
     pub font_family: Option<SharedString>,
+    /// Font size as a multiple of the editor font size. Overlapping scales multiply.
+    pub font_scale: Option<f32>,
+    /// Baseline shift in editor font sizes, positive is up. The first decoration covering a byte wins.
+    pub baseline_shift: Option<f32>,
 }
 
 impl TextDecoration {
@@ -117,12 +121,26 @@ impl TextDecoration {
             range,
             style,
             font_family: None,
+            font_scale: None,
+            baseline_shift: None,
         }
     }
 
     /// Render this range in another font family, e.g. a monospace one for inline code.
     pub fn with_font_family(mut self, font_family: impl Into<SharedString>) -> Self {
         self.font_family = Some(font_family.into());
+        self
+    }
+
+    /// Render this range at `font_scale` times the editor font size, e.g. 0.75 for a subscript.
+    pub fn with_font_scale(mut self, font_scale: f32) -> Self {
+        self.font_scale = Some(font_scale);
+        self
+    }
+
+    /// Shift this range's baseline by `baseline_shift` editor font sizes, positive is up.
+    pub fn with_baseline_shift(mut self, baseline_shift: f32) -> Self {
+        self.baseline_shift = Some(baseline_shift);
         self
     }
 }
@@ -582,6 +600,8 @@ pub(crate) struct FontOverride {
     pub(crate) family: Option<SharedString>,
     pub(crate) weight: Option<FontWeight>,
     pub(crate) style: Option<FontStyle>,
+    pub(crate) scale: Option<f32>,
+    pub(crate) raise: Option<f32>,
 }
 
 impl FontOverride {
@@ -624,7 +644,35 @@ where
     spans
 }
 
-/// Font overrides per byte span; earlier layers and items win per property.
+fn product_spans(items: Vec<(Range<usize>, f32)>) -> Vec<(Range<usize>, f32)> {
+    let mut edges: Vec<usize> = items
+        .iter()
+        .flat_map(|(range, _)| [range.start, range.end])
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    let mut spans: Vec<(Range<usize>, f32)> = Vec::new();
+    for segment in edges.windows(2) {
+        let mut covering = items
+            .iter()
+            .filter(|(range, _)| range.start <= segment[0] && segment[1] <= range.end)
+            .map(|(_, scale)| *scale)
+            .peekable();
+        if covering.peek().is_none() {
+            continue;
+        }
+        let scale: f32 = covering.product();
+        match spans.last_mut() {
+            Some((range, last)) if range.end == segment[0] && *last == scale => {
+                range.end = segment[1];
+            }
+            _ => spans.push((segment[0]..segment[1], scale)),
+        }
+    }
+    spans
+}
+
+/// Font overrides per byte span; earlier layers and items win per property, except scale.
 pub(crate) fn font_override_spans(
     layers: &[&[TextDecoration]],
 ) -> Vec<(Range<usize>, FontOverride)> {
@@ -640,11 +688,22 @@ pub(crate) fn font_override_spans(
         first_wins_spans(decorations().filter_map(|decoration| {
             Some((decoration.range.clone(), decoration.style.font_style?))
         }));
+    let scales = product_spans(
+        decorations()
+            .filter_map(|decoration| Some((decoration.range.clone(), decoration.font_scale?)))
+            .collect(),
+    );
+    let raises = first_wins_spans(
+        decorations()
+            .filter_map(|decoration| Some((decoration.range.clone(), decoration.baseline_shift?))),
+    );
     let mut edges: Vec<usize> = families
         .iter()
         .map(|(range, _)| range)
         .chain(weights.iter().map(|(range, _)| range))
         .chain(styles.iter().map(|(range, _)| range))
+        .chain(scales.iter().map(|(range, _)| range))
+        .chain(raises.iter().map(|(range, _)| range))
         .flat_map(|range| [range.start, range.end])
         .collect();
     edges.sort_unstable();
@@ -662,6 +721,8 @@ pub(crate) fn font_override_spans(
             family: value_at(&families, segment[0]),
             weight: value_at(&weights, segment[0]),
             style: value_at(&styles, segment[0]),
+            scale: value_at(&scales, segment[0]),
+            raise: value_at(&raises, segment[0]),
         };
         if font_override == FontOverride::default() {
             continue;
@@ -986,6 +1047,7 @@ mod tests {
                         family: Some("Mono".into()),
                         weight: Some(FontWeight::BOLD),
                         style: None,
+                        ..Default::default()
                     }
                 ),
                 (
@@ -994,6 +1056,7 @@ mod tests {
                         family: Some("Mono".into()),
                         weight: Some(FontWeight::BOLD),
                         style: Some(FontStyle::Italic),
+                        ..Default::default()
                     }
                 ),
                 (
@@ -1002,8 +1065,34 @@ mod tests {
                         family: None,
                         weight: Some(FontWeight::LIGHT),
                         style: Some(FontStyle::Italic),
+                        ..Default::default()
                     }
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn font_override_spans_multiply_scales_and_first_raise_wins() {
+        let style = HighlightStyle::default();
+        let layer = [
+            TextDecoration::new(0..8, style).with_font_scale(2.),
+            TextDecoration::new(4..12, style)
+                .with_font_scale(0.5)
+                .with_baseline_shift(0.35),
+            TextDecoration::new(6..10, style).with_baseline_shift(-0.2),
+        ];
+        let scaled = |scale: f32, raise: Option<f32>| FontOverride {
+            scale: Some(scale),
+            raise,
+            ..Default::default()
+        };
+        assert_eq!(
+            font_override_spans(&[&layer[..]]),
+            vec![
+                (0..4, scaled(2., None)),
+                (4..8, scaled(1., Some(0.35))),
+                (8..12, scaled(0.5, Some(0.35))),
             ]
         );
     }

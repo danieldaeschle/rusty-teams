@@ -29,12 +29,19 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | `src/input/base/state.rs`, `movement.rs`, `mode.rs` | `scroll_to`, hit testing, IME bounds, `line_and_position_for_offset` and Up / Down use the row helpers; `update_auto_grow(display_map, line_height)` counts `content_rows` | click, scroll and arrow keys land on the right row; auto grow fits the image |
 | `src/input/base/mode.rs`, `element.rs` | `update_auto_grow` lets the auto-grow height exceed `max_rows` by the rows block tokens add, up to `BLOCK_GROWTH_FACTOR` (2) times `max_rows`; the textarea min height uses `mode.rows()` | an image does not use up the text row budget |
 | `src/input/base/element.rs` | `layout_cursors` also follows the caret on a frame where an auto-grow viewport changed height (`viewport_changed`), not only when the selection changed | text typed after a block token, or loaded content, stays visible while the viewport is still growing |
+| `src/input/editor/decorations.rs` | `TextDecoration.font_scale` / `baseline_shift`, `with_font_scale()` / `with_baseline_shift()`, `FontOverride.scale` / `raise`, `product_spans()` (scales multiply, first raise wins) | per-range font size and baseline shift |
+| `src/input/editor/display_map/scaled_text.rs` (new) | `scale_pieces()`, `scaled_row()`, `row_box()`: pieces of equal scale, a shared baseline, row height = max of the base box and every piece box (Small never shrinks a row) | one rule for wrapper and painter |
+| `src/input/editor/display_map/text_wrapper.rs`, `wrap_map.rs`, `display_map.rs` | `set_line_height()`, wrap measures every scale piece at its own size, rows taller than the line height are stored in `LineItem.blocks`, `_update(.., row_heights)` | wrap width and row tops follow the real glyph sizes |
+| `src/input/editor/display_map/inline_line.rs` | `InlineFragment.placement` (paint offset and height), `InputLine.inline_offset` | fragments of a scaled row paint on one baseline; atomic tokens sit on it too |
+| `src/input/base/element.rs` | `scale_font()`, `push_text_fragments()`; `layout_lines` / `layout_token_lines` build `InputLine::inline` rows for rows with scaled pieces, `prepaint_tokens` adds `inline_offset`, prepaint sets the wrapper line height | rows without scaled pieces keep the single `ShapedLine` path |
 
 ## Limits
 
 - Syntax-highlight (tree-sitter / LSP) bold or italic still wraps with the base font; only decorations feed wrapping.
 - Hanging-indent markers are dropped by an edit inside them; the app sets them again on change.
 - The unwrapped longest-line width (soft wrap off) ignores font overrides.
+- Scaled text needs a multi-line input; an empty line has no range to scale and stays one line high.
+- The caret is as tall as its row, not as tall as the glyph at the caret.
 - Block tokens are textarea-only and need soft wrap: no folds, line numbers, ghost text or touch handles. Without soft wrap a block token shares its row with text.
 
 ## Re-apply on a gpui-kit upgrade

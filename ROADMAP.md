@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 66 %** (54 done, 4 partial, 27 missing of 85). Partial counts half.
+**Parity: 67 %** (55 done, 4 partial, 26 missing of 85). Partial counts half.
 
 ## By area
 
@@ -10,7 +10,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 75 % | 4 | 1 | 1 |
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
-| [Reading](#reading) | 82 % | 15 | 1 | 3 |
+| [Reading](#reading) | 87 % | 16 | 1 | 2 |
 | [Writing](#writing) | 75 % | 10 | 1 | 3 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
@@ -64,7 +64,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Code: inline pill, block with language, copy and syntax colors | Done |  |
 | Lists: nested, numbered with start | Done |  |
 | Tables, rules, block quotes, highlight and text color | Done |  |
-| Superscript, subscript, font size | Missing | Shown as plain text |
+| Superscript, subscript, font size | Done | Real size and baseline shift; Teams sizes xx-small 9px, x-large 24px |
 | Quotes and replies | Done |  |
 | Reactions shown | Done |  |
 | Edited and deleted markers | Done |  |
@@ -93,7 +93,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Delete own message | Done |  |
 | React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
 | Emoji picker | Partial | For reactions; composer still uses colon codes |
-| Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block |
+| Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block; superscript, subscript (Ctrl+Shift+= / Ctrl+=) and Small/Large shown at real size while typing |
 | Attach a file, paste or drag an image | Done | Images sit in the text at the cursor as a large preview and send at that spot; files via OneDrive or the channel's Files |
 | GIFs and stickers | Missing |  |
 | Schedule send | Missing |  |

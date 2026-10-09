@@ -7,6 +7,7 @@ pub(crate) struct InlineFragment {
     pub(crate) x: Pixels,
     pub(crate) width: Pixels,
     pub(crate) text: Option<ShapedLine>,
+    pub(crate) placement: Option<(Pixels, Pixels)>,
 }
 
 pub(crate) struct InputLine {
@@ -14,6 +15,7 @@ pub(crate) struct InputLine {
     pub(crate) width: Pixels,
     pub(crate) text: SharedString,
     pub(crate) height: Option<Pixels>,
+    pub(crate) inline_offset: Pixels,
     content: Content,
 }
 // Keep the ordinary shaped row inline: boxing it would add an allocation to
@@ -30,6 +32,7 @@ impl From<ShapedLine> for InputLine {
             width: line.width,
             text: line.text.clone(),
             height: None,
+            inline_offset: px(0.),
             content: Content::Text(line),
         }
     }
@@ -42,11 +45,23 @@ impl InputLine {
             text,
             width,
             height: None,
+            inline_offset: px(0.),
             content: Content::Inline(fragments),
         }
     }
     pub(crate) fn with_height(mut self, height: Option<Pixels>) -> Self {
         self.height = height;
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn fragments(&self) -> Option<&[InlineFragment]> {
+        match &self.content {
+            Content::Inline(fragments) => Some(fragments),
+            Content::Text(_) => None,
+        }
+    }
+    pub(crate) fn with_inline_offset(mut self, inline_offset: Pixels) -> Self {
+        self.inline_offset = inline_offset;
         self
     }
     pub(crate) fn x_for_index(&self, ix: usize) -> Pixels {
@@ -129,15 +144,16 @@ impl InputLine {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let paint = |line: &ShapedLine, pos, align, width, window: &mut Window, cx: &mut App| {
-            if background {
-                let _ = line.paint_background(pos, height, align, width, window, cx);
-            } else {
-                let _ = line.paint(pos, height, align, width, window, cx);
-            }
-        };
+        let paint =
+            |line: &ShapedLine, pos, height, align, width, window: &mut Window, cx: &mut App| {
+                if background {
+                    let _ = line.paint_background(pos, height, align, width, window, cx);
+                } else {
+                    let _ = line.paint(pos, height, align, width, window, cx);
+                }
+            };
         match &self.content {
-            Content::Text(line) => paint(line, pos, align, width, window, cx),
+            Content::Text(line) => paint(line, pos, height, align, width, window, cx),
             Content::Inline(fragments) => {
                 let remaining = (width.unwrap_or(self.width) - self.width).max(px(0.));
                 let offset = match align {
@@ -147,9 +163,11 @@ impl InputLine {
                 };
                 for f in fragments {
                     if let Some(line) = &f.text {
+                        let (y, height) = f.placement.unwrap_or((px(0.), height));
                         paint(
                             line,
-                            pos + point(offset + f.x, px(0.)),
+                            pos + point(offset + f.x, y),
+                            height,
                             TextAlign::Left,
                             None,
                             window,

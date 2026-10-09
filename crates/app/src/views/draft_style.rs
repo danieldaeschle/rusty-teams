@@ -2,8 +2,9 @@ use std::ops::Range;
 
 use gpui_kit::component::input::{RangeDecoration, RangeDecorationStyle, TextDecoration};
 use gpui_kit::*;
-use teams_core::{Draft, LineKind, MarkKind, SizeStep};
+use teams_core::{Draft, FontSize, LineKind, MarkKind, SizeStep};
 
+use crate::render::blocks::{Script, StyleFlags};
 use crate::theme;
 
 const CODE_PILL_RADIUS: f32 = 4.;
@@ -60,10 +61,7 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
                 color: None,
             });
         }
-        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(SizeStep::Small) => {
-            style.color = Some(theme::text_soft());
-        }
-        MarkKind::Size(SizeStep::Large) => style.font_weight = Some(FontWeight::SEMIBOLD),
+        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(_) => {}
         MarkKind::Code => style.color = Some(theme::text_strong()),
         MarkKind::Link(_) => {
             style.color = Some(theme::accent_text());
@@ -71,6 +69,18 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
         }
     }
     style
+}
+
+fn size_flags(kind: &MarkKind) -> StyleFlags {
+    let mut flags = StyleFlags::default();
+    match kind {
+        MarkKind::Superscript => flags.script = Some(Script::Super),
+        MarkKind::Subscript => flags.script = Some(Script::Sub),
+        MarkKind::Size(SizeStep::Small) => flags.size = Some(FontSize::Small),
+        MarkKind::Size(SizeStep::Large) => flags.size = Some(FontSize::Large),
+        _ => {}
+    }
+    flags
 }
 
 /// From the start of the first line of `lines` to the end of the last; Block and Bar cover
@@ -92,7 +102,14 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
         .filter(|(_, indent)| *indent > px(0.))
         .collect();
     for mark in draft.marks() {
-        let decoration = TextDecoration::new(mark.range.clone(), mark_style(&mark.kind));
+        let mut decoration = TextDecoration::new(mark.range.clone(), mark_style(&mark.kind));
+        let flags = size_flags(&mark.kind);
+        if flags.is_flowed() {
+            decoration = decoration.with_font_scale(flags.font_scale());
+            if flags.baseline_raise() != 0. {
+                decoration = decoration.with_baseline_shift(flags.baseline_raise());
+            }
+        }
         if mark.kind == MarkKind::Code {
             text.push(decoration.with_font_family(mono.clone()));
             ranges.push(

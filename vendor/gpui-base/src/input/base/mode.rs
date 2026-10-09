@@ -2,7 +2,7 @@ use crate::input::InputModeKind;
 use std::rc::Rc;
 use std::{cell::RefCell, ops::Range};
 
-use gpui::{Context, Pixels, Window};
+use gpui::{Context, Pixels, Window, px};
 use ropey::Rope;
 
 use super::DisplayMap;
@@ -36,6 +36,7 @@ pub(crate) enum LayoutMode {
         rows: usize,
         min_rows: usize,
         max_rows: usize,
+        extra: Pixels,
     },
     /// A code editor input mode.
     CodeEditor {
@@ -98,6 +99,7 @@ impl LayoutMode {
             rows: min_rows,
             min_rows,
             max_rows,
+            extra: px(0.),
         }
     }
 
@@ -215,6 +217,7 @@ impl LayoutMode {
                 rows,
                 min_rows,
                 max_rows,
+                ..
             } => {
                 *rows = new_rows.clamp(*min_rows, *max_rows);
             }
@@ -237,10 +240,25 @@ impl LayoutMode {
             rows,
             min_rows,
             max_rows,
+            extra,
         } = self
         {
             let cap = (*max_rows + block_rows).min(*max_rows * BLOCK_GROWTH_FACTOR);
             *rows = content_rows.clamp(*min_rows, cap.max(*max_rows));
+            *extra = if content_rows > *rows {
+                px(0.)
+            } else {
+                (line_height * content_rows as f32 + display_map.scaled_extra()
+                    - line_height * *rows as f32)
+                    .max(px(0.))
+            };
+        }
+    }
+
+    pub(super) fn grow_extra(&self) -> Pixels {
+        match self {
+            LayoutMode::AutoGrow { extra, .. } => *extra,
+            _ => px(0.),
         }
     }
 

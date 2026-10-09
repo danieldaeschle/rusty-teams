@@ -21,8 +21,11 @@ use crate::{
     input::{
         RopeExt as _,
         blink_cursor::CURSOR_WIDTH,
-        decorations::font_override_spans,
-        display_map::{InlineMetric, LineLayout, split_run_by_font_overrides},
+        decorations::{FontOverride, font_override_spans},
+        display_map::{
+            InlineFragment, InlineMetric, InputLine, LineLayout, ScaledRow, scaled_row,
+            split_run_by_font_overrides,
+        },
     },
 };
 
@@ -1936,14 +1939,15 @@ impl<M: InputModeKind> TextElement<M> {
         last_layout: &LastLayout,
         font_size: Pixels,
         runs: &[TextRun],
+        font_overrides: &[(Range<usize>, FontOverride)],
         window: &mut Window,
     ) -> Vec<LineLayout> {
-        use crate::input::display_map::{InlineFragment, InputLine};
         let spans = state.token_spans();
         let cache = state
             .token_layout_cache
             .as_ref()
             .expect("tokens measured before shaping");
+        let scale_font = scale_font(font_overrides, window);
         let mut run_offset = 0;
         last_layout
             .visible_buffer_lines
@@ -1963,6 +1967,16 @@ impl<M: InputModeKind> TextElement<M> {
                 };
                 let mut lines: SmallVec<[InputLine; 1]> = SmallVec::new();
                 for range in ranges {
+                    let scaled = scale_font.as_ref().and_then(|font| {
+                        scaled_row(
+                            window.text_system(),
+                            font,
+                            font_size,
+                            last_layout.line_height,
+                            line_start + range.start..line_start + range.end,
+                            font_overrides,
+                        )
+                    });
                     let mut fragments = Vec::new();
                     let mut block_height = None;
                     let mut offset = range.start;
@@ -1975,21 +1989,18 @@ impl<M: InputModeKind> TextElement<M> {
                     {
                         let local = span.range().start - line_start..span.range().end - line_start;
                         if offset < local.start {
-                            let part = offset..local.start;
-                            let shaped = window.text_system().shape_line(
-                                text[part.clone()].to_owned().into(),
+                            push_text_fragments(
+                                window,
+                                &text,
+                                offset..local.start,
+                                range.start,
+                                line_start,
+                                scaled.as_ref(),
                                 font_size,
-                                &runs_for_range(runs, run_offset, &part),
-                                None,
+                                |part| runs_for_range(runs, run_offset, part),
+                                &mut x,
+                                &mut fragments,
                             );
-                            let width = shaped.width;
-                            fragments.push(InlineFragment {
-                                range: part.start - range.start..part.end - range.start,
-                                x,
-                                width,
-                                text: Some(shaped),
-                            });
-                            x += width;
                         }
                         let token_size = cache.sizes.get(span.token()).copied().unwrap_or_default();
                         let width = token_size.width;
@@ -2001,30 +2012,36 @@ impl<M: InputModeKind> TextElement<M> {
                             x,
                             width,
                             text: None,
+                            placement: None,
                         });
                         x += width;
                         offset = local.end;
                     }
                     if offset < range.end {
-                        let part = offset..range.end;
-                        let shaped = window.text_system().shape_line(
-                            text[part.clone()].to_owned().into(),
+                        push_text_fragments(
+                            window,
+                            &text,
+                            offset..range.end,
+                            range.start,
+                            line_start,
+                            scaled.as_ref(),
                             font_size,
-                            &runs_for_range(runs, run_offset, &part),
-                            None,
+                            |part| runs_for_range(runs, run_offset, part),
+                            &mut x,
+                            &mut fragments,
                         );
-                        let width = shaped.width;
-                        fragments.push(InlineFragment {
-                            range: part.start - range.start..part.end - range.start,
-                            x,
-                            width,
-                            text: Some(shaped),
-                        });
                     }
-                    lines.push(
-                        InputLine::inline(text[range].to_owned().into(), fragments)
-                            .with_height(block_height),
-                    );
+                    let mut line = InputLine::inline(text[range].to_owned().into(), fragments)
+                        .with_height(block_height);
+                    if let Some(scaled) = &scaled {
+                        let row_box = scaled.row_box;
+                        line = line
+                            .with_height(
+                                block_height.or(row_box.custom_height(last_layout.line_height)),
+                            )
+                            .with_inline_offset(row_box.baseline - row_box.base_baseline);
+                    }
+                    lines.push(line);
                 }
                 let indent = state.display_map.line(row).map_or(0, |line| line.indent);
                 let wrap_indent = if indent > 0 && lines.len() > 1 {
@@ -2083,9 +2100,13 @@ impl<M: InputModeKind> TextElement<M> {
                 if let Some(position) =
                     layout.lines[ix].position_for_index(span.range().start - start, layout, false)
                 {
+                    let baseline_offset =
+                        layout.lines[ix].inline_offset_at(position.y, layout.line_height);
                     placements.push((
                         state.token_context(span, layout.line_height, width),
-                        bounds.origin + position + point(layout.line_number_width, y),
+                        bounds.origin
+                            + position
+                            + point(layout.line_number_width, y + baseline_offset),
                     ));
                 }
             }
@@ -2130,13 +2151,21 @@ impl<M: InputModeKind> TextElement<M> {
         last_layout: &LastLayout,
         font_size: Pixels,
         runs: &[TextRun],
+        font_overrides: &[(Range<usize>, FontOverride)],
         bg_segments: &[(Range<usize>, Hsla)],
         whitespace_indicators: Option<WhitespaceIndicators>,
         window: &mut Window,
     ) -> Vec<LineLayout> {
         let is_single_line = state.is_single_line();
         if state.tokens_visible() {
-            return Self::layout_token_lines(state, last_layout, font_size, runs, window);
+            return Self::layout_token_lines(
+                state,
+                last_layout,
+                font_size,
+                runs,
+                font_overrides,
+                window,
+            );
         }
 
         if is_single_line {
@@ -2179,6 +2208,7 @@ impl<M: InputModeKind> TextElement<M> {
             return vec![line_layout];
         }
 
+        let scale_font = scale_font(font_overrides, window);
         let mut lines = Vec::with_capacity(last_layout.visible_buffer_lines.len());
         // run_offset tracks position in the runs vec coordinate space (only visible line bytes).
         // This is separate from the visible_text offset because runs from highlight_lines
@@ -2194,30 +2224,68 @@ impl<M: InputModeKind> TextElement<M> {
 
             debug_assert_eq!(line_item.len(), line_text.len());
 
-            let mut wrapped_lines: SmallVec<[ShapedLine; 1]> = SmallVec::with_capacity(1);
+            let mut wrapped_lines: SmallVec<[InputLine; 1]> = SmallVec::with_capacity(1);
             let mut line_has_background = false;
+            let line_start = last_layout.visible_line_byte_offsets[vi];
 
             for range in &line_item.wrapped_lines {
-                let line_runs = runs_for_range(runs, run_offset, &range);
-                let line_runs = if bg_segments.is_empty() {
-                    line_runs
-                } else {
-                    split_runs_by_bg_segments(
-                        last_layout.visible_line_byte_offsets[vi] + (range.start),
-                        &line_runs,
-                        bg_segments,
+                let scaled = scale_font.as_ref().and_then(|font| {
+                    scaled_row(
+                        window.text_system(),
+                        font,
+                        font_size,
+                        last_layout.line_height,
+                        line_start + range.start..line_start + range.end,
+                        font_overrides,
                     )
+                });
+                let part_runs = |part: &Range<usize>| {
+                    let line_runs = runs_for_range(runs, run_offset, part);
+                    let line_runs = if bg_segments.is_empty() {
+                        line_runs
+                    } else {
+                        split_runs_by_bg_segments(line_start + part.start, &line_runs, bg_segments)
+                    };
+                    align_runs_to_char_boundaries(&line_text[part.clone()], &line_runs)
+                        .unwrap_or(line_runs)
                 };
 
+                if let Some(scaled) = scaled {
+                    let mut fragments = Vec::new();
+                    let mut x = px(0.);
+                    push_text_fragments(
+                        window,
+                        &line_text,
+                        range.clone(),
+                        range.start,
+                        line_start,
+                        Some(&scaled),
+                        font_size,
+                        |part| {
+                            let line_runs = part_runs(part);
+                            line_has_background |= has_background(&line_runs);
+                            line_runs
+                        },
+                        &mut x,
+                        &mut fragments,
+                    );
+                    let row_box = scaled.row_box;
+                    wrapped_lines.push(
+                        InputLine::inline(line_text[range.clone()].to_string().into(), fragments)
+                            .with_height(row_box.custom_height(last_layout.line_height))
+                            .with_inline_offset(row_box.baseline - row_box.base_baseline),
+                    );
+                    continue;
+                }
+
+                let line_runs = part_runs(range);
                 let sub_line: SharedString = line_text[range.clone()].to_string().into();
-                let line_runs =
-                    align_runs_to_char_boundaries(&sub_line, &line_runs).unwrap_or(line_runs);
                 let shaped_line = window
                     .text_system()
                     .shape_line(sub_line, font_size, &line_runs, None);
 
                 line_has_background |= has_background(&line_runs);
-                wrapped_lines.push(shaped_line);
+                wrapped_lines.push(shaped_line.into());
             }
 
             // Use the first visual line's indentation width for continuation lines.
@@ -2233,13 +2301,9 @@ impl<M: InputModeKind> TextElement<M> {
             };
 
             let line_layout = LineLayout::new()
-                .lines(wrapped_lines)
+                .inline_lines(wrapped_lines)
                 .wrap_indent(wrap_indent)
-                .first_indent(
-                    state
-                        .display_map
-                        .line_indent(last_layout.visible_line_byte_offsets[vi]),
-                )
+                .first_indent(state.display_map.line_indent(line_start))
                 .with_background(line_has_background)
                 .with_whitespaces(whitespace_indicators.clone());
             lines.push(line_layout);
@@ -2650,7 +2714,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             // At least `rows` tall (auto grow: the content's rows, capped at
             // `max_rows` plus the rows of block tokens); a taller parent still fills it.
             let rows = state.mode.rows();
-            style.min_size.height = (rows * line_height).into();
+            style.min_size.height = (rows * line_height + state.mode.grow_extra()).into();
         } else {
             // For single-line inputs, the minimum height should be the line height
             style.size.height = line_height.into();
@@ -2688,10 +2752,20 @@ impl<M: InputModeKind> Element for TextElement<M> {
         };
         self.state.update(cx, |state, cx| {
             state.display_map.set_font(font, text_size, cx);
+            state.display_map.set_line_height(window.line_height(), cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
             state
                 .display_map
                 .set_font_overrides(font_overrides.clone(), cx);
+            if state.mode.is_auto_grow() {
+                let (rows, extra) = (state.mode.rows(), state.mode.grow_extra());
+                state
+                    .mode
+                    .update_auto_grow(&state.display_map, window.line_height());
+                if (state.mode.rows(), state.mode.grow_extra()) != (rows, extra) {
+                    cx.notify();
+                }
+            }
         });
 
         let state = self.state.read(cx);
@@ -2887,6 +2961,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             &last_layout,
             text_size,
             &runs,
+            &font_overrides,
             &document_colors,
             whitespace_indicators,
             window,
@@ -3520,6 +3595,69 @@ fn placeholder_line_runs<'a>(
     }
 
     result
+}
+
+fn scale_font(
+    font_overrides: &[(Range<usize>, FontOverride)],
+    window: &Window,
+) -> Option<gpui::Font> {
+    font_overrides
+        .iter()
+        .any(|(_, font_override)| font_override.scale.is_some() || font_override.raise.is_some())
+        .then(|| window.text_style().font())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_text_fragments(
+    window: &Window,
+    line_text: &str,
+    part: Range<usize>,
+    row_start: usize,
+    line_start: usize,
+    scaled: Option<&ScaledRow>,
+    font_size: Pixels,
+    mut part_runs: impl FnMut(&Range<usize>) -> Vec<TextRun>,
+    x: &mut Pixels,
+    fragments: &mut Vec<InlineFragment>,
+) {
+    let mut push =
+        |local: Range<usize>, size: Pixels, placement_of: Option<(&ScaledRow, Pixels)>| {
+            let shaped = window.text_system().shape_line(
+                line_text[local.clone()].to_owned().into(),
+                size,
+                &part_runs(&local),
+                None,
+            );
+            let width = shaped.width;
+            let placement = placement_of.map(|(scaled, raise)| {
+                (
+                    scaled.row_box.baseline - raise - shaped.ascent,
+                    shaped.ascent + shaped.descent,
+                )
+            });
+            fragments.push(InlineFragment {
+                range: local.start - row_start..local.end - row_start,
+                x: *x,
+                width,
+                text: Some(shaped),
+                placement,
+            });
+            *x += width;
+        };
+    match scaled {
+        None => push(part, font_size, None),
+        Some(scaled) => {
+            for (range, row_piece) in
+                scaled.pieces_in(line_start + part.start..line_start + part.end)
+            {
+                push(
+                    range.start - line_start..range.end - line_start,
+                    font_size * row_piece.piece.scale,
+                    Some((scaled, scaled.raise_pixels(row_piece))),
+                );
+            }
+        }
+    }
 }
 
 /// Get the runs for the given range.
@@ -5206,3 +5344,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "element/scaled_tests.rs"]
+mod scaled_tests;

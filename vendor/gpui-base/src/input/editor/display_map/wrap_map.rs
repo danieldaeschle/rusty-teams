@@ -131,6 +131,10 @@ impl WrapMap {
         self.wrapper.set_font_overrides(font_overrides, cx);
     }
 
+    pub(super) fn set_line_height(&mut self, line_height: Pixels, cx: &mut App) {
+        self.wrapper.set_line_height(line_height, cx);
+    }
+
     pub(super) fn set_hanging_indents(
         &mut self,
         hanging_indents: std::rc::Rc<[Range<usize>]>,
