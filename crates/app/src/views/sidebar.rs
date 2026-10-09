@@ -16,6 +16,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, FolderKind};
 use crate::format;
+use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section, SectionInput,
@@ -285,6 +286,33 @@ fn preview_icon(text: &str) -> Option<IconName> {
     }
 }
 
+fn local_preview_row(preview: &LocalPreview, color: Hsla) -> Div {
+    let row = h_flex()
+        .flex_1()
+        .min_w_0()
+        .overflow_hidden()
+        .gap(px(4.))
+        .items_center()
+        .text_size(px(12.5))
+        .text_color(color);
+    match preview {
+        LocalPreview::Draft(text) => row
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(theme::accent_text())
+                    .child("Draft:"),
+            )
+            .child(div().truncate().child(text.clone())),
+        LocalPreview::NotSent => row.child(
+            div()
+                .flex_none()
+                .text_color(theme::red_soft())
+                .child("Not sent"),
+        ),
+    }
+}
+
 impl SidebarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
@@ -293,7 +321,11 @@ impl SidebarView {
             }
             if matches!(
                 event,
-                AppEvent::Sidebar | AppEvent::Selection | AppEvent::Directory | AppEvent::Typing
+                AppEvent::Sidebar
+                    | AppEvent::Selection
+                    | AppEvent::Directory
+                    | AppEvent::Typing
+                    | AppEvent::LocalPreviews
             ) {
                 cx.notify();
             }
@@ -513,6 +545,7 @@ impl SidebarView {
         &self,
         item: &ChatItem,
         selected: bool,
+        local_preview: Option<&LocalPreview>,
         directory: &Directory,
         menu: &MenuContext,
     ) -> AnyElement {
@@ -570,20 +603,23 @@ impl SidebarView {
         } else {
             theme::text_muted()
         };
-        let preview = preview_text(&item.preview).map(|(text, italic)| {
-            let glyph = preview_icon(&text);
-            h_flex()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .gap(px(4.))
-                .items_center()
-                .text_size(px(12.5))
-                .when(italic, |preview| preview.italic())
-                .text_color(preview_color)
-                .children(glyph.map(|name| icon(name, 12., preview_color)))
-                .child(div().truncate().child(text))
-        });
+        let preview = match local_preview {
+            Some(local) => Some(local_preview_row(local, preview_color)),
+            None => preview_text(&item.preview).map(|(text, italic)| {
+                let glyph = preview_icon(&text);
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .gap(px(4.))
+                    .items_center()
+                    .text_size(px(12.5))
+                    .when(italic, |preview| preview.italic())
+                    .text_color(preview_color)
+                    .children(glyph.map(|name| icon(name, 12., preview_color)))
+                    .child(div().truncate().child(text))
+            }),
+        };
         let lines = v_flex()
             .flex_1()
             .min_w_0()
@@ -648,7 +684,7 @@ impl SidebarView {
     }
 
     fn chats_body(&self, window_height: f32, cx: &mut Context<Self>) -> AnyElement {
-        let (sections, menu) = {
+        let (sections, menu, local_previews) = {
             let state = self.state.read(cx);
             let now = Utc::now();
             let offset = Local::now().offset().fix();
@@ -672,7 +708,7 @@ impl SidebarView {
                     .collect(),
                 favorites_id: state.directory.favorites().map(|folder| folder.id.clone()),
             };
-            (sections, menu)
+            (sections, menu, state.local_previews.clone())
         };
 
         let top = -f32::from(self.chats_scroll.offset().y);
@@ -718,7 +754,14 @@ impl SidebarView {
                     list = with_spacer(list, &mut skipped_height);
                     let is_selected = selected == Some(Selection::Chat(item.id.clone()));
                     let directory = &directory_state.read(cx).directory;
-                    list = list.child(self.chat_row(item, is_selected, directory, &menu));
+                    let local_preview = local_previews.get(&item.id).filter(|_| !is_selected);
+                    list = list.child(self.chat_row(
+                        item,
+                        is_selected,
+                        local_preview,
+                        directory,
+                        &menu,
+                    ));
                 } else {
                     skipped_height += ROW_HEIGHT;
                 }

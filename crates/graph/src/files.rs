@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use session::{Method, Request, Scope, Session};
 
@@ -36,7 +36,7 @@ pub struct SharedFile {
     pub download_url: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UploadedFile {
     pub drive_id: String,
     pub item_id: String,

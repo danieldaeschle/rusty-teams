@@ -63,6 +63,8 @@ fn chat(
     .unwrap()
 }
 
+type ScheduledCall = (String, String, DateTime<Utc>, String);
+
 #[derive(Default)]
 struct Fake {
     chats: Mutex<Vec<Chat>>,
@@ -99,6 +101,7 @@ struct Fake {
     link_page_calls: Mutex<Vec<String>>,
     links_put: Mutex<Vec<(String, String)>>,
     link_info_calls: Mutex<usize>,
+    scheduled: Mutex<Vec<ScheduledCall>>,
 }
 
 impl Fake {
@@ -623,6 +626,29 @@ impl Remote for Handle {
     async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<chatsvc::ChatApp>> {
         *self.app_calls.lock().unwrap() += 1;
         Ok(self.apps.lock().unwrap().clone())
+    }
+
+    async fn create_scheduled(
+        &self,
+        inner_thread_id: &str,
+        html: &str,
+        send_at: DateTime<Utc>,
+        display_name: &str,
+    ) -> Result<chatsvc::ScheduledDraft> {
+        self.scheduled.lock().unwrap().push((
+            inner_thread_id.to_owned(),
+            html.to_owned(),
+            send_at,
+            display_name.to_owned(),
+        ));
+        Ok(chatsvc::ScheduledDraft {
+            id: "d1".to_owned(),
+            client_message_id: "1".to_owned(),
+            inner_thread_id: inner_thread_id.to_owned(),
+            send_at,
+            html: html.to_owned(),
+            delivery_state: None,
+        })
     }
 
     async fn invoke_card(&self, invoke: chatsvc::InvokeRequest) -> Result<chatsvc::InvokeResponse> {
@@ -3213,4 +3239,57 @@ async fn link_infos_are_fetched_once_per_url_and_internal_links_never() {
             .is_none()
     );
     assert_eq!(*fake.link_info_calls.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn schedule_message_resolves_the_inner_thread_id() {
+    let fake = Arc::new(Fake::default());
+    *fake.teams.lock().unwrap() =
+        vec![serde_json::from_value(json!({"id": "team-1", "displayName": "Squad"})).unwrap()];
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    let send_at = base() + Duration::days(1);
+
+    let draft = engine
+        .schedule_message(CHAT, None, "<p>a</p>", send_at)
+        .await
+        .unwrap();
+    assert_eq!(draft.id, "d1");
+    engine
+        .schedule_message(CHANNEL, None, "<p>b</p>", send_at)
+        .await
+        .unwrap();
+    engine
+        .schedule_message(CHANNEL, Some("m0030"), "<p>c</p>", send_at)
+        .await
+        .unwrap();
+
+    let created = fake.scheduled.lock().unwrap().clone();
+    let thread_ids: Vec<&str> = created.iter().map(|entry| entry.0.as_str()).collect();
+    assert_eq!(
+        thread_ids,
+        [CHAT, CHANNEL, "19:channel@thread.tacv2;messageid=m0030"]
+    );
+    assert_eq!(created[0].3, "Me Myself");
+}
+
+#[tokio::test]
+async fn schedule_message_rejects_notes_and_chat_threads() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let send_at = base();
+    assert!(matches!(
+        engine
+            .schedule_message(teams_core::NOTES_CHAT_ID, None, "<p>a</p>", send_at)
+            .await,
+        Err(Error::Unsupported(_))
+    ));
+    assert!(matches!(
+        engine
+            .schedule_message(CHAT, Some("m1"), "<p>a</p>", send_at)
+            .await,
+        Err(Error::Unsupported(_))
+    ));
+    assert!(fake.scheduled.lock().unwrap().is_empty());
 }

@@ -1,10 +1,11 @@
 use graph::{MentionTarget, OutgoingMention};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::markdown::escape_html;
 
 /// `text` is the display name exactly as it appears after the `@` in the message text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MentionInput {
     pub target: MentionTarget,
     pub text: String,

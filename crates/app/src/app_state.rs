@@ -6,11 +6,12 @@ use chatsvc::TypingEvent;
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::{ChatRecord, Sidebar, Store};
-use teams_core::{ChatApp, CoreEvent, ImageRef};
+use teams_core::{ChatApp, CoreEvent, ImageRef, ScheduledDraft};
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::notice::Notice;
 use crate::notify;
 use crate::typing::TypingState;
@@ -43,6 +44,9 @@ pub enum AppEvent {
     Cards(String),
     TaskDialog,
     Typing,
+    LocalPreviews,
+    Outbox(String),
+    Scheduled,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -77,6 +81,9 @@ pub struct AppState {
     pub keep_unread: Option<String>,
     pub typing: TypingState,
     typing_timer_running: bool,
+    pub local_previews: HashMap<String, LocalPreview>,
+    pub scheduled: Vec<ScheduledDraft>,
+    pub scheduled_polling: bool,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -148,7 +155,11 @@ impl AppState {
             keep_unread: None,
             typing: TypingState::default(),
             typing_timer_running: false,
+            local_previews: HashMap::new(),
+            scheduled: Vec::new(),
+            scheduled_polling: false,
         };
+        state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
         state.followed_channels = notify::load_followed_channels(&state.store);
         if !mode.demo {
@@ -550,6 +561,8 @@ impl AppState {
             }
             BackendEvent::Engine(engine) => {
                 self.engine = Some(engine);
+                self.resend_outbox(cx);
+                self.refresh_scheduled(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
                 cx.emit(AppEvent::Status);

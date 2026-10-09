@@ -11,11 +11,12 @@ use super::link_preview::link_preview_card;
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
+use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
 use super::widgets::symbol;
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
-use crate::rows::{Delivery, MessageRow, Receipt, Skeleton, bubble_corners};
+use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 
@@ -35,13 +36,20 @@ const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 
+pub struct DeliveryActions {
+    pub retry: RowAction,
+    pub delete: RowAction,
+    pub send_now: RowAction,
+}
+
 pub struct RowActions {
     pub bot: Option<BotIdentity>,
     pub open_thread: RowAction,
-    pub retry: RowAction,
+    pub delivery: DeliveryActions,
     pub reply: RowAction,
     pub hovered: Option<HoverChange>,
     pub menu: Option<MessageMenu>,
+    pub scheduled_menu: Option<ScheduledMenu>,
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
     pub files: Option<FileActions>,
@@ -110,14 +118,27 @@ fn bubble(
             .child(DELETED_PREVIEW);
     }
     let failed = matches!(row.delivery, Delivery::Failed(_));
+    let scheduled = matches!(row.delivery, Delivery::Scheduled(_));
     element = element
-        .bg(if own && !failed {
-            theme::bubble_own()
-        } else {
-            theme::bubble_other()
+        .when(!scheduled, |bubble| {
+            bubble.bg(if own && !failed {
+                theme::bubble_own()
+            } else {
+                theme::bubble_other()
+            })
         })
         .when(failed, |bubble| {
             bubble.border_1().border_color(theme::red())
+        })
+        .when(scheduled, |bubble| {
+            bubble
+                .border_1()
+                .border_dashed()
+                .border_color(if row.delivery == Delivery::Scheduled(ScheduledState::DeliveryFailed) {
+                    theme::red()
+                } else {
+                    theme::accent()
+                })
         });
     let has_reactions = !row.reactions.is_empty();
     let mut content = v_flex().gap(px(6.));
@@ -208,6 +229,15 @@ fn bubble(
                 .child(deferred(message_toolbar(menu)).with_priority(1)),
         );
     }
+    if let Some(menu) = extras.scheduled_menu {
+        element = element.child(
+            div()
+                .absolute()
+                .top(px(-TOOLBAR_LIFT))
+                .right(px(8.))
+                .child(deferred(scheduled_toolbar(menu)).with_priority(1)),
+        );
+    }
     element
 }
 
@@ -215,6 +245,7 @@ fn bubble(
 struct BubbleExtras {
     hover: Option<HoverChange>,
     menu: Option<MessageMenu>,
+    scheduled_menu: Option<ScheduledMenu>,
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
@@ -237,6 +268,9 @@ fn bubble_meta(row: &MessageRow, own: bool) -> Div {
         .child(row.time.clone())
         .when(own && row.delivery == Delivery::Sending, |meta| {
             meta.child(symbol("schedule", META_CHECK_SIZE, tint))
+        })
+        .when(matches!(row.delivery, Delivery::Scheduled(_)), |meta| {
+            meta.child(symbol("schedule", META_SIZE + 3., tint))
         })
         .when(
             own && row.delivery == Delivery::Delivered,
@@ -338,26 +372,54 @@ fn has_text(row: &MessageRow) -> bool {
             && row.adaptive_cards.is_empty())
 }
 
-fn delivery_note(row: &MessageRow, retry: RowAction, index: usize) -> Option<AnyElement> {
+fn delivery_link(index: usize, name: &str, label: &'static str, action: RowAction) -> Stateful<Div> {
+    div()
+        .id(ElementId::Name(format!("{name}-{index}").into()))
+        .cursor_pointer()
+        .text_color(theme::red_tint())
+        .underline()
+        .child(label)
+        .when_some(action, |link, action| {
+            link.on_click(move |_, _, cx| action(cx))
+        })
+}
+
+fn delivery_note(
+    row: &MessageRow,
+    delivery: DeliveryActions,
+    index: usize,
+) -> Option<AnyElement> {
+    let DeliveryActions {
+        retry,
+        delete,
+        send_now,
+    } = delivery;
+    let note = |text: &'static str| {
+        h_flex()
+            .gap(px(4.))
+            .text_size(px(11.))
+            .text_color(theme::red_soft())
+            .child(text)
+    };
     match &row.delivery {
-        Delivery::Delivered | Delivery::Sending => None,
+        Delivery::Delivered | Delivery::Sending | Delivery::Scheduled(ScheduledState::Waiting) => {
+            None
+        }
         Delivery::Failed(_) => Some(
-            h_flex()
-                .gap(px(4.))
-                .text_size(px(11.))
-                .text_color(theme::red_soft())
-                .child("Failed to send.")
-                .child(
-                    div()
-                        .id(ElementId::Name(format!("retry-{index}").into()))
-                        .cursor_pointer()
-                        .text_color(theme::red_tint())
-                        .underline()
-                        .child("Retry")
-                        .when_some(retry, |link, retry| {
-                            link.on_click(move |_, _, cx| retry(cx))
-                        }),
-                )
+            note("Failed to send.")
+                .child(delivery_link(index, "retry", "Retry", retry))
+                .child(delivery_link(index, "delete", "Delete", delete))
+                .into_any_element(),
+        ),
+        Delivery::Scheduled(ScheduledState::DeliveryFailed) => Some(
+            note("Couldn't send at the scheduled time.")
+                .child(delivery_link(index, "send-now", "Send now", send_now))
+                .child(delivery_link(index, "delete", "Delete", delete))
+                .into_any_element(),
+        ),
+        Delivery::Scheduled(ScheduledState::ChangeFailed) => Some(
+            note("Couldn't change the scheduled message.")
+                .child(delivery_link(index, "retry", "Retry", retry))
                 .into_any_element(),
         ),
     }
@@ -535,7 +597,7 @@ fn others_row(
     index: usize,
     directory: &Directory,
     bot: Option<&BotIdentity>,
-    retry: RowAction,
+    delivery: DeliveryActions,
     extras: BubbleExtras,
     cx: &App,
 ) -> Div {
@@ -557,7 +619,7 @@ fn others_row(
         );
     }
     column = column.child(bubble(row, index, false, directory, extras, cx));
-    if let Some(note) = delivery_note(row, retry, index) {
+    if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
     }
     let lead = if let Some(bot) = bot.filter(|_| first || row.card) {
@@ -584,7 +646,7 @@ fn own_row(
     row: &MessageRow,
     index: usize,
     directory: &Directory,
-    retry: RowAction,
+    delivery: DeliveryActions,
     extras: BubbleExtras,
     cx: &App,
 ) -> Div {
@@ -594,7 +656,7 @@ fn own_row(
             .max_w(relative(MAX_WIDTH_RATIO))
             .child(bubble(row, index, true, directory, extras, cx)),
     );
-    if let Some(note) = delivery_note(row, retry, index) {
+    if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
     }
     column
@@ -610,10 +672,11 @@ pub fn render_message_row(
     let RowActions {
         bot,
         open_thread,
-        retry,
+        delivery,
         reply,
         hovered,
         menu,
+        scheduled_menu,
         react,
         reaction_controls,
         files,
@@ -623,6 +686,7 @@ pub fn render_message_row(
     let extras = BubbleExtras {
         hover: hovered,
         menu,
+        scheduled_menu,
         react,
         controls: reaction_controls,
         files,
@@ -645,9 +709,9 @@ pub fn render_message_row(
     let body = if row.card {
         post_card(row, index, directory, extras.files.as_ref(), cx)
     } else if own {
-        own_row(row, index, directory, retry, extras, cx)
+        own_row(row, index, directory, delivery, extras, cx)
     } else {
-        others_row(row, index, directory, bot.as_ref(), retry, extras, cx)
+        others_row(row, index, directory, bot.as_ref(), delivery, extras, cx)
     };
     container
         .child(

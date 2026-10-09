@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _,
@@ -22,11 +23,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use serde::{Deserialize, Serialize};
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
     LinkPreview, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
+
+mod drafts;
+mod schedule;
 
 use super::attachment_tray::{
     AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, OutgoingFile, OutgoingImage,
@@ -44,6 +49,7 @@ use crate::app_state::AppState;
 use crate::emoji;
 use crate::remote_image::RemoteImage;
 use crate::runtime;
+use crate::scheduled_rows::scheduled_label;
 use crate::theme;
 use crate::typing::OutgoingTyping;
 
@@ -74,7 +80,8 @@ actions!(
         ToggleSuperscript,
         ToggleSubscript,
         ToggleCode,
-        EditLink
+        EditLink,
+        ScheduleSend
     ]
 );
 
@@ -88,6 +95,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-=", ToggleSubscript, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-shift-c", ToggleCode, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-k", EditLink, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-shift-enter", ScheduleSend, Some(KEY_CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-b", ToggleBold, Some(KEY_CONTEXT)),
         #[cfg(target_os = "macos")]
@@ -99,7 +107,7 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyPreview {
     pub message_id: String,
     pub author: String,
@@ -110,6 +118,7 @@ pub struct ReplyPreview {
 pub struct EditPreview {
     pub message_id: String,
     pub excerpt: String,
+    pub scheduled: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +209,10 @@ impl UploadHandle {
 
 pub enum ComposerEvent {
     Submit(Box<Outgoing>),
+    Schedule {
+        outgoing: Box<Outgoing>,
+        send_at: DateTime<Utc>,
+    },
     EditLast,
     Typing(bool),
 }
@@ -279,6 +292,10 @@ pub struct Composer {
     uploads: HashMap<u64, UploadHandle>,
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
+    draft_save: Option<Task<()>>,
+    saved_images: Option<drafts::ImageFingerprint>,
+    schedule: Option<schedule::SchedulePopover>,
+    scheduling: Option<String>,
     pending_anchors: HashMap<u64, usize>,
     link: ComposeLink,
     fun_picker: Entity<FunPicker>,
@@ -471,6 +488,10 @@ impl Composer {
             uploads: HashMap::new(),
             demo_failed: HashSet::new(),
             carry_images_into: None,
+            draft_save: None,
+            saved_images: None,
+            schedule: None,
+            scheduling: None,
             pending_anchors: HashMap::new(),
             link: ComposeLink::default(),
             fun_picker,
@@ -491,6 +512,7 @@ impl Composer {
             self.update_emoji(cx);
             self.update_mention(cx);
             self.update_link_preview(cx);
+            self.schedule_draft_save(cx);
         }
         let value = input.read(cx).value();
         if submitted_text(event, &value).is_some()
@@ -695,6 +717,7 @@ impl Composer {
         };
         self.apply_to_input(edits, selection, window, cx);
         self.record(StepKind::Other, cx);
+        self.schedule_draft_save(cx);
     }
 
     fn apply_to_input(
@@ -822,6 +845,7 @@ impl Composer {
         self.refresh_style(cx);
         self.update_emoji(cx);
         self.update_mention(cx);
+        self.schedule_draft_save(cx);
         cx.notify();
     }
 
@@ -922,6 +946,7 @@ impl Composer {
             self.draft.take_edits();
             self.record(StepKind::Other, cx);
             self.refresh_style(cx);
+            self.schedule_draft_save(cx);
         }
         cx.notify();
     }
@@ -945,6 +970,7 @@ impl Composer {
             self.draft.take_edits();
             self.record(StepKind::Other, cx);
             self.refresh_style(cx);
+            self.schedule_draft_save(cx);
         }
         cx.notify();
     }
@@ -1442,6 +1468,9 @@ impl Composer {
     ) {
         self.set_placeholder(&format!("Message {name}"), window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
+            self.save_draft_now(cx);
+            self.draft_save = None;
+            self.saved_images = None;
             let carry = self.carry_images_into.take().as_deref() == Some(conversation_id);
             self.conversation_id = Some(conversation_id.to_owned());
             self.cancel_uploads();
@@ -1459,6 +1488,10 @@ impl Composer {
             }
             self.mention_inputs.clear();
             self.close_popup();
+            self.schedule = None;
+            if !carry {
+                self.load_stored_draft(conversation_id, window, cx);
+            }
             cx.notify();
         }
     }
@@ -1477,6 +1510,7 @@ impl Composer {
         if self.reply.is_some() {
             self.editing = None;
         }
+        self.schedule_draft_save(cx);
         cx.notify();
     }
 
@@ -1491,10 +1525,11 @@ impl Composer {
     }
 
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
+        self.can_send(cx).then(|| self.compose(cx))
+    }
+
+    fn compose(&self, cx: &App) -> Outgoing {
         let state = self.input.read(cx);
-        if !self.can_send(cx) {
-            return None;
-        }
         let mut draft = self.current_draft(cx);
         let image_spans: Vec<(Range<usize>, u64)> = state
             .tokens()
@@ -1529,7 +1564,7 @@ impl Composer {
             .filter_map(|span| self.mention_inputs.get(span.token().id().as_ref()))
             .cloned()
             .collect();
-        Some(Outgoing {
+        Outgoing {
             draft,
             mentions,
             reply: self.reply.clone(),
@@ -1545,7 +1580,7 @@ impl Composer {
             } else {
                 Vec::new()
             },
-        })
+        }
     }
 
     /// The draft, or the plain input text while a change is still on its way to the draft.
@@ -1992,6 +2027,7 @@ impl Composer {
         }
         let uploaded = self.tray.remove(id);
         self.discard_uploaded(uploaded.into_iter().collect(), cx);
+        self.schedule_draft_save(cx);
         cx.notify();
     }
 
@@ -2003,6 +2039,9 @@ impl Composer {
     }
 
     pub fn submit_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scheduling.is_some() {
+            return;
+        }
         let Some(outgoing) = self.outgoing(cx) else {
             return;
         };
@@ -2011,6 +2050,7 @@ impl Composer {
         self.mention_inputs.clear();
         if self.editing.is_none() {
             self.tray.clear();
+            self.clear_stored_draft(cx);
         }
         self.reply = None;
         self.editing = None;
@@ -2057,6 +2097,7 @@ impl Composer {
         self.editing = outgoing.edit.clone();
         self.link.restore(outgoing.link_preview.clone());
         self.close_popup();
+        self.schedule_draft_save(cx);
         cx.notify();
     }
 
@@ -2294,7 +2335,10 @@ impl Composer {
                 .bg(theme::surface())
                 .border_1()
                 .border_color(theme::border())
-                .child(icon(IconName::Pencil, 14., theme::accent_text()))
+                .child(match edit.scheduled {
+                    Some(_) => symbol("schedule_send", 14., theme::accent_text()).into_any_element(),
+                    None => icon(IconName::Pencil, 14., theme::accent_text()).into_any_element(),
+                })
                 .child(
                     v_flex()
                         .flex_1()
@@ -2305,7 +2349,13 @@ impl Composer {
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme::accent_text())
-                                .child("Editing message"),
+                                .child(match edit.scheduled {
+                                    Some(send_at) => format!(
+                                        "Editing scheduled message - {}",
+                                        scheduled_label(send_at, Utc::now())
+                                    ),
+                                    None => "Editing message".to_owned(),
+                                }),
                         )
                         .child(
                             div()
@@ -2398,6 +2448,10 @@ impl Render for Composer {
             .justify_center()
             .rounded(px(8.))
             .child(symbol("keyboard_return", 20., white()))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, _, cx| this.open_schedule_menu(cx)),
+            )
             .when(!can_send, |button| button.opacity(0.4))
             .when(can_send, |button| {
                 button
@@ -2554,6 +2608,7 @@ impl Render for Composer {
                 }
             }))
             .on_action(cx.listener(|this, _: &EditLink, window, cx| this.edit_link(window, cx)))
+            .on_action(cx.listener(|this, _: &ScheduleSend, _, cx| this.open_schedule_picker(cx)))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
                 if this.link_editor.is_none() {
                     this.step_history(true, window, cx);
@@ -2578,8 +2633,11 @@ impl Render for Composer {
                     cx.stop_propagation();
                 }
             }))
-            .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
+            .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
                 if this.link_editor.is_some() {
+                } else if this.schedule.is_some() {
+                    this.move_schedule_highlight(-1, window, cx);
+                    cx.stop_propagation();
                 } else if this.popup_is_open() {
                     this.move_highlight(-1, cx);
                     cx.stop_propagation();
@@ -2588,8 +2646,12 @@ impl Render for Composer {
                     cx.stop_propagation();
                 }
             }))
-            .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
-                if this.link_editor.is_none() && this.popup_is_open() {
+            .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                if this.link_editor.is_some() {
+                } else if this.schedule.is_some() {
+                    this.move_schedule_highlight(1, window, cx);
+                    cx.stop_propagation();
+                } else if this.popup_is_open() {
                     this.move_highlight(1, cx);
                     cx.stop_propagation();
                 }
@@ -2597,6 +2659,9 @@ impl Render for Composer {
             .capture_action(cx.listener(|this, action: &Enter, window, cx| {
                 if this.link_editor.is_some() {
                     this.apply_link(window, cx);
+                    cx.stop_propagation();
+                } else if this.schedule.is_some() {
+                    this.activate_schedule_row(window, cx);
                     cx.stop_propagation();
                 } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
@@ -2632,6 +2697,11 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.schedule.is_some() {
+                    this.close_schedule(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.link_editor.is_some() {
                     this.close_link_editor(window, cx);
                     cx.stop_propagation();
@@ -2666,6 +2736,7 @@ impl Render for Composer {
                     .children(self.render_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
+                    .children(self.render_schedule(cx))
                     .child(
                         v_flex()
                             .relative()
@@ -3934,6 +4005,7 @@ mod tests {
                         edit: Some(EditPreview {
                             message_id: "m1".into(),
                             excerpt: "old".into(),
+                            scheduled: None,
                         }),
                         images: Vec::new(),
                         files: Vec::new(),
@@ -3989,6 +4061,95 @@ mod tests {
                 .unwrap();
                 cx.update(|cx| assert_eq!(composer.read(cx).tray.items().len(), expected));
             }
+        }
+
+        #[gpui_kit::test]
+        fn each_conversation_keeps_its_own_draft(cx: &mut TestAppContext) {
+            let (handle, composer) = demo_composer(cx);
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("chat-a", "A", window, cx);
+                    composer.set_text("**hello** there", window, cx);
+                    composer.set_conversation("chat-b", "B", window, cx);
+                });
+            })
+            .unwrap();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert!(composer.draft.is_blank());
+                let stored = composer
+                    .app
+                    .read(cx)
+                    .store
+                    .draft("chat-a")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(stored.preview, "hello there");
+            });
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_text("other", window, cx);
+                    composer.set_conversation("chat-a", "A", window, cx);
+                });
+            })
+            .unwrap();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                assert_eq!(composer.draft.text(), "hello there");
+                assert!(composer.draft.to_html().contains("<b>"));
+                assert!(
+                    composer
+                        .app
+                        .read(cx)
+                        .store
+                        .draft("chat-b")
+                        .unwrap()
+                        .is_some()
+                );
+            });
+        }
+
+        #[gpui_kit::test]
+        fn sending_clears_the_stored_draft_and_a_blank_composer_deletes_it(
+            cx: &mut TestAppContext,
+        ) {
+            let (handle, composer) = demo_composer(cx);
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("chat-a", "A", window, cx);
+                    composer.set_text("hi", window, cx);
+                    composer.save_draft_now(cx);
+                });
+            })
+            .unwrap();
+            cx.update(|cx| {
+                assert!(
+                    composer
+                        .read(cx)
+                        .app
+                        .read(cx)
+                        .store
+                        .draft("chat-a")
+                        .unwrap()
+                        .is_some()
+                );
+            });
+            cx.update_window(handle, |_, window, cx| {
+                composer.update(cx, |composer, cx| composer.submit_current(window, cx));
+            })
+            .unwrap();
+            cx.update(|cx| {
+                assert!(
+                    composer
+                        .read(cx)
+                        .app
+                        .read(cx)
+                        .store
+                        .draft("chat-a")
+                        .unwrap()
+                        .is_none()
+                );
+            });
         }
 
         #[gpui_kit::test]

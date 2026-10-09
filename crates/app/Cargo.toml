@@ -31,10 +31,10 @@ session.workspace = true
 store.workspace = true
 teams-core.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 
 [target.'cfg(windows)'.dependencies]
-uuid.workspace = true
 webview.workspace = true
 raw-window-handle = "0.6"
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }

@@ -24,6 +24,7 @@ mod presence;
 mod preview;
 mod receipts;
 mod remote;
+mod scheduled;
 mod search;
 mod sidebar_sync;
 mod spans;
@@ -42,7 +43,7 @@ pub use card_inputs::{
     MomentInput, NumberInput, TIME_PLACEHOLDER, TextInput, TextStyle, ToggleInput,
     collect_input_values, merge_input_data,
 };
-pub use chatsvc::{ChatApp, Gif};
+pub use chatsvc::{ChatApp, Gif, ScheduledDraft};
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -66,6 +67,7 @@ pub use presence::{Availability, Presence};
 pub use preview::preview_text;
 pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
+pub use scheduled::NOTES_CHAT_ID;
 pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{

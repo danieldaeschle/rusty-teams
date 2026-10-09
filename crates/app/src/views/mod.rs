@@ -17,6 +17,7 @@ pub mod message_row;
 pub mod new_chat;
 pub mod reaction_picker;
 pub mod reaction_pills;
+pub mod scheduled_toolbar;
 pub mod shell;
 pub mod sidebar;
 pub mod status_bar;

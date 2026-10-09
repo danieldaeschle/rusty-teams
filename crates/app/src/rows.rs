@@ -96,11 +96,19 @@ pub enum Receipt {
     Read,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledState {
+    Waiting,
+    DeliveryFailed,
+    ChangeFailed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivery {
     Delivered,
     Sending,
     Failed(String),
+    Scheduled(ScheduledState),
 }
 
 /// An image of a message that is still being sent, shown from its local bytes.

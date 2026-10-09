@@ -15,16 +15,17 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::MessageRecord;
+use store::{MessageRecord, OutboxState, OutboxTarget};
 use teams_core::{FileCard, ImageRef, LinkPreview};
 
+mod scheduled;
+
 use super::adaptive_card::ensure_cards_inputs;
-use super::attachment_tray::OutgoingImage;
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
-use super::message_row::{RowActions, render_message_row, render_skeleton_row};
+use super::message_row::{DeliveryActions, RowActions, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
@@ -35,15 +36,16 @@ use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
 use crate::notice::short_error;
+use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
+use crate::pending_rows::pending_row;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
-use crate::render::layout_blocks;
 use crate::rows::{
-    Delivery, LocalImage, MessageRow, PendingReactions, Receipt, Row, RowContext, Series,
-    StartInfo, api_reaction, apply_pending_reactions, assign_series, changed_indices, diff_keys,
-    flat_rows, has_own_reaction, message_draft, message_text, placeholder_rows, reaction_glyph,
-    reply_excerpt, set_own_reaction, thread_list_rows, thread_rows, trailing_skeleton,
+    Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
+    apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
+    has_own_reaction, message_draft, message_text, placeholder_rows, reaction_glyph, reply_excerpt,
+    set_own_reaction, thread_list_rows, thread_rows, trailing_skeleton,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -148,6 +150,8 @@ pub struct ConversationView {
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     notice: Option<String>,
+    scheduled_failure: Option<scheduled::ScheduledFailure>,
+    scheduled_in_flight: HashSet<String>,
     drag_file_count: usize,
     sync_generation: u64,
     window_active: bool,
@@ -339,6 +343,11 @@ impl ConversationView {
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.observe_window_activation(window, Self::on_window_activation),
+            cx.on_app_quit(|this, cx| {
+                this.composer
+                    .update(cx, |composer, cx| composer.save_draft_now(cx));
+                async {}
+            }),
             cx.observe_keystrokes(|this, event, _, cx| {
                 if event.keystroke.key == "escape" {
                     this.close_reaction_details(cx);
@@ -369,6 +378,8 @@ impl ConversationView {
             reaction_details: None,
             highlighted_message: None,
             notice: None,
+            scheduled_failure: None,
+            scheduled_in_flight: HashSet::new(),
             drag_file_count: 0,
             sync_generation: 0,
             window_active: window.is_window_active(),
@@ -459,8 +470,19 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
-            AppEvent::TaskDialog => {}
+            AppEvent::TaskDialog | AppEvent::LocalPreviews => {}
             AppEvent::Typing => cx.notify(),
+            AppEvent::Scheduled => self.rebuild(false, cx),
+            AppEvent::Outbox(conversation_id) => {
+                let is_current = self
+                    .current
+                    .as_ref()
+                    .is_some_and(|current| current.selection.conversation_id() == conversation_id);
+                if is_current {
+                    self.reload_pending(cx);
+                    self.rebuild(false, cx);
+                }
+            }
             AppEvent::Sidebar => {
                 self.mark_read(ReadTrigger::Incoming, cx);
                 self.refresh_reactor_names(cx);
@@ -492,10 +514,21 @@ impl ConversationView {
             ComposerEvent::Submit(outgoing) if self.draft_active => {
                 self.send_new_chat((**outgoing).clone(), window, cx)
             }
+            ComposerEvent::Submit(outgoing)
+                if outgoing
+                    .edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.scheduled.is_some()) =>
+            {
+                self.send_scheduled_edit((**outgoing).clone(), window, cx)
+            }
             ComposerEvent::Submit(outgoing) if outgoing.edit.is_some() => {
                 self.send_edit((**outgoing).clone(), window, cx)
             }
             ComposerEvent::Submit(outgoing) => self.send((**outgoing).clone(), window, cx),
+            ComposerEvent::Schedule { outgoing, send_at } => {
+                self.schedule((**outgoing).clone(), *send_at, window, cx)
+            }
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
         }
@@ -600,8 +633,11 @@ impl ConversationView {
             sync: SyncProgress::default(),
         });
         self.sync_generation += 1;
-        self.clear_pending();
+        self.reload_pending(cx);
         self.notice = None;
+        self.scheduled_failure = None;
+        self.app
+            .update(cx, |state, cx| state.refresh_scheduled(cx));
         self.rebuild(true, cx);
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
@@ -841,7 +877,7 @@ impl ConversationView {
         } else {
             row_key
         };
-        self.clear_pending();
+        self.reload_pending(cx);
         self.rebuild(true, cx);
         let index = self
             .rows
@@ -1167,6 +1203,7 @@ impl ConversationView {
                 .cloned()
                 .map(|row| Row::Message(Box::new(row))),
         );
+        rows.extend(self.scheduled_rows(context.my_user_id.as_deref(), cx));
         let receipts = self.receipts(&records, cx);
         for row in rows.iter_mut() {
             if let Row::Message(message) = row
@@ -1605,12 +1642,71 @@ impl ConversationView {
         self.pending_outgoing.clear();
     }
 
+    fn outbox_route(&self) -> (OutboxTarget, Option<String>) {
+        match self.current.as_ref().map(|current| &current.mode) {
+            Some(ViewMode::Thread(root_id)) => (OutboxTarget::Thread, Some(root_id.clone())),
+            Some(ViewMode::ThreadList) => (OutboxTarget::Post, None),
+            _ => (OutboxTarget::Flat, None),
+        }
+    }
+
+    fn reload_pending(&mut self, cx: &App) {
+        self.clear_pending();
+        let state = self.app.read(cx);
+        if state.mode.demo || state.mode.read_only {
+            return;
+        }
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let conversation_id = current.selection.conversation_id().to_owned();
+        let Ok(records) = state.store.outbox_for_conversation(&conversation_id) else {
+            return;
+        };
+        let my_user_id = state.store.meta(META_USER_ID).ok().flatten();
+        let route = self.outbox_route();
+        for record in records {
+            if (record.target, record.thread_root_id.clone()) != route {
+                continue;
+            }
+            let Some(outgoing) = outgoing_of(&record) else {
+                continue;
+            };
+            let delivery = match record.state {
+                OutboxState::Sending => Delivery::Sending,
+                OutboxState::Failed => Delivery::Failed(record.last_error.unwrap_or_default()),
+            };
+            self.pending.push(pending_row(
+                record.id.clone(),
+                conversation_id.clone(),
+                my_user_id.clone(),
+                record.created_at,
+                &outgoing,
+                delivery,
+            ));
+            self.pending_outgoing.insert(record.id, outgoing);
+        }
+    }
+
+    fn discard_outbox_row(&self, id: &str, cx: &mut Context<Self>) {
+        self.app.read(cx).store.delete_outbox(id).ok();
+        self.app
+            .update(cx, |state, cx| state.refresh_local_previews(cx));
+    }
+
+    fn delete_pending(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.pending.retain(|row| row.key != key);
+        self.pending_outgoing.remove(key);
+        self.discard_outbox_row(key, cx);
+        self.rebuild(false, cx);
+    }
+
     fn open_thread(&mut self, root_id: String, cx: &mut Context<Self>) {
         self.stop_typing(cx);
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::Thread(root_id);
         }
-        self.clear_pending();
+        self.reload_pending(cx);
         self.rebuild(true, cx);
     }
 
@@ -1619,13 +1715,23 @@ impl ConversationView {
         if let Some(current) = self.current.as_mut() {
             current.mode = ViewMode::ThreadList;
         }
-        self.clear_pending();
+        self.reload_pending(cx);
         self.rebuild(true, cx);
     }
 
     fn send(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        self.send_as(new_outbox_id(), outgoing, window, cx);
+    }
+
+    fn send_as(
+        &mut self,
+        id: String,
+        outgoing: Outgoing,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let state = self.app.read(cx);
-        let (mode, engine) = (state.mode, state.engine.clone());
+        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
         let Some(current) = self.current.as_ref() else {
             return;
         };
@@ -1634,75 +1740,42 @@ impl ConversationView {
             return;
         }
         let Some(engine) = engine else {
+            self.discard_outbox_row(&id, cx);
             self.restore_unsent("Not connected yet: nothing was sent", &outgoing, window, cx);
             return;
         };
         let conversation_id = current.selection.conversation_id().to_owned();
-        let view_mode = current.mode.clone();
-        let key = self.push_pending(&outgoing, cx);
+        let (target, thread_root_id) = self.outbox_route();
+        let created_at = Utc::now();
+        self.push_pending(id.clone(), created_at, &outgoing, cx);
+        if let Some(record) = outbox_record(
+            &id,
+            &conversation_id,
+            target,
+            thread_root_id.as_deref(),
+            &outgoing,
+            created_at,
+        ) {
+            store.put_outbox(&record).ok();
+        }
         self.notice = None;
         self.rebuild(false, cx);
         self.scroller
             .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
 
-        let sent = outgoing.clone();
         let receiver = runtime::spawn(async move {
-            let extras = sent.extras();
-            let html = sent.html();
-            let text = &html;
-            let Outgoing {
-                mentions, reply, ..
-            } = &sent;
-            let record = match (&view_mode, reply) {
-                (_, Some(reply)) => {
-                    engine
-                        .reply_to_with_extras(
-                            &conversation_id,
-                            &reply.message_id,
-                            text,
-                            mentions,
-                            &extras,
-                        )
-                        .await
-                }
-                (ViewMode::Flat, None) => {
-                    engine
-                        .send_message_with_extras(&conversation_id, text, None, mentions, &extras)
-                        .await
-                }
-                (ViewMode::ThreadList, None) => {
-                    engine
-                        .post_to_channel_with_extras(
-                            &conversation_id,
-                            text,
-                            None,
-                            mentions,
-                            &extras,
-                        )
-                        .await
-                }
-                (ViewMode::Thread(root_id), None) => {
-                    engine
-                        .send_message_with_extras(
-                            &conversation_id,
-                            text,
-                            Some(root_id),
-                            mentions,
-                            &extras,
-                        )
-                        .await
-                }
-            }?;
-            if let Some(preview) = &sent.link_preview {
-                let _ = engine
-                    .attach_link_preview(&conversation_id, &record.message_id, preview)
-                    .await;
-            }
-            Ok(())
+            deliver(
+                &engine,
+                &conversation_id,
+                target,
+                thread_root_id.as_deref(),
+                &outgoing,
+            )
+            .await
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = receiver.await;
-            this.update(cx, |this, cx| this.finish_send(&key, result, cx))
+            this.update(cx, |this, cx| this.finish_send(&id, result, cx))
                 .ok();
         })
         .detach();
@@ -1721,78 +1794,33 @@ impl ConversationView {
         cx.notify();
     }
 
-    fn push_pending(&mut self, outgoing: &Outgoing, cx: &App) -> String {
+    fn next_pending_key(&mut self) -> String {
         self.pending_counter += 1;
-        let key = format!("{PENDING_KEY_PREFIX}{}", self.pending_counter);
+        format!("{PENDING_KEY_PREFIX}{}", self.pending_counter)
+    }
+
+    fn push_pending(
+        &mut self,
+        key: String,
+        created_at: DateTime<Utc>,
+        outgoing: &Outgoing,
+        cx: &App,
+    ) {
         let my_user_id = self.row_context(cx).my_user_id;
-        self.pending_outgoing.insert(key.clone(), outgoing.clone());
         let conversation_id = self
             .current
             .as_ref()
             .map(|current| current.selection.conversation_id().to_owned())
             .unwrap_or_default();
-        self.pending.push(MessageRow {
-            key: key.clone(),
+        self.pending.push(pending_row(
+            key.clone(),
             conversation_id,
-            author: "You".to_owned(),
-            sender_id: my_user_id,
-            application_id: None,
-            created_at: Utc::now(),
-            series: Series::default(),
-            card: false,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            day_header: None,
-            blocks: if outgoing.draft.is_blank() && outgoing.images.is_empty() {
-                Vec::new()
-            } else {
-                layout_blocks(&teams_core::html_to_spans(&outgoing.html()))
-            },
-            edited: false,
-            deleted: false,
-            reactions: Vec::new(),
-            images: outgoing
-                .images
-                .iter()
-                .filter_map(|image| match image {
-                    OutgoingImage::Remote(remote) => Some(remote.image_ref()),
-                    OutgoingImage::Inline(_) => None,
-                })
-                .collect(),
-            local_images: outgoing
-                .images
-                .iter()
-                .filter_map(|image| match image {
-                    OutgoingImage::Inline(inline) => Some(LocalImage {
-                        image: inline.image.clone(),
-                        size: inline.dimensions,
-                    }),
-                    OutgoingImage::Remote(_) => None,
-                })
-                .collect(),
-            adaptive_cards: Vec::new(),
-            link_preview: outgoing.link_preview.clone(),
-            files: outgoing
-                .files
-                .iter()
-                .map(|file| FileCard {
-                    name: file.name.clone(),
-                    kind: file.kind,
-                    content_type: None,
-                    size: Some(file.size),
-                    open_url: file.reference.content_url.clone(),
-                })
-                .collect(),
-            reply_count: None,
-            new_marker: false,
-            reply_faces: Vec::new(),
-            last_reply_time: None,
-            open_thread: None,
-            is_reply: false,
-            delivery: Delivery::Sending,
-            receipt: Receipt::Hidden,
-            own: true,
-        });
-        key
+            my_user_id,
+            created_at,
+            outgoing,
+            Delivery::Sending,
+        ));
+        self.pending_outgoing.insert(key, outgoing.clone());
     }
 
     fn send_new_chat(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
@@ -1844,7 +1872,8 @@ impl ConversationView {
         self.pending_outgoing.clear();
         self.draft_error = None;
         self.notice = None;
-        let key = self.push_pending(&outgoing, cx);
+        let key = self.next_pending_key();
+        self.push_pending(key.clone(), Utc::now(), &outgoing, cx);
         self.rebuild(true, cx);
         let recipients_for_finish = user_ids.clone();
         let receiver = runtime::spawn(async move {
@@ -2170,6 +2199,7 @@ impl ConversationView {
         let edit = EditPreview {
             message_id: record.message_id.clone(),
             excerpt: reply_excerpt(&record),
+            scheduled: None,
         };
         let in_chat = matches!(
             self.current.as_ref().map(|current| &current.selection),
@@ -2398,7 +2428,7 @@ impl ConversationView {
         if self.draft_active {
             self.send_new_chat(outgoing, window, cx);
         } else {
-            self.send(outgoing, window, cx);
+            self.send_as(key.to_owned(), outgoing, window, cx);
         }
     }
 
@@ -2413,18 +2443,23 @@ impl ConversationView {
             Ok(Err(error)) => Some(short_error(&error)),
             Err(error) => Some(short_error(&error)),
         };
+        let store = self.app.read(cx).store.clone();
         match failure {
             None => {
+                store.delete_outbox(key).ok();
                 self.pending.retain(|row| row.key != key);
                 self.pending_outgoing.remove(key);
             }
             Some(error) => {
+                store.mark_outbox_failed(key, &error).ok();
                 if let Some(row) = self.pending.iter_mut().find(|row| row.key == key) {
                     row.delivery = Delivery::Failed(error.clone());
                     self.notice = Some(format!("Not sent: {error}"));
                 }
             }
         }
+        self.app
+            .update(cx, |state, cx| state.refresh_local_previews(cx));
         self.rebuild(false, cx);
     }
 
@@ -2705,6 +2740,18 @@ impl Render for ConversationView {
                                     .ok();
                             }) as Box<dyn Fn(&mut App)>
                         });
+                        let scheduled = view.upgrade().and_then(|entity| {
+                            entity
+                                .read(cx)
+                                .scheduled_row_actions(message, &view, window, cx)
+                        });
+                        let delete = matches!(message.delivery, Delivery::Failed(_)).then(|| {
+                            let (view, key) = (view.clone(), message.key.clone());
+                            Box::new(move |cx: &mut App| {
+                                view.update(cx, |this, cx| this.delete_pending(&key, cx))
+                                    .ok();
+                            }) as Box<dyn Fn(&mut App)>
+                        });
                         let senders: Vec<String> = (!message.own && !message.series.has_prev)
                             .then(|| message.sender_id.clone())
                             .flatten()
@@ -2739,7 +2786,9 @@ impl Render for ConversationView {
                                 });
                             });
                         }
-                        let is_real = !drafting && !message.key.starts_with(PENDING_KEY_PREFIX);
+                        let is_real = !drafting
+                            && !message.key.starts_with(PENDING_KEY_PREFIX)
+                            && scheduled.is_none();
                         let hovered = is_real.then(|| {
                             let (view, key) = (view.clone(), message.key.clone());
                             Rc::new(move |hovered: bool, cx: &mut App| {
@@ -2749,6 +2798,18 @@ impl Render for ConversationView {
                                 .ok();
                             }) as Rc<dyn Fn(bool, &mut App)>
                         });
+                        let (delivery, scheduled_menu, hovered) = match scheduled {
+                            Some(actions) => (actions.delivery, actions.menu, Some(actions.hovered)),
+                            None => (
+                                DeliveryActions {
+                                    retry,
+                                    delete,
+                                    send_now: None,
+                                },
+                                None,
+                                hovered,
+                            ),
+                        };
                         let actionable = is_real && !message.deleted && !message.card;
                         let (menu, react, reaction_controls) = view
                             .upgrade()
@@ -2833,10 +2894,11 @@ impl Render for ConversationView {
                             RowActions {
                                 bot,
                                 open_thread,
-                                retry,
+                                delivery,
                                 reply,
                                 hovered,
                                 menu,
+                                scheduled_menu,
                                 react,
                                 reaction_controls,
                                 files,

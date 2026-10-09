@@ -15,6 +15,7 @@ serde_json.workspace = true
 session.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }

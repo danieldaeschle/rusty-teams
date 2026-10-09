@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MentionTarget {
     User { user_id: String },
     Channel { channel_id: String },
@@ -43,7 +44,7 @@ pub struct HostedImage {
 }
 
 /// `attachment_id` is the GUID inside the file's eTag; it matches the `<attachment id>` tag in the html body.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileReference {
     pub attachment_id: String,
     pub content_url: String,

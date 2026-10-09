@@ -1,5 +1,6 @@
 pub mod cards;
 pub mod conversations;
+pub mod drafts;
 mod error;
 pub mod links;
 pub mod gifs;
@@ -14,6 +15,7 @@ pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
 pub use conversations::Conversations;
+pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use error::{Error, Result};
 pub use gifs::{Gif, Gifs};
 pub use mask::mask_conversation_id;

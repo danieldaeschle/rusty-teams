@@ -392,6 +392,10 @@ impl Draft {
         draft
     }
 
+    pub fn to_lines(&self) -> Vec<DraftLine> {
+        self.slice(0..self.text.len())
+    }
+
     pub fn from_markdown(text: &str) -> Draft {
         Draft::from_lines(&markdown_lines(text))
     }
@@ -2044,6 +2048,19 @@ mod tests {
                 kind: MarkKind::Bold
             }]
         );
+    }
+
+    #[test]
+    fn lines_round_trip_through_json_with_formatting() {
+        let mut draft = Draft::plain("bold\nitem\nafter");
+        draft.toggle(0..4, MarkKind::Bold);
+        draft.set_line_kind(1, LineKind::Bullet(0), None, 0);
+        let json = serde_json::to_string(&draft.to_lines()).unwrap();
+        let lines: Vec<DraftLine> = serde_json::from_str(&json).unwrap();
+        let restored = Draft::from_lines(&lines);
+        assert_eq!(restored.text(), draft.text());
+        assert_eq!(restored.to_html(), draft.to_html());
+        assert_eq!(restored.lines(), draft.lines());
     }
 
     fn typed_draft(text: &str) -> Draft {

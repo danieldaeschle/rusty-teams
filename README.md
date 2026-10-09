@@ -15,6 +15,7 @@ It does chats and channels. Calls, meetings and channel tabs are planned (see [R
 - Send, edit, delete, react, quote-reply, @mentions
 - Rich text composer: format bar over a selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code; Markdown converts as you type or paste
 - Composer picker for emoji, GIFs and stickers; GIFs and stickers also show in messages
+- Schedule send: right-click the send button or `Ctrl+Shift+Enter`; Teams delivers the message, text and formatting only
 - Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
 - Link previews: card under messages, preview above the composer that goes out with the message
 - Inline images, file cards, Adaptive Cards (layout, links, images, buttons: submit, execute, show card, toggle; input fields; task dialogs)

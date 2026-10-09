@@ -8,11 +8,15 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 24] = symbols![
+const SYMBOLS: [(&str, &[u8]); 28] = symbols![
     "done",
     "done_all",
     "keyboard_return",
     "schedule",
+    "schedule_send",
+    "event",
+    "wb_sunny",
+    "work",
     "close",
     "reply",
     "group",

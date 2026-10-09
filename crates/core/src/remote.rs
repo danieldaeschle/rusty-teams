@@ -1,6 +1,7 @@
 use chatsvc::{
     CardActions, ChatApp, ConversationRef, Conversations, Gif, Gifs, InvokeRequest, InvokeResponse,
-    LinkInfo, MemberHorizon, MessageLinks, Messages, Receipts,
+    LinkInfo, MemberHorizon, MessageLinks, Messages, Receipts, ScheduledDraft,
+    ScheduledDrafts,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -240,6 +241,33 @@ pub trait Remote {
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
         Err(Error::Unsupported("GIF search"))
+    }
+
+    async fn create_scheduled(
+        &self,
+        _inner_thread_id: &str,
+        _html: &str,
+        _send_at: DateTime<Utc>,
+        _display_name: &str,
+    ) -> Result<ScheduledDraft> {
+        Err(Error::Unsupported("schedule send"))
+    }
+
+    async fn scheduled_drafts(&self) -> Result<Vec<ScheduledDraft>> {
+        Err(Error::Unsupported("schedule send"))
+    }
+
+    async fn update_scheduled(
+        &self,
+        _draft: &ScheduledDraft,
+        _html: &str,
+        _display_name: &str,
+    ) -> Result<ScheduledDraft> {
+        Err(Error::Unsupported("schedule send"))
+    }
+
+    async fn cancel_scheduled(&self, _draft_id: &str) -> Result<()> {
+        Err(Error::Unsupported("schedule send"))
     }
 }
 
@@ -627,6 +655,39 @@ impl Remote for Graph {
 
     async fn search_gifs(&self, query: &str) -> Result<Vec<Gif>> {
         Ok(Gifs::new(self.session()).search(query).await?)
+    }
+
+    async fn create_scheduled(
+        &self,
+        inner_thread_id: &str,
+        html: &str,
+        send_at: DateTime<Utc>,
+        display_name: &str,
+    ) -> Result<ScheduledDraft> {
+        Ok(ScheduledDrafts::new(self.session())
+            .create(inner_thread_id, html, send_at, display_name)
+            .await?)
+    }
+
+    async fn scheduled_drafts(&self) -> Result<Vec<ScheduledDraft>> {
+        Ok(ScheduledDrafts::new(self.session()).list().await?)
+    }
+
+    async fn update_scheduled(
+        &self,
+        draft: &ScheduledDraft,
+        html: &str,
+        display_name: &str,
+    ) -> Result<ScheduledDraft> {
+        Ok(ScheduledDrafts::new(self.session())
+            .update(draft, html, display_name)
+            .await?)
+    }
+
+    async fn cancel_scheduled(&self, draft_id: &str) -> Result<()> {
+        Ok(ScheduledDrafts::new(self.session())
+            .cancel(draft_id)
+            .await?)
     }
 }
 

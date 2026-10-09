@@ -7,6 +7,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use serde::{Deserialize, Serialize};
 use teams_core::{FileKind, FileReference, UploadedFile};
 
 use super::attachments::file_badge;
@@ -239,7 +240,7 @@ pub enum OutgoingImage {
     Remote(RemoteImage),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutgoingFile {
     pub name: String,
     pub size: u64,

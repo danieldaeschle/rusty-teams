@@ -44,7 +44,7 @@ fn element_id(prefix: &str, key: &str) -> ElementId {
     ElementId::Name(format!("{prefix}-{key}").into())
 }
 
-fn bar_button(id: ElementId) -> Stateful<Div> {
+pub(super) fn bar_button(id: ElementId) -> Stateful<Div> {
     div()
         .id(id)
         .size(px(BAR_BUTTON))

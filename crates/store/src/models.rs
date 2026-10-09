@@ -168,3 +168,83 @@ pub struct ActivityRecord {
     pub updated_at: DateTime<Utc>,
     pub read: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentImage {
+    pub name: String,
+    pub format: String,
+    pub bytes: Vec<u8>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxTarget {
+    Flat,
+    Post,
+    Thread,
+}
+
+impl OutboxTarget {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            OutboxTarget::Flat => "flat",
+            OutboxTarget::Post => "post",
+            OutboxTarget::Thread => "thread",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "flat" => Some(OutboxTarget::Flat),
+            "post" => Some(OutboxTarget::Post),
+            "thread" => Some(OutboxTarget::Thread),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxState {
+    Sending,
+    Failed,
+}
+
+impl OutboxState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            OutboxState::Sending => "sending",
+            OutboxState::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "sending" => Some(OutboxState::Sending),
+            "failed" => Some(OutboxState::Failed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub target: OutboxTarget,
+    pub thread_root_id: Option<String>,
+    pub payload: String,
+    pub images: Vec<AttachmentImage>,
+    pub state: OutboxState,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftRecord {
+    pub conversation_id: String,
+    pub payload: String,
+    pub preview: String,
+    pub images: Vec<AttachmentImage>,
+    pub updated_at: DateTime<Utc>,
+}
