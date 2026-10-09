@@ -3,7 +3,7 @@
 A fast native Microsoft Teams chat client written in Rust with [GPUI](https://www.gpui.rs/).
 It does chats and channels. Calls, meetings and channel tabs are planned (see [ROADMAP.md](ROADMAP.md)).
 
-![Rusty Teams with demo data](docs/screenshots/app-demo.png)
+![Rusty Teams with demo data](.github/app-demo.png)
 
 > Unofficial. Not affiliated with or endorsed by Microsoft. It uses the same web APIs as the Teams web app, which can change at any time.
 
@@ -94,16 +94,14 @@ It signs you in through a real Teams web page and lets that page make the API ca
 |---|---|
 | Demo data, no account | `cargo run -p app -- --demo` |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
-| Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams`, see [docs/build-windows.md](docs/build-windows.md) |
+| Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
 | Tests | `cargo test` |
 | Screenshot without a desktop (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 
 ## Docs
 
 - [ROADMAP.md](ROADMAP.md) - open and finished features by priority
-- [docs/research](docs/research) - how Teams does realtime, pins, read receipts and edits
-- [docs/design](docs/design) - mockups
-- [docs/build-windows.md](docs/build-windows.md) - cross-compiling without admin rights
+- `docs/` - local research notes and mockups, not in git
 
 ## License
 
