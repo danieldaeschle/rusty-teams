@@ -4,7 +4,7 @@
 
 # Rusty Teams
 
-**A fast, native Microsoft Teams chat client. Written in Rust, rendered on the GPU.**
+**A fast, native Microsoft Teams chat client. Written in Rust, rendered on the GPU. No admin approval needed.**
 
 [![Rust](https://img.shields.io/badge/Rust-2024-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-c4642d)](https://www.gpui.rs/)
@@ -24,6 +24,7 @@
 
 | | Rusty Teams |
 |---|---|
+| 🏢 Works in company tenants | No app registration, no admin consent: it runs on the Teams web app your account may already use |
 | ⚡ Starts instantly | Renders from a local SQLite cache before the network answers |
 | 🔒 No tokens stored | Signs in through a real Teams web page; tokens never leave it |
 | 📡 Live, no polling | Realtime socket pushes every change |
