@@ -46,7 +46,7 @@ use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
     has_own_reaction, message_draft, message_text, placeholder_rows, reaction_glyph, reply_excerpt,
-    set_own_reaction, thread_list_rows, thread_rows, trailing_skeleton,
+    set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, Face};
@@ -64,7 +64,6 @@ const JUMP_SCAN_LIMIT: usize = 5000;
 const JUMP_CONTEXT_MESSAGES: usize = 12;
 const HIGHLIGHT_DURATION: Duration = Duration::from_secs(2);
 const PROGRESS_DELAY: Duration = Duration::from_millis(400);
-const SKELETON_DELAY: Duration = Duration::from_millis(1000);
 const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
 const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
@@ -96,7 +95,6 @@ struct SyncProgress {
     empty_cache: bool,
     newest_cached: Option<DateTime<Utc>>,
     shown_at: Option<Instant>,
-    trailing_skeleton: bool,
     slow: bool,
     failed: bool,
 }
@@ -1174,7 +1172,6 @@ impl ConversationView {
         let placeholders = current.sync.messages
             && records.is_empty()
             && !matches!(current.mode, ViewMode::Thread(_));
-        let trailing = current.sync.trailing_skeleton && current.mode == ViewMode::Flat;
         let mut rows = match &current.mode {
             _ if placeholders => {
                 current.has_older = false;
@@ -1197,9 +1194,6 @@ impl ConversationView {
                 thread_rows(&records, root_id, &context)
             }
         };
-        if trailing && !placeholders {
-            rows.push(trailing_skeleton());
-        }
         rows.extend(
             self.pending
                 .iter()
@@ -1352,8 +1346,7 @@ impl ConversationView {
         cx.spawn(async move |this, cx| {
             let stages = [
                 (PROGRESS_DELAY, Duration::ZERO),
-                (SKELETON_DELAY, PROGRESS_DELAY),
-                (SLOW_AFTER, SKELETON_DELAY),
+                (SLOW_AFTER, PROGRESS_DELAY),
             ];
             for (stage, (at, previous)) in stages.into_iter().enumerate() {
                 cx.background_executor().timer(at - previous).await;
@@ -1377,11 +1370,6 @@ impl ConversationView {
         }
         match stage {
             0 => sync.shown_at = Some(Instant::now()),
-            1 if sync.messages => {
-                sync.trailing_skeleton = true;
-                self.rebuild(false, cx);
-            }
-            1 => {}
             _ => sync.slow = true,
         }
         cx.notify();
@@ -1401,7 +1389,6 @@ impl ConversationView {
             return;
         };
         sync.messages = false;
-        sync.trailing_skeleton = false;
         let newest_cached = sync.newest_cached;
         match result {
             Ok(Ok(_)) => self.mark_fetched_new(newest_cached, cx),

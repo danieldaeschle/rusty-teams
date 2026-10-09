@@ -174,13 +174,6 @@ pub struct Skeleton {
     pub lines: u8,
 }
 
-const SKELETON_TRAILING: Skeleton = Skeleton {
-    key: "skeleton-trailing",
-    own: false,
-    width_ratio: 0.32,
-    lines: 1,
-};
-
 const SKELETON_PLACEHOLDERS: [Skeleton; 4] = [
     Skeleton {
         key: "skeleton-0",
@@ -213,10 +206,6 @@ pub fn placeholder_rows() -> Vec<Row> {
         .into_iter()
         .map(Row::Skeleton)
         .collect()
-}
-
-pub fn trailing_skeleton() -> Row {
-    Row::Skeleton(SKELETON_TRAILING)
 }
 
 fn sender_key(row: &MessageRow) -> &str {
