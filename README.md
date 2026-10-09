@@ -1,38 +1,85 @@
+<div align="center">
+
+<img src="crates/app/assets/icon/teams-fast-256.png" alt="Rusty Teams logo" width="112">
+
 # Rusty Teams
 
-A fast native Microsoft Teams chat client written in Rust with [GPUI](https://www.gpui.rs/).
-It does chats and channels. Calls, meetings and channel tabs are planned (see [ROADMAP.md](ROADMAP.md)).
+**A fast, native Microsoft Teams chat client. Written in Rust, rendered on the GPU.**
 
-![Rusty Teams with demo data](.github/app-demo.png)
+[![Rust](https://img.shields.io/badge/Rust-2024-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![GPUI](https://img.shields.io/badge/UI-GPUI-c4642d)](https://www.gpui.rs/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3b3b3b)](#status)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea043)](LICENSE)
 
+[Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Roadmap](ROADMAP.md)
+
+<img src=".github/app-demo.png" alt="Rusty Teams with demo data" width="900">
+
+</div>
+
+> [!NOTE]
 > Unofficial. Not affiliated with or endorsed by Microsoft. It uses the same web APIs as the Teams web app, which can change at any time.
+
+## Why
+
+| | Rusty Teams |
+|---|---|
+| ⚡ Starts instantly | Renders from a local SQLite cache before the network answers |
+| 🔒 No tokens stored | Signs in through a real Teams web page; tokens never leave it |
+| 📡 Live, no polling | Realtime socket pushes every change |
+| 🔎 Offline search | Full-text index over your chats, `Ctrl+K` switcher |
 
 ## Features
 
-- Chats and channels, with the Teams pin order, chat folders and hidden teams
+**Chats and channels**
+- Teams pin order, chat folders, hidden teams
 - Chat menu: pin, move to folder, mark as unread, mute, hide, leave
-- Live updates over the Teams realtime socket, no polling
+- Read receipts, typing indicator with faces, presence, unread jump
+- Activity bell: new messages, @mentions and reactions, kept for 14 days
+
+**Messages**
 - Send, edit, delete, react, quote-reply, @mentions
-- Rich text composer: format bar over a selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code; Markdown converts as you type or paste
-- Composer picker for emoji, GIFs and stickers; GIFs and stickers also show in messages
-- Schedule send: right-click the send button or `Ctrl+Shift+Enter`; Teams delivers the message, text and formatting only
-- Emoji by `:` code with English codes and German aliases, `:thumbsup:` and `:)` convert as you type
-- Link previews: card under messages, preview above the composer that goes out with the message
-- Inline images, file cards, Adaptive Cards (layout, links, images, buttons: submit, execute, show card, toggle; input fields; task dialogs)
-- Read receipts, typing indicator (shown and sent), presence (last known status shown at start), unread jump
-- Select and copy message text, `Ctrl+A` in the composer
-- Local full-text search and a `Ctrl+K` switcher, served from the cache
-- Activity bell: feed of new messages, @mentions and reactions to your messages, kept for 14 days
-- Dark theme, opens instantly from the local cache
+- Inline images, file cards, link previews
+- Adaptive Cards: layout, links, images, buttons, inputs, task dialogs
+- GIFs and stickers in messages
+- Select and copy message text
+
+**Composer**
+- Rich text: format bar on selection, `Ctrl+B` / `Ctrl+I` / `Ctrl+U`, lists, quotes, code
+- Markdown converts as you type or paste
+- Picker with Emoji, GIF and Sticker tabs
+- `:thumbsup:` and `:)` convert as you type, German aliases included
+- Schedule send: right-click send or `Ctrl+Shift+Enter`
+- Drafts and unsent messages survive a restart
+
+**App**
+- Dark theme, opens instantly from the cache
 - Self-update from an update folder
-- Single instance: a second start brings the running window to the front
+- Single instance: a second start brings the window to the front
 
 ## Status
 
 | Platform | State |
 |---|---|
-| Windows | Main target. Login through an embedded WebView2 |
-| Linux | Connects to a Chrome you start with `--remote-debugging-port=9222`. Built-in login is planned |
+| 🪟 Windows | Main target. Login through an embedded WebView2 |
+| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222`. Built-in login is planned |
+
+Calls, meetings and channel tabs are planned, see [ROADMAP.md](ROADMAP.md).
+
+## Quick start
+
+Try it with demo data, no account needed:
+
+```bash
+cargo run -p app -- --demo
+```
+
+| Task | Command |
+|---|---|
+| Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
+| Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
+| Tests | `cargo test` |
+| Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 
 ## How it works
 
@@ -57,14 +104,18 @@ It signs you in through a real Teams web page and lets that page make the API ca
                Graph  |  chat service (ic3)  |  presence  |  Trouter socket
 ```
 
-### Sign-in and tokens
+<details>
+<summary><b>Sign-in and tokens</b></summary>
 
 1. A hidden browser page loads Teams web with its own profile. On Windows this is WebView2, so single sign-on with the Windows account usually just works.
 2. If Teams asks for a login, the login window shows itself. After that the page stays parked in the background.
 3. Every API call is sent to that page over CDP. A small script (`crates/session/assets/fetch.js`) picks the matching token from the page's MSAL cache, refreshes it when needed, and runs the `fetch`.
 4. Only the response goes back to Rust. Tokens never leave the page.
 
-### Data flow
+</details>
+
+<details>
+<summary><b>Data flow</b></summary>
 
 | Step | What happens |
 |---|---|
@@ -74,7 +125,10 @@ It signs you in through a real Teams web page and lets that page make the API ca
 | Write | Sends, edits and reactions go out through Graph or the chat service, then the cache updates |
 | Search | Local FTS5 index over cached messages, no server round trip |
 
-### Crates
+</details>
+
+<details>
+<summary><b>Crates</b></summary>
 
 | Crate | Job |
 |---|---|
@@ -88,15 +142,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 | `browser` | Chrome lifecycle and watchdog for the CDP transport |
 | `cli` | `teams-probe`, a read-only end-to-end check |
 
-## Build and run
-
-| Task | Command |
-|---|---|
-| Demo data, no account | `cargo run -p app -- --demo` |
-| Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
-| Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
-| Tests | `cargo test` |
-| Screenshot without a desktop (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
+</details>
 
 ## Docs
 
