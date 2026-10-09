@@ -1,0 +1,221 @@
+{
+  "commandId": "com.microsoft.teamspace.inputextension.giphy",
+  "parameters": [
+    {
+      "name": "query",
+      "value": "thumbs up"
+    },
+    {
+      "name": "rating",
+      "value": "g"
+    },
+    {
+      "name": "limit",
+      "value": "3"
+    },
+    {
+      "name": "lang",
+      "value": "de"
+    }
+  ],
+  "result": [
+    {
+      "result": [
+        {
+          "composeType": "Image",
+          "composeValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BYoRqTmcgzHcL9TCy1/giphy.gif",
+          "fieldValues": [
+            {
+              "fieldName": "title",
+              "fieldValue": "Baby Thank You GIF"
+            },
+            {
+              "fieldName": "image",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BYoRqTmcgzHcL9TCy1/giphy.gif"
+            },
+            {
+              "fieldName": "previewImage",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BYoRqTmcgzHcL9TCy1/giphy-preview.gif"
+            },
+            {
+              "fieldName": "previewImageFW",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BYoRqTmcgzHcL9TCy1/200w.gif"
+            },
+            {
+              "fieldName": "previewImageFH",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/BYoRqTmcgzHcL9TCy1/200.gif"
+            },
+            {
+              "fieldName": "width",
+              "fieldValue": "358"
+            },
+            {
+              "fieldName": "height",
+              "fieldValue": "360"
+            },
+            {
+              "fieldName": "previewImageWidth",
+              "fieldValue": "100"
+            },
+            {
+              "fieldName": "previewImageHeight",
+              "fieldValue": "100"
+            },
+            {
+              "fieldName": "previewImageFWWidth",
+              "fieldValue": "200"
+            },
+            {
+              "fieldName": "previewImageFWHeight",
+              "fieldValue": "202"
+            },
+            {
+              "fieldName": "previewImageFHWidth",
+              "fieldValue": "198"
+            },
+            {
+              "fieldName": "previewImageFHHeight",
+              "fieldValue": "200"
+            }
+          ]
+        },
+        {
+          "composeType": "Image",
+          "composeValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JwjBy94VzDd6/giphy.gif",
+          "fieldValues": [
+            {
+              "fieldName": "title",
+              "fieldValue": "No Problem Yes GIF by Vevo"
+            },
+            {
+              "fieldName": "image",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JwjBy94VzDd6/giphy.gif"
+            },
+            {
+              "fieldName": "previewImage",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JwjBy94VzDd6/giphy-preview.gif"
+            },
+            {
+              "fieldName": "previewImageFW",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JwjBy94VzDd6/200w.gif"
+            },
+            {
+              "fieldName": "previewImageFH",
+              "fieldValue": "https://media0.giphy.com/media/v1.Y2lkPWZjZGU1NDk1bXBhdnhsemhvaDlkMXI0ODI2eWt1dHFhNnpxM2J2cWZuZ3RwMWY3dyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/JwjBy94VzDd6/200.gif"
+            },
+            {
+              "fieldName": "width",
+              "fieldValue": "141"
+            },
+            {
+              "fieldName": "height",
+              "fieldValue": "141"
+            },
+            {
+              "fieldName": "previewImageWidth",
+              "fieldValue": "100"
+            },
+            {
+              "fieldName": "previewImageHeight",
+              "fieldValue": "100"
+            },
+            {
+              "fieldName": "previewImageFWWidth",
+              "fieldValue": "200"
+            },
+            {
+              "fieldName": "previewImageFWHeight",
+              "fieldValue": "200"
+            },
+            {
+              "fieldName": "previewImageFHWidth",
+              "fieldValue": "200"
+            },
+            {
+              "fieldName": "previewImageFHHeight",
+              "fieldValue": "200"
+            }
+          ]
+        }
+      ],
+      "templateType": "Grid"
+    }
+  ],
+  "schema": {
+    "composeType": "Image",
+    "composeValueSelector": "images.original.url",
+    "isCollection": true,
+    "resultSelector": "data",
+    "supportedTemplates": [
+      {
+        "fields": [
+          {
+            "name": "title",
+            "value": "title"
+          },
+          {
+            "isRequired": true,
+            "name": "image",
+            "value": "images.original.url"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImage",
+            "value": "images.preview_gif.url"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFW",
+            "value": "images.fixed_width.url"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFH",
+            "value": "images.fixed_height.url"
+          },
+          {
+            "isRequired": true,
+            "name": "width",
+            "value": "images.original.width"
+          },
+          {
+            "isRequired": true,
+            "name": "height",
+            "value": "images.original.height"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageWidth",
+            "value": "images.preview_gif.width"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageHeight",
+            "value": "images.preview_gif.height"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFWWidth",
+            "value": "images.fixed_width.width"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFWHeight",
+            "value": "images.fixed_width.height"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFHWidth",
+            "value": "images.fixed_height.width"
+          },
+          {
+            "isRequired": true,
+            "name": "previewImageFHHeight",
+            "value": "images.fixed_height.height"
+          }
+        ],
+        "type": "Grid"
+      }
+    ]
+  }
+}

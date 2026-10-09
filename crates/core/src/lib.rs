@@ -8,8 +8,10 @@ mod download;
 mod draft;
 mod engine;
 mod error;
+mod external_image;
 mod events;
 mod folders;
+mod gifs;
 mod image_size;
 mod images;
 mod link_sync;
@@ -40,7 +42,7 @@ pub use card_inputs::{
     MomentInput, NumberInput, TIME_PLACEHOLDER, TextInput, TextStyle, ToggleInput,
     collect_input_values, merge_input_data,
 };
-pub use chatsvc::ChatApp;
+pub use chatsvc::{ChatApp, Gif};
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -53,6 +55,7 @@ pub use graph::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, SharedFile,
     UploadedFile,
 };
+pub use external_image::external_image_url;
 pub use images::StoredImage;
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview};
 pub use mapping::{chat_record, message_record};

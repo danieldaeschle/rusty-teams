@@ -19,6 +19,7 @@ use store::MessageRecord;
 use teams_core::{FileCard, ImageRef, LinkPreview};
 
 use super::adaptive_card::ensure_cards_inputs;
+use super::attachment_tray::OutgoingImage;
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
@@ -1749,13 +1750,23 @@ impl ConversationView {
             edited: false,
             deleted: false,
             reactions: Vec::new(),
-            images: Vec::new(),
+            images: outgoing
+                .images
+                .iter()
+                .filter_map(|image| match image {
+                    OutgoingImage::Remote(remote) => Some(remote.image_ref()),
+                    OutgoingImage::Inline(_) => None,
+                })
+                .collect(),
             local_images: outgoing
                 .images
                 .iter()
-                .map(|image| LocalImage {
-                    image: image.image.clone(),
-                    size: image.dimensions,
+                .filter_map(|image| match image {
+                    OutgoingImage::Inline(inline) => Some(LocalImage {
+                        image: inline.image.clone(),
+                        size: inline.dimensions,
+                    }),
+                    OutgoingImage::Remote(_) => None,
                 })
                 .collect(),
             adaptive_cards: Vec::new(),

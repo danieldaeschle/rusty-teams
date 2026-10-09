@@ -82,6 +82,7 @@ struct Fake {
     presence_answers: Mutex<Vec<Presence>>,
     presence_subscriptions: Mutex<Vec<(String, Vec<String>, bool)>>,
     hosted_requests: Mutex<Vec<String>>,
+    external_requests: Mutex<Vec<String>>,
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
     extras_sent: Mutex<Vec<MessageExtras>>,
     folder_requests: Mutex<usize>,
@@ -575,6 +576,11 @@ impl Remote for Handle {
     async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
         self.record(format!("share {} {}", file.item_id, user_ids.join(",")));
         Ok(())
+    }
+
+    async fn external_image(&self, url: &str) -> Result<Photo> {
+        self.external_requests.lock().unwrap().push(url.to_owned());
+        self.hosted_content(url).await
     }
 
     async fn hosted_content(&self, url: &str) -> Result<Photo> {
@@ -2211,6 +2217,25 @@ async fn images_are_fetched_once_cached_and_announced() {
     let stored = engine.image(found[0].key()).unwrap();
     assert_eq!(stored.content_type, "image/png");
     assert_eq!((stored.width, stored.height), (Some(40), Some(20)));
+}
+
+#[tokio::test]
+async fn gif_and_sticker_images_load_without_graph_and_keep_their_cache_key() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let proxied = "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/content?url=https%3a%2f%2fstatics.teams.cdn.office.net%2fx%2fa.png";
+    let image = teams_core::ImageRef {
+        id: "x".to_owned(),
+        url: proxied.to_owned(),
+        width: None,
+        height: None,
+    };
+    engine.fetch_image(&image).await.unwrap();
+    assert_eq!(
+        *fake.external_requests.lock().unwrap(),
+        ["https://statics.teams.cdn.office.net/x/a.png"]
+    );
+    assert!(engine.image(proxied).is_some());
 }
 
 #[tokio::test]

@@ -8,12 +8,15 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, h_flex,
+    ActiveTheme as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
     input::{
         Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, InlineToken, InputContent,
         InputEvent, InputState, MoveDown, MoveUp, OutdentInline, RangeDecorationCollection, Redo,
         TextDecorationCollection, Textarea, TextareaMode, TextareaState, Undo,
     },
+    popover::Popover,
     tooltip::Tooltip,
     v_flex,
 };
@@ -35,9 +38,11 @@ use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
 use super::format_toolbar::{self, FormatButton};
 use super::link_preview::{ComposeLink, draft_link, link_preview_card};
+use super::fun_picker::{FunPicker, FunPickerEvent};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
+use crate::remote_image::RemoteImage;
 use crate::runtime;
 use crate::theme;
 use crate::typing::OutgoingTyping;
@@ -127,15 +132,20 @@ impl Outgoing {
     /// The body before mentions become `<at>` tags.
     pub fn html(&self) -> String {
         let mut html = String::new();
-        let mut placed = 0;
+        let mut objects = self.images.iter();
+        let mut uploaded = 0;
         for character in self.draft.to_html().chars() {
             if character != OBJECT_MARK {
                 html.push(character);
                 continue;
             }
-            placed += 1;
-            if placed <= self.images.len() {
-                html.push_str(&format!("<img src=\"../hostedContents/{placed}/$value\">"));
+            match objects.next() {
+                Some(OutgoingImage::Inline(_)) => {
+                    uploaded += 1;
+                    html.push_str(&format!("<img src=\"../hostedContents/{uploaded}/$value\">"));
+                }
+                Some(OutgoingImage::Remote(remote)) => html.push_str(&remote.html()),
+                None => {}
             }
         }
         html
@@ -151,9 +161,12 @@ impl Outgoing {
             images: self
                 .images
                 .iter()
-                .map(|outgoing| HostedImage {
-                    content_type: outgoing.image.format.mime_type().to_owned(),
-                    bytes: Arc::new(outgoing.image.bytes.clone()),
+                .filter_map(|outgoing| match outgoing {
+                    OutgoingImage::Inline(inline) => Some(HostedImage {
+                        content_type: inline.image.format.mime_type().to_owned(),
+                        bytes: Arc::new(inline.image.bytes.clone()),
+                    }),
+                    OutgoingImage::Remote(_) => None,
                 })
                 .collect(),
             files: self
@@ -268,7 +281,8 @@ pub struct Composer {
     carry_images_into: Option<String>,
     pending_anchors: HashMap<u64, usize>,
     link: ComposeLink,
-    _subscriptions: [Subscription; 3],
+    fun_picker: Entity<FunPicker>,
+    _subscriptions: [Subscription; 4],
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -410,6 +424,8 @@ impl Composer {
                 cx.notify();
             }
         });
+        let fun_picker = cx.new(|cx| FunPicker::new(app.clone(), window, cx));
+        let picker_subscription = cx.subscribe_in(&fun_picker, window, Self::on_fun_pick);
         let decorations = input.update(cx, |state, cx| {
             (
                 state.create_decorations_collection(Vec::new(), cx),
@@ -457,7 +473,8 @@ impl Composer {
             carry_images_into: None,
             pending_anchors: HashMap::new(),
             link: ComposeLink::default(),
-            _subscriptions: [subscription, observer, image_observer],
+            fun_picker,
+            _subscriptions: [subscription, observer, image_observer, picker_subscription],
         }
     }
 
@@ -1699,8 +1716,9 @@ impl Composer {
         cx.notify();
     }
 
-    fn add_pending(&mut self, names: &[String], cx: &App) -> Vec<u64> {
-        if self.tray.items().len() + names.len() > MAX_ATTACHMENTS {
+    /// Images that no longer sit in the text give way to new attachments.
+    fn make_room(&mut self, needed: usize, cx: &App) {
+        if self.tray.items().len() + needed > MAX_ATTACHMENTS {
             let referenced: Vec<u64> = self
                 .input
                 .read(cx)
@@ -1710,6 +1728,10 @@ impl Composer {
                 .collect();
             self.tray.discard_images_except(&referenced);
         }
+    }
+
+    fn add_pending(&mut self, names: &[String], cx: &App) -> Vec<u64> {
+        self.make_room(names.len(), cx);
         let ids = self.tray.add_pending(names);
         let anchor = self.selection(cx).end;
         self.pending_anchors
@@ -1734,6 +1756,41 @@ impl Composer {
             .ok();
         })
         .detach();
+    }
+
+    fn on_fun_pick(
+        &mut self,
+        _: &Entity<FunPicker>,
+        event: &FunPickerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            FunPickerEvent::Emoji(glyph) => self.insert_emoji(glyph, window, cx),
+            FunPickerEvent::Image(image) => self.insert_remote_image(image.clone(), window, cx),
+        }
+    }
+
+    fn insert_emoji(&mut self, glyph: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let range = self.selection(cx);
+        let cursor = range.end;
+        self.replace_text(range, glyph, cursor, window, cx);
+        self.remember_emoji(glyph, cx);
+        cx.notify();
+    }
+
+    fn insert_remote_image(
+        &mut self,
+        image: RemoteImage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.make_room(1, cx);
+        if let Some(id) = self.tray.add_remote(image) {
+            self.insert_image_token(id, window, cx);
+        }
+        self.focus(window, cx);
+        cx.notify();
     }
 
     fn paste(&mut self, item: &ClipboardItem, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -2348,6 +2405,31 @@ impl Render for Composer {
                     .hover(|button| button.bg(white().opacity(0.1)))
                     .on_click(cx.listener(|this, _, window, cx| this.submit_current(window, cx)))
             });
+        let fun = can_attach.then(|| {
+            let picker = self.fun_picker.clone();
+            let reset_picker = self.fun_picker.clone();
+            Popover::new("composer-fun-popover")
+                .anchor(Anchor::BottomLeft)
+                .offset(px(10.))
+                .p_0()
+                .trigger(
+                    Button::new("composer-fun")
+                        .ghost()
+                        .size(px(32.))
+                        .tooltip("Emoji, GIFs und Sticker")
+                        .child(symbol("mood", 20., theme::text_muted())),
+                )
+                .on_open_change(move |open, window, cx| {
+                    if *open {
+                        reset_picker.update(cx, |picker, cx| picker.reset(window, cx));
+                    }
+                })
+                .content(move |_, _, cx| {
+                    let popover = cx.entity().downgrade();
+                    picker.update(cx, |picker, _| picker.set_popover(popover));
+                    picker.clone()
+                })
+        });
         let attach = can_attach.then(|| {
             div()
                 .id("composer-attach")
@@ -2613,6 +2695,7 @@ impl Render for Composer {
                                     .py(px(6.))
                                     .pl(px(if can_attach { 6. } else { 12. }))
                                     .pr(px(6.))
+                                    .children(fun)
                                     .children(attach)
                                     .child(
                                         div()
@@ -2725,6 +2808,7 @@ mod tests {
         use gpui_kit::{Image, ImageFormat};
         use teams_core::FileKind;
 
+        use super::super::attachment_tray::InlineImage;
         use super::{Outgoing, OutgoingFile, OutgoingImage};
 
         let outgoing = Outgoing {
@@ -2733,11 +2817,11 @@ mod tests {
             link_preview: None,
             reply: None,
             edit: None,
-            images: vec![OutgoingImage {
+            images: vec![OutgoingImage::Inline(InlineImage {
                 name: "pasted-image.png".into(),
                 image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![1, 2, 3])),
                 dimensions: Some((1, 1)),
-            }],
+            })],
             files: vec![OutgoingFile {
                 name: "plan.pdf".into(),
                 size: 9,
@@ -2762,11 +2846,21 @@ mod tests {
 
         use gpui_kit::{Image, ImageFormat};
 
-        super::OutgoingImage {
+        super::OutgoingImage::Inline(super::super::attachment_tray::InlineImage {
             name: "pasted-image.png".into(),
             image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![width as u8])),
             dimensions: Some((width, width)),
-        }
+        })
+    }
+
+    fn remote_gif(title: &str) -> super::OutgoingImage {
+        super::OutgoingImage::Remote(super::RemoteImage {
+            kind: crate::remote_image::RemoteKind::Gif,
+            url: "https://media0.giphy.com/media/a/giphy.gif".into(),
+            title: title.into(),
+            width: 200,
+            height: 100,
+        })
     }
 
     fn outgoing_with(text: &str, images: Vec<super::OutgoingImage>) -> super::Outgoing {
@@ -2798,6 +2892,33 @@ mod tests {
             outgoing.html(),
             "<img src=\"../hostedContents/1/$value\">x<img src=\"../hostedContents/2/$value\">"
         );
+    }
+
+    #[test]
+    fn gifs_sit_in_place_and_only_uploaded_images_are_numbered() {
+        let outgoing = outgoing_with(
+            "\u{FFFC}a\u{FFFC}b\u{FFFC}",
+            vec![placed_image(2), remote_gif("Wave"), placed_image(4)],
+        );
+        assert_eq!(
+            outgoing.html(),
+            "<img src=\"../hostedContents/1/$value\">a<img src=\"https://media0.giphy.com/media/a/giphy.gif\" width=\"200\" height=\"100\" alt=\"Wave\" itemtype=\"http://schema.skype.com/Giphy\">b<img src=\"../hostedContents/2/$value\">"
+        );
+        assert_eq!(outgoing.extras().images.len(), 2);
+    }
+
+    #[test]
+    fn a_gif_title_is_escaped_in_the_html() {
+        let outgoing = outgoing_with("\u{FFFC}", vec![remote_gif("a \"b\" <c>")]);
+        assert!(outgoing.html().contains("alt=\"a &quot;b&quot; &lt;c&gt;\""));
+    }
+
+    #[test]
+    fn a_sticker_carries_the_sticker_itemtype() {
+        let sticker = super::RemoteImage::sticker(crate::stickers::popular()[0]);
+        let outgoing = outgoing_with("\u{FFFC}", vec![super::OutgoingImage::Remote(sticker)]);
+        assert!(outgoing.html().contains("itemtype=\"http://schema.skype.com/Sticker\""));
+        assert!(outgoing.html().contains("width=\"250\" height=\"250\""));
     }
 
     #[test]
@@ -3059,7 +3180,10 @@ mod tests {
             let dimensions: Vec<_> = outgoing
                 .images
                 .iter()
-                .map(|image| image.dimensions)
+                .map(|image| match image {
+                    super::super::OutgoingImage::Inline(inline) => inline.dimensions,
+                    super::super::OutgoingImage::Remote(_) => None,
+                })
                 .collect();
             assert_eq!(dimensions, [Some((4, 4)), Some((2, 2))]);
             assert_eq!(
@@ -3081,6 +3205,50 @@ mod tests {
             typist.press("ctrl-a ctrl-c");
             let copied = typist.cx.read_from_clipboard().and_then(|item| item.text());
             assert_eq!(copied.as_deref(), Some("hi"));
+        }
+
+        #[gpui_kit::test]
+        fn an_inserted_gif_alone_can_be_sent_and_undo_removes_it(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            assert!(!typist.cx.update(|cx| composer.read(cx).can_send(cx)));
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.insert_remote_image(
+                        super::super::RemoteImage {
+                            kind: crate::remote_image::RemoteKind::Gif,
+                            url: "https://media0.giphy.com/media/a/giphy.gif".into(),
+                            title: "Wave".into(),
+                            width: 200,
+                            height: 100,
+                        },
+                        window,
+                        cx,
+                    )
+                });
+            });
+            assert!(typist.cx.update(|cx| composer.read(cx).can_send(cx)));
+            assert_eq!(typist.value(), "\u{FFFC}");
+            let outgoing = typist.outgoing();
+            assert!(outgoing.html().starts_with("<img src=\"https://media0.giphy.com/"));
+            assert!(outgoing.extras().images.is_empty());
+            typist.press("ctrl-z");
+            assert_eq!(typist.value(), "");
+            assert!(!typist.cx.update(|cx| composer.read(cx).can_send(cx)));
+        }
+
+        #[gpui_kit::test]
+        fn an_inserted_emoji_lands_at_the_cursor(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("ab");
+            typist.press("left");
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.insert_emoji("\u{1F44D}", window, cx)
+                });
+            });
+            assert_eq!(typist.value(), "a\u{1F44D}b");
         }
 
         #[gpui_kit::test]

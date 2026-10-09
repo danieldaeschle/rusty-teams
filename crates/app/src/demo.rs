@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
@@ -9,7 +9,7 @@ use store::{
     TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    CardActionOutcome, ChatApp, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
+    CardActionOutcome, ChatApp, Gif, LinkPreview, MentionCandidate, PersonCandidate, PersonSource,
     TaskDialog,
     TaskDialogKind,
 };
@@ -18,6 +18,9 @@ use crate::activity::{Actor, Entry, Kind};
 use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
+use crate::demo_gifs;
+
+static SEARCHABLE_GIFS: OnceLock<Vec<Gif>> = OnceLock::new();
 
 pub const DEMO_USER_ID: &str = "demo-me";
 const DEMO_USER_NAME: &str = "Dana Demo";
@@ -424,6 +427,17 @@ fn image_directory() -> PathBuf {
     std::env::temp_dir().join("rusty-teams-demo")
 }
 
+pub fn search_gifs(query: &str) -> Vec<Gif> {
+    let query = query.trim().to_lowercase();
+    SEARCHABLE_GIFS
+        .get()
+        .into_iter()
+        .flatten()
+        .filter(|gif| gif.title.to_lowercase().contains(&query))
+        .cloned()
+        .collect()
+}
+
 pub fn first_unread(conversation_id: &str) -> Option<String> {
     (conversation_id == UNREAD_CHAT).then(|| "u3".to_owned())
 }
@@ -655,6 +669,11 @@ pub fn seed_directory(state: &mut AppState) {
             state.directory.set_image(STAGING_IMAGE_KEY, &path);
             state.directory.set_image(LINK_IMAGE_KEY, &path);
         }
+        let _ = SEARCHABLE_GIFS.set(demo_gifs::generate(&directory_path));
+        state.directory.set_image(
+            demo_gifs::RECEIVED_GIF_KEY,
+            &directory_path.join(demo_gifs::file_name(demo_gifs::RECEIVED_GIF_NAME)),
+        );
     }
     state.typing.start(
         "demo-chat-mara",
@@ -1139,6 +1158,21 @@ fn release_messages() -> Vec<MessageRecord> {
             jonas,
             at(0, 13, 40),
             "<p>Formula check: H<sub>2</sub>O and x<sup>2</sup> + y<sup>2</sup>. <span style=\"font-size:xx-small;\">Small print, reviewed by <at id=\"0\">Mara Lindqvist</at>.</span> <span style=\"font-size:x-large;\">Big news:</span> the <span style=\"font-size:x-large;\"><a href=\"https://example.com/notes\">release notes</a></span> are out.</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            "m9",
+            None,
+            (PRIYA_ID, priya_name),
+            at(0, 13, 45),
+            &format!(
+                "<p>Ship it!</p><img src=\"{}\" width=\"{}\" height=\"{}\" alt=\"Party\" itemtype=\"http://schema.skype.com/Giphy\">",
+                demo_gifs::RECEIVED_GIF_KEY,
+                demo_gifs::RECEIVED_GIF_SIZE.0,
+                demo_gifs::RECEIVED_GIF_SIZE.1
+            ),
             "[]",
             false,
         ),

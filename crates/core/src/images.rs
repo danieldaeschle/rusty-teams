@@ -6,6 +6,7 @@ use store::{ImageFileCache, ImageRecord};
 use crate::engine::SyncEngine;
 use crate::error::Result;
 use crate::events::CoreEvent;
+use crate::external_image::external_image_url;
 use crate::image_size::sniff;
 use crate::remote::Remote;
 use crate::stored::ImageRef;
@@ -73,7 +74,10 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     async fn download_image(&self, key: &str) -> Result<Option<PathBuf>> {
-        let photo = self.remote.hosted_content(key).await?;
+        let photo = match external_image_url(key) {
+            Some(url) => self.remote.external_image(&url).await?,
+            None => self.remote.hosted_content(key).await?,
+        };
         let path = match &self.image_files {
             Some(files) => {
                 let extension = file_extension(&photo.content_type, &photo.bytes);

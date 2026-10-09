@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 68 %** (56 done, 4 partial, 25 missing of 85). Partial counts half.
+**Parity: 70 %** (58 done, 3 partial, 24 missing of 85). Partial counts half.
 
 ## By area
 
@@ -11,7 +11,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
 | [Reading](#reading) | 87 % | 16 | 1 | 2 |
-| [Writing](#writing) | 75 % | 10 | 1 | 3 |
+| [Writing](#writing) | 86 % | 12 | 0 | 2 |
 | [Message actions](#message-actions) | 0 % | 0 | 0 | 4 |
 | [Channels](#channels) | 36 % | 2 | 1 | 4 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
@@ -26,9 +26,8 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | 1 | Channel: new post with subject, post cards |  |
 | 2 | Sign in on Linux without Chrome on a debug port |  |
-| 3 | Emoji picker in the composer | Reaction picker exists |
-| 4 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
-| 5 | Unsent messages survive a restart |  |
+| 3 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
+| 4 | Unsent messages survive a restart |  |
 
 ## Sign-in and app
 
@@ -92,10 +91,10 @@ Feature parity with the Microsoft Teams desktop client.
 | Edit own message | Done | From the menu or Up arrow in an empty composer |
 | Delete own message | Done |  |
 | React to a message | Done | Hover bar, emoji picker, click a chip to toggle |
-| Emoji picker | Partial | For reactions; composer still uses colon codes |
+| Emoji picker | Done | For reactions and in the composer |
 | Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block; superscript, subscript (Ctrl+Shift+= / Ctrl+=) and Small/Large shown at real size while typing |
 | Attach a file, paste or drag an image | Done | Images sit in the text at the cursor as a large preview and send at that spot; files via OneDrive or the channel's Files |
-| GIFs and stickers | Missing |  |
+| GIFs and stickers | Done | Show and send; composer picker with Emoji, GIF and Sticker tabs; GIF search needs the org to allow it |
 | Schedule send | Missing |  |
 | Unsent messages survive a restart | Missing | Pending sends live in memory only |
 

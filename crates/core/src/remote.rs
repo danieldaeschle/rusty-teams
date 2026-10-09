@@ -1,6 +1,6 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, Conversations, InvokeRequest, InvokeResponse, LinkInfo,
-    MemberHorizon, MessageLinks, Messages, Receipts,
+    CardActions, ChatApp, ConversationRef, Conversations, Gif, Gifs, InvokeRequest, InvokeResponse,
+    LinkInfo, MemberHorizon, MessageLinks, Messages, Receipts,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -188,6 +188,10 @@ pub trait Remote {
         Err(Error::Unsupported("hosted content"))
     }
 
+    async fn external_image(&self, _url: &str) -> Result<Photo> {
+        Err(Error::Unsupported("external images"))
+    }
+
     async fn user_photos(&self, _user_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
         Err(Error::Unsupported("profile photos"))
     }
@@ -232,6 +236,10 @@ pub trait Remote {
 
     async fn link_info(&self, _url: &str) -> Result<LinkInfo> {
         Err(Error::Unsupported("link previews"))
+    }
+
+    async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
+        Err(Error::Unsupported("GIF search"))
     }
 }
 
@@ -557,6 +565,10 @@ impl Remote for Graph {
         Ok(Graph::download_hosted_content(self, url).await?)
     }
 
+    async fn external_image(&self, url: &str) -> Result<Photo> {
+        Ok(Graph::download_external_image(self, url).await?)
+    }
+
     async fn user_photos(&self, user_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
         let photos = Graph::user_photos(self, user_ids).await?;
         Ok(photos
@@ -611,6 +623,10 @@ impl Remote for Graph {
 
     async fn link_info(&self, url: &str) -> Result<LinkInfo> {
         Ok(Messages::new(self.session()).link_info(url).await?)
+    }
+
+    async fn search_gifs(&self, query: &str) -> Result<Vec<Gif>> {
+        Ok(Gifs::new(self.session()).search(query).await?)
     }
 }
 

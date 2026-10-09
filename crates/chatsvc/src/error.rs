@@ -12,6 +12,8 @@ pub enum Error {
     UnknownFolder(String),
     #[error("pin list changed twice while writing, giving up")]
     VersionConflict,
+    #[error("GIFs are disabled by the organization")]
+    GifsDisabled,
     #[error("invalid event payload: {0}")]
     Decode(String),
 }

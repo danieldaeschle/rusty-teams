@@ -12,6 +12,8 @@ pub enum Error {
     Folders(String),
     #[error("unknown conversation {0}")]
     UnknownConversation(String),
+    #[error("GIFs are disabled by the organization")]
+    GifsDisabled,
     #[error("{0} is not supported yet")]
     Unsupported(&'static str),
 }
@@ -20,6 +22,7 @@ impl From<chatsvc::Error> for Error {
     fn from(error: chatsvc::Error) -> Self {
         match error {
             chatsvc::Error::Session(inner) => Error::Graph(graph::Error::Session(inner)),
+            chatsvc::Error::GifsDisabled => Error::GifsDisabled,
             other => Error::Folders(other.to_string()),
         }
     }

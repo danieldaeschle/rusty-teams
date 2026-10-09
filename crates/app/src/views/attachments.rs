@@ -4,12 +4,13 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{FileCard, FileKind, ImageRef};
+use teams_core::{FileCard, FileKind, ImageRef, external_image_url};
 
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::downloads::{self, DownloadState};
 use crate::format;
+use crate::remote_image;
 use crate::render::{Block, render_blocks};
 use crate::rows::LocalImage;
 use crate::theme;
@@ -36,12 +37,16 @@ pub struct FileActions {
 }
 
 pub fn fit_image(size: Option<(u32, u32)>) -> (f32, f32) {
+    fit_image_within(size, IMAGE_MAX_HEIGHT)
+}
+
+fn fit_image_within(size: Option<(u32, u32)>, max_height: f32) -> (f32, f32) {
     let Some((width, height)) = size.filter(|(width, height)| *width > 0 && *height > 0) else {
         return IMAGE_FALLBACK;
     };
     let (width, height) = (width as f32, height as f32);
     let scale = (IMAGE_MAX_WIDTH / width)
-        .min(IMAGE_MAX_HEIGHT / height)
+        .min(max_height / height)
         .min(1.);
     (
         (width * scale).max(IMAGE_MIN_SIDE).round(),
@@ -55,7 +60,12 @@ fn declared_size(image: &ImageRef) -> Option<(u32, u32)> {
 
 pub fn image_size(image: &ImageRef, directory: &Directory) -> (f32, f32) {
     let loaded = directory.image(&image.url).and_then(|entry| entry.size);
-    fit_image(declared_size(image).or(loaded))
+    let max_height = if external_image_url(&image.url).is_some() {
+        remote_image::MAX_HEIGHT as f32
+    } else {
+        IMAGE_MAX_HEIGHT
+    };
+    fit_image_within(declared_size(image).or(loaded), max_height)
 }
 
 fn image_view(image: &ImageRef, id: String, directory: &Directory) -> AnyElement {
@@ -408,8 +418,8 @@ pub fn attachments_view(
 #[cfg(test)]
 mod tests {
     use super::{
-        IMAGE_FALLBACK, Placement, file_subtitle, fit_image, local_image_index, placement,
-        placements,
+        IMAGE_FALLBACK, Placement, file_subtitle, fit_image, fit_image_within, local_image_index,
+        placement, placements,
     };
     use crate::render::Block;
     use teams_core::{FileCard, FileKind, ImageRef};
@@ -453,6 +463,11 @@ mod tests {
     #[test]
     fn wide_images_shrink_to_the_max_width_keeping_aspect() {
         assert_eq!(fit_image(Some((720, 360))), (360., 180.));
+    }
+
+    #[test]
+    fn gifs_and_stickers_are_capped_at_250_high() {
+        assert_eq!(fit_image_within(Some((300, 500)), 250.), (150., 250.));
     }
 
     #[test]

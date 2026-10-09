@@ -141,6 +141,10 @@ fn best_match(emoji: &'static Emoji, query: &str) -> Option<(Tier, usize, Match)
     ))
 }
 
+pub fn glyphs() -> impl Iterator<Item = &'static str> {
+    index().iter().map(|emoji| emoji.glyph)
+}
+
 /// Ranked by: recent, exact, English prefix, German prefix, word start, contains, emoji order.
 pub fn search(query: &str, recent: &[String], limit: usize) -> Vec<Match> {
     let query = query.to_lowercase();

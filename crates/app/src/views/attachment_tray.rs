@@ -12,6 +12,7 @@ use teams_core::{FileKind, FileReference, UploadedFile};
 use super::attachments::file_badge;
 use super::widgets::icon;
 use crate::format;
+use crate::remote_image::{RemoteImage, image_source};
 use crate::theme;
 
 pub const MAX_ATTACHMENTS: usize = 10;
@@ -171,6 +172,7 @@ pub enum ItemKind {
         image: Arc<Image>,
         dimensions: Option<(u32, u32)>,
     },
+    Remote(RemoteImage),
     File {
         bytes: Arc<Vec<u8>>,
         upload: UploadState,
@@ -186,29 +188,55 @@ pub struct TrayItem {
     pub kind: ItemKind,
 }
 
+impl ItemKind {
+    /// Shown inline in the text instead of as a chip.
+    fn is_object(&self) -> bool {
+        matches!(self, ItemKind::Image { .. } | ItemKind::Remote(_))
+    }
+}
+
 impl TrayItem {
     fn blocks_send(&self) -> bool {
         match &self.kind {
             ItemKind::Reading => true,
-            ItemKind::Image { .. } => false,
+            ItemKind::Image { .. } | ItemKind::Remote(_) => false,
             ItemKind::File { upload, .. } => !matches!(upload, UploadState::Done(_)),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct PreviewImage {
-    pub image: Arc<Image>,
-    pub dimensions: Option<(u32, u32)>,
+pub enum PreviewImage {
+    Inline {
+        image: Arc<Image>,
+        dimensions: Option<(u32, u32)>,
+    },
+    Remote(RemoteImage),
+}
+
+impl PreviewImage {
+    fn dimensions(&self) -> Option<(u32, u32)> {
+        match self {
+            PreviewImage::Inline { dimensions, .. } => *dimensions,
+            PreviewImage::Remote(remote) => Some((remote.width, remote.height)),
+        }
+    }
 }
 
 pub type RemoveImage = Rc<dyn Fn(&mut Window, &mut App)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutgoingImage {
+pub struct InlineImage {
     pub name: String,
     pub image: Arc<Image>,
     pub dimensions: Option<(u32, u32)>,
+}
+
+/// One object in the text: uploaded bytes or a GIF or sticker the message links to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutgoingImage {
+    Inline(InlineImage),
+    Remote(RemoteImage),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,19 +294,32 @@ impl AttachmentTray {
     }
 
     pub fn has_chips(&self) -> bool {
-        self.items
-            .iter()
-            .any(|item| !matches!(item.kind, ItemKind::Image { .. }))
+        self.items.iter().any(|item| !item.kind.is_object())
     }
 
     pub fn image(&self, id: u64) -> Option<PreviewImage> {
         self.items.iter().find_map(|item| match &item.kind {
-            ItemKind::Image { image, dimensions } if item.id == id => Some(PreviewImage {
-                image: image.clone(),
-                dimensions: *dimensions,
-            }),
+            ItemKind::Image { image, dimensions } if item.id == id => {
+                Some(PreviewImage::Inline {
+                    image: image.clone(),
+                    dimensions: *dimensions,
+                })
+            }
+            ItemKind::Remote(remote) if item.id == id => {
+                Some(PreviewImage::Remote(remote.clone()))
+            }
             _ => None,
         })
+    }
+
+    /// `None` when the tray is full.
+    pub fn add_remote(&mut self, remote: RemoteImage) -> Option<u64> {
+        self.notice = None;
+        if self.items.len() >= MAX_ATTACHMENTS {
+            self.notice = Some(limit_notice(1));
+            return None;
+        }
+        Some(self.push(remote.title.clone(), 0, ItemKind::Remote(remote)))
     }
 
     pub fn notice(&self) -> Option<&str> {
@@ -469,7 +510,7 @@ impl AttachmentTray {
         let (images, others): (Vec<_>, Vec<_>) = self
             .items
             .drain(..)
-            .partition(|item| matches!(item.kind, ItemKind::Image { .. }));
+            .partition(|item| item.kind.is_object());
         self.items = images;
         others
             .into_iter()
@@ -492,15 +533,18 @@ impl AttachmentTray {
         self.clear();
         let image_ids = images
             .iter()
-            .map(|image| {
-                self.push(
-                    image.name.clone(),
-                    image.image.bytes.len() as u64,
+            .map(|image| match image {
+                OutgoingImage::Inline(inline) => self.push(
+                    inline.name.clone(),
+                    inline.image.bytes.len() as u64,
                     ItemKind::Image {
-                        image: image.image.clone(),
-                        dimensions: image.dimensions,
+                        image: inline.image.clone(),
+                        dimensions: inline.dimensions,
                     },
-                )
+                ),
+                OutgoingImage::Remote(remote) => {
+                    self.push(remote.title.clone(), 0, ItemKind::Remote(remote.clone()))
+                }
             })
             .collect();
         for file in files {
@@ -525,11 +569,14 @@ impl AttachmentTray {
             .filter_map(|id| {
                 let item = self.items.iter().find(|item| item.id == *id)?;
                 match &item.kind {
-                    ItemKind::Image { image, dimensions } => Some(OutgoingImage {
-                        name: item.name.clone(),
-                        image: image.clone(),
-                        dimensions: *dimensions,
-                    }),
+                    ItemKind::Image { image, dimensions } => {
+                        Some(OutgoingImage::Inline(InlineImage {
+                            name: item.name.clone(),
+                            image: image.clone(),
+                            dimensions: *dimensions,
+                        }))
+                    }
+                    ItemKind::Remote(remote) => Some(OutgoingImage::Remote(remote.clone())),
                     _ => None,
                 }
             })
@@ -538,7 +585,7 @@ impl AttachmentTray {
 
     pub fn discard_images_except(&mut self, kept: &[u64]) {
         self.items
-            .retain(|item| !matches!(item.kind, ItemKind::Image { .. }) || kept.contains(&item.id));
+            .retain(|item| !item.kind.is_object() || kept.contains(&item.id));
     }
 
     pub fn outgoing_files(&self) -> Vec<OutgoingFile> {
@@ -697,7 +744,7 @@ pub fn chip_state(item: &TrayItem) -> ChipState {
     };
     match &item.kind {
         ItemKind::Reading => muted("Reading ...".to_owned()),
-        ItemKind::Image { .. } => muted(size),
+        ItemKind::Image { .. } | ItemKind::Remote(_) => muted(size),
         ItemKind::File {
             upload,
             sent_as_file,
@@ -770,7 +817,7 @@ pub fn inline_preview(
     selected: bool,
     remove: RemoveImage,
 ) -> AnyElement {
-    let dimensions = preview.as_ref().and_then(|preview| preview.dimensions);
+    let dimensions = preview.as_ref().and_then(PreviewImage::dimensions);
     let (width, height) = preview_size(dimensions, f32::from(available_width));
     let group = SharedString::from(format!("image-preview-{id}"));
     let frame = div()
@@ -782,12 +829,18 @@ pub fn inline_preview(
         .border_color(theme::border_strong())
         .bg(theme::surface_raised());
     let frame = match preview {
-        Some(preview) => frame.child(
-            img(preview.image)
-                .size_full()
-                .rounded(px(PREVIEW_RADIUS))
-                .object_fit(ObjectFit::Cover),
-        ),
+        Some(preview) => {
+            let source = match preview {
+                PreviewImage::Inline { image, .. } => ImageSource::from(image),
+                PreviewImage::Remote(remote) => image_source(&remote.url),
+            };
+            frame.child(
+                img(source)
+                    .size_full()
+                    .rounded(px(PREVIEW_RADIUS))
+                    .object_fit(ObjectFit::Cover),
+            )
+        }
         None => frame,
     };
     div()
@@ -925,7 +978,7 @@ pub fn render_tray<T: 'static>(
     let elements: Vec<AnyElement> = tray
         .items()
         .iter()
-        .filter(|item| !matches!(item.kind, ItemKind::Image { .. }))
+        .filter(|item| !item.kind.is_object())
         .map(|item| chip(item, remove, retry, cx))
         .collect();
     Some(
@@ -951,10 +1004,12 @@ mod tests {
 
     use super::{
         AttachmentTray, Classification, DoneFile, FILES_LATER_NOTICE, INLINE_IMAGE_MAX_BYTES,
-        INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS, PasteAction,
-        Tone, UploadResult, chip_state, classify, limit_notice, paste_action, pasted_image_name,
-        prepare_pasted_image, preview_size, read_attachment, sniff_inline_format,
+        INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS, OutgoingImage,
+        PasteAction, PreviewImage, RemoteImage, Tone, UploadResult, chip_state, classify,
+        limit_notice, paste_action, pasted_image_name, prepare_pasted_image, preview_size,
+        read_attachment, sniff_inline_format,
     };
+    use crate::remote_image::RemoteKind;
 
     const PNG_HEADER: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -1357,6 +1412,42 @@ mod tests {
         assert!(!restored.blocks_send());
     }
 
+    fn gif(title: &str) -> RemoteImage {
+        RemoteImage {
+            kind: RemoteKind::Gif,
+            url: "https://media0.giphy.com/media/a/giphy.gif".into(),
+            title: title.into(),
+            width: 200,
+            height: 100,
+        }
+    }
+
+    #[test]
+    fn a_remote_image_is_an_object_without_a_chip_and_never_blocks_sending() {
+        let mut tray = AttachmentTray::default();
+        let id = tray.add_remote(gif("Wave")).unwrap();
+        assert!(!tray.has_chips());
+        assert!(!tray.blocks_send());
+        assert!(matches!(tray.image(id), Some(PreviewImage::Remote(_))));
+        let images = tray.images_in(&[id]);
+        assert_eq!(images, vec![OutgoingImage::Remote(gif("Wave"))]);
+        let mut restored = AttachmentTray::default();
+        let ids = restored.restore(&images, &[]);
+        assert_eq!(restored.images_in(&ids), images);
+        assert_eq!(tray.keep_images_only(), Vec::new());
+        assert_eq!(tray.items().len(), 1);
+    }
+
+    #[test]
+    fn a_full_tray_refuses_another_remote_image() {
+        let mut tray = AttachmentTray::default();
+        for _ in 0..MAX_ATTACHMENTS {
+            assert!(tray.add_remote(gif("Wave")).is_some());
+        }
+        assert!(tray.add_remote(gif("Wave")).is_none());
+        assert!(tray.notice().is_some());
+    }
+
     #[test]
     fn images_come_back_in_the_order_asked_for_and_only_when_known() {
         let mut tray = AttachmentTray::default();
@@ -1365,8 +1456,14 @@ mod tests {
         tray.finish_reading(ids[1], LoadedFile::new(png(4, 4)), true);
         let images = tray.images_in(&[ids[1], 99, ids[0]]);
         assert_eq!(images.len(), 2);
-        assert_eq!(images[0].dimensions, Some((4, 4)));
-        assert_eq!(images[1].dimensions, Some((2, 2)));
+        let dimensions: Vec<_> = images
+            .iter()
+            .map(|image| match image {
+                OutgoingImage::Inline(inline) => inline.dimensions,
+                OutgoingImage::Remote(_) => None,
+            })
+            .collect();
+        assert_eq!(dimensions, [Some((4, 4)), Some((2, 2))]);
         assert!(!tray.has_chips());
         tray.discard_images_except(&[ids[1]]);
         assert_eq!(tray.items().len(), 1);

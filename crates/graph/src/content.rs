@@ -7,6 +7,7 @@ use crate::people::decode_binary;
 
 const CHAT_PATH: &str = "/v1.0/chats/";
 const CHANNEL_PATH: &str = "/v1.0/teams/";
+const EXTERNAL_IMAGE_SCOPE: &str = "Chat.Read";
 
 impl Graph {
     /// Binary GET of a Graph hosted content URL (`.../hostedContents/{id}/$value`).
@@ -19,6 +20,16 @@ impl Graph {
             .batch(std::slice::from_ref(&request), &scope)
             .await?
             .remove(0);
+        decode_binary(url, answer)
+    }
+
+    /// Anonymous binary GET of a public image URL (GIF or sticker CDN), run inside the page.
+    pub async fn download_external_image(&self, url: &str) -> Result<Photo> {
+        let request = Request::anonymous_binary_get(url, Vec::new());
+        let answer = self
+            .session()
+            .send(request, &Scope::graph(EXTERNAL_IMAGE_SCOPE))
+            .await?;
         decode_binary(url, answer)
     }
 }
