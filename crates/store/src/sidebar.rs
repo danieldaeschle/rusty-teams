@@ -126,24 +126,61 @@ fn compare_names(left: &str, right: &str) -> Ordering {
     sort_key(left).cmp(&sort_key(right))
 }
 
-fn sort_key(name: &str) -> (bool, String) {
-    let trimmed = name.trim_start();
-    let starts_with_word = trimmed
-        .chars()
-        .next()
-        .is_some_and(char::is_alphanumeric);
-    let mut folded = String::with_capacity(trimmed.len());
-    for character in trimmed.chars().flat_map(char::to_lowercase) {
-        match character {
-            'ä' | 'á' | 'à' | 'â' => folded.push('a'),
-            'ö' | 'ó' | 'ò' | 'ô' => folded.push('o'),
-            'ü' | 'ú' | 'ù' | 'û' => folded.push('u'),
-            'é' | 'è' | 'ê' | 'ë' => folded.push('e'),
-            'ß' => folded.push_str("ss"),
-            other => folded.push(other),
-        }
+const PUNCTUATION_ORDER: &str = "_-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$";
+
+const LETTER_FOLDS: &[(&str, &str)] = &[
+    ("àáâãäåāăą", "a"),
+    ("æ", "ae"),
+    ("çćĉċč", "c"),
+    ("ďđ", "d"),
+    ("èéêëēĕėęě", "e"),
+    ("ĝğġģ", "g"),
+    ("ĥħ", "h"),
+    ("ìíîïĩīĭįıǐ", "i"),
+    ("ĵ", "j"),
+    ("ķ", "k"),
+    ("ĺļľŀł", "l"),
+    ("ñńņňŉ", "n"),
+    ("òóôõöøōŏőǒ", "o"),
+    ("œ", "oe"),
+    ("ŕŗř", "r"),
+    ("śŝşš", "s"),
+    ("ß", "ss"),
+    ("ţťŧ", "t"),
+    ("ùúûüũūŭůűųǔ", "u"),
+    ("ŵ", "w"),
+    ("ýÿŷ", "y"),
+    ("źżž", "z"),
+];
+
+fn primary_weights(character: char) -> Vec<(u8, u32)> {
+    if character.is_whitespace() {
+        return vec![(0, 0)];
     }
-    (starts_with_word, folded)
+    if let Some(position) = PUNCTUATION_ORDER.find(character) {
+        return vec![(1, position as u32)];
+    }
+    if character.is_ascii_digit() || character.is_alphabetic() {
+        let class = if character.is_numeric() { 2 } else { 3 };
+        if let Some((_, base)) = LETTER_FOLDS
+            .iter()
+            .find(|(variants, _)| variants.contains(character))
+        {
+            return base.chars().map(|letter| (class, letter as u32)).collect();
+        }
+        return vec![(class, character as u32)];
+    }
+    vec![(1, PUNCTUATION_ORDER.len() as u32 + character as u32)]
+}
+
+fn sort_key(name: &str) -> (Vec<(u8, u32)>, String) {
+    let lowered: String = name
+        .trim_start()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect();
+    let primary = lowered.chars().flat_map(primary_weights).collect();
+    (primary, lowered)
 }
 
 #[cfg(test)]
@@ -157,5 +194,27 @@ mod tests {
         assert_eq!(compare_names("Übergabe", "Zoll"), Ordering::Less);
         assert_eq!(compare_names("Übergabe", "Tests"), Ordering::Greater);
         assert_eq!(compare_names("🚩 Rollout", "Alpha"), Ordering::Less);
+    }
+
+    #[test]
+    fn tie_breaks_follow_locale_compare() {
+        let ordered = ["x y", "x_y", "x-y", "xy"];
+        for pair in ordered.windows(2) {
+            assert_eq!(compare_names(pair[0], pair[1]), Ordering::Less);
+        }
+        assert_eq!(compare_names("_a", "-a"), Ordering::Less);
+        assert_eq!(compare_names("-a", "(a"), Ordering::Less);
+        assert_eq!(compare_names("(a", "#a"), Ordering::Less);
+        assert_eq!(compare_names("#a", "🚩a"), Ordering::Less);
+        assert_eq!(compare_names("10 x", "2 x"), Ordering::Less);
+        assert_eq!(compare_names("9", "a"), Ordering::Less);
+        assert_eq!(compare_names("e", "é"), Ordering::Less);
+        assert_eq!(compare_names("ss", "ß"), Ordering::Less);
+        assert_eq!(compare_names("a", "ä"), Ordering::Less);
+        assert_eq!(compare_names("ä", "ae"), Ordering::Less);
+        assert_eq!(compare_names("ø", "p"), Ordering::Less);
+        assert_eq!(compare_names("o", "ø"), Ordering::Less);
+        assert_eq!(compare_names("ł", "m"), Ordering::Less);
+        assert_eq!(compare_names("ı", "j"), Ordering::Less);
     }
 }

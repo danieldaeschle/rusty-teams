@@ -59,8 +59,11 @@ fn parse_team(team: &Value) -> Option<TeamLayout> {
                 .filter(|channel| flag(channel, "isDeleted") != Some(true))
                 .filter_map(|channel| {
                     let general = flag(channel, "isGeneral").unwrap_or(false);
-                    let shown = flag(channel, "isFavorite")
-                        .unwrap_or(if general { general_shown } else { true });
+                    let shown = if general {
+                        general_shown
+                    } else {
+                        flag(channel, "isFavorite").unwrap_or(true)
+                    };
                     Some(ChannelLayout {
                         channel_id: channel.get("id")?.as_str()?.to_owned(),
                         general,
@@ -82,6 +85,25 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn general_visibility_follows_the_team_flag_only() {
+        let body = json!({"teams": [
+            {"id": "19:a@thread.tacv2", "isGeneralChannelFavorite": false, "channels": [
+                {"id": "19:a@thread.tacv2", "isGeneral": true, "isFavorite": true}
+            ]},
+            {"id": "19:b@thread.tacv2", "isGeneralChannelFavorite": true, "channels": [
+                {"id": "19:b@thread.tacv2", "isGeneral": true, "isFavorite": false}
+            ]},
+            {"id": "19:c@thread.tacv2", "channels": [
+                {"id": "19:c@thread.tacv2", "isGeneral": true, "isFavorite": false}
+            ]}
+        ]});
+        let layout = parse_team_layout(&body).unwrap();
+        assert!(layout[0].channels[0].hidden);
+        assert!(!layout[1].channels[0].hidden);
+        assert!(!layout[2].channels[0].hidden);
+    }
 
     #[test]
     fn keeps_the_service_order_and_reads_hidden_flags() {
