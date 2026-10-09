@@ -1,7 +1,10 @@
 use chatsvc::{ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse};
 use serde_json::Value;
 
-use crate::adaptive_card::{CardAction, task_value};
+use crate::adaptive_card::{CardAction, ExecuteAction, ExecuteTrigger, task_value};
+use crate::card_inputs::{
+    ChoiceQuery, InputChoice, SEARCH_INVOKE_NAME, parse_search_results, search_request_value,
+};
 use crate::engine::SyncEngine;
 use crate::error::{Error, Result};
 use crate::receipts::locked;
@@ -77,7 +80,19 @@ impl<R: Remote> SyncEngine<R> {
         let payload = action
             .invoke_payload()
             .ok_or(Error::Unsupported("this card action"))?;
-        self.invoke_card(conversation_id, message_id, payload.name, payload.value)
+        self.invoke_card(conversation_id, message_id, &payload.name, payload.value)
+            .await
+    }
+
+    pub async fn card_refresh(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        action: &ExecuteAction,
+        trigger: ExecuteTrigger,
+    ) -> Result<CardActionOutcome> {
+        let payload = action.payload_for(trigger);
+        self.invoke_card(conversation_id, message_id, &payload.name, payload.value)
             .await
     }
 
@@ -96,6 +111,28 @@ impl<R: Remote> SyncEngine<R> {
         .await
     }
 
+    pub async fn card_search(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        query: &ChoiceQuery,
+        query_text: &str,
+    ) -> Result<Vec<InputChoice>> {
+        let response = self
+            .invoke_response(
+                conversation_id,
+                message_id,
+                SEARCH_INVOKE_NAME,
+                search_request_value(query, query_text),
+            )
+            .await?;
+        match response {
+            InvokeResponse::Search(value) => Ok(parse_search_results(&value)),
+            InvokeResponse::Failed { .. } => Err(Error::Unsupported("a search the app rejected")),
+            _ => Ok(Vec::new()),
+        }
+    }
+
     async fn invoke_card(
         &self,
         conversation_id: &str,
@@ -103,11 +140,23 @@ impl<R: Remote> SyncEngine<R> {
         name: &str,
         value: Value,
     ) -> Result<CardActionOutcome> {
+        let response = self
+            .invoke_response(conversation_id, message_id, name, value)
+            .await?;
+        Ok(outcome_of(response))
+    }
+
+    async fn invoke_response(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        name: &str,
+        value: Value,
+    ) -> Result<InvokeResponse> {
         let (app, bot_id) = self.card_app(conversation_id, message_id).await?;
         self.ensure_display_name().await?;
         let display_name = self.me().map(|me| me.display_name).unwrap_or_default();
-        let response = self
-            .remote
+        self.remote
             .invoke_card(InvokeRequest {
                 bot_id,
                 app_id: app.app_id,
@@ -118,8 +167,7 @@ impl<R: Remote> SyncEngine<R> {
                 client_message_id: None,
                 conversation_id: conversation_id.to_owned(),
             })
-            .await?;
-        Ok(outcome_of(response))
+            .await
     }
 
     pub async fn card_app(
@@ -152,7 +200,7 @@ impl<R: Remote> SyncEngine<R> {
 
 fn outcome_of(response: InvokeResponse) -> CardActionOutcome {
     match response {
-        InvokeResponse::Empty => CardActionOutcome::Sent,
+        InvokeResponse::Empty | InvokeResponse::Search(_) => CardActionOutcome::Sent,
         InvokeResponse::Card(card) => CardActionOutcome::ReplaceCard(card.to_string()),
         InvokeResponse::Message(text) | InvokeResponse::Task(TaskResponse::Message(text)) => {
             CardActionOutcome::Message(text)

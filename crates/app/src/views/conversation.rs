@@ -17,7 +17,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{MessageRecord, OutboxState, OutboxTarget};
-use teams_core::{FileCard, LinkPreview};
+use teams_core::{ExecuteAction, FileCard, LinkPreview};
 
 mod feed;
 mod pins;
@@ -36,6 +36,7 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
+use crate::card_state::CardScope;
 use crate::data::{is_one_on_one, others};
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
@@ -2500,6 +2501,22 @@ impl ConversationView {
         }
     }
 
+    fn refresh_card(
+        &mut self,
+        key: &str,
+        card_index: usize,
+        action: ExecuteAction,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conversation_id) = self.conversation_id() else {
+            return;
+        };
+        let scope = CardScope::message(&conversation_id, key, card_index);
+        self.app.update(cx, |state, cx| {
+            state.refresh_card_manually(scope, action, cx)
+        });
+    }
+
     fn show_notice(&mut self, message: &str, cx: &mut Context<Self>) {
         self.app.update(cx, |state, cx| {
             state.raise_notice(message.to_owned(), None, cx)
@@ -2531,6 +2548,7 @@ impl ConversationView {
         key: &str,
         own: bool,
         mine: HashSet<String>,
+        refresh: Option<(usize, ExecuteAction)>,
         view: WeakEntity<Self>,
         cx: &App,
     ) -> MessageMenu {
@@ -2563,6 +2581,15 @@ impl ConversationView {
                     .ok();
             })
         };
+        let refresh_card = refresh.map(|(card_index, refresh_action)| {
+            let (view, key) = (view.clone(), key.to_owned());
+            Rc::new(move |_: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| {
+                    this.refresh_card(&key, card_index, refresh_action.clone(), cx)
+                })
+                .ok();
+            }) as Action
+        });
         let chat_id = self.chat_id();
         let state = self.app.read(cx);
         let saved = self
@@ -2589,6 +2616,7 @@ impl ConversationView {
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
             mark_unread: (in_chat && !own)
                 .then(|| action(|this, key, _, cx| this.mark_unread_from(key, cx))),
+            refresh_card,
             pin,
             hover,
             picker: self.picker.clone(),

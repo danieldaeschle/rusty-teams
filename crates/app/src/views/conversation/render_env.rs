@@ -11,7 +11,7 @@ use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
-use crate::views::adaptive_card::ensure_cards_inputs;
+use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
@@ -153,7 +153,18 @@ impl RenderEnv {
                     .filter(|chip| chip.mine)
                     .map(|chip| chip.glyph())
                     .collect();
-                let menu = this.message_menu(&message.key, message.own, mine, view.clone(), cx);
+                let refresh =
+                    message
+                        .adaptive_cards
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, card)| {
+                            card.refresh
+                                .as_ref()
+                                .map(|refresh| (index, refresh.action.clone()))
+                        });
+                let menu =
+                    this.message_menu(&message.key, message.own, mine, refresh, view.clone(), cx);
                 let react = menu.react.clone();
                 let visible = this.toolbar_visible(&message.key);
                 let controls = (!message.reactions.is_empty())
@@ -188,6 +199,13 @@ impl RenderEnv {
             &message.conversation_id,
             &message.key,
             window,
+            cx,
+        );
+        request_card_refreshes(
+            &self.app,
+            &message.adaptive_cards,
+            &message.conversation_id,
+            &message.key,
             cx,
         );
         RowActions {

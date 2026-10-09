@@ -39,6 +39,7 @@ pub struct MessageMenu {
     pub edit: Option<Action>,
     pub delete: Option<Action>,
     pub mark_unread: Option<Action>,
+    pub refresh_card: Option<Action>,
     pub pin: OpenChange,
     pub hover: HoverChange,
     pub picker: Entity<ReactionPicker>,
@@ -113,7 +114,19 @@ fn picker_button(menu: &MessageMenu) -> AnyElement {
 }
 
 fn more_button(menu: &MessageMenu) -> AnyElement {
-    let (reply, forward, copy_link, copy, save, toggle_pinned, edit, delete, mark_unread, pin) = (
+    let (
+        reply,
+        forward,
+        copy_link,
+        copy,
+        save,
+        toggle_pinned,
+        edit,
+        delete,
+        mark_unread,
+        refresh_card,
+        pin,
+    ) = (
         menu.reply.clone(),
         menu.forward.clone(),
         menu.copy_link.clone(),
@@ -123,6 +136,7 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
         menu.edit.clone(),
         menu.delete.clone(),
         menu.mark_unread.clone(),
+        menu.refresh_card.clone(),
         menu.pin.clone(),
     );
     let (saved, pinned) = (menu.saved, menu.pinned);
@@ -146,6 +160,9 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
             }
             if let Some(copy_link) = copy_link.clone() {
                 popup = popup.item(item("Copy link", IconName::Link, copy_link));
+            }
+            if let Some(refresh_card) = refresh_card.clone() {
+                popup = popup.item(item("Refresh card", IconName::RefreshCw, refresh_card));
             }
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
             if let Some(save) = save.clone() {

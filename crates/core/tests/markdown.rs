@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use teams_core::markdown_to_html;
+use teams_core::{card_markdown_to_html, markdown_to_html};
 
 #[derive(Deserialize)]
 struct Golden {
@@ -59,4 +59,28 @@ fn list_items_escape_html() {
 #[test]
 fn list_lines_inside_a_fence_stay_code() {
     assert_eq!(markdown_to_html("```\n- a\n```"), "<pre>- a</pre>");
+}
+
+#[test]
+fn card_markdown_adds_italic_and_mentions_to_the_message_dialect() {
+    assert_eq!(
+        card_markdown_to_html("_soft_ and *slanted* and **bold**"),
+        "<i>soft</i> and <i>slanted</i> and <b>bold</b>"
+    );
+    assert_eq!(
+        card_markdown_to_html("hi <at>Ada & Co</at> <x>"),
+        "hi <at>Ada &amp; Co</at> &lt;x&gt;"
+    );
+    assert_eq!(
+        markdown_to_html("_soft_ <at>Ada</at>"),
+        "_soft_ &lt;at&gt;Ada&lt;/at&gt;"
+    );
+}
+
+#[test]
+fn card_markdown_keeps_snake_case_and_urls() {
+    assert_eq!(
+        card_markdown_to_html("my_var_name https://a.example/_x_/ [l](https://a.example/_y_)"),
+        "my_var_name https://a.example/_x_/ <a href=\"https://a.example/_y_\">l</a>"
+    );
 }

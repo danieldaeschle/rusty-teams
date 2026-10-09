@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 79 %** (68 done, 2 partial, 17 missing of 87). Partial counts half.
+**Parity: 80 %** (69 done, 1 partial, 17 missing of 87). Partial counts half.
 
 ## By area
 
@@ -10,7 +10,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
 | [Chat list](#chat-list) | 90 % | 9 | 0 | 1 |
-| [Reading](#reading) | 87 % | 16 | 1 | 2 |
+| [Reading](#reading) | 89 % | 17 | 0 | 2 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 57 % | 4 | 0 | 3 |
@@ -71,7 +71,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Unread jump with New divider | Done |  |
 | Read receipts | Done |  |
 | Select and copy message text | Done |  |
-| Adaptive Cards | Partial | Buttons work (submit, execute, show card, toggle, task dialog card). Input fields work in messages and card dialogs (text, number, date, time, toggle, choice set) with validation. URL task dialogs run in a hosted window on Windows (Teams JS SDK host), in the browser on Linux. Date and time are plain text fields, no picker |
+| Adaptive Cards | Done | Schema 1.6 plus Teams extras: all elements incl. Table, CodeBlock, Badge, Icon, Rating, Carousel, Media and charts; all inputs with date and time pickers, live validation and Data.Query typeahead; all actions incl. overflow menu; Universal Actions auto refresh. URL task dialogs run in a hosted window on Windows, in the browser on Linux. Not yet: message-level carousel layout, chart tooltips |
 | Typing indicator | Done | Shows who types as avatars above the composer (names on hover) and in the list preview; sends your own typing |
 | Link previews | Done | One card per message from the chat service |
 | Loop components | Missing |  |

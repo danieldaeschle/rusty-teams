@@ -1,7 +1,8 @@
 use serde_json::json;
 use teams_core::{
-    AdaptiveCard, CardAction, CardActionKind, CardElement, ColumnWidth, ImageSize, Span, TextColor,
-    TextSize, ToggleTarget, VerticalAlignment, card_content_text,
+    AdaptiveCard, CardAction, CardActionIcon, CardActionKind, CardElement, ColumnWidth,
+    ExecuteTrigger, IconSize, ImageSize, Span, TextColor, TextSize, ToggleTarget,
+    VerticalAlignment, card_content_text,
 };
 
 fn digest_card() -> String {
@@ -43,11 +44,11 @@ fn digest_card_keeps_layout_text_and_actions() {
     assert!(card.full_width);
     assert_eq!(card.items.len(), 3);
 
-    let CardElement::Columns(columns) = &card.items[0].element else {
+    let CardElement::Columns { columns, .. } = &card.items[0].element else {
         panic!("first item is a column set");
     };
     assert_eq!(columns[0].width, ColumnWidth::Auto);
-    assert_eq!(columns[0].vertical_alignment, VerticalAlignment::Center);
+    assert_eq!(columns[0].layout.vertical_alignment, VerticalAlignment::Center);
     let CardElement::Image(image) = &columns[0].items[0].element else {
         panic!("avatar column holds an image");
     };
@@ -61,7 +62,7 @@ fn digest_card_keeps_layout_text_and_actions() {
     assert_eq!(title.size, TextSize::Medium);
 
     assert!(card.items[1].separator);
-    let CardElement::Columns(columns) = &card.items[1].element else {
+    let CardElement::Columns { columns, .. } = &card.items[1].element else {
         panic!("second item is a column set");
     };
     assert_eq!(columns[0].width, ColumnWidth::Pixels(40.));
@@ -134,7 +135,10 @@ fn message_back_and_im_back_send_the_teams_value() {
         {"type": "Action.Submit", "title": "B", "data": {"msteams": {"type": "imBack"}, "k": 2}}
     ]));
     let first = actions[0].invoke_payload().unwrap();
-    assert_eq!((first.name, first.value), ("messageback", json!({"k": 1})));
+    assert_eq!(
+        (first.name.as_str(), first.value),
+        ("messageback", json!({"k": 1}))
+    );
     let second = actions[1].invoke_payload().unwrap();
     assert_eq!(second.value, json!({"msteams": {"type": "imBack"}, "k": 2}));
 }
@@ -292,4 +296,251 @@ fn element_visibility_covers_items_actions_and_nested_cards() {
     assert!(!visibility["details"]);
     assert!(!visibility["later"]);
     assert!(!visibility["nested"]);
+}
+
+fn parse(card: serde_json::Value) -> AdaptiveCard {
+    AdaptiveCard::parse(&card.to_string()).unwrap()
+}
+
+fn refresh_card(user_ids: Option<serde_json::Value>) -> AdaptiveCard {
+    let mut refresh =
+        json!({"action": {"type": "Action.Execute", "verb": "refreshView", "data": {"k": 1}}});
+    if let Some(user_ids) = user_ids {
+        refresh["userIds"] = user_ids;
+    }
+    parse(json!({"body": [{"type": "TextBlock", "text": "x"}], "refresh": refresh}))
+}
+
+#[test]
+fn refresh_parses_the_execute_action_and_user_ids() {
+    let card = refresh_card(Some(json!(["8:orgid:ABC"])));
+    let refresh = card.refresh.unwrap();
+    assert_eq!(refresh.action.verb, "refreshView");
+    assert_eq!(refresh.user_ids, Some(vec!["8:orgid:ABC".to_owned()]));
+    assert!(parse(json!({"body": [{"type": "TextBlock", "text": "x"}], "refresh": {"action": {"type": "Action.OpenUrl", "url": "https://a.example"}}})).refresh.is_none());
+}
+
+#[test]
+fn refresh_runs_for_small_chats_without_user_ids() {
+    let refresh = refresh_card(None).refresh.unwrap();
+    assert!(refresh.runs_automatically(Some(2), None));
+    assert!(refresh.runs_automatically(Some(60), Some("8:orgid:me")));
+    assert!(!refresh.runs_automatically(Some(61), Some("8:orgid:me")));
+    assert!(!refresh.runs_automatically(None, Some("8:orgid:me")));
+}
+
+#[test]
+fn refresh_with_user_ids_runs_only_for_listed_users() {
+    let refresh = refresh_card(Some(json!(["8:orgid:ABC-1", "8:orgid:other"])))
+        .refresh
+        .unwrap();
+    assert!(refresh.runs_automatically(Some(500), Some("abc-1")));
+    assert!(refresh.runs_automatically(Some(500), Some("8:orgid:abc-1")));
+    assert!(!refresh.runs_automatically(Some(2), Some("8:orgid:nobody")));
+    assert!(!refresh.runs_automatically(Some(2), None));
+}
+
+#[test]
+fn execute_payload_carries_the_trigger() {
+    let refresh = refresh_card(None).refresh.unwrap();
+    assert_eq!(refresh.action.payload().value["trigger"], "manual");
+    let automatic = refresh.action.payload_for(ExecuteTrigger::Automatic);
+    assert_eq!(automatic.name, "adaptiveCard/action");
+    assert_eq!(automatic.value["trigger"], "automatic");
+}
+
+#[test]
+fn tab_info_and_sign_in_submits_open_a_url() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Tab", "data": {"msteams": {"type": "invoke", "value": {"type": "tab/tabInfoAction", "tabInfo": {"contentUrl": "https://content.example/c", "websiteUrl": "https://site.example/w", "name": "n", "entityId": "e"}}}}},
+        {"type": "Action.Submit", "title": "Tab content", "data": {"msteams": {"type": "invoke", "value": {"type": "tab/tabInfoAction", "tabInfo": {"contentUrl": "https://content.example/c"}}}}},
+        {"type": "Action.Submit", "title": "Tab bad", "data": {"msteams": {"type": "invoke", "value": {"type": "tab/tabInfoAction", "tabInfo": {"websiteUrl": "javascript:x"}}}}},
+        {"type": "Action.Submit", "title": "Sign in", "data": {"msteams": {"type": "signin", "value": "https://login.example/start"}}}
+    ]));
+    assert_eq!(
+        actions[0].kind,
+        CardActionKind::OpenUrl("https://site.example/w".into())
+    );
+    assert_eq!(
+        actions[1].kind,
+        CardActionKind::OpenUrl("https://content.example/c".into())
+    );
+    assert_eq!(actions[2].kind, CardActionKind::Unsupported);
+    assert_eq!(
+        actions[3].kind,
+        CardActionKind::OpenUrl("https://login.example/start".into())
+    );
+}
+
+#[test]
+fn other_invoke_submits_send_the_value_named_by_its_type() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Go", "data": {"msteams": {"type": "invoke", "value": {"type": "custom/thing", "payload": 1}}}}
+    ]));
+    let payload = actions[0].invoke_payload().unwrap();
+    assert_eq!(payload.name, "custom/thing");
+    assert_eq!(payload.value, json!({"type": "custom/thing", "payload": 1}));
+}
+
+#[test]
+fn add_app_submits_stay_as_unavailable_buttons() {
+    let actions = card_actions(json!([
+        {"type": "Action.Submit", "title": "Add", "data": {"msteams": {"type": "invoke", "value": {"type": "appInstallToConversation"}}}},
+        {"type": "Action.Submit", "title": "Add 2", "data": {"msteams": {"type": "addAppToConversation"}}}
+    ]));
+    for action in &actions {
+        assert_eq!(
+            action.kind,
+            CardActionKind::Unavailable("Adding apps is not supported")
+        );
+        assert!(!action.is_clickable());
+    }
+}
+
+#[test]
+fn select_actions_are_parsed_on_card_image_container_and_column() {
+    let select = json!({"type": "Action.OpenUrl", "url": "https://a.example"});
+    let card = parse(json!({
+        "selectAction": select,
+        "body": [
+            {"type": "Image", "url": "https://img.example/a.png", "selectAction": {"type": "Action.Submit", "data": {"a": 1}}},
+            {"type": "Container", "selectAction": {"type": "Action.ToggleVisibility", "targetElements": ["x"]}, "items": [{"type": "TextBlock", "text": "t"}]},
+            {"type": "ColumnSet", "columns": [{"type": "Column", "selectAction": {"type": "Action.Execute", "verb": "v"}, "items": [{"type": "TextBlock", "text": "t"}]}]},
+            {"type": "Image", "url": "https://img.example/b.png", "selectAction": {"type": "Action.ShowCard", "card": {"body": [{"type": "TextBlock", "text": "t"}]}}}
+        ]
+    }));
+    assert!(matches!(
+        card.select_action.unwrap().kind,
+        CardActionKind::OpenUrl(_)
+    ));
+    let CardElement::Image(image) = &card.items[0].element else {
+        panic!("image")
+    };
+    assert!(matches!(
+        image.select_action.as_ref().unwrap().kind,
+        CardActionKind::Submit(_)
+    ));
+    let CardElement::Container { select_action, .. } = &card.items[1].element else {
+        panic!("container")
+    };
+    assert!(matches!(
+        select_action.as_ref().unwrap().kind,
+        CardActionKind::ToggleVisibility(_)
+    ));
+    let CardElement::Columns { columns, .. } = &card.items[2].element else {
+        panic!("columns")
+    };
+    assert!(matches!(
+        columns[0].select_action.as_ref().unwrap().kind,
+        CardActionKind::Execute(_)
+    ));
+    let CardElement::Image(image) = &card.items[3].element else {
+        panic!("image")
+    };
+    assert!(image.select_action.is_none());
+}
+
+#[test]
+fn media_takes_the_first_web_source_and_poster() {
+    let card = parse(json!({"body": [
+        {"type": "Media", "poster": "https://img.example/p.png", "altText": "Intro", "sources": [
+            {"mimeType": "video/mp4", "url": "ftp://x"}, {"mimeType": "video/mp4", "url": "https://v.example/a.mp4"}, {"url": "https://v.example/b.mp4"}
+        ]},
+        {"type": "Media", "sources": []},
+        {"type": "TextBlock", "text": "after"}
+    ]}));
+    assert_eq!(card.items.len(), 2);
+    let CardElement::Media(media) = &card.items[0].element else {
+        panic!("media")
+    };
+    assert_eq!(media.source_url, "https://v.example/a.mp4");
+    assert_eq!(
+        media.poster_url.as_deref(),
+        Some("https://img.example/p.png")
+    );
+    assert_eq!(media.alt_text.as_deref(), Some("Intro"));
+}
+
+#[test]
+fn icon_elements_and_action_icons_are_parsed() {
+    let card = parse(json!({
+        "body": [
+            {"type": "Icon", "name": "Calendar", "size": "xxLarge", "color": "accent", "style": "Filled", "selectAction": {"type": "Action.OpenUrl", "url": "https://a.example"}},
+            {"type": "Icon", "name": "Mail"}
+        ],
+        "actions": [
+            {"type": "Action.OpenUrl", "title": "A", "url": "https://a.example", "iconUrl": "icon:Send,Filled"},
+            {"type": "Action.OpenUrl", "title": "B", "url": "https://a.example", "iconUrl": "https://img.example/i.png"},
+            {"type": "Action.OpenUrl", "title": "C", "url": "https://a.example", "iconUrl": "data:image/png;base64,AA"}
+        ]
+    }));
+    let CardElement::Icon(icon) = &card.items[0].element else {
+        panic!("icon")
+    };
+    assert_eq!(
+        (icon.name.as_str(), icon.size, icon.color, icon.filled),
+        (
+            "Calendar",
+            IconSize::ExtraExtraLarge,
+            TextColor::Accent,
+            true
+        )
+    );
+    assert!(icon.select_action.is_some());
+    let CardElement::Icon(plain) = &card.items[1].element else {
+        panic!("icon")
+    };
+    assert_eq!((plain.size, plain.filled), (IconSize::Standard, false));
+    assert_eq!(
+        card.actions[0].icon,
+        Some(CardActionIcon::Named("Send".into()))
+    );
+    assert_eq!(
+        card.actions[1].icon,
+        Some(CardActionIcon::Url("https://img.example/i.png".into()))
+    );
+    assert_eq!(card.actions[2].icon, None);
+}
+
+#[test]
+fn mentions_and_italic_survive_in_text_fact_and_rich_text() {
+    let card = parse(json!({"body": [
+        {"type": "TextBlock", "text": "Hi <at>Ada</at>, this is _soft_ and snake_case_x"},
+        {"type": "FactSet", "facts": [{"title": "Owner", "value": "<at>Bob</at>"}]},
+        {"type": "RichTextBlock", "inlines": [{"type": "TextRun", "text": "cc <at>Cy</at>", "weight": "bolder"}]}
+    ]}));
+    let CardElement::Text(text) = &card.items[0].element else {
+        panic!("text")
+    };
+    assert!(text.spans.contains(&Span::Mention {
+        name: "Ada".into(),
+        id: None
+    }));
+    assert!(
+        text.spans
+            .contains(&Span::Italic(vec![Span::Text("soft".into())]))
+    );
+    let CardElement::Facts(facts) = &card.items[1].element else {
+        panic!("facts")
+    };
+    assert_eq!(
+        facts[0].value,
+        vec![Span::Mention {
+            name: "Bob".into(),
+            id: None
+        }]
+    );
+    let CardElement::Text(rich) = &card.items[2].element else {
+        panic!("rich")
+    };
+    assert_eq!(
+        rich.spans,
+        vec![Span::Bold(vec![
+            Span::Text("cc ".into()),
+            Span::Mention {
+                name: "Cy".into(),
+                id: None
+            }
+        ])]
+    );
 }

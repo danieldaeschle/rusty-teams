@@ -142,7 +142,7 @@ fn inputs_without_id_or_choices_and_unknown_types_fall_back() {
         json!([
             {"type": "Input.Text"},
             {"type": "Input.ChoiceSet", "id": "c", "choices": []},
-            {"type": "Input.Rating", "id": "r", "fallbackText": "Rating is not supported"}
+            {"type": "Input.Slider", "id": "r", "fallbackText": "Slider is not supported"}
         ]),
         json!([]),
     );

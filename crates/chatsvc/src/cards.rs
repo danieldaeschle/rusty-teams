@@ -13,6 +13,7 @@ const BOT_MRI_PREFIX: &str = "28:";
 const CARD_MESSAGE_TYPE: &str = "RichText/Media_Card";
 const ADAPTIVE_CARD_TYPE: &str = "application/vnd.microsoft.card.adaptive";
 const MESSAGE_TYPE: &str = "application/vnd.microsoft.activity.message";
+const SEARCH_RESPONSE_TYPE: &str = "application/vnd.microsoft.search.searchResponse";
 const ERROR_STATUS_FLOOR: u64 = 400;
 
 pub fn spaces_scope() -> Scope {
@@ -75,6 +76,7 @@ pub enum InvokeResponse {
     Empty,
     Card(Value),
     Message(String),
+    Search(Value),
     Task(TaskResponse),
     Failed { status_code: u16, message: String },
 }
@@ -247,6 +249,7 @@ pub fn parse_invoke_response(body: &Value) -> InvokeResponse {
             .map(|card| InvokeResponse::Card(card.clone()))
             .unwrap_or(InvokeResponse::Empty),
         Some(MESSAGE_TYPE) => InvokeResponse::Message(value.map(text_of).unwrap_or_default()),
+        Some(SEARCH_RESPONSE_TYPE) => InvokeResponse::Search(value.cloned().unwrap_or(Value::Null)),
         _ => InvokeResponse::Empty,
     }
 }
@@ -533,6 +536,18 @@ mod tests {
         assert_eq!(
             parse_invoke_response(&json!({"task": {"type": "continue", "value": {}}})),
             InvokeResponse::Empty
+        );
+    }
+
+    #[test]
+    fn search_answers_carry_the_results_value() {
+        let value = json!({"results": [{"title": "Ada", "value": "ada"}]});
+        assert_eq!(
+            parse_invoke_response(&json!({
+                "type": "application/vnd.microsoft.search.searchResponse",
+                "value": value
+            })),
+            InvokeResponse::Search(value)
         );
     }
 

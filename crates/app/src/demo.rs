@@ -839,10 +839,26 @@ fn bot_messages() -> Vec<MessageRecord> {
             ]}
         ]
     });
-    vec![
+    let mut messages = vec![
         bot_card_message("b1", at(0, 13, 45), &card),
         bot_card_message("b2", at(0, 13, 52), &input_card()),
-    ]
+        bot_card_message("b3", at(0, 13, 58), &crate::demo_input_cards::all_inputs_card()),
+    ];
+    messages.extend(
+        crate::demo_cards::behaviour_cards()
+            .iter()
+            .zip(0u32..)
+            .map(|(card, index)| bot_card_message(&format!("g{index}"), at(0, 14, index), card)),
+    );
+    messages.extend(
+        crate::demo_chart_cards::cards()
+            .iter()
+            .zip(0..)
+            .map(|(chart_card, minute)| {
+                bot_card_message(&format!("c{minute}"), at(0, 15, minute), chart_card)
+            }),
+    );
+    messages
 }
 
 fn bot_card_message(id: &str, time: DateTime<Utc>, card: &serde_json::Value) -> MessageRecord {
@@ -947,6 +963,14 @@ pub async fn card_answer(task: CardTask) -> CardAnswer {
         CardActionOutcome::Sent
     };
     Ok((outcome, Some((bot_app(), BOT_ID.to_owned()))))
+}
+
+pub async fn refresh_answer() -> CardAnswer {
+    tokio::time::sleep(CARD_ANSWER_DELAY).await;
+    Ok((
+        CardActionOutcome::ReplaceCard(crate::demo_cards::refreshed_card().to_string()),
+        Some((bot_app(), BOT_ID.to_owned())),
+    ))
 }
 
 fn settings_card() -> serde_json::Value {

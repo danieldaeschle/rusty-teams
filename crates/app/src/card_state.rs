@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use teams_core::AdaptiveCard;
@@ -10,6 +10,7 @@ use crate::card_inputs::{FieldHandle, InputField};
 const DIALOG_KEY: &str = "task-dialog";
 pub const DONE_HOLD: Duration = Duration::from_millis(1600);
 pub const MAX_REASON_CHARS: usize = 160;
+const MAX_REFRESHES_IN_FLIGHT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionPhase {
@@ -84,11 +85,14 @@ pub struct CardState {
     phases: HashMap<String, ActionPhase>,
     visibility: HashMap<String, bool>,
     open_cards: HashMap<String, usize>,
+    slots: HashMap<String, usize>,
     notes: HashMap<String, String>,
     overrides: HashMap<(String, String), CardOverride>,
     input_values: HashMap<String, String>,
     input_errors: HashMap<String, String>,
     input_fields: HashMap<String, FieldHandle>,
+    refreshed: HashSet<(String, String)>,
+    refreshes_in_flight: usize,
 }
 
 impl CardState {
@@ -114,10 +118,14 @@ impl CardState {
         self.phases.retain(|key, _| !key.starts_with(card_key));
         self.visibility.retain(|key, _| !key.starts_with(card_key));
         self.open_cards.retain(|key, _| !key.starts_with(card_key));
+        self.slots.retain(|key, _| !key.starts_with(card_key));
         self.notes.remove(card_key);
-        self.input_values.retain(|key, _| !key.starts_with(card_key));
-        self.input_errors.retain(|key, _| !key.starts_with(card_key));
-        self.input_fields.retain(|key, _| !key.starts_with(card_key));
+        self.input_values
+            .retain(|key, _| !key.starts_with(card_key));
+        self.input_errors
+            .retain(|key, _| !key.starts_with(card_key));
+        self.input_fields
+            .retain(|key, _| !key.starts_with(card_key));
     }
 
     pub fn has_input(&self, input_key: &str) -> bool {
@@ -132,14 +140,15 @@ impl CardState {
     }
 
     pub fn input_value(&self, input_key: &str) -> &str {
-        self.input_values
-            .get(input_key)
-            .map_or("", String::as_str)
+        self.input_values.get(input_key).map_or("", String::as_str)
     }
 
     pub fn input_text(&self, input_key: &str, cx: &App) -> String {
         match self.input_fields.get(input_key) {
-            Some(handle) => handle.field.text(cx),
+            Some(handle) => handle
+                .field
+                .text(cx)
+                .unwrap_or_else(|| self.input_value(input_key).to_owned()),
             None => self.input_value(input_key).to_owned(),
         }
     }
@@ -188,6 +197,14 @@ impl CardState {
         }
     }
 
+    pub fn slot(&self, slot_key: &str, default: usize) -> usize {
+        self.slots.get(slot_key).copied().unwrap_or(default)
+    }
+
+    pub fn set_slot(&mut self, slot_key: &str, value: usize) {
+        self.slots.insert(slot_key.to_owned(), value);
+    }
+
     pub fn note(&self, card_key: &str) -> Option<&str> {
         self.notes.get(card_key).map(String::as_str)
     }
@@ -210,6 +227,32 @@ impl CardState {
             (conversation_id.to_owned(), message_id.to_owned()),
             replaced,
         );
+    }
+
+    pub fn begin_refresh(&mut self, conversation_id: &str, message_id: &str, manual: bool) -> bool {
+        let key = (conversation_id.to_owned(), message_id.to_owned());
+        if !manual
+            && (self.refreshed.contains(&key)
+                || self.refreshes_in_flight >= MAX_REFRESHES_IN_FLIGHT)
+        {
+            return false;
+        }
+        self.refreshed.insert(key);
+        self.refreshes_in_flight += 1;
+        true
+    }
+
+    pub fn cancel_refresh(&mut self, conversation_id: &str, message_id: &str) {
+        self.refreshed
+            .remove(&(conversation_id.to_owned(), message_id.to_owned()));
+        self.refreshes_in_flight = self.refreshes_in_flight.saturating_sub(1);
+    }
+
+    /// True when the throttle was full, so a deferred refresh may start now.
+    pub fn finish_refresh(&mut self) -> bool {
+        let was_full = self.refreshes_in_flight >= MAX_REFRESHES_IN_FLIGHT;
+        self.refreshes_in_flight = self.refreshes_in_flight.saturating_sub(1);
+        was_full
     }
 
     pub fn overrides_for(&self, conversation_id: &str) -> HashMap<String, CardOverride> {
@@ -268,6 +311,16 @@ mod tests {
     }
 
     #[test]
+    fn slots_default_until_set_and_clear_with_their_card() {
+        let mut state = CardState::default();
+        assert_eq!(state.slot("m-card-0-3", 2), 2);
+        state.set_slot("m-card-0-3", 5);
+        assert_eq!(state.slot("m-card-0-3", 2), 5);
+        state.clear_card("m-card-0");
+        assert_eq!(state.slot("m-card-0-3", 2), 2);
+    }
+
+    #[test]
     fn overrides_are_scoped_to_their_conversation() {
         let mut state = CardState::default();
         let replaced = CardOverride {
@@ -277,6 +330,37 @@ mod tests {
         state.set_override("c1", "m1", replaced.clone());
         assert_eq!(state.overrides_for("c1").get("m1"), Some(&replaced));
         assert!(state.overrides_for("c2").is_empty());
+    }
+
+    #[test]
+    fn a_message_refreshes_once_unless_asked_manually() {
+        let mut state = CardState::default();
+        assert!(state.begin_refresh("c", "m", false));
+        assert!(!state.begin_refresh("c", "m", false));
+        assert!(state.begin_refresh("c", "m", true));
+        assert!(state.begin_refresh("c", "other", false));
+    }
+
+    #[test]
+    fn at_most_three_automatic_refreshes_run_at_once() {
+        let mut state = CardState::default();
+        for message_id in ["a", "b", "c"] {
+            assert!(state.begin_refresh("c", message_id, false));
+        }
+        assert!(!state.begin_refresh("c", "d", false));
+        assert!(state.begin_refresh("c", "d", true));
+        assert!(state.finish_refresh());
+        assert!(state.finish_refresh());
+        assert!(!state.finish_refresh());
+        assert!(state.begin_refresh("c", "e", false));
+    }
+
+    #[test]
+    fn a_cancelled_refresh_may_start_again() {
+        let mut state = CardState::default();
+        assert!(state.begin_refresh("c", "m", false));
+        state.cancel_refresh("c", "m");
+        assert!(state.begin_refresh("c", "m", false));
     }
 
     #[test]

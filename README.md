@@ -43,7 +43,7 @@
 - Send, edit, delete, react, quote-reply, @mentions
 - Forward, copy link, save (Saved panel), pin to the chat banner, mark unread from here
 - Inline images, file cards, link previews
-- Adaptive Cards: layout, links, images, buttons, inputs, task dialogs
+- Adaptive Cards like Teams: tables, code blocks, badges, charts, date and time pickers, live refresh, task dialogs
 - GIFs and stickers in messages
 - Select and copy message text
 

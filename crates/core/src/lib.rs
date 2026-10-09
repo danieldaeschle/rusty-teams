@@ -2,7 +2,13 @@ mod actions;
 mod adaptive_card;
 mod avatars;
 mod card_actions;
+mod card_chart;
+mod card_date;
 mod card_inputs;
+mod card_layout;
+mod card_table;
+mod card_widgets;
+mod card_width;
 mod channel_sync;
 mod download;
 mod draft;
@@ -17,6 +23,7 @@ mod images;
 mod link_sync;
 mod links;
 mod mapping;
+mod italic;
 mod markdown;
 mod mentions;
 mod message_actions;
@@ -33,17 +40,34 @@ mod spans;
 mod stored;
 
 pub use adaptive_card::{
-    AdaptiveCard, CARD_THEME, CardAction, CardActionKind, CardColumn, CardElement, CardFact,
-    CardImage, CardItem, CardSpacing, CardText, ColumnWidth, ContainerStyle, ExecuteAction,
-    ImageSize, InvokePayload, SubmitAction, TextColor, TextSize, ToggleTarget, VerticalAlignment,
-    card_content_text, task_value,
+    ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn, CardElement,
+    CardFact, CardIcon, CardImage, CardItem, CardMedia, CardRefresh, CardSpacing, CardText,
+    ColumnWidth, ContainerStyle, ExecuteAction, ExecuteTrigger, IconSize, ImageSize,
+    InvokePayload, SubmitAction, TextColor, TextSize, ToggleTarget, VerticalAlignment,
+    card_content_text, split_overflow, task_value,
 };
+pub use card_date::{format_card_dates, format_card_dates_in};
+pub use card_layout::{ContainerLayout, HorizontalAlignment};
+pub use card_table::{CardTable, TableCell, TableColumn, TableRow};
+pub use card_widgets::{
+    BadgeAppearance, BadgeShape, BadgeSize, BadgeStyle, CardBadge, CardCarousel, CardCarouselPage,
+    CardCodeBlock, CardCompoundButton, CardProgressBar, CardProgressRing, IconPosition,
+    LabelPosition, RingSize,
+};
+pub use card_width::{TargetWidth, WidthClass};
 pub use avatars::Avatar;
 pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
+pub use card_chart::{
+    AxisScale, BarDisplayMode, CardChart, ChartColor, ChartGauge, ChartKind, ChartPoint,
+    ChartSeries, GaugeSegment, GaugeValueFormat, format_chart_value, label_stride, nice_scale,
+    series_categories, series_maximum, series_value, slice_angles, unit_fraction,
+};
 pub use card_inputs::{
-    CardInput, CardInputKind, ChoiceInput, ChoiceStyle, DATE_PLACEHOLDER, InputChoice, InputError,
-    MomentInput, NumberInput, TIME_PLACEHOLDER, TextInput, TextStyle, ToggleInput,
-    collect_input_values, merge_input_data,
+    CardInput, CardInputKind, ChoiceInput, ChoiceQuery, ChoiceStyle, DATE_PLACEHOLDER,
+    InlineAction, InputChoice, InputError, MomentInput, NumberInput, RatingColor, RatingDisplay,
+    RatingInput, RatingSize, RatingStyle, SEARCH_INVOKE_NAME, TIME_PLACEHOLDER, TextInput,
+    TextStyle, ToggleInput, collect_input_values, format_date, format_time, merge_input_data,
+    parse_search_results, search_request_value,
 };
 pub use chatsvc::{ChatApp, ForwardResult, Gif, PinnedMessage, SavedMessage, ScheduledDraft};
 pub use draft::{
@@ -62,7 +86,7 @@ pub use graph::{
 pub use images::StoredImage;
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview};
 pub use mapping::{chat_record, message_record};
-pub use markdown::{escape_html, markdown_to_html, plain_text_to_html};
+pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
 pub use mentions::MentionInput;
 pub use message_link::{ChannelLinkInput, channel_message_link, chat_message_link};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};

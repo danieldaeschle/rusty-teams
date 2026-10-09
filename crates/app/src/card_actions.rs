@@ -1,8 +1,8 @@
 use gpui_kit::*;
 use serde_json::Value;
 use teams_core::{
-    AdaptiveCard, CardAction, CardActionOutcome, CardInput, ChatApp, TaskDialog,
-    TaskDialogKind, adaptive_cards,
+    AdaptiveCard, CardAction, CardActionOutcome, CardInput, ChatApp, TaskDialog, TaskDialogKind,
+    adaptive_cards,
 };
 use tokio::sync::oneshot;
 
@@ -227,7 +227,12 @@ impl AppState {
         cx.notify();
     }
 
-    fn replace_card(&mut self, scope: &CardScope, json: &str, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn replace_card(
+        &mut self,
+        scope: &CardScope,
+        json: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(card) = AdaptiveCard::parse(json) else {
             return false;
         };
@@ -363,6 +368,17 @@ impl AppState {
         cx: &mut Context<Self>,
     ) {
         self.cards.toggle_open_card(actions_key, index);
+        self.announce_cards(scope, cx);
+    }
+
+    pub fn set_card_slot(
+        &mut self,
+        scope: &CardScope,
+        slot_key: &str,
+        value: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.cards.set_slot(slot_key, value);
         self.announce_cards(scope, cx);
     }
 
