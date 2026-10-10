@@ -73,6 +73,10 @@ impl Rings {
         self.entries.iter().filter(|entry| entry.state.is_ringing())
     }
 
+    pub fn first_ringing_id(&self) -> Option<u64> {
+        self.ringing().next().map(|entry| entry.ring.ring_id)
+    }
+
     pub fn is_ringing(&self) -> bool {
         self.ringing().next().is_some()
     }

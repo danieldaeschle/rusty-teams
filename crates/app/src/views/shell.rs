@@ -10,6 +10,12 @@ use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
+use super::shortcuts::{
+    AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenChannelsTab,
+    OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts, ToggleCallCamera,
+    ToggleCallShare,
+};
+use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::SidebarView;
 use super::status_bar::render_status_bar;
 use super::status_menu::own_status_button;
@@ -21,6 +27,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
+use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 
@@ -28,16 +35,7 @@ actions!(teams, [OpenSwitcher, NewChat, ToggleCallMute]);
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
-    cx.bind_keys([
-        KeyBinding::new("ctrl-k", OpenSwitcher, None),
-        KeyBinding::new("ctrl-n", NewChat, None),
-        KeyBinding::new("alt-r", ReplyToHovered, None),
-        KeyBinding::new("ctrl-shift-m", ToggleCallMute, None),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-k", OpenSwitcher, None),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-n", NewChat, None),
-    ]);
+    super::shortcuts::bind_scopes(cx, &[Scope::Global, Scope::OutsideComposer, Scope::GlobalOverTextFields]);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +62,7 @@ pub struct AppShell {
     saved_panel: Option<Entity<SavedPanel>>,
     forward_dialog: Option<Entity<ForwardDialog>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
+    shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
@@ -127,6 +126,7 @@ impl AppShell {
             saved_panel: None,
             forward_dialog: None,
             status_dialog: None,
+            shortcuts_dialog: None,
             profile_card: None,
             focus_handle,
             open_target,
@@ -389,6 +389,30 @@ impl AppShell {
         cx.notify();
     }
 
+    fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcuts_dialog.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+            return;
+        }
+        self.switcher = None;
+        self.activity_panel = None;
+        self.saved_panel = None;
+        let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
+        cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, _: &ShortcutsDialogEvent, window, cx| {
+                this.shortcuts_dialog = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.shortcuts_dialog = Some(dialog);
+        cx.notify();
+    }
+
     fn open_profile_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(request) = self
             .state
@@ -482,6 +506,7 @@ impl Render for AppShell {
             || self.saved_panel.is_some()
             || self.forward_dialog.is_some()
             || self.status_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
             || self.profile_card.is_some()
             || {
                 let state = self.state.read(cx);
@@ -521,6 +546,44 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
                 this.state.update(cx, |state, cx| state.toggle_call_mute(cx));
             }))
+            .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
+                this.toggle_shortcuts_dialog(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenActivity, window, cx| {
+                this.toggle_activity_panel(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
+                this.toggle_saved_panel(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenChatsTab, _, cx| {
+                this.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenChannelsTab, _, cx| {
+                this.sidebar.update(cx, |sidebar, cx| sidebar.show_channels(cx));
+            }))
+            .on_action(cx.listener(|this, _: &PreviousConversation, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Previous, cx));
+            }))
+            .on_action(cx.listener(|this, _: &NextConversation, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
+            }))
+            .on_action(cx.listener(|this, _: &AcceptCall, _, cx| {
+                this.state.update(cx, |state, cx| state.accept_ringing_call(cx));
+            }))
+            .on_action(cx.listener(|this, _: &DeclineCall, _, cx| {
+                this.state.update(cx, |state, cx| state.decline_ringing_call(cx));
+            }))
+            .on_action(cx.listener(|this, _: &HangUpCall, _, cx| {
+                this.state.update(cx, |state, cx| state.leave_call(cx));
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCallCamera, _, cx| {
+                this.state.update(cx, |state, cx| state.toggle_call_camera(cx));
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCallShare, _, cx| {
+                this.state.update(cx, |state, cx| state.toggle_call_share(cx));
+            }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.conversation.update(cx, |conversation, cx| {
                     conversation.reply_to_hovered(window, cx)
@@ -557,6 +620,7 @@ impl Render for AppShell {
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())
             .children(self.status_dialog.clone())
+            .children(self.shortcuts_dialog.clone())
             .children(self.profile_card.clone())
             .child(crate::frame_log::probe("last"))
     }

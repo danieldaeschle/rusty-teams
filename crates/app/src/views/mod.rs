@@ -37,6 +37,8 @@ pub mod saved_panel;
 pub mod scheduled_toolbar;
 pub mod shared_tab;
 pub mod shell;
+pub mod shortcuts;
+pub mod shortcuts_dialog;
 pub mod sidebar;
 pub mod status_bar;
 pub mod status_menu;

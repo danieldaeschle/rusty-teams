@@ -21,8 +21,9 @@ use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
-    AvatarSpec, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section, SectionInput,
-    SectionKind, any_unread_channel, build_sections, unread_chat_count,
+    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
+    SectionInput, SectionKind, Step, any_unread_channel, build_sections, step_id, unread_chat_count,
+    visible_channel_ids,
 };
 use crate::theme;
 
@@ -354,6 +355,47 @@ impl SidebarView {
             channels_scroll: ScrollHandle::new(),
             _subscription: subscription,
         }
+    }
+
+    pub fn show_chats(&mut self, cx: &mut Context<Self>) {
+        self.tab = SidebarTab::Chats;
+        cx.notify();
+    }
+
+    pub fn show_channels(&mut self, cx: &mut Context<Self>) {
+        self.tab = SidebarTab::Channels;
+        cx.notify();
+    }
+
+    pub fn select_adjacent(&mut self, step: Step, cx: &mut Context<Self>) {
+        let selection = match self.tab {
+            SidebarTab::Chats => self
+                .state
+                .read(cx)
+                .adjacent_chat_id(step)
+                .map(Selection::Chat),
+            SidebarTab::Channels => self.adjacent_channel_id(step, cx).map(Selection::Channel),
+        };
+        if let Some(selection) = selection {
+            self.state.update(cx, |state, cx| state.select(selection, cx));
+        }
+    }
+
+    fn adjacent_channel_id(&self, step: Step, cx: &mut Context<Self>) -> Option<String> {
+        let state = self.state.read(cx);
+        let selected_channel = match &state.selection {
+            Some(Selection::Channel(channel_id)) => Some(channel_id.as_str()),
+            _ => None,
+        };
+        let input = ChannelOrderInput {
+            teams: &state.sidebar.teams,
+            pinned_ids: &state.directory.pinned_channels,
+            collapsed_teams: &self.collapsed_teams,
+            revealed_channel_teams: &self.revealed_channel_teams,
+            hidden_teams_open: self.hidden_teams_open,
+            selected_channel,
+        };
+        step_id(&visible_channel_ids(&input), selected_channel, step)
     }
 
     fn expand_team_of_selection(&mut self, cx: &mut Context<Self>) {

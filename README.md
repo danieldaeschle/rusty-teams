@@ -56,6 +56,7 @@
 - `:thumbsup:` and `:)` convert as you type, German aliases included
 - Schedule send: right-click send or `Ctrl+Shift+Enter`
 - Drafts and unsent messages survive a restart
+- Keyboard like Teams: `Ctrl+1`..`4` panels and tabs, `Alt+Up` / `Alt+Down` next chat, call keys on `Ctrl+Shift+A/D/H/O/E/M`, `Ctrl+.` lists them all
 
 **Calls**
 - Test call to the Teams Echo bot from the avatar menu: native WebRTC audio, mute (`Ctrl+Shift+M`), device switching, mini window while you read other chats

@@ -70,7 +70,7 @@ const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
 const HISTORY_LIMIT: usize = 200;
 const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
-const KEY_CONTEXT: &str = "Composer";
+pub(super) const KEY_CONTEXT: &str = "Composer";
 const IMAGE_TOKEN_PREFIX: &str = "image-";
 
 actions!(
@@ -89,25 +89,7 @@ actions!(
 );
 
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("ctrl-b", ToggleBold, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-i", ToggleItalic, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-u", ToggleUnderline, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-x", ToggleStrike, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-=", ToggleSuperscript, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-=", ToggleSubscript, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-c", ToggleCode, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-k", EditLink, Some(KEY_CONTEXT)),
-        KeyBinding::new("ctrl-shift-enter", ScheduleSend, Some(KEY_CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-b", ToggleBold, Some(KEY_CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-i", ToggleItalic, Some(KEY_CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-u", ToggleUnderline, Some(KEY_CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-k", EditLink, Some(KEY_CONTEXT)),
-    ]);
+    super::shortcuts::bind_scopes(cx, &[super::shortcuts::Scope::Composer]);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

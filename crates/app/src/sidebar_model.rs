@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use store::{ChatRecord, Sidebar};
+use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam};
 use teams_core::ChatSection;
 
 use crate::app_state::chat_title;
@@ -326,12 +326,16 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
     sections
 }
 
-pub fn next_chat_id(sections: &[Section], removed_id: &str) -> Option<String> {
-    let visible: Vec<&str> = sections
+pub fn visible_chat_ids(sections: &[Section]) -> Vec<&str> {
+    sections
         .iter()
         .filter(|section| !section.collapsed)
         .flat_map(|section| section.items.iter().map(|item| item.id.as_str()))
-        .collect();
+        .collect()
+}
+
+pub fn next_chat_id(sections: &[Section], removed_id: &str) -> Option<String> {
+    let visible = visible_chat_ids(sections);
     let position = visible.iter().position(|id| *id == removed_id)?;
     visible
         .get(position + 1)
@@ -341,6 +345,89 @@ pub fn next_chat_id(sections: &[Section], removed_id: &str) -> Option<String> {
                 .and_then(|previous| visible.get(previous))
         })
         .map(|id| (*id).to_owned())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Previous,
+    Next,
+}
+
+pub fn step_id(ids: &[&str], current: Option<&str>, step: Step) -> Option<String> {
+    let position = current.and_then(|current| ids.iter().position(|id| *id == current));
+    let target = match (position, step) {
+        (Some(position), Step::Next) => position + 1,
+        (Some(position), Step::Previous) => position.checked_sub(1)?,
+        (None, Step::Next) => 0,
+        (None, Step::Previous) => ids.len().checked_sub(1)?,
+    };
+    ids.get(target).map(|id| (*id).to_owned())
+}
+
+pub struct ChannelOrderInput<'a> {
+    pub teams: &'a [SidebarTeam],
+    pub pinned_ids: &'a [String],
+    pub collapsed_teams: &'a HashSet<String>,
+    pub revealed_channel_teams: &'a HashSet<String>,
+    pub hidden_teams_open: bool,
+    pub selected_channel: Option<&'a str>,
+}
+
+pub fn visible_channel_ids<'a>(input: &ChannelOrderInput<'a>) -> Vec<&'a str> {
+    let mut ids: Vec<&str> = Vec::new();
+    let mut push = |id: &'a str| {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    };
+    for pinned_id in input.pinned_ids {
+        let known = input
+            .teams
+            .iter()
+            .flat_map(|entry| entry.channels.iter())
+            .find(|channel| &channel.id == pinned_id);
+        if let Some(channel) = known {
+            push(&channel.id);
+        }
+    }
+    let holds_selection = |entry: &SidebarTeam| {
+        entry
+            .channels
+            .iter()
+            .any(|channel| Some(channel.id.as_str()) == input.selected_channel)
+    };
+    let hidden_teams_shown = input.hidden_teams_open
+        || input
+            .teams
+            .iter()
+            .any(|entry| entry.hidden && holds_selection(entry));
+    let teams = input
+        .teams
+        .iter()
+        .filter(|entry| !entry.hidden)
+        .chain(
+            input
+                .teams
+                .iter()
+                .filter(|entry| entry.hidden && hidden_teams_shown),
+        );
+    for entry in teams {
+        if input.collapsed_teams.contains(&entry.team.id) {
+            continue;
+        }
+        let is_hidden = |channel: &ChannelRecord| entry.hidden_channel_ids.contains(&channel.id);
+        let is_selected = |channel: &ChannelRecord| Some(channel.id.as_str()) == input.selected_channel;
+        let revealed = input.revealed_channel_teams.contains(&entry.team.id);
+        for channel in entry.channels.iter().filter(|channel| !is_hidden(channel) || is_selected(channel)) {
+            push(&channel.id);
+        }
+        if revealed {
+            for channel in entry.channels.iter().filter(|channel| is_hidden(channel) && !is_selected(channel)) {
+                push(&channel.id);
+            }
+        }
+    }
+    ids
 }
 
 fn section(
@@ -515,6 +602,99 @@ mod tests {
         let single = [chat("a", "group", false)];
         let sections = build_sections(&input(&single, &directory, &collapsed));
         assert_eq!(next_chat_id(&sections, "a"), None);
+    }
+
+    #[test]
+    fn stepping_follows_the_visible_order_without_wrapping() {
+        let ids = ["a", "b", "c"];
+        assert_eq!(step_id(&ids, Some("a"), Step::Next), Some("b".to_owned()));
+        assert_eq!(step_id(&ids, Some("b"), Step::Previous), Some("a".to_owned()));
+        assert_eq!(step_id(&ids, Some("c"), Step::Next), None);
+        assert_eq!(step_id(&ids, Some("a"), Step::Previous), None);
+        assert_eq!(step_id(&ids, None, Step::Next), Some("a".to_owned()));
+        assert_eq!(step_id(&ids, Some("gone"), Step::Previous), Some("c".to_owned()));
+        assert_eq!(step_id(&[], None, Step::Next), None);
+    }
+
+    #[test]
+    fn visible_chats_skip_collapsed_sections_and_see_more_rows() {
+        let mut chats = vec![chat("fav", "group", false), chat("hid", "group", false)];
+        chats.extend((0..7).map(|index| muted_chat(&format!("m{index}"))));
+        chats.push(chat("other", "group", false));
+        let directory = sectioned_directory(
+            true,
+            true,
+            vec![
+                folder("fav-folder", FolderKind::Favorites, &["fav"]),
+                folder("work", FolderKind::UserCreated, &["hid"]),
+                folder("recent", FolderKind::Recent, &[]),
+                folder("muted-folder", FolderKind::Muted, &[]),
+            ],
+        );
+        let mut collapsed = HashSet::new();
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        assert_eq!(
+            visible_chat_ids(&sections),
+            vec!["fav", "hid", "other", "m0", "m1", "m2", "m3", "m4"]
+        );
+        collapsed.insert("work".to_owned());
+        collapsed.insert("muted-folder".to_owned());
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        assert_eq!(visible_chat_ids(&sections), vec!["fav", "other"]);
+    }
+
+    fn team(id: &str, hidden: bool, channel_ids: &[&str], hidden_channel_ids: &[&str]) -> SidebarTeam {
+        SidebarTeam {
+            team: store::TeamRecord {
+                id: id.into(),
+                name: id.into(),
+            },
+            channels: channel_ids
+                .iter()
+                .map(|channel_id| ChannelRecord {
+                    id: (*channel_id).into(),
+                    team_id: id.into(),
+                    name: (*channel_id).into(),
+                    membership_type: None,
+                    last_message_at: None,
+                    unread: false,
+                })
+                .collect(),
+            hidden,
+            hidden_channel_ids: hidden_channel_ids.iter().map(|id| (*id).to_owned()).collect(),
+            notifications: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn visible_channels_list_pinned_first_then_open_teams() {
+        let teams = [
+            team("t1", false, &["a", "b", "c"], &["b"]),
+            team("t2", false, &["d", "e"], &[]),
+            team("t3", true, &["f"], &[]),
+        ];
+        let pinned = ["e".to_owned(), "missing".to_owned()];
+        let order = |selected: Option<&str>,
+                     hidden_teams_open: bool,
+                     collapsed: &[&str],
+                     revealed: &[&str]| {
+            let to_set = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<HashSet<_>>();
+            let (collapsed, revealed) = (to_set(collapsed), to_set(revealed));
+            let input = ChannelOrderInput {
+                teams: &teams,
+                pinned_ids: &pinned,
+                collapsed_teams: &collapsed,
+                revealed_channel_teams: &revealed,
+                hidden_teams_open,
+                selected_channel: selected,
+            };
+            visible_channel_ids(&input).into_iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+        assert_eq!(order(None, false, &[], &[]), vec!["e", "a", "c", "d"]);
+        assert_eq!(order(Some("b"), false, &[], &[]), vec!["e", "a", "b", "c", "d"]);
+        assert_eq!(order(Some("f"), false, &[], &[]), vec!["e", "a", "c", "d", "f"]);
+        assert_eq!(order(None, true, &[], &[]), vec!["e", "a", "c", "d", "f"]);
+        assert_eq!(order(None, true, &["t2"], &["t1"]), vec!["e", "a", "c", "b", "f"]);
     }
 
     #[test]

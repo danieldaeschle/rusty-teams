@@ -262,6 +262,22 @@ impl AppState {
         self.send_call_command(CallCommand::StartShare(source));
     }
 
+    pub fn toggle_call_share(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
+        if call.model.local_share.is_some() {
+            self.stop_call_share(cx);
+            return;
+        }
+        if !call.model.can_share() {
+            return;
+        }
+        if let Some(source) = call.model.screens().first().map(|source| (*source).clone()) {
+            self.start_call_share(source, cx);
+        }
+    }
+
     pub fn stop_call_share(&mut self, _cx: &mut Context<Self>) {
         self.send_call_command(CallCommand::StopShare);
     }
@@ -387,6 +403,18 @@ impl AppState {
         }
         for (ring_id, outcome) in self.rings.tick(Instant::now()) {
             self.finish_ring(ring_id, outcome, cx);
+        }
+    }
+
+    pub fn accept_ringing_call(&mut self, cx: &mut Context<Self>) {
+        if let Some(ring_id) = self.rings.first_ringing_id() {
+            self.accept_ring(ring_id, cx);
+        }
+    }
+
+    pub fn decline_ringing_call(&mut self, cx: &mut Context<Self>) {
+        if let Some(ring_id) = self.rings.first_ringing_id() {
+            self.decline_ring(ring_id, cx);
         }
     }
 
@@ -590,6 +618,21 @@ mod tests {
             })
         });
         app
+    }
+
+    #[gpui_kit::test]
+    fn declining_by_shortcut_only_acts_while_a_ring_shows(cx: &mut TestAppContext) {
+        let app = app_with_chats(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.decline_ringing_call(cx);
+                assert!(!state.rings.is_ringing());
+                state.demo_incoming_ring(cx);
+                assert!(state.rings.is_ringing());
+                state.decline_ringing_call(cx);
+                assert!(!state.rings.is_ringing());
+            })
+        });
     }
 
     #[gpui_kit::test]

@@ -6,7 +6,9 @@ use store::{ChannelNotifications, ChatRecord};
 
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::notice::{NoticeAction, short_error, truncated};
-use crate::sidebar_model::{SectionInput, build_sections, next_chat_id};
+use crate::sidebar_model::{
+    Section, SectionInput, Step, build_sections, next_chat_id, step_id, visible_chat_ids,
+};
 
 pub const TITLE_LIMIT: usize = 40;
 
@@ -255,6 +257,18 @@ impl AppState {
     }
 
     fn next_chat_after(&self, chat_id: &str) -> Option<String> {
+        next_chat_id(&self.chat_sections(), chat_id)
+    }
+
+    pub fn adjacent_chat_id(&self, step: Step) -> Option<String> {
+        let current = match &self.selection {
+            Some(Selection::Chat(chat_id)) => Some(chat_id.as_str()),
+            _ => None,
+        };
+        step_id(&visible_chat_ids(&self.chat_sections()), current, step)
+    }
+
+    fn chat_sections(&self) -> Vec<Section> {
         let input = SectionInput {
             chats: &self.sidebar.chats,
             directory: &self.directory,
@@ -264,7 +278,7 @@ impl AppState {
             now: Utc::now(),
             offset: Local::now().offset().fix(),
         };
-        next_chat_id(&build_sections(&input), chat_id)
+        build_sections(&input)
     }
 
     pub(crate) fn run_chat_action(

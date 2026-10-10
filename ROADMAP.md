@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 90 %** (77 done, 5 partial, 6 missing of 88). Partial counts half.
+**Parity: 91 %** (78 done, 5 partial, 5 missing of 88). Partial counts half.
 
 ## By area
 
@@ -15,7 +15,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
 | [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
-| [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
+| [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
 | [Calls and meetings](#calls-and-meetings) | 67 % | 2 | 4 | 0 |
@@ -25,7 +25,6 @@ Feature parity with the Microsoft Teams desktop client.
 | # | Feature | Note |
 |---|---|---|
 | 1 | Sign in on Linux without Chrome on a debug port |  |
-| 2 | Keyboard: Ctrl+1..9, Alt+Up/Down |  |
 
 ## Sign-in and app
 
@@ -139,7 +138,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
 | Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
-| Keyboard: Ctrl+1..9, Alt+Up/Down | Missing |  |
+| Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share screen, M mute; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
 
 ## Presence and people
 
