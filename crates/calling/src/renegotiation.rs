@@ -10,6 +10,7 @@ pub enum MediaAction {
     ApplyAnswer,
     Escalate,
     ApplyOnNewPeer,
+    ApplyOnSamePeer,
     AnswerOnNewPeer,
     AnswerOnSamePeer,
     RejectGlare,
@@ -20,6 +21,7 @@ pub enum MediaAction {
 pub struct MediaNegotiator {
     path: MediaPath,
     own_offer_pending: bool,
+    same_peer_offer_pending: bool,
 }
 
 impl Default for MediaNegotiator {
@@ -27,6 +29,7 @@ impl Default for MediaNegotiator {
         MediaNegotiator {
             path: MediaPath::Pending,
             own_offer_pending: false,
+            same_peer_offer_pending: false,
         }
     }
 }
@@ -54,7 +57,22 @@ impl MediaNegotiator {
         }
     }
 
+    pub fn begin_same_peer_offer(&mut self) -> bool {
+        if self.own_offer_pending || self.same_peer_offer_pending {
+            return false;
+        }
+        self.same_peer_offer_pending = true;
+        true
+    }
+
+    pub fn same_peer_offer_failed(&mut self) {
+        self.same_peer_offer_pending = false;
+    }
+
     pub fn on_media_answer(&mut self) -> MediaAction {
+        if std::mem::take(&mut self.same_peer_offer_pending) {
+            return MediaAction::ApplyOnSamePeer;
+        }
         if !self.own_offer_pending {
             return MediaAction::Ignore;
         }
@@ -64,7 +82,7 @@ impl MediaNegotiator {
     }
 
     pub fn on_renegotiation(&mut self, new_offer: bool, escalation: bool) -> MediaAction {
-        if self.own_offer_pending {
+        if self.own_offer_pending || self.same_peer_offer_pending {
             return MediaAction::RejectGlare;
         }
         if escalation {
@@ -141,6 +159,20 @@ mod tests {
         assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
         assert_eq!(negotiator.on_renegotiation(true, false), MediaAction::AnswerOnNewPeer);
         assert_eq!(negotiator.path(), MediaPath::Mixer);
+    }
+
+    #[test]
+    fn an_offer_on_the_same_peer_waits_for_its_answer_and_blocks_other_offers() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false);
+        assert!(negotiator.begin_same_peer_offer());
+        assert!(!negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
+        assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnSamePeer);
+        assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
+        assert!(negotiator.begin_same_peer_offer());
+        negotiator.same_peer_offer_failed();
+        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
     }
 
     #[test]

@@ -53,6 +53,7 @@ pub fn pending_row(
             .collect(),
         adaptive_cards: Vec::new(),
         link_preview: outgoing.link_preview.clone(),
+        meeting_link: teams_core::meeting_link_in_html(&outgoing.html()),
         files: outgoing
             .files
             .iter()

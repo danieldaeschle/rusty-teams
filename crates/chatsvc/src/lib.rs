@@ -1,3 +1,4 @@
+pub mod calllog;
 pub mod cards;
 pub mod channel_notifications;
 pub mod conversations;
@@ -18,6 +19,7 @@ pub mod saved;
 pub mod settings;
 pub mod translate;
 
+pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };

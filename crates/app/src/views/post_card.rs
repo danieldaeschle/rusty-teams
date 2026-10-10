@@ -7,7 +7,7 @@ use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::profile_card::opens_profile;
-use super::link_preview::link_preview_card;
+use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
 use super::reaction_pills::reaction_pills;
@@ -104,6 +104,11 @@ fn message_content(
         directory,
         actions.files.as_ref(),
     ));
+    content = content.children(
+        row.meeting_link
+            .clone()
+            .map(|url| meeting_join_chip(format!("message-{index}-join"), url)),
+    );
     content = content.children(row.link_preview.as_ref().map(|preview| {
         link_preview_card(
             preview,

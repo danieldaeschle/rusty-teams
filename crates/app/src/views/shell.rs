@@ -12,7 +12,7 @@ use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenChannelsTab,
-    OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts, ToggleCallCamera,
+    OpenCallsTab, OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts, ToggleCallCamera,
     ToggleCallShare,
 };
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
@@ -578,6 +578,9 @@ impl Render for AppShell {
             }))
             .on_action(cx.listener(|this, _: &OpenChannelsTab, _, cx| {
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_channels(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenCallsTab, _, cx| {
+                this.sidebar.update(cx, |sidebar, cx| sidebar.show_calls(cx));
             }))
             .on_action(cx.listener(|this, _: &PreviousConversation, _, cx| {
                 this.sidebar

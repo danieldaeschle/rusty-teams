@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use calling::{CaptionState, VideoKey};
+use calling::{CaptionState, HoldState, VideoKey};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -12,6 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_extras::{BackgroundMenu, background_items, confirm_stop_recording, open_transfer_picker};
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::icon;
 use crate::app_state::AppState;
@@ -38,7 +39,7 @@ fn dark_text() -> Hsla {
     hsla(0., 0., 0.08, 1.)
 }
 
-fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) -> Stateful<Div> {
+pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) -> Stateful<Div> {
     let (background, foreground) = if filled { (dark_text(), theme::white()) } else { (transparent_black(), dark_text()) };
     div()
         .id(id)
@@ -231,12 +232,11 @@ pub fn with_tile_menu(app: &Entity<AppState>, model: &CallModel, mri: &str, name
 
 pub fn more_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
     let in_meeting = model.kind == crate::call::CallKind::Meeting;
-    if !in_meeting {
+    if !in_meeting && !model.is_one_to_one() {
         return None;
     }
-    let (mute_app, captions_app) = (app.clone(), app.clone());
-    let organizes = model.organizes_meeting();
-    let captions_on = model.captions_on();
+    let app = app.clone();
+    let model = model.clone();
     Some(
         Button::new("call-more")
             .ghost()
@@ -244,27 +244,76 @@ pub fn more_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
             .size(px(CONTROL_SIZE))
             .rounded_full()
             .child(round_control("call-more-face", IconName::Ellipsis, theme::surface_raised(), theme::text()))
-            .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| {
-                let (mute_app, captions_app) = (mute_app.clone(), captions_app.clone());
-                let mut popup = popup.min_w(px(MENU_WIDTH));
-                if organizes {
-                    popup = popup.item(
-                        PopupMenuItem::new("Mute all")
-                            .icon(IconName::MicOff)
-                            .on_click(move |_, _, cx| mute_app.update(cx, |state, cx| state.mute_all_call(cx))),
-                    );
-                }
-                popup.item(
-                    PopupMenuItem::new(if captions_on { "Turn off live captions" } else { "Turn on live captions" })
-                        .icon(if captions_on { IconName::CaptionsOff } else { IconName::Captions })
-                        .on_click(move |_, _, cx| captions_app.update(cx, |state, cx| state.toggle_call_captions(cx))),
-                )
-            })
+            .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| more_menu(popup, &app, &model))
             .into_any_element(),
     )
 }
 
-pub fn camera_menu_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
+fn more_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+    let popup = popup.min_w(px(MENU_WIDTH));
+    if model.is_one_to_one() {
+        return one_to_one_items(popup, app, model);
+    }
+    meeting_items(popup, app, model)
+}
+
+fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+    let (hold_app, transfer_app) = (app.clone(), app.clone());
+    let held = model.hold == HoldState::Local;
+    popup = popup.item(
+        PopupMenuItem::new(if held { "Resume" } else { "Hold" })
+            .icon(IconName::Timer)
+            .disabled(!held && !model.can_hold())
+            .on_click(move |_, _, cx| hold_app.update(cx, |state, cx| state.toggle_call_hold(cx))),
+    );
+    let can_transfer = model.can_transfer();
+    popup.item(
+        PopupMenuItem::new("Transfer...")
+            .icon(IconName::Forward)
+            .disabled(!can_transfer)
+            .on_click(move |_, window, cx| open_transfer_picker(&transfer_app, window, cx)),
+    )
+}
+
+fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+    let (mute_app, captions_app, record_app, board_app) = (app.clone(), app.clone(), app.clone(), app.clone());
+    let captions_on = model.captions_on();
+    if model.organizes_meeting() {
+        popup = popup.item(
+            PopupMenuItem::new("Mute all")
+                .icon(IconName::MicOff)
+                .on_click(move |_, _, cx| mute_app.update(cx, |state, cx| state.mute_all_call(cx))),
+        );
+    }
+    if model.can_record() {
+        let recording = model.recording;
+        popup = popup.item(
+            PopupMenuItem::new(if recording { "Stop recording" } else { "Start recording" })
+                .icon(IconName::Video)
+                .on_click(move |_, window, cx| {
+                    if recording {
+                        confirm_stop_recording(&record_app, window, cx);
+                    } else {
+                        record_app.update(cx, |state, cx| state.set_call_recording(true, cx));
+                    }
+                }),
+        );
+    }
+    if model.can_open_whiteboard() {
+        popup = popup.item(
+            PopupMenuItem::new("Whiteboard")
+                .icon(IconName::Frame)
+                .on_click(move |_, _, cx| board_app.update(cx, |state, cx| state.open_call_whiteboard(cx))),
+        );
+    }
+    popup.item(
+        PopupMenuItem::new(if captions_on { "Turn off live captions" } else { "Turn on live captions" })
+            .icon(if captions_on { IconName::CaptionsOff } else { IconName::Captions })
+            .on_click(move |_, _, cx| captions_app.update(cx, |state, cx| state.toggle_call_captions(cx))),
+    )
+}
+
+pub fn camera_menu_button(app: &Entity<AppState>, model: &CallModel, backgrounds: BackgroundMenu) -> Option<AnyElement> {
     if !model.can_use_camera() {
         return None;
     }
@@ -287,12 +336,12 @@ pub fn camera_menu_button(app: &Entity<AppState>, model: &CallModel) -> Option<A
                     .bg(theme::surface_raised())
                     .child(icon(IconName::ChevronUp, 16., theme::text())),
             )
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| camera_menu(popup, &app, &model))
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| camera_menu(popup, &app, &model, &backgrounds))
             .into_any_element(),
     )
 }
 
-fn camera_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+fn camera_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel, backgrounds: &BackgroundMenu) -> PopupMenu {
     let camera_app = app.clone();
     let cameras = super::call_view::device_items(calling::camera_entries(&model.cameras), &model.camera, move |choice, cx| {
         camera_app.update(cx, |state, cx| state.select_call_camera(choice, cx));
@@ -301,11 +350,7 @@ fn camera_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> P
     for item in cameras {
         popup = popup.item(item);
     }
-    let (none_app, blur_app) = (app.clone(), app.clone());
-    popup
-        .separator()
-        .item(PopupMenuItem::new("Background: None").checked(!model.blur).on_click(move |_, _, cx| none_app.update(cx, |state, cx| state.set_call_background_blur(false, cx))))
-        .item(PopupMenuItem::new("Background: Blur").checked(model.blur).on_click(move |_, _, cx| blur_app.update(cx, |state, cx| state.set_call_background_blur(true, cx))))
+    background_items(popup, app, backgrounds)
 }
 
 pub fn captions_overlay(model: &CallModel, now: Instant) -> Option<AnyElement> {

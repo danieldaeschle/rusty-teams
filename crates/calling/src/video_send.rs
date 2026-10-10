@@ -11,6 +11,7 @@ use libwebrtc::video_source::native::NativeVideoSource;
 use libwebrtc::video_track::RtcVideoTrack;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::background::BackgroundPicture;
 use crate::blur::{BlurSettings, BlurStage};
 use crate::camera::start_camera;
 use crate::capture::Capture;
@@ -116,12 +117,21 @@ impl LocalVideo {
         }
     }
 
-    pub fn set_blur(&self, enabled: bool) {
+    pub fn set_background(&self, enabled: bool, picture: Option<Arc<BackgroundPicture>>) {
+        self.blur.set_picture(picture);
         self.blur.set_enabled(enabled);
+    }
+
+    pub fn camera_track(&self) -> RtcVideoTrack {
+        self.camera.track.clone()
     }
 
     pub fn blur_average_ms(&self) -> Option<f32> {
         (self.camera_on() && self.blur.enabled()).then(|| self.blur.average_ms())
+    }
+
+    pub fn has_lines(&self) -> bool {
+        self.lines.is_some()
     }
 
     pub fn is_available(&self) -> bool {
@@ -140,8 +150,10 @@ impl LocalVideo {
         if self.camera_on() {
             Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
         }
-        if self.sharing() {
-            Self::begin_sending(&lines.share.sender(), &self.screen.track)?;
+        if self.sharing()
+            && let Some(share) = &lines.share
+        {
+            Self::begin_sending(&share.sender(), &self.screen.track)?;
         }
         self.lines = Some(lines);
         Ok(())
@@ -199,6 +211,7 @@ impl LocalVideo {
 
     pub fn start_share(&mut self, source: &ShareSource) -> Result<()> {
         let lines = self.lines.as_ref().ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
+        let share = lines.share.as_ref().ok_or_else(|| Error::Webrtc("sharing needs a meeting".into()))?;
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
@@ -208,15 +221,15 @@ impl LocalVideo {
             VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
             _ => start_screen_capture(source.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
         };
-        Self::begin_sending(&lines.share.sender(), &self.screen.track)?;
+        Self::begin_sending(&share.sender(), &self.screen.track)?;
         self.screen.capture = Some(capture);
         Ok(())
     }
 
     pub fn stop_share(&mut self) {
         self.screen.capture = None;
-        if let Some(lines) = &self.lines {
-            let _ = Self::set_active(&lines.share.sender(), false);
+        if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()) {
+            let _ = Self::set_active(&share.sender(), false);
         }
         self.hub.forget(&VideoKey::LocalScreen);
     }

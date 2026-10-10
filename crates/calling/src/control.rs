@@ -3,16 +3,21 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
+use crate::background::BackgroundChoice;
+use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
+use crate::hold::HoldState;
 use crate::mute::MuteCommand;
 use crate::reaction::Reaction;
 use crate::roster::RosterEntry;
 use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
+use crate::signaling::{Callee, MeetingTarget};
 use crate::state::CallState;
 use crate::video_frame::VideoHub;
+use crate::whiteboard::ContentShare;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallCommand {
@@ -38,8 +43,13 @@ pub enum CallCommand {
     StopSpotlight { mri: String },
     RemoveParticipant { mri: String },
     SetCaptions(bool),
-    SetBlur(bool),
+    SetBackground(BackgroundChoice),
     SendReaction(Reaction),
+    SetRecording { on: bool, title: String },
+    ConsentToRecording,
+    Hold(bool),
+    Transfer { target: Callee, replaces: Option<String> },
+    OpenWhiteboard { title: String },
     Hangup,
     EndMeeting,
 }
@@ -75,6 +85,14 @@ pub enum CallUpdate {
     Captions(CaptionState),
     Caption(CaptionEntry),
     BlurTiming(f32),
+    Recording(bool),
+    ConsentRequired(bool),
+    Hold(HoldState),
+    Whiteboard(Option<ContentShare>),
+    WhiteboardUrl(String),
+    BreakoutMove(BreakoutMove),
+    BreakoutRoom { main: MeetingTarget },
+    ReplacementLink(String),
     Organizer { action: String, outcome: std::result::Result<u16, String> },
     MeetingChat(String),
     Notice(String),

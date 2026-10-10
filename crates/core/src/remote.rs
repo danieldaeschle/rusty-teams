@@ -1,5 +1,5 @@
 use chatsvc::{
-    CardActions, ChatApp, ConversationRef, Conversations, ForcedAvailability, ForwardResult, Gif,
+    CallLogEntry, CardActions, ChatApp, ConversationRef, Conversations, ForcedAvailability, ForwardResult, Gif,
     Gifs, InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient,
     LinkInfo, MemberHorizon, MessageLanguage, MessageLinks, Messages, PinnedMessage, Pins,
     PresenceService, PresenceStatus, Receipts, SavedMessage, ScheduledDraft, ScheduledDrafts,
@@ -293,6 +293,10 @@ pub trait Remote {
 
     async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
         Err(Error::Unsupported("saved messages"))
+    }
+
+    async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
+        Err(Error::Unsupported("call history"))
     }
 
     async fn chat_pins(&self, _chat_id: &str) -> Result<Vec<PinnedMessage>> {
@@ -860,6 +864,10 @@ impl Remote for Graph {
 
     async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
         Ok(Messages::new(self.session()).list_saved().await?)
+    }
+
+    async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
+        Ok(Messages::new(self.session()).list_call_logs().await?)
     }
 
     async fn chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {

@@ -11,6 +11,7 @@ chrono.workspace = true
 cpal = "0.17"
 chatsvc.workspace = true
 flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 futures-util.workspace = true
 libwebrtc = { version = "0.3.51", features = ["glib-main-loop"] }
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }

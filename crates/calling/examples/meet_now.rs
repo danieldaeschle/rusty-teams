@@ -4,7 +4,10 @@ use std::time::{Duration, Instant};
 use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
-use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, ShareKind, ShareSource};
+use calling::{
+    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, ShareKind,
+    ShareSource,
+};
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
 use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
@@ -23,8 +26,12 @@ const THREAD_PROPERTY_RETRIES: usize = 8;
 const CAPTIONS_HOLD: Duration = Duration::from_secs(10);
 const FEATURE_LIMIT: Duration = Duration::from_secs(90);
 const VIDEO_ENV: &str = "CALLING_VIDEO";
+const RECORD_HOLD: Duration = Duration::from_secs(10);
+const WHITEBOARD_WAIT: Duration = Duration::from_secs(45);
+const BACKGROUND_CACHE: &str = "calling-meet-now-backgrounds";
 
 struct Arguments {
+    resolve_by_id: bool,
     camera: bool,
     share: bool,
     extras: bool,
@@ -32,6 +39,9 @@ struct Arguments {
     captions: bool,
     mute_all: bool,
     blur: bool,
+    record: bool,
+    whiteboard_state: bool,
+    background: bool,
     stop_media_after: Option<Duration>,
     hold: Duration,
     thread_out: Option<PathBuf>,
@@ -40,6 +50,7 @@ struct Arguments {
 
 fn arguments() -> Arguments {
     let mut parsed = Arguments {
+        resolve_by_id: false,
         camera: false,
         share: false,
         extras: false,
@@ -47,6 +58,9 @@ fn arguments() -> Arguments {
         captions: false,
         mute_all: false,
         blur: false,
+        record: false,
+        whiteboard_state: false,
+        background: false,
         stop_media_after: None,
         hold: Duration::from_secs(10),
         thread_out: None,
@@ -63,6 +77,13 @@ fn arguments() -> Arguments {
             "--mute-all" => parsed.mute_all = true,
             "--blur" => {
                 parsed.blur = true;
+                parsed.camera = true;
+            }
+            "--record" => parsed.record = true,
+            "--whiteboard-state" => parsed.whiteboard_state = true,
+            "--resolve-by-id" => parsed.resolve_by_id = true,
+            "--background" => {
+                parsed.background = true;
                 parsed.camera = true;
             }
             "--stop-media-after" => parsed.stop_media_after = input.next().and_then(|value| value.parse().ok()).map(Duration::from_secs),
@@ -102,7 +123,8 @@ async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<Str
 }
 
 fn main() {
-    if arguments().blur && std::env::var_os(VIDEO_ENV).is_none() {
+    let flags = arguments();
+    if (flags.blur || flags.background) && std::env::var_os(VIDEO_ENV).is_none() {
         // SAFETY: nothing else runs yet; the runtime below starts after this.
         unsafe { std::env::set_var(VIDEO_ENV, "pattern") };
     }
@@ -130,6 +152,13 @@ struct Features {
     caption_events: usize,
     blur_reports: usize,
     blur_total_ms: f64,
+    recording_seen_on: bool,
+    recording_seen_off: bool,
+    recording_stop_due: Option<Instant>,
+    recording_done: bool,
+    whiteboard_url_seen: bool,
+    whiteboard_share_seen: bool,
+    whiteboard_wait_until: Option<Instant>,
     deadline: Option<Instant>,
 }
 
@@ -138,7 +167,10 @@ impl Features {
         if self.deadline.is_none_or(|deadline| Instant::now() >= deadline) {
             return false;
         }
-        (arguments.spotlight_self && !self.spotlight_cleared) || (arguments.captions && !self.captions_stopped)
+        (arguments.spotlight_self && !self.spotlight_cleared)
+            || (arguments.captions && !self.captions_stopped)
+            || (arguments.record && !self.recording_done)
+            || (arguments.whiteboard_state && self.whiteboard_wait_until.is_none_or(|until| Instant::now() < until) && !self.whiteboard_share_seen)
     }
 }
 
@@ -151,8 +183,8 @@ async fn run() {
 
     let started = Instant::now();
     let reused = std::env::args().skip_while(|argument| argument != "--thread").nth(1);
-    let thread_id = match reused {
-        Some(thread_id) => thread_id,
+    let (thread_id, created_meeting) = match reused {
+        Some(thread_id) => (thread_id, None),
         None => {
             let body = json!({"meetingType": "MeetNow", "isStreamEnabled": false, "subject": SUBJECT, "unhideChatThread": true});
             let created = session
@@ -160,7 +192,8 @@ async fn run() {
                 .await
                 .expect("create meeting");
             println!("# create MeetNow: HTTP {} after {:?}", created.status, started.elapsed());
-            created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned()
+            let thread_id = created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned();
+            (thread_id, Some(created.body))
         }
     };
     if let Some(path) = &arguments.thread_out {
@@ -200,6 +233,11 @@ async fn run() {
     };
     let (engine, _events) = CallEngine::start(session.clone(), poll_session, config).await.expect("engine");
     println!("# engine ready after {:?}", started.elapsed());
+    if arguments.resolve_by_id
+        && let Some(created) = &created_meeting
+    {
+        check_resolve_by_id(&engine, created, &thread_id).await;
+    }
     let join_started = Instant::now();
     let mut handle = engine.start_call(CallSpec::Meeting(target));
 
@@ -234,7 +272,30 @@ async fn run() {
                     sharing = label.is_some();
                     println!("# local share update: {}", label.is_some());
                 }
-                Some(CallUpdate::Notice(text)) => println!("# notice: {text}"),
+                Some(CallUpdate::Notice(text)) => {
+                    println!("# notice: {text}");
+                    if arguments.record && text.to_ascii_lowercase().contains("recording") && !features.recording_seen_on {
+                        features.recording_done = true;
+                    }
+                }
+                Some(CallUpdate::Recording(on)) => {
+                    println!("# recording state: {}", if on { "on" } else { "off" });
+                    if on {
+                        features.recording_seen_on = true;
+                        features.recording_stop_due = Some(Instant::now() + RECORD_HOLD);
+                    } else if features.recording_seen_on {
+                        features.recording_seen_off = true;
+                        features.recording_done = true;
+                    }
+                }
+                Some(CallUpdate::Whiteboard(share)) => {
+                    println!("# whiteboard share: {}", share.as_ref().map_or_else(|| "ended".to_owned(), |share| format!("presenter {:?}, whiteboard {}, url {}", share.presenter, share.whiteboard, share.url.is_some())));
+                    features.whiteboard_share_seen |= share.is_some();
+                }
+                Some(CallUpdate::WhiteboardUrl(url)) => {
+                    features.whiteboard_url_seen = true;
+                    println!("# whiteboard board url fetched: host {}", url.split('/').nth(2).unwrap_or("?"));
+                }
                 Some(CallUpdate::State(CallState::Ended { reason })) => ended = Some(reason),
                 Some(CallUpdate::OwnIdentity { mri }) => features.own_mri = Some(mri),
                 Some(CallUpdate::Captions(state)) => {
@@ -323,6 +384,10 @@ async fn run() {
                     features.captions_stopped = true;
                     let _ = handle.commands.send(CallCommand::SetCaptions(false));
                 }
+                if features.recording_stop_due.is_some_and(|due| Instant::now() >= due) {
+                    features.recording_stop_due = None;
+                    let _ = handle.commands.send(CallCommand::SetRecording { on: false, title: SUBJECT.to_owned() });
+                }
                 if hand_lower_due.is_some_and(|due| Instant::now() >= due) {
                     hand_lower_due = None;
                     let _ = handle.commands.send(CallCommand::SetHand(false));
@@ -355,7 +420,21 @@ async fn run() {
                         let _ = handle.commands.send(CallCommand::SetCaptions(true));
                     }
                     if arguments.blur {
-                        let _ = handle.commands.send(CallCommand::SetBlur(true));
+                        let _ = handle.commands.send(CallCommand::SetBackground(BackgroundChoice::Blur));
+                    }
+                    if arguments.record {
+                        let _ = handle.commands.send(CallCommand::SetRecording { on: true, title: SUBJECT.to_owned() });
+                    }
+                    if arguments.whiteboard_state {
+                        features.whiteboard_wait_until = Some(Instant::now() + WHITEBOARD_WAIT);
+                        println!("# whiteboard: fetching the board url, then waiting {WHITEBOARD_WAIT:?} for a whiteboard share (start one from Teams web in this meeting)");
+                        let _ = handle.commands.send(CallCommand::OpenWhiteboard { title: SUBJECT.to_owned() });
+                    }
+                    if arguments.background {
+                        let image = background_image(&session).await;
+                        if let Some(path) = image {
+                            let _ = handle.commands.send(CallCommand::SetBackground(BackgroundChoice::Image(path)));
+                        }
                     }
                     if arguments.share {
                         let source = ShareSource { id: 0, kind: ShareKind::Screen, title: String::new() };
@@ -406,9 +485,16 @@ async fn run() {
     if arguments.captions {
         println!("# captions: became active {}, caption events {}", features.captions_active, features.caption_events);
     }
-    if arguments.blur {
+    if arguments.blur || arguments.background {
         let average = if features.blur_reports == 0 { 0. } else { features.blur_total_ms / features.blur_reports as f64 };
-        println!("# blur: average processing {average:.1} ms over {} report(s)", features.blur_reports);
+        let label = if arguments.background { "background image" } else { "blur" };
+        println!("# {label}: average processing {average:.1} ms over {} report(s)", features.blur_reports);
+    }
+    if arguments.record {
+        println!("# recording: seen on {}, seen off {}", features.recording_seen_on, features.recording_seen_off);
+    }
+    if arguments.whiteboard_state {
+        println!("# whiteboard: board url fetched {}, share update parsed {}", features.whiteboard_url_seen, features.whiteboard_share_seen);
     }
     let gone_started = Instant::now();
     let mut gone_after = None;
@@ -424,6 +510,33 @@ async fn run() {
     println!("# engine stopped, total {:?}", started.elapsed());
 }
 
+async fn background_image(session: &Session) -> Option<PathBuf> {
+    let cache = BackgroundCache::new(std::env::temp_dir().join(BACKGROUND_CACHE));
+    let catalog = match cache.refresh_catalog(session).await {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            println!("# background image list failed: {error}");
+            return None;
+        }
+    };
+    println!("# background image list downloaded: {} entries", catalog.len());
+    let first = catalog.first()?;
+    match cache.ensure_thumbnail(session, first).await {
+        Ok(path) => println!("# first thumbnail cached: {} bytes", std::fs::metadata(&path).map_or(0, |meta| meta.len())),
+        Err(error) => println!("# first thumbnail failed: {error}"),
+    }
+    match cache.ensure_image(session, first).await {
+        Ok(path) => {
+            println!("# first image {} cached: {} bytes", first.id, std::fs::metadata(&path).map_or(0, |meta| meta.len()));
+            Some(path)
+        }
+        Err(error) => {
+            println!("# first image failed: {error}");
+            None
+        }
+    }
+}
+
 fn urlencoding_component(value: &str) -> String {
     value
         .bytes()
@@ -432,4 +545,46 @@ fn urlencoding_component(value: &str) -> String {
             other => format!("%{other:02X}"),
         })
         .collect()
+}
+
+fn find_text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                if keys.iter().any(|wanted| key.eq_ignore_ascii_case(wanted))
+                    && let Some(text) = inner.as_str().filter(|text| !text.is_empty())
+                {
+                    return Some(text);
+                }
+                if let Some(found) = find_text(inner, keys) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(items) => items.iter().find_map(|item| find_text(item, keys)),
+        _ => None,
+    }
+}
+
+async fn check_resolve_by_id(engine: &CallEngine, created: &Value, thread_id: &str) {
+    let code = find_text(created, &["joinMeetingId", "meetingCode"]).map(|code| code.replace(' ', ""));
+    let passcode = find_text(created, &["passcode"]);
+    println!("# resolve by id: meeting id found {}, passcode found {}", code.is_some(), passcode.is_some());
+    let Some(code) = code else {
+        return;
+    };
+    let url = match passcode {
+        Some(passcode) => format!("https://teams.microsoft.com/meet/{code}?p={passcode}"),
+        None => format!("https://teams.microsoft.com/meet/{code}"),
+    };
+    let meeting_data = json!({"meetingCode": code, "passcode": passcode, "meetingUrl": url});
+    match engine.resolve_meeting(&meeting_data).await {
+        Ok(target) => println!(
+            "# resolve by id: found, same thread {}, tenant and organizer present {}",
+            target.thread_id == thread_id,
+            !target.tenant_id.is_empty() && !target.organizer_id.is_empty()
+        ),
+        Err(error) => println!("# resolve by id: failed: {}", error.to_string().chars().take(160).collect::<String>()),
+    }
 }

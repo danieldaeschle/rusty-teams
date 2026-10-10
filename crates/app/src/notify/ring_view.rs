@@ -1,3 +1,4 @@
+use calling::AcceptMode;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -42,8 +43,8 @@ fn answer_button(id: &'static str, label: &str, glyph: IconName, fill: Hsla) -> 
     h_flex()
         .id(id)
         .h(px(BUTTON_HEIGHT))
-        .px(px(14.))
-        .gap(px(6.))
+        .px(px(10.))
+        .gap(px(5.))
         .flex_none()
         .items_center()
         .justify_center()
@@ -95,9 +96,16 @@ impl Render for RingView {
         let accept = answer_button("ring-accept", entry.accept_label(), IconName::Phone, theme::green()).on_click(
             move |_, _, cx| {
                 cx.stop_propagation();
-                accept_app.update(cx, |state, cx| state.accept_ring(ring_id, cx));
+                accept_app.update(cx, |state, cx| state.accept_ring(ring_id, AcceptMode::Audio, cx));
             },
         );
+        let video_app = self.app.clone();
+        let accept_video = entry.ring.video.then(|| {
+            answer_button("ring-accept-video", "Video", IconName::Video, theme::green()).on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                video_app.update(cx, |state, cx| state.accept_ring(ring_id, AcceptMode::Video, cx));
+            })
+        });
         div()
             .id(("ring", ring_id))
             .size_full()
@@ -140,7 +148,7 @@ impl Render for RingView {
                                             .child(ENDS_CURRENT_CALL),
                                     )
                                 })
-                                .child(h_flex().mt(px(8.)).gap(px(8.)).child(decline).child(accept)),
+                                .child(h_flex().mt(px(8.)).gap(px(6.)).child(decline).child(accept).children(accept_video)),
                         ),
                 ),
             )

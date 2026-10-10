@@ -24,6 +24,7 @@ pub struct CaptionBot {
     pub mri: String,
     pub command_url: Option<String>,
     pub active: bool,
+    pub recording: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,7 +223,8 @@ fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
     let command_url = metadata.iter().find_map(|metadata| metadata["commandUrl"].as_str()).map(str::to_owned);
     let known = command_url.is_some() || metadata.iter().any(|metadata| metadata["processingModes"].is_object());
     let active = metadata.iter().any(|metadata| metadata["processingModes"]["closedCaptions"]["state"].as_str() == Some("Active"));
-    known.then(|| CaptionBot { mri: mri.to_owned(), command_url, active })
+    let recording = metadata.iter().any(|metadata| metadata["processingModes"]["recording"]["state"].as_str() == Some("Active"));
+    known.then(|| CaptionBot { mri: mri.to_owned(), command_url, active, recording })
 }
 
 fn published_state(participant: &Value, endpoints: &[&Value], state_type: &str) -> Option<PublishedState> {

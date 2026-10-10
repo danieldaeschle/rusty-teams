@@ -1131,6 +1131,37 @@ mod tests {
         assert_eq!(parsed.media[1].direction(), Some("inactive"));
     }
 
+    const ONE_TO_ONE_VIDEO_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1 2\r\nm=audio 1234 RTP/SAVP 111\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:111 opus/48000/2\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=label:main-audio\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:1\r\na=sendrecv\r\na=label:main-video\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:2\r\na=sendrecv\r\na=label:applicationsharing-video\r\n";
+
+    fn browser_answer(camera_direction: &str, share_port: &str, share_direction: &str) -> String {
+        format!("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:111 opus/48000/2\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 BB\r\na=setup:active\r\na=ssrc:7 cname:x\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:102 H264/90000\r\na=mid:1\r\na={camera_direction}\r\na=ssrc:8 cname:x\r\nm=video {share_port} UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:102 H264/90000\r\na=mid:2\r\na={share_direction}\r\n")
+    }
+
+    #[test]
+    fn a_one_to_one_offer_keeps_a_camera_line_and_a_sharing_line() {
+        let remote = from_teams_offer(ONE_TO_ONE_VIDEO_OFFER).unwrap();
+        let roles: Vec<LineRole> = remote.lines.iter().map(|line| line.role).collect();
+        assert_eq!(roles, vec![LineRole::MainAudio, LineRole::MainVideo, LineRole::ScreenShare]);
+        assert_eq!(remote.plan().screen_share_mids, vec!["2".to_owned()]);
+        assert!(remote.plan().gallery_mids.is_empty());
+        assert_eq!(parse(&remote.browser_sdp).unwrap().media.iter().filter(|media| media.kind == "video").count(), 2);
+    }
+
+    #[test]
+    fn accepting_with_audio_answers_the_video_line_receive_only_and_with_video_sending() {
+        let remote = from_teams_offer(ONE_TO_ONE_VIDEO_OFFER).unwrap();
+        for (camera_direction, expected) in [("recvonly", "recvonly"), ("sendrecv", "sendrecv")] {
+            let answer = to_teams_answer(&browser_answer(camera_direction, "0", "inactive"), &remote, &mut counter()).unwrap();
+            let parsed = parse(&answer.sdp).unwrap();
+            assert_eq!(parsed.media.len(), 3);
+            assert_eq!(parsed.media[1].port, "1234");
+            assert_eq!(parsed.media[1].direction(), Some(expected));
+            assert_eq!(parsed.media[1].value("label"), Some("main-video"));
+            assert_eq!(parsed.media[2].port, "0");
+            assert_eq!(parsed.media[2].value("label"), Some("applicationsharing-video"));
+        }
+    }
+
     #[test]
     fn folded_gallery_lines_expand_below_their_carrier_mid() {
         assert_eq!(folded_mids("17", 8), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());

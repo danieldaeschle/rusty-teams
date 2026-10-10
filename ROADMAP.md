@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 91 %** (79 done, 9 partial, 4 missing of 92). Partial counts half.
+**Parity: 89 %** (81 done, 14 partial, 4 missing of 99). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 60 % | 2 | 8 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 62 % | 4 | 13 | 0 |
 
 ## Next
 
@@ -166,11 +166,18 @@ Feature parity with the Microsoft Teams desktop client.
 | Incoming call: ring, accept, decline | Partial | Ring toast, ring tone, missed call in Activity, registrar endpoint, attach + accept. Built from the Teams code, not yet rung by a second person |
 | 1:1 and group calls | Partial | Phone button, Calling and Ringing tiles, end notices, direct to mixer renegotiation. Not yet tried with a second person |
 | Join a meeting from a chat | Partial | Join button from the live meeting state, joins muted, roster tiles, lobby, Leave and End meeting. Audio only. Verified with a meeting of one; not yet with other participants |
-| Video and screen sharing | Partial | Send and receive over libwebrtc H264, source requests through `applyChannelParameters`, stage, strip, self view, share banner. Sent frames acknowledged by the mixer; receive only checked by a local loopback, not with a second person. Incoming calls stay audio-only |
+| Video and screen sharing | Partial | Send and receive over libwebrtc H264, source requests through `applyChannelParameters`, stage, strip, self view, share banner. Sent frames acknowledged by the mixer; receive only checked by a local loopback, not with a second person |
 | Meeting extras | Partial | Share menu switch "Include computer sound" (remembered, mixed into the one audio track with the mic, own playback excluded on Windows 10 build 20348+), raise hand with queue badge, lower hand and Lower all hands for organizers, reactions on the sender's tile for 3 s, meeting chat in a 320 px side panel with unread badge. Checked with synthetic sources and the demo only; not yet live in a meeting or with a second person |
 | Organizer controls | Partial | Amber lobby banner with View (Admit, Deny per person) and Admit all, tile menu (right-click or "..." on hover): Pin for me, Spotlight for everyone, Mute, Lower hand, Remove from meeting with a confirm dialog, "..." controls menu with Mute all. Request bodies built from the Teams code and unit tested; demo checked, not yet live with a second person |
 | Live captions | Partial | "..." > Turn on live captions: recorder bot joins, start command with a skype token, captions arrive on the SCTP data channel (data id 3), 2-line overlay with bold speaker that fades after 4 s. Message framing and parsing from the Teams code; not yet seen with real speech |
-| Background blur | Partial | Camera menu Background: None / Blur (remembered). On-device MediaPipe selfie segmentation through tract (Apache-2.0 model, 11 ms per 640x360 frame in a release build), edge feathering, self view shows the result. Checked with a still photo and synthetic frames; not yet on a real camera |
+| Backgrounds | Partial | Camera menu Background: None / Blur / Microsoft's default images / "Add image..." (remembered). The image list and thumbnails are fetched at runtime into the app data folder, nothing of Microsoft's ships with the app; the picture is cover-scaled behind the same segmentation mask (checked with a synthetic mask, demo with generated pictures, the CDN download only through `meet_now --background`). On-device MediaPipe selfie segmentation through tract (Apache-2.0 model, 11 ms per 640x360 frame in a release build), edge feathering, self view shows the result. Checked with a still photo and synthetic frames; not yet on a real camera |
+| Video calls (1:1 and incoming) | Partial | Camera button in 1:1 calls renegotiates a video line on the same peer connection (modalities Audio and Video), incoming video ring toast with Decline / Audio / Video, accept with video answers the video line sending, accept with audio receive-only. Offer and answer built from the Teams code and unit tested at SDP level; needs a second person |
+| Recording | Partial | Organizer "..." > Start recording / Stop recording (confirm) through the recorder bot, red dot and "Recording" in the header for everyone from the meeting state, consent notice that keeps mic and camera off until OK. Bodies unit tested; start and stop run live through `meet_now --record`, consent needs a tenant with the policy on and a second person |
+| Hold, resume, transfer | Partial | 1:1 "..." > Hold renegotiates every line inactive, "On hold" view with Resume, "You're on hold" when the other side holds, Transfer... person picker with Transfer now (blind) and Consult first (second call, first held, Transfer now). Needs a second person; redirect and park not built |
+| Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
+| Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
+| Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
+| Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |
 | In a call shown in presence | Done | "In a call", "In a meeting", "Presenting" from Teams activity on profile cards and chat headers; no notification sounds during a native call |
 
 ## Agents

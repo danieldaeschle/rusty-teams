@@ -9,13 +9,15 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use crate::call::{CallOptions, CallSpec, IncomingCall, Plan};
+use crate::call::{AcceptMode, CallOptions, CallSpec, IncomingCall, Plan};
 use crate::control::{CallHandle, call_channel};
 use crate::end::EndKind;
 use crate::error::{Error, Result};
 use crate::push::{CallNotification, Caller, PushEvent, decode_push};
 use crate::relay::DEFAULT_RELAY_HOST;
-use crate::signaling::{AttachRequest, Participant, SelfIdentity, Signaling, TenantRouting, fetch_self};
+use crate::signaling::{
+    AttachRequest, LeaveReason, MeetingTarget, Participant, SelfIdentity, Signaling, TenantRouting, fetch_self,
+};
 use crate::timeline::Timeline;
 use crate::trouter_events::{CallEvent, CallbackLinks, callback_call_id, classify, decode_body};
 
@@ -90,7 +92,7 @@ pub enum EngineEvent {
 }
 
 enum RingCommand {
-    Accept(oneshot::Sender<Option<CallHandle>>),
+    Accept(AcceptMode, oneshot::Sender<Option<CallHandle>>),
     Decline,
     Drop,
 }
@@ -252,19 +254,27 @@ impl CallEngine {
     }
 
     pub fn start_call(&self, spec: CallSpec) -> CallHandle {
+        self.start_call_with(spec, false)
+    }
+
+    pub fn start_consult(&self, spec: CallSpec) -> CallHandle {
+        self.start_call_with(spec, true)
+    }
+
+    fn start_call_with(&self, spec: CallSpec, concurrent: bool) -> CallHandle {
         let (handle, control) = call_channel();
         let engine = self.clone();
         self.inner.runtime.spawn(async move {
-            let options = engine.inner.call_options();
+            let options = CallOptions { concurrent, ..engine.inner.call_options() };
             let _ = engine.run(Plan::Outgoing(spec), options, control).await;
         });
         handle
     }
 
-    pub async fn accept_ring(&self, ring_id: u64) -> Option<CallHandle> {
+    pub async fn accept_ring(&self, ring_id: u64, mode: AcceptMode) -> Option<CallHandle> {
         let commands = self.inner.rings.lock().expect("rings lock").get(&ring_id).cloned()?;
         let (answer, handle) = oneshot::channel();
-        commands.send(RingCommand::Accept(answer)).ok()?;
+        commands.send(RingCommand::Accept(mode, answer)).ok()?;
         handle.await.ok().flatten()
     }
 
@@ -283,6 +293,16 @@ impl CallEngine {
         if let Some(commands) = commands {
             let _ = commands.send(command);
         }
+    }
+
+    pub async fn resolve_meeting(&self, meeting_data: &serde_json::Value) -> Result<MeetingTarget> {
+        let signaling = self.inner.signaling(Timeline::new(self.inner.config.trace));
+        let from = self.inner.participant(&uuid::Uuid::new_v4().to_string());
+        let (target, conversation) = signaling
+            .resolve_meeting(&from, &self.inner.callback_links(), meeting_data)
+            .await?;
+        let _ = signaling.leave(&conversation, &from, LeaveReason::Cancel).await;
+        Ok(target)
     }
 
     pub async fn stop(&self) {
@@ -422,9 +442,10 @@ async fn ring_task(
                 }
             }
             command = commands.recv() => match command {
-                Some(RingCommand::Accept(answer)) => {
+                Some(RingCommand::Accept(accept, answer)) => {
                     let (handle, control) = call_channel();
                     let incoming = IncomingCall {
+                        accept,
                         notification,
                         attached,
                         links,

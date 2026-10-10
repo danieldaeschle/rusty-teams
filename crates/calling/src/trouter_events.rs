@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::end::{EndKind, classify_end};
 use crate::error::{Error, Result};
 use crate::reaction::{ReactionEvent, parse_reactions};
+use crate::transfer::{TransferEvent, completion};
 
 const CALLBACK_ROOT: &str = "callAgent/";
 const GZIP_ENCODING: &str = "gzip";
@@ -23,6 +24,24 @@ const SPEAKER_KEYS: [&str; 7] = [
     "speakers",
 ];
 const MAX_SPEAKER_DEPTH: usize = 4;
+
+const MAX_FIND_DEPTH: usize = 6;
+
+/// First value under `key` anywhere in `value`; Teams nests the same field at different depths.
+pub(crate) fn find_key<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    find_key_within(value, key, 0)
+}
+
+fn find_key_within<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a Value> {
+    if depth > MAX_FIND_DEPTH {
+        return None;
+    }
+    match value {
+        Value::Object(map) => map.get(key).or_else(|| map.values().find_map(|child| find_key_within(child, key, depth + 1))),
+        Value::Array(items) => items.iter().find_map(|item| find_key_within(item, key, depth + 1)),
+        _ => None,
+    }
+}
 
 pub fn decode_body(callback: &TrouterCallback) -> Result<Value> {
     let text = if callback
@@ -116,6 +135,11 @@ pub enum CallEvent {
     AddParticipantSuccess(Value),
     AddParticipantFailure(Value),
     Reactions(Vec<ReactionEvent>),
+    LocalParticipantUpdate(Value),
+    Replacement(Value),
+    ContentShareUpdate(Value),
+    ContentShareEnd(Value),
+    Transfer(TransferEvent),
     End(CallEnd),
     Other { scope: String, event: String },
 }
@@ -133,6 +157,11 @@ impl CallEvent {
             CallEvent::AddParticipantSuccess(_) => "conversation/addParticipantSuccess".into(),
             CallEvent::AddParticipantFailure(_) => "conversation/addParticipantFailure".into(),
             CallEvent::Reactions(_) => "conversation/receiveMessage".into(),
+            CallEvent::LocalParticipantUpdate(_) => "conversation/localParticipantUpdate".into(),
+            CallEvent::Replacement(_) => "call/replacement".into(),
+            CallEvent::ContentShareUpdate(_) => "conversation/contentSharingUpdate".into(),
+            CallEvent::ContentShareEnd(_) => "conversation/contentSharingEnd".into(),
+            CallEvent::Transfer(_) => "call/transfer".into(),
             CallEvent::End(_) => "call/end".into(),
             CallEvent::Other { scope, event } => format!("{scope}/{event}"),
         }
@@ -148,6 +177,12 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("conversation", "addParticipantSuccess") => CallEvent::AddParticipantSuccess(body),
         ("conversation", "receiveMessage") => CallEvent::Reactions(parse_reactions(&body)),
         ("conversation", "addParticipantFailure") => CallEvent::AddParticipantFailure(body),
+        ("conversation", "localParticipantUpdate") => CallEvent::LocalParticipantUpdate(body),
+        ("conversation", "contentSharingUpdate") => CallEvent::ContentShareUpdate(body),
+        ("conversation", "contentSharingEnd") => CallEvent::ContentShareEnd(body),
+        ("call", "replacement") => CallEvent::Replacement(body),
+        ("call", "transferAcceptance") => CallEvent::Transfer(TransferEvent::Accepted),
+        ("call", "transferCompletion") => CallEvent::Transfer(completion(&body)),
         ("call", "acceptance") => CallEvent::Acceptance(acceptance(&body)?),
         ("call", "progress") => CallEvent::Progress(progress(&body)),
         ("call", "mediaAnswer") => CallEvent::MediaAnswer(media_answer(&body)?),
@@ -404,6 +439,22 @@ mod tests {
         assert_eq!(acceptance.sdp, "v=0\r\n");
         assert!(acceptance.from_mixer);
         assert_eq!(acceptance.links["callLeg"], "https://cc/leg");
+    }
+
+    #[test]
+    fn classifies_the_events_of_the_last_features() {
+        let (_, update) = classify("callAgent/abc/1/conversation/localParticipantUpdate/", json!({"breakoutDetails": {}})).unwrap();
+        assert!(matches!(update, CallEvent::LocalParticipantUpdate(_)));
+        let (_, replacement) = classify("callAgent/abc/1/call/replacement/", json!({"callNotification": {}})).unwrap();
+        assert_eq!(replacement.name(), "call/replacement");
+        let (_, share) = classify("callAgent/abc/1/conversation/contentSharingUpdate/", json!({"sessionState": {}})).unwrap();
+        assert!(matches!(share, CallEvent::ContentShareUpdate(_)));
+        let (_, ended) = classify("callAgent/abc/1/conversation/contentSharingEnd/", Value::Null).unwrap();
+        assert!(matches!(ended, CallEvent::ContentShareEnd(_)));
+        let (_, accepted) = classify("callAgent/abc/1/call/transferAcceptance/", Value::Null).unwrap();
+        assert_eq!(accepted, CallEvent::Transfer(TransferEvent::Accepted));
+        let (_, completed) = classify("callAgent/abc/1/call/transferCompletion/", json!({"transferCompletion": {"code": 0}})).unwrap();
+        assert!(matches!(completed, CallEvent::Transfer(event) if event.succeeded()));
     }
 
     #[test]

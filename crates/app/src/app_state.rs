@@ -56,6 +56,7 @@ pub enum AppEvent {
     Scheduled,
     Pins(String),
     Saved,
+    CallHistory,
     Translation,
     Forward,
     StatusMessage,
@@ -103,6 +104,7 @@ pub struct AppState {
     pub scheduled: Vec<ScheduledDraft>,
     pub scheduled_polling: bool,
     pub saved: SavedSet,
+    pub call_history: Vec<teams_core::CallLogEntry>,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub forward_request: Option<ForwardSource>,
     pub own_status: PresenceStatus,
@@ -115,7 +117,9 @@ pub struct AppState {
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
     pub call_share_sound: bool,
-    pub call_background_blur: bool,
+    pub call_background: crate::call::BackgroundPick,
+    pub call_backgrounds: crate::call::BackgroundLibrary,
+    pub transfer_picker: Option<Entity<crate::views::transfer_picker::TransferPicker>>,
     pub rings: Rings,
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
@@ -195,6 +199,7 @@ impl AppState {
             scheduled: Vec::new(),
             scheduled_polling: false,
             saved: SavedSet::default(),
+            call_history: Vec::new(),
             pins: HashMap::new(),
             forward_request: None,
             own_status: PresenceStatus::default(),
@@ -207,7 +212,13 @@ impl AppState {
             call_launcher: None,
             call_count: 0,
             call_share_sound: false,
-            call_background_blur: false,
+            call_background: crate::call::BackgroundPick::None,
+            call_backgrounds: if mode.demo {
+                crate::call::demo_library()
+            } else {
+                crate::call::BackgroundLibrary::new(crate::call::default_cache_directory())
+            },
+            transfer_picker: None,
             rings: Rings::default(),
             live_meetings: HashMap::new(),
             live_refreshing: HashSet::new(),
@@ -216,7 +227,8 @@ impl AppState {
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
-        state.call_background_blur = crate::call::load_background_blur(&state.store);
+        state.call_background = crate::call::load_background(&state.store);
+        state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);
         state.load_cached_translation_settings();
         if !mode.demo {
             state.directory.load_cached_presence(&state.store);

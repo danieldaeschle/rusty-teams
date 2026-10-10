@@ -8,13 +8,18 @@ pub enum EndKind {
     AnsweredElsewhere,
     Forwarded,
     MediaError,
+    RoomClosed,
     Other,
 }
 
 const SUB_CODE_DECLINED: i64 = 10603;
 const SUB_CODES_NO_ANSWER: [i64; 2] = [10408, 10486];
+const SUB_CODES_ROOM_CLOSED: [i64; 2] = [4097, 5030];
 
 pub fn classify_end(code: i64, sub_code: i64) -> EndKind {
+    if SUB_CODES_ROOM_CLOSED.contains(&sub_code) {
+        return EndKind::RoomClosed;
+    }
     match code {
         0 => EndKind::Normal,
         487 => EndKind::Cancelled,
@@ -45,6 +50,13 @@ mod tests {
         assert_eq!(classify_end(451, 0), EndKind::Forwarded);
         assert_eq!(classify_end(452, 0), EndKind::Forwarded);
         assert_eq!(classify_end(410, 0), EndKind::MediaError);
+    }
+
+    #[test]
+    fn a_closed_breakout_room_ends_with_its_own_sub_codes() {
+        assert_eq!(classify_end(0, 4097), EndKind::RoomClosed);
+        assert_eq!(classify_end(0, 5030), EndKind::RoomClosed);
+        assert_eq!(classify_end(0, 5001), EndKind::Normal);
     }
 
     #[test]

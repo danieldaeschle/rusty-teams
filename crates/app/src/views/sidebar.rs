@@ -13,6 +13,7 @@ use store::{
 };
 
 use super::avatar::{spec_avatar, square_avatar, with_presence};
+use super::calls_tab::calls_body;
 use super::widgets::{count_badge, dot, icon, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
@@ -52,6 +53,7 @@ const NOTIFICATION_ICON_SIZE: f32 = 13.;
 enum SidebarTab {
     Chats,
     Channels,
+    Calls,
 }
 
 #[derive(Clone)]
@@ -268,6 +270,7 @@ pub struct SidebarView {
     hidden_teams_open: bool,
     chats_scroll: ScrollHandle,
     channels_scroll: ScrollHandle,
+    calls_scroll: ScrollHandle,
     _subscription: Subscription,
 }
 
@@ -353,6 +356,7 @@ impl SidebarView {
             hidden_teams_open: false,
             chats_scroll: ScrollHandle::new(),
             channels_scroll: ScrollHandle::new(),
+            calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
         }
     }
@@ -367,6 +371,18 @@ impl SidebarView {
         cx.notify();
     }
 
+    pub fn show_calls(&mut self, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Calls, cx);
+    }
+
+    fn open_tab(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
+        self.tab = tab;
+        if tab == SidebarTab::Calls {
+            self.state.update(cx, |state, cx| state.refresh_call_history(cx));
+        }
+        cx.notify();
+    }
+
     pub fn select_adjacent(&mut self, step: Step, cx: &mut Context<Self>) {
         let selection = match self.tab {
             SidebarTab::Chats => self
@@ -375,6 +391,7 @@ impl SidebarView {
                 .adjacent_chat_id(step)
                 .map(Selection::Chat),
             SidebarTab::Channels => self.adjacent_channel_id(step, cx).map(Selection::Channel),
+            SidebarTab::Calls => None,
         };
         if let Some(selection) = selection {
             self.state.update(cx, |state, cx| state.select(selection, cx));
@@ -450,10 +467,7 @@ impl SidebarView {
             })
             .child(label.to_owned())
             .children(marker)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.tab = tab;
-                cx.notify();
-            }))
+            .on_click(cx.listener(move |this, _, _, cx| this.open_tab(tab, cx)))
     }
 
     fn tab_bar(
@@ -482,7 +496,8 @@ impl SidebarView {
                     .border_1()
                     .border_color(theme::border())
                     .child(self.tab_button(SidebarTab::Chats, "Chats", chat_marker, cx))
-                    .child(self.tab_button(SidebarTab::Channels, "Channels", channel_marker, cx)),
+                    .child(self.tab_button(SidebarTab::Channels, "Channels", channel_marker, cx))
+                    .child(self.tab_button(SidebarTab::Calls, "Calls", None, cx)),
             )
             .child(self.new_chat_button(cx))
     }
@@ -1461,6 +1476,7 @@ impl Render for SidebarView {
         let body = match self.tab {
             SidebarTab::Chats => self.chats_body(window_height, cx),
             SidebarTab::Channels => self.channels_body(cx),
+            SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, cx),
         };
         v_flex()
             .w(px(SIDEBAR_WIDTH))

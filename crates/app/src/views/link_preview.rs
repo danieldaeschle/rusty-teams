@@ -7,6 +7,7 @@ use gpui_kit::*;
 use teams_core::{LinkPreview, first_public_link};
 
 use super::widgets::icon;
+use crate::app_state::AppHandle;
 use crate::data::Directory;
 use crate::theme;
 
@@ -17,6 +18,7 @@ const THUMB_MIN_HEIGHT: f32 = 48.;
 const THUMB_MAX_HEIGHT: f32 = 112.;
 const THUMB_RADIUS: f32 = 6.;
 const CLOSE_SIZE: f32 = 22.;
+const JOIN_CHIP_HEIGHT: f32 = 24.;
 
 pub type CloseHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -161,11 +163,41 @@ pub fn link_preview_card(
         .into_any_element()
 }
 
+pub fn meeting_join_chip(id: String, url: String) -> AnyElement {
+    h_flex()
+        .id(ElementId::Name(id.into()))
+        .flex_none()
+        .self_start()
+        .h(px(JOIN_CHIP_HEIGHT))
+        .px(px(10.))
+        .gap(px(5.))
+        .items_center()
+        .rounded_full()
+        .bg(theme::accent())
+        .text_size(px(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::on_accent())
+        .cursor_pointer()
+        .hover(|chip| chip.opacity(0.85))
+        .child(icon(IconName::Video, 13., theme::on_accent()))
+        .child("Join")
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let Some(handle) = cx.try_global::<AppHandle>() else {
+                return;
+            };
+            let app = handle.0.clone();
+            app.update(cx, |state, cx| state.join_meeting_link(&url, cx));
+        })
+        .into_any_element()
+}
+
 #[derive(Default)]
 pub struct ComposeLink {
     url: Option<String>,
     preview: Option<LinkPreview>,
     dismissed: Option<String>,
+    pub meeting: Option<String>,
     pub lookup: Option<Task<()>>,
 }
 

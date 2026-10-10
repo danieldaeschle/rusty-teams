@@ -1,5 +1,5 @@
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -7,6 +7,7 @@ use libwebrtc::native::yuv_helper::i420_to_abgr;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use tract_onnx::prelude::*;
 
+use crate::background::BackgroundPicture;
 use crate::camera::i420_from_rgba;
 use crate::error::{Error, Result};
 
@@ -196,18 +197,16 @@ impl Composer<'_> {
     }
 }
 
-/// Keeps the person (mask near 1) sharp and replaces the rest with a blurred copy; `mask` is `MASK_WIDTH` x `MASK_HEIGHT`.
-pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
-    let (background, small_width, small_height) = blurred_background(rgba, width, height);
+fn compose_over(rgba: &mut [u8], width: usize, height: usize, mask: &[f32], background: &[u8], background_width: usize, background_height: usize) {
     let composer = Composer {
-        background: &background,
+        background,
         mask,
         width,
         mask_x: axis(width, MASK_WIDTH),
         mask_y: axis(height, MASK_HEIGHT),
-        small_x: axis(width, small_width),
-        small_y: axis(height, small_height),
-        small_width,
+        small_x: axis(width, background_width),
+        small_y: axis(height, background_height),
+        small_width: background_width,
     };
     let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
     let rows_per_band = height.div_ceil(bands);
@@ -219,11 +218,22 @@ pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
     });
 }
 
+/// Keeps the person (mask near 1) sharp and replaces the rest with a blurred copy; `mask` is `MASK_WIDTH` x `MASK_HEIGHT`.
+pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
+    let (background, small_width, small_height) = blurred_background(rgba, width, height);
+    compose_over(rgba, width, height, mask, &background, small_width, small_height);
+}
+
+pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, mask: &[f32], covered: &[u8]) {
+    compose_over(rgba, width, height, mask, covered, width, height);
+}
+
 /// Shared between the UI command and the camera thread.
 #[derive(Default)]
 pub struct BlurSettings {
     enabled: AtomicBool,
     average_micros: AtomicU32,
+    picture: Mutex<Option<Arc<BackgroundPicture>>>,
 }
 
 impl BlurSettings {
@@ -233,6 +243,14 @@ impl BlurSettings {
 
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_picture(&self, picture: Option<Arc<BackgroundPicture>>) {
+        *self.picture.lock().expect("picture lock") = picture;
+    }
+
+    fn picture(&self) -> Option<Arc<BackgroundPicture>> {
+        self.picture.lock().expect("picture lock").clone()
     }
 
     pub fn average_ms(&self) -> f32 {
@@ -245,11 +263,31 @@ pub struct BlurStage {
     settings: Arc<BlurSettings>,
     blur: Option<BackgroundBlur>,
     unavailable: bool,
+    covered: Option<CoveredPicture>,
+}
+
+struct CoveredPicture {
+    picture: Arc<BackgroundPicture>,
+    width: usize,
+    height: usize,
+    rgb: Vec<u8>,
 }
 
 impl BlurStage {
     pub fn new(settings: Arc<BlurSettings>) -> Self {
-        BlurStage { settings, blur: None, unavailable: false }
+        BlurStage { settings, blur: None, unavailable: false, covered: None }
+    }
+
+    fn refresh_covered(&mut self, width: usize, height: usize) {
+        let Some(picture) = self.settings.picture() else {
+            self.covered = None;
+            return;
+        };
+        let fresh = self.covered.as_ref().is_some_and(|covered| Arc::ptr_eq(&covered.picture, &picture) && covered.width == width && covered.height == height);
+        if !fresh {
+            let rgb = picture.covering(width, height);
+            self.covered = Some(CoveredPicture { picture, width, height, rgb });
+        }
     }
 
     pub fn apply_rgba(&mut self, rgba: &mut [u8], width: usize, height: usize) {
@@ -265,8 +303,9 @@ impl BlurStage {
                 }
             }
         }
+        self.refresh_covered(width, height);
         if let Some(blur) = self.blur.as_mut() {
-            blur.apply(rgba, width, height);
+            blur.apply(rgba, width, height, self.covered.as_ref().map(|covered| covered.rgb.as_slice()));
             self.settings.average_micros.store((blur.average_ms() * 1000.) as u32, Ordering::Relaxed);
         }
     }
@@ -300,13 +339,16 @@ impl BackgroundBlur {
         Ok(BackgroundBlur { segmenter: Segmenter::new()?, mask: Vec::new(), frames: 0, stride: 1, average_ms: 0., processed: 0 })
     }
 
-    pub fn apply(&mut self, rgba: &mut [u8], width: usize, height: usize) {
+    pub fn apply(&mut self, rgba: &mut [u8], width: usize, height: usize, covered: Option<&[u8]>) {
         let started = Instant::now();
         if self.frames.is_multiple_of(self.stride) || self.mask.is_empty() {
             self.segment(rgba, width, height, started);
         }
         self.frames += 1;
-        compose(rgba, width, height, &self.mask);
+        match covered {
+            Some(covered) => compose_image(rgba, width, height, &self.mask, covered),
+            None => compose(rgba, width, height, &self.mask),
+        }
         let elapsed = started.elapsed().as_secs_f64() * 1000.;
         self.average_ms = if self.processed == 0 { elapsed } else { self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT };
         self.processed += 1;
@@ -411,6 +453,40 @@ mod tests {
         assert!(blurred.chunks(CHANNELS).all(|pixel| pixel[3] == 255));
     }
 
+    fn cover_of(color: [u8; 3]) -> Vec<u8> {
+        BackgroundPicture::from_rgb(color.repeat(4 * 4), 4, 4).unwrap().covering(WIDTH, HEIGHT)
+    }
+
+    #[test]
+    fn the_person_stays_and_the_picture_replaces_everything_else() {
+        let original = checkerboard();
+        let mut replaced = original.clone();
+        compose_image(&mut replaced, WIDTH, HEIGHT, &oval_mask(), &cover_of([10, 120, 200]));
+        let (center_x, center_y) = (WIDTH / 2, HEIGHT / 2);
+        assert_eq!(pixel(&replaced, center_x, center_y), pixel(&original, center_x, center_y));
+        for (x, y) in [(2, 2), (WIDTH - 3, HEIGHT - 3), (2, HEIGHT - 3)] {
+            assert_eq!(&replaced[(y * WIDTH + x) * CHANNELS..][..4], &[10, 120, 200, 255]);
+        }
+    }
+
+    #[test]
+    fn the_picture_edge_is_feathered_like_the_blur_edge() {
+        let original = checkerboard();
+        let mut replaced = original.clone();
+        compose_image(&mut replaced, WIDTH, HEIGHT, &oval_mask(), &cover_of([0, 0, 0]));
+        let edge_row = HEIGHT / 2;
+        let switches = (0..WIDTH - 1)
+            .filter(|&x| pixel(&replaced, x, edge_row) != pixel(&original, x, edge_row) && pixel(&replaced, x + 1, edge_row) == pixel(&original, x + 1, edge_row))
+            .count();
+        assert!(switches <= 2);
+        let mut everyone = original.clone();
+        compose_image(&mut everyone, WIDTH, HEIGHT, &vec![1.; MASK_WIDTH * MASK_HEIGHT], &cover_of([0, 0, 0]));
+        assert_eq!(everyone, original);
+        let mut nobody = original;
+        compose_image(&mut nobody, WIDTH, HEIGHT, &vec![0.; MASK_WIDTH * MASK_HEIGHT], &cover_of([0, 0, 0]));
+        assert!(nobody.chunks(CHANNELS).all(|pixel| pixel[..3] == [0, 0, 0] && pixel[3] == 255));
+    }
+
     #[test]
     fn the_model_answers_one_probability_per_mask_pixel() {
         let segmenter = Segmenter::new().expect("model loads");
@@ -423,8 +499,8 @@ mod tests {
     fn the_blur_keeps_a_running_average_and_a_mask() {
         let mut blur = BackgroundBlur::new().expect("model loads");
         let mut frame = checkerboard();
-        blur.apply(&mut frame, WIDTH, HEIGHT);
-        blur.apply(&mut frame, WIDTH, HEIGHT);
+        blur.apply(&mut frame, WIDTH, HEIGHT, None);
+        blur.apply(&mut frame, WIDTH, HEIGHT, None);
         assert!(blur.average_ms() > 0.);
         assert_eq!(blur.mask.len(), MASK_WIDTH * MASK_HEIGHT);
     }

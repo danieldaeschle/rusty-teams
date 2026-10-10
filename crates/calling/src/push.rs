@@ -6,6 +6,7 @@ use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::hold::offer_sends_video;
 
 pub const EVT_TEAMS_CALL: i64 = 107;
 pub const EVT_GROUP_VIDEO_CALL: i64 = 109;
@@ -118,6 +119,8 @@ fn notification_from(payload: &Value, evt: i64) -> Result<CallNotification> {
         .as_array()
         .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(VIDEO_MODALITY)));
     let invitation = &payload["conversationInvitation"];
+    let offer_sdp = text_of(&notification["mediaContent"]["blob"]);
+    let offer_has_video = offer_sdp.as_deref().is_some_and(offer_sends_video);
     Ok(CallNotification {
         call_id,
         participant_id,
@@ -126,13 +129,13 @@ fn notification_from(payload: &Value, evt: i64) -> Result<CallNotification> {
             display_name: notification["from"]["displayName"].as_str().unwrap_or_default().to_owned(),
         },
         links,
-        offer_sdp: text_of(&notification["mediaContent"]["blob"]),
+        offer_sdp,
         controller_name: text_of(&notification["controllerName"]),
         conversation_controller: text_of(&invitation["conversationController"]),
         is_multi_party: invitation["isMultiParty"].as_bool().unwrap_or(false),
         subject: text_of(&invitation["subject"]),
         thread_id: text_of(&payload["groupChat"]["threadId"]),
-        video: evt == EVT_GROUP_VIDEO_CALL || modalities_have_video,
+        video: evt == EVT_GROUP_VIDEO_CALL || modalities_have_video || offer_has_video,
     })
 }
 
@@ -209,6 +212,16 @@ mod tests {
         let mut with_video = payload();
         with_video["callNotification"]["callModalities"] = json!(["Audio", "Video"]);
         assert!(incoming(&gp_body(&with_video)).video);
+    }
+
+    #[test]
+    fn an_offer_that_sends_video_makes_a_video_call_even_without_the_modality() {
+        let mut with_video = payload();
+        let offer = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 1234 RTP/SAVP 111\r\na=mid:0\r\na=sendrecv\r\nm=video 1234 RTP/SAVP 102\r\na=mid:1\r\na=sendrecv\r\na=label:main-video\r\n";
+        with_video["callNotification"]["mediaContent"] = json!({"blob": offer});
+        assert!(incoming(&gp_body(&with_video)).video);
+        with_video["callNotification"]["mediaContent"] = json!({"blob": offer.replace("a=sendrecv\r\na=label:main-video", "a=inactive\r\na=label:main-video")});
+        assert!(!incoming(&gp_body(&with_video)).video);
     }
 
     #[test]

@@ -2,11 +2,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::{
-    CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, DeviceChoice, DeviceLists, EndKind, EndReason, Progress,
-    Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare, DeviceChoice, DeviceLists, EndKind, EndReason,
+    HoldState, MeetingTarget, Progress, Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
+use super::background::BackgroundPick;
 use super::pictures::CallPictures;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
@@ -31,9 +32,63 @@ pub struct ActiveCall {
     pub pictures: CallPictures,
     pub stage_fullscreen: bool,
     pub chat_open: bool,
+    pub meeting_target: Option<MeetingTarget>,
+    pub pending_move: Option<PendingMove>,
+    pub consult: Option<ConsultCall>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingMove {
+    pub target: MeetingTarget,
+    pub title: String,
+    pub breakout: Option<BreakoutState>,
+}
+
+pub struct ConsultCall {
+    pub id: u64,
+    pub target: (String, String),
+    pub commands: UnboundedSender<CallCommand>,
+    pub state: CallState,
+    pub replacement: Option<String>,
+    pub transferring: bool,
+}
+
+impl ConsultCall {
+    pub fn connected(&self) -> bool {
+        matches!(self.state, CallState::Connected { .. })
+    }
+
+    pub fn ready_to_transfer(&self) -> bool {
+        self.connected() && self.replacement.is_some()
+    }
+
+    pub fn status_text(&self) -> String {
+        let name = &self.target.1;
+        match &self.state {
+            CallState::Connected { .. } => format!("Consulting {name}"),
+            _ => format!("Calling {name}..."),
+        }
+    }
 }
 
 impl ActiveCall {
+    pub fn new(id: u64, model: CallModel, commands: UnboundedSender<CallCommand>, conversation_id: Option<String>, video: Arc<VideoHub>) -> Self {
+        ActiveCall {
+            id,
+            model,
+            commands,
+            viewing: true,
+            conversation_id,
+            video,
+            pictures: CallPictures::default(),
+            stage_fullscreen: false,
+            chat_open: false,
+            meeting_target: None,
+            pending_move: None,
+            consult: None,
+        }
+    }
+
     pub fn chat_thread(&self) -> Option<&str> {
         chat_thread(self.model.kind, self.model.meeting_chat.as_deref(), self.conversation_id.as_deref())
     }
@@ -89,6 +144,13 @@ impl Tile {
             spotlight: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BreakoutState {
+    pub room_name: String,
+    pub main: Option<MeetingTarget>,
+    pub main_title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +261,13 @@ pub struct CallModel {
     pub pinned: Option<String>,
     pub captions: CaptionState,
     pub caption_lines: Vec<CaptionLine>,
-    pub blur: bool,
+    pub background: BackgroundPick,
+    pub recording: bool,
+    pub consent_required: bool,
+    pub hold: HoldState,
+    pub whiteboard: Option<ContentShare>,
+    pub breakout: Option<BreakoutState>,
+    pub main_meeting: Option<MeetingTarget>,
     pub reactions: Vec<ReactionChip>,
     reaction_serial: u64,
     pub meeting_chat: Option<String>,
@@ -242,7 +310,13 @@ impl CallModel {
             pinned: None,
             captions: CaptionState::Off,
             caption_lines: Vec::new(),
-            blur: false,
+            background: BackgroundPick::None,
+            recording: false,
+            consent_required: false,
+            hold: HoldState::Active,
+            whiteboard: None,
+            breakout: None,
+            main_meeting: None,
             reactions: Vec::new(),
             reaction_serial: 0,
             meeting_chat: None,
@@ -345,7 +419,16 @@ impl CallModel {
                 self.captions = state;
             }
             CallUpdate::Caption(entry) => self.note_caption(entry, Instant::now()),
-            CallUpdate::BlurTiming(_) | CallUpdate::Organizer { .. } => {}
+            CallUpdate::Recording(on) => self.recording = on,
+            CallUpdate::ConsentRequired(required) => self.consent_required = required,
+            CallUpdate::Hold(hold) => self.hold = hold,
+            CallUpdate::Whiteboard(share) => self.whiteboard = share,
+            CallUpdate::BreakoutRoom { main } => self.main_meeting = Some(main),
+            CallUpdate::BlurTiming(_)
+            | CallUpdate::Organizer { .. }
+            | CallUpdate::WhiteboardUrl(_)
+            | CallUpdate::BreakoutMove(_)
+            | CallUpdate::ReplacementLink(_) => {}
         }
     }
 
@@ -536,6 +619,42 @@ impl CallModel {
             .filter(|name| !name.is_empty())
             .unwrap_or("Someone");
         Some(format!("{name} is sharing"))
+    }
+
+    pub fn whiteboard_label(&self) -> Option<String> {
+        let share = self.whiteboard.as_ref()?;
+        let name = share
+            .presenter
+            .as_deref()
+            .and_then(|presenter| self.tiles.iter().find(|tile| tile.mri == presenter))
+            .map(|tile| tile.name.as_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Someone");
+        Some(format!("{name} is sharing a whiteboard"))
+    }
+
+    pub fn whiteboard_url(&self) -> Option<&str> {
+        self.whiteboard.as_ref()?.url.as_deref()
+    }
+
+    pub fn is_one_to_one(&self) -> bool {
+        self.kind == CallKind::Direct
+    }
+
+    pub fn can_hold(&self) -> bool {
+        self.is_one_to_one() && self.is_live() && self.hold != HoldState::Remote
+    }
+
+    pub fn can_transfer(&self) -> bool {
+        self.is_one_to_one() && self.is_live() && self.hold == HoldState::Active
+    }
+
+    pub fn can_record(&self) -> bool {
+        self.organizes_meeting() && self.is_live() && !self.lobby
+    }
+
+    pub fn can_open_whiteboard(&self) -> bool {
+        self.kind == CallKind::Meeting && self.is_live() && !self.lobby
     }
 
     pub fn tile_speaking(&self, tile: &Tile) -> bool {
@@ -1095,5 +1214,82 @@ mod tests {
         assert!(model.visible_captions(start + Duration::from_secs(7)).is_empty());
         model.apply(CallUpdate::Captions(CaptionState::Off));
         assert!(model.caption_lines.is_empty() && !model.captions_on());
+    }
+
+    fn one_to_one() -> CallModel {
+        let mut model = CallModel::people("Bea", &[("8:orgid:bea".into(), "Bea".into())]);
+        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model
+    }
+
+    #[test]
+    fn hold_and_transfer_belong_to_one_to_one_calls_and_follow_the_hold_state() {
+        let mut model = one_to_one();
+        assert!(model.can_hold() && model.can_transfer());
+        model.apply(CallUpdate::Hold(HoldState::Local));
+        assert!(model.can_hold() && !model.can_transfer());
+        model.apply(CallUpdate::Hold(HoldState::Remote));
+        assert!(!model.can_hold() && !model.can_transfer());
+        let meeting = meeting_with_me();
+        assert!(!meeting.can_hold() && !meeting.can_transfer());
+        assert!(!CallModel::people("Group", &[("8:orgid:a".into(), "A".into()), ("8:orgid:b".into(), "B".into())]).can_hold());
+    }
+
+    #[test]
+    fn recording_and_consent_follow_the_call_updates_and_only_organizers_may_record() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        assert!(!model.can_record());
+        model.apply(CallUpdate::Roster(vec![organizer_entry("8:orgid:me")]));
+        assert!(model.can_record());
+        model.apply(CallUpdate::Recording(true));
+        model.apply(CallUpdate::ConsentRequired(true));
+        assert!(model.recording && model.consent_required);
+        model.apply(CallUpdate::ConsentRequired(false));
+        assert!(model.recording && !model.consent_required);
+        model.apply(CallUpdate::Recording(false));
+        assert!(!model.recording);
+    }
+
+    #[test]
+    fn a_whiteboard_share_names_the_presenter_and_offers_the_browser_only_with_a_link() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![entry("8:orgid:ana", "Ana", false, false)]));
+        assert_eq!(model.whiteboard_label(), None);
+        let share = |presenter: &str, url: Option<&str>| calling::ContentShare {
+            session_id: "s".into(),
+            presenter: Some(presenter.into()),
+            subject: "Whiteboard".into(),
+            url: url.map(str::to_owned),
+            whiteboard: true,
+        };
+        model.apply(CallUpdate::Whiteboard(Some(share("8:orgid:ana", Some("https://app.whiteboard.microsoft.com/x")))));
+        assert_eq!(model.whiteboard_label().as_deref(), Some("Ana is sharing a whiteboard"));
+        assert_eq!(model.whiteboard_url(), Some("https://app.whiteboard.microsoft.com/x"));
+        model.apply(CallUpdate::Whiteboard(Some(share("8:orgid:stranger", None))));
+        assert_eq!(model.whiteboard_label().as_deref(), Some("Someone is sharing a whiteboard"));
+        assert_eq!(model.whiteboard_url(), None);
+        model.apply(CallUpdate::Whiteboard(None));
+        assert_eq!(model.whiteboard_label(), None);
+    }
+
+    #[test]
+    fn a_consultation_can_transfer_once_connected_with_a_replacement_link() {
+        let (handle, _control) = calling::call_channel();
+        let mut consult = ConsultCall {
+            id: 3,
+            target: ("8:orgid:ana".into(), "Ana".into()),
+            commands: handle.commands,
+            state: CallState::Connecting,
+            replacement: None,
+            transferring: false,
+        };
+        assert_eq!(consult.status_text(), "Calling Ana...");
+        assert!(!consult.ready_to_transfer());
+        consult.state = CallState::Connected { since: Instant::now() };
+        assert_eq!(consult.status_text(), "Consulting Ana");
+        assert!(!consult.ready_to_transfer());
+        consult.replacement = Some("https://cc/replacement".into());
+        assert!(consult.ready_to_transfer());
     }
 }

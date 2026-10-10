@@ -7,8 +7,8 @@ use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
     AdaptiveCard, Draft, FileCard, ImageRef, LinkPreview, ReactionInfo, Span, adaptive_cards,
-    card_texts, files, images, link_preview, linked_message_spans, message_spans, reactions,
-    translated_spans,
+    card_texts, files, images, link_preview, linked_message_spans, meeting_link_in_html,
+    message_spans, reactions, translated_spans,
 };
 
 use crate::card_state::CardOverride;
@@ -138,6 +138,7 @@ pub struct MessageRow {
     pub local_images: Vec<LocalImage>,
     pub files: Vec<FileCard>,
     pub link_preview: Option<LinkPreview>,
+    pub meeting_link: Option<String>,
     pub adaptive_cards: Vec<AdaptiveCard>,
     pub subject: Option<String>,
     pub new_marker: bool,
@@ -565,6 +566,9 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         local_images: Vec::new(),
         files: files(record),
         link_preview: link_preview(record),
+        meeting_link: (!record.deleted)
+            .then(|| meeting_link_in_html(&record.body_html))
+            .flatten(),
         adaptive_cards: match context.card_overrides.get(&record.message_id) {
             Some(replaced) if replaced.basis == record.attachments_json => replaced.cards.clone(),
             _ => adaptive_cards(record),

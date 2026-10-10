@@ -4,6 +4,8 @@ use serde_json::{Map, Value, json};
 use session::{ApiResponse, App, GRAPH, Method, Request, SPACES, Scope, Session};
 
 use crate::captions::{self, BotAction};
+use crate::recording::{self, Consent, StartDetails};
+use crate::transfer::{self, TransferTarget};
 use crate::error::{Error, Result};
 use crate::organizer::{self, Target};
 use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
@@ -24,7 +26,7 @@ const ALLOWED_HOST_SUFFIXES: [&str; 2] = [".flightproxy.teams.microsoft.com", ".
 const BACKEND_SUFFIX: &str = ".skype.com";
 const AUTHZ_SCOPE_NAME: &str = "authorization.readwrite";
 const FLIGHTPROXY_EP: &str = "https://api.flightproxy.teams.microsoft.com/api/v2/ep";
-const CONVERSATION_LINK_NAMES: [&str; 9] = [
+const CONVERSATION_LINK_NAMES: [&str; 11] = [
     "conversationEnd",
     "conversationUpdate",
     "localParticipantUpdate",
@@ -34,6 +36,8 @@ const CONVERSATION_LINK_NAMES: [&str; 9] = [
     "addModalityFailure",
     "confirmUnmute",
     "receiveMessage",
+    "contentSharingUpdate",
+    "contentSharingEnd",
 ];
 const SUBSCRIBE_LINK_NAMES: [&str; 6] = [
     "conversationEnd",
@@ -192,6 +196,7 @@ pub struct Invitation<'a> {
     pub media_leg_id: &'a str,
     pub callbacks: &'a CallbackLinks,
     pub target: &'a InviteTarget,
+    pub modalities: &'a [String],
 }
 
 pub struct Answer<'a> {
@@ -289,6 +294,19 @@ impl Signaling {
         let body = subscribe_body(from, callbacks, meeting);
         let response = self.send("POST epconv subscribe", Method::Post, EPCONV_URL, Some(body)).await?;
         conversation_from(&response.body)
+    }
+
+    /// Opens a roster-only conversation for the meeting ID; the caller leaves it once the target is read.
+    pub async fn resolve_meeting(
+        &self,
+        from: &Participant,
+        callbacks: &CallbackLinks,
+        meeting_data: &Value,
+    ) -> Result<(MeetingTarget, Conversation)> {
+        let body = crate::join::resolve_body(from, callbacks, meeting_data);
+        let response = self.send("POST epconv resolve", Method::Post, EPCONV_URL, Some(body)).await?;
+        let target = crate::join::target_from_answer(&response.body, meeting_data)?;
+        Ok((target, conversation_from(&response.body)?))
     }
 
     /// Joins with the offer; the answer may restate the conversation links, otherwise the subscribed ones stay.
@@ -437,17 +455,21 @@ impl Signaling {
         from: &Participant,
         thread_id: &str,
         callbacks: &CallbackLinks,
-    ) -> Result<()> {
+    ) -> Result<u16> {
         let body = captions::add_bot_body(from.wire(), thread_id, callbacks.call_id(), &from.display_name, callbacks);
         let mut request = self.request(Method::Post, conversation.link("addParticipantAndModality")?, Some(body));
         request = request.with_body_token(captions::RECORDER_RESOURCE, captions::RECORDER_SCOPE, captions::INITIATOR_TOKEN_PLACEHOLDER);
-        self.exchange(&self.session, "POST add (caption bot)", request).await.map(|_| ())
+        self.exchange(&self.session, "POST add (caption bot)", request).await.map(|response| response.status)
     }
 
     pub async fn caption_command(&self, command_url: &str, action: BotAction, from: &Participant) -> Result<()> {
         ensure_teams_url(command_url)?;
         let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let body = captions::command_body(action, &from.mri, &from.participant_id, &timestamp);
+        self.bot_command(command_url, body, "caption command").await.map(|_| ())
+    }
+
+    async fn bot_command(&self, command_url: &str, body: Value, label: &str) -> Result<u16> {
         let arguments = json!({
             "url": command_url,
             "body": body,
@@ -458,12 +480,40 @@ impl Signaling {
         });
         let answer = self.session.run_with_token(App::Teams, &spaces_scope(), captions::COMMAND_SCRIPT, &arguments, false).await?;
         let status = answer["status"].as_u64().unwrap_or_default();
-        self.timeline.record("POST caption command", format!("HTTP {status}"));
+        self.timeline.record(format!("POST {label}"), format!("HTTP {status}"));
         if (200..300).contains(&status) {
-            return Ok(());
+            return Ok(status as u16);
         }
         let reason = answer["error"].as_str().unwrap_or("no answer");
-        Err(Error::Signaling(format!("caption command answered HTTP {status} {reason}")))
+        Err(Error::Signaling(format!("{label} answered HTTP {status} {reason}")))
+    }
+
+    pub async fn recording_command(&self, command_url: &str, action: BotAction, from: &Participant, title: &str) -> Result<u16> {
+        ensure_teams_url(command_url)?;
+        let now = chrono::Utc::now();
+        let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let file_name = recording::file_name(title, now);
+        let correlation_id = uuid::Uuid::new_v4().to_string();
+        let details = StartDetails {
+            own_mri: &from.mri,
+            participant_leg_id: &from.participant_id,
+            timestamp: &timestamp,
+            file_name: &file_name,
+            meeting_title: title,
+            organizer_name: &from.display_name,
+            correlation_id: &correlation_id,
+        };
+        self.bot_command(command_url, recording::command_body(action, details), "recording command").await
+    }
+
+    pub async fn consent_to_recording(&self, conversation: &Conversation, from: &Participant, consent: Consent) -> Result<u16> {
+        let body = recording::consent_body(from.wire(), self.next_state_sequence(), consent);
+        self.send("POST publishState (recording consent)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn transfer(&self, transfer_url: &str, from: &Participant, target: TransferTarget<'_>, callbacks: &CallbackLinks) -> Result<()> {
+        let body = transfer::transfer_body(from, target, callbacks);
+        self.post_json("POST transfer", transfer_url, body).await
     }
 
     /// One broker long poll; answers the next subscribe URL.
@@ -547,7 +597,7 @@ fn conversation_properties() -> Value {
     })
 }
 
-fn endpoint_state() -> Value {
+pub(crate) fn endpoint_state() -> Value {
     json!({
         "endpointStateSequenceNumber": 2,
         "endpointProperties": {"additionalEndpointProperties": {"infoShownInReportMode": "FullInformation"}},
@@ -625,7 +675,7 @@ pub fn epconv_body(invitation: &Invitation<'_>) -> Value {
         "meetingData": meeting_data,
         "endpointState": endpoint_state(),
         "callInvitation": {
-            "callModalities": AUDIO_MODALITIES,
+            "callModalities": invitation.modalities,
             "replaces": null,
             "transferor": null,
             "clientTransferContext": null,
@@ -639,13 +689,17 @@ pub fn epconv_body(invitation: &Invitation<'_>) -> Value {
     })
 }
 
+pub(crate) fn subscribe_request(callbacks: &CallbackLinks) -> Value {
+    json!({
+        "roster": roster_request(callbacks),
+        "properties": conversation_properties(),
+        "links": link_map(&SUBSCRIBE_LINK_NAMES, |name| callbacks.conversation(name)),
+    })
+}
+
 pub fn subscribe_body(from: &Participant, callbacks: &CallbackLinks, meeting: &MeetingTarget) -> Value {
     json!({
-        "conversationRequest": {
-            "roster": roster_request(callbacks),
-            "properties": conversation_properties(),
-            "links": link_map(&SUBSCRIBE_LINK_NAMES, |name| callbacks.conversation(name)),
-        },
+        "conversationRequest": subscribe_request(callbacks),
         "participants": {"from": from.wire()},
         "groupChat": {"threadId": meeting.thread_id, "messageId": MEETING_MESSAGE_ID},
         "meetingInfo": {"tenantId": meeting.tenant_id, "organizerId": meeting.organizer_id},
@@ -732,23 +786,25 @@ pub fn renegotiation_body(
     callbacks: &CallbackLinks,
     offer_sdp: &str,
     media_leg_id: &str,
+    modalities: &[String],
+    new_offer: bool,
 ) -> Value {
     json!({
         "mediaNegotiation": {
-            "callModalities": AUDIO_MODALITIES,
+            "callModalities": modalities,
             "sender": from.wire(),
             "links": {
                 "mediaAnswer": callbacks.call("mediaAnswer"),
                 "rejection": callbacks.call("rejection"),
             },
-            "mediaContent": renegotiation_content(offer_sdp, media_leg_id),
+            "mediaContent": renegotiation_content(offer_sdp, media_leg_id, new_offer),
         },
     })
 }
 
-fn renegotiation_content(sdp: &str, media_leg_id: &str) -> Value {
+fn renegotiation_content(sdp: &str, media_leg_id: &str, new_offer: bool) -> Value {
     let mut content = media_content(sdp, media_leg_id, true);
-    content["newOffer"] = json!(true);
+    content["newOffer"] = json!(new_offer);
     content
 }
 
@@ -936,6 +992,7 @@ mod tests {
             media_leg_id: "AB",
             callbacks: &callbacks,
             target,
+            modalities: &["Audio".to_owned()],
         })
     }
 
@@ -982,7 +1039,7 @@ mod tests {
         assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio"]));
         assert_eq!(body["callInvitation"]["mediaContent"]["contentType"], SDP_CONTENT_TYPE);
         assert!(body["callInvitation"]["links"]["acceptance"].as_str().unwrap().ends_with("/call/acceptance/"));
-        assert_eq!(body["conversationRequest"]["links"].as_object().unwrap().len(), 9);
+        assert_eq!(body["conversationRequest"]["links"].as_object().unwrap().len(), 11);
     }
 
     #[test]
@@ -1137,9 +1194,13 @@ mod tests {
     fn renegotiation_messages_name_their_reply_links() {
         let from = from();
         let callbacks = callbacks();
-        let offer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB");
+        let offer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned()], true);
         let negotiation = &offer["mediaNegotiation"];
         assert_eq!(negotiation["mediaContent"]["newOffer"], true);
+        assert_eq!(negotiation["callModalities"], json!(["Audio"]));
+        let same_peer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned(), "Video".to_owned()], false);
+        assert_eq!(same_peer["mediaNegotiation"]["mediaContent"]["newOffer"], false);
+        assert_eq!(same_peer["mediaNegotiation"]["callModalities"], json!(["Audio", "Video"]));
         assert!(negotiation["links"]["mediaAnswer"].as_str().unwrap().ends_with("/call/mediaAnswer/"));
         assert!(negotiation["links"]["rejection"].as_str().unwrap().ends_with("/call/rejection/"));
         let answer = escalation_answer_body(&from, &callbacks, "v=0\r\n", "AB");
@@ -1147,6 +1208,16 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with("/call/mediaAcknowledgement/"));
+    }
+
+    #[test]
+    fn a_video_call_invites_with_audio_and_video() {
+        let from = from();
+        let callbacks = callbacks();
+        let target = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
+        let modalities = vec!["Audio".to_owned(), "Video".to_owned()];
+        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities });
+        assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio", "Video"]));
     }
 
     #[test]

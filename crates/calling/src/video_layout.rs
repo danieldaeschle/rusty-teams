@@ -15,6 +15,7 @@ use crate::video_frame::VideoKey;
 pub const RECEIVE_SLOTS: usize = 4;
 pub const CAMERA_MID: &str = "1";
 pub const SHARE_MID: &str = "6";
+pub const ONE_TO_ONE_SHARE_MID: &str = "2";
 const CAMERA_LINE_LABEL: &str = "main-video";
 const SHARE_LINE_LABEL: &str = "applicationsharing-video";
 const CAMERA_STREAM: &str = "camera";
@@ -40,11 +41,18 @@ pub fn offer_plan() -> OfferPlan {
     }
 }
 
+pub fn one_to_one_plan() -> OfferPlan {
+    OfferPlan {
+        screen_share_mids: vec![ONE_TO_ONE_SHARE_MID.to_owned()],
+        gallery_mids: Vec::new(),
+    }
+}
+
 /// Offered after the audio line: camera, `RECEIVE_SLOTS` receive-only slots, screen share (mids 1, 2-5, 6).
 #[derive(Clone)]
 pub struct VideoLines {
     pub camera: RtpTransceiver,
-    pub share: RtpTransceiver,
+    pub share: Option<RtpTransceiver>,
 }
 
 fn h264_only(capabilities: Vec<RtpCodecCapability>) -> Vec<RtpCodecCapability> {
@@ -85,7 +93,15 @@ pub fn add_video_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -
         add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving.clone())?;
     }
     let share = add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending)?;
-    Ok(VideoLines { camera, share })
+    Ok(VideoLines { camera, share: Some(share) })
+}
+
+pub fn add_one_to_one_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<VideoLines> {
+    let sending = h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs);
+    let receiving = h264_only(factory.get_rtp_receiver_capabilities(MediaType::Video).codecs);
+    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending)?;
+    add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving)?;
+    Ok(VideoLines { camera, share: None })
 }
 
 /// Per-line direction told to the mixer through `updateMediaDescriptions`; no SDP renegotiation.

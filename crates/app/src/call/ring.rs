@@ -23,14 +23,14 @@ impl RingEntry {
 
     pub fn subtitle(&self) -> &'static str {
         match (self.ring.video, self.ring.is_group) {
-            (true, _) => "Incoming call",
+            (true, _) => "Incoming video call",
             (false, true) => "Incoming group audio call",
             (false, false) => "Incoming audio call",
         }
     }
 
     pub fn accept_label(&self) -> &'static str {
-        if self.ring.video { "Accept with audio" } else { "Accept" }
+        if self.ring.video { "Audio" } else { "Accept" }
     }
 }
 
@@ -203,13 +203,13 @@ mod tests {
     }
 
     #[test]
-    fn video_calls_offer_accept_with_audio() {
+    fn video_calls_offer_audio_and_video_answers() {
         let audio = RingEntry { ring: ring(1, false), state: RingState::start(Instant::now()), demo: false };
         let video = RingEntry { ring: ring(2, true), ..audio.clone() };
         assert_eq!(audio.subtitle(), "Incoming audio call");
         assert_eq!(audio.accept_label(), "Accept");
-        assert_eq!(video.subtitle(), "Incoming call");
-        assert_eq!(video.accept_label(), "Accept with audio");
+        assert_eq!(video.subtitle(), "Incoming video call");
+        assert_eq!(video.accept_label(), "Audio");
         assert_eq!(audio.caller_user_id().as_deref(), Some("caller"));
     }
 

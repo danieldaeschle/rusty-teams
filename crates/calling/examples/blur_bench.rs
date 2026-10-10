@@ -20,7 +20,7 @@ fn main() {
     let mut blur = BackgroundBlur::new().expect("model");
     let segmenter = Segmenter::new().expect("model");
     for _ in 0..WARMUP {
-        blur.apply(&mut frame.clone(), WIDTH, HEIGHT);
+        blur.apply(&mut frame.clone(), WIDTH, HEIGHT, None);
     }
     let started = Instant::now();
     for _ in 0..FRAMES {
@@ -31,7 +31,7 @@ fn main() {
     let mut result = frame.clone();
     for _ in 0..FRAMES {
         result.copy_from_slice(&frame);
-        blur.apply(&mut result, WIDTH, HEIGHT);
+        blur.apply(&mut result, WIDTH, HEIGHT, None);
     }
     println!("segment + blur + compose {WIDTH}x{HEIGHT}: {:.2} ms/frame (running average {:.2} ms)", started.elapsed().as_secs_f64() * 1000. / FRAMES as f64, blur.average_ms());
     if let Some(path) = output {

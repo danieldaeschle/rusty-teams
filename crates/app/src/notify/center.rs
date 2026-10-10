@@ -22,6 +22,7 @@ use super::text::describe;
 use super::ring_view::RingView;
 use super::toast::{PillView, ToastView};
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
 use crate::single_instance;
@@ -31,6 +32,9 @@ const SLIDE_DURATION: Duration = Duration::from_millis(180);
 const SLIDE_DISTANCE: f32 = 48.;
 const DEMO_SPEC_DELAY: Duration = Duration::from_secs(3);
 const DEMO_RING_ENV: &str = "TEAMS_DEMO_RING";
+const DEMO_RING_KIND_ENV: &str = "TEAMS_DEMO_RING_KIND";
+const DEMO_CALL_ENV: &str = "TEAMS_DEMO_CALL";
+const DEMO_SCENE_DELAY: Duration = Duration::from_millis(1500);
 
 struct OpenWindow {
     handle: AnyWindowHandle,
@@ -120,17 +124,34 @@ impl NotificationCenter {
         })
         .detach();
         if center.app.read(cx).mode.demo {
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(DEMO_SPEC_DELAY).await;
-                this.update(cx, |center, cx| center.show_demo_toasts(cx))
-                    .ok();
-            })
-            .detach();
+            if demo_scene().is_none() {
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(DEMO_SPEC_DELAY).await;
+                    this.update(cx, |center, cx| center.show_demo_toasts(cx))
+                        .ok();
+                })
+                .detach();
+            }
             if let Some(delay) = demo_ring_delay() {
                 let app = center.app.clone();
+                let video = std::env::var(DEMO_RING_KIND_ENV).is_ok_and(|kind| kind.trim() == "video");
                 cx.spawn(async move |_, cx| {
                     cx.background_executor().timer(delay).await;
-                    app.update(cx, |state, cx| state.demo_incoming_ring(cx));
+                    app.update(cx, |state, cx| {
+                        if video {
+                            state.demo_incoming_video_ring(cx)
+                        } else {
+                            state.demo_incoming_ring(cx)
+                        }
+                    });
+                })
+                .detach();
+            }
+            if let Some(scene) = demo_scene() {
+                let app = center.app.clone();
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor().timer(DEMO_SCENE_DELAY).await;
+                    app.update(cx, |state, cx| state.start_demo_scene(scene, cx));
                 })
                 .detach();
             }
@@ -900,6 +921,10 @@ fn open_popup<V: Render>(
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
+}
+
+fn demo_scene() -> Option<DemoScene> {
+    DemoScene::from_name(&std::env::var(DEMO_CALL_ENV).ok()?)
 }
 
 /// `TEAMS_DEMO_RING=<seconds>` rings a fake incoming call that long after the demo starts.

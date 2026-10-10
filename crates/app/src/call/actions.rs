@@ -2,13 +2,14 @@ use std::time::{Duration, Instant};
 
 use calling::meeting::LiveMeeting;
 use calling::{
-    CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
+    AcceptMode, CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
 };
 use gpui_kit::*;
 
-use super::demo::{DemoCall, demo_caller, demo_guests, demo_ring, start_demo_call};
+use super::background::{BACKGROUND_META_KEY, BackgroundPick, SHOWN_IMAGES, is_image_file, save_custom_backgrounds};
+use super::demo::{DemoCall, DemoScene, demo_caller, demo_guests, demo_ring, demo_video_ring, start_demo_call, start_demo_scene_call};
+use super::features::room_closed_move;
 use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
-use super::pictures::CallPictures;
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title};
@@ -16,10 +17,10 @@ use crate::notify::selection_for;
 
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
 const SHARE_SOURCES_EVERY_TICKS: u32 = 10;
-const NOT_CONNECTED_NOTICE: &str = "Not connected to Teams yet";
+pub(super) const NOT_CONNECTED_NOTICE: &str = "Not connected to Teams yet";
 const READ_ONLY_NOTICE: &str = "Calls are off in read-only mode";
 const NOT_CALLABLE_NOTICE: &str = "This chat cannot be called";
-const MEETING_UNAVAILABLE_NOTICE: &str = "This meeting cannot be joined";
+pub(super) const MEETING_UNAVAILABLE_NOTICE: &str = "This meeting cannot be joined";
 const ANSWER_FAILED_NOTICE: &str = "Could not answer the call";
 const MEETING_KIND: &str = "meeting";
 const DEMO_LOBBY_MEETING: &str = "demo-chat-meeting-retro";
@@ -28,14 +29,9 @@ const DEMO_SMALL_MEETING: usize = 4;
 const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
-pub const BACKGROUND_BLUR_META_KEY: &str = "call_background_blur";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
     store.meta(SHARE_SOUND_META_KEY).ok().flatten().as_deref() == Some("1")
-}
-
-pub fn load_background_blur(store: &store::Store) -> bool {
-    store.meta(BACKGROUND_BLUR_META_KEY).ok().flatten().as_deref() == Some("1")
 }
 
 fn now_unix() -> i64 {
@@ -112,7 +108,7 @@ impl AppState {
             lobby: conversation_id == DEMO_LOBBY_MEETING,
             organizer: conversation_id != DEMO_LOBBY_MEETING,
         };
-        let Some(handle) = self.place_call(CallSpec::Meeting(target), demo, cx) else {
+        let Some(handle) = self.place_call(CallSpec::Meeting(target.clone()), demo, cx) else {
             return;
         };
         let title = selection_for(&self.sidebar, conversation_id)
@@ -120,9 +116,12 @@ impl AppState {
             .unwrap_or_else(|| "Meeting".to_owned());
         let model = CallModel::meeting(&title, is_organizer(&meeting, self.directory.me.as_ref()));
         self.begin_call(handle, model, Some(conversation_id.to_owned()), cx);
+        if let Some(call) = self.call.as_mut() {
+            call.meeting_target = Some(target);
+        }
     }
 
-    fn place_call(&mut self, spec: CallSpec, demo: DemoCall, cx: &mut Context<Self>) -> Option<CallHandle> {
+    pub(super) fn place_call(&mut self, spec: CallSpec, demo: DemoCall, cx: &mut Context<Self>) -> Option<CallHandle> {
         if self.mode.demo {
             return Some(start_demo_call(demo));
         }
@@ -139,7 +138,7 @@ impl AppState {
         }
     }
 
-    fn begin_call(
+    pub(super) fn begin_call(
         &mut self,
         handle: CallHandle,
         model: CallModel,
@@ -149,26 +148,17 @@ impl AppState {
         self.call_count += 1;
         let call_id = self.call_count;
         let CallHandle { commands, updates, video } = handle;
-        self.call = Some(ActiveCall {
-            id: call_id,
-            model,
-            commands,
-            viewing: true,
-            conversation_id,
-            video,
-            pictures: CallPictures::default(),
-            stage_fullscreen: false,
-            chat_open: false,
-        });
+        self.call = Some(ActiveCall::new(call_id, model, commands, conversation_id, video));
         if self.call_share_sound {
             self.send_call_command(CallCommand::SetShareSound(true));
         }
-        if self.call_background_blur {
-            self.send_call_command(CallCommand::SetBlur(true));
-            if let Some(call) = self.call.as_mut() {
-                call.model.blur = true;
-            }
+        if let Some(call) = self.call.as_mut() {
+            call.model.background = self.call_background.clone();
         }
+        if self.call_background != BackgroundPick::None {
+            self.send_background_command(cx);
+        }
+        self.refresh_call_backgrounds(cx);
         self.new_chat = false;
         self.follow_call(call_id, updates, cx);
         cx.emit(AppEvent::Call);
@@ -227,6 +217,14 @@ impl AppState {
                 self.raise_notice(text, None, cx);
                 return;
             }
+            CallUpdate::WhiteboardUrl(url) => {
+                cx.open_url(&url);
+                return;
+            }
+            CallUpdate::BreakoutMove(moved) => {
+                self.begin_breakout_move(moved, cx);
+                return;
+            }
             _ => {}
         }
         call.model.apply(update);
@@ -244,14 +242,23 @@ impl AppState {
         };
         let elapsed = call.model.elapsed(Instant::now());
         let notice = ended_notice(&reason, elapsed, &call.model.peer_name);
+        let next_move = call.pending_move.take().or_else(|| room_closed_move(call, &reason));
+        let consult = call.consult.take();
         call.pictures.clear(cx);
         self.call = None;
-        self.raise_notice(notice, None, cx);
+        if let Some(consult) = consult {
+            let _ = consult.commands.send(CallCommand::Hangup);
+        }
+        match next_move {
+            Some(next_move) => self.join_moved_call(next_move, cx),
+            None => self.raise_notice(notice, None, cx),
+        }
+        self.refresh_call_history_after_call(cx);
         cx.emit(AppEvent::Call);
         cx.notify();
     }
 
-    fn send_call_command(&self, command: CallCommand) {
+    pub(super) fn send_call_command(&self, command: CallCommand) {
         if let Some(call) = &self.call {
             let _ = call.commands.send(command);
         }
@@ -458,14 +465,82 @@ impl AppState {
         self.send_call_command(CallCommand::SetCaptions(on));
     }
 
-    pub fn set_call_background_blur(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.call_background_blur = on;
-        let _ = self.store.set_meta(BACKGROUND_BLUR_META_KEY, if on { "1" } else { "0" });
+    pub fn set_call_background(&mut self, pick: BackgroundPick, cx: &mut Context<Self>) {
+        let _ = self.store.set_meta(BACKGROUND_META_KEY, &pick.to_meta());
+        self.call_background = pick.clone();
         if let Some(call) = self.call.as_mut() {
-            call.model.blur = on;
+            call.model.background = pick;
         }
-        self.send_call_command(CallCommand::SetBlur(on));
+        self.send_background_command(cx);
         cx.notify();
+    }
+
+    pub(super) fn send_background_command(&mut self, cx: &mut Context<Self>) {
+        let pick = self.call_background.clone();
+        if let Some(choice) = self.call_backgrounds.choice_for(&pick) {
+            self.send_call_command(CallCommand::SetBackground(choice));
+            return;
+        }
+        let BackgroundPick::Default(id) = pick else { return };
+        let Some(image) = self.call_backgrounds.find(&id).cloned() else { return };
+        let Some(launcher) = self.call_launcher.clone() else { return };
+        let cache = self.call_backgrounds.cache.clone();
+        let receiver = crate::runtime::spawn(async move { launcher.download_background(&cache, &image).await });
+        cx.spawn(async move |this, cx| {
+            let path = receiver.await.ok().flatten();
+            this.update(cx, |state, cx| match path {
+                Some(path) if state.call_background == BackgroundPick::Default(id) => {
+                    state.send_call_command(CallCommand::SetBackground(calling::BackgroundChoice::Image(path)));
+                }
+                Some(_) => {}
+                None => state.raise_notice("That background could not be downloaded".to_owned(), None, cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn refresh_call_backgrounds(&mut self, cx: &mut Context<Self>) {
+        if self.mode.demo || !self.call_backgrounds.needs_refresh() {
+            return;
+        }
+        let Some(launcher) = self.call_launcher.clone() else { return };
+        self.call_backgrounds.refreshing = true;
+        let cache = self.call_backgrounds.cache.clone();
+        let wanted = SHOWN_IMAGES;
+        let receiver = crate::runtime::spawn(async move { launcher.refresh_backgrounds(&cache, wanted).await });
+        cx.spawn(async move |this, cx| {
+            let catalog = receiver.await.ok().flatten();
+            this.update(cx, |state, cx| {
+                state.call_backgrounds.refreshing = false;
+                if let Some(catalog) = catalog {
+                    state.call_backgrounds.images = catalog;
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn add_call_background(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
+        cx.spawn(async move |this, cx| {
+            let Some(path) = receiver.await.ok().and_then(Result::ok).flatten().and_then(|paths| paths.into_iter().next()) else {
+                return;
+            };
+            this.update(cx, |state, cx| {
+                if !is_image_file(&path) {
+                    state.raise_notice("Pick a JPG or PNG picture".to_owned(), None, cx);
+                    return;
+                }
+                state.call_backgrounds.add_custom(path.clone());
+                save_custom_backgrounds(&state.store, &state.call_backgrounds.customs);
+                state.set_call_background(BackgroundPick::Custom(path), cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn toggle_stage_fullscreen(&mut self, cx: &mut Context<Self>) {
@@ -519,6 +594,32 @@ impl AppState {
         self.push_ring(demo_ring(), true, cx);
     }
 
+    pub fn demo_incoming_video_ring(&mut self, cx: &mut Context<Self>) {
+        self.push_ring(demo_video_ring(), true, cx);
+    }
+
+    pub fn start_demo_scene(&mut self, scene: DemoScene, cx: &mut Context<Self>) {
+        if self.call.is_some() {
+            return;
+        }
+        let (script, model, conversation_id) = if scene.is_one_to_one() {
+            (DemoCall::People(vec![demo_caller()]), CallModel::people("Mara Lindqvist", &[demo_caller()]), "demo-chat-mara")
+        } else {
+            let script = DemoCall::Meeting { guests: demo_guests(DEMO_SMALL_MEETING), lobby: false, organizer: true };
+            (script, CallModel::meeting("Standup", true), "demo-chat-meeting-standup")
+        };
+        let handle = start_demo_scene_call(script, scene);
+        self.begin_call(handle, model, Some(conversation_id.to_owned()), cx);
+        if let Some(call) = self.call.as_mut().filter(|_| !scene.is_one_to_one()) {
+            call.meeting_target = Some(calling::MeetingTarget {
+                thread_id: conversation_id.to_owned(),
+                tenant_id: "demo-tenant".to_owned(),
+                organizer_id: "demo-me".to_owned(),
+                meeting_data: None,
+            });
+        }
+    }
+
     fn signal_ring(&mut self, ring_id: u64, signal: RingSignal, cx: &mut Context<Self>) {
         if let Some(outcome) = self.rings.signal(ring_id, signal, Instant::now()) {
             self.finish_ring(ring_id, outcome, cx);
@@ -547,7 +648,7 @@ impl AppState {
 
     pub fn accept_ringing_call(&mut self, cx: &mut Context<Self>) {
         if let Some(ring_id) = self.rings.first_ringing_id() {
-            self.accept_ring(ring_id, cx);
+            self.accept_ring(ring_id, AcceptMode::Audio, cx);
         }
     }
 
@@ -557,7 +658,7 @@ impl AppState {
         }
     }
 
-    pub fn accept_ring(&mut self, ring_id: u64, cx: &mut Context<Self>) {
+    pub fn accept_ring(&mut self, ring_id: u64, mode: AcceptMode, cx: &mut Context<Self>) {
         let Some(entry) = self.rings.get(ring_id).cloned() else {
             return;
         };
@@ -576,13 +677,16 @@ impl AppState {
         if entry.demo {
             let handle = start_demo_call(DemoCall::Incoming(demo_caller()));
             self.begin_call(handle, model, conversation_id, cx);
+            if mode == AcceptMode::Video {
+                self.send_call_command(CallCommand::SetCamera(true));
+            }
             return;
         }
         let Some(launcher) = self.call_launcher.clone() else {
             self.raise_notice(ANSWER_FAILED_NOTICE.to_owned(), None, cx);
             return;
         };
-        let receiver = crate::runtime::spawn(async move { launcher.accept_ring(ring_id).await });
+        let receiver = crate::runtime::spawn(async move { launcher.accept_ring(ring_id, mode).await });
         cx.spawn(async move |this, cx| {
             let handle = receiver.await.ok().flatten();
             this.update(cx, |state, cx| match handle {
@@ -696,13 +800,19 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use calling::{CallCommand, CallControl, CallState, CallUpdate, EndKind, EndReason, EngineEvent, Reaction, call_channel};
+    use std::path::PathBuf;
+
+    use calling::{BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, EndKind, EndReason, EngineEvent, HoldState, Reaction, call_channel};
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
-    use super::{ActiveCall, CallModel, CallPictures};
+    use super::{ActiveCall, CallModel};
     use crate::app_state::{AppState, Mode, Selection};
+    use crate::call::TransferCandidate;
+    use crate::call::background::BackgroundPick;
     use crate::call::demo::demo_ring;
+    use crate::call::features::room_closed_move;
+    use crate::call::model::{BreakoutState, ConsultCall};
     use crate::data::Person;
 
     fn app_with_call(cx: &mut TestAppContext) -> Entity<AppState> {
@@ -712,17 +822,7 @@ mod tests {
         let (handle, _control) = call_channel();
         cx.update(|cx| {
             app.update(cx, |state, _| {
-                state.call = Some(ActiveCall {
-                    id: 7,
-                    model: CallModel::test(),
-                    commands: handle.commands,
-                    viewing: true,
-                    conversation_id: None,
-                    video: handle.video,
-                    pictures: CallPictures::default(),
-                    stage_fullscreen: false,
-                    chat_open: false,
-                });
+                state.call = Some(ActiveCall::new(7, CallModel::test(), handle.commands, None, handle.video));
             })
         });
         app
@@ -736,17 +836,7 @@ mod tests {
         let conversation_id = conversation_id.map(str::to_owned);
         cx.update(|cx| {
             app.update(cx, |state, _| {
-                state.call = Some(ActiveCall {
-                    id: 7,
-                    model,
-                    commands: handle.commands,
-                    viewing: true,
-                    conversation_id,
-                    video: handle.video,
-                    pictures: CallPictures::default(),
-                    stage_fullscreen: false,
-                    chat_open: false,
-                });
+                state.call = Some(ActiveCall::new(7, model, handle.commands, conversation_id, handle.video));
             })
         });
         (app, control)
@@ -897,15 +987,221 @@ mod tests {
     fn the_background_choice_is_remembered_and_sent_to_the_call(cx: &mut TestAppContext) {
         let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
         let store = cx.update(|cx| app.read(cx).store.clone());
-        assert!(!cx.update(|cx| app.read(cx).call_background_blur));
-        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background_blur(true, cx)));
-        assert_eq!(control.try_recv_command(), Some(CallCommand::SetBlur(true)));
-        assert!(cx.update(|cx| app.read(cx).call.as_ref().unwrap().model.blur));
+        assert_eq!(cx.update(|cx| app.read(cx).call_background.clone()), BackgroundPick::None);
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background(BackgroundPick::Blur, cx)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetBackground(BackgroundChoice::Blur)));
+        assert_eq!(cx.update(|cx| app.read(cx).call.as_ref().unwrap().model.background.clone()), BackgroundPick::Blur);
         let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
-        assert!(cx.update(|cx| reopened.read(cx).call_background_blur));
-        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background_blur(false, cx)));
+        assert_eq!(cx.update(|cx| reopened.read(cx).call_background.clone()), BackgroundPick::Blur);
+        let picture = PathBuf::from("/pictures/wall.jpg");
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background(BackgroundPick::Custom(picture.clone()), cx)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetBackground(BackgroundChoice::Image(picture.clone()))));
         let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
-        assert!(!cx.update(|cx| reopened.read(cx).call_background_blur));
+        assert_eq!(cx.update(|cx| reopened.read(cx).call_background.clone()), BackgroundPick::Custom(picture));
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background(BackgroundPick::None, cx)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetBackground(BackgroundChoice::None)));
+    }
+
+    #[gpui_kit::test]
+    fn a_default_image_that_is_not_downloaded_yet_sends_nothing(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background(BackgroundPick::Default("office_01".into()), cx)));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn only_the_organizer_starts_a_recording_and_the_notice_needs_a_consent_request(cx: &mut TestAppContext) {
+        let (attendee, mut attendee_control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            attendee.update(cx, |state, cx| {
+                state.set_call_recording(true, cx);
+                state.accept_recording_notice(cx);
+            })
+        });
+        assert_eq!(attendee_control.try_recv_command(), None);
+        let (organizer, mut control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| {
+            organizer.update(cx, |state, cx| {
+                state.set_call_recording(true, cx);
+                state.apply_call_update(7, CallUpdate::Recording(true), cx);
+                state.set_call_recording(false, cx);
+                state.accept_recording_notice(cx);
+                state.apply_call_update(7, CallUpdate::ConsentRequired(true), cx);
+                state.accept_recording_notice(cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetRecording { on: true, title: "Standup".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetRecording { on: false, title: "Standup".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::ConsentToRecording));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    fn live_one_to_one() -> CallModel {
+        let mut model = CallModel::people("Bea", &[("8:orgid:bea".into(), "Bea".into())]);
+        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model
+    }
+
+    #[gpui_kit::test]
+    fn hold_and_resume_alternate_and_stop_while_the_other_side_holds(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_one_to_one(), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_call_hold(cx);
+                state.apply_call_update(7, CallUpdate::Hold(HoldState::Local), cx);
+                state.toggle_call_hold(cx);
+                state.apply_call_update(7, CallUpdate::Hold(HoldState::Remote), cx);
+                state.toggle_call_hold(cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Hold(true)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Hold(false)));
+        assert_eq!(control.try_recv_command(), None);
+        let (meeting, mut meeting_control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| meeting.update(cx, |state, cx| state.toggle_call_hold(cx)));
+        assert_eq!(meeting_control.try_recv_command(), None);
+    }
+
+    fn candidate(name: &str) -> TransferCandidate {
+        TransferCandidate { mri: format!("8:orgid:{name}"), name: name.into(), user_id: Some(name.into()), chat_id: format!("19:{name}") }
+    }
+
+    #[gpui_kit::test]
+    fn a_blind_transfer_names_the_target_and_a_consulted_one_carries_the_replacement_link(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_one_to_one(), None);
+        cx.update(|cx| app.update(cx, |state, cx| state.transfer_call_blind(candidate("ana"), cx)));
+        assert_eq!(
+            control.try_recv_command(),
+            Some(CallCommand::Transfer { target: calling::Callee { mri: "8:orgid:ana".into(), display_name: "ana".into() }, replaces: None })
+        );
+        let (consulting, mut consult_control) = app_with_commands(cx, live_one_to_one(), None);
+        let (consult_handle, _consult_updates) = call_channel();
+        cx.update(|cx| {
+            consulting.update(cx, |state, cx| {
+                state.call.as_mut().unwrap().consult = Some(ConsultCall {
+                    id: 8,
+                    target: ("8:orgid:ana".into(), "Ana".into()),
+                    commands: consult_handle.commands,
+                    state: CallState::Connecting,
+                    replacement: Some("https://cc.skype.com/replacement".into()),
+                    transferring: false,
+                });
+                state.transfer_consulted(cx);
+                state.call.as_mut().unwrap().consult.as_mut().unwrap().state = CallState::Connected { since: Instant::now() };
+                state.transfer_consulted(cx);
+            })
+        });
+        assert_eq!(
+            consult_control.try_recv_command(),
+            Some(CallCommand::Transfer {
+                target: calling::Callee { mri: "8:orgid:ana".into(), display_name: "Ana".into() },
+                replaces: Some("https://cc.skype.com/replacement".into()),
+            })
+        );
+        assert_eq!(consult_control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn the_transfer_list_holds_one_to_one_chats_without_the_person_on_the_call(cx: &mut TestAppContext) {
+        let app = app_with_chats(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                let names: Vec<String> = state.transfer_candidates().into_iter().map(|candidate| candidate.name).collect();
+                assert_eq!(names, vec!["Bea".to_owned()]);
+                let (handle, _control) = call_channel();
+                let mut on_the_call = CallModel::people("Bea", &[("8:orgid:bea-id".into(), "Bea".into())]);
+                on_the_call.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+                state.call = Some(ActiveCall::new(9, on_the_call, handle.commands, None, handle.video));
+                assert!(state.transfer_candidates().is_empty());
+                cx.notify();
+            })
+        });
+    }
+
+    fn room_move(returning: bool) -> calling::BreakoutMove {
+        calling::BreakoutMove {
+            room_name: "Room 1".into(),
+            target: calling::MeetingTarget { thread_id: "19:meeting_room@thread.v2".into(), tenant_id: "t".into(), organizer_id: "o".into(), meeting_data: None },
+            returning,
+        }
+    }
+
+    fn main_target() -> calling::MeetingTarget {
+        calling::MeetingTarget { thread_id: "19:meeting_main@thread.v2".into(), tenant_id: "t".into(), organizer_id: "o".into(), meeting_data: None }
+    }
+
+    #[gpui_kit::test]
+    fn being_moved_to_a_room_leaves_the_call_and_remembers_the_way_back(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.call.as_mut().unwrap().meeting_target = Some(main_target());
+                state.apply_call_update(7, CallUpdate::BreakoutMove(room_move(false)), cx);
+                let pending = state.call.as_ref().unwrap().pending_move.clone().expect("a move is pending");
+                assert_eq!(pending.target.thread_id, "19:meeting_room@thread.v2");
+                assert_eq!(pending.title, "Room 1");
+                let room = pending.breakout.expect("a room");
+                assert_eq!(room.main, Some(main_target()));
+                assert_eq!(room.main_title, "Standup");
+                assert_eq!(state.notice.as_ref().map(|notice| notice.text.as_str()), Some("Moving you to Room 1"));
+                state.apply_call_update(7, CallUpdate::BreakoutMove(room_move(false)), cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Hangup));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn the_return_button_and_a_closed_room_both_lead_back_to_the_main_meeting(cx: &mut TestAppContext) {
+        let mut room = live_meeting(false);
+        room.breakout = Some(BreakoutState { room_name: "Room 1".into(), main: Some(main_target()), main_title: "Standup".into() });
+        let (app, mut control) = app_with_commands(cx, room.clone(), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.return_to_main_meeting(cx);
+                let pending = state.call.as_ref().unwrap().pending_move.clone().expect("a move is pending");
+                assert_eq!(pending.target, main_target());
+                assert_eq!(pending.title, "Standup");
+                assert!(pending.breakout.is_none());
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Hangup));
+        let (closed, _control) = app_with_commands(cx, room, None);
+        cx.update(|cx| {
+            closed.update(cx, |state, _| {
+                let call = state.call.as_ref().unwrap();
+                let moved = room_closed_move(call, &EndReason::Remote(EndKind::RoomClosed)).expect("goes back");
+                assert_eq!(moved.target, main_target());
+                assert!(room_closed_move(call, &EndReason::Remote(EndKind::Normal)).is_none());
+                assert!(room_closed_move(call, &EndReason::LocalHangup).is_none());
+            })
+        });
+        let (plain, _control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| plain.update(cx, |state, _| assert!(room_closed_move(state.call.as_ref().unwrap(), &EndReason::Remote(EndKind::RoomClosed)).is_none())));
+    }
+
+    #[gpui_kit::test]
+    fn the_whiteboard_menu_asks_for_the_board_unless_someone_already_shares_one(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.open_call_whiteboard(cx);
+                state.apply_call_update(
+                    7,
+                    CallUpdate::Whiteboard(Some(calling::ContentShare {
+                        session_id: "s".into(),
+                        presenter: Some("8:orgid:ana".into()),
+                        subject: "Whiteboard".into(),
+                        url: Some("https://app.whiteboard.microsoft.com/x".into()),
+                        whiteboard: true,
+                    })),
+                    cx,
+                );
+                state.open_call_whiteboard(cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::OpenWhiteboard { title: "Standup".into() }));
+        assert_eq!(control.try_recv_command(), None);
     }
 
     #[gpui_kit::test]

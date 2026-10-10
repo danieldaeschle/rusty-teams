@@ -60,6 +60,18 @@ fn entry_from(item: &Value) -> Option<CaptionEntry> {
     })
 }
 
+pub fn recorder_features() -> Value {
+    json!({
+        "enablePPTSharing": true,
+        "intermediateLiveCaptions": false,
+        "actionItemsEnabled": false,
+        "enableEmailAndMeetingLanguageModel": true,
+        "ceoSummit": false,
+        "useUnmixedAudio": true,
+        "enableTranscriptMeetingChaptering": false,
+    })
+}
+
 pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name: &str, callbacks: &CallbackLinks) -> Value {
     json!({
         "disableUnmute": false,
@@ -72,15 +84,7 @@ pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name:
             "clientInfo": "Teams-R4",
             "callId": call_id,
             "threadId": thread_id,
-            "recorderFeatures": {
-                "enablePPTSharing": true,
-                "intermediateLiveCaptions": false,
-                "actionItemsEnabled": false,
-                "enableEmailAndMeetingLanguageModel": true,
-                "ceoSummit": false,
-                "useUnmixedAudio": true,
-                "enableTranscriptMeetingChaptering": false,
-            },
+            "recorderFeatures": recorder_features(),
             "mode": BOT_MODE,
             "iCalUid": null,
             "consumerType": "Teams",
@@ -172,6 +176,10 @@ impl CaptionFlow {
     }
 
     pub fn next(&mut self, bot: Option<&CaptionBot>) -> CaptionStep {
+        self.next_for(bot, |bot| bot.active)
+    }
+
+    pub fn next_for(&mut self, bot: Option<&CaptionBot>, is_active: fn(&CaptionBot) -> bool) -> CaptionStep {
         if !self.wanted {
             return if std::mem::take(&mut self.started) { CaptionStep::Stop } else { CaptionStep::Wait };
         }
@@ -181,7 +189,7 @@ impl CaptionFlow {
         if bot.command_url.is_some() && !std::mem::replace(&mut self.started, true) {
             return CaptionStep::Start;
         }
-        if self.started && bot.active && !std::mem::replace(&mut self.reported, true) {
+        if self.started && is_active(bot) && !std::mem::replace(&mut self.reported, true) {
             return CaptionStep::ReportOn;
         }
         CaptionStep::Wait
@@ -193,7 +201,7 @@ mod tests {
     use super::*;
 
     fn bot(command_url: bool, active: bool) -> CaptionBot {
-        CaptionBot { mri: RECORDING_BOT_MRI.into(), command_url: command_url.then(|| "https://x/v2/oncommand/1".into()), active }
+        CaptionBot { mri: RECORDING_BOT_MRI.into(), command_url: command_url.then(|| "https://x/v2/oncommand/1".into()), active, recording: false }
     }
 
     #[test]

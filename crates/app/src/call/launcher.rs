@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use calling::meeting::{LiveMeeting, fetch_live_meeting};
 use calling::{
-    CallEngine, CallHandle, CallSpec, CallState, CallUpdate, EndReason, EngineConfig, EngineEvent, call_channel,
+    AcceptMode, BackgroundCache, CallEngine, CallHandle, CallSpec, CallState, CallUpdate, DefaultBackground, EndReason, EngineConfig, EngineEvent, MeetingTarget, call_channel,
 };
 use session::{Session, SessionConfig, Transport};
 
@@ -49,8 +49,15 @@ impl CallLauncher {
         }
     }
 
-    pub async fn accept_ring(&self, ring_id: u64) -> Option<CallHandle> {
-        self.engine()?.accept_ring(ring_id).await
+    pub fn start_consult(&self, spec: CallSpec) -> CallHandle {
+        match self.engine() {
+            Some(engine) => engine.start_consult(spec),
+            None => failed_handle(NOT_READY),
+        }
+    }
+
+    pub async fn accept_ring(&self, ring_id: u64, mode: AcceptMode) -> Option<CallHandle> {
+        self.engine()?.accept_ring(ring_id, mode).await
     }
 
     pub fn decline_ring(&self, ring_id: u64) {
@@ -63,6 +70,28 @@ impl CallLauncher {
         if let Some(engine) = self.engine() {
             engine.drop_ring(ring_id);
         }
+    }
+
+    pub async fn refresh_backgrounds(&self, cache: &BackgroundCache, thumbnails: usize) -> Option<Vec<DefaultBackground>> {
+        let session = self.engine()?.session();
+        let catalog = cache.refresh_catalog(&session).await.ok()?;
+        for image in catalog.iter().take(thumbnails) {
+            let _ = cache.ensure_thumbnail(&session, image).await;
+        }
+        Some(catalog)
+    }
+
+    pub async fn download_background(&self, cache: &BackgroundCache, image: &DefaultBackground) -> Option<std::path::PathBuf> {
+        let session = self.engine()?.session();
+        cache.ensure_image(&session, image).await.ok()
+    }
+
+    pub async fn resolve_meeting(&self, meeting_data: &serde_json::Value) -> Result<MeetingTarget, String> {
+        self.engine()
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .resolve_meeting(meeting_data)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn live_meeting(&self, thread_id: &str) -> Option<LiveMeeting> {

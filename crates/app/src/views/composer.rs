@@ -42,7 +42,7 @@ use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
 use super::format_toolbar::{self, FormatButton};
-use super::link_preview::{ComposeLink, draft_link, link_preview_card};
+use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::fun_picker::{FunPicker, FunPickerEvent};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
@@ -1310,9 +1310,11 @@ impl Composer {
             return;
         }
         let draft = self.current_draft(cx);
+        let meeting = teams_core::meeting_link_in_html(&draft.to_html());
         if let Some(url) = self.link.observe(draft_link(&draft), draft.is_blank()) {
             self.fetch_link_preview(url, cx);
         }
+        self.link.meeting = meeting;
         cx.notify();
     }
 
@@ -1360,6 +1362,16 @@ impl Composer {
             .shown()
             .and_then(LinkPreview::image)
             .is_some_and(|image| self.app.read(cx).directory.image(&image.url).is_none())
+    }
+
+    fn render_meeting_chip(&self) -> Option<Div> {
+        let url = self.link.meeting.clone()?;
+        Some(
+            h_flex()
+                .w_full()
+                .mb(px(6.))
+                .child(meeting_join_chip("composer-meeting-join".to_owned(), url)),
+        )
     }
 
     fn render_link_preview(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -2728,6 +2740,7 @@ impl Render for Composer {
             .children(notice)
             .children(self.render_reply_strip(cx))
             .children(self.render_edit_strip(cx))
+            .children(self.render_meeting_chip())
             .children(self.render_link_preview(cx))
             .child(
                 div()

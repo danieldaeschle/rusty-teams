@@ -16,6 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_extras::{BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button, room_chip, whiteboard_stage};
 use super::call_organizer::{camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu};
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
@@ -699,7 +700,7 @@ fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: Ti
     let video = state
         .call
         .as_ref()
-        .filter(|_| remote.has_video)
+        .filter(|_| remote.has_video || model.is_one_to_one())
         .and_then(|call| call.pictures.live(&VideoKey::Person(remote.mri.clone()), now));
     if let Some(image) = video {
         return video_tile(size, image, &remote.name, model.tile_speaking(remote), remote.muted, extras).into_any_element();
@@ -804,7 +805,11 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(model.title.clone()),
         )
-        .child(div().flex_none().text_size(px(13.)).text_color(status_color).child(status));
+        .child(div().flex_none().text_size(px(13.)).text_color(status_color).child(status))
+        .children(recording_chip(model))
+        .children(room_chip(model))
+        .child(div().flex_1())
+        .children(return_button(app, model));
 
     let max_tiles = if chat.is_some() { CHAT_OPEN_TILES } else { MAX_TILES };
     let layout = grid_layout(model.visible_tiles().len(), max_tiles);
@@ -814,7 +819,10 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
     let own_index = model.own_cell_index(cells.len());
     cells.insert(own_index, own_tile(app, state, model, size, now));
     let focus = model.focus().filter(|_| model.screen_sharer.is_none());
-    let stage = render_stage(app, state, false).or_else(|| focus.as_ref().and_then(|focus| render_focus_stage(app, state, focus, now)));
+    let stage = render_stage(app, state, false)
+        .or_else(|| whiteboard_stage(app, model))
+        .or_else(|| focus.as_ref().and_then(|focus| render_focus_stage(app, state, focus, now)));
+    let hold = hold_panel(app, model);
     let focused = focus.as_ref().map(|focus| focus.mri.as_str());
 
     let controls = h_flex()
@@ -827,7 +835,7 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
         .border_t_1()
         .border_color(theme::border())
         .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
-        .child(h_flex().gap(px(2.)).items_center().child(camera_button(app, model)).children(camera_menu_button(app, model)))
+        .child(h_flex().gap(px(2.)).items_center().child(camera_button(app, model)).children(camera_menu_button(app, model, BackgroundMenu::of(state))))
         .child(share_button(app, model, state.call_share_sound))
         .child(hand_button(app, model))
         .child(reactions_button(app, model))
@@ -846,7 +854,9 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
             .child(header)
             .children(lobby_banner(app, model))
             .children(sharing_banner(app, model, state.call_share_sound))
+            .children(consult_banner(app, state))
             .child(match stage {
+                _ if hold.is_some() => hold.expect("checked above"),
                 Some(stage) => h_flex()
                     .flex_1()
                     .min_h_0()
@@ -872,7 +882,9 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
             })
             .child(controls)
             .children(captions_overlay(model, now))
-            .children(captions_hint_chip(model));
+            .children(captions_hint_chip(model))
+            .children(state.transfer_picker.clone())
+            .children(consent_overlay(app, model));
     Some(
         h_flex()
             .flex_1()

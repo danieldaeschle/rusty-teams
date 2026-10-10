@@ -1045,6 +1045,7 @@ dependencies = [
  "cpal",
  "flate2",
  "futures-util",
+ "image",
  "libwebrtc",
  "nokhwa",
  "serde",

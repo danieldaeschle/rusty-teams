@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AudioDevice, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, CaptionEntry, CaptionState, DeviceChoice, DeviceLists,
-    EndReason, IncomingRing, Progress, PublishedState, RaisedHand, Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
+    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, CaptionEntry, CaptionState,
+    ContentShare, DeviceChoice, DeviceLists, EndReason, HoldState, IncomingRing, MeetingTarget, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
+    ShareKind, ShareSource, VideoKey, call_channel,
 };
 use calling::CameraDevice;
 
@@ -61,6 +62,44 @@ const DEMO_GUESTS: [&str; 11] = [
 
 pub type Person = (String, String);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DemoScene {
+    #[default]
+    Plain,
+    Call,
+    Recording,
+    Consent,
+    Hold,
+    Held,
+    Breakout,
+    Whiteboard,
+}
+
+impl DemoScene {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name.trim() {
+            "call" => DemoScene::Call,
+            "recording" => DemoScene::Recording,
+            "consent" => DemoScene::Consent,
+            "hold" => DemoScene::Hold,
+            "held" => DemoScene::Held,
+            "breakout" => DemoScene::Breakout,
+            "whiteboard" => DemoScene::Whiteboard,
+            _ => return None,
+        })
+    }
+
+    pub fn is_one_to_one(self) -> bool {
+        matches!(self, DemoScene::Call | DemoScene::Hold | DemoScene::Held)
+    }
+}
+
+const BREAKOUT_AT_TICKS: u32 = 20;
+const WHITEBOARD_AT_TICKS: u32 = 5;
+const DEMO_BOARD_URL: &str = "https://app.whiteboard.microsoft.com/me/whiteboards/demo";
+const DEMO_REPLACEMENT_LINK: &str = "https://demo.invalid/replacement";
+const DEMO_ROOM_THREAD: &str = "19:meeting_demo-room-1@thread.v2";
+
 pub enum DemoCall {
     Test,
     People(Vec<Person>),
@@ -79,6 +118,10 @@ pub fn demo_guests(count: usize) -> Vec<Person> {
 
 pub fn demo_caller() -> Person {
     (DEMO_CALLER.0.to_owned(), DEMO_CALLER.1.to_owned())
+}
+
+pub fn demo_video_ring() -> IncomingRing {
+    IncomingRing { video: true, ..demo_ring() }
 }
 
 pub fn demo_ring() -> IncomingRing {
@@ -126,8 +169,12 @@ fn demo_devices() -> DeviceLists {
 }
 
 pub fn start_demo_call(script: DemoCall) -> CallHandle {
+    start_demo_scene_call(script, DemoScene::Plain)
+}
+
+pub fn start_demo_scene_call(script: DemoCall, scene: DemoScene) -> CallHandle {
     let (handle, control) = call_channel();
-    crate::runtime::handle().spawn(run_demo_call(control, script));
+    crate::runtime::handle().spawn(run_demo_call(control, script, scene));
     handle
 }
 
@@ -149,7 +196,7 @@ fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
         .collect()
 }
 
-async fn run_demo_call(mut control: CallControl, script: DemoCall) {
+async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoScene) {
     control.send(CallUpdate::OwnIdentity {
         mri: DEMO_OWN_MRI.to_owned(),
     });
@@ -185,6 +232,9 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
         control.send(CallUpdate::Lobby(false));
     }
     let mut roster = roster_of(&people);
+    if matches!(script, DemoCall::People(_)) {
+        control.send(CallUpdate::ReplacementLink(DEMO_REPLACEMENT_LINK.to_owned()));
+    }
     if matches!(script, DemoCall::Meeting { organizer: true, .. }) {
         roster.push(demo_organizer());
         roster.extend(DEMO_WAITING.iter().enumerate().map(|(index, name)| demo_waiting(index, name)));
@@ -199,7 +249,8 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
     control.send(CallUpdate::Roster(roster.clone()));
     let video = !matches!(script, DemoCall::Test);
     let sharer = matches!(script, DemoCall::Meeting { .. }).then(|| people.get(1).map(|person| person.0.clone())).flatten();
-    speak_until_hangup(control, people, roster, video, sharer).await;
+    start_scene(&control, scene);
+    speak_until_hangup(control, people, roster, video, sharer, scene).await;
 }
 
 async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bool {
@@ -235,7 +286,38 @@ fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, shari
     }
 }
 
-async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut roster: Vec<RosterEntry>, video: bool, sharer: Option<String>) {
+fn start_scene(control: &CallControl, scene: DemoScene) {
+    match scene {
+        DemoScene::Recording => control.send(CallUpdate::Recording(true)),
+        DemoScene::Consent => {
+            control.send(CallUpdate::Recording(true));
+            control.send(CallUpdate::ConsentRequired(true));
+        }
+        DemoScene::Hold => control.send(CallUpdate::Hold(HoldState::Local)),
+        DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
+        DemoScene::Call | DemoScene::Breakout | DemoScene::Whiteboard | DemoScene::Plain => {}
+    }
+}
+
+fn scene_tick(control: &CallControl, scene: DemoScene, ticks: u32, people: &[Person]) {
+    match scene {
+        DemoScene::Breakout if ticks == BREAKOUT_AT_TICKS => control.send(CallUpdate::BreakoutMove(BreakoutMove {
+            room_name: "Room 1".to_owned(),
+            target: MeetingTarget { thread_id: DEMO_ROOM_THREAD.to_owned(), tenant_id: "demo-tenant".to_owned(), organizer_id: "demo-me".to_owned(), meeting_data: None },
+            returning: false,
+        })),
+        DemoScene::Whiteboard if ticks == WHITEBOARD_AT_TICKS => control.send(CallUpdate::Whiteboard(Some(ContentShare {
+            session_id: "demo-whiteboard".to_owned(),
+            presenter: people.first().map(|person| person.0.clone()),
+            subject: "Whiteboard".to_owned(),
+            url: Some(DEMO_BOARD_URL.to_owned()),
+            whiteboard: true,
+        }))),
+        _ => {}
+    }
+}
+
+async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut roster: Vec<RosterEntry>, video: bool, sharer: Option<String>, scene: DemoScene) {
     let started = Instant::now();
     let mut video_ticks = 0u32;
     let mut sharing = false;
@@ -285,6 +367,7 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
                     }
                     caption_ticks += 1;
                 }
+                scene_tick(&control, scene, ticks, &people);
                 ticks += 1;
             }
             command = control.recv() => match command {
@@ -365,7 +448,16 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
                     caption_ticks = 0;
                     control.send(CallUpdate::Captions(if on { CaptionState::On } else { CaptionState::Off }));
                 }
-                Some(CallCommand::SetBlur(on)) => blur = on,
+                Some(CallCommand::SetBackground(choice)) => blur = choice != BackgroundChoice::None,
+                Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
+                Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
+                Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),
+                Some(CallCommand::Transfer { .. }) => {
+                    control.send(CallUpdate::Notice("Call transferred".to_owned()));
+                    end(&control, EndReason::LocalHangup);
+                    return;
+                }
+                Some(CallCommand::OpenWhiteboard { .. }) => control.send(CallUpdate::WhiteboardUrl(DEMO_BOARD_URL.to_owned())),
                 Some(CallCommand::RefreshShareSources) => control.send(CallUpdate::ShareSources(demo_share_sources())),
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);

@@ -1,4 +1,4 @@
-use chatsvc::{EventKind, ForwardResult, MessageEvent, PinnedMessage, SavedMessage};
+use chatsvc::{CallLogEntry, EventKind, ForwardResult, MessageEvent, PinnedMessage, SavedMessage};
 
 use crate::engine::{Conversation, SyncEngine};
 use crate::error::{Error, Result};
@@ -62,6 +62,10 @@ impl<R: Remote> SyncEngine<R> {
 
     pub async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
         self.remote.list_saved().await
+    }
+
+    pub async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
+        self.remote.list_call_logs().await
     }
 
     pub async fn chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {

@@ -566,6 +566,7 @@ impl ConversationView {
             | AppEvent::StatusMessage
             | AppEvent::NotificationSettings
             | AppEvent::Profile
+            | AppEvent::CallHistory
             | AppEvent::Ring
             | AppEvent::MissedCall(_)
             | AppEvent::Call => {}

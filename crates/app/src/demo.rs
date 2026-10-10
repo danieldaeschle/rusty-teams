@@ -769,6 +769,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&unread_messages());
     let _ = store.upsert_messages(&channel_messages());
     let _ = store.upsert_messages(&priority_messages());
+    let _ = store.upsert_messages(&meeting_link_messages());
     let _ = store.upsert_messages(&bot_messages());
 }
 
@@ -1181,6 +1182,22 @@ fn settings_card() -> serde_json::Value {
             {"type": "Action.Submit", "title": "Save", "data": {"save": true}}
         ]
     })
+}
+
+const DEMO_MEETING_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZGVtbw%40thread.v2/0?context=%7b%22Tid%22%3a%22demo-tenant%22%2c%22Oid%22%3a%22demo-mara%22%7d";
+
+fn meeting_link_messages() -> Vec<MessageRecord> {
+    let mara = (MARA_ID, "Mara Lindqvist");
+    vec![message(
+        "demo-chat-mara",
+        "ml1",
+        None,
+        mara,
+        at(0, 13, 38),
+        &format!("<p>Let's sync live, here is the meeting: <a href=\"{DEMO_MEETING_LINK}\">Join the Teams meeting</a></p>"),
+        "[]",
+        false,
+    )]
 }
 
 fn priority_messages() -> Vec<MessageRecord> {
