@@ -63,6 +63,20 @@ fn chat(
     .unwrap()
 }
 
+fn translated(messages: &[chatsvc::TranslateRequest]) -> Vec<chatsvc::Translation> {
+    messages
+        .iter()
+        .map(|request| chatsvc::Translation {
+            message_id: request.message_id.clone(),
+            version: None,
+            status: chatsvc::TranslationStatus::Done,
+            content_html: Some("<p>translated</p>".to_owned()),
+            subject: None,
+            title: None,
+        })
+        .collect()
+}
+
 type ScheduledCall = (String, String, DateTime<Utc>, String);
 
 #[derive(Default)]
@@ -102,6 +116,7 @@ struct Fake {
     link_page_calls: Mutex<Vec<String>>,
     links_put: Mutex<Vec<(String, String)>>,
     link_info_calls: Mutex<usize>,
+    translate_calls: Mutex<Vec<String>>,
     scheduled: Mutex<Vec<ScheduledCall>>,
     own_status_answer: Mutex<chatsvc::PresenceStatus>,
     availability_puts: Mutex<Vec<Option<chatsvc::ForcedAvailability>>>,
@@ -760,6 +775,36 @@ impl Remote for Handle {
             .unwrap()
             .push((describe(target), links_json.to_owned()));
         Ok(())
+    }
+
+    async fn translate_chat_messages(
+        &self,
+        chat_id: &str,
+        to_language: &str,
+        messages: &[chatsvc::TranslateRequest],
+        _trigger: &chatsvc::TranslationTrigger,
+    ) -> Result<Vec<chatsvc::Translation>> {
+        self.translate_calls
+            .lock()
+            .unwrap()
+            .push(format!("chat {chat_id} {to_language} {}", messages.len()));
+        Ok(translated(messages))
+    }
+
+    async fn translate_channel_messages(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        to_language: &str,
+        messages: &[chatsvc::TranslateRequest],
+        _trigger: &chatsvc::TranslationTrigger,
+    ) -> Result<Vec<chatsvc::Translation>> {
+        self.translate_calls.lock().unwrap().push(format!(
+            "channel {team_id} {channel_id} {root_id} {to_language} {}",
+            messages.len()
+        ));
+        Ok(translated(messages))
     }
 
     async fn link_info(&self, url: &str) -> Result<chatsvc::LinkInfo> {
@@ -3734,4 +3779,61 @@ async fn message_links_resolve_chat_notes_and_channel() {
             created_ms: root.created_at.timestamp_millis(),
         })
     );
+}
+
+#[tokio::test]
+async fn chat_translation_goes_out_in_batches_of_thirty() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(1, 1, "<p>eins</p>")]);
+    engine.fetch_newer(CHAT).await.unwrap();
+    let ids: Vec<String> = (0..31).map(|index| format!("m{index:04}")).collect();
+    let translations = engine
+        .translate_messages(CHAT, &ids, "en", &teams_core::TranslationTrigger::OnDemand)
+        .await
+        .unwrap();
+    assert_eq!(translations.len(), 31);
+    assert_eq!(
+        *fake.translate_calls.lock().unwrap(),
+        [format!("chat {CHAT} en 30"), format!("chat {CHAT} en 1")]
+    );
+}
+
+#[tokio::test]
+async fn channel_translation_groups_messages_by_thread_root() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.fetch_newer(CHANNEL).await.unwrap();
+    let root_id = engine.open_conversation(CHANNEL).unwrap()[0]
+        .message_id
+        .clone();
+    let translations = engine
+        .translate_messages(
+            CHANNEL,
+            std::slice::from_ref(&root_id),
+            "fr",
+            &teams_core::TranslationTrigger::OnDemand,
+        )
+        .await
+        .unwrap();
+    assert_eq!(translations.len(), 1);
+    assert_eq!(
+        *fake.translate_calls.lock().unwrap(),
+        [format!("channel team-1 {CHANNEL} {root_id} fr 1")]
+    );
+}
+
+#[tokio::test]
+async fn translating_in_an_unknown_conversation_fails() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let outcome = engine
+        .translate_messages(
+            "19:nope@thread.v2",
+            &["m1".to_owned()],
+            "en",
+            &teams_core::TranslationTrigger::OnDemand,
+        )
+        .await;
+    assert!(matches!(outcome, Err(teams_core::Error::UnknownConversation(_))));
 }

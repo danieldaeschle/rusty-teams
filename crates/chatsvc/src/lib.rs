@@ -5,6 +5,7 @@ pub mod drafts;
 mod error;
 pub mod forward;
 pub mod gifs;
+pub mod language_settings;
 pub mod links;
 mod mask;
 pub mod messages;
@@ -15,6 +16,7 @@ pub mod realtime;
 pub mod receipts;
 pub mod saved;
 pub mod settings;
+pub mod translate;
 
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
@@ -25,6 +27,10 @@ pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};
 pub use gifs::{Gif, Gifs};
+pub use language_settings::{
+    LanguageSettings, LanguageSettingsClient, TranslationBehavior, authoring_patch, behavior_patch,
+    parse_language_settings, target_patch,
+};
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
 pub use messages::{ConversationRef, Messages};
@@ -45,3 +51,7 @@ pub use realtime::{
 pub use receipts::{MemberHorizon, Receipts};
 pub use saved::SavedMessage;
 pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use translate::{
+    Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,
+    TranslationStatus, TranslationTrigger, Translator, language_code,
+};

@@ -446,6 +446,13 @@ pub fn linked_message_spans(record: &MessageRecord) -> Vec<Span> {
     spans
 }
 
+/// The spans of `record` with its body replaced by the translated html.
+pub fn translated_spans(record: &MessageRecord, translated_html: &str) -> Vec<Span> {
+    let mut translated = record.clone();
+    translated.body_html = translated_html.to_owned();
+    linked_message_spans(&translated)
+}
+
 fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
     for span in spans {
         match span {

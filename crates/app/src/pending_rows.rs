@@ -71,5 +71,6 @@ pub fn pending_row(
         receipt: Receipt::Hidden,
         own: true,
         forwarded: false,
+        translation: None,
     }
 }

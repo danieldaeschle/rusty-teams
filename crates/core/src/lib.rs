@@ -41,6 +41,8 @@ mod sidebar_sync;
 mod spans;
 mod stored;
 mod time_zone;
+mod translate_sync;
+mod translation;
 
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,
@@ -114,6 +116,16 @@ pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX, QuoteInfo,
     ReactionInfo, adaptive_cards, attachments, can_delete, can_edit, card_texts, copy_text, files,
-    images, linked_message_spans, mentions, message_spans, quotes, reactions, user_mention_inputs,
+    images, linked_message_spans, mentions, message_spans, quotes, reactions, translated_spans,
+    user_mention_inputs,
+};
+pub use chatsvc::{
+    Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
+    TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
+    parse_language_settings, target_patch,
 };
 pub use time_zone::local_time;
+pub use translation::{
+    FALLBACK_TARGET, LanguageStamp, confident_language, default_target, language_name, min_chars,
+    offered_language,
+};

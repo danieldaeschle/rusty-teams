@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -9,8 +10,9 @@ use store::{
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CardActionOutcome, ChatApp, ChatSection, Gif, LinkPreview, MentionCandidate,
-    PersonCandidate, PersonSource, PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
+    Activity, CardActionOutcome, ChatApp, ChatSection, Gif, Language, LanguageSettings,
+    LinkPreview, MentionCandidate, PersonCandidate, PersonSource, PinnedMessage, SavedMessage,
+    TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -145,6 +147,8 @@ const DEMO_CHANNEL_NOTIFICATIONS: [(&str, ChannelNotificationLevel, bool); 4] = 
 const UNREAD_CHAT: &str = "demo-chat-atlas";
 const RELEASE_CHAT: &str = "demo-chat-release";
 const PINNED_MESSAGE: &str = "m5b";
+const FRENCH_MESSAGE: &str = "m10";
+const SPANISH_MESSAGE: &str = "m11";
 const SAVED_MESSAGES: [&str; 2] = ["m4", "m5c"];
 const FORWARD_ITEMTYPE: &str = "http://schema.skype.com/Forward";
 const FAVORITES_ID: &str = "demo-folder-favorites";
@@ -544,6 +548,74 @@ pub fn search_gifs(query: &str) -> Vec<Gif> {
         .collect()
 }
 
+pub fn language_settings() -> LanguageSettings {
+    LanguageSettings {
+        display_locale: Some("en-US".to_owned()),
+        target_locale: Some("en".to_owned()),
+        behavior: TranslationBehavior::Ask,
+        authoring_locales: vec!["de-DE".to_owned(), "en-US".to_owned()],
+        preferences: serde_json::Map::new(),
+    }
+}
+
+pub fn language_list() -> Vec<Language> {
+    [
+        ("de", "German"),
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("it", "Italian"),
+        ("ja", "Japanese"),
+        ("nl", "Dutch"),
+        ("pt", "Portuguese"),
+    ]
+    .into_iter()
+    .map(|(code, name)| Language {
+        code: code.to_owned(),
+        name: name.to_owned(),
+    })
+    .collect()
+}
+
+pub fn language_stamps(conversation_id: &str) -> HashMap<String, String> {
+    if conversation_id != RELEASE_CHAT {
+        return HashMap::new();
+    }
+    HashMap::from([
+        (
+            FRENCH_MESSAGE.to_owned(),
+            "languages=fr:100;en:12;length:104;&detector=Bling".to_owned(),
+        ),
+        (
+            SPANISH_MESSAGE.to_owned(),
+            "languages=es:100;pt:31;length:94;&detector=Bling".to_owned(),
+        ),
+    ])
+}
+
+pub fn translations(message_ids: &[String]) -> Vec<Translation> {
+    let translated = |message_id: &str| match message_id {
+        FRENCH_MESSAGE => Some("<p>Hello everyone, <strong>version 0.2</strong> is ready. Can you check the checklist before Friday?</p>"),
+        SPANISH_MESSAGE => Some("<p>Thanks for the heads-up. I will test the build this afternoon and let you know if anything breaks.</p>"),
+        _ => None,
+    };
+    message_ids
+        .iter()
+        .map(|message_id| Translation {
+            message_id: message_id.clone(),
+            version: None,
+            status: if translated(message_id).is_some() {
+                TranslationStatus::Done
+            } else {
+                TranslationStatus::Failed
+            },
+            content_html: translated(message_id).map(str::to_owned),
+            subject: None,
+            title: None,
+        })
+        .collect()
+}
+
 pub fn first_unread(conversation_id: &str) -> Option<String> {
     (conversation_id == UNREAD_CHAT).then(|| "u3".to_owned())
 }
@@ -707,6 +779,8 @@ fn photo(palette: &Palette) -> Arc<Image> {
 pub fn seed_directory(state: &mut AppState) {
     state.own_status = crate::own_status::demo_status();
     state.own_email = DEMO_USER_EMAIL.to_owned();
+    state.translation.settings = Some(language_settings());
+    state.translation.languages = language_list();
     let directory = &mut state.directory;
     directory.me = Some(Person {
         user_id: DEMO_USER_ID.to_owned(),
@@ -1392,6 +1466,26 @@ fn release_messages() -> Vec<MessageRecord> {
                 demo_gifs::RECEIVED_GIF_SIZE.0,
                 demo_gifs::RECEIVED_GIF_SIZE.1
             ),
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            FRENCH_MESSAGE,
+            None,
+            (LEA_ID, lea_name),
+            at(0, 13, 47),
+            "<p>Bonjour \u{e0} tous, la <strong>version 0.2</strong> est pr\u{ea}te. Pouvez-vous v\u{e9}rifier la liste de contr\u{f4}le avant vendredi\u{a0}?</p>",
+            "[]",
+            false,
+        ),
+        message(
+            chat,
+            SPANISH_MESSAGE,
+            None,
+            jonas,
+            at(0, 13, 49),
+            "<p>Gracias por el aviso. Probar\u{e9} la compilaci\u{f3}n esta tarde y os dir\u{e9} si algo falla.</p>",
             "[]",
             false,
         ),

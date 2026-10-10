@@ -8,6 +8,7 @@ use store::MessageRecord;
 use teams_core::{
     AdaptiveCard, Draft, FileCard, ImageRef, LinkPreview, ReactionInfo, Span, adaptive_cards,
     card_texts, files, images, link_preview, linked_message_spans, message_spans, reactions,
+    translated_spans,
 };
 
 use crate::card_state::CardOverride;
@@ -15,6 +16,7 @@ use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
 use crate::render::blocks::{Inline, strip_image_placeholders};
 use crate::render::{Block, layout_blocks};
+use crate::translation::{TranslationContext, TranslationLine};
 
 const POST_VISIBLE_REPLIES: usize = 3;
 
@@ -144,6 +146,7 @@ pub struct MessageRow {
     pub own: bool,
     pub receipt: Receipt,
     pub forwarded: bool,
+    pub translation: Option<TranslationLine>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,6 +513,7 @@ pub struct RowContext {
     pub names: HashMap<String, String>,
     pub pending_reactions: PendingReactions,
     pub card_overrides: HashMap<String, CardOverride>,
+    pub translation: TranslationContext,
 }
 
 fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<ReactionInfo> {
@@ -526,8 +530,12 @@ fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<Reacti
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
     let local = record.created_at.with_timezone(&context.offset);
     let images = images(record);
+    let own = context.my_user_id.is_some() && record.sender_id == context.my_user_id;
+    let translation = context.translation.resolve(record, own);
     let blocks = if record.deleted {
         vec![Block::Paragraph(Inline::plain(DELETED_TEXT))]
+    } else if let Some(html) = &translation.translated_html {
+        layout_blocks(&translated_spans(record, html))
     } else {
         layout_blocks(&linked_message_spans(record))
     };
@@ -566,8 +574,9 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         reply_root: record.reply_to_id.clone(),
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
-        own: context.my_user_id.is_some() && record.sender_id == context.my_user_id,
+        own,
         forwarded: !record.deleted && is_forwarded(&record.body_html),
+        translation: translation.line,
     }
 }
 
@@ -938,11 +947,77 @@ mod tests {
             names: HashMap::new(),
             pending_reactions: HashMap::new(),
             card_overrides: HashMap::new(),
+            translation: TranslationContext::default(),
         }
     }
 
     fn keys(rows: &[Row]) -> Vec<String> {
         rows.iter().map(|row| row.key().to_owned()).collect()
+    }
+
+    fn translation_context(shown: bool) -> RowContext {
+        use crate::translation::CachedTranslation;
+        let mut context = context();
+        context.translation.enabled = true;
+        context.translation.target = "en".into();
+        context.translation.stamps.insert(
+            "a".into(),
+            "languages=fr:100;length:80;&detector=Bling".into(),
+        );
+        context.my_user_id = Some("me".into());
+        if shown {
+            context.translation.cached.insert(
+                ("a".into(), 0),
+                CachedTranslation {
+                    html: "<p><strong>translated</strong> body</p>".into(),
+                    source: Some("fr".into()),
+                },
+            );
+            context.translation.shown.insert("a".into());
+        }
+        context
+    }
+
+    #[test]
+    fn a_foreign_message_carries_the_offer_and_keeps_its_text() {
+        let row = message_row(&record("a", None, 8, 6), &translation_context(false));
+        assert!(matches!(
+            row.translation,
+            Some(TranslationLine::Offer { ref language_code, .. }) if language_code == "fr"
+        ));
+        assert_eq!(row.blocks, layout_blocks(&linked_message_spans(&record("a", None, 8, 6))));
+    }
+
+    #[test]
+    fn a_shown_translation_replaces_the_body_and_the_original_comes_back() {
+        let original = message_row(&record("a", None, 8, 6), &translation_context(false)).blocks;
+        let translated = message_row(&record("a", None, 8, 6), &translation_context(true));
+        assert_ne!(translated.blocks, original);
+        assert_eq!(
+            translated.translation,
+            Some(TranslationLine::Translated {
+                language: Some("French".into()),
+                showing_original: false
+            })
+        );
+        let mut hidden = translation_context(true);
+        hidden.translation.shown.clear();
+        let back = message_row(&record("a", None, 8, 6), &hidden);
+        assert_eq!(back.blocks, original);
+        assert_eq!(
+            back.translation,
+            Some(TranslationLine::Translated {
+                language: Some("French".into()),
+                showing_original: true
+            })
+        );
+    }
+
+    #[test]
+    fn own_messages_get_no_offer() {
+        let mut own = record("a", None, 8, 6);
+        own.sender_id = Some("me".into());
+        assert_eq!(message_row(&own, &translation_context(false)).translation, None);
     }
 
     #[test]

@@ -20,6 +20,7 @@ use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
 use crate::notice::Notice;
 use crate::profile_state::{ProfileCache, ProfileRequest};
+use crate::translation::TranslationState;
 use crate::typing::TypingState;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
@@ -55,6 +56,7 @@ pub enum AppEvent {
     Scheduled,
     Pins(String),
     Saved,
+    Translation,
     Forward,
     StatusMessage,
     NotificationSettings,
@@ -115,6 +117,7 @@ pub struct AppState {
     pub rings: Rings,
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
+    pub translation: TranslationState,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -204,9 +207,11 @@ impl AppState {
             rings: Rings::default(),
             live_meetings: HashMap::new(),
             live_refreshing: HashSet::new(),
+            translation: TranslationState::default(),
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
+        state.load_cached_translation_settings();
         if !mode.demo {
             state.directory.load_cached_presence(&state.store);
             state.reload_directory();
@@ -597,6 +602,7 @@ impl AppState {
         cx.emit(AppEvent::Selection);
         cx.notify();
         self.refresh_live_meeting(&conversation_id, cx);
+        self.refresh_language_stamps(&conversation_id, cx);
     }
 
     fn apply_typing(&mut self, event: TypingEvent, cx: &mut Context<Self>) {
@@ -710,6 +716,7 @@ impl AppState {
                 self.engine = Some(engine);
                 self.resend_outbox(cx);
                 self.refresh_scheduled(cx);
+                self.refresh_translation_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
                 self.refresh_own_status(cx);
@@ -721,6 +728,7 @@ impl AppState {
                 | CoreEvent::ReceiptsChanged { conversation_id },
             ) => {
                 self.clear_typists_who_sent(&conversation_id, cx);
+                self.refresh_language_stamps(&conversation_id, cx);
                 cx.emit(AppEvent::Messages(conversation_id));
             }
             BackendEvent::Core(CoreEvent::PinsChanged { conversation_id }) => {

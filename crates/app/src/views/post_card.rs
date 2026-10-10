@@ -12,6 +12,7 @@ use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
 use super::reaction_pills::reaction_pills;
 use super::scheduled_toolbar::scheduled_toolbar;
+use super::translation_line::translation_line;
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::rows::{Delivery, MessageRow, PostRow};
@@ -197,9 +198,11 @@ fn message_block(
         menu,
         scheduled_menu,
         highlighted,
+        translation: translation_actions,
         ..
     } = actions;
     let note = delivery_note(row, delivery, index);
+    let translation = translation_line(row, index, translation_actions.as_ref());
     let body = v_flex()
         .flex_1()
         .min_w_0()
@@ -218,6 +221,7 @@ fn message_block(
             },
         )
         .child(content)
+        .children(translation)
         .children(note);
     div()
         .id(ElementId::Name(format!("post-message-{index}").into()))

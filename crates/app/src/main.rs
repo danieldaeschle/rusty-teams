@@ -56,6 +56,8 @@ mod stickers;
 mod stored_outgoing;
 mod task_dialog;
 mod theme;
+mod translation;
+mod translation_actions;
 mod typing;
 mod updater;
 mod views;

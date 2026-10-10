@@ -60,6 +60,7 @@ use crate::rows::{
     reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
+use crate::translation::TranslationLine;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
 use crate::typing::typing_tooltip;
@@ -559,6 +560,7 @@ impl ConversationView {
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
+            AppEvent::Translation => self.rebuild(false, cx),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
             AppEvent::Scheduled => self.rebuild(false, cx),
@@ -1112,6 +1114,14 @@ impl ConversationView {
             .as_ref()
             .map(|current| app.cards.overrides_for(current.selection.conversation_id()))
             .unwrap_or_default();
+        let translation = self
+            .current
+            .as_ref()
+            .map(|current| {
+                app.translation
+                    .context_for(current.selection.conversation_id())
+            })
+            .unwrap_or_default();
         RowContext {
             offset: now.offset().fix(),
             today: now.date_naive(),
@@ -1119,6 +1129,7 @@ impl ConversationView {
             names,
             pending_reactions: self.pending_reactions.clone(),
             card_overrides,
+            translation,
         }
     }
 
@@ -2573,6 +2584,15 @@ impl ConversationView {
         });
     }
 
+    pub(super) fn translate_message(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(conversation_id) = self.conversation_id() else {
+            return;
+        };
+        self.app.update(cx, |state, cx| {
+            state.translate_message(&conversation_id, key, cx)
+        });
+    }
+
     fn show_notice(&mut self, message: &str, cx: &mut Context<Self>) {
         self.app.update(cx, |state, cx| {
             state.raise_notice(message.to_owned(), None, cx)
@@ -2601,13 +2621,21 @@ impl ConversationView {
 
     fn message_menu(
         &self,
-        key: &str,
-        own: bool,
+        message: &MessageRow,
         mine: HashSet<String>,
         refresh: Option<(usize, ExecuteAction)>,
         view: WeakEntity<Self>,
         cx: &App,
     ) -> MessageMenu {
+        let (key, own) = (message.key.as_str(), message.own);
+        let translate_label = match message.translation {
+            Some(TranslationLine::Translated {
+                showing_original: false,
+                ..
+            }) => "See original",
+            Some(TranslationLine::Translated { .. }) => "See translation",
+            _ => "Translate",
+        };
         let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
             let (view, key) = (view.clone(), key.to_owned());
             Rc::new(move |window, cx| {
@@ -2664,6 +2692,8 @@ impl ConversationView {
             forward: Some(action(|this, key, _, cx| this.forward_message(key, cx))),
             copy_link: Some(action(|this, key, _, cx| this.copy_link(key, cx))),
             copy: action(|this, key, _, cx| this.copy_text(key, cx)),
+            translate: Some(action(|this, key, _, cx| this.translate_message(key, cx))),
+            translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
             toggle_pinned: in_chat.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),

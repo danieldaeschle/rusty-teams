@@ -9,7 +9,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{ChatSection, ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
+use teams_core::{
+    ChatSection, ForcedAvailability, ForcedKind, PresenceStatus, TranslationBehavior,
+    WorkLocationKind,
+};
 
 use super::avatar::{person_avatar, with_presence};
 use super::widgets::{icon, symbol};
@@ -33,6 +36,7 @@ const SWITCH_HEIGHT: f32 = 16.;
 const SWITCH_THUMB: f32 = 12.;
 const SWITCH_PADDING: f32 = 2.;
 const TOGGLE_LABEL_WIDTH: f32 = 270.;
+const LANGUAGE_LIST_HEIGHT: f32 = 320.;
 
 #[derive(Clone)]
 struct MenuContext {
@@ -204,6 +208,7 @@ fn status_menu(
         )
         .separator()
         .item(chat_list_item(context, window, cx))
+        .item(translation_item(context, window, cx))
         .item(
             PopupMenuItem::new("Make a test call")
                 .icon(menu_icon(IconName::Phone))
@@ -252,6 +257,108 @@ fn chat_list_item(
         ))
     });
     PopupMenuItem::submenu("Chat list", submenu).icon(menu_icon(IconName::LayoutList))
+}
+
+fn translation_item(
+    context: &MenuContext,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenuItem {
+    let app = context.app.clone();
+    let submenu = PopupMenu::build(window, cx, move |menu, window, cx| {
+        translation_menu(menu, window, cx, &app)
+    });
+    PopupMenuItem::submenu("Translation", submenu).icon(menu_icon(IconName::Languages))
+}
+
+fn translation_menu(
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+) -> PopupMenu {
+    let state = app.read(cx);
+    if state.translation.settings.is_none() {
+        return menu.item(PopupMenuItem::label("Translation settings not loaded yet"));
+    }
+    let target = state.translation.target();
+    let behavior = state.translation.behavior();
+    let languages = state.translation.languages.clone();
+    let never: Vec<(String, String)> = state
+        .translation
+        .display_codes()
+        .into_iter()
+        .filter(|code| *code != target)
+        .map(|code| {
+            let name = state.translation.language_name(&code);
+            (code, name)
+        })
+        .collect();
+    let target_label = format!("Translate to {}", state.translation.language_name(&target));
+    let target_app = app.clone();
+    let mut menu = menu.check_side(Side::Right).min_w(px(MENU_WIDTH)).submenu_with_icon(
+        None,
+        target_label,
+        window,
+        cx,
+        move |submenu, _, _| {
+            languages.iter().fold(
+                submenu
+                    .check_side(Side::Right)
+                    .max_h(px(LANGUAGE_LIST_HEIGHT))
+                    .scrollable(true),
+                |submenu, language| {
+                    let (app, code) = (target_app.clone(), language.code.clone());
+                    submenu.item(
+                        PopupMenuItem::new(language.name.clone())
+                            .checked(language.code == target)
+                            .on_click(move |_, _, cx| {
+                                app.update(cx, |state, cx| state.set_translation_target(&code, cx));
+                            }),
+                    )
+                },
+            )
+        },
+    );
+    menu = menu.separator();
+    for (label, choice) in [
+        ("Ask me before translating", TranslationBehavior::Ask),
+        ("Auto-translate all messages", TranslationBehavior::Auto),
+        ("Never translate", TranslationBehavior::Never),
+    ] {
+        let app = app.clone();
+        menu = menu.item(
+            PopupMenuItem::new(label)
+                .checked(behavior == choice)
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.set_translation_behavior(choice, cx));
+                }),
+        );
+    }
+    menu = menu
+        .separator()
+        .item(PopupMenuItem::label("Never translate messages in"));
+    if never.is_empty() {
+        return menu.item(PopupMenuItem::label("No languages"));
+    }
+    for (code, name) in never {
+        let app = app.clone();
+        menu = menu.item(
+            PopupMenuItem::element(move |_, _| {
+                h_flex()
+                    .w(px(TOGGLE_LABEL_WIDTH))
+                    .gap(px(12.))
+                    .items_center()
+                    .justify_between()
+                    .child(div().flex_1().min_w_0().truncate().child(name.clone()))
+                    .child(menu_icon(IconName::X))
+            })
+            .on_click(move |_, _, cx| {
+                app.update(cx, |state, cx| state.allow_translating_language(&code, cx));
+            }),
+        );
+    }
+    menu
 }
 
 fn section_toggle(

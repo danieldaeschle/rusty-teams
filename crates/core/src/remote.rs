@@ -1,8 +1,9 @@
 use chatsvc::{
     CardActions, ChatApp, ConversationRef, Conversations, ForcedAvailability, ForwardResult, Gif,
-    Gifs, InvokeRequest, InvokeResponse, LinkInfo, MemberHorizon, MessageLinks, Messages,
-    PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts, SavedMessage, ScheduledDraft,
-    ScheduledDrafts, StatusNote, WorkLocationKind,
+    Gifs, InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient,
+    LinkInfo, MemberHorizon, MessageLanguage, MessageLinks, Messages, PinnedMessage, Pins,
+    PresenceService, PresenceStatus, Receipts, SavedMessage, ScheduledDraft, ScheduledDrafts,
+    StatusNote, TranslateRequest, Translation, TranslationTrigger, Translator, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -333,6 +334,48 @@ pub trait Remote {
 
     async fn link_info(&self, _url: &str) -> Result<LinkInfo> {
         Err(Error::Unsupported("link previews"))
+    }
+
+    async fn message_languages(
+        &self,
+        _conversation: &ConversationRef,
+        _page_size: usize,
+    ) -> Result<Vec<MessageLanguage>> {
+        Err(Error::Unsupported("message languages"))
+    }
+
+    async fn translate_chat_messages(
+        &self,
+        _chat_id: &str,
+        _to_language: &str,
+        _messages: &[TranslateRequest],
+        _trigger: &TranslationTrigger,
+    ) -> Result<Vec<Translation>> {
+        Err(Error::Unsupported("translation"))
+    }
+
+    async fn translate_channel_messages(
+        &self,
+        _team_id: &str,
+        _channel_id: &str,
+        _root_id: &str,
+        _to_language: &str,
+        _messages: &[TranslateRequest],
+        _trigger: &TranslationTrigger,
+    ) -> Result<Vec<Translation>> {
+        Err(Error::Unsupported("translation"))
+    }
+
+    async fn translation_languages(&self, _locale: &str) -> Result<Vec<Language>> {
+        Err(Error::Unsupported("translation"))
+    }
+
+    async fn language_settings(&self) -> Result<LanguageSettings> {
+        Err(Error::Unsupported("translation settings"))
+    }
+
+    async fn patch_language_settings(&self, _patch: serde_json::Value) -> Result<()> {
+        Err(Error::Unsupported("translation settings"))
     }
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
@@ -866,6 +909,56 @@ impl Remote for Graph {
 
     async fn link_info(&self, url: &str) -> Result<LinkInfo> {
         Ok(Messages::new(self.session()).link_info(url).await?)
+    }
+
+    async fn message_languages(
+        &self,
+        conversation: &ConversationRef,
+        page_size: usize,
+    ) -> Result<Vec<MessageLanguage>> {
+        Ok(Messages::new(self.session())
+            .list_language_stamps(conversation, page_size)
+            .await?)
+    }
+
+    async fn translate_chat_messages(
+        &self,
+        chat_id: &str,
+        to_language: &str,
+        messages: &[TranslateRequest],
+        trigger: &TranslationTrigger,
+    ) -> Result<Vec<Translation>> {
+        Ok(Translator::new(self.session())
+            .translate_chat(chat_id, to_language, messages, trigger)
+            .await?)
+    }
+
+    async fn translate_channel_messages(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        to_language: &str,
+        messages: &[TranslateRequest],
+        trigger: &TranslationTrigger,
+    ) -> Result<Vec<Translation>> {
+        Ok(Translator::new(self.session())
+            .translate_channel(team_id, channel_id, root_id, to_language, messages, trigger)
+            .await?)
+    }
+
+    async fn translation_languages(&self, locale: &str) -> Result<Vec<Language>> {
+        Ok(Translator::new(self.session()).languages(locale).await?)
+    }
+
+    async fn language_settings(&self) -> Result<LanguageSettings> {
+        Ok(LanguageSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn patch_language_settings(&self, patch: serde_json::Value) -> Result<()> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .patch(patch)
+            .await?)
     }
 
     async fn search_gifs(&self, query: &str) -> Result<Vec<Gif>> {

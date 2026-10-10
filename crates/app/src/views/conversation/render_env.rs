@@ -11,10 +11,12 @@ use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
+use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
+use crate::views::translation_line::{LineAction, TranslationActions};
 
 pub(super) struct RenderEnv {
     pub view: WeakEntity<ConversationView>,
@@ -163,8 +165,7 @@ impl RenderEnv {
                                 .as_ref()
                                 .map(|refresh| (index, refresh.action.clone()))
                         });
-                let menu =
-                    this.message_menu(&message.key, message.own, mine, refresh, view.clone(), cx);
+                let menu = this.message_menu(message, mine, refresh, view.clone(), cx);
                 let react = menu.react.clone();
                 let visible = this.toolbar_visible(&message.key);
                 let controls = (!message.reactions.is_empty())
@@ -193,6 +194,9 @@ impl RenderEnv {
                     .file_actions(&message.key, &message.files, view.clone())
             });
         let bot = self.bot_identity(message, cx);
+        let translation = (is_real && !message.deleted)
+            .then(|| self.translation_actions(message))
+            .flatten();
         ensure_cards_inputs(
             &self.app,
             &message.adaptive_cards,
@@ -223,7 +227,37 @@ impl RenderEnv {
                 .app
                 .read(cx)
                 .is_saved(&message.conversation_id, &message.key),
+            translation,
         }
+    }
+
+    fn translation_actions(&self, message: &MessageRow) -> Option<TranslationActions> {
+        let line = message.translation.as_ref()?;
+        let (app, conversation_id, key) = (
+            self.app.clone(),
+            message.conversation_id.clone(),
+            message.key.clone(),
+        );
+        let translate: LineAction = {
+            let (app, conversation_id, key) = (app.clone(), conversation_id.clone(), key.clone());
+            Rc::new(move |cx: &mut App| {
+                app.update(cx, |state, cx| {
+                    state.translate_message(&conversation_id, &key, cx)
+                });
+            })
+        };
+        let never = match line {
+            TranslationLine::Offer { language_code, .. } => {
+                let language_code = language_code.clone();
+                Some(Rc::new(move |cx: &mut App| {
+                    app.update(cx, |state, cx| {
+                        state.never_translate_language(&language_code, cx)
+                    });
+                }) as LineAction)
+            }
+            _ => None,
+        };
+        Some(TranslationActions { translate, never })
     }
 
     fn open_by_root(

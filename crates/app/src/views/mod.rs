@@ -45,4 +45,5 @@ pub mod status_menu;
 pub mod status_message_dialog;
 pub mod switcher;
 pub mod title_bar;
+pub mod translation_line;
 pub mod widgets;

@@ -32,6 +32,8 @@ pub struct MessageMenu {
     pub forward: Option<Action>,
     pub copy_link: Option<Action>,
     pub copy: Action,
+    pub translate: Option<Action>,
+    pub translate_label: &'static str,
     pub save: Option<Action>,
     pub saved: bool,
     pub toggle_pinned: Option<Action>,
@@ -119,6 +121,7 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
         forward,
         copy_link,
         copy,
+        translate,
         save,
         toggle_pinned,
         edit,
@@ -131,6 +134,7 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
         menu.forward.clone(),
         menu.copy_link.clone(),
         menu.copy.clone(),
+        menu.translate.clone(),
         menu.save.clone(),
         menu.toggle_pinned.clone(),
         menu.edit.clone(),
@@ -139,7 +143,7 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
         menu.refresh_card.clone(),
         menu.pin.clone(),
     );
-    let (saved, pinned) = (menu.saved, menu.pinned);
+    let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
         .icon(IconName::Ellipsis)
         .ghost()
@@ -165,6 +169,9 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
                 popup = popup.item(item("Refresh card", IconName::RefreshCw, refresh_card));
             }
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
+            if let Some(translate) = translate.clone() {
+                popup = popup.item(item(translate_label, IconName::Languages, translate));
+            }
             if let Some(save) = save.clone() {
                 popup = popup.item(if saved {
                     item("Unsave message", IconName::BookmarkOff, save)

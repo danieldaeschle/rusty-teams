@@ -13,6 +13,7 @@ use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
+use super::translation_line::{TranslationActions, translation_line};
 use super::widgets::{icon, symbol};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
@@ -55,6 +56,7 @@ pub struct RowActions {
     pub files: Option<FileActions>,
     pub highlighted: bool,
     pub saved: bool,
+    pub translation: Option<TranslationActions>,
 }
 
 const TOOLBAR_LIFT: f32 = 22.;
@@ -255,6 +257,7 @@ struct BubbleExtras {
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
     saved: bool,
+    translation: Option<TranslationActions>,
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -457,9 +460,10 @@ fn others_row(
     directory: &Directory,
     bot: Option<&BotIdentity>,
     delivery: DeliveryActions,
-    extras: BubbleExtras,
+    mut extras: BubbleExtras,
     cx: &App,
 ) -> Div {
+    let translation = extras.translation.take();
     let first = !row.series.has_prev;
     let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
     let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
@@ -482,6 +486,7 @@ fn others_row(
         );
     }
     column = column.child(bubble(row, index, false, directory, extras, cx));
+    column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
     }
@@ -518,15 +523,17 @@ fn own_row(
     index: usize,
     directory: &Directory,
     delivery: DeliveryActions,
-    extras: BubbleExtras,
+    mut extras: BubbleExtras,
     cx: &App,
 ) -> Div {
+    let translation = extras.translation.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
         div()
             .max_w(relative(MAX_WIDTH_RATIO))
             .child(bubble(row, index, true, directory, extras, cx)),
     );
+    column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
     }
@@ -552,6 +559,7 @@ pub fn render_message_row(
         files,
         highlighted,
         saved,
+        translation,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -561,6 +569,7 @@ pub fn render_message_row(
         controls: reaction_controls,
         files,
         saved,
+        translation,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

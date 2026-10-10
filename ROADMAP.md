@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 91 %** (78 done, 5 partial, 5 missing of 88). Partial counts half.
+**Parity: 93 %** (79 done, 5 partial, 4 missing of 88). Partial counts half.
 
 ## By area
 
@@ -10,7 +10,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|---|---|
 | [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
 | [Chat list](#chat-list) | 100 % | 10 | 0 | 0 |
-| [Reading](#reading) | 89 % | 17 | 0 | 2 |
+| [Reading](#reading) | 95 % | 18 | 0 | 1 |
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
@@ -74,7 +74,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Typing indicator | Done | Shows who types as avatars above the composer (names on hover) and in the list preview; sends your own typing |
 | Link previews | Done | One card per message from the chat service |
 | Loop components | Missing |  |
-| Translate a message | Missing |  |
+| Translate a message | Done | Menu item on every message; offer line under foreign messages (Translate, Never translate language); See original toggle; auto-translate; settings under the avatar menu > Translation, synced with Teams |
 
 ## Writing
 
