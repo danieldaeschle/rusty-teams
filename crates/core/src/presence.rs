@@ -36,13 +36,41 @@ impl Availability {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Presence {
-    pub availability: Availability,
-    pub in_call: bool,
+pub enum Activity {
+    InACall,
+    InAConferenceCall,
+    InAMeeting,
+    Presenting,
+    OutOfOffice,
 }
 
-fn is_call_activity(activity: Option<&str>) -> bool {
-    matches!(activity, Some("InACall" | "InAConferenceCall"))
+impl Activity {
+    pub fn from_service(name: &str) -> Option<Self> {
+        match name {
+            "InACall" => Some(Activity::InACall),
+            "InAConferenceCall" => Some(Activity::InAConferenceCall),
+            "InAMeeting" => Some(Activity::InAMeeting),
+            "Presenting" => Some(Activity::Presenting),
+            "OutOfOffice" => Some(Activity::OutOfOffice),
+            _ => None,
+        }
+    }
+
+    pub fn is_call(self) -> bool {
+        matches!(self, Activity::InACall | Activity::InAConferenceCall)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Presence {
+    pub availability: Availability,
+    pub activity: Option<Activity>,
+}
+
+impl Presence {
+    pub fn in_call(&self) -> bool {
+        self.activity.is_some_and(Activity::is_call)
+    }
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -203,10 +231,49 @@ impl<R: Remote> SyncEngine<R> {
         for (user_id, availability, activity) in found {
             let presence = Presence {
                 availability: Availability::from_service(availability),
-                in_call: is_call_activity(activity),
+                activity: activity.and_then(Activity::from_service),
             };
             changed |= known.insert(user_id.clone(), presence) != Some(presence);
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_names_map_and_unknown_is_none() {
+        assert_eq!(Activity::from_service("InACall"), Some(Activity::InACall));
+        assert_eq!(
+            Activity::from_service("InAConferenceCall"),
+            Some(Activity::InAConferenceCall)
+        );
+        assert_eq!(
+            Activity::from_service("InAMeeting"),
+            Some(Activity::InAMeeting)
+        );
+        assert_eq!(
+            Activity::from_service("Presenting"),
+            Some(Activity::Presenting)
+        );
+        assert_eq!(
+            Activity::from_service("OutOfOffice"),
+            Some(Activity::OutOfOffice)
+        );
+        assert_eq!(Activity::from_service("Available"), None);
+    }
+
+    #[test]
+    fn only_call_activities_count_as_in_call() {
+        let presence = |activity| Presence {
+            availability: Availability::Busy,
+            activity,
+        };
+        assert!(presence(Some(Activity::InACall)).in_call());
+        assert!(presence(Some(Activity::InAConferenceCall)).in_call());
+        assert!(!presence(Some(Activity::InAMeeting)).in_call());
+        assert!(!presence(None).in_call());
     }
 }

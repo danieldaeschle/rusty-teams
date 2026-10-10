@@ -374,6 +374,13 @@ impl CallModel {
         }
     }
 
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.state,
+            CallState::Connecting | CallState::Connected { .. } | CallState::Reconnecting { .. }
+        )
+    }
+
     pub fn is_connecting(&self) -> bool {
         matches!(self.state, CallState::Connecting)
     }

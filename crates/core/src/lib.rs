@@ -103,7 +103,7 @@ pub use message_link::{
     ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
 };
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
-pub use presence::{Availability, Presence};
+pub use presence::{Activity, Availability, Presence};
 pub use preview::preview_text;
 pub use profile::{OrgPerson, PersonProfile};
 pub use receipts::{ReceiptReader, ReceiptState};

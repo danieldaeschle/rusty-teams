@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use store::{ChannelNotificationLevel, ChannelNotifications};
 
+use crate::call::CallModel;
+
 pub const SOUND_THROTTLE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -138,6 +140,10 @@ pub struct Environment {
     pub in_call: bool,
 }
 
+pub fn in_call(server_in_call: bool, native_call: Option<&CallModel>) -> bool {
+    server_in_call || native_call.is_some_and(CallModel::is_active)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decision {
     pub toast: bool,
@@ -217,6 +223,8 @@ pub fn should_flash(settings: &Settings, toast_shown: bool, window_active: bool)
 
 #[cfg(test)]
 mod tests {
+    use calling::{CallState, EndReason};
+
     use super::*;
 
     fn incoming(kind: ChatKind) -> Incoming {
@@ -286,6 +294,31 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(decide(&settings, &group(), Environment::default()), SILENT);
+    }
+
+    #[test]
+    fn in_call_follows_server_presence_or_a_live_native_call() {
+        let model = |state| {
+            let mut model = CallModel::incoming("Bea", "8:orgid:b", "Bea");
+            model.state = state;
+            model
+        };
+        let since = std::time::Instant::now();
+        assert!(!in_call(false, None));
+        assert!(in_call(true, None));
+        assert!(in_call(false, Some(&model(CallState::Connecting))));
+        assert!(in_call(false, Some(&model(CallState::Connected { since }))));
+        assert!(in_call(
+            false,
+            Some(&model(CallState::Reconnecting { since }))
+        ));
+        assert!(!in_call(false, Some(&model(CallState::Idle))));
+        assert!(!in_call(
+            false,
+            Some(&model(CallState::Ended {
+                reason: EndReason::LocalHangup
+            }))
+        ));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use super::incoming::IncomingTracker;
 use super::layout::{self, Slot, ring_height};
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::rules::{
-    ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide,
+    ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide, in_call,
     should_flash,
 };
 use super::settings;
@@ -240,10 +240,11 @@ impl NotificationCenter {
         let own_do_not_disturb = state.directory.me.as_ref().is_some_and(|me| {
             state.directory.presence_of(&me.user_id).kind() == PresenceKind::DoNotDisturb
         });
-        let in_call = match (state.engine.as_ref(), state.directory.me.as_ref()) {
+        let server_in_call = match (state.engine.as_ref(), state.directory.me.as_ref()) {
             (Some(engine), Some(me)) => data::in_call(engine, &me.user_id),
             _ => false,
         };
+        let in_call = in_call(server_in_call, state.call.as_ref().map(|call| &call.model));
         Environment {
             chat_in_foreground: selected && self.main_window_active(cx),
             system_quiet: platform::system_quiet(),

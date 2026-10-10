@@ -461,8 +461,13 @@ impl AppState {
             .requested_presence_ids()
             .into_iter()
             .filter(|user_id| {
-                data::presence_kind(&engine, user_id)
-                    .is_some_and(|kind| self.directory.set_presence(user_id, kind))
+                let Some(kind) = data::presence_kind(&engine, user_id) else {
+                    return false;
+                };
+                let activity_changed = self
+                    .directory
+                    .set_activity(user_id, data::presence_activity(&engine, user_id));
+                self.directory.set_presence(user_id, kind) || activity_changed
             })
             .collect()
     }

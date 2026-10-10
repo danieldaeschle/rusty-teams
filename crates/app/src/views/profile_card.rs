@@ -171,7 +171,7 @@ impl ProfileCard {
             PHOTO_SIZE,
             theme::surface_raised(),
         );
-        let availability = presence.kind().label();
+        let availability = directory.status_label(&self.user_id, presence);
         let local_time = profile.and_then(|profile| local_time_label(profile, Utc::now()));
         let subline = status_line(availability, local_time.as_deref());
         let details = v_flex()

@@ -2874,9 +2874,12 @@ impl ConversationView {
                                 .child(avatar)
                                 .into_any_element(),
                         );
-                        subline = presence
-                            .map(|presence| presence.kind().label().to_owned())
-                            .unwrap_or_default();
+                        subline = match (user_id, presence) {
+                            (Some(id), Some(presence)) => {
+                                directory.status_label(id, presence).to_owned()
+                            }
+                            _ => String::new(),
+                        };
                     } else {
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::background()));

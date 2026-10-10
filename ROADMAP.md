@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 89 %** (76 done, 4 partial, 8 missing of 88). Partial counts half.
+**Parity: 90 %** (77 done, 5 partial, 6 missing of 88). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 42 % | 1 | 3 | 2 |
+| [Calls and meetings](#calls-and-meetings) | 67 % | 2 | 4 | 0 |
 
 ## Next
 
@@ -168,7 +168,7 @@ Feature parity with the Microsoft Teams desktop client.
 | 1:1 and group calls | Partial | Phone button, Calling and Ringing tiles, end notices, direct to mixer renegotiation. Not yet tried with a second person |
 | Join a meeting from a chat | Partial | Join button from the live meeting state, joins muted, roster tiles, lobby, Leave and End meeting. Audio only. Verified with a meeting of one; not yet with other participants |
 | Video and screen sharing | Partial | Send and receive over libwebrtc H264, source requests through `applyChannelParameters`, stage, strip, self view, share banner. Sent frames acknowledged by the mixer; receive only checked by a local loopback, not with a second person. Incoming calls stay audio-only |
-| In a call shown in presence | Missing | |
+| In a call shown in presence | Done | "In a call", "In a meeting", "Presenting" from Teams activity on profile cards and chat headers; no notification sounds during a native call |
 
 ## Agents
 

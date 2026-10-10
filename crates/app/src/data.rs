@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::{Image, ImageFormat};
 use store::{ChatRecord, Store};
 
-use teams_core::{Availability, ChatSectionSettings};
+use teams_core::{Activity, Availability, ChatSectionSettings};
 use tokio::sync::oneshot;
 
 use crate::backend::Engine;
@@ -127,6 +127,7 @@ pub struct Directory {
     pub unread_counts: HashMap<String, u32>,
     pub(crate) avatars: HashMap<String, AvatarState>,
     pub(crate) presence: HashMap<String, (PresenceKind, Instant)>,
+    pub(crate) activity: HashMap<String, Activity>,
     pub(crate) presence_cached: HashMap<String, PresenceKind>,
     pub(crate) presence_requested: HashMap<String, Instant>,
     pub(crate) presence_pending: HashSet<String>,
@@ -199,6 +200,20 @@ impl Directory {
             Some(kind) => Presence::Cached(*kind),
             None if self.presence_pending.contains(user_id) => Presence::Loading,
             None => Presence::Live(PresenceKind::Unknown),
+        }
+    }
+
+    pub fn set_activity(&mut self, user_id: &str, activity: Option<Activity>) -> bool {
+        match activity {
+            Some(activity) => self.activity.insert(user_id.to_owned(), activity) != Some(activity),
+            None => self.activity.remove(user_id).is_some(),
+        }
+    }
+
+    pub fn status_label(&self, user_id: &str, presence: Presence) -> &'static str {
+        match self.activity.get(user_id) {
+            Some(activity) if matches!(presence, Presence::Live(_)) => activity_label(*activity),
+            _ => presence.kind().label(),
         }
     }
 
@@ -437,6 +452,21 @@ pub fn presence_kind_of(availability: Availability) -> PresenceKind {
     }
 }
 
+pub fn activity_label(activity: Activity) -> &'static str {
+    match activity {
+        Activity::InACall => "In a call",
+        Activity::InAConferenceCall | Activity::InAMeeting => "In a meeting",
+        Activity::Presenting => "Presenting",
+        Activity::OutOfOffice => "Out of office",
+    }
+}
+
+pub fn presence_activity(engine: &Engine, user_id: &str) -> Option<Activity> {
+    engine
+        .presence(user_id)
+        .and_then(|presence| presence.activity)
+}
+
 pub fn presence_kind(engine: &Engine, user_id: &str) -> Option<PresenceKind> {
     engine
         .presence(user_id)
@@ -446,7 +476,7 @@ pub fn presence_kind(engine: &Engine, user_id: &str) -> Option<PresenceKind> {
 pub fn in_call(engine: &Engine, user_id: &str) -> bool {
     engine
         .presence(user_id)
-        .is_some_and(|presence| presence.in_call)
+        .is_some_and(|presence| presence.in_call())
 }
 
 pub type Done = oneshot::Receiver<Result<(), String>>;
@@ -503,6 +533,30 @@ pub fn remove_from_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_wording_replaces_availability_only_for_live_presence() {
+        let cases = [
+            (Activity::InACall, "In a call"),
+            (Activity::InAConferenceCall, "In a meeting"),
+            (Activity::InAMeeting, "In a meeting"),
+            (Activity::Presenting, "Presenting"),
+            (Activity::OutOfOffice, "Out of office"),
+        ];
+        for (activity, label) in cases {
+            let mut directory = Directory::default();
+            directory.set_activity("ada", Some(activity));
+            let live = Presence::Live(PresenceKind::Busy);
+            assert_eq!(directory.status_label("ada", live), label);
+            assert_eq!(
+                directory.status_label("ada", Presence::Cached(PresenceKind::Busy)),
+                "Busy"
+            );
+            assert_eq!(directory.status_label("bob", live), "Busy");
+            assert!(directory.set_activity("ada", None));
+            assert_eq!(directory.status_label("ada", live), "Busy");
+        }
+    }
 
     fn folder(id: &str, kind: FolderKind, ids: &[&str]) -> FolderInfo {
         FolderInfo {

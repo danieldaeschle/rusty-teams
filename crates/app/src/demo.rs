@@ -9,8 +9,8 @@ use store::{
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    CardActionOutcome, ChatApp, ChatSection, Gif, LinkPreview, MentionCandidate, PersonCandidate,
-    PersonSource, PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
+    Activity, CardActionOutcome, ChatApp, ChatSection, Gif, LinkPreview, MentionCandidate,
+    PersonCandidate, PersonSource, PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -768,14 +768,16 @@ pub fn seed_directory(state: &mut AppState) {
     directory.set_avatar(TOBIAS_ID, Some(photo(&TOBIAS)));
     for (user_id, kind) in [
         (MARA_ID, PresenceKind::Available),
-        (JONAS_ID, PresenceKind::DoNotDisturb),
+        (JONAS_ID, PresenceKind::Busy),
         (PRIYA_ID, PresenceKind::Away),
         (TOBIAS_ID, PresenceKind::Offline),
-        (LEA_ID, PresenceKind::DoNotDisturb),
+        (LEA_ID, PresenceKind::Busy),
         (DEMO_USER_ID, PresenceKind::Available),
     ] {
         directory.set_presence(user_id, kind);
     }
+    directory.set_activity(JONAS_ID, Some(Activity::InACall));
+    directory.set_activity(LEA_ID, Some(Activity::InAConferenceCall));
     let directory_path = image_directory();
     if std::fs::create_dir_all(&directory_path).is_ok() {
         let path = directory_path.join("staging-dashboard.png");
