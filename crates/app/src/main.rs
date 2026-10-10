@@ -8,6 +8,7 @@ mod app_state;
 mod assets;
 mod avatar_image;
 mod backend;
+mod call;
 mod card_actions;
 mod card_inputs;
 mod chat_actions;

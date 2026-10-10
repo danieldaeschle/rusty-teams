@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 87 %** (75 done, 1 partial, 11 missing of 87). Partial counts half.
+**Parity: 87 %** (76 done, 1 partial, 11 missing of 88). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 80 % | 4 | 0 | 1 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 0 % | 0 | 0 | 5 |
+| [Calls and meetings](#calls-and-meetings) | 17 % | 1 | 0 | 5 |
 
 ## Next
 
@@ -163,7 +163,8 @@ Feature parity with the Microsoft Teams desktop client.
 
 | Feature | State | Note |
 |---|---|---|
-| Incoming call: ring, accept, decline | Missing | Plan: Teams Web call UI in its own WebView2 window |
+| Test call (Echo bot) | Done | Native libwebrtc audio, call view, mini window, mute, devices |
+| Incoming call: ring, accept, decline | Missing | Native (no webview): ring toast, registrar endpoint, attach + accept |
 | 1:1 and group calls | Missing | |
 | Join a meeting from a chat | Missing | |
 | Screen sharing | Missing | |

@@ -552,7 +552,8 @@ impl ConversationView {
             | AppEvent::Forward
             | AppEvent::StatusMessage
             | AppEvent::NotificationSettings
-            | AppEvent::Profile => {}
+            | AppEvent::Profile
+            | AppEvent::Call => {}
             AppEvent::Saved => cx.notify(),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
@@ -1705,6 +1706,9 @@ impl ConversationView {
             return;
         }
         let state = self.app.read(cx);
+        if state.viewing_call() {
+            return;
+        }
         let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|c| c.selection.clone())
         else {
             return;

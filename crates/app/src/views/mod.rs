@@ -3,6 +3,8 @@ pub mod adaptive_card;
 pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
+pub mod call_mini;
+pub mod call_view;
 pub mod card_carousel;
 pub mod card_chart;
 pub mod card_code_block;

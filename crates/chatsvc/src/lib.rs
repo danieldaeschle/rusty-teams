@@ -38,8 +38,9 @@ pub use presence::{
 };
 pub use reactions::{emotion_key, emotion_keys};
 pub use realtime::{
-    EventKind, MessageEvent, PresenceUpdate, Realtime, RealtimeConfig, RealtimeEvent, StatusEvent,
-    StatusKind, TrouterEndpoint, TypingEvent,
+    CallbackReplier, EventKind, InstanceNames, MessageEvent, PresenceUpdate, Realtime,
+    RealtimeConfig, RealtimeEvent, StatusEvent, StatusKind, TrouterCallback, TrouterEndpoint,
+    TypingEvent,
 };
 pub use receipts::{MemberHorizon, Receipts};
 pub use saved::SavedMessage;

@@ -1,0 +1,19 @@
+[package]
+name = "calling"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+chatsvc.workspace = true
+flate2 = "1"
+futures-util.workspace = true
+libwebrtc = "0.3.51"
+serde.workspace = true
+serde_json.workspace = true
+session.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true

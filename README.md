@@ -57,6 +57,9 @@
 - Schedule send: right-click send or `Ctrl+Shift+Enter`
 - Drafts and unsent messages survive a restart
 
+**Calls**
+- Test call to the Teams Echo bot from the avatar menu: native WebRTC audio, mute (`Ctrl+Shift+M`), device switching, mini window while you read other chats
+
 **App**
 - Dark theme, opens instantly from the cache
 - Self-update from an update folder
@@ -142,6 +145,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 | `store` | SQLite cache, migrations, search, image file cache |
 | `graph` | Typed Microsoft Graph client with batching and paging |
 | `chatsvc` | Teams chat service: Trouter realtime, pins, folders, receipts |
+| `calling` | Native calls: Teams signaling, SDP translation, libwebrtc audio |
 | `session` | `Transport` trait, CDP session, in-page fetch |
 | `webview` | Hidden WebView2 host (Windows only) |
 | `browser` | Chrome lifecycle and watchdog for the CDP transport |

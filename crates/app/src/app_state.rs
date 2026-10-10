@@ -12,6 +12,7 @@ use teams_core::{
 };
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
+use crate::call::{ActiveCall, CallLauncher};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 use crate::local_previews::{LocalPreview, load_local_previews};
@@ -57,6 +58,7 @@ pub enum AppEvent {
     StatusMessage,
     NotificationSettings,
     Profile,
+    Call,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,6 +105,9 @@ pub struct AppState {
     pub status_message_request: bool,
     pub profiles: ProfileCache,
     pub profile_request: Option<ProfileRequest>,
+    pub call: Option<ActiveCall>,
+    pub call_launcher: Option<Arc<CallLauncher>>,
+    pub call_count: u64,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -186,6 +191,9 @@ impl AppState {
             status_message_request: false,
             profiles: ProfileCache::new(),
             profile_request: None,
+            call: None,
+            call_launcher: None,
+            call_count: 0,
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -548,6 +556,7 @@ impl AppState {
 
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
         self.new_chat = true;
+        self.show_call(false, cx);
         cx.emit(AppEvent::Selection);
         cx.notify();
     }
@@ -562,6 +571,7 @@ impl AppState {
     }
 
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
+        self.show_call(false, cx);
         let was_drafting = std::mem::take(&mut self.new_chat);
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
             return;
@@ -676,6 +686,7 @@ impl AppState {
                 self.connection = connection;
                 cx.emit(AppEvent::Status);
             }
+            BackendEvent::Calls(launcher) => self.call_launcher = Some(launcher),
             BackendEvent::Engine(engine) => {
                 self.engine = Some(engine);
                 self.resend_outbox(cx);

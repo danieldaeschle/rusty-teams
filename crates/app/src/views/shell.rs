@@ -2,6 +2,8 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
+use super::call_mini::render_call_mini;
+use super::call_view::render_call_view;
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
@@ -21,7 +23,7 @@ use crate::notify::{NotificationCenter, selection_for};
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 
-actions!(teams, [OpenSwitcher, NewChat]);
+actions!(teams, [OpenSwitcher, NewChat, ToggleCallMute]);
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
@@ -29,6 +31,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-k", OpenSwitcher, None),
         KeyBinding::new("ctrl-n", NewChat, None),
         KeyBinding::new("alt-r", ReplyToHovered, None),
+        KeyBinding::new("ctrl-shift-m", ToggleCallMute, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-k", OpenSwitcher, None),
         #[cfg(target_os = "macos")]
@@ -478,6 +481,8 @@ impl Render for AppShell {
             };
         Overlays::update(cx, |overlays| overlays.panels = panels);
         let state = self.state.read(cx);
+        let call_view = render_call_view(&self.state, state).filter(|_| state.viewing_call());
+        let call_mini = render_call_mini(&self.state, state);
         let status = render_status_bar(
             state,
             &self.update,
@@ -504,6 +509,9 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &NewChat, _, cx| {
                 this.state.update(cx, |state, cx| state.start_new_chat(cx));
             }))
+            .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
+                this.state.update(cx, |state, cx| state.toggle_call_mute(cx));
+            }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.conversation.update(cx, |conversation, cx| {
                     conversation.reply_to_hovered(window, cx)
@@ -525,10 +533,14 @@ impl Render for AppShell {
                             .min_h_0()
                             .w_full()
                             .child(self.sidebar.clone())
-                            .child(self.conversation.clone()),
+                            .child(match call_view {
+                                Some(call_view) => call_view,
+                                None => self.conversation.clone().into_any_element(),
+                            }),
                     )
                     .child(status),
             )
+            .children(call_mini)
             .children(self.activity_panel.clone())
             .children(self.saved_panel.clone())
             .children(self.switcher.clone())

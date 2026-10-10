@@ -9,6 +9,8 @@ use store::Store;
 use teams_core::{ChatsvcFolderSource, CoreEvent, SyncEngine};
 use tokio::sync::mpsc;
 
+use crate::call::CallLauncher;
+
 pub type Engine = SyncEngine<Graph>;
 
 const CONNECT_RETRY: Duration = Duration::from_secs(8);
@@ -44,6 +46,7 @@ pub enum LiveState {
 pub enum BackendEvent {
     Connection(ConnectionState),
     Engine(Arc<Engine>),
+    Calls(Arc<CallLauncher>),
     Core(CoreEvent),
     Live(LiveState),
     Typing(TypingEvent),
@@ -122,6 +125,7 @@ async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, events: Eve
         .unwrap_or_else(build);
     let engine = Arc::new(engine);
     let _ = events.send(BackendEvent::Engine(engine.clone()));
+    let _ = events.send(BackendEvent::Calls(Arc::new(CallLauncher::new(transport))));
     tokio::spawn(forward_core_events(engine.clone(), events.clone()));
     let (nudge, nudges) = mpsc::unbounded_channel();
     tokio::spawn(realtime_loop(

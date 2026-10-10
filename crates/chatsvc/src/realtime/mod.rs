@@ -1,3 +1,4 @@
+mod callback;
 mod event;
 mod host;
 mod runner;
@@ -15,6 +16,7 @@ pub use event::{
     EventKind, MessageEvent, PresenceUpdate, RealtimeEvent, StatusEvent, StatusKind,
     TrouterEndpoint, TypingEvent, decode_payload,
 };
+pub use callback::{CallbackReplier, TrouterCallback};
 pub use host::{DEFAULT_TROUTER_HOST, is_trouter_host};
 
 use crate::error::Result;
@@ -30,6 +32,26 @@ pub struct RealtimeConfig {
     pub ensure_interval: Duration,
     pub navigation_settle: Duration,
     pub max_reattach_backoff: Duration,
+    pub instance: InstanceNames,
+    pub forward_callbacks: bool,
+}
+
+/// Page globals of one Trouter client; a second client in the same tab needs its own names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceNames {
+    pub global: String,
+    pub binding: String,
+    pub endpoint_storage_key: String,
+}
+
+impl Default for InstanceNames {
+    fn default() -> Self {
+        InstanceNames {
+            global: runner::DEFAULT_GLOBAL_NAME.to_owned(),
+            binding: runner::DEFAULT_BINDING_NAME.to_owned(),
+            endpoint_storage_key: runner::DEFAULT_EPID_KEY.to_owned(),
+        }
+    }
 }
 
 impl Default for RealtimeConfig {
@@ -41,6 +63,8 @@ impl Default for RealtimeConfig {
             ensure_interval: Duration::from_secs(30),
             navigation_settle: Duration::from_millis(1500),
             max_reattach_backoff: Duration::from_secs(30),
+            instance: InstanceNames::default(),
+            forward_callbacks: false,
         }
     }
 }
@@ -48,6 +72,8 @@ impl Default for RealtimeConfig {
 pub struct Realtime {
     host: String,
     events: mpsc::UnboundedReceiver<RealtimeEvent>,
+    callbacks: Option<mpsc::UnboundedReceiver<TrouterCallback>>,
+    replier: CallbackReplier,
     stop: Option<oneshot::Sender<oneshot::Sender<()>>>,
     task: JoinHandle<()>,
 }
@@ -61,10 +87,23 @@ impl Realtime {
     pub async fn start_with(session: &Session, config: RealtimeConfig) -> Result<Realtime> {
         let session = session.clone();
         let host = host::resolve(&session, &config).await;
-        let attached = attach(&session).await?;
+        let script = runner::PageScript::new(&config);
+        let attached = attach(&session, &script).await?;
         let (output, events) = mpsc::unbounded_channel();
+        let (callback_output, callbacks) = mpsc::unbounded_channel();
+        let (reply_sender, replies) = mpsc::unbounded_channel();
         let (stop, stop_receiver) = oneshot::channel();
-        let mut runner = Runner::new(session, config, host.clone(), output);
+        let mut runner = Runner::new(
+            session,
+            config,
+            script,
+            host.clone(),
+            output,
+            runner::CallbackPipes {
+                output: callback_output,
+                replies,
+            },
+        );
         if let Err(error) = runner.ensure().await {
             attached.shutdown().await;
             return Err(error.into());
@@ -73,6 +112,10 @@ impl Realtime {
         Ok(Realtime {
             host,
             events,
+            callbacks: Some(callbacks),
+            replier: CallbackReplier {
+                sender: reply_sender,
+            },
             stop: Some(stop),
             task,
         })
@@ -84,6 +127,15 @@ impl Realtime {
 
     pub async fn recv(&mut self) -> Option<RealtimeEvent> {
         self.events.recv().await
+    }
+
+    /// Callbacks only flow when `forward_callbacks` is set; the receiver can be taken once.
+    pub fn take_callbacks(&mut self) -> Option<mpsc::UnboundedReceiver<TrouterCallback>> {
+        self.callbacks.take()
+    }
+
+    pub fn callback_replier(&self) -> CallbackReplier {
+        self.replier.clone()
     }
 
     /// Deletes the registration and closes the page-side socket.

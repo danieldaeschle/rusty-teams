@@ -173,6 +173,7 @@ fn status_menu(
     let header_context = context.clone();
     let message_app = context.app.clone();
     let settings_app = context.app.clone();
+    let call_app = context.app.clone();
     let row_label = match &context.summary.until {
         Some(until) => format!("{} {until}", context.summary.label),
         None => context.summary.label.to_owned(),
@@ -201,6 +202,13 @@ fn status_menu(
         )
         .separator()
         .item(chat_list_item(context, window, cx))
+        .item(
+            PopupMenuItem::new("Make a test call")
+                .icon(menu_icon(IconName::Phone))
+                .on_click(move |_, _, cx| {
+                    call_app.update(cx, |state, cx| state.start_test_call(cx));
+                }),
+        )
         .item(
             PopupMenuItem::new("Notification settings")
                 .icon(menu_icon(IconName::Settings))

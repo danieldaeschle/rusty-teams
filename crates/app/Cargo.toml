@@ -18,6 +18,7 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [dependencies]
+calling.workspace = true
 chatsvc.workspace = true
 chrono.workspace = true
 directories.workspace = true

@@ -34,6 +34,7 @@ store = { path = "crates/store" }
 teams-core = { path = "crates/core" }
 gpui-kit = "=0.7.1"
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.8" }
+calling = { path = "crates/calling" }
 chatsvc = { path = "crates/chatsvc" }
 webview = { path = "crates/webview" }
 

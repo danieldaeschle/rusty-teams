@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = 3;
+  const VERSION = 4;
   const GLOBAL_NAME = '__chatsvcTrouter';
   const BINDING_NAME = '__chatsvcRealtime';
   const EPID_KEY = '__chatsvcEpid';
@@ -14,6 +14,9 @@
   const MAX_PRESENCE_ENTRIES = 1000;
   const MAX_PRESENCE_FIELD = 128;
   const MAX_SENDER_NAME = 256;
+  const FORWARD_CALLBACKS = false;
+  const CALLBACK_PREFIX = 'callAgent/';
+  const CALLBACK_REPLY_TIMEOUT_MS = 5000;
 
   if (window.top !== window || !location.origin.startsWith('https://teams.')) return;
   const existing = window[GLOBAL_NAME];
@@ -34,7 +37,7 @@
 
   const state = {
     token: null, host: null, epid: loadEpid(), socket: null, ready: false,
-    closed: false, ackCounter: 0, lastFrameAt: 0, registeredAt: 0, retry: 0, reconnectTimer: null, queue: [],
+    closed: false, pendingReplies: new Map(), ackCounter: 0, lastFrameAt: 0, registeredAt: 0, retry: 0, reconnectTimer: null, queue: [],
   };
 
   const flush = () => {
@@ -52,6 +55,33 @@
   };
   const status = (kind, detail) => forward({channel: 'status', kind, detail: detail || ''});
   const announceEndpoint = () => forward({channel: 'endpoint', endpointId: state.epid, trouterUri: state.surl + '/unifiedPresenceService'});
+  const headerValue = (headers, name) => {
+    const key = Object.keys(headers || {}).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+    return key === undefined ? null : String(headers[key]);
+  };
+  const answer = (id, status, body) => {
+    const pending = state.pendingReplies.get(id);
+    if (pending === undefined) return false;
+    clearTimeout(pending.timer);
+    state.pendingReplies.delete(id);
+    send('3:::' + JSON.stringify({id, status, headers: pending.headers, body: body || ''}));
+    return true;
+  };
+  const forwardCallback = (request, path) => {
+    const headers = request.headers || {};
+    const echoed = {};
+    for (const name of ['X-Microsoft-Skype-Chain-ID', 'trouter-request']) {
+      const value = headerValue(headers, name);
+      if (value !== null) echoed[name] = value;
+    }
+    const correlation = headerValue(headers, 'MS-CV');
+    if (correlation !== null) echoed['MS-CV'] = correlation + '.0';
+    const timer = setTimeout(() => answer(request.id, 200, ''), CALLBACK_REPLY_TIMEOUT_MS);
+    state.pendingReplies.set(request.id, {timer, headers: echoed});
+    forward({channel: 'callback', requestId: request.id, path,
+      contentEncoding: headerValue(headers, 'X-Microsoft-Skype-Content-Encoding'),
+      body: typeof request.body === 'string' ? request.body : JSON.stringify(request.body === undefined ? null : request.body)});
+  };
 
   const conversationOf = (resource) => {
     const link = (resource && (resource.conversationLink || resource.to || resource.id)) || '';
@@ -174,10 +204,15 @@
     } else if (packet.type === '3') {
       let request;
       try { request = JSON.parse(packet.data); } catch (error) { return; }
+      const path = String(request.url || '').replace(/^\/v4\/f\/[^/]+\//, '');
+      if (FORWARD_CALLBACKS && path.startsWith(CALLBACK_PREFIX)) {
+        forwardCallback(request, path);
+        return;
+      }
       send('3:::' + JSON.stringify({id: request.id, status: 200, headers: {}, body: ''}));
       let body = null;
       try { body = JSON.parse(request.body); } catch (error) {}
-      forwardNotification(String(request.url || '').replace(/^\/v4\/f\/[^/]+\//, ''), body);
+      forwardNotification(path, body);
     }
   };
 
@@ -214,6 +249,8 @@
     state.closed = true;
     clearInterval(maintain);
     clearTimeout(state.reconnectTimer);
+    for (const pending of state.pendingReplies.values()) clearTimeout(pending.timer);
+    state.pendingReplies.clear();
     if (state.socket) state.socket.close();
     if (window[GLOBAL_NAME] === api) delete window[GLOBAL_NAME];
   };
@@ -232,6 +269,7 @@
       return state.ready ? 'ready' : state.socket ? 'connecting' : 'waiting';
     },
     shutdown,
+    reply: (id, status, body) => answer(id, status, body),
     stop: async () => {
       let unregistered = null;
       if (state.token) {
