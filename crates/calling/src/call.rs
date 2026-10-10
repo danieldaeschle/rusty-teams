@@ -7,6 +7,7 @@ use std::time::Duration;
 use chatsvc::TrouterCallback;
 use futures_util::StreamExt;
 use libwebrtc::audio_stream::native::NativeAudioStream;
+use libwebrtc::data_channel::{DataChannel, DataChannelInit};
 use libwebrtc::prelude::*;
 use libwebrtc::rtp_transceiver::{RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::session_description::{SdpType, SessionDescription};
@@ -18,6 +19,8 @@ use tokio::time::{Instant, interval, sleep_until, timeout};
 
 use crate::audio::{SAMPLE_RATE, rms, tone_ratio, write_wav};
 use crate::audio_io::{AudioMode, AudioSetup};
+use crate::captions::{CAPTIONS_DATA_ID, CaptionEntry, CaptionFlow, CaptionState, CaptionStep, BotAction, parse_caption_message};
+use crate::data_channel::Depacketizer;
 use crate::control::{CallCommand, CallControl, CallUpdate, Progress};
 use crate::devices::{self, DeviceChoice};
 use crate::end::EndKind;
@@ -28,6 +31,7 @@ use crate::push::CallNotification;
 use crate::share_audio::ShareAudio;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
 use crate::renegotiation::{MediaAction, MediaNegotiator};
+use crate::organizer::Target;
 use crate::roster::Roster;
 use crate::sdp::{RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
 use crate::signaling::{
@@ -55,6 +59,11 @@ const DEFAULT_KEEP_ALIVE_SECONDS: u64 = 2700;
 const MIN_KEEP_ALIVE_SECONDS: u64 = 60;
 const KEEP_ALIVE_FRACTION: f64 = 0.9;
 const MIC_STREAM: &str = "microphone";
+const DATA_CHANNEL_LABEL: &str = "main-channel";
+pub const DATA_CHANNEL_ENV: &str = "CALLING_DATA_CHANNEL";
+const CAPTION_START_LIMIT: Duration = Duration::from_secs(40);
+const BLUR_TIMING_EVERY_TICKS: u32 = TICKS_PER_SECOND * 2;
+const BOT_PREFIX: &str = "28:";
 
 #[derive(Debug, Clone)]
 pub struct CallOptions {
@@ -73,6 +82,7 @@ pub struct CallOptions {
     pub wav_path: Option<PathBuf>,
     pub sdp_dump_dir: Option<PathBuf>,
     pub trace: bool,
+    pub data_channel: bool,
 }
 
 impl Default for CallOptions {
@@ -93,6 +103,7 @@ impl Default for CallOptions {
             wav_path: None,
             sdp_dump_dir: None,
             trace: std::env::var_os(crate::engine::TRACE_ENV).is_some(),
+            data_channel: data_channel_from_env(),
         }
     }
 }
@@ -185,6 +196,10 @@ pub(crate) enum Plan {
     Incoming(Box<IncomingCall>),
 }
 
+fn data_channel_from_env() -> bool {
+    !matches!(std::env::var(DATA_CHANNEL_ENV).ok().as_deref(), Some("0" | "off"))
+}
+
 pub fn keep_alive_period(seconds: Option<u64>) -> Duration {
     let seconds = seconds.unwrap_or(DEFAULT_KEEP_ALIVE_SECONDS).max(MIN_KEEP_ALIVE_SECONDS);
     Duration::from_secs_f64(seconds as f64 * KEEP_ALIVE_FRACTION)
@@ -207,11 +222,13 @@ enum PeerEvent {
     Connection(PeerConnectionState),
     Track(RtcAudioTrack),
     VideoTrack { mid: String, track: RtcVideoTrack },
+    Data(Vec<u8>),
 }
 
 struct PeerSession {
     peer: PeerConnection,
     events: mpsc::UnboundedReceiver<PeerEvent>,
+    _data_channel: Option<DataChannel>,
 }
 
 struct OfferedMedia {
@@ -334,13 +351,14 @@ impl CallEngine {
     }
 }
 
-fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &str) -> Result<PeerSession> {
+fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &str, with_data_channel: bool) -> Result<PeerSession> {
     let mut configuration = RtcConfiguration::default();
     configuration.ice_servers = vec![grant.ice_server(relay_host)];
     let peer = factory
         .create_peer_connection(configuration)
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let (sender, events) = mpsc::unbounded_channel();
+    let data_channel = with_data_channel.then(|| open_data_channel(&peer, sender.clone())).transpose()?;
     let ice_sender = sender.clone();
     peer.on_ice_connection_state_change(Some(Box::new(move |state| {
         let _ = ice_sender.send(PeerEvent::Ice(state));
@@ -358,7 +376,17 @@ fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &s
             let _ = sender.send(PeerEvent::VideoTrack { mid, track });
         }
     })));
-    Ok(PeerSession { peer, events })
+    Ok(PeerSession { peer, events, _data_channel: data_channel })
+}
+
+fn open_data_channel(peer: &PeerConnection, sender: mpsc::UnboundedSender<PeerEvent>) -> Result<DataChannel> {
+    let channel = peer
+        .create_data_channel(DATA_CHANNEL_LABEL, DataChannelInit::default())
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    channel.on_message(Some(Box::new(move |buffer| {
+        let _ = sender.send(PeerEvent::Data(buffer.data.to_vec()));
+    })));
+    Ok(channel)
 }
 
 async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, track: &RtcAudioTrack) -> Result<OfferedMedia> {
@@ -500,7 +528,8 @@ async fn drive(
     control.send(CallUpdate::Cameras(camera_devices(options.video).await));
     refresh_share_sources(control.updates(), options.video);
 
-    let mut current = open_peer(&factory, &grant, &options.relay_host)?;
+    let wants_data_channel = options.data_channel && spec.as_ref().is_some_and(CallSpec::is_meeting);
+    let mut current = open_peer(&factory, &grant, &options.relay_host, wants_data_channel)?;
     live.peers.push(current.peer.clone());
 
     let signaling = Arc::new(inner.signaling(timeline.clone()));
@@ -633,6 +662,9 @@ async fn drive(
     let mut share_sound_wanted = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
     let mut own_hand: Option<String> = None;
+    let mut depacketizer = Depacketizer::default();
+    let mut caption_flow = CaptionFlow::default();
+    let mut caption_deadline: Option<Instant> = None;
     let mut meeting_chat = conversation.chat_thread.clone();
     if let Some(thread) = &meeting_chat {
         control.send(CallUpdate::MeetingChat(thread.clone()));
@@ -768,6 +800,21 @@ async fn drive(
                                 lobby = in_lobby;
                                 control.send(CallUpdate::Lobby(lobby));
                             }
+                            if caption_flow.wanted() {
+                                run_caption_steps(&mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), control, timeline).await;
+                                if caption_flow.on() {
+                                    caption_deadline = None;
+                                }
+                            }
+                        }
+                    }
+                    Ok(CallEvent::AddParticipantFailure(_)) => {
+                        replier.reply(request_id, 200, "");
+                        if caption_flow.wanted() && roster.caption_bot().is_none() {
+                            timeline.record("caption bot failed", "addParticipantFailure");
+                            caption_flow.failed();
+                            caption_deadline = None;
+                            control.send(CallUpdate::Captions(CaptionState::Failed("The captions service could not join".into())));
                         }
                     }
                     Ok(CallEvent::ConversationUpdate(body)) => {
@@ -856,6 +903,19 @@ async fn drive(
                 PeerEvent::VideoTrack { mid, track } => {
                     timeline.record("remote video track", format!("mid {mid}"));
                     live.video_tasks.push(spawn_video_pump(track, mid, video.router().clone(), control.video.clone(), live.video_counters.clone()));
+                }
+                PeerEvent::Data(frame) => {
+                    if let Some(message) = depacketizer.push(&frame)
+                        && message.data_id == CAPTIONS_DATA_ID
+                    {
+                        for entry in parse_caption_message(&message.payload) {
+                            if caption_flow.text_arrived() {
+                                caption_deadline = None;
+                                control.send(CallUpdate::Captions(CaptionState::On));
+                            }
+                            control.send(CallUpdate::Caption(named_caption(entry, &roster)));
+                        }
+                    }
                 }
             },
             Some(event) = next_peer_event(&mut next) => match event {
@@ -1004,6 +1064,62 @@ async fn drive(
                         control.send(CallUpdate::Notice("Could not lower all hands".into()));
                     }
                 }
+                Some(CallCommand::Admit { mri }) => {
+                    let result = remote.signaling.admit(&remote.conversation, &remote.participant, target_of(&roster, &mri), &links).await;
+                    report_organizer_result(result, "admit", "Could not admit that person", control, timeline);
+                }
+                Some(CallCommand::AdmitAll) => {
+                    let result = remote.signaling.admit_all(&remote.conversation, &remote.participant, &links).await;
+                    report_organizer_result(result, "admit all", "Could not admit everyone", control, timeline);
+                }
+                Some(CallCommand::Deny { mri }) => {
+                    let result = remote.signaling.remove_participant(&remote.conversation, &remote.participant, target_of(&roster, &mri), &links).await;
+                    report_organizer_result(result, "deny", "Could not deny that person", control, timeline);
+                }
+                Some(CallCommand::RemoveParticipant { mri }) => {
+                    let result = remote.signaling.remove_participant(&remote.conversation, &remote.participant, target_of(&roster, &mri), &links).await;
+                    report_organizer_result(result, "remove participant", "Could not remove that person", control, timeline);
+                }
+                Some(CallCommand::MuteParticipant { mri }) => {
+                    let result = remote.signaling.mute_participant(&remote.conversation, &remote.participant, &mri).await;
+                    report_organizer_result(result, "mute participant", "Could not mute that person", control, timeline);
+                }
+                Some(CallCommand::MuteAll) => {
+                    let others: Vec<String> = roster
+                        .members()
+                        .iter()
+                        .filter(|member| member.mri != own_mri && !member.in_lobby && !member.mri.starts_with(BOT_PREFIX))
+                        .map(|member| member.mri.clone())
+                        .collect();
+                    let result = remote.signaling.mute_everyone(&remote.conversation, &remote.participant, &others).await;
+                    report_organizer_result(result, "mute all", "Could not mute everyone", control, timeline);
+                }
+                Some(CallCommand::Spotlight { mri }) => {
+                    let result = remote.signaling.spotlight(&remote.conversation, &remote.participant, &mri).await;
+                    report_organizer_result(result, "spotlight", "Could not spotlight that person", control, timeline);
+                }
+                Some(CallCommand::StopSpotlight { mri }) => {
+                    let state_ids: Vec<String> = roster.spotlight_of(&mri).map(|spotlight| spotlight.state_id.clone()).into_iter().collect();
+                    if !state_ids.is_empty() {
+                        let result = remote.signaling.lower_hands(&remote.conversation, &remote.participant, &state_ids).await.map(|()| 200);
+                        report_organizer_result(result, "stop spotlight", "Could not stop the spotlight", control, timeline);
+                    }
+                }
+                Some(CallCommand::SetCaptions(on)) => {
+                    caption_flow.want(on);
+                    if on {
+                        caption_deadline = Some(Instant::now() + CAPTION_START_LIMIT);
+                        control.send(CallUpdate::Captions(CaptionState::Starting));
+                    } else {
+                        caption_deadline = None;
+                        control.send(CallUpdate::Captions(CaptionState::Off));
+                    }
+                    run_caption_steps(&mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), control, timeline).await;
+                    if caption_flow.on() {
+                        caption_deadline = None;
+                    }
+                }
+                Some(CallCommand::SetBlur(on)) => local_video.set_blur(on),
                 Some(CallCommand::SendReaction(reaction)) => {
                     if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {
                         timeline.record("reaction failed", error.to_string());
@@ -1031,6 +1147,17 @@ async fn drive(
             _ = stats_tick.tick(), if remote_set => {
                 let snapshot = collect_stats(&current.peer).await;
                 ticks += 1;
+                if caption_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    caption_deadline = None;
+                    caption_flow.failed();
+                    timeline.record("captions", "did not start in time");
+                    control.send(CallUpdate::Captions(CaptionState::Failed("Captions did not start".into())));
+                }
+                if ticks.is_multiple_of(BLUR_TIMING_EVERY_TICKS)
+                    && let Some(average_ms) = local_video.blur_average_ms()
+                {
+                    control.send(CallUpdate::BlurTiming(average_ms));
+                }
                 let local_level = if muted && share_audio.is_none() { 0.0 } else { snapshot.local_level as f32 };
                 control.send(CallUpdate::Levels { local: local_level, remote: snapshot.audio_level as f32 });
                 if snapshot.selected_pair.is_some() {
@@ -1127,7 +1254,7 @@ async fn start_escalation(
     let url = acceptance_links
         .get("mediaRenegotiation")
         .ok_or_else(|| Error::Signaling("acceptance without a mediaRenegotiation link".into()))?;
-    let session = open_peer(factory, grant, &options.relay_host)?;
+    let session = open_peer(factory, grant, &options.relay_host, false)?;
     let media = create_offer(&session.peer, factory, track).await?;
     let body = renegotiation_body(&remote.participant, links, &media.signaled.sdp, media_leg_id);
     remote.signaling.post_json("POST mediaRenegotiation", url, body).await?;
@@ -1144,7 +1271,7 @@ async fn answer_on_new_peer(
     track: &RtcAudioTrack,
     teams_offer: &str,
 ) -> Result<(PeerSession, AnsweredMedia)> {
-    let session = open_peer(factory, grant, &options.relay_host)?;
+    let session = open_peer(factory, grant, &options.relay_host, false)?;
     let answered = answer_offer(&session.peer, Some(track), teams_offer).await?;
     Ok((session, answered))
 }
@@ -1245,6 +1372,77 @@ fn tell_media_descriptions(
             timeline.record("updateMediaDescriptions failed", format!("{sent}: {error}"));
         }
     });
+}
+
+fn target_of<'a>(roster: &'a Roster, mri: &'a str) -> Target<'a> {
+    let display_name = roster.members().iter().find(|member| member.mri == mri).map_or("", |member| member.display_name.as_str());
+    Target { mri, display_name }
+}
+
+fn report_organizer_result(result: Result<u16>, label: &str, notice: &str, control: &CallControl, timeline: &Timeline) {
+    if let Err(error) = &result {
+        timeline.record(format!("{label} failed"), error.to_string());
+        control.send(CallUpdate::Notice(notice.into()));
+    }
+    control.send(CallUpdate::Organizer { action: label.to_owned(), outcome: result.map_err(|error| error.to_string()) });
+}
+
+fn named_caption(mut entry: CaptionEntry, roster: &Roster) -> CaptionEntry {
+    if entry.display_name.is_empty() {
+        entry.display_name = roster.name_of(&entry.user_id).unwrap_or_default().to_owned();
+    }
+    entry
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_caption_steps(
+    flow: &mut CaptionFlow,
+    roster: &Roster,
+    remote: &RemoteCall,
+    links: &CallbackLinks,
+    meeting_chat: Option<&str>,
+    control: &CallControl,
+    timeline: &Timeline,
+) {
+    let fail = |flow: &mut CaptionFlow, reason: &str| {
+        flow.failed();
+        control.send(CallUpdate::Captions(CaptionState::Failed(reason.to_owned())));
+    };
+    loop {
+        match flow.next(roster.caption_bot()) {
+            CaptionStep::Wait => return,
+            CaptionStep::AddBot => {
+                let Some(thread) = meeting_chat else {
+                    return fail(flow, "This meeting has no chat for captions");
+                };
+                if let Err(error) = remote.signaling.add_caption_bot(&remote.conversation, &remote.participant, thread, links).await {
+                    timeline.record("caption bot failed", error.to_string());
+                    return fail(flow, "The captions service could not join");
+                }
+            }
+            CaptionStep::Start => {
+                let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone()) else { return };
+                if let Err(error) = remote.signaling.caption_command(&url, BotAction::Start, &remote.participant).await {
+                    timeline.record("caption start failed", error.to_string());
+                    return fail(flow, "Captions could not start");
+                }
+                if let Err(error) = remote.signaling.set_caption_preference(&remote.conversation, &remote.participant, true).await {
+                    timeline.record("caption preference failed", error.to_string());
+                }
+            }
+            CaptionStep::Stop => {
+                if let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone())
+                    && let Err(error) = remote.signaling.caption_command(&url, BotAction::Stop, &remote.participant).await
+                {
+                    timeline.record("caption stop failed", error.to_string());
+                }
+                if let Err(error) = remote.signaling.set_caption_preference(&remote.conversation, &remote.participant, false).await {
+                    timeline.record("caption preference failed", error.to_string());
+                }
+            }
+            CaptionStep::ReportOn => control.send(CallUpdate::Captions(CaptionState::On)),
+        }
+    }
 }
 
 fn send_receive_change(control: &CallControl, change: ReceiveChange) {

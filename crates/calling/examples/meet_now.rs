@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
-use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, EngineConfig, MeetingTarget, Reaction, ShareKind, ShareSource};
+use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, ShareKind, ShareSource};
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
 use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
@@ -20,11 +20,18 @@ const GONE_LIMIT: Duration = Duration::from_secs(90);
 const POLL: Duration = Duration::from_secs(2);
 const MEDIA_DELAY: Duration = Duration::from_secs(3);
 const THREAD_PROPERTY_RETRIES: usize = 8;
+const CAPTIONS_HOLD: Duration = Duration::from_secs(10);
+const FEATURE_LIMIT: Duration = Duration::from_secs(90);
+const VIDEO_ENV: &str = "CALLING_VIDEO";
 
 struct Arguments {
     camera: bool,
     share: bool,
     extras: bool,
+    spotlight_self: bool,
+    captions: bool,
+    mute_all: bool,
+    blur: bool,
     stop_media_after: Option<Duration>,
     hold: Duration,
     thread_out: Option<PathBuf>,
@@ -36,6 +43,10 @@ fn arguments() -> Arguments {
         camera: false,
         share: false,
         extras: false,
+        spotlight_self: false,
+        captions: false,
+        mute_all: false,
+        blur: false,
         stop_media_after: None,
         hold: Duration::from_secs(10),
         thread_out: None,
@@ -47,6 +58,13 @@ fn arguments() -> Arguments {
             "--camera" => parsed.camera = true,
             "--share" => parsed.share = true,
             "--extras" => parsed.extras = true,
+            "--spotlight-self" => parsed.spotlight_self = true,
+            "--captions" => parsed.captions = true,
+            "--mute-all" => parsed.mute_all = true,
+            "--blur" => {
+                parsed.blur = true;
+                parsed.camera = true;
+            }
             "--stop-media-after" => parsed.stop_media_after = input.next().and_then(|value| value.parse().ok()).map(Duration::from_secs),
             "--hold" => parsed.hold = Duration::from_secs(input.next().and_then(|value| value.parse().ok()).unwrap_or(10)),
             "--thread-out" => parsed.thread_out = input.next().map(PathBuf::from),
@@ -83,8 +101,48 @@ async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<Str
     (tenant, meeting.as_ref().and_then(|meeting| text(&meeting["organizerId"])))
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    if arguments().blur && std::env::var_os(VIDEO_ENV).is_none() {
+        // SAFETY: nothing else runs yet; the runtime below starts after this.
+        unsafe { std::env::set_var(VIDEO_ENV, "pattern") };
+    }
+    tokio::runtime::Runtime::new().expect("runtime").block_on(run());
+}
+
+fn http_status(reason: &str) -> String {
+    reason
+        .split("HTTP ")
+        .nth(1)
+        .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+        .filter(|digits| !digits.is_empty())
+        .map_or_else(|| "no status".to_owned(), |digits| format!("HTTP {digits}"))
+}
+
+#[derive(Default)]
+struct Features {
+    own_mri: Option<String>,
+    spotlight_seen: bool,
+    spotlight_cleared: bool,
+    captions_requested: bool,
+    captions_active: bool,
+    captions_stop_due: Option<Instant>,
+    captions_stopped: bool,
+    caption_events: usize,
+    blur_reports: usize,
+    blur_total_ms: f64,
+    deadline: Option<Instant>,
+}
+
+impl Features {
+    fn pending(&self, arguments: &Arguments) -> bool {
+        if self.deadline.is_none_or(|deadline| Instant::now() >= deadline) {
+            return false;
+        }
+        (arguments.spotlight_self && !self.spotlight_cleared) || (arguments.captions && !self.captions_stopped)
+    }
+}
+
+async fn run() {
     let arguments = arguments();
     let endpoint = std::env::var("CDP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
     let session = Session::connect(&endpoint).await.expect("browser");
@@ -159,6 +217,7 @@ async fn main() {
     let mut reactions_seen = Vec::new();
     let mut sharing_local_level: f32 = 0.0;
     let mut sharing = false;
+    let mut features = Features::default();
     let deadline = Instant::now() + CONNECT_LIMIT + LIVE_STATE_LIMIT + WAIT_FILE_LIMIT + arguments.hold + END_LIMIT;
     let mut tick = tokio::time::interval(POLL);
     while ended.is_none() && Instant::now() < deadline {
@@ -177,7 +236,44 @@ async fn main() {
                 }
                 Some(CallUpdate::Notice(text)) => println!("# notice: {text}"),
                 Some(CallUpdate::State(CallState::Ended { reason })) => ended = Some(reason),
+                Some(CallUpdate::OwnIdentity { mri }) => features.own_mri = Some(mri),
+                Some(CallUpdate::Captions(state)) => {
+                    println!("# captions state: {}", match &state {
+                        CaptionState::Off => "off".to_owned(),
+                        CaptionState::Starting => "starting".to_owned(),
+                        CaptionState::On => "on".to_owned(),
+                        CaptionState::Failed(reason) => format!("failed ({reason})"),
+                    });
+                    if state == CaptionState::On && !features.captions_active {
+                        features.captions_active = true;
+                        features.captions_stop_due = Some(Instant::now() + CAPTIONS_HOLD);
+                    }
+                    if matches!(state, CaptionState::Failed(_)) {
+                        features.captions_stopped = true;
+                    }
+                }
+                Some(CallUpdate::Caption(_)) => features.caption_events += 1,
+                Some(CallUpdate::BlurTiming(average_ms)) => {
+                    features.blur_reports += 1;
+                    features.blur_total_ms += f64::from(average_ms);
+                }
+                Some(CallUpdate::Organizer { action, outcome }) => match outcome {
+                    Ok(status) => println!("# organizer {action}: HTTP {status}"),
+                    Err(reason) => println!("# organizer {action}: failed, {}", http_status(&reason)),
+                },
                 Some(CallUpdate::Roster(entries)) => {
+                    let own_spotlit = entries.iter().any(|entry| Some(&entry.mri) == features.own_mri.as_ref() && entry.spotlight.is_some());
+                    if own_spotlit && !features.spotlight_seen {
+                        features.spotlight_seen = true;
+                        println!("# own spotlight visible in the roster");
+                        if let Some(mri) = features.own_mri.clone() {
+                            let _ = handle.commands.send(CallCommand::StopSpotlight { mri });
+                        }
+                    }
+                    if !own_spotlit && features.spotlight_seen && !features.spotlight_cleared {
+                        features.spotlight_cleared = true;
+                        println!("# own spotlight gone from the roster");
+                    }
                     let hands = entries.iter().filter(|entry| entry.hand.is_some()).count();
                     if hands != hands_seen {
                         println!("# roster hands raised: {hands}");
@@ -222,6 +318,11 @@ async fn main() {
                     let _ = handle.commands.send(CallCommand::SetCamera(false));
                     let _ = handle.commands.send(CallCommand::StopShare);
                 }
+                if features.captions_stop_due.is_some_and(|due| Instant::now() >= due) {
+                    features.captions_stop_due = None;
+                    features.captions_stopped = true;
+                    let _ = handle.commands.send(CallCommand::SetCaptions(false));
+                }
                 if hand_lower_due.is_some_and(|due| Instant::now() >= due) {
                     hand_lower_due = None;
                     let _ = handle.commands.send(CallCommand::SetHand(false));
@@ -239,6 +340,22 @@ async fn main() {
                         }
                         let _ = handle.commands.send(CallCommand::SetShareSound(true));
                         hand_lower_due = Some(Instant::now() + Duration::from_secs(6));
+                    }
+                    features.deadline = Some(Instant::now() + FEATURE_LIMIT);
+                    if arguments.spotlight_self
+                        && let Some(mri) = features.own_mri.clone()
+                    {
+                        let _ = handle.commands.send(CallCommand::Spotlight { mri });
+                    }
+                    if arguments.mute_all {
+                        let _ = handle.commands.send(CallCommand::MuteAll);
+                    }
+                    if arguments.captions {
+                        features.captions_requested = true;
+                        let _ = handle.commands.send(CallCommand::SetCaptions(true));
+                    }
+                    if arguments.blur {
+                        let _ = handle.commands.send(CallCommand::SetBlur(true));
                     }
                     if arguments.share {
                         let source = ShareSource { id: 0, kind: ShareKind::Screen, title: String::new() };
@@ -264,7 +381,7 @@ async fn main() {
                 }
                 let waiting_for_file = arguments.wait_file.as_ref().is_some_and(|path| !path.exists())
                     && join_started.elapsed() < CONNECT_LIMIT + WAIT_FILE_LIMIT;
-                if end_sent_at.is_none() && released_at.is_some_and(|at| Instant::now() >= at) && !waiting_for_file {
+                if end_sent_at.is_none() && released_at.is_some_and(|at| Instant::now() >= at) && !waiting_for_file && !features.pending(&arguments) {
                     println!("# roster before end: {roster_count:?} participant(s), inbound packets {inbound}");
                     let _ = handle.commands.send(CallCommand::EndMeeting);
                     end_sent_at = Some(Instant::now());
@@ -282,6 +399,16 @@ async fn main() {
             reactions_seen.len(),
             Reaction::ALL.len()
         );
+    }
+    if arguments.spotlight_self {
+        println!("# spotlight self: shown {}, cleared {}", features.spotlight_seen, features.spotlight_cleared);
+    }
+    if arguments.captions {
+        println!("# captions: became active {}, caption events {}", features.captions_active, features.caption_events);
+    }
+    if arguments.blur {
+        let average = if features.blur_reports == 0 { 0. } else { features.blur_total_ms / features.blur_reports as f64 };
+        println!("# blur: average processing {average:.1} ms over {} report(s)", features.blur_reports);
     }
     let gone_started = Instant::now();
     let mut gone_after = None;

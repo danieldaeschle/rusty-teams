@@ -3,10 +3,12 @@ use std::time::{Duration, Instant};
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AudioDevice, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, DeviceChoice, DeviceLists, EndReason,
-    IncomingRing, Progress, RaisedHand, Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
+    AudioDevice, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, CaptionEntry, CaptionState, DeviceChoice, DeviceLists,
+    EndReason, IncomingRing, Progress, PublishedState, RaisedHand, Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
 };
 use calling::CameraDevice;
+
+use super::demo_scene::self_view;
 use tokio::time::{interval, sleep};
 
 use super::model::{ECHO_MRI, ECHO_NAME};
@@ -29,6 +31,15 @@ const SHARE_START: Duration = Duration::from_secs(10);
 const SHARE_END: Duration = Duration::from_secs(45);
 const REACTION_EVERY_TICKS: u32 = 20;
 const DEMO_FIRST_HANDS: [(usize, u64); 2] = [(2, 1), (0, 2)];
+const DEMO_WAITING: [&str; 3] = ["Anja Vogel", "Matteo Conti", "Hannah Weiss"];
+const CAPTION_WORDS_PER_TICK: usize = 2;
+const CAPTION_HOLD_TICKS: usize = 14;
+const DEMO_CAPTIONS: [(usize, &str); 4] = [
+    (0, "Thanks everyone for joining, let us start with the release status."),
+    (1, "The build is green and the new call controls are ready for review."),
+    (2, "Can we admit the two people from the lobby before we begin?"),
+    (0, "Yes, I am letting them in now and we will share the plan on screen."),
+];
 const GUEST_PHASE: u32 = 37;
 const SELF_PHASE: u32 = 211;
 pub const DEMO_OWN_MRI: &str = "8:orgid:demo-me";
@@ -53,7 +64,7 @@ pub type Person = (String, String);
 pub enum DemoCall {
     Test,
     People(Vec<Person>),
-    Meeting { guests: Vec<Person>, lobby: bool },
+    Meeting { guests: Vec<Person>, lobby: bool, organizer: bool },
     Incoming(Person),
 }
 
@@ -132,6 +143,8 @@ fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
             has_video: index < DEMO_CAMERAS,
             sharing: false,
             hand: None,
+            spotlight: None,
+            organizer: false,
         })
         .collect()
 }
@@ -143,7 +156,7 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
     let (people, lobby) = match &script {
         DemoCall::Test => (vec![(ECHO_MRI.to_owned(), ECHO_NAME.to_owned())], false),
         DemoCall::People(callees) => (callees.clone(), false),
-        DemoCall::Meeting { guests, lobby } => (guests.clone(), *lobby),
+        DemoCall::Meeting { guests, lobby, .. } => (guests.clone(), *lobby),
         DemoCall::Incoming(caller) => (vec![caller.clone()], false),
     };
     if !ring_until_answered(&mut control, &script).await {
@@ -172,6 +185,10 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
         control.send(CallUpdate::Lobby(false));
     }
     let mut roster = roster_of(&people);
+    if matches!(script, DemoCall::Meeting { organizer: true, .. }) {
+        roster.push(demo_organizer());
+        roster.extend(DEMO_WAITING.iter().enumerate().map(|(index, name)| demo_waiting(index, name)));
+    }
     if matches!(script, DemoCall::Meeting { .. }) {
         for (index, rank) in DEMO_FIRST_HANDS {
             if let Some(entry) = roster.get_mut(index) {
@@ -205,9 +222,9 @@ async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bo
     true
 }
 
-fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, sharing: bool, sharer: Option<&str>, camera_on: bool) {
-    if camera_on {
-        control.video.publish(VideoKey::LocalCamera, bgra_from_i420(pattern_frame(PatternKind::Camera, tick + SELF_PHASE)));
+fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, sharing: bool, sharer: Option<&str>, camera: Option<bool>) {
+    if let Some(blur) = camera {
+        control.video.publish(VideoKey::LocalCamera, self_view((tick + SELF_PHASE) as usize, blur));
     }
     for (index, (mri, _)) in people.iter().take(DEMO_CAMERAS).enumerate() {
         let frame = pattern_frame(PatternKind::Camera, tick + index as u32 * GUEST_PHASE);
@@ -223,6 +240,9 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
     let mut video_ticks = 0u32;
     let mut sharing = false;
     let mut camera_on = false;
+    let mut blur = false;
+    let mut captions_on = false;
+    let mut caption_ticks = 0usize;
     let mut video_tick = interval(VIDEO_PERIOD);
     let mut muted = false;
     let mut input = DeviceChoice::SystemDefault;
@@ -239,7 +259,7 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
                     sharing = share_now;
                     control.send(CallUpdate::ScreenShare(sharer.clone().filter(|_| sharing)));
                 }
-                publish_demo_video(&control, &people, video_ticks, sharing, sharer.as_deref(), camera_on);
+                publish_demo_video(&control, &people, video_ticks, sharing, sharer.as_deref(), camera_on.then_some(blur));
                 video_ticks += 1;
             }
             _ = tick.tick() => {
@@ -258,6 +278,12 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
                 {
                     let reaction = Reaction::ALL[(ticks / REACTION_EVERY_TICKS) as usize % Reaction::ALL.len()];
                     control.send(CallUpdate::Reaction { mri: mri.clone(), reaction });
+                }
+                if captions_on {
+                    if let Some(entry) = demo_caption(&people, caption_ticks) {
+                        control.send(CallUpdate::Caption(entry));
+                    }
+                    caption_ticks += 1;
                 }
                 ticks += 1;
             }
@@ -303,6 +329,43 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
                 Some(CallCommand::SendReaction(reaction)) => {
                     control.send(CallUpdate::Reaction { mri: DEMO_OWN_MRI.to_owned(), reaction });
                 }
+                Some(CallCommand::Admit { mri }) => {
+                    roster.iter_mut().filter(|entry| entry.mri == mri).for_each(|entry| entry.in_lobby = false);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::AdmitAll) => {
+                    roster.iter_mut().for_each(|entry| entry.in_lobby = false);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::Deny { mri } | CallCommand::RemoveParticipant { mri }) => {
+                    roster.retain(|entry| entry.mri != mri);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::MuteParticipant { mri }) => {
+                    roster.iter_mut().filter(|entry| entry.mri == mri).for_each(|entry| entry.muted = true);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::MuteAll) => {
+                    roster.iter_mut().filter(|entry| entry.mri != DEMO_OWN_MRI).for_each(|entry| entry.muted = true);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::Spotlight { mri }) => {
+                    let rank = roster.iter().filter_map(|entry| entry.spotlight.as_ref().map(|state| state.rank)).max().unwrap_or(0) + 1;
+                    if let Some(entry) = roster.iter_mut().find(|entry| entry.mri == mri) {
+                        entry.spotlight = Some(demo_spotlight(rank));
+                    }
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::StopSpotlight { mri }) => {
+                    roster.iter_mut().filter(|entry| entry.mri == mri).for_each(|entry| entry.spotlight = None);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::SetCaptions(on)) => {
+                    captions_on = on;
+                    caption_ticks = 0;
+                    control.send(CallUpdate::Captions(if on { CaptionState::On } else { CaptionState::Off }));
+                }
+                Some(CallCommand::SetBlur(on)) => blur = on,
                 Some(CallCommand::RefreshShareSources) => control.send(CallUpdate::ShareSources(demo_share_sources())),
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);
@@ -311,6 +374,54 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut r
             },
         }
     }
+}
+
+fn demo_organizer() -> RosterEntry {
+    RosterEntry {
+        mri: DEMO_OWN_MRI.to_owned(),
+        display_name: "You".to_owned(),
+        muted: false,
+        in_lobby: false,
+        has_video: false,
+        sharing: false,
+        hand: None,
+        spotlight: None,
+        organizer: true,
+    }
+}
+
+fn demo_waiting(index: usize, name: &str) -> RosterEntry {
+    RosterEntry {
+        mri: format!("8:orgid:demo-waiting-{index}"),
+        display_name: name.to_owned(),
+        muted: false,
+        in_lobby: true,
+        has_video: false,
+        sharing: false,
+        hand: None,
+        spotlight: None,
+        organizer: false,
+    }
+}
+
+fn demo_spotlight(rank: u64) -> PublishedState {
+    PublishedState { state_id: format!("demo-spotlight-{rank}"), rank }
+}
+
+fn demo_caption(people: &[Person], tick: usize) -> Option<CaptionEntry> {
+    let line = tick / (CAPTION_HOLD_TICKS * 2) % DEMO_CAPTIONS.len();
+    let within = tick % (CAPTION_HOLD_TICKS * 2);
+    let (speaker, text) = DEMO_CAPTIONS[line];
+    let words: Vec<&str> = text.split(' ').collect();
+    let shown = ((within + 1) * CAPTION_WORDS_PER_TICK).min(words.len());
+    let (mri, name) = people.get(speaker % people.len().max(1))?;
+    Some(CaptionEntry {
+        id: format!("demo-caption-{}", tick / (CAPTION_HOLD_TICKS * 2)),
+        user_id: mri.clone(),
+        display_name: name.clone(),
+        text: words[..shown].join(" "),
+        is_final: shown == words.len(),
+    })
 }
 
 fn demo_hand(rank: u64) -> RaisedHand {
@@ -336,6 +447,8 @@ fn set_demo_hand(roster: &mut Vec<RosterEntry>, mri: &str, raised: bool) {
             has_video: false,
             sharing: false,
             hand: Some(demo_hand(next_rank)),
+            spotlight: None,
+            organizer: false,
         }),
     }
 }

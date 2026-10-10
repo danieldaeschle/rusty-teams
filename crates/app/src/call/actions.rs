@@ -7,7 +7,7 @@ use calling::{
 use gpui_kit::*;
 
 use super::demo::{DemoCall, demo_caller, demo_guests, demo_ring, start_demo_call};
-use super::model::{ActiveCall, CallModel, ended_notice};
+use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
 use super::pictures::CallPictures;
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
@@ -28,9 +28,14 @@ const DEMO_SMALL_MEETING: usize = 4;
 const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
+pub const BACKGROUND_BLUR_META_KEY: &str = "call_background_blur";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
     store.meta(SHARE_SOUND_META_KEY).ok().flatten().as_deref() == Some("1")
+}
+
+pub fn load_background_blur(store: &store::Store) -> bool {
+    store.meta(BACKGROUND_BLUR_META_KEY).ok().flatten().as_deref() == Some("1")
 }
 
 fn now_unix() -> i64 {
@@ -105,6 +110,7 @@ impl AppState {
         let demo = DemoCall::Meeting {
             guests: demo_guests(guests),
             lobby: conversation_id == DEMO_LOBBY_MEETING,
+            organizer: conversation_id != DEMO_LOBBY_MEETING,
         };
         let Some(handle) = self.place_call(CallSpec::Meeting(target), demo, cx) else {
             return;
@@ -156,6 +162,12 @@ impl AppState {
         });
         if self.call_share_sound {
             self.send_call_command(CallCommand::SetShareSound(true));
+        }
+        if self.call_background_blur {
+            self.send_call_command(CallCommand::SetBlur(true));
+            if let Some(call) = self.call.as_mut() {
+                call.model.blur = true;
+            }
         }
         self.new_chat = false;
         self.follow_call(call_id, updates, cx);
@@ -384,6 +396,75 @@ impl AppState {
         self.call_share_sound = on;
         let _ = self.store.set_meta(SHARE_SOUND_META_KEY, if on { "1" } else { "0" });
         self.send_call_command(CallCommand::SetShareSound(on));
+        cx.notify();
+    }
+
+    pub fn admit_call_guest(&mut self, mri: String, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_admit()) {
+            self.send_call_command(CallCommand::Admit { mri });
+        }
+    }
+
+    pub fn admit_all_call_guests(&mut self, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_admit() && !call.model.lobby_guests().is_empty()) {
+            self.send_call_command(CallCommand::AdmitAll);
+        }
+    }
+
+    pub fn deny_call_guest(&mut self, mri: String, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_admit()) {
+            self.send_call_command(CallCommand::Deny { mri });
+        }
+    }
+
+    pub fn mute_call_participant(&mut self, mri: String, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_manage()) {
+            self.send_call_command(CallCommand::MuteParticipant { mri });
+        }
+    }
+
+    pub fn mute_all_call(&mut self, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_manage()) {
+            self.send_call_command(CallCommand::MuteAll);
+        }
+    }
+
+    pub fn remove_call_participant(&mut self, mri: String, _cx: &mut Context<Self>) {
+        if self.call.as_ref().is_some_and(|call| call.model.can_manage()) {
+            self.send_call_command(CallCommand::RemoveParticipant { mri });
+        }
+    }
+
+    pub fn toggle_call_spotlight(&mut self, mri: String, _cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref().filter(|call| call.model.can_manage() && call.model.is_active()) else {
+            return;
+        };
+        let command = if call.model.is_spotlighted(&mri) { CallCommand::StopSpotlight { mri } } else { CallCommand::Spotlight { mri } };
+        self.send_call_command(command);
+    }
+
+    pub fn toggle_call_pin(&mut self, mri: &str, cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.model.toggle_pin(mri);
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_call_captions(&mut self, _cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref().filter(|call| call.model.is_active() && call.model.kind == CallKind::Meeting) else {
+            return;
+        };
+        let on = !call.model.captions_on();
+        self.send_call_command(CallCommand::SetCaptions(on));
+    }
+
+    pub fn set_call_background_blur(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.call_background_blur = on;
+        let _ = self.store.set_meta(BACKGROUND_BLUR_META_KEY, if on { "1" } else { "0" });
+        if let Some(call) = self.call.as_mut() {
+            call.model.blur = on;
+        }
+        self.send_call_command(CallCommand::SetBlur(on));
         cx.notify();
     }
 
@@ -717,6 +798,8 @@ mod tests {
                     has_video: false,
                     sharing: false,
                     hand: Some(calling::RaisedHand { state_id: "s".into(), rank: 1 }),
+                    spotlight: None,
+                    organizer: false,
                 }]), cx);
                 state.lower_call_hand("8:orgid:a".into(), cx);
                 state.lower_all_call_hands(cx);
@@ -724,6 +807,105 @@ mod tests {
         });
         assert_eq!(organizer_control.try_recv_command(), Some(CallCommand::LowerHand { mri: "8:orgid:a".into() }));
         assert_eq!(organizer_control.try_recv_command(), Some(CallCommand::LowerAllHands));
+    }
+
+    fn guest(mri: &str, name: &str, in_lobby: bool, spotlit: bool) -> calling::RosterEntry {
+        calling::RosterEntry {
+            mri: mri.into(),
+            display_name: name.into(),
+            muted: false,
+            in_lobby,
+            has_video: false,
+            sharing: false,
+            hand: None,
+            spotlight: spotlit.then(|| calling::Spotlight { state_id: "sp".into(), rank: 1 }),
+            organizer: false,
+        }
+    }
+
+    #[gpui_kit::test]
+    fn organizer_controls_become_commands_and_attendees_send_nothing(cx: &mut TestAppContext) {
+        let (attendee, mut attendee_control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            attendee.update(cx, |state, cx| {
+                state.admit_call_guest("8:orgid:g".into(), cx);
+                state.admit_all_call_guests(cx);
+                state.deny_call_guest("8:orgid:g".into(), cx);
+                state.mute_call_participant("8:orgid:a".into(), cx);
+                state.mute_all_call(cx);
+                state.remove_call_participant("8:orgid:a".into(), cx);
+                state.toggle_call_spotlight("8:orgid:a".into(), cx);
+            })
+        });
+        assert_eq!(attendee_control.try_recv_command(), None);
+        let (organizer, mut control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| {
+            organizer.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::Roster(vec![guest("8:orgid:a", "Ana", false, false), guest("8:orgid:g", "Gast", true, false)]), cx);
+                state.admit_call_guest("8:orgid:g".into(), cx);
+                state.admit_all_call_guests(cx);
+                state.deny_call_guest("8:orgid:g".into(), cx);
+                state.mute_call_participant("8:orgid:a".into(), cx);
+                state.mute_all_call(cx);
+                state.remove_call_participant("8:orgid:a".into(), cx);
+                state.toggle_call_spotlight("8:orgid:a".into(), cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Admit { mri: "8:orgid:g".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::AdmitAll));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Deny { mri: "8:orgid:g".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::MuteParticipant { mri: "8:orgid:a".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::MuteAll));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::RemoveParticipant { mri: "8:orgid:a".into() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::Spotlight { mri: "8:orgid:a".into() }));
+    }
+
+    #[gpui_kit::test]
+    fn the_spotlight_button_stops_an_existing_spotlight_and_pinning_stays_local(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::Roster(vec![guest("8:orgid:a", "Ana", false, true)]), cx);
+                state.toggle_call_spotlight("8:orgid:a".into(), cx);
+                state.toggle_call_pin("8:orgid:a", cx);
+                assert_eq!(state.call.as_ref().unwrap().model.pinned.as_deref(), Some("8:orgid:a"));
+                state.toggle_call_pin("8:orgid:a", cx);
+                assert_eq!(state.call.as_ref().unwrap().model.pinned, None);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::StopSpotlight { mri: "8:orgid:a".into() }));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn captions_toggle_between_on_and_off_and_only_in_meetings(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_call_captions(cx);
+                state.apply_call_update(7, CallUpdate::Captions(calling::CaptionState::On), cx);
+                state.toggle_call_captions(cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptions(true)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptions(false)));
+        let app = app_with_call(cx);
+        cx.update(|cx| app.update(cx, |state, cx| state.toggle_call_captions(cx)));
+    }
+
+    #[gpui_kit::test]
+    fn the_background_choice_is_remembered_and_sent_to_the_call(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        let store = cx.update(|cx| app.read(cx).store.clone());
+        assert!(!cx.update(|cx| app.read(cx).call_background_blur));
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background_blur(true, cx)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetBlur(true)));
+        assert!(cx.update(|cx| app.read(cx).call.as_ref().unwrap().model.blur));
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert!(cx.update(|cx| reopened.read(cx).call_background_blur));
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_background_blur(false, cx)));
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert!(!cx.update(|cx| reopened.read(cx).call_background_blur));
     }
 
     #[gpui_kit::test]

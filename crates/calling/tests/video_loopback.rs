@@ -59,7 +59,7 @@ async fn a_generated_h264_stream_survives_the_pipeline_to_bgra_pictures() {
     transceiver
         .set_codec_preferences(h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs))
         .unwrap();
-    let pattern = spawn_pattern(LocalSink::new(source, None), PatternKind::Camera);
+    let pattern = spawn_pattern(LocalSink::new(source, None), PatternKind::Camera, None);
 
     let offer = sender.create_offer(OfferOptions::default()).await.unwrap();
     sender.set_local_description(offer.clone()).await.unwrap();

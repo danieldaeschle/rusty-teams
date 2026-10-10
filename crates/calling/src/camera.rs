@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use libwebrtc::native::yuv_helper::abgr_to_i420;
@@ -7,6 +8,7 @@ use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatTyp
 use nokhwa::{Camera, query};
 use std::sync::atomic::Ordering;
 
+use crate::blur::{BlurSettings, BlurStage};
 use crate::capture::Capture;
 use crate::devices::{DeviceChoice, DeviceEntry};
 use crate::error::{Error, Result};
@@ -41,7 +43,7 @@ fn camera_index(choice: &DeviceChoice) -> CameraIndex {
     }
 }
 
-fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
+pub(crate) fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
@@ -62,6 +64,7 @@ fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
 
 pub fn start_camera(
     choice: &DeviceChoice,
+    blur: Arc<BlurSettings>,
     mut deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
@@ -72,6 +75,7 @@ pub fn start_camera(
             Ok(camera) => camera,
             Err(error) => return failed(error.to_string()),
         };
+        let mut blur_stage = BlurStage::new(blur);
         while !stop.load(Ordering::SeqCst) {
             let Ok(frame) = camera.frame() else {
                 std::thread::sleep(RETRY_PAUSE);
@@ -80,7 +84,9 @@ pub fn start_camera(
             let Ok(decoded) = frame.decode_image::<RgbAFormat>() else { continue };
             let (width, height) = (decoded.width(), decoded.height());
             if width >= 2 && height >= 2 && width % 2 == 0 && height % 2 == 0 {
-                deliver(i420_from_rgba(decoded.as_raw(), width, height));
+                let mut rgba = decoded.into_raw();
+                blur_stage.apply_rgba(&mut rgba, width as usize, height as usize);
+                deliver(i420_from_rgba(&rgba, width, height));
             }
         }
         let _ = camera.stop_stream();

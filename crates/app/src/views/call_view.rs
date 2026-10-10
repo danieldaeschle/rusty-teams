@@ -6,7 +6,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
     popover::Popover,
     switch::Switch,
     tooltip::Tooltip,
@@ -16,6 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_organizer::{camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu};
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
 use super::widgets::{count_badge, icon, symbol};
@@ -29,9 +30,9 @@ use crate::theme;
 const HEADER_HEIGHT: f32 = 60.;
 const RING_WIDTH: f32 = 3.;
 const RING_GAP: f32 = 4.;
-const CONTROL_SIZE: f32 = 44.;
+pub(super) const CONTROL_SIZE: f32 = 44.;
 const CONTROL_ICON: f32 = 20.;
-const MENU_WIDTH: f32 = 280.;
+pub(super) const MENU_WIDTH: f32 = 280.;
 const PULSE_PERIOD: Duration = Duration::from_millis(1400);
 const DISABLED_OPACITY: f32 = 0.4;
 const TILE_GAP: f32 = 20.;
@@ -49,7 +50,7 @@ pub const NO_MICROPHONE_HINT: &str = "No microphone found";
 pub const NO_CAMERA_HINT: &str = "No camera found";
 pub const NO_SHARE_HINT: &str = "Sharing starts once the call is connected";
 pub const NO_WINDOWS_HINT: &str = "No windows found";
-const BANNER_HEIGHT: f32 = 40.;
+pub(super) const BANNER_HEIGHT: f32 = 40.;
 const MAX_WINDOW_ITEMS: usize = 12;
 pub const LOBBY_TEXT: &str = "Waiting in the lobby...";
 pub const CHAT_PANEL_WIDTH: f32 = 320.;
@@ -71,13 +72,12 @@ pub fn reaction_glyph(reaction: Reaction) -> String {
 struct TileExtras {
     hand: Option<usize>,
     reaction: Option<(Reaction, u64)>,
+    spotlight: bool,
+    pinned: bool,
 }
 
 fn hand_badge(position: usize) -> Div {
     h_flex()
-        .absolute()
-        .top(px(10.))
-        .left(px(10.))
         .h(px(24.))
         .px(px(8.))
         .gap(px(4.))
@@ -117,9 +117,19 @@ fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
 }
 
 fn tile_overlays(extras: &TileExtras) -> Vec<AnyElement> {
-    let hand = extras.hand.map(|position| hand_badge(position).into_any_element());
+    let badges = (extras.hand.is_some() || extras.spotlight || extras.pinned).then(|| {
+        h_flex()
+            .absolute()
+            .top(px(10.))
+            .left(px(10.))
+            .gap(px(6.))
+            .children(extras.hand.map(hand_badge))
+            .when(extras.spotlight, |row| row.child(spotlight_chip()))
+            .when(extras.pinned, |row| row.child(pin_chip()))
+            .into_any_element()
+    });
     let reaction = extras.reaction.map(|(reaction, serial)| reaction_chip(reaction, serial));
-    hand.into_iter().chain(reaction).collect()
+    badges.into_iter().chain(reaction).collect()
 }
 
 pub fn status_line(model: &CallModel, now: Instant) -> (String, Hsla) {
@@ -296,7 +306,7 @@ fn control_shell(id: &'static str, background: Hsla) -> Stateful<Div> {
         .hover(|button| button.opacity(0.85))
 }
 
-fn round_control(id: &'static str, glyph: IconName, background: Hsla, foreground: Hsla) -> Stateful<Div> {
+pub(super) fn round_control(id: &'static str, glyph: IconName, background: Hsla, foreground: Hsla) -> Stateful<Div> {
     control_shell(id, background).child(icon(glyph, CONTROL_ICON, foreground))
 }
 
@@ -612,7 +622,7 @@ fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
         })
 }
 
-fn device_items(
+pub(super) fn device_items(
     entries: Vec<DeviceEntry>,
     selected: &calling::DeviceChoice,
     pick: impl Fn(calling::DeviceChoice, &mut App) + Clone + 'static,
@@ -652,16 +662,6 @@ fn devices_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> 
     for item in outputs {
         popup = popup.item(item);
     }
-    if model.can_use_camera() {
-        let camera_app = app.clone();
-        let cameras = device_items(calling::camera_entries(&model.cameras), &model.camera, move |choice, cx| {
-            camera_app.update(cx, |state, cx| state.select_call_camera(choice, cx));
-        });
-        popup = popup.separator().item(PopupMenuItem::label("Camera"));
-        for item in cameras {
-            popup = popup.item(item);
-        }
-    }
     popup
 }
 
@@ -688,23 +688,11 @@ fn person_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, remo
     let extras = TileExtras {
         hand: remote.hand.map(|rank| model.hand_position(rank)),
         reaction: model.chip_of(&remote.mri, now).map(|chip| (chip.reaction, chip.serial)),
+        spotlight: remote.spotlight.is_some(),
+        pinned: model.is_pinned(&remote.mri),
     };
     let element = person_tile_body(state, model, remote, size, now, &extras);
-    if !(model.can_lower_hands() && remote.hand.is_some()) {
-        return element;
-    }
-    let (app, mri) = (app.clone(), remote.mri.clone());
-    div()
-        .id(SharedString::from(format!("call-tile-{}", remote.mri)))
-        .flex_none()
-        .child(element)
-        .context_menu(move |popup, _, _| {
-            let (app, mri) = (app.clone(), mri.clone());
-            popup.item(PopupMenuItem::new("Lower hand").on_click(move |_, _, cx| {
-                app.update(cx, |state, cx| state.lower_call_hand(mri.clone(), cx));
-            }))
-        })
-        .into_any_element()
+    with_tile_menu(app, model, &remote.mri, &remote.name, false, element)
 }
 
 fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: TileSize, now: Instant, extras: &TileExtras) -> AnyElement {
@@ -726,18 +714,29 @@ fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: Ti
     tile(size, avatar, &remote.name, model.tile_speaking(remote), remote.muted, caption, extras).into_any_element()
 }
 
-fn own_tile(state: &AppState, model: &CallModel, size: TileSize, now: Instant) -> AnyElement {
+fn own_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: TileSize, now: Instant) -> AnyElement {
+    let own_mri = model.own_mri.clone().unwrap_or_default();
     let extras = TileExtras {
         hand: model.own_hand.map(|rank| model.hand_position(rank)),
         reaction: model.own_chip(now).map(|chip| (chip.reaction, chip.serial)),
+        spotlight: model.own_spotlight.is_some(),
+        pinned: model.is_pinned(&own_mri),
     };
+    let element = own_tile_body(state, model, size, now, &extras);
+    if own_mri.is_empty() {
+        return element;
+    }
+    with_tile_menu(app, model, &own_mri, "You", true, element)
+}
+
+fn own_tile_body(state: &AppState, model: &CallModel, size: TileSize, now: Instant, extras: &TileExtras) -> AnyElement {
     let me = state.directory.me.as_ref();
     let self_view = state
         .call
         .as_ref()
         .and_then(|call| call.pictures.live(&VideoKey::LocalCamera, now));
     if let Some(image) = self_view {
-        return video_tile(size, image, "You", model.local_speaking, model.muted, &extras).into_any_element();
+        return video_tile(size, image, "You", model.local_speaking, model.muted, extras).into_any_element();
     }
     let avatar = person_avatar(
         &state.directory,
@@ -745,7 +744,7 @@ fn own_tile(state: &AppState, model: &CallModel, size: TileSize, now: Instant) -
         me.map_or("You", |person| person.display_name.as_str()),
         size.avatar,
     );
-    tile(size, avatar, "You", model.local_speaking, model.muted, None, &extras).into_any_element()
+    tile(size, avatar, "You", model.local_speaking, model.muted, None, extras).into_any_element()
 }
 
 fn remote_tiles(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: TileSize, hidden_cap: GridLayout, now: Instant) -> Vec<AnyElement> {
@@ -761,14 +760,17 @@ fn remote_tiles(app: &Entity<AppState>, state: &AppState, model: &CallModel, siz
     cells
 }
 
-fn people_strip(app: &Entity<AppState>, state: &AppState, model: &CallModel, now: Instant) -> Stateful<Div> {
+fn people_strip(app: &Entity<AppState>, state: &AppState, model: &CallModel, now: Instant, focused: Option<&str>) -> Stateful<Div> {
     let mut cells: Vec<AnyElement> = model
         .strip_tiles()
         .into_iter()
+        .filter(|remote| Some(remote.mri.as_str()) != focused)
         .map(|remote| person_tile(app, state, model, remote, STRIP_TILE, now))
         .collect();
-    let own_index = model.own_cell_index(cells.len());
-    cells.insert(own_index, own_tile(state, model, STRIP_TILE, now));
+    if focused.is_none() || focused != model.own_mri.as_deref() {
+        let own_index = model.own_cell_index(cells.len());
+        cells.insert(own_index, own_tile(app, state, model, STRIP_TILE, now));
+    }
     v_flex()
         .id("call-strip")
         .flex_none()
@@ -810,8 +812,10 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
     let size = tile_size(cells_for_size);
     let mut cells = remote_tiles(app, state, model, size, layout, now);
     let own_index = model.own_cell_index(cells.len());
-    cells.insert(own_index, own_tile(state, model, size, now));
-    let stage = render_stage(app, state, false);
+    cells.insert(own_index, own_tile(app, state, model, size, now));
+    let focus = model.focus().filter(|_| model.screen_sharer.is_none());
+    let stage = render_stage(app, state, false).or_else(|| focus.as_ref().and_then(|focus| render_focus_stage(app, state, focus, now)));
+    let focused = focus.as_ref().map(|focus| focus.mri.as_str());
 
     let controls = h_flex()
         .w_full()
@@ -823,21 +827,24 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
         .border_t_1()
         .border_color(theme::border())
         .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
-        .child(camera_button(app, model))
+        .child(h_flex().gap(px(2.)).items_center().child(camera_button(app, model)).children(camera_menu_button(app, model)))
         .child(share_button(app, model, state.call_share_sound))
         .child(hand_button(app, model))
         .child(reactions_button(app, model))
         .child(devices_button(app, model))
+        .children(more_button(app, model))
         .when(call.chat_thread().is_some(), |row| row.child(chat_button(app, call.chat_open, state.call_chat_unread())))
         .child(leave_button(app, model, "call-leave", false))
         .when(model.kind == CallKind::Meeting, |row| row.child(leave_menu(app, model)));
 
     let column = v_flex()
+            .relative()
             .flex_1()
             .min_w_0()
             .h_full()
             .bg(theme::background())
             .child(header)
+            .children(lobby_banner(app, model))
             .children(sharing_banner(app, model, state.call_share_sound))
             .child(match stage {
                 Some(stage) => h_flex()
@@ -847,7 +854,7 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
                     .gap(px(TILE_GAP))
                     .items_center()
                     .child(stage)
-                    .child(people_strip(app, state, model, now))
+                    .child(people_strip(app, state, model, now, focused))
                     .into_any_element(),
                 None => h_flex()
                     .id("call-grid")
@@ -863,7 +870,9 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
                     .children(cells)
                     .into_any_element(),
             })
-            .child(controls);
+            .child(controls)
+            .children(captions_overlay(model, now))
+            .children(captions_hint_chip(model));
     Some(
         h_flex()
             .flex_1()

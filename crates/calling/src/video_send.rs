@@ -11,6 +11,7 @@ use libwebrtc::video_source::native::NativeVideoSource;
 use libwebrtc::video_track::RtcVideoTrack;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::blur::{BlurSettings, BlurStage};
 use crate::camera::start_camera;
 use crate::capture::Capture;
 use crate::control::CallUpdate;
@@ -99,6 +100,7 @@ pub struct LocalVideo {
     camera: Outgoing,
     screen: Outgoing,
     lines: Option<VideoLines>,
+    blur: Arc<BlurSettings>,
 }
 
 impl LocalVideo {
@@ -110,7 +112,16 @@ impl LocalVideo {
             camera: Outgoing::new(factory, CAMERA_LABEL, PatternKind::Camera, false),
             screen: Outgoing::new(factory, SCREEN_LABEL, PatternKind::Screen, true),
             lines: None,
+            blur: Arc::new(BlurSettings::default()),
         }
+    }
+
+    pub fn set_blur(&self, enabled: bool) {
+        self.blur.set_enabled(enabled);
+    }
+
+    pub fn blur_average_ms(&self) -> Option<f32> {
+        (self.camera_on() && self.blur.enabled()).then(|| self.blur.average_ms())
     }
 
     pub fn is_available(&self) -> bool {
@@ -170,8 +181,8 @@ impl LocalVideo {
         self.camera.capture = None;
         let mut sink = self.sink(&self.camera, VideoKey::LocalCamera);
         let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera)),
-            _ => start_camera(choice, move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
+            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(BlurStage::new(self.blur.clone())))),
+            _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
         };
         Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
         self.camera.capture = Some(capture);
@@ -194,7 +205,7 @@ impl LocalVideo {
         self.screen.capture = None;
         let mut sink = self.sink(&self.screen, VideoKey::LocalScreen);
         let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen)),
+            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
             _ => start_screen_capture(source.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
         };
         Self::begin_sending(&lines.share.sender(), &self.screen.track)?;

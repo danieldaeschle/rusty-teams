@@ -2,6 +2,7 @@ use calling::devices::shared_factory;
 use calling::sdp::{LineRole, parse, stream_lines, to_teams_offer};
 use calling::video_layout::{SlotTable, add_video_lines, offer_plan};
 use libwebrtc::audio_source::native::NativeAudioSource;
+use libwebrtc::data_channel::DataChannelInit;
 use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::prelude::*;
 use libwebrtc::rtp_transceiver::{RtpTransceiverDirection, RtpTransceiverInit};
@@ -15,8 +16,13 @@ fn counter() -> impl FnMut() -> u32 {
 }
 
 async fn browser_offer() -> String {
+    offer_with(false).await
+}
+
+async fn offer_with(data_channel: bool) -> String {
     let factory = shared_factory();
     let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
+    let _channel = data_channel.then(|| peer.create_data_channel("main-channel", DataChannelInit::default()).unwrap());
     let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 100);
     let track = factory.create_audio_track("microphone", source);
     peer.add_transceiver(
@@ -37,6 +43,20 @@ async fn browser_offer() -> String {
     .await
     .unwrap()
     .to_string()
+}
+
+#[tokio::test]
+async fn the_caption_data_channel_adds_one_x_data_line_after_the_video_lines() {
+    let offer = to_teams_offer(&offer_with(true).await, &offer_plan(), &mut counter()).unwrap();
+    let parsed = parse(&offer.sdp).unwrap();
+    let kinds: Vec<(&str, &str)> = parsed.media.iter().map(|media| (media.kind.as_str(), media.mid().unwrap_or_default())).collect();
+    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds[7], ("x-data", "7"));
+    assert_eq!(&kinds[..7].iter().map(|(_, mid)| *mid).collect::<Vec<_>>(), &["0", "1", "2", "3", "4", "5", "6"]);
+    assert_eq!(parsed.media[7].value("x-data-protocol"), Some("sctp"));
+    assert_eq!(offer.lines.iter().filter(|line| line.role == LineRole::Data).count(), 1);
+    let group = parsed.session.attributes.iter().find(|attribute| attribute.name == "group").and_then(|attribute| attribute.value.clone());
+    assert_eq!(group.as_deref(), Some("BUNDLE 0 1 2 3 4 5 6 7"));
 }
 
 #[tokio::test]

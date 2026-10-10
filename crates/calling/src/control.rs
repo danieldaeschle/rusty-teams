@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
+use crate::captions::{CaptionEntry, CaptionState};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::mute::MuteCommand;
@@ -28,6 +29,16 @@ pub enum CallCommand {
     SetHand(bool),
     LowerHand { mri: String },
     LowerAllHands,
+    Admit { mri: String },
+    AdmitAll,
+    Deny { mri: String },
+    MuteParticipant { mri: String },
+    MuteAll,
+    Spotlight { mri: String },
+    StopSpotlight { mri: String },
+    RemoveParticipant { mri: String },
+    SetCaptions(bool),
+    SetBlur(bool),
     SendReaction(Reaction),
     Hangup,
     EndMeeting,
@@ -61,6 +72,10 @@ pub enum CallUpdate {
     ShareSources(Vec<ShareSource>),
     ShareSound(bool),
     Reaction { mri: String, reaction: Reaction },
+    Captions(CaptionState),
+    Caption(CaptionEntry),
+    BlurTiming(f32),
+    Organizer { action: String, outcome: std::result::Result<u16, String> },
     MeetingChat(String),
     Notice(String),
 }

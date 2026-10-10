@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
-use session::{ApiResponse, GRAPH, Method, Request, Scope, Session};
+use session::{ApiResponse, App, GRAPH, Method, Request, SPACES, Scope, Session};
 
+use crate::captions::{self, BotAction};
 use crate::error::{Error, Result};
+use crate::organizer::{self, Target};
 use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
 use crate::relay::ic3_scope;
 use crate::timeline::Timeline;
@@ -20,6 +22,7 @@ const ENDPOINT_CAPABILITIES: u64 = 73463;
 const CLIENT_ENDPOINT_CAPABILITIES: u64 = 47150826;
 const ALLOWED_HOST_SUFFIXES: [&str; 2] = [".flightproxy.teams.microsoft.com", ".teams.microsoft.com"];
 const BACKEND_SUFFIX: &str = ".skype.com";
+const AUTHZ_SCOPE_NAME: &str = "authorization.readwrite";
 const FLIGHTPROXY_EP: &str = "https://api.flightproxy.teams.microsoft.com/api/v2/ep";
 const CONVERSATION_LINK_NAMES: [&str; 9] = [
     "conversationEnd",
@@ -167,6 +170,10 @@ const FAILURE_BODY_CHARS: usize = 240;
 pub enum LeaveReason {
     Hangup,
     Cancel,
+}
+
+fn spaces_scope() -> Scope {
+    Scope::new(SPACES, AUTHZ_SCOPE_NAME)
 }
 
 pub struct Signaling {
@@ -381,12 +388,82 @@ impl Signaling {
     }
 
     pub async fn update_endpoint_metadata(&self, conversation: &Conversation, from: &Participant) -> Result<()> {
-        let body = json!({
-            "participants": {"from": from.wire()},
-            "endpointMetadata": {"holographicCapabilities": 3},
-        });
+        self.put_endpoint_metadata(conversation, from, json!({"holographicCapabilities": 3})).await
+    }
+
+    pub async fn set_caption_preference(&self, conversation: &Conversation, from: &Participant, captions: bool) -> Result<()> {
+        self.put_endpoint_metadata(conversation, from, captions::endpoint_metadata(captions)).await
+    }
+
+    async fn put_endpoint_metadata(&self, conversation: &Conversation, from: &Participant, metadata: Value) -> Result<()> {
+        let body = json!({"participants": {"from": from.wire()}, "endpointMetadata": metadata});
         let url = conversation.link("updateEndpointMetadata")?;
         self.send("PUT updateEndpointMetadata", Method::Put, url, Some(body)).await.map(|_| ())
+    }
+
+    pub async fn admit(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
+        let body = organizer::admit_body(from.wire(), target, callbacks, &uuid::Uuid::new_v4().to_string());
+        self.send("POST admit", Method::Post, conversation.link("admit")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn admit_all(&self, conversation: &Conversation, from: &Participant, callbacks: &CallbackLinks) -> Result<u16> {
+        let body = organizer::admit_all_body(from.wire(), callbacks, &uuid::Uuid::new_v4().to_string());
+        self.send("POST admitAll", Method::Post, conversation.link("admitAll")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn remove_participant(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
+        let body = organizer::remove_participant_body(from.wire(), target, callbacks);
+        self.send("POST removeParticipant", Method::Post, conversation.link("removeParticipant")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn mute_participant(&self, conversation: &Conversation, from: &Participant, mri: &str) -> Result<u16> {
+        let body = organizer::mute_participants_body(from.wire(), &[mri.to_owned()]);
+        self.send("POST mute", Method::Post, conversation.link("mute")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn mute_everyone(&self, conversation: &Conversation, from: &Participant, others: &[String]) -> Result<u16> {
+        let body = organizer::mute_everyone_body(from.wire(), others);
+        self.send("POST mute (all)", Method::Post, conversation.link("mute")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn spotlight(&self, conversation: &Conversation, from: &Participant, mri: &str) -> Result<u16> {
+        let body = organizer::spotlight_body(from.wire(), self.next_state_sequence(), mri, &from.mri);
+        self.send("POST publishState (spotlight)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn add_caption_bot(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        thread_id: &str,
+        callbacks: &CallbackLinks,
+    ) -> Result<()> {
+        let body = captions::add_bot_body(from.wire(), thread_id, callbacks.call_id(), &from.display_name, callbacks);
+        let mut request = self.request(Method::Post, conversation.link("addParticipantAndModality")?, Some(body));
+        request = request.with_body_token(captions::RECORDER_RESOURCE, captions::RECORDER_SCOPE, captions::INITIATOR_TOKEN_PLACEHOLDER);
+        self.exchange(&self.session, "POST add (caption bot)", request).await.map(|_| ())
+    }
+
+    pub async fn caption_command(&self, command_url: &str, action: BotAction, from: &Participant) -> Result<()> {
+        ensure_teams_url(command_url)?;
+        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let body = captions::command_body(action, &from.mri, &from.participant_id, &timestamp);
+        let arguments = json!({
+            "url": command_url,
+            "body": body,
+            "recorderResource": captions::RECORDER_RESOURCE,
+            "recorderScope": captions::RECORDER_SCOPE,
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "chainId": self.chain_id,
+        });
+        let answer = self.session.run_with_token(App::Teams, &spaces_scope(), captions::COMMAND_SCRIPT, &arguments, false).await?;
+        let status = answer["status"].as_u64().unwrap_or_default();
+        self.timeline.record("POST caption command", format!("HTTP {status}"));
+        if (200..300).contains(&status) {
+            return Ok(());
+        }
+        let reason = answer["error"].as_str().unwrap_or("no answer");
+        Err(Error::Signaling(format!("caption command answered HTTP {status} {reason}")))
     }
 
     /// One broker long poll; answers the next subscribe URL.
