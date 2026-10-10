@@ -1,4 +1,4 @@
-use calling::sdp::{self, OfferPlan, SessionDescription, to_browser_answer, to_teams_offer};
+use calling::sdp::{self, OfferPlan, SessionDescription, from_teams_offer, to_browser_answer, to_teams_answer, to_teams_offer};
 
 const BROWSER_OFFER: &str = include_str!("fixtures/browser_offer.sdp");
 const TEAMS_OFFER: &str = include_str!("fixtures/teams_offer.sdp");
@@ -110,4 +110,65 @@ fn captured_teams_answer_translates_to_the_captured_browser_answer() {
     let actual = sections(&sdp::parse(&answer).unwrap());
     let expected = sections(&sdp::parse(BROWSER_ANSWER).unwrap());
     assert_same(actual, expected, differs_per_run);
+}
+
+fn kinds(description: &SessionDescription) -> Vec<String> {
+    description.media.iter().map(|media| media.kind.clone()).collect()
+}
+
+#[test]
+fn captured_teams_offer_translates_to_a_browser_offer() {
+    let remote = from_teams_offer(TEAMS_OFFER).unwrap();
+    let browser = sdp::parse(&remote.browser_sdp).unwrap();
+    assert_eq!(browser.media.len(), 20);
+    let mids: Vec<&str> = browser.media.iter().filter_map(|media| media.mid()).collect();
+    assert_eq!(mids, (0..20).map(|mid| mid.to_string()).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>());
+    let kinds = kinds(&browser);
+    assert_eq!(kinds.iter().filter(|kind| *kind == "audio").count(), 1);
+    assert_eq!(kinds.iter().filter(|kind| *kind == "video").count(), 18);
+    assert_eq!(kinds.last().map(String::as_str), Some("application"));
+    assert!(browser.media.iter().all(|media| media.port == "9"));
+    assert!(browser.media[..19].iter().all(|media| media.proto == "UDP/TLS/RTP/SAVPF"));
+    assert!(!remote.browser_sdp.contains("x-ssrc-range") && !remote.browser_sdp.contains("a=label"));
+    assert!(!remote.browser_sdp.contains("10.10.10.10") && !remote.browser_sdp.contains("1234"));
+    assert!(remote.browser_sdp.contains("a=group:BUNDLE 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"));
+    assert_eq!(remote.lines.len(), 13);
+    assert_eq!(remote.lines[10].browser_mids.len(), 8);
+}
+
+#[test]
+fn a_teams_offer_survives_the_trip_through_libwebrtc_form_and_back() {
+    let remote = from_teams_offer(TEAMS_OFFER).unwrap();
+    let back = to_teams_offer(&remote.browser_sdp, &remote.plan(), &mut counter()).unwrap();
+    let actual = sections(&sdp::parse(&back.sdp).unwrap());
+    let expected = sections(&sdp::parse(TEAMS_OFFER).unwrap());
+    let per_run_ssrcs = |_: usize, line: &str| {
+        is_teams_codec_policy(line) || line.starts_with("a=ssrc:") || line.starts_with("a=x-ssrc-range:")
+    };
+    assert_same(actual, expected, per_run_ssrcs);
+    assert_eq!(back.lines, remote.lines);
+}
+
+#[test]
+fn an_answer_to_a_teams_offer_comes_back_in_the_teams_dialect() {
+    let remote = from_teams_offer(TEAMS_OFFER).unwrap();
+    let answer = to_teams_answer(BROWSER_ANSWER, &remote, &mut counter()).unwrap();
+    let described = sdp::parse(&answer.sdp).unwrap();
+    let captured = sdp::parse(TEAMS_ANSWER).unwrap();
+    assert_eq!(described.media.len(), captured.media.len());
+    for (ours, theirs) in described.media.iter().zip(&captured.media) {
+        assert_eq!(ours.kind, theirs.kind);
+        assert_eq!(ours.value("label"), theirs.value("label"));
+        assert_eq!(ours.port, "1234");
+        assert_eq!(ours.proto, "RTP/SAVP");
+    }
+    assert_eq!(answer.lines, remote.lines);
+    let bundle = described
+        .session
+        .attributes
+        .iter()
+        .find(|attribute| attribute.name == "group")
+        .and_then(|attribute| attribute.value.clone())
+        .unwrap();
+    assert_eq!(bundle, "BUNDLE 0 1 2 3 4 5 6 7 8 9 17 18 19");
 }

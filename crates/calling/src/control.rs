@@ -5,6 +5,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::mute::MuteCommand;
+use crate::roster::RosterEntry;
 use crate::state::CallState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +15,13 @@ pub enum CallCommand {
     SelectOutput(DeviceChoice),
     RefreshDevices,
     Hangup,
+    EndMeeting,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Progress {
+    Calling,
+    Ringing,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +33,11 @@ pub enum CallUpdate {
     Selected { input: DeviceChoice, output: DeviceChoice },
     ListenOnly(bool),
     Stats { inbound_packets: u64, outbound_packets: u64 },
+    Progress(Progress),
+    Roster(Vec<RosterEntry>),
+    Speakers(Vec<String>),
+    Lobby(bool),
+    OwnIdentity { mri: String },
 }
 
 pub struct CallHandle {

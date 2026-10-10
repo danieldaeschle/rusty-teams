@@ -33,6 +33,12 @@ pub fn set_badge(_handle: NativeHandle, _badge: Option<&Badge>) {}
 
 pub fn play_sound() {}
 
+pub struct RingTone;
+
+pub fn start_ring() -> Option<RingTone> {
+    None
+}
+
 pub struct Tray;
 
 impl Tray {

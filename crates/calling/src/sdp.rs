@@ -322,7 +322,9 @@ pub fn to_teams_offer(browser_sdp: &str, plan: &OfferPlan, numbers: &mut impl Nu
         };
         let multi_stream = (Some(&mid) == gallery_carrier.as_ref()).then_some(plan.gallery_mids.len());
         let is_first = media.is_empty();
-        let signaled = if role == LineRole::Data {
+        let signaled = if source.port == "0" {
+            signal_rejected_line(source, role)
+        } else if role == LineRole::Data {
             signal_data_line(source, numbers)
         } else {
             signal_rtp_line(source, role, multi_stream, &cname, is_first, numbers)
@@ -342,7 +344,7 @@ pub fn to_teams_offer(browser_sdp: &str, plan: &OfferPlan, numbers: &mut impl Nu
         match attribute.name.as_str() {
             "msid-semantic" => attribute.value = Some(" WMS *".to_owned()),
             "group" if attribute.value.as_deref().is_some_and(|value| value.starts_with("BUNDLE")) => {
-                let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
+                let mids: Vec<&str> = media.iter().filter(|line| line.port != "0").filter_map(Media::mid).collect();
                 attribute.value = Some(format!("BUNDLE {}", mids.join(" ")));
             }
             _ => {}
@@ -353,6 +355,23 @@ pub fn to_teams_offer(browser_sdp: &str, plan: &OfferPlan, numbers: &mut impl Nu
         sdp: write(&description),
         lines,
     })
+}
+
+fn signal_rejected_line(source: &Media, role: LineRole) -> Media {
+    let attributes = vec![
+        Attribute::new("mid", source.mid().unwrap_or_default()),
+        Attribute::flag("inactive"),
+        Attribute::new("label", role.label()),
+    ];
+    Media {
+        kind: if role == LineRole::Data { "x-data".to_owned() } else { source.kind.clone() },
+        port: "0".to_owned(),
+        proto: SIGNALED_PROTO.to_owned(),
+        formats: source.formats.clone(),
+        connection: Some(PLACEHOLDER_CONNECTION.to_owned()),
+        bandwidths: Vec::new(),
+        attributes,
+    }
 }
 
 fn signal_rtp_line(
@@ -770,6 +789,215 @@ fn browser_data_line(teams_line: &Media, offered: &Media, session: &Session) -> 
     }
 }
 
+const BROWSER_PORT: &str = "9";
+const BROWSER_PROTO: &str = "UDP/TLS/RTP/SAVPF";
+const BROWSER_CONNECTION: &str = "IN IP4 0.0.0.0";
+const BROWSER_RTCP: &str = "9 IN IP4 0.0.0.0";
+const BROWSER_DATA_PROTO: &str = "UDP/DTLS/SCTP";
+const BROWSER_DATA_FORMAT: &str = "webrtc-datachannel";
+const SCTP_PORT: &str = "5000";
+const SCTP_MAX_MESSAGE_SIZE: &str = "262144";
+const PLACEHOLDER_CANDIDATE_TAIL: &str = " 1234 typ host";
+const TEAMS_ONLY_ATTRIBUTES: [&str; 6] = [
+    "x-multi-stream",
+    "x-signaling-fb",
+    "x-ssrc-range",
+    "x-source-streamid",
+    "x-data-protocol",
+    "label",
+];
+const TRANSPORT_ATTRIBUTES: [&str; 5] = ["setup", "ice-ufrag", "ice-pwd", "fingerprint", "ice-options"];
+
+/// A Teams offer translated for libwebrtc; `lines` remembers which browser mids each signaled line stands for.
+#[derive(Debug, Clone)]
+pub struct RemoteOffer {
+    pub browser_sdp: String,
+    pub lines: Vec<SignaledLine>,
+}
+
+impl RemoteOffer {
+    pub fn plan(&self) -> OfferPlan {
+        let mut plan = OfferPlan::default();
+        for line in &self.lines {
+            match line.role {
+                LineRole::ScreenShare => plan.screen_share_mids.extend(line.browser_mids.iter().cloned()),
+                _ if line.browser_mids.len() > 1 => plan.gallery_mids.extend(line.browser_mids.iter().cloned()),
+                _ => {}
+            }
+        }
+        plan
+    }
+}
+
+fn role_of_teams_line(line: &Media) -> LineRole {
+    match line.value("label") {
+        Some("main-audio") => LineRole::MainAudio,
+        Some("main-video") => LineRole::MainVideo,
+        Some("applicationsharing-video") => LineRole::ScreenShare,
+        Some("data") => LineRole::Data,
+        _ => match line.kind.as_str() {
+            "audio" => LineRole::MainAudio,
+            "x-data" | "application" => LineRole::Data,
+            _ => LineRole::MainVideo,
+        },
+    }
+}
+
+/// Folded gallery lines get the mids just below the carrier line's own mid.
+fn folded_mids(carrier: &str, count: usize) -> Vec<String> {
+    match carrier.parse::<usize>() {
+        Ok(last) if last + 1 >= count => (last + 1 - count..=last).map(|mid| mid.to_string()).collect(),
+        _ => (0..count)
+            .map(|index| if index + 1 == count { carrier.to_owned() } else { format!("{carrier}-{index}") })
+            .collect(),
+    }
+}
+
+pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
+    let teams = parse(teams_sdp)?;
+    let mut media = Vec::new();
+    let mut lines = Vec::new();
+    for source in &teams.media {
+        let role = role_of_teams_line(source);
+        let carrier = source.mid().unwrap_or_default().to_owned();
+        let folded = source
+            .value("x-multi-stream")
+            .and_then(|value| value.split(' ').next()?.parse::<usize>().ok())
+            .filter(|count| *count > 1);
+        let mids = match folded {
+            Some(count) => folded_mids(&carrier, count),
+            None => vec![carrier.clone()],
+        };
+        for (index, mid) in mids.iter().enumerate() {
+            let converted = if role == LineRole::Data {
+                browser_data_from_teams(source, mid, &teams.session)
+            } else {
+                browser_rtp_from_teams(source, mid, folded.is_some(), index == 0 && lines.is_empty(), &teams.session)
+            };
+            media.push(converted);
+        }
+        lines.push(SignaledLine {
+            browser_mids: mids,
+            role,
+        });
+    }
+    let mut session = teams.session.clone();
+    session.bandwidths.clear();
+    session.connection = None;
+    session.attributes.retain(|attribute| matches!(attribute.name.as_str(), "extmap-allow-mixed" | "msid-semantic"));
+    let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
+    session.attributes.push(Attribute::new("group", format!("BUNDLE {}", mids.join(" "))));
+    Ok(RemoteOffer {
+        browser_sdp: write(&SessionDescription { session, media }),
+        lines,
+    })
+}
+
+fn transport_from_teams(source: &Media, session: &Session) -> Vec<Attribute> {
+    TRANSPORT_ATTRIBUTES
+        .iter()
+        .filter_map(|name| {
+            source
+                .attributes
+                .iter()
+                .chain(&session.attributes)
+                .find(|attribute| attribute.name == *name)
+                .cloned()
+        })
+        .collect()
+}
+
+fn browser_data_from_teams(source: &Media, mid: &str, session: &Session) -> Media {
+    let mut attributes = transport_from_teams(source, session);
+    attributes.push(Attribute::new("mid", mid));
+    attributes.push(Attribute::new("sctp-port", SCTP_PORT));
+    attributes.push(Attribute::new("max-message-size", SCTP_MAX_MESSAGE_SIZE));
+    Media {
+        kind: "application".to_owned(),
+        port: BROWSER_PORT.to_owned(),
+        proto: BROWSER_DATA_PROTO.to_owned(),
+        formats: vec![BROWSER_DATA_FORMAT.to_owned()],
+        connection: Some(BROWSER_CONNECTION.to_owned()),
+        bandwidths: Vec::new(),
+        attributes,
+    }
+}
+
+fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candidate: bool, session: &Session) -> Media {
+    let rtpmap = source.rtpmap();
+    let is_rtx = |payload: &str| rtpmap.get(payload).is_some_and(|encoding| encoding.starts_with("rtx/"));
+    let mut attributes = Vec::new();
+    let mut expanded_feedback: Vec<Attribute> = Vec::new();
+    for attribute in &source.attributes {
+        let value = attribute.value.as_deref().unwrap_or_default();
+        match attribute.name.as_str() {
+            name if TEAMS_ONLY_ATTRIBUTES.contains(&name) => {}
+            name if name.starts_with("x-") => {}
+            "mid" | "rtcp-mux" => {}
+            name if TRANSPORT_ATTRIBUTES.contains(&name) => {}
+            "candidate" => {
+                if carries_candidate && !value.contains(PLACEHOLDER_CANDIDATE_TAIL) {
+                    attributes.push(attribute.clone());
+                }
+            }
+            "ssrc" => {
+                let placeholder = value.contains("fake_attribute") || value.starts_with("1 ");
+                if !folded && !placeholder {
+                    attributes.push(attribute.clone());
+                }
+            }
+            "ssrc-group" => {
+                if !folded {
+                    attributes.push(attribute.clone());
+                }
+            }
+            "rtcp" => attributes.push(Attribute::new("rtcp", BROWSER_RTCP)),
+            "rtpmap" => attributes.push(Attribute::new("rtpmap", browser_rtpmap(value))),
+            "extmap" => attributes.push(Attribute::new("extmap", browser_extmap(value))),
+            "rtcp-fb" => match value.strip_prefix("* ") {
+                Some(kind) => expanded_feedback.extend(
+                    source
+                        .formats
+                        .iter()
+                        .filter(|payload| !is_rtx(payload))
+                        .map(|payload| Attribute::new("rtcp-fb", format!("{payload} {kind}"))),
+                ),
+                None => attributes.push(attribute.clone()),
+            },
+            _ => attributes.push(attribute.clone()),
+        }
+    }
+    attributes.extend(expanded_feedback);
+    attributes.extend(transport_from_teams(source, session));
+    attributes.push(Attribute::new("mid", mid));
+    attributes.push(Attribute::flag("rtcp-mux"));
+    Media {
+        kind: source.kind.clone(),
+        port: BROWSER_PORT.to_owned(),
+        proto: BROWSER_PROTO.to_owned(),
+        formats: source.formats.clone(),
+        connection: Some(BROWSER_CONNECTION.to_owned()),
+        bandwidths: Vec::new(),
+        attributes,
+    }
+}
+
+fn browser_rtpmap(value: &str) -> String {
+    match value.split_once(' ') {
+        Some((payload, encoding)) if encoding.eq_ignore_ascii_case("red/8000") => format!("{payload} red/48000/2"),
+        _ => value.to_owned(),
+    }
+}
+
+fn browser_extmap(value: &str) -> String {
+    value.replace('\\', "/").replace(NOT_ADVERTISED_SUFFIX, "")
+}
+
+/// libwebrtc answers every offered line in the offer's order and with its mids, so the offer's plan applies unchanged.
+pub fn to_teams_answer(browser_answer_sdp: &str, remote: &RemoteOffer, numbers: &mut impl NumberSource) -> Result<SignaledOffer> {
+    to_teams_offer(browser_answer_sdp, &remote.plan(), numbers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,5 +1055,50 @@ mod tests {
         assert!(browser.contains("a=ssrc:1000 msid:mainAudio-1000 mainAudio-1000\n"));
         assert!(browser.contains("a=group:BUNDLE 0\n"));
         assert!(!browser.contains("SATINFB") && !browser.contains("MTURNID") && !browser.contains("label"));
+    }
+    #[test]
+    fn an_audio_offer_from_teams_gets_the_browser_shape_back() {
+        let offer = to_teams_offer(AUDIO_ONLY_OFFER, &OfferPlan::default(), &mut counter()).unwrap();
+        let remote = from_teams_offer(&offer.sdp).unwrap();
+        let text = remote.browser_sdp.replace("\r\n", "\n");
+        assert!(text.contains("m=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126\n"), "{text}");
+        assert!(text.contains("c=IN IP4 0.0.0.0\n"));
+        assert!(text.contains("a=rtcp:9 IN IP4 0.0.0.0\n"));
+        assert!(text.contains("a=rtpmap:63 red/48000/2\n"));
+        assert!(text.contains("a=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\n"));
+        assert!(text.contains("a=ice-ufrag:u\n") && text.contains("a=fingerprint:sha-256 AA\n") && text.contains("a=setup:actpass\n"));
+        assert!(text.contains("a=mid:0\n") && text.contains("a=group:BUNDLE 0\n"));
+        assert!(!text.contains("10.10.10.10") && !text.contains("x-ssrc-range") && !text.contains("label") && !text.contains("1234"));
+        assert_eq!(remote.lines, offer.lines);
+    }
+
+    #[test]
+    fn shared_video_feedback_is_spelled_out_per_codec_again() {
+        let teams = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=video 1234 RTP/SAVP 102 103\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=rtpmap:103 rtx/90000\r\na=fmtp:103 apt=102\r\na=rtcp-fb:* nack\r\na=rtcp-fb:* nack pli\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=label:main-video\r\n";
+        let remote = from_teams_offer(teams).unwrap();
+        let text = remote.browser_sdp.replace("\r\n", "\n");
+        assert!(text.contains("a=rtcp-fb:102 nack\n") && text.contains("a=rtcp-fb:102 nack pli\n"));
+        assert!(!text.contains("a=rtcp-fb:103") && !text.contains("a=rtcp-fb:*"));
+    }
+
+    #[test]
+    fn a_rejected_video_line_stays_rejected_and_out_of_the_bundle() {
+        let audio_and_video = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 1234 RTP/SAVP 111\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:111 opus/48000/2\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=label:main-audio\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:1\r\na=sendrecv\r\na=label:main-video\r\n";
+        let remote = from_teams_offer(audio_and_video).unwrap();
+        let answer = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:111 opus/48000/2\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 BB\r\na=setup:active\r\na=ssrc:7 cname:x\r\nm=video 0 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:102 H264/90000\r\na=mid:1\r\na=inactive\r\n";
+        let signaled = to_teams_answer(answer, &remote, &mut counter()).unwrap();
+        let text = signaled.sdp.replace("\r\n", "\n");
+        assert!(text.contains("m=video 0 RTP/SAVP 102\n"), "{text}");
+        assert!(text.contains("a=group:BUNDLE 0\n"));
+        let parsed = parse(&signaled.sdp).unwrap();
+        assert_eq!(parsed.media.len(), 2);
+        assert_eq!(parsed.media[1].value("label"), Some("main-video"));
+        assert_eq!(parsed.media[1].direction(), Some("inactive"));
+    }
+
+    #[test]
+    fn folded_gallery_lines_expand_below_their_carrier_mid() {
+        assert_eq!(folded_mids("17", 8), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());
+        assert_eq!(folded_mids("x", 2), vec!["x-0".to_owned(), "x".to_owned()]);
     }
 }

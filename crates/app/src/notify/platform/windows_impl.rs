@@ -1,5 +1,9 @@
 use std::ffi::c_void;
 use std::io::Cursor;
+use std::num::NonZero;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -32,12 +36,14 @@ use windows::core::{BOOL, w};
 
 use super::{NativeHandle, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
+use crate::notify::ring_tone::{SAMPLE_RATE, ring_cycle};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../assets/sounds/notification.mp3");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/teams-fast-256.png");
 const TRAY_ICON_SIZE: u32 = 32;
 const TRAY_DOT_RADIUS: f32 = 6.;
 const BASE_DPI: f32 = 96.;
+const RING_POLL: Duration = Duration::from_millis(20);
 
 fn hwnd(handle: NativeHandle) -> HWND {
     HWND(handle as *mut c_void)
@@ -244,6 +250,43 @@ unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
         let _ = DeleteObject(HGDIOBJ(mask.0));
         icon
     }
+}
+
+pub struct RingTone {
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for RingTone {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+pub fn start_ring() -> Option<RingTone> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    std::thread::spawn(move || {
+        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+            return;
+        };
+        sink.log_on_drop(false);
+        let (Some(channels), Some(rate)) = (NonZero::new(1u16), NonZero::new(SAMPLE_RATE)) else {
+            return;
+        };
+        let cycle = ring_cycle(SAMPLE_RATE);
+        while !flag.load(Ordering::SeqCst) {
+            let player = rodio::Player::connect_new(sink.mixer());
+            player.append(rodio::buffer::SamplesBuffer::new(channels, rate, cycle.clone()));
+            while !player.empty() {
+                if flag.load(Ordering::SeqCst) {
+                    player.stop();
+                    return;
+                }
+                std::thread::sleep(RING_POLL);
+            }
+        }
+    });
+    Some(RingTone { stop })
 }
 
 pub fn play_sound() {

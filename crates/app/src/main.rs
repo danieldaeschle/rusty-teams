@@ -196,7 +196,10 @@ fn main() {
     };
     let store = Arc::new(store);
     let receiver = (!arguments.demo)
-        .then(|| backend::start(store.clone(), transport(arguments.endpoint.as_deref(), arguments.database.as_deref())));
+        .then(|| {
+            let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
+            backend::start(store.clone(), transport, !arguments.read_only)
+        });
 
     let mut application = gpui_kit::application();
     if let Ok(http_client) = reqwest_client::ReqwestClient::user_agent(HTTP_USER_AGENT) {
@@ -219,6 +222,7 @@ fn main() {
             if arguments.demo {
                 state.update(cx, |state, cx| {
                     demo::seed_directory(state);
+                    state.demo_live_meetings();
                     state.select(demo::first_selection(), cx);
                 });
             }

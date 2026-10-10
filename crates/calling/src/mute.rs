@@ -30,6 +30,10 @@ impl MuteEffect {
             endpoint_is_muted: muted,
         }
     }
+
+    pub fn initial(is_meeting: bool) -> Self {
+        MuteEffect::for_muted(is_meeting)
+    }
 }
 
 #[cfg(test)]
@@ -53,5 +57,13 @@ mod tests {
         let open = MuteEffect::for_muted(false);
         assert!(open.track_enabled);
         assert!(!open.endpoint_is_muted);
+    }
+
+    #[test]
+    fn meetings_start_muted_and_other_calls_do_not() {
+        let meeting = MuteEffect::initial(true);
+        assert!(meeting.muted && !meeting.track_enabled && meeting.endpoint_is_muted);
+        let direct = MuteEffect::initial(false);
+        assert!(!direct.muted && direct.track_enabled && !direct.endpoint_is_muted);
     }
 }

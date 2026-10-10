@@ -1,10 +1,12 @@
 (() => {
-  const VERSION = 4;
+  const VERSION = 5;
   const GLOBAL_NAME = '__chatsvcTrouter';
   const BINDING_NAME = '__chatsvcRealtime';
   const EPID_KEY = '__chatsvcEpid';
   const REGISTRAR = 'https://teams.cloud.microsoft/registrar/prod/V2/registrations';
   const UI_VERSION = '1415/26091712213';
+  const WORKER_REGISTRATION = {appId: 'TeamsCDLWebWorker', templateKey: 'TeamsCDLWebWorker_2.6'};
+  const CALLING_REGISTRATION = {appId: 'SkypeSpacesWeb', templateKey: 'SkypeSpacesWeb_2.6'};
   const PING_MS = 30000;
   const SILENCE_LIMIT_MS = 100000;
   const REREGISTER_MS = 40 * 60 * 1000;
@@ -15,6 +17,7 @@
   const MAX_PRESENCE_FIELD = 128;
   const MAX_SENDER_NAME = 256;
   const FORWARD_CALLBACKS = false;
+  const RINGABLE = false;
   const CALLBACK_PREFIX = 'callAgent/';
   const CALLBACK_REPLY_TIMEOUT_MS = 5000;
 
@@ -143,9 +146,11 @@
 
   const register = async (surl) => {
     state.surl = surl || state.surl;
+    const registration = RINGABLE ? CALLING_REGISTRATION : WORKER_REGISTRATION;
     const body = {
-      clientDescription: {appId: 'TeamsCDLWebWorker', aesKey: '', languageId: 'en-US', platform: 'chrome',
-        templateKey: 'TeamsCDLWebWorker_2.6', platformUIVersion: UI_VERSION},
+      clientDescription: {appId: registration.appId, aesKey: '', languageId: 'en-US', platform: 'chrome',
+        templateKey: registration.templateKey, platformUIVersion: UI_VERSION,
+        ...(RINGABLE ? {productContext: ''} : {})},
       registrationId: state.epid, nodeId: '',
       transports: {TROUTER: [{context: '', path: state.surl, ttl: 3600}]},
     };
@@ -212,6 +217,11 @@
       send('3:::' + JSON.stringify({id: request.id, status: 200, headers: {}, body: ''}));
       let body = null;
       try { body = JSON.parse(request.body); } catch (error) {}
+      if (FORWARD_CALLBACKS && body && typeof body.evt === 'number') {
+        forward({channel: 'callback', requestId: request.id, path: '', contentEncoding: null,
+          body: typeof request.body === 'string' ? request.body : JSON.stringify(request.body)});
+        return;
+      }
       forwardNotification(path, body);
     }
   };

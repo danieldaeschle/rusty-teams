@@ -14,6 +14,7 @@ pub enum Kind {
     Messages,
     Mention,
     Reaction,
+    MissedCall,
 }
 
 impl Kind {
@@ -22,11 +23,12 @@ impl Kind {
             Kind::Messages => "messages",
             Kind::Mention => "mention",
             Kind::Reaction => "reaction",
+            Kind::MissedCall => "missed_call",
         }
     }
 
     fn from_key(key: &str) -> Option<Kind> {
-        [Kind::Messages, Kind::Mention, Kind::Reaction]
+        [Kind::Messages, Kind::Mention, Kind::Reaction, Kind::MissedCall]
             .into_iter()
             .find(|kind| kind.key() == key)
     }
@@ -338,6 +340,36 @@ impl Feed {
         entry.updated_at = incoming.created_at;
         move_to_end(&mut entry.actors, actor);
         self.dirty.insert(entry.id);
+    }
+
+    pub fn record_missed_call(&mut self, conversation_id: &str, actor: Actor, at: DateTime<Utc>) {
+        let open_row = self.entries.iter().position(|entry| {
+            entry.kind == Kind::MissedCall
+                && !entry.read
+                && entry.actors.first().is_some_and(|known| known.user_id == actor.user_id && known.name == actor.name)
+        });
+        match open_row {
+            Some(index) => {
+                let entry = &mut self.entries[index];
+                entry.count += 1;
+                entry.updated_at = at;
+                self.dirty.insert(entry.id);
+            }
+            None => {
+                self.add(Entry {
+                    id: 0,
+                    conversation_id: conversation_id.to_owned(),
+                    kind: Kind::MissedCall,
+                    message_id: String::new(),
+                    actors: vec![actor],
+                    preview: String::new(),
+                    glyphs: Vec::new(),
+                    count: 1,
+                    updated_at: at,
+                    read: false,
+                });
+            }
+        }
     }
 
     pub fn record_chat_preview(
@@ -836,5 +868,32 @@ mod tests {
             now - Duration::days(RETENTION_DAYS)
         );
         assert_eq!(start_time(Some(at(8, 0)), now), at(8, 0));
+    }
+    #[test]
+    fn a_missed_call_is_one_row_per_caller_until_it_is_read() {
+        let mut feed = Feed::load(Vec::new());
+        let caller = Actor { user_id: Some("u1".into()), name: "Cara".into() };
+        feed.record_missed_call("19:dm", caller.clone(), at(9, 0));
+        feed.record_missed_call("19:dm", caller.clone(), at(9, 5));
+        assert_eq!(feed.unread_count(), 1);
+        let entry = feed.get(1).unwrap();
+        assert_eq!(entry.kind, Kind::MissedCall);
+        assert_eq!(entry.count, 2);
+        assert_eq!(entry.updated_at, at(9, 5));
+        feed.mark_all_read();
+        feed.record_missed_call("19:dm", caller, at(10, 0));
+        assert_eq!(feed.unread_count(), 1);
+        feed.record_missed_call("19:other", Actor { user_id: Some("u2".into()), name: "Dan".into() }, at(10, 1));
+        assert_eq!(feed.unread_count(), 2);
+    }
+
+    #[test]
+    fn missed_calls_survive_the_store_round_trip() {
+        let mut feed = Feed::load(Vec::new());
+        feed.record_missed_call("19:dm", Actor { user_id: Some("u1".into()), name: "Cara".into() }, at(9, 0));
+        let record = feed.get(1).unwrap().to_record();
+        assert_eq!(record.kind, "missed_call");
+        let restored = Entry::from_record(record).unwrap();
+        assert_eq!(restored.kind, Kind::MissedCall);
     }
 }

@@ -27,6 +27,7 @@ mod shared;
 
 use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
+use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
@@ -553,7 +554,10 @@ impl ConversationView {
             | AppEvent::StatusMessage
             | AppEvent::NotificationSettings
             | AppEvent::Profile
+            | AppEvent::Ring
+            | AppEvent::MissedCall(_)
             | AppEvent::Call => {}
+            AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
@@ -2934,6 +2938,7 @@ impl ConversationView {
         if let Some(note) = channel_note {
             subline = note.to_owned();
         }
+        let call_controls = header_call_controls(&self.app, app, &current.selection);
         let sync = &current.sync;
         if sync.failed {
             subline = "Not up to date".to_owned();
@@ -2977,6 +2982,7 @@ impl ConversationView {
                     }),
             )
             .children(stack)
+            .children(call_controls)
     }
 }
 

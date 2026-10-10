@@ -12,7 +12,8 @@ use teams_core::{
 };
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
-use crate::call::{ActiveCall, CallLauncher};
+use crate::call::{ActiveCall, CallLauncher, MissedCall, Rings};
+use calling::meeting::LiveMeeting;
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 use crate::local_previews::{LocalPreview, load_local_previews};
@@ -59,6 +60,9 @@ pub enum AppEvent {
     NotificationSettings,
     Profile,
     Call,
+    Ring,
+    LiveMeeting,
+    MissedCall(MissedCall),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -108,6 +112,9 @@ pub struct AppState {
     pub call: Option<ActiveCall>,
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
+    pub rings: Rings,
+    pub live_meetings: HashMap<String, LiveMeeting>,
+    pub live_refreshing: HashSet<String>,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -194,6 +201,9 @@ impl AppState {
             call: None,
             call_launcher: None,
             call_count: 0,
+            rings: Rings::default(),
+            live_meetings: HashMap::new(),
+            live_refreshing: HashSet::new(),
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -576,10 +586,12 @@ impl AppState {
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
             return;
         }
+        let conversation_id = selection.conversation_id().to_owned();
         self.selection = Some(selection);
         self.keep_unread = None;
         cx.emit(AppEvent::Selection);
         cx.notify();
+        self.refresh_live_meeting(&conversation_id, cx);
     }
 
     fn apply_typing(&mut self, event: TypingEvent, cx: &mut Context<Self>) {
@@ -687,6 +699,8 @@ impl AppState {
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Calls(launcher) => self.call_launcher = Some(launcher),
+            BackendEvent::Ring(event) => self.on_engine_event(event, cx),
+            BackendEvent::ThreadChanged(conversation_id) => self.on_thread_changed(&conversation_id, cx),
             BackendEvent::Engine(engine) => {
                 self.engine = Some(engine);
                 self.resend_outbox(cx);

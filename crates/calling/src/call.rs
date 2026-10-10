@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use chatsvc::{CallbackReplier, InstanceNames, Realtime, RealtimeConfig, RealtimeEvent, TrouterCallback};
+use chatsvc::TrouterCallback;
 use futures_util::StreamExt;
 use libwebrtc::audio_stream::native::NativeAudioStream;
 use libwebrtc::prelude::*;
@@ -17,30 +18,40 @@ use tokio::time::{Instant, interval, sleep_until, timeout};
 
 use crate::audio::{SAMPLE_RATE, rms, tone_ratio, write_wav};
 use crate::audio_io::{AudioMode, AudioSetup};
-use crate::control::{CallCommand, CallControl, CallUpdate};
+use crate::control::{CallCommand, CallControl, CallUpdate, Progress};
 use crate::devices::{self, DeviceChoice};
+use crate::end::EndKind;
+use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
 use crate::mute::{MuteCommand, MuteEffect};
-use crate::relay::{DEFAULT_RELAY_HOST, fetch_relay_grant};
-use crate::sdp::{OfferPlan, SignaledOffer, to_browser_answer, to_teams_offer};
+use crate::push::CallNotification;
+use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
+use crate::renegotiation::{MediaAction, MediaNegotiator};
+use crate::roster::Roster;
+use crate::sdp::{OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, to_browser_answer, to_teams_answer, to_teams_offer};
 use crate::signaling::{
-    Conversation, EchoInvitation, Participant, Signaling, TenantRouting, fetch_self, find_echo_bot_thread,
+    Answer, Attached, Callee, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget, Participant, Signaling,
+    TenantRouting, find_echo_bot_thread, escalation_answer_body, renegotiation_body,
 };
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
-use crate::trouter_events::{CallEnd, CallEvent, CallbackLinks, acceptance_acknowledgement, classify, decode_body};
+use crate::trouter_events::{
+    CallEnd, CallEvent, CallbackLinks, ProgressStatus, acceptance_acknowledgement, classify, decode_body,
+};
 
-const ENDPOINT_WAIT: Duration = Duration::from_secs(30);
 const END_CALLBACK_WAIT: Duration = Duration::from_secs(4);
 const STATS_PERIOD: Duration = Duration::from_millis(200);
 const TICKS_PER_SECOND: u32 = 5;
 const RECONNECT_WINDOW: Duration = Duration::from_secs(30);
+const OUTGOING_TIMEOUT: Duration = Duration::from_secs(90);
 const FAR_FUTURE: Duration = Duration::from_secs(60 * 60 * 24 * 365);
-const PRESENCE_SUFFIX: &str = "unifiedPresenceService";
-pub const TRACE_ENV: &str = "CALLING_TRACE";
+const DEFAULT_KEEP_ALIVE_SECONDS: u64 = 2700;
+const MIN_KEEP_ALIVE_SECONDS: u64 = 60;
+const KEEP_ALIVE_FRACTION: f64 = 0.9;
+const MIC_STREAM: &str = "microphone";
 
 #[derive(Debug, Clone)]
-pub struct TestCallOptions {
+pub struct CallOptions {
     pub hold_after_connected: Option<Duration>,
     pub hard_limit: Option<Duration>,
     pub reconnect_window: Duration,
@@ -56,9 +67,9 @@ pub struct TestCallOptions {
     pub trace: bool,
 }
 
-impl Default for TestCallOptions {
+impl Default for CallOptions {
     fn default() -> Self {
-        TestCallOptions {
+        CallOptions {
             hold_after_connected: None,
             hard_limit: None,
             reconnect_window: RECONNECT_WINDOW,
@@ -71,7 +82,7 @@ impl Default for TestCallOptions {
             record_remote: false,
             wav_path: None,
             sdp_dump_dir: None,
-            trace: std::env::var_os(TRACE_ENV).is_some(),
+            trace: std::env::var_os(crate::engine::TRACE_ENV).is_some(),
         }
     }
 }
@@ -87,7 +98,7 @@ pub struct AudioSecond {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TestCallReport {
+pub struct CallReport {
     pub timeline: Vec<TimelineEntry>,
     pub ice_connected_ms: Option<u128>,
     pub peer_connected_ms: Option<u128>,
@@ -105,26 +116,55 @@ pub struct TestCallReport {
     pub recorded_samples: usize,
 }
 
-pub fn calling_realtime_config() -> RealtimeConfig {
-    RealtimeConfig {
-        instance: InstanceNames {
-            global: "__callingTrouter".into(),
-            binding: "__callingRealtime".into(),
-            endpoint_storage_key: "__callingEpid".into(),
-        },
-        forward_callbacks: true,
-        ..RealtimeConfig::default()
+#[derive(Debug, Clone)]
+pub enum CallSpec {
+    Echo,
+    People { callees: Vec<Callee>, thread_id: String },
+    Meeting(MeetingTarget),
+}
+
+impl CallSpec {
+    fn target(&self) -> InviteTarget {
+        match self {
+            CallSpec::Echo => InviteTarget::Echo,
+            CallSpec::People { callees, thread_id } => InviteTarget::People {
+                callees: callees.clone(),
+                thread_id: thread_id.clone(),
+            },
+            CallSpec::Meeting(meeting) => InviteTarget::Meeting(meeting.clone()),
+        }
     }
+
+    fn is_meeting(&self) -> bool {
+        matches!(self, CallSpec::Meeting(_))
+    }
+
+    fn is_people(&self) -> bool {
+        matches!(self, CallSpec::People { .. })
+    }
+}
+
+pub(crate) struct IncomingCall {
+    pub notification: CallNotification,
+    pub attached: Attached,
+    pub links: CallbackLinks,
+    pub participant: Participant,
+    pub callbacks: mpsc::UnboundedReceiver<TrouterCallback>,
+}
+
+pub(crate) enum Plan {
+    Outgoing(CallSpec),
+    Incoming(Box<IncomingCall>),
+}
+
+pub fn keep_alive_period(seconds: Option<u64>) -> Duration {
+    let seconds = seconds.unwrap_or(DEFAULT_KEEP_ALIVE_SECONDS).max(MIN_KEEP_ALIVE_SECONDS);
+    Duration::from_secs_f64(seconds as f64 * KEEP_ALIVE_FRACTION)
 }
 
 fn random_u32() -> u32 {
     let bytes = uuid::Uuid::new_v4().into_bytes();
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) & 0x7fff_ffff
-}
-
-fn callback_base(trouter_uri: &str) -> String {
-    let trimmed = trouter_uri.strip_suffix(PRESENCE_SUFFIX).unwrap_or(trouter_uri).trim_end_matches('/');
-    format!("{trimmed}/")
 }
 
 #[derive(Default)]
@@ -140,6 +180,26 @@ enum PeerEvent {
     Track(RtcAudioTrack),
 }
 
+struct PeerSession {
+    peer: PeerConnection,
+    events: mpsc::UnboundedReceiver<PeerEvent>,
+}
+
+struct OfferedMedia {
+    browser_offer: String,
+    signaled: SignaledOffer,
+}
+
+struct NextPeer {
+    session: PeerSession,
+    offered: Option<OfferedMedia>,
+}
+
+struct AnsweredMedia {
+    remote: RemoteOffer,
+    answer_sdp: String,
+}
+
 #[derive(Clone)]
 struct RemoteCall {
     signaling: Arc<Signaling>,
@@ -149,14 +209,15 @@ struct RemoteCall {
 
 #[derive(Default)]
 struct Live {
-    realtime: Option<Realtime>,
-    callbacks: Option<mpsc::UnboundedReceiver<TrouterCallback>>,
-    replier: Option<CallbackReplier>,
-    peer: Option<PeerConnection>,
+    peers: Vec<PeerConnection>,
     audio: Option<AudioSetup>,
     remote: Option<RemoteCall>,
     broker: Option<JoinHandle<()>>,
     broker_running: Arc<AtomicBool>,
+    callbacks: Option<mpsc::UnboundedReceiver<TrouterCallback>>,
+    route_id: Option<String>,
+    skip_leave: bool,
+    cancel_leave: bool,
 }
 
 fn advance(state: &mut CallState, signal: CallSignal, control: &CallControl) -> bool {
@@ -169,102 +230,218 @@ fn advance(state: &mut CallState, signal: CallSignal, control: &CallControl) -> 
     true
 }
 
+/// Places the Echo test call on its own non-ringable Trouter instance; the app uses a shared engine instead.
 pub async fn run_test_call(
     session: &Session,
     poll_session: &Session,
-    options: TestCallOptions,
-    mut control: CallControl,
-) -> Result<TestCallReport> {
-    let timeline = Timeline::new(options.trace);
-    let mut report = TestCallReport::default();
-    let mut state = CallState::Idle;
-    advance(&mut state, CallSignal::Dial, &control);
-    let mut live = Live::default();
-    let recording = Arc::new(Mutex::new(Recording::default()));
-    let setup = CallSetup {
-        session,
-        poll_session,
-        options: &options,
-        timeline: &timeline,
-        recording: &recording,
+    options: CallOptions,
+    control: CallControl,
+) -> Result<CallReport> {
+    let config = EngineConfig {
+        ringable: false,
+        routing: options.routing.clone(),
+        relay_host: options.relay_host.clone(),
+        trace: options.trace,
+        instance: chatsvc::InstanceNames {
+            global: "__testCallTrouter".into(),
+            binding: "__testCallRealtime".into(),
+            endpoint_storage_key: "__testCallEpid".into(),
+        },
     };
-    let outcome = drive(&mut live, &setup, &mut control, &mut state, &mut report).await;
-    let failure = match outcome {
-        Ok(()) => None,
-        Err(Error::Cancelled) => {
-            advance(&mut state, CallSignal::LocalLeave, &control);
-            None
+    let (engine, _events) = CallEngine::start(session.clone(), poll_session.clone(), config).await?;
+    let report = engine.run(Plan::Outgoing(CallSpec::Echo), options, control).await;
+    engine.stop().await;
+    report
+}
+
+impl CallEngine {
+    pub(crate) async fn run(&self, plan: Plan, options: CallOptions, mut control: CallControl) -> Result<CallReport> {
+        let inner = self.inner.as_ref();
+        let _one_call_at_a_time = inner.gate.lock().await;
+        let timeline = Timeline::new(options.trace);
+        let mut report = CallReport::default();
+        let mut state = CallState::Idle;
+        advance(&mut state, CallSignal::Dial, &control);
+        let mut live = Live::default();
+        let recording = Arc::new(Mutex::new(Recording::default()));
+        let outcome = drive(
+            inner,
+            &options,
+            &timeline,
+            &recording,
+            plan,
+            &mut live,
+            &mut control,
+            &mut state,
+            &mut report,
+        )
+        .await;
+        let failure = match outcome {
+            Ok(()) => None,
+            Err(Error::Cancelled) => {
+                advance(&mut state, CallSignal::LocalLeave, &control);
+                None
+            }
+            Err(error) => {
+                advance(&mut state, CallSignal::Error(error.to_string()), &control);
+                Some(error)
+            }
+        };
+        let cancelled = live.cancel_leave || matches!(&state, CallState::Ended { reason: crate::state::EndReason::Cancelled });
+        tear_down(live, inner, &timeline, &mut report, cancelled).await;
+        let recording = recording.lock().await;
+        report.recorded_samples = recording.samples.len();
+        if let Some(path) = &options.wav_path {
+            write_wav(path, &recording.samples).map_err(|error| Error::Webrtc(format!("wav: {error}")))?;
         }
-        Err(error) => {
-            advance(&mut state, CallSignal::Error(error.to_string()), &control);
-            Some(error)
+        report.timeline = timeline.entries();
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(report),
         }
-    };
-    tear_down(live, &timeline, &mut report).await;
-    let recording = recording.lock().await;
-    report.recorded_samples = recording.samples.len();
-    if let Some(path) = &options.wav_path {
-        write_wav(path, &recording.samples).map_err(|error| Error::Webrtc(format!("wav: {error}")))?;
-    }
-    report.timeline = timeline.entries();
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(report),
     }
 }
 
-struct CallSetup<'a> {
-    session: &'a Session,
-    poll_session: &'a Session,
-    options: &'a TestCallOptions,
-    timeline: &'a Timeline,
-    recording: &'a Arc<Mutex<Recording>>,
+fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &str) -> Result<PeerSession> {
+    let mut configuration = RtcConfiguration::default();
+    configuration.ice_servers = vec![grant.ice_server(relay_host)];
+    let peer = factory
+        .create_peer_connection(configuration)
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    let (sender, events) = mpsc::unbounded_channel();
+    let ice_sender = sender.clone();
+    peer.on_ice_connection_state_change(Some(Box::new(move |state| {
+        let _ = ice_sender.send(PeerEvent::Ice(state));
+    })));
+    let connection_sender = sender.clone();
+    peer.on_connection_state_change(Some(Box::new(move |state| {
+        let _ = connection_sender.send(PeerEvent::Connection(state));
+    })));
+    peer.on_track(Some(Box::new(move |event| {
+        if let MediaStreamTrack::Audio(track) = event.track {
+            let _ = sender.send(PeerEvent::Track(track));
+        }
+    })));
+    Ok(PeerSession { peer, events })
 }
 
+async fn create_offer(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<OfferedMedia> {
+    let transceiver_init = RtpTransceiverInit {
+        direction: RtpTransceiverDirection::SendRecv,
+        stream_ids: vec![MIC_STREAM.into()],
+        send_encodings: Vec::new(),
+    };
+    peer.add_transceiver(MediaStreamTrack::Audio(track.clone()), transceiver_init)
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    let offer = peer
+        .create_offer(OfferOptions {
+            offer_to_receive_audio: true,
+            ..OfferOptions::default()
+        })
+        .await
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    peer.set_local_description(offer.clone())
+        .await
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    let browser_offer = offer.to_string();
+    let mut numbers = random_u32;
+    let signaled = to_teams_offer(&browser_offer, &OfferPlan::default(), &mut numbers)?;
+    Ok(OfferedMedia { browser_offer, signaled })
+}
+
+/// Video lines of a Teams offer are stopped so the answer rejects them; audio is all this client does.
+async fn answer_offer(
+    peer: &PeerConnection,
+    track: Option<&RtcAudioTrack>,
+    teams_offer: &str,
+) -> Result<AnsweredMedia> {
+    let remote = from_teams_offer(teams_offer)?;
+    let description =
+        SessionDescription::parse(&remote.browser_sdp, SdpType::Offer).map_err(|error| Error::Sdp(error.description))?;
+    peer.set_remote_description(description)
+        .await
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    for transceiver in peer.transceivers() {
+        if matches!(transceiver.receiver().track(), Some(MediaStreamTrack::Video(_))) {
+            let _ = transceiver.stop();
+        }
+    }
+    if let Some(track) = track {
+        peer.add_track(MediaStreamTrack::Audio(track.clone()), &[MIC_STREAM])
+            .map_err(|error| Error::Webrtc(error.to_string()))?;
+    }
+    let answer = peer
+        .create_answer(AnswerOptions::default())
+        .await
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    peer.set_local_description(answer.clone())
+        .await
+        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    let mut numbers = random_u32;
+    let signaled = to_teams_answer(&answer.to_string(), &remote, &mut numbers)?;
+    Ok(AnsweredMedia {
+        remote,
+        answer_sdp: signaled.sdp,
+    })
+}
+
+fn new_media_leg_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string().to_uppercase()
+}
+
+async fn next_peer_event(next: &mut Option<NextPeer>) -> Option<PeerEvent> {
+    match next {
+        Some(next) => next.session.events.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn drive(
+    inner: &Inner,
+    options: &CallOptions,
+    timeline: &Timeline,
+    recording: &Arc<Mutex<Recording>>,
+    plan: Plan,
     live: &mut Live,
-    setup: &CallSetup<'_>,
     control: &mut CallControl,
     state: &mut CallState,
-    report: &mut TestCallReport,
+    report: &mut CallReport,
 ) -> Result<()> {
-    let CallSetup {
-        session,
-        poll_session,
-        options,
-        timeline,
-        recording,
-    } = *setup;
-    let mut realtime = Realtime::start_with(session, calling_realtime_config()).await?;
-    live.callbacks = Some(
-        realtime
-            .take_callbacks()
-            .ok_or_else(|| Error::Callback("callback stream already taken".into()))?,
-    );
-    live.replier = Some(realtime.callback_replier());
-    let endpoint = control
-        .until_hangup(timeout(ENDPOINT_WAIT, async {
-            while let Some(event) = realtime.recv().await {
-                if let RealtimeEvent::Endpoint(endpoint) = event {
-                    return Some(endpoint);
-                }
-            }
-            None
-        }))
-        .await;
-    live.realtime = Some(realtime);
-    let endpoint = endpoint?
-        .ok()
-        .flatten()
-        .ok_or_else(|| Error::Callback("Trouter socket never announced its endpoint".into()))?;
+    let own_mri = format!("8:orgid:{}", inner.identity.object_id);
+    control.send(CallUpdate::OwnIdentity { mri: own_mri.clone() });
+    let (spec, incoming) = match plan {
+        Plan::Outgoing(spec) => (Some(spec), None),
+        Plan::Incoming(incoming) => (None, Some(*incoming)),
+    };
+    let (links, participant, mut callbacks, incoming_media) = match incoming {
+        Some(IncomingCall {
+            notification,
+            attached,
+            links,
+            participant,
+            callbacks,
+        }) => (links, participant, callbacks, Some((notification, attached))),
+        None => {
+            let links = inner.callback_links();
+            let participant = inner.participant(&uuid::Uuid::new_v4().to_string());
+            let callbacks = inner.register_route(links.call_id());
+            (links, participant, callbacks, None)
+        }
+    };
+    live.route_id = Some(links.call_id().to_owned());
     timeline.record("Trouter connected", "callback socket ready");
 
-    let identity = control.until_hangup(fetch_self(session)).await??;
-    let thread_id = control
-        .until_hangup(find_echo_bot_thread(session, &identity.object_id))
-        .await??;
-    timeline.record("echo bot chat", if thread_id.is_some() { "found" } else { "none" });
-    let grant = control.until_hangup(fetch_relay_grant(session)).await??;
+    let thread_id = if matches!(spec, Some(CallSpec::Echo)) {
+        let thread_id = control
+            .until_hangup(find_echo_bot_thread(&inner.session, &inner.identity.object_id))
+            .await??;
+        timeline.record("echo bot chat", if thread_id.is_some() { "found" } else { "none" });
+        thread_id
+    } else {
+        None
+    };
+    let grant = control.until_hangup(fetch_relay_grant(&inner.session)).await??;
     timeline.record("GET trap/tokens", format!("relay grant, expires in {} s", grant.expires_in_seconds));
 
     let factory = devices::shared_factory();
@@ -280,83 +457,101 @@ async fn drive(
     let track = audio.track.clone();
     live.audio = Some(audio);
 
-    let mut configuration = RtcConfiguration::default();
-    configuration.ice_servers = vec![grant.ice_server(&options.relay_host)];
-    let peer = factory
-        .create_peer_connection(configuration)
-        .map_err(|error| Error::Webrtc(error.to_string()))?;
-    live.peer = Some(peer.clone());
-    let (peer_events, mut peer_receiver) = mpsc::unbounded_channel();
-    let ice_sender = peer_events.clone();
-    peer.on_ice_connection_state_change(Some(Box::new(move |state| {
-        let _ = ice_sender.send(PeerEvent::Ice(state));
-    })));
-    let connection_sender = peer_events.clone();
-    peer.on_connection_state_change(Some(Box::new(move |state| {
-        let _ = connection_sender.send(PeerEvent::Connection(state));
-    })));
-    let track_sender = peer_events;
-    peer.on_track(Some(Box::new(move |event| {
-        if let MediaStreamTrack::Audio(track) = event.track {
-            let _ = track_sender.send(PeerEvent::Track(track));
-        }
-    })));
+    let mut current = open_peer(&factory, &grant, &options.relay_host)?;
+    live.peers.push(current.peer.clone());
 
-    let transceiver_init = RtpTransceiverInit {
-        direction: RtpTransceiverDirection::SendRecv,
-        stream_ids: vec!["microphone".into()],
-        send_encodings: Vec::new(),
-    };
-    peer.add_transceiver(MediaStreamTrack::Audio(track), transceiver_init)
-        .map_err(|error| Error::Webrtc(error.to_string()))?;
-
-    let offer = peer
-        .create_offer(OfferOptions {
-            offer_to_receive_audio: true,
-            ..OfferOptions::default()
-        })
-        .await
-        .map_err(|error| Error::Webrtc(error.to_string()))?;
-    peer.set_local_description(offer.clone())
-        .await
-        .map_err(|error| Error::Webrtc(error.to_string()))?;
-    let browser_offer = offer.to_string();
-    let mut numbers = random_u32;
-    let signaled = to_teams_offer(&browser_offer, &OfferPlan::default(), &mut numbers)?;
-    timeline.record("setLocalDescription", format!("{} m-line(s) signaled", signaled.lines.len()));
-    dump_sdp(options, "1-browser-offer.sdp", &browser_offer);
-    dump_sdp(options, "2-teams-offer.sdp", &signaled.sdp);
-
-    let participant = Participant {
-        mri: format!("8:orgid:{}", identity.object_id),
-        display_name: identity.display_name.clone(),
-        endpoint_id: endpoint.endpoint_id.clone(),
-        participant_id: uuid::Uuid::new_v4().to_string(),
-        language_id: "en-gb".into(),
-    };
-    let links = CallbackLinks::new(&callback_base(&endpoint.trouter_uri), &uuid::Uuid::new_v4().to_string());
-    let media_leg_id = uuid::Uuid::new_v4().simple().to_string().to_uppercase();
-    let signaling = Arc::new(Signaling::new(
-        session.clone(),
-        poll_session.clone(),
-        options.routing.clone(),
-        timeline.clone(),
-    ));
+    let signaling = Arc::new(inner.signaling(timeline.clone()));
+    let media_leg_id = new_media_leg_id();
     let call_started = Instant::now();
-    let conversation = control
-        .until_hangup(signaling.create_conversation(&EchoInvitation {
-            from: &participant,
-            offer_sdp: &signaled.sdp,
-            media_leg_id: &media_leg_id,
-            callbacks: &links,
-        }))
-        .await??;
-    let remote = RemoteCall {
-        signaling: signaling.clone(),
-        conversation: conversation.clone(),
-        participant: participant.clone(),
+    let mut offered: Option<OfferedMedia> = None;
+    let mut negotiator = MediaNegotiator::default();
+    let mut remote_set = false;
+    let mut keep_alive_link: Option<String> = None;
+    let mut keep_alive_seconds: Option<u64> = None;
+    let mut keep_alive_at: Option<Instant> = None;
+    let mut outgoing_deadline: Option<Instant> = None;
+    let is_meeting = spec.as_ref().is_some_and(CallSpec::is_meeting);
+    let is_echo = matches!(spec, Some(CallSpec::Echo));
+
+    let conversation = match (spec, incoming_media) {
+        (Some(spec), None) => {
+            let media = create_offer(&current.peer, &track).await?;
+            timeline.record("setLocalDescription", format!("{} m-line(s) signaled", media.signaled.lines.len()));
+            dump_sdp(options, "1-browser-offer.sdp", &media.browser_offer);
+            dump_sdp(options, "2-teams-offer.sdp", &media.signaled.sdp);
+            let target = spec.target();
+            let invitation = Invitation {
+                from: &participant,
+                offer_sdp: &media.signaled.sdp,
+                media_leg_id: &media_leg_id,
+                callbacks: &links,
+                target: &target,
+            };
+            let conversation = match &target {
+                InviteTarget::Meeting(meeting) => {
+                    let subscribed = control
+                        .until_hangup(signaling.subscribe_meeting(&participant, &links, meeting))
+                        .await??;
+                    signaling.join_meeting(&subscribed, &invitation).await?
+                }
+                _ => signaling.create_conversation(&invitation).await?,
+            };
+            if spec.is_people() {
+                control.send(CallUpdate::Progress(Progress::Calling));
+                outgoing_deadline = Some(Instant::now() + OUTGOING_TIMEOUT);
+            }
+            offered = Some(media);
+            live.remote = Some(RemoteCall {
+                signaling: signaling.clone(),
+                conversation: conversation.clone(),
+                participant: participant.clone(),
+            });
+            conversation
+        }
+        (None, Some((_notification, attached))) => {
+            let teams_offer = attached
+                .offer_sdp
+                .clone()
+                .ok_or_else(|| Error::Signaling("attach answer without an offer".into()))?;
+            let conversation = attached
+                .conversation
+                .clone()
+                .ok_or_else(|| Error::Signaling("attach answer without a conversation".into()))?;
+            live.remote = Some(RemoteCall {
+                signaling: signaling.clone(),
+                conversation: conversation.clone(),
+                participant: participant.clone(),
+            });
+            let answered = answer_offer(&current.peer, Some(&track), &teams_offer).await?;
+            timeline.record("setRemoteDescription", format!("offer applied, {} signaled line(s)", answered.remote.lines.len()));
+            dump_sdp(options, "3-teams-offer.sdp", &teams_offer);
+            dump_sdp(options, "4-teams-answer.sdp", &answered.answer_sdp);
+            let acceptance_url = attached
+                .links
+                .get("acceptance")
+                .ok_or_else(|| Error::Signaling("attach answer without an acceptance link".into()))?;
+            let modalities = vec!["Audio".to_owned()];
+            signaling
+                .accept(
+                    acceptance_url,
+                    &Answer {
+                        from: &participant,
+                        answer_sdp: &answered.answer_sdp,
+                        media_leg_id: &media_leg_id,
+                        callbacks: &links,
+                        modalities: &modalities,
+                    },
+                )
+                .await?;
+            negotiator.answered_incoming(attached.from_mixer);
+            remote_set = true;
+            keep_alive_link = attached.links.get("callLeg").cloned();
+            keep_alive_at = Some(Instant::now() + keep_alive_period(None));
+            conversation
+        }
+        _ => return Err(Error::Callback("call plan without an offer or an invitation".into())),
     };
-    live.remote = Some(remote.clone());
+    let remote = live.remote.clone().expect("remote call set above");
     live.broker_running.store(true, Ordering::SeqCst);
     live.broker = Some(tokio::spawn(poll_broker(
         signaling.clone(),
@@ -364,21 +559,28 @@ async fn drive(
         live.broker_running.clone(),
     )));
 
-    let mut muted = false;
-    if let Err(error) = signaling.update_endpoint_state(&conversation, &participant, muted).await {
+    let initial = MuteEffect::initial(is_meeting);
+    let mut muted = initial.muted;
+    live.audio.as_ref().expect("audio set above").track.set_enabled(initial.track_enabled);
+    if muted {
+        control.send(CallUpdate::Muted(true));
+    }
+    if let Err(error) = signaling.update_endpoint_state(&conversation, &participant, initial.endpoint_is_muted).await {
         timeline.record("updateEndpointState failed", error.to_string());
     }
 
-    let callbacks = live.callbacks.as_mut().expect("callbacks set above");
-    let replier = live.replier.clone().expect("replier set above");
+    let replier = inner.replier.clone();
     let mut stats_tick = interval(STATS_PERIOD);
     let hard_deadline = options.hard_limit.map(|limit| call_started + limit);
     let mut leave_at = hard_deadline;
     let mut reconnect_deadline: Option<Instant> = None;
-    let mut remote_set = false;
+    let mut next: Option<NextPeer> = None;
+    let mut roster = Roster::default();
+    let mut lobby = false;
     let mut previous_packets = 0u64;
     let mut ticks = 0u32;
     let mut second = 0u32;
+    let echo_thread = thread_id;
     loop {
         tokio::select! {
             Some(callback) = callbacks.recv() => {
@@ -386,34 +588,135 @@ async fn drive(
                 match handle_callback(&callback, timeline) {
                     Ok(CallEvent::Acceptance(acceptance)) => {
                         replier.reply(request_id, 200, acceptance_acknowledgement(&links).to_string());
-                        dump_sdp(options, "3-teams-answer.sdp", &acceptance.sdp);
-                        if let Ok(answer) = to_browser_answer(&acceptance.sdp, &signaled, &browser_offer) {
-                            dump_sdp(options, "4-browser-answer.sdp", &answer);
+                        match negotiator.on_acceptance(acceptance.from_mixer) {
+                            MediaAction::ApplyAnswer => {
+                                let Some(media) = offered.as_ref() else { continue };
+                                dump_sdp(options, "3-teams-answer.sdp", &acceptance.sdp);
+                                if let Ok(answer) = to_browser_answer(&acceptance.sdp, &media.signaled, &media.browser_offer) {
+                                    dump_sdp(options, "4-browser-answer.sdp", &answer);
+                                }
+                                apply_answer(&current.peer, &acceptance.sdp, &media.signaled, &media.browser_offer)
+                                    .await
+                                    .inspect_err(|error| timeline.record("answer rejected", error.to_string()))?;
+                                remote_set = true;
+                                outgoing_deadline = None;
+                                let directions: Vec<String> = current
+                                    .peer
+                                    .transceivers()
+                                    .iter()
+                                    .map(|transceiver| format!("{:?}", transceiver.current_direction()))
+                                    .collect();
+                                timeline.record("setRemoteDescription", format!("answer applied, directions {}", directions.join(",")));
+                                if acceptance.in_lobby() {
+                                    lobby = true;
+                                    control.send(CallUpdate::Lobby(true));
+                                }
+                                keep_alive_link = acceptance.links.get("callLeg").cloned();
+                                keep_alive_seconds = acceptance.keep_alive_seconds;
+                                keep_alive_at = Some(Instant::now() + keep_alive_period(keep_alive_seconds));
+                                let remote = remote.clone();
+                                let links = links.clone();
+                                let thread_id = echo_thread.clone();
+                                tokio::spawn(async move {
+                                    if is_echo {
+                                        let _ = remote.signaling.add_echo_bot(&remote.conversation, &remote.participant, thread_id.as_deref(), &links).await;
+                                    }
+                                    let _ = remote.signaling.update_endpoint_metadata(&remote.conversation, &remote.participant).await;
+                                });
+                            }
+                            MediaAction::Escalate => {
+                                match start_escalation(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links).await {
+                                    Ok(pending) => {
+                                        timeline.record("escalation", "new peer connection, new offer sent");
+                                        live.peers.push(pending.session.peer.clone());
+                                        next = Some(pending);
+                                    }
+                                    Err(error) => {
+                                        negotiator.escalation_failed();
+                                        timeline.record("escalation failed", error.to_string());
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        apply_answer(&peer, &acceptance.sdp, &signaled, &browser_offer).await.inspect_err(|error| {
-                            timeline.record("answer rejected", error.to_string());
-                        })?;
-                        remote_set = true;
-                        let directions: Vec<String> = peer
-                            .transceivers()
-                            .iter()
-                            .map(|transceiver| format!("{:?}", transceiver.current_direction()))
-                            .collect();
-                        timeline.record("setRemoteDescription", format!("answer applied, directions {}", directions.join(",")));
-                        let signaling = signaling.clone();
-                        let conversation = conversation.clone();
-                        let participant = participant.clone();
-                        let links = links.clone();
-                        let thread_id = thread_id.clone();
-                        tokio::spawn(async move {
-                            let _ = signaling.add_echo_bot(&conversation, &participant, thread_id.as_deref(), &links).await;
-                            let _ = signaling.update_endpoint_metadata(&conversation, &participant).await;
-                        });
+                    }
+                    Ok(CallEvent::MediaAnswer(answer)) => {
+                        replier.reply(request_id, 200, "");
+                        if negotiator.on_media_answer() == MediaAction::ApplyOnNewPeer {
+                            let applied = match next.as_ref().and_then(|pending| Some((pending, pending.offered.as_ref()?))) {
+                                Some((pending, media)) => apply_answer(&pending.session.peer, &answer.sdp, &media.signaled, &media.browser_offer).await,
+                                None => Err(Error::Webrtc("no pending peer connection for the answer".into())),
+                            };
+                            match applied {
+                                Ok(()) => {
+                                    if let Some(url) = answer.links.get("mediaAcknowledgement") {
+                                        let _ = remote.signaling.post_empty("POST mediaAcknowledgement", url).await;
+                                    }
+                                }
+                                Err(error) => {
+                                    negotiator.escalation_failed();
+                                    next = None;
+                                    timeline.record("escalation answer rejected", error.to_string());
+                                }
+                            }
+                        }
+                    }
+                    Ok(CallEvent::MediaRenegotiation(renegotiation)) => {
+                        replier.reply(request_id, 200, "");
+                        let action = negotiator.on_renegotiation(renegotiation.new_offer, renegotiation.escalation);
+                        let result = match action {
+                            MediaAction::AnswerOnNewPeer => {
+                                match answer_on_new_peer(&factory, &grant, options, &track, &renegotiation.sdp).await {
+                                    Ok((session, answered)) => {
+                                        live.peers.push(session.peer.clone());
+                                        let sent = send_media_answer(&remote, &links, &renegotiation.links, &answered, &media_leg_id).await;
+                                        next = Some(NextPeer { session, offered: None });
+                                        sent
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            MediaAction::AnswerOnSamePeer => {
+                                match answer_offer(&current.peer, None, &renegotiation.sdp).await {
+                                    Ok(answered) => send_media_answer(&remote, &links, &renegotiation.links, &answered, &media_leg_id).await,
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            _ => Ok(()),
+                        };
+                        if let Err(error) = result {
+                            timeline.record("renegotiation failed", error.to_string());
+                        }
+                    }
+                    Ok(CallEvent::RosterUpdate(body)) => {
+                        replier.reply(request_id, 200, "");
+                        if roster.apply(&body) {
+                            let entries = roster.entries();
+                            timeline.record("roster", format!("{} participant(s)", entries.len()));
+                            control.send(CallUpdate::Roster(entries));
+                            if let Some(in_lobby) = roster.is_in_lobby(&own_mri)
+                                && in_lobby != lobby
+                            {
+                                lobby = in_lobby;
+                                control.send(CallUpdate::Lobby(lobby));
+                            }
+                        }
+                    }
+                    Ok(CallEvent::Progress(status)) => {
+                        replier.reply(request_id, 200, "");
+                        if status == ProgressStatus::Ringing {
+                            control.send(CallUpdate::Progress(Progress::Ringing));
+                        }
+                    }
+                    Ok(CallEvent::Speakers(sources)) => {
+                        replier.reply(request_id, 200, "");
+                        control.send(CallUpdate::Speakers(roster.mris_for_sources(&sources)));
                     }
                     Ok(CallEvent::End(end)) => {
                         replier.reply(request_id, 200, "");
+                        let kind = end.kind();
                         report.end = Some(end);
-                        advance(state, CallSignal::RemoteEnd, control);
+                        advance(state, CallSignal::RemoteEnd(kind), control);
                         break;
                     }
                     Ok(_) => replier.reply(request_id, 200, ""),
@@ -423,7 +726,7 @@ async fn drive(
                     }
                 }
             }
-            Some(event) = peer_receiver.recv() => match event {
+            Some(event) = current.events.recv() => match event {
                 PeerEvent::Ice(ice_state) => {
                     timeline.record("ICE state", format!("{ice_state:?}"));
                     if ice_state == IceConnectionState::Connected && report.ice_connected_ms.is_none() {
@@ -456,12 +759,31 @@ async fn drive(
                         _ => {}
                     }
                 }
-                PeerEvent::Track(track) => {
+                PeerEvent::Track(remote_track) => {
                     timeline.record("remote audio track", "receiving");
                     if options.record_remote {
-                        tokio::spawn(record_track(track, recording.clone(), options.tone_hz));
+                        tokio::spawn(record_track(remote_track, recording.clone(), options.tone_hz));
                     }
                 }
+            },
+            Some(event) = next_peer_event(&mut next) => match event {
+                PeerEvent::Connection(PeerConnectionState::Connected) => {
+                    if let Some(pending) = next.take() {
+                        timeline.record("escalation", "new peer connection connected, old one dropped");
+                        let old = std::mem::replace(&mut current, pending.session);
+                        old.peer.close();
+                        offered = pending.offered;
+                        remote_set = true;
+                    }
+                }
+                PeerEvent::Connection(PeerConnectionState::Failed) => {
+                    negotiator.escalation_failed();
+                    if let Some(pending) = next.take() {
+                        pending.session.peer.close();
+                    }
+                    timeline.record("escalation failed", "new peer connection failed, staying on the old one");
+                }
+                _ => {}
             },
             command = control.recv() => match command {
                 Some(CallCommand::Mute(mute)) => {
@@ -484,13 +806,26 @@ async fn drive(
                 Some(CallCommand::RefreshDevices) => {
                     control.send(CallUpdate::Devices(devices::list_devices(&factory)));
                 }
+                Some(CallCommand::EndMeeting) => {
+                    if is_meeting {
+                        match remote.signaling.end_for_all(&remote.conversation, &remote.participant).await {
+                            Ok(()) => {
+                                live.skip_leave = true;
+                                report.left_cleanly = true;
+                            }
+                            Err(error) => timeline.record("end meeting failed", error.to_string()),
+                        }
+                    }
+                    advance(state, CallSignal::LocalLeave, control);
+                    break;
+                }
                 Some(CallCommand::Hangup) | None => {
                     advance(state, CallSignal::LocalLeave, control);
                     break;
                 }
             },
             _ = stats_tick.tick(), if remote_set => {
-                let snapshot = collect_stats(&peer).await;
+                let snapshot = collect_stats(&current.peer).await;
                 ticks += 1;
                 let local_level = if muted { 0.0 } else { snapshot.local_level as f32 };
                 control.send(CallUpdate::Levels { local: local_level, remote: snapshot.audio_level as f32 });
@@ -542,9 +877,78 @@ async fn drive(
                 advance(state, CallSignal::LocalLeave, control);
                 break;
             }
+            _ = sleep_until(outgoing_deadline.unwrap_or_else(far_future)), if outgoing_deadline.is_some() => {
+                timeline.record("no answer", "outgoing call timed out");
+                live.cancel_leave = true;
+                advance(state, CallSignal::RemoteEnd(EndKind::NoAnswer), control);
+                break;
+            }
+            _ = sleep_until(keep_alive_at.unwrap_or_else(far_future)), if keep_alive_at.is_some() => {
+                keep_alive_at = Some(Instant::now() + keep_alive_period(keep_alive_seconds));
+                let remote = remote.clone();
+                let links = links.clone();
+                let call_leg = keep_alive_link.clone();
+                tokio::spawn(async move {
+                    if let Some(url) = call_leg {
+                        let _ = remote.signaling.keep_call_alive(&url).await;
+                    }
+                    let _ = remote.signaling.keep_conversation_alive(&remote.conversation, &remote.participant, &links).await;
+                });
+            }
         }
     }
+    live.callbacks = Some(callbacks);
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn start_escalation(
+    factory: &PeerConnectionFactory,
+    grant: &RelayGrant,
+    options: &CallOptions,
+    track: &RtcAudioTrack,
+    remote: &RemoteCall,
+    links: &CallbackLinks,
+    media_leg_id: &str,
+    acceptance_links: &BTreeMap<String, String>,
+) -> Result<NextPeer> {
+    let url = acceptance_links
+        .get("mediaRenegotiation")
+        .ok_or_else(|| Error::Signaling("acceptance without a mediaRenegotiation link".into()))?;
+    let session = open_peer(factory, grant, &options.relay_host)?;
+    let media = create_offer(&session.peer, track).await?;
+    let body = renegotiation_body(&remote.participant, links, &media.signaled.sdp, media_leg_id);
+    remote.signaling.post_json("POST mediaRenegotiation", url, body).await?;
+    Ok(NextPeer {
+        session,
+        offered: Some(media),
+    })
+}
+
+async fn answer_on_new_peer(
+    factory: &PeerConnectionFactory,
+    grant: &RelayGrant,
+    options: &CallOptions,
+    track: &RtcAudioTrack,
+    teams_offer: &str,
+) -> Result<(PeerSession, AnsweredMedia)> {
+    let session = open_peer(factory, grant, &options.relay_host)?;
+    let answered = answer_offer(&session.peer, Some(track), teams_offer).await?;
+    Ok((session, answered))
+}
+
+async fn send_media_answer(
+    remote: &RemoteCall,
+    links: &CallbackLinks,
+    reply_links: &BTreeMap<String, String>,
+    answered: &AnsweredMedia,
+    media_leg_id: &str,
+) -> Result<()> {
+    let url = reply_links
+        .get("mediaAnswer")
+        .ok_or_else(|| Error::Signaling("renegotiation without a mediaAnswer link".into()))?;
+    let body = escalation_answer_body(&remote.participant, links, &answered.answer_sdp, media_leg_id);
+    remote.signaling.post_json("POST mediaAnswer", url, body).await
 }
 
 fn far_future() -> Instant {
@@ -565,26 +969,29 @@ fn apply_mute(command: MuteCommand, currently_muted: bool, audio: &AudioSetup, r
     effect.muted
 }
 
-async fn tear_down(mut live: Live, timeline: &Timeline, report: &mut TestCallReport) {
+async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &mut CallReport, cancelled: bool) {
     if let Some(audio) = &live.audio {
         audio.track.set_enabled(false);
     }
     live.broker_running.store(false, Ordering::SeqCst);
-    if let Some(remote) = &live.remote {
-        match remote.signaling.leave(&remote.conversation, &remote.participant).await {
+    if !live.skip_leave
+        && let Some(remote) = &live.remote
+    {
+        let reason = if cancelled { LeaveReason::Cancel } else { LeaveReason::Hangup };
+        match remote.signaling.leave(&remote.conversation, &remote.participant, reason).await {
             Ok(()) => report.left_cleanly = true,
             Err(error) => timeline.record("leave failed", error.to_string()),
         }
     }
     if report.end.is_none()
-        && let (Some(callbacks), Some(replier)) = (live.callbacks.as_mut(), live.replier.as_ref())
+        && let Some(callbacks) = live.callbacks.as_mut()
         && live.remote.is_some()
     {
         let waited = timeout(END_CALLBACK_WAIT, async {
             while let Some(callback) = callbacks.recv().await {
                 let request_id = callback.request_id;
                 let event = handle_callback(&callback, timeline);
-                replier.reply(request_id, 200, "");
+                inner.replier.reply(request_id, 200, "");
                 if let Ok(CallEvent::End(end)) = event {
                     return Some(end);
                 }
@@ -594,7 +1001,7 @@ async fn tear_down(mut live: Live, timeline: &Timeline, report: &mut TestCallRep
         .await;
         report.end = waited.ok().flatten();
     }
-    if let Some(peer) = &live.peer {
+    for peer in &live.peers {
         peer.close();
     }
     if let Some(audio) = live.audio.take() {
@@ -603,11 +1010,25 @@ async fn tear_down(mut live: Live, timeline: &Timeline, report: &mut TestCallRep
     if let Some(broker) = live.broker.take() {
         broker.abort();
     }
-    if let Some(realtime) = live.realtime.take() {
-        realtime.stop().await;
+    if let Some(route_id) = &live.route_id {
+        inner.unregister_route(route_id);
     }
-    timeline.record("closed", "peer closed, Trouter registration removed");
+    timeline.record("closed", "peer closed, call route removed");
 }
+
+fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<CallEvent> {
+    let body = decode_body(callback)?;
+    let (_, event) = classify(&callback.path, body)?;
+    let detail = match &event {
+        CallEvent::Acceptance(acceptance) => format!("answer sdp {} bytes, fromMixer={}", acceptance.sdp.len(), acceptance.from_mixer),
+        CallEvent::End(end) => format!("code={} subCode={} phrase={}", end.code, end.sub_code, end.phrase),
+        CallEvent::Progress(status) => format!("{status:?}"),
+        _ => String::new(),
+    };
+    timeline.record(format!("Trouter {}", event.name()), detail);
+    Ok(event)
+}
+
 
 async fn apply_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
     let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
@@ -619,7 +1040,7 @@ async fn apply_answer(peer: &PeerConnection, teams_answer: &str, signaled: &Sign
 }
 
 /// Writes an SDP with ICE credentials, fingerprints and addresses masked, for debugging the dialect.
-fn dump_sdp(options: &TestCallOptions, name: &str, sdp: &str) {
+fn dump_sdp(options: &CallOptions, name: &str, sdp: &str) {
     let Some(directory) = &options.sdp_dump_dir else {
         return;
     };
@@ -646,18 +1067,6 @@ fn mask_address(token: &str) -> String {
     } else {
         token.to_owned()
     }
-}
-
-fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<CallEvent> {
-    let body = decode_body(callback)?;
-    let (_, event) = classify(&callback.path, body)?;
-    let detail = match &event {
-        CallEvent::Acceptance(acceptance) => format!("answer sdp {} bytes, fromMixer={}", acceptance.sdp.len(), acceptance.from_mixer),
-        CallEvent::End(end) => format!("code={} subCode={} phrase={}", end.code, end.sub_code, end.phrase),
-        _ => String::new(),
-    };
-    timeline.record(format!("Trouter {}", event.name()), detail);
-    Ok(event)
 }
 
 async fn record_track(track: RtcAudioTrack, recording: Arc<Mutex<Recording>>, tone_hz: f32) {
@@ -771,11 +1180,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn callback_base_comes_from_the_presence_uri() {
-        assert_eq!(
-            callback_base("https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc//unifiedPresenceService"),
-            "https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc/"
-        );
-        assert_eq!(callback_base("https://h/v4/f/abc/unifiedPresenceService"), "https://h/v4/f/abc/");
+    fn keep_alive_fires_at_ninety_percent_of_the_interval() {
+        assert_eq!(keep_alive_period(Some(2700)), Duration::from_secs(2430));
+        assert_eq!(keep_alive_period(None), Duration::from_secs(2430));
+        assert_eq!(keep_alive_period(Some(10)), Duration::from_secs(54));
+    }
+
+    #[test]
+    fn specs_map_to_invitation_targets() {
+        assert_eq!(CallSpec::Echo.target(), InviteTarget::Echo);
+        let people = CallSpec::People {
+            callees: vec![Callee { mri: "8:orgid:b".into(), display_name: "Bea".into() }],
+            thread_id: "19:t@thread.v2".into(),
+        };
+        assert!(people.is_people() && !people.is_meeting());
+        assert!(matches!(people.target(), InviteTarget::People { thread_id, .. } if thread_id == "19:t@thread.v2"));
+        let meeting = CallSpec::Meeting(MeetingTarget {
+            thread_id: "19:meeting@thread.v2".into(),
+            tenant_id: "t".into(),
+            organizer_id: "o".into(),
+            meeting_data: None,
+        });
+        assert!(meeting.is_meeting() && !meeting.is_people());
     }
 }

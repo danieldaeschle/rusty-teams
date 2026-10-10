@@ -24,6 +24,8 @@ const REPLY_FIELD_FRAME: f32 = 14.;
 const REPLY_HINT_ROW: f32 = 20.;
 const REPLY_SPACING: f32 = 8.;
 const CONFIRM_HEIGHT: f32 = 56.;
+const RING_BASE_HEIGHT: f32 = 120.;
+const RING_NOTE_HEIGHT: f32 = 18.;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slot {
@@ -42,6 +44,10 @@ pub fn toast_height(model: &ToastModel, preview_lines: usize) -> f32 {
         }
         ReplyState::Closed => base + ACTION_ROW_SPACING + ACTION_BUTTON,
     }
+}
+
+pub fn ring_height(ends_current_call: bool) -> f32 {
+    if ends_current_call { RING_BASE_HEIGHT + RING_NOTE_HEIGHT } else { RING_BASE_HEIGHT }
 }
 
 pub struct StackSlots {
@@ -149,6 +155,20 @@ mod tests {
         assert_eq!(toast.width, 540);
         assert_eq!(toast.height, 120);
         assert_eq!(toast.y + toast.height, 1032 - 18);
+    }
+
+    #[test]
+    fn ring_toasts_sit_below_the_message_toasts_next_to_the_corner() {
+        let heights = [80., ring_height(false)];
+        let slots = stack_slots(area(1.), Corner::BottomRight, &heights, false);
+        assert_eq!(slots.toasts[1].y + slots.toasts[1].height, 1032 - 12);
+        assert_eq!(slots.toasts[1].height, 120);
+        assert!(slots.toasts[0].y + slots.toasts[0].height < slots.toasts[1].y);
+    }
+
+    #[test]
+    fn the_second_call_note_makes_the_ring_toast_taller() {
+        assert!(ring_height(true) > ring_height(false));
     }
 
     #[test]

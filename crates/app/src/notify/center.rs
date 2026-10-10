@@ -7,7 +7,7 @@ use store::Sidebar;
 
 use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
-use super::layout::{self, Slot};
+use super::layout::{self, Slot, ring_height};
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide,
@@ -19,6 +19,7 @@ use super::stack::{
     FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
 use super::text::describe;
+use super::ring_view::RingView;
 use super::toast::{PillView, ToastView};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::data::{self, Directory, PresenceKind};
@@ -29,6 +30,7 @@ const TICK: Duration = Duration::from_millis(33);
 const SLIDE_DURATION: Duration = Duration::from_millis(180);
 const SLIDE_DISTANCE: f32 = 48.;
 const DEMO_SPEC_DELAY: Duration = Duration::from_secs(3);
+const DEMO_RING_ENV: &str = "TEAMS_DEMO_RING";
 
 struct OpenWindow {
     handle: AnyWindowHandle,
@@ -56,6 +58,10 @@ pub struct NotificationCenter {
     throttle: SoundThrottle,
     windows: HashMap<u64, OpenWindow>,
     opening: HashSet<u64>,
+    ring_windows: HashMap<u64, OpenWindow>,
+    ring_opening: HashSet<u64>,
+    ring_tone: Option<platform::RingTone>,
+    demo_mode: bool,
     pill: Option<OpenWindow>,
     pill_opening: bool,
     hover_hold: bool,
@@ -88,6 +94,10 @@ impl NotificationCenter {
             throttle: SoundThrottle::default(),
             windows: HashMap::new(),
             opening: HashSet::new(),
+            ring_windows: HashMap::new(),
+            ring_opening: HashSet::new(),
+            ring_tone: None,
+            demo_mode: app.read(cx).mode.demo,
             pill: None,
             pill_opening: false,
             hover_hold: false,
@@ -116,8 +126,20 @@ impl NotificationCenter {
                     .ok();
             })
             .detach();
+            if let Some(delay) = demo_ring_delay() {
+                let app = center.app.clone();
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor().timer(delay).await;
+                    app.update(cx, |state, cx| state.demo_incoming_ring(cx));
+                })
+                .detach();
+            }
         }
         center
+    }
+
+    pub fn app(&self) -> &Entity<AppState> {
+        &self.app
     }
 
     pub fn settings(&self) -> &Settings {
@@ -175,6 +197,7 @@ impl NotificationCenter {
             AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.refresh_badge(cx),
+            AppEvent::Ring => self.on_rings_changed(cx),
             _ => {}
         }
     }
@@ -294,6 +317,16 @@ impl NotificationCenter {
         }
     }
 
+    fn ringing_ids(&self, cx: &App) -> Vec<(u64, bool)> {
+        let state = self.app.read(cx);
+        let in_call = state.call.is_some();
+        state
+            .rings
+            .ringing()
+            .map(|entry| (entry.ring.ring_id, in_call))
+            .collect()
+    }
+
     fn sync_windows(&mut self, cx: &mut Context<Self>) {
         let visible = self.visible_ids();
         let stale: Vec<u64> = self
@@ -305,8 +338,18 @@ impl NotificationCenter {
         for id in stale {
             self.close_window(id, cx);
         }
+        let rings = self.ringing_ids(cx);
+        let stale_rings: Vec<u64> = self
+            .ring_windows
+            .keys()
+            .filter(|id| !rings.iter().any(|(ring_id, _)| ring_id == *id))
+            .copied()
+            .collect();
+        for id in stale_rings {
+            self.close_ring_window(id, cx);
+        }
         let area = self.work_area(cx);
-        let heights: Vec<f32> = self
+        let mut heights: Vec<f32> = self
             .stack
             .visible()
             .iter()
@@ -315,12 +358,75 @@ impl NotificationCenter {
                 layout::toast_height(toast, lines)
             })
             .collect();
+        heights.extend(rings.iter().map(|(_, in_call)| ring_height(*in_call)));
         let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
         let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
         for (id, slot) in visible.iter().zip(slots.toasts.iter()) {
             self.place_toast(*id, *slot, area, cx);
         }
+        for ((ring_id, _), slot) in rings.iter().zip(slots.toasts.iter().skip(visible.len())) {
+            self.place_ring(*ring_id, *slot, area, cx);
+        }
         self.sync_pill(slots.pill, area, cx);
+    }
+
+    fn place_ring(&mut self, ring_id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
+        let Some(window) = self.ring_windows.get(&ring_id) else {
+            self.open_ring_window(ring_id, slot, area, cx);
+            return;
+        };
+        if let Some(native) = window.native {
+            let offset = self.slide_offset(window.opened, area);
+            window.place(native, slot, slot.x + offset, cx);
+        }
+    }
+
+    fn open_ring_window(&mut self, ring_id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
+        if !self.ring_opening.insert(ring_id) {
+            return;
+        }
+        open_popup(
+            popup_options(slot, area),
+            cx,
+            move |center, _, cx| cx.new(|cx| RingView::new(center, ring_id, cx)),
+            move |this, window| {
+                this.ring_opening.remove(&ring_id);
+                if let Some(window) = window {
+                    this.ring_windows.insert(ring_id, window);
+                }
+            },
+        );
+    }
+
+    fn close_ring_window(&mut self, ring_id: u64, cx: &mut Context<Self>) {
+        let closed = self.ring_windows.get(&ring_id).is_some_and(|window| {
+            window
+                .handle
+                .update(cx, |_, window, _| window.remove_window())
+                .is_ok()
+        });
+        if closed {
+            self.ring_windows.remove(&ring_id);
+        }
+    }
+
+    fn on_rings_changed(&mut self, cx: &mut Context<Self>) {
+        let ringing = self.app.read(cx).rings.is_ringing();
+        if ringing && !self.main_window_active(cx) && let Some(native) = self.main_native {
+            platform::flash(native);
+        }
+        self.sync_windows(cx);
+        self.sync_ring_tone(ringing);
+        cx.notify();
+    }
+
+    fn sync_ring_tone(&mut self, ringing: bool) {
+        let audible = ringing && self.settings.sound && !self.demo_mode;
+        match (audible, self.ring_tone.is_some()) {
+            (true, false) => self.ring_tone = platform::start_ring(),
+            (false, true) => self.ring_tone = None,
+            _ => {}
+        }
     }
 
     fn slide_offset(&self, opened: Instant, area: WorkArea) -> i32 {
@@ -466,7 +572,10 @@ impl NotificationCenter {
         }
         self.stack.promote(now, fade_in);
         self.sync_hover_hold(now);
-        if !self.stack.is_empty() || !self.windows.is_empty() || self.pill.is_some() {
+        if !self.app.read(cx).rings.is_empty() {
+            self.app.update(cx, |state, cx| state.tick_rings(cx));
+        }
+        if !self.stack.is_empty() || !self.windows.is_empty() || self.pill.is_some() || !self.ring_windows.is_empty() {
             self.sync_windows(cx);
             cx.notify();
         }
@@ -790,6 +899,12 @@ fn open_popup<V: Render>(
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
+}
+
+/// `TEAMS_DEMO_RING=<seconds>` rings a fake incoming call that long after the demo starts.
+fn demo_ring_delay() -> Option<Duration> {
+    let seconds: f32 = std::env::var(DEMO_RING_ENV).ok()?.trim().parse().ok()?;
+    (seconds >= 0.).then(|| Duration::from_secs_f32(seconds))
 }
 
 fn preview_lines(text: &str, cx: &App) -> usize {

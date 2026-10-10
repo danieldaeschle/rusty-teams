@@ -7,6 +7,7 @@ use super::feed::{Actor, Entry, Feed, RETENTION_DAYS, ReactedMessage, start_time
 use super::preview_label;
 use super::reactions::reacted_messages;
 use crate::app_state::{AppEvent, AppState};
+use crate::call::MissedCall;
 use crate::demo;
 use crate::notify::{IncomingTracker, channel_alerts};
 use crate::people::resolve_names;
@@ -72,8 +73,19 @@ impl ActivityCenter {
             AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.on_sidebar(cx),
+            AppEvent::MissedCall(missed) => self.on_missed_call(missed, cx),
             _ => {}
         }
+    }
+
+    fn on_missed_call(&mut self, missed: &MissedCall, cx: &mut Context<Self>) {
+        let conversation_id = self.app.read(cx).conversation_of_missed_call(missed).unwrap_or_default();
+        let actor = Actor {
+            user_id: missed.caller_mri.strip_prefix("8:orgid:").map(str::to_owned),
+            name: missed.caller_name.clone(),
+        };
+        self.feed.record_missed_call(&conversation_id, actor, missed.at);
+        self.flush(cx);
     }
 
     fn on_selection(&mut self, cx: &mut Context<Self>) {

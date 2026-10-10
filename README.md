@@ -59,6 +59,9 @@
 
 **Calls**
 - Test call to the Teams Echo bot from the avatar menu: native WebRTC audio, mute (`Ctrl+Shift+M`), device switching, mini window while you read other chats
+- Phone button in 1:1 and group chat headers: callee tiles show Calling and Ringing, Cancel while ringing, notices like "Bea declined" or "No answer"
+- Incoming calls: topmost ring toast with Decline and Accept, ring tone, missed calls in Activity
+- Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
 
 **App**
 - Dark theme, opens instantly from the cache
@@ -72,7 +75,7 @@
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
 | 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222`. Built-in login is planned |
 
-Calls, meetings and channel tabs are planned, see [ROADMAP.md](ROADMAP.md).
+Video, screen sharing and the remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 

@@ -34,6 +34,7 @@ pub struct RealtimeConfig {
     pub max_reattach_backoff: Duration,
     pub instance: InstanceNames,
     pub forward_callbacks: bool,
+    pub ringable: bool,
 }
 
 /// Page globals of one Trouter client; a second client in the same tab needs its own names.
@@ -65,6 +66,7 @@ impl Default for RealtimeConfig {
             max_reattach_backoff: Duration::from_secs(30),
             instance: InstanceNames::default(),
             forward_callbacks: false,
+            ringable: false,
         }
     }
 }

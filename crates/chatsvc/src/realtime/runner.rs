@@ -15,6 +15,7 @@ pub(super) const DEFAULT_BINDING_NAME: &str = "__chatsvcRealtime";
 pub(super) const DEFAULT_EPID_KEY: &str = "__chatsvcEpid";
 const WORKER_TEMPLATE: &str = include_str!("../../assets/trouter.js");
 const FORWARD_CALLBACKS_OFF: &str = "const FORWARD_CALLBACKS = false;";
+const REGISTRATION_OFF: &str = "const RINGABLE = false;";
 const STOP_STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The page worker with this instance's names baked in.
@@ -35,6 +36,9 @@ impl PageScript {
             .replace(&quoted(DEFAULT_EPID_KEY), &quoted(&names.endpoint_storage_key));
         if config.forward_callbacks {
             worker_source = worker_source.replace(FORWARD_CALLBACKS_OFF, "const FORWARD_CALLBACKS = true;");
+        }
+        if config.ringable {
+            worker_source = worker_source.replace(REGISTRATION_OFF, "const RINGABLE = true;");
         }
         PageScript {
             global_name: names.global.clone(),
@@ -337,5 +341,21 @@ mod tests {
         assert_eq!(script.stop_expression(), "window.__callingTrouter ? window.__callingTrouter.stop() : null");
         let default_script = PageScript::new(&RealtimeConfig::default());
         assert!(default_script.worker_source.contains(FORWARD_CALLBACKS_OFF));
+    }
+
+    #[test]
+    fn only_the_ringable_instance_registers_for_calls() {
+        let ringable = PageScript::new(&RealtimeConfig {
+            ringable: true,
+            ..RealtimeConfig::default()
+        });
+        assert!(ringable.worker_source.contains("const RINGABLE = true;"));
+        let quiet = PageScript::new(&RealtimeConfig::default());
+        assert!(quiet.worker_source.contains(REGISTRATION_OFF));
+        for script in [ringable, quiet] {
+            assert!(script.worker_source.contains("{appId: 'SkypeSpacesWeb', templateKey: 'SkypeSpacesWeb_2.6'}"));
+            assert!(script.worker_source.contains("{appId: 'TeamsCDLWebWorker', templateKey: 'TeamsCDLWebWorker_2.6'}"));
+            assert!(script.worker_source.contains("RINGABLE ? {productContext: ''} : {}"));
+        }
     }
 }

@@ -17,3 +17,6 @@ session.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+webview.workspace = true

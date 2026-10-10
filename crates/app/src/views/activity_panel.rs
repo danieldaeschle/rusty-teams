@@ -344,6 +344,7 @@ fn kind_marker(entry: &Entry) -> Div {
             .font_weight(FontWeight::BOLD)
             .child("@"),
         Kind::Reaction => marker.child(entry.glyphs.first().cloned().unwrap_or_default()),
+        Kind::MissedCall => marker.child(icon(IconName::PhoneOff, 10., theme::red())),
     }
 }
 
@@ -353,6 +354,7 @@ fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, S
         Kind::Messages => names,
         Kind::Mention => format!("{names} mentioned you"),
         Kind::Reaction => format!("{names} reacted"),
+        Kind::MissedCall => format!("Missed call from {names}"),
     };
     match conversation_label(sidebar, &entry.conversation_id) {
         Some(label) => format!("{verb} in {label}"),
@@ -366,6 +368,7 @@ fn detail(entry: &Entry) -> String {
             format!("{} new messages: {}", entry.count, entry.preview)
         }
         Kind::Reaction => format!("{} to: {}", entry.glyphs.join(" "), entry.preview),
+        Kind::MissedCall if entry.count > 1 => format!("{} missed calls", entry.count),
         _ => entry.preview.clone(),
     }
 }
@@ -522,6 +525,7 @@ mod tests {
         assert_eq!(detail(&entry(Kind::Messages, 3)), "3 new messages: hello");
         assert_eq!(detail(&entry(Kind::Mention, 1)), "hello");
         assert_eq!(detail(&entry(Kind::Reaction, 1)), "A B to: hello");
+        assert_eq!(detail(&entry(Kind::MissedCall, 3)), "3 missed calls");
     }
 
     #[test]
@@ -545,6 +549,10 @@ mod tests {
         assert_eq!(
             headline(&entry(Kind::Mention, 1), &sidebar, &HashMap::new()),
             "Anna mentioned you"
+        );
+        assert_eq!(
+            headline(&entry(Kind::MissedCall, 1), &sidebar, &HashMap::new()),
+            "Missed call from Anna"
         );
     }
 

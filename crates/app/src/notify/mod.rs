@@ -5,6 +5,9 @@ mod incoming;
 mod layout;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod platform;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod ring_tone;
+mod ring_view;
 mod rules;
 mod settings;
 mod settings_view;

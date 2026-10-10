@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use calling::EngineEvent;
 use chatsvc::{EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind, TypingEvent};
 use chrono::{DateTime, Utc};
 use graph::Graph;
@@ -47,6 +48,8 @@ pub enum BackendEvent {
     Connection(ConnectionState),
     Engine(Arc<Engine>),
     Calls(Arc<CallLauncher>),
+    Ring(EngineEvent),
+    ThreadChanged(String),
     Core(CoreEvent),
     Live(LiveState),
     Typing(TypingEvent),
@@ -95,13 +98,14 @@ pub fn live_state_for(kind: StatusKind) -> LiveState {
 pub fn start(
     store: Arc<Store>,
     transport: Arc<dyn Transport>,
+    ringable: bool,
 ) -> mpsc::UnboundedReceiver<BackendEvent> {
     let (sender, receiver) = mpsc::unbounded_channel();
-    crate::runtime::handle().spawn(supervise(store, transport, sender));
+    crate::runtime::handle().spawn(supervise(store, transport, ringable, sender));
     receiver
 }
 
-async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, events: EventSender) {
+async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, ringable: bool, events: EventSender) {
     let _ = events.send(BackendEvent::Connection(ConnectionState::Connecting));
     let session = loop {
         match Session::with_transport(transport.clone(), SessionConfig::default()).await {
@@ -125,7 +129,11 @@ async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, events: Eve
         .unwrap_or_else(build);
     let engine = Arc::new(engine);
     let _ = events.send(BackendEvent::Engine(engine.clone()));
-    let _ = events.send(BackendEvent::Calls(Arc::new(CallLauncher::new(transport))));
+    let ring_events = events.clone();
+    let launcher = CallLauncher::start(transport, ringable, move |event| {
+        let _ = ring_events.send(BackendEvent::Ring(event));
+    });
+    let _ = events.send(BackendEvent::Calls(launcher));
     tokio::spawn(forward_core_events(engine.clone(), events.clone()));
     let (nudge, nudges) = mpsc::unbounded_channel();
     tokio::spawn(realtime_loop(
@@ -198,6 +206,9 @@ async fn realtime_loop(
                     match event {
                         RealtimeEvent::Message(message) => {
                             let _ = events.send(BackendEvent::Live(LiveState::Live));
+                            if let Some(conversation_id) = thread_signal(&message) {
+                                let _ = events.send(BackendEvent::ThreadChanged(conversation_id));
+                            }
                             let receipt_engine = engine.clone();
                             let receipt_event = message.clone();
                             engine.handle_pin_event(&message);
@@ -250,6 +261,14 @@ async fn presence_resubscribe_loop(engine: Arc<Engine>) {
     loop {
         interval.tick().await;
         let _ = engine.resubscribe_presence().await;
+    }
+}
+
+/// A thread update or a new message in a chat can start or end a meeting (the call bubble is a message).
+pub fn thread_signal(event: &MessageEvent) -> Option<String> {
+    match event.kind {
+        EventKind::ThreadUpdate | EventKind::NewMessage => event.conversation_id.clone(),
+        _ => None,
     }
 }
 
@@ -364,6 +383,20 @@ mod tests {
                 conversation_id: "c".into()
             })
         );
+    }
+
+    #[test]
+    fn thread_updates_and_new_messages_signal_a_possible_meeting_change() {
+        assert_eq!(
+            thread_signal(&event(EventKind::ThreadUpdate, Some("c"), None)).as_deref(),
+            Some("c")
+        );
+        assert_eq!(
+            thread_signal(&event(EventKind::NewMessage, Some("c"), Some("m"))).as_deref(),
+            Some("c")
+        );
+        assert_eq!(thread_signal(&event(EventKind::Typing, Some("c"), None)), None);
+        assert_eq!(thread_signal(&event(EventKind::ThreadUpdate, None, None)), None);
     }
 
     #[test]

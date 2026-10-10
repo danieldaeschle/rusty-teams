@@ -179,7 +179,9 @@ fn status_menu(
         None => context.summary.label.to_owned(),
     };
     let submenu_context = context.clone();
-    popup
+    let ring_app = context.app.clone();
+    let demo = context.app.read(cx).mode.demo;
+    let popup = popup
         .min_w(px(MENU_WIDTH))
         .item(PopupMenuItem::element(move |_, cx| {
             header(&header_context, cx)
@@ -215,7 +217,17 @@ fn status_menu(
                 .on_click(move |_, _, cx| {
                     settings_app.update(cx, |state, cx| state.open_notification_settings(cx));
                 }),
-        )
+        );
+    if !demo {
+        return popup;
+    }
+    popup.item(
+        PopupMenuItem::new("Simulate incoming call")
+            .icon(menu_icon(IconName::Phone))
+            .on_click(move |_, _, cx| {
+                ring_app.update(cx, |state, cx| state.demo_incoming_ring(cx));
+            }),
+    )
 }
 
 fn chat_list_item(

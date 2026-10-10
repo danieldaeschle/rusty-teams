@@ -1,10 +1,12 @@
 use std::time::Instant;
 
+use crate::end::EndKind;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndReason {
     LocalHangup,
     Cancelled,
-    RemoteEnded,
+    Remote(EndKind),
     Dropped,
     Failed(String),
 }
@@ -26,7 +28,7 @@ pub enum CallSignal {
     MediaFailed,
     ReconnectTimedOut,
     LocalLeave,
-    RemoteEnd,
+    RemoteEnd(EndKind),
     Error(String),
 }
 
@@ -41,7 +43,7 @@ impl CallState {
             (CallState::Connected { since }, MediaDisconnected) => CallState::Reconnecting { since: *since },
             (CallState::Connecting, LocalLeave) => ended(EndReason::Cancelled),
             (_, LocalLeave) => ended(EndReason::LocalHangup),
-            (_, RemoteEnd) => ended(EndReason::RemoteEnded),
+            (_, RemoteEnd(kind)) => ended(EndReason::Remote(kind)),
             (CallState::Reconnecting { .. }, ReconnectTimedOut | MediaFailed) => ended(EndReason::Dropped),
             (CallState::Connected { .. }, MediaFailed) => ended(EndReason::Dropped),
             (CallState::Connecting, MediaFailed) => ended(EndReason::Failed("connection failed".into())),
@@ -131,16 +133,19 @@ mod tests {
 
     #[test]
     fn remote_end_wins_in_every_active_state() {
-        assert_eq!(run(&[CallSignal::Dial, CallSignal::RemoteEnd]), ended(EndReason::RemoteEnded));
         assert_eq!(
-            run(&[CallSignal::Dial, CallSignal::MediaConnected, CallSignal::RemoteEnd]),
-            ended(EndReason::RemoteEnded)
+            run(&[CallSignal::Dial, CallSignal::RemoteEnd(EndKind::Declined)]),
+            ended(EndReason::Remote(EndKind::Declined))
+        );
+        assert_eq!(
+            run(&[CallSignal::Dial, CallSignal::MediaConnected, CallSignal::RemoteEnd(EndKind::Normal)]),
+            ended(EndReason::Remote(EndKind::Normal))
         );
     }
 
     #[test]
     fn ended_is_final_until_the_next_dial() {
-        let state = run(&[CallSignal::Dial, CallSignal::LocalLeave, CallSignal::MediaConnected, CallSignal::RemoteEnd]);
+        let state = run(&[CallSignal::Dial, CallSignal::LocalLeave, CallSignal::MediaConnected, CallSignal::RemoteEnd(EndKind::Normal)]);
         assert_eq!(state, ended(EndReason::Cancelled));
         assert_eq!(state.next(CallSignal::Dial, Instant::now()), CallState::Connecting);
     }
