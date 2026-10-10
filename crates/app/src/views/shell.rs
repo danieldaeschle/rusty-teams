@@ -3,6 +3,7 @@ use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::call_mini::render_call_mini;
+use super::call_stage::render_stage_overlay;
 use super::call_view::render_call_view;
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
@@ -69,6 +70,7 @@ pub struct AppShell {
     update: UpdateStatus,
     _subscription: Subscription,
     _activity_observation: Subscription,
+    _escape_observation: Subscription,
 }
 
 impl AppShell {
@@ -107,6 +109,11 @@ impl AppShell {
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_observation = cx.observe(&activity, |_, _, cx| cx.notify());
+        let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
+            if event.keystroke.key == "escape" {
+                this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
+            }
+        });
         let closing = notifications.clone();
         window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
         let mut shell = AppShell {
@@ -126,6 +133,7 @@ impl AppShell {
             update: UpdateStatus::UpToDate,
             _subscription: subscription,
             _activity_observation: activity_observation,
+            _escape_observation: escape_observation,
         };
         shell.apply_open_target(cx);
         let Startup {
@@ -483,6 +491,7 @@ impl Render for AppShell {
         let state = self.state.read(cx);
         let call_view = render_call_view(&self.state, state).filter(|_| state.viewing_call());
         let call_mini = render_call_mini(&self.state, state);
+        let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(
             state,
             &self.update,
@@ -541,6 +550,7 @@ impl Render for AppShell {
                     .child(status),
             )
             .children(call_mini)
+            .children(stage_overlay)
             .children(self.activity_panel.clone())
             .children(self.saved_panel.clone())
             .children(self.switcher.clone())

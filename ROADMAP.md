@@ -167,7 +167,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Incoming call: ring, accept, decline | Partial | Ring toast, ring tone, missed call in Activity, registrar endpoint, attach + accept. Built from the Teams code, not yet rung by a second person |
 | 1:1 and group calls | Partial | Phone button, Calling and Ringing tiles, end notices, direct to mixer renegotiation. Not yet tried with a second person |
 | Join a meeting from a chat | Partial | Join button from the live meeting state, joins muted, roster tiles, lobby, Leave and End meeting. Audio only. Verified with a meeting of one; not yet with other participants |
-| Screen sharing | Missing | |
+| Video and screen sharing | Partial | Send and receive over libwebrtc H264, source requests through `applyChannelParameters`, stage, strip, self view, share banner. Sent frames acknowledged by the mixer; receive only checked by a local loopback, not with a second person. Incoming calls stay audio-only |
 | In a call shown in presence | Missing | |
 
 ## Agents

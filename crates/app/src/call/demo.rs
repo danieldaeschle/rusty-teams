@@ -1,9 +1,12 @@
 use std::time::{Duration, Instant};
 
+use calling::video_frame::bgra_from_i420;
+use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
     AudioDevice, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, DeviceChoice, DeviceLists, EndReason,
-    IncomingRing, Progress, RosterEntry, call_channel,
+    IncomingRing, Progress, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
 };
+use calling::CameraDevice;
 use tokio::time::{interval, sleep};
 
 use super::model::{ECHO_MRI, ECHO_NAME};
@@ -19,6 +22,13 @@ const REMOTE_SPEAKS: std::ops::Range<u32> = 0..18;
 const LOCAL_SPEAKS: std::ops::Range<u32> = 24..32;
 const SPEAKING_LEVEL: f32 = 0.3;
 const SPEAKER_TICKS: u32 = 10;
+const VIDEO_PERIOD: Duration = Duration::from_millis(125);
+const DEMO_CAMERAS: usize = 4;
+const SCREEN_EVERY_TICKS: u32 = 4;
+const SHARE_START: Duration = Duration::from_secs(10);
+const SHARE_END: Duration = Duration::from_secs(45);
+const GUEST_PHASE: u32 = 37;
+const SELF_PHASE: u32 = 211;
 pub const DEMO_OWN_MRI: &str = "8:orgid:demo-me";
 pub const DEMO_RING_ID: u64 = 9001;
 const DEMO_CALLER: (&str, &str) = ("8:orgid:demo-mara", "Mara Lindqvist");
@@ -78,6 +88,23 @@ fn device(index: u16, name: &str) -> AudioDevice {
     }
 }
 
+fn demo_cameras() -> Vec<CameraDevice> {
+    vec![
+        CameraDevice { key: "0".into(), name: "Integrated Camera".into() },
+        CameraDevice { key: "1".into(), name: "Studio Webcam".into() },
+    ]
+}
+
+fn demo_share_sources() -> Vec<ShareSource> {
+    let window = |id: u64, title: &str| ShareSource { id, kind: ShareKind::Window, title: title.to_owned() };
+    vec![
+        ShareSource { id: 1, kind: ShareKind::Screen, title: String::new() },
+        window(2, "Release notes - Docs"),
+        window(3, "Standup board"),
+        window(4, "Terminal"),
+    ]
+}
+
 fn demo_devices() -> DeviceLists {
     DeviceLists {
         inputs: vec![device(0, "Headset Microphone"), device(1, "Built-in Microphone")],
@@ -100,6 +127,8 @@ fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
             display_name: name.clone(),
             muted: index % 3 == 1,
             in_lobby: false,
+            has_video: index < DEMO_CAMERAS,
+            sharing: false,
         })
         .collect()
 }
@@ -122,6 +151,8 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
     }
     control.send(CallUpdate::ListenOnly(false));
     control.send(CallUpdate::Devices(demo_devices()));
+    control.send(CallUpdate::Cameras(demo_cameras()));
+    control.send(CallUpdate::ShareSources(demo_share_sources()));
     control.send(CallUpdate::Selected {
         input: DeviceChoice::SystemDefault,
         output: DeviceChoice::SystemDefault,
@@ -138,7 +169,9 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
         control.send(CallUpdate::Lobby(false));
     }
     control.send(CallUpdate::Roster(roster_of(&people)));
-    speak_until_hangup(control, people).await;
+    let video = !matches!(script, DemoCall::Test);
+    let sharer = matches!(script, DemoCall::Meeting { .. }).then(|| people.get(1).map(|person| person.0.clone())).flatten();
+    speak_until_hangup(control, people, video, sharer).await;
 }
 
 async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bool {
@@ -161,7 +194,25 @@ async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bo
     true
 }
 
-async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>) {
+fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, sharing: bool, sharer: Option<&str>, camera_on: bool) {
+    if camera_on {
+        control.video.publish(VideoKey::LocalCamera, bgra_from_i420(pattern_frame(PatternKind::Camera, tick + SELF_PHASE)));
+    }
+    for (index, (mri, _)) in people.iter().take(DEMO_CAMERAS).enumerate() {
+        let frame = pattern_frame(PatternKind::Camera, tick + index as u32 * GUEST_PHASE);
+        control.video.publish(VideoKey::Person(mri.clone()), bgra_from_i420(frame));
+    }
+    if sharing && sharer.is_some() && tick.is_multiple_of(SCREEN_EVERY_TICKS) {
+        control.video.publish(VideoKey::Screen, bgra_from_i420(pattern_frame(PatternKind::Screen, tick)));
+    }
+}
+
+async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video: bool, sharer: Option<String>) {
+    let started = Instant::now();
+    let mut video_ticks = 0u32;
+    let mut sharing = false;
+    let mut camera_on = false;
+    let mut video_tick = interval(VIDEO_PERIOD);
     let mut muted = false;
     let mut input = DeviceChoice::SystemDefault;
     let mut output = DeviceChoice::SystemDefault;
@@ -169,6 +220,16 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>) {
     let mut tick = interval(LEVEL_PERIOD);
     loop {
         tokio::select! {
+            _ = video_tick.tick(), if video || camera_on => {
+                let elapsed = started.elapsed();
+                let share_now = sharer.is_some() && (SHARE_START..SHARE_END).contains(&elapsed);
+                if share_now != sharing {
+                    sharing = share_now;
+                    control.send(CallUpdate::ScreenShare(sharer.clone().filter(|_| sharing)));
+                }
+                publish_demo_video(&control, &people, video_ticks, sharing, sharer.as_deref(), camera_on);
+                video_ticks += 1;
+            }
             _ = tick.tick() => {
                 let phase = ticks % CYCLE_TICKS;
                 let remote_speaks = REMOTE_SPEAKS.contains(&phase);
@@ -196,6 +257,14 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>) {
                     control.send(CallUpdate::Selected { input: input.clone(), output: output.clone() });
                 }
                 Some(CallCommand::RefreshDevices) => control.send(CallUpdate::Devices(demo_devices())),
+                Some(CallCommand::SetCamera(on)) => {
+                    camera_on = on;
+                    control.send(CallUpdate::Camera(on));
+                }
+                Some(CallCommand::SelectCamera(_)) => {}
+                Some(CallCommand::StartShare(source)) => control.send(CallUpdate::LocalShare(Some(source.label()))),
+                Some(CallCommand::StopShare) => control.send(CallUpdate::LocalShare(None)),
+                Some(CallCommand::RefreshShareSources) => control.send(CallUpdate::ShareSources(demo_share_sources())),
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);
                     return;

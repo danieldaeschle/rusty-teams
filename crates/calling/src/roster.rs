@@ -2,6 +2,9 @@ use serde_json::Value;
 
 const ACTIVE: &str = "active";
 const AUDIO: &str = "audio";
+const VIDEO: &str = "video";
+const SCREEN: &str = "applicationsharing-video";
+const SENDING_DIRECTIONS: [&str; 2] = ["sendonly", "sendrecv"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
@@ -10,6 +13,9 @@ pub struct Member {
     pub muted: bool,
     pub in_lobby: bool,
     pub audio_sources: Vec<u32>,
+    pub video_source: Option<u32>,
+    pub screen_source: Option<u32>,
+    pub streams: Vec<String>,
     version: u64,
 }
 
@@ -19,6 +25,8 @@ pub struct RosterEntry {
     pub display_name: String,
     pub muted: bool,
     pub in_lobby: bool,
+    pub has_video: bool,
+    pub sharing: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,6 +48,8 @@ impl Roster {
                 display_name: member.display_name.clone(),
                 muted: member.muted,
                 in_lobby: member.in_lobby,
+                has_video: member.video_source.is_some(),
+                sharing: member.screen_source.is_some(),
             })
             .collect()
     }
@@ -77,6 +87,29 @@ impl Roster {
         self.members.iter().find(|member| member.mri == mri).map(|member| member.in_lobby)
     }
 
+    pub fn stream_summaries(&self, mri: &str) -> Vec<String> {
+        self.members
+            .iter()
+            .find(|member| member.mri == mri)
+            .map(|member| member.streams.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn video_candidates(&self, own_mri: &str) -> Vec<(String, u32)> {
+        self.members
+            .iter()
+            .filter(|member| member.mri != own_mri && !member.in_lobby)
+            .filter_map(|member| Some((member.mri.clone(), member.video_source?)))
+            .collect()
+    }
+
+    pub fn screen_share(&self, own_mri: &str) -> Option<(String, u32)> {
+        self.members
+            .iter()
+            .filter(|member| member.mri != own_mri && !member.in_lobby)
+            .find_map(|member| Some((member.mri.clone(), member.screen_source?)))
+    }
+
     pub fn mris_for_sources(&self, sources: &[u32]) -> Vec<String> {
         self.members
             .iter()
@@ -111,8 +144,36 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         muted,
         in_lobby,
         audio_sources,
+        video_source: sending_source(&in_call, VIDEO),
+        screen_source: sending_source(&in_call, SCREEN),
+        streams: stream_summaries(&in_call),
         version,
     }
+}
+
+fn stream_summaries(in_call: &[&&Value]) -> Vec<String> {
+    in_call
+        .iter()
+        .flat_map(|endpoint| endpoint["call"]["mediaStreams"].as_array().into_iter().flatten())
+        .map(|stream| {
+            format!(
+                "{} source {} {} request {}",
+                stream["type"].as_str().unwrap_or("?"),
+                stream["sourceId"],
+                stream["direction"].as_str().unwrap_or("?"),
+                stream["mdRequestId"]
+            )
+        })
+        .collect()
+}
+
+fn sending_source(in_call: &[&&Value], stream_type: &str) -> Option<u32> {
+    in_call
+        .iter()
+        .flat_map(|endpoint| endpoint["call"]["mediaStreams"].as_array().into_iter().flatten())
+        .filter(|stream| stream["type"].as_str() == Some(stream_type))
+        .filter(|stream| stream["direction"].as_str().is_some_and(|direction| SENDING_DIRECTIONS.contains(&direction)))
+        .find_map(|stream| source_id(&stream["sourceId"]))
 }
 
 fn audio_streams(endpoint: &Value) -> impl Iterator<Item = &Value> {
@@ -228,6 +289,33 @@ mod tests {
         })));
         assert_eq!(roster.mris_for_sources(&[301]), vec!["8:orgid:b".to_owned()]);
         assert!(roster.mris_for_sources(&[999]).is_empty());
+    }
+
+    fn sending(mut person: Value, video: Option<u32>, screen: Option<u32>) -> Value {
+        let streams = person["endpoints"]["ep"]["call"]["mediaStreams"].as_array_mut().unwrap();
+        streams.clear();
+        streams.push(json!({"type": "audio", "label": "main-audio", "sourceId": 201, "direction": "sendrecv"}));
+        streams.push(json!({"type": "video", "label": "main-video", "sourceId": video.unwrap_or(202), "direction": if video.is_some() { "sendonly" } else { "inactive" }}));
+        streams.push(json!({"type": "applicationsharing-video", "label": "applicationsharing-video", "sourceId": screen.unwrap_or(212), "direction": if screen.is_some() { "sendrecv" } else { "recvonly" }}));
+        person
+    }
+
+    #[test]
+    fn only_sending_video_streams_are_candidates() {
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({
+            "8:orgid:me": sending(participant("Me", 1, "active", false, 201), Some(250), None),
+            "8:orgid:a": sending(participant("Ana", 1, "active", false, 301), Some(302), None),
+            "8:orgid:b": sending(participant("Bo", 1, "active", false, 401), None, None),
+            "8:orgid:c": sending(participant("Cy", 1, "active", false, 501), None, Some(512)),
+        })));
+        assert_eq!(roster.video_candidates("8:orgid:me"), vec![("8:orgid:a".to_owned(), 302)]);
+        assert_eq!(roster.screen_share("8:orgid:me"), Some(("8:orgid:c".to_owned(), 512)));
+        assert_eq!(roster.screen_share("8:orgid:c"), None);
+        let entries = roster.entries();
+        assert!(entries.iter().find(|entry| entry.display_name == "Ana").unwrap().has_video);
+        assert!(!entries.iter().find(|entry| entry.display_name == "Bo").unwrap().has_video);
+        assert!(entries.iter().find(|entry| entry.display_name == "Cy").unwrap().sharing);
     }
 
     #[test]

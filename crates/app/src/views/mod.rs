@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod avatar;
 pub mod call_controls;
 pub mod call_mini;
+pub mod call_stage;
 pub mod call_view;
 pub mod card_carousel;
 pub mod card_chart;

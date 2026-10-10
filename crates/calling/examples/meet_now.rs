@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
-use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, EngineConfig, MeetingTarget};
+use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, EngineConfig, MeetingTarget, ShareKind, ShareSource};
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
 use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
@@ -18,8 +18,13 @@ const WAIT_FILE_LIMIT: Duration = Duration::from_secs(300);
 const END_LIMIT: Duration = Duration::from_secs(20);
 const GONE_LIMIT: Duration = Duration::from_secs(90);
 const POLL: Duration = Duration::from_secs(2);
+const MEDIA_DELAY: Duration = Duration::from_secs(3);
+const THREAD_PROPERTY_RETRIES: usize = 8;
 
 struct Arguments {
+    camera: bool,
+    share: bool,
+    stop_media_after: Option<Duration>,
     hold: Duration,
     thread_out: Option<PathBuf>,
     wait_file: Option<PathBuf>,
@@ -27,6 +32,9 @@ struct Arguments {
 
 fn arguments() -> Arguments {
     let mut parsed = Arguments {
+        camera: false,
+        share: false,
+        stop_media_after: None,
         hold: Duration::from_secs(10),
         thread_out: None,
         wait_file: None,
@@ -34,6 +42,9 @@ fn arguments() -> Arguments {
     let mut input = std::env::args().skip(1);
     while let Some(flag) = input.next() {
         match flag.as_str() {
+            "--camera" => parsed.camera = true,
+            "--share" => parsed.share = true,
+            "--stop-media-after" => parsed.stop_media_after = input.next().and_then(|value| value.parse().ok()).map(Duration::from_secs),
             "--hold" => parsed.hold = Duration::from_secs(input.next().and_then(|value| value.parse().ok()).unwrap_or(10)),
             "--thread-out" => parsed.thread_out = input.next().map(PathBuf::from),
             "--wait-file" => parsed.wait_file = input.next().map(PathBuf::from),
@@ -95,7 +106,14 @@ async fn main() {
         std::fs::write(path, &thread_id).expect("thread file");
     }
 
-    let (tenant_id, organizer_id) = tenant_and_organizer(&session, &thread_id).await;
+    let (mut tenant_id, mut organizer_id) = tenant_and_organizer(&session, &thread_id).await;
+    for _ in 0..THREAD_PROPERTY_RETRIES {
+        if tenant_id.is_some() {
+            break;
+        }
+        tokio::time::sleep(POLL).await;
+        (tenant_id, organizer_id) = tenant_and_organizer(&session, &thread_id).await;
+    }
     let organizer_id = organizer_id.unwrap_or_else(|| me.object_id.clone());
     println!(
         "# thread: tenant found {}, organizer is me {}",
@@ -131,14 +149,22 @@ async fn main() {
     let mut live_detected_after = None;
     let mut released_at = None;
     let mut end_sent_at = None;
+    let mut media_due: Option<Instant> = None;
+    let mut media_stop_due: Option<Instant> = None;
     let deadline = Instant::now() + CONNECT_LIMIT + LIVE_STATE_LIMIT + WAIT_FILE_LIMIT + arguments.hold + END_LIMIT;
     let mut tick = tokio::time::interval(POLL);
     while ended.is_none() && Instant::now() < deadline {
         tokio::select! {
             update = handle.updates.recv() => match update {
                 Some(CallUpdate::State(CallState::Connected { .. })) => {
-                    connected_after.get_or_insert(join_started.elapsed());
+                    if connected_after.is_none() {
+                        connected_after = Some(join_started.elapsed());
+                        media_due = Some(Instant::now() + MEDIA_DELAY);
+                    }
                 }
+                Some(CallUpdate::Camera(on)) => println!("# camera update: {on}"),
+                Some(CallUpdate::LocalShare(label)) => println!("# local share update: {}", label.is_some()),
+                Some(CallUpdate::Notice(text)) => println!("# notice: {text}"),
                 Some(CallUpdate::State(CallState::Ended { reason })) => ended = Some(reason),
                 Some(CallUpdate::Roster(entries)) => roster_count = Some(entries.len()),
                 Some(CallUpdate::Stats { inbound_packets, .. }) => inbound = inbound_packets,
@@ -146,6 +172,22 @@ async fn main() {
                 None => break,
             },
             _ = tick.tick() => {
+                if media_stop_due.is_some_and(|due| Instant::now() >= due) {
+                    media_stop_due = None;
+                    let _ = handle.commands.send(CallCommand::SetCamera(false));
+                    let _ = handle.commands.send(CallCommand::StopShare);
+                }
+                if media_due.is_some_and(|due| Instant::now() >= due) {
+                    media_due = None;
+                    media_stop_due = arguments.stop_media_after.map(|after| Instant::now() + after);
+                    if arguments.camera {
+                        let _ = handle.commands.send(CallCommand::SetCamera(true));
+                    }
+                    if arguments.share {
+                        let source = ShareSource { id: 0, kind: ShareKind::Screen, title: String::new() };
+                        let _ = handle.commands.send(CallCommand::StartShare(source));
+                    }
+                }
                 if connected_after.is_none() {
                     if join_started.elapsed() > CONNECT_LIMIT {
                         println!("# not connected within {CONNECT_LIMIT:?}, hanging up");

@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 use crate::relay::ic3_scope;
 use crate::timeline::Timeline;
 use crate::trouter_events::{CallbackLinks, acceptance_links};
+use crate::video_layout::MediaDescription;
 
 pub const EPCONV_URL: &str = "https://api-emea.flightproxy.teams.microsoft.com/api/v2/epconv";
 pub const ECHO_BOT_MRI: &str = "28:cf28171e-fcfd-47e4-a1d6-79460b0b3ca0";
@@ -157,6 +158,8 @@ pub fn routed_url(url: &str) -> Result<String> {
     Ok(format!("{FLIGHTPROXY_EP}/{host}{path}"))
 }
 
+const FAILURE_BODY_CHARS: usize = 240;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaveReason {
     Hangup,
@@ -240,7 +243,8 @@ impl Signaling {
         let response = session.batch(&[request], &ic3_scope()).await?.remove(0);
         self.timeline.record(label, format!("HTTP {}", response.status));
         if !response.is_success() {
-            return Err(Error::Signaling(format!("{label} answered HTTP {}", response.status)));
+            let reason: String = response.body.to_string().chars().take(FAILURE_BODY_CHARS).collect();
+            return Err(Error::Signaling(format!("{label} answered HTTP {} {reason}", response.status)));
         }
         Ok(response)
     }
@@ -305,6 +309,18 @@ impl Signaling {
         });
         let url = conversation.link("updateEndpointState")?;
         self.post_json("POST updateEndpointState", url, body).await
+    }
+
+    pub async fn update_media_descriptions(&self, url: &str, descriptions: &[MediaDescription], request_id: u32) -> Result<()> {
+        let body = json!({
+            "UpdateMediaDescriptions": {
+                "mediaDescriptions": {
+                    "descriptions": descriptions.iter().map(MediaDescription::wire).collect::<Vec<_>>(),
+                    "requestId": request_id,
+                },
+            },
+        });
+        self.post_json("POST updateMediaDescriptions", url, body).await
     }
 
     pub async fn add_echo_bot(

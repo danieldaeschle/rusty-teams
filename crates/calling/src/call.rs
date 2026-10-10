@@ -28,13 +28,18 @@ use crate::push::CallNotification;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
 use crate::renegotiation::{MediaAction, MediaNegotiator};
 use crate::roster::Roster;
-use crate::sdp::{OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, to_browser_answer, to_teams_answer, to_teams_offer};
+use crate::sdp::{RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
 use crate::signaling::{
     Answer, Attached, Callee, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget, Participant, Signaling,
     TenantRouting, find_echo_bot_thread, escalation_answer_body, renegotiation_body,
 };
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
+use crate::video_layout::{MediaDescription, SlotTable, VideoLines, VideoRouter, add_video_lines, offer_plan};
+use crate::video_send::{LocalVideo, VideoMode};
+use crate::camera::{CameraDevice, list_cameras};
+use crate::screen::{ShareKind, ShareSource, list_share_sources};
+use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
     CallEnd, CallEvent, CallbackLinks, ProgressStatus, acceptance_acknowledgement, classify, decode_body,
 };
@@ -56,6 +61,8 @@ pub struct CallOptions {
     pub hard_limit: Option<Duration>,
     pub reconnect_window: Duration,
     pub audio: AudioMode,
+    pub video: VideoMode,
+    pub camera: DeviceChoice,
     pub tone_hz: f32,
     pub input: DeviceChoice,
     pub output: DeviceChoice,
@@ -74,6 +81,8 @@ impl Default for CallOptions {
             hard_limit: None,
             reconnect_window: RECONNECT_WINDOW,
             audio: AudioMode::from_env(),
+            video: VideoMode::from_env(),
+            camera: DeviceChoice::SystemDefault,
             tone_hz: 440.0,
             input: DeviceChoice::SystemDefault,
             output: DeviceChoice::SystemDefault,
@@ -97,6 +106,22 @@ pub struct AudioSecond {
     pub tone_ratio: f32,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VideoReport {
+    pub inbound_packets: u64,
+    pub inbound_frames_decoded: u64,
+    pub inbound_width: u32,
+    pub inbound_height: u32,
+    pub frames_received: u64,
+    pub frames_published: u64,
+    pub outbound_packets: u64,
+    pub outbound_frames_encoded: u64,
+    pub outbound_width: u32,
+    pub outbound_height: u32,
+    pub remote_reports: u64,
+    pub remote_round_trip_ms: f64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CallReport {
     pub timeline: Vec<TimelineEntry>,
@@ -109,6 +134,8 @@ pub struct CallReport {
     pub inbound_packets: u64,
     pub inbound_bytes: u64,
     pub outbound_packets: u64,
+    pub video: VideoReport,
+    pub own_streams: Vec<String>,
     pub seconds_with_inbound_audio: u32,
     pub seconds: Vec<AudioSecond>,
     pub end: Option<CallEnd>,
@@ -178,6 +205,7 @@ enum PeerEvent {
     Ice(IceConnectionState),
     Connection(PeerConnectionState),
     Track(RtcAudioTrack),
+    VideoTrack { mid: String, track: RtcVideoTrack },
 }
 
 struct PeerSession {
@@ -188,6 +216,7 @@ struct PeerSession {
 struct OfferedMedia {
     browser_offer: String,
     signaled: SignaledOffer,
+    video: VideoLines,
 }
 
 struct NextPeer {
@@ -218,6 +247,8 @@ struct Live {
     route_id: Option<String>,
     skip_leave: bool,
     cancel_leave: bool,
+    video_tasks: Vec<JoinHandle<()>>,
+    video_counters: Arc<VideoCounters>,
 }
 
 fn advance(state: &mut CallState, signal: CallSignal, control: &CallControl) -> bool {
@@ -317,15 +348,19 @@ fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &s
     peer.on_connection_state_change(Some(Box::new(move |state| {
         let _ = connection_sender.send(PeerEvent::Connection(state));
     })));
-    peer.on_track(Some(Box::new(move |event| {
-        if let MediaStreamTrack::Audio(track) = event.track {
+    peer.on_track(Some(Box::new(move |event| match event.track {
+        MediaStreamTrack::Audio(track) => {
             let _ = sender.send(PeerEvent::Track(track));
+        }
+        MediaStreamTrack::Video(track) => {
+            let mid = event.transceiver.mid().unwrap_or_default();
+            let _ = sender.send(PeerEvent::VideoTrack { mid, track });
         }
     })));
     Ok(PeerSession { peer, events })
 }
 
-async fn create_offer(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<OfferedMedia> {
+async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, track: &RtcAudioTrack) -> Result<OfferedMedia> {
     let transceiver_init = RtpTransceiverInit {
         direction: RtpTransceiverDirection::SendRecv,
         stream_ids: vec![MIC_STREAM.into()],
@@ -333,9 +368,11 @@ async fn create_offer(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<Of
     };
     peer.add_transceiver(MediaStreamTrack::Audio(track.clone()), transceiver_init)
         .map_err(|error| Error::Webrtc(error.to_string()))?;
+    let video = add_video_lines(peer, factory)?;
     let offer = peer
         .create_offer(OfferOptions {
             offer_to_receive_audio: true,
+            offer_to_receive_video: true,
             ..OfferOptions::default()
         })
         .await
@@ -345,8 +382,8 @@ async fn create_offer(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<Of
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let browser_offer = offer.to_string();
     let mut numbers = random_u32;
-    let signaled = to_teams_offer(&browser_offer, &OfferPlan::default(), &mut numbers)?;
-    Ok(OfferedMedia { browser_offer, signaled })
+    let signaled = to_teams_offer(&browser_offer, &offer_plan(), &mut numbers)?;
+    Ok(OfferedMedia { browser_offer, signaled, video })
 }
 
 /// Video lines of a Teams offer are stopped so the answer rejects them; audio is all this client does.
@@ -456,6 +493,11 @@ async fn drive(
     });
     let track = audio.track.clone();
     live.audio = Some(audio);
+    let mut local_video = LocalVideo::new(&factory, options.video, control.video.clone(), control.updates());
+    let mut camera_choice = options.camera.clone();
+    let mut media_description_request = 1u32;
+    control.send(CallUpdate::Cameras(camera_devices(options.video).await));
+    refresh_share_sources(control.updates(), options.video);
 
     let mut current = open_peer(&factory, &grant, &options.relay_host)?;
     live.peers.push(current.peer.clone());
@@ -475,7 +517,7 @@ async fn drive(
 
     let conversation = match (spec, incoming_media) {
         (Some(spec), None) => {
-            let media = create_offer(&current.peer, &track).await?;
+            let media = create_offer(&current.peer, &factory, &track).await?;
             timeline.record("setLocalDescription", format!("{} m-line(s) signaled", media.signaled.lines.len()));
             dump_sdp(options, "1-browser-offer.sdp", &media.browser_offer);
             dump_sdp(options, "2-teams-offer.sdp", &media.signaled.sdp);
@@ -499,6 +541,9 @@ async fn drive(
             if spec.is_people() {
                 control.send(CallUpdate::Progress(Progress::Calling));
                 outgoing_deadline = Some(Instant::now() + OUTGOING_TIMEOUT);
+            }
+            if let Err(error) = local_video.set_lines(media.video.clone()) {
+                timeline.record("video lines not attached", error.to_string());
             }
             offered = Some(media);
             live.remote = Some(RemoteCall {
@@ -581,6 +626,8 @@ async fn drive(
     let mut ticks = 0u32;
     let mut second = 0u32;
     let echo_thread = thread_id;
+    let mut video = VideoReceive::new(own_mri.clone(), VideoRouter::default());
+    let mut media_links: BTreeMap<String, String> = BTreeMap::new();
     loop {
         tokio::select! {
             Some(callback) = callbacks.recv() => {
@@ -599,6 +646,8 @@ async fn drive(
                                     .await
                                     .inspect_err(|error| timeline.record("answer rejected", error.to_string()))?;
                                 remote_set = true;
+                                media_links.extend(acceptance.links.clone());
+                                negotiate_video(&mut video, &signaling, control, timeline, &acceptance.sdp, media, acceptance.from_mixer, &media_links, &roster);
                                 outgoing_deadline = None;
                                 let directions: Vec<String> = current
                                     .peer
@@ -649,6 +698,10 @@ async fn drive(
                             };
                             match applied {
                                 Ok(()) => {
+                                    if let Some(media) = next.as_ref().and_then(|pending| pending.offered.as_ref()) {
+                                        media_links.extend(answer.links.clone());
+                                        negotiate_video(&mut video, &signaling, control, timeline, &answer.sdp, media, true, &media_links, &roster);
+                                    }
                                     if let Some(url) = answer.links.get("mediaAcknowledgement") {
                                         let _ = remote.signaling.post_empty("POST mediaAcknowledgement", url).await;
                                     }
@@ -694,6 +747,12 @@ async fn drive(
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
                             control.send(CallUpdate::Roster(entries));
+                            let own_streams = roster.stream_summaries(&own_mri);
+                            if own_streams != report.own_streams {
+                                timeline.record("own media streams", own_streams.join("; "));
+                                report.own_streams = own_streams;
+                            }
+                            send_receive_change(control, video.reselect(&roster));
                             if let Some(in_lobby) = roster.is_in_lobby(&own_mri)
                                 && in_lobby != lobby
                             {
@@ -710,7 +769,11 @@ async fn drive(
                     }
                     Ok(CallEvent::Speakers(sources)) => {
                         replier.reply(request_id, 200, "");
-                        control.send(CallUpdate::Speakers(roster.mris_for_sources(&sources)));
+                        let speakers = roster.mris_for_sources(&sources);
+                        if video.note_speakers(&speakers) {
+                            send_receive_change(control, video.reselect(&roster));
+                        }
+                        control.send(CallUpdate::Speakers(speakers));
                     }
                     Ok(CallEvent::End(end)) => {
                         replier.reply(request_id, 200, "");
@@ -765,6 +828,10 @@ async fn drive(
                         tokio::spawn(record_track(remote_track, recording.clone(), options.tone_hz));
                     }
                 }
+                PeerEvent::VideoTrack { mid, track } => {
+                    timeline.record("remote video track", format!("mid {mid}"));
+                    live.video_tasks.push(spawn_video_pump(track, mid, video.router().clone(), control.video.clone(), live.video_counters.clone()));
+                }
             },
             Some(event) = next_peer_event(&mut next) => match event {
                 PeerEvent::Connection(PeerConnectionState::Connected) => {
@@ -773,8 +840,17 @@ async fn drive(
                         let old = std::mem::replace(&mut current, pending.session);
                         old.peer.close();
                         offered = pending.offered;
+                        if let Some(media) = &offered
+                            && let Err(error) = local_video.set_lines(media.video.clone())
+                        {
+                            timeline.record("video lines not attached", error.to_string());
+                        }
                         remote_set = true;
                     }
+                }
+                PeerEvent::VideoTrack { mid, track } => {
+                    timeline.record("remote video track", format!("mid {mid} (new peer)"));
+                    live.video_tasks.push(spawn_video_pump(track, mid, video.router().clone(), control.video.clone(), live.video_counters.clone()));
                 }
                 PeerEvent::Connection(PeerConnectionState::Failed) => {
                     negotiator.escalation_failed();
@@ -806,6 +882,52 @@ async fn drive(
                 Some(CallCommand::RefreshDevices) => {
                     control.send(CallUpdate::Devices(devices::list_devices(&factory)));
                 }
+                Some(CallCommand::SetCamera(on)) => {
+                    if !remote_set {
+                        control.send(CallUpdate::Notice(NOT_CONNECTED_FOR_VIDEO.into()));
+                    } else if on {
+                        match local_video.start_camera(&camera_choice) {
+                            Ok(()) => {
+                                control.send(CallUpdate::Camera(true));
+                                tell_media_descriptions(&remote, &media_links, MediaDescription::camera(true), &mut media_description_request, timeline);
+                            }
+                            Err(error) => control.send(CallUpdate::Notice(format!("Camera could not start: {error}"))),
+                        }
+                    } else {
+                        local_video.stop_camera();
+                        control.send(CallUpdate::Camera(false));
+                        tell_media_descriptions(&remote, &media_links, MediaDescription::camera(false), &mut media_description_request, timeline);
+                    }
+                }
+                Some(CallCommand::SelectCamera(choice)) => {
+                    camera_choice = choice;
+                    if local_video.camera_on()
+                        && let Err(error) = local_video.start_camera(&camera_choice)
+                    {
+                        control.send(CallUpdate::Notice(format!("Camera could not start: {error}")));
+                    }
+                }
+                Some(CallCommand::StartShare(source)) => {
+                    if !remote_set {
+                        control.send(CallUpdate::Notice(NOT_CONNECTED_FOR_VIDEO.into()));
+                    } else {
+                        match local_video.start_share(&source) {
+                            Ok(()) => {
+                                control.send(CallUpdate::LocalShare(Some(source.label())));
+                                tell_media_descriptions(&remote, &media_links, MediaDescription::share(true), &mut media_description_request, timeline);
+                            }
+                            Err(error) => control.send(CallUpdate::Notice(format!("Sharing could not start: {error}"))),
+                        }
+                    }
+                }
+                Some(CallCommand::StopShare) => {
+                    if local_video.sharing() {
+                        local_video.stop_share();
+                        control.send(CallUpdate::LocalShare(None));
+                        tell_media_descriptions(&remote, &media_links, MediaDescription::share(false), &mut media_description_request, timeline);
+                    }
+                }
+                Some(CallCommand::RefreshShareSources) => refresh_share_sources(control.updates(), options.video),
                 Some(CallCommand::EndMeeting) => {
                     if is_meeting {
                         match remote.signaling.end_for_all(&remote.conversation, &remote.participant).await {
@@ -838,6 +960,11 @@ async fn drive(
                 report.inbound_packets = snapshot.inbound_packets;
                 report.inbound_bytes = snapshot.inbound_bytes;
                 report.outbound_packets = snapshot.outbound_packets;
+                report.video = VideoReport {
+                    frames_received: live.video_counters.received.load(Ordering::Relaxed),
+                    frames_published: live.video_counters.published.load(Ordering::Relaxed),
+                    ..snapshot.video.clone()
+                };
                 if ticks.is_multiple_of(TICKS_PER_SECOND) {
                     second += 1;
                     let (decoded_rms, ratio) = {
@@ -863,8 +990,11 @@ async fn drive(
                     timeline.record(
                         "stats",
                         format!(
-                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={}",
-                            snapshot.inbound_packets, snapshot.inbound_bytes, snapshot.audio_level, snapshot.outbound_packets, snapshot.local_level, snapshot.echo_return_loss_enhancement, snapshot.dtls_state
+                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms)",
+                            snapshot.inbound_packets, snapshot.inbound_bytes, snapshot.audio_level, snapshot.outbound_packets, snapshot.local_level, snapshot.echo_return_loss_enhancement, snapshot.dtls_state,
+                            snapshot.video.inbound_packets, snapshot.video.inbound_frames_decoded, snapshot.video.inbound_width, snapshot.video.inbound_height,
+                            snapshot.video.outbound_packets, snapshot.video.outbound_frames_encoded, snapshot.video.outbound_width, snapshot.video.outbound_height,
+                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms
                         ),
                     );
                 }
@@ -916,7 +1046,7 @@ async fn start_escalation(
         .get("mediaRenegotiation")
         .ok_or_else(|| Error::Signaling("acceptance without a mediaRenegotiation link".into()))?;
     let session = open_peer(factory, grant, &options.relay_host)?;
-    let media = create_offer(&session.peer, track).await?;
+    let media = create_offer(&session.peer, factory, track).await?;
     let body = renegotiation_body(&remote.participant, links, &media.signaled.sdp, media_leg_id);
     remote.signaling.post_json("POST mediaRenegotiation", url, body).await?;
     Ok(NextPeer {
@@ -949,6 +1079,96 @@ async fn send_media_answer(
         .ok_or_else(|| Error::Signaling("renegotiation without a mediaAnswer link".into()))?;
     let body = escalation_answer_body(&remote.participant, links, &answered.answer_sdp, media_leg_id);
     remote.signaling.post_json("POST mediaAnswer", url, body).await
+}
+
+#[allow(clippy::too_many_arguments)]
+fn negotiate_video(
+    video: &mut VideoReceive,
+    signaling: &Arc<Signaling>,
+    control: &CallControl,
+    timeline: &Timeline,
+    answer_sdp: &str,
+    media: &OfferedMedia,
+    from_mixer: bool,
+    links: &BTreeMap<String, String>,
+    roster: &Roster,
+) {
+    let streams = match stream_lines(answer_sdp, &media.signaled.lines) {
+        Ok(streams) => streams,
+        Err(error) => {
+            timeline.record("video slots unknown", error.to_string());
+            return;
+        }
+    };
+    let table = SlotTable::from_streams(&streams);
+    let link = links.get("applyChannelParameters").or_else(|| links.get("controlVideoStreaming"));
+    timeline.record(
+        "video slots",
+        format!(
+            "{} receive slot(s), screen {}, fromMixer={from_mixer}, request link {}",
+            table.people.len(),
+            table.screen.is_some(),
+            link.is_some()
+        ),
+    );
+    let requester = link
+        .filter(|_| from_mixer)
+        .map(|url| SourceRequester::start(signaling.clone(), url.clone(), video.router().clone(), control.video.clone(), timeline.clone()));
+    video.negotiated(table, requester);
+    send_receive_change(control, video.reselect(roster));
+}
+
+const NOT_CONNECTED_FOR_VIDEO: &str = "Video starts once the call is connected";
+
+async fn camera_devices(mode: VideoMode) -> Vec<CameraDevice> {
+    match mode {
+        VideoMode::Pattern => vec![CameraDevice { key: "pattern".into(), name: "Test pattern".into() }],
+        VideoMode::Off => Vec::new(),
+        VideoMode::Platform => tokio::task::spawn_blocking(list_cameras).await.unwrap_or_default(),
+    }
+}
+
+fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode) {
+    tokio::spawn(async move {
+        let sources = match mode {
+            VideoMode::Pattern => vec![
+                ShareSource { id: 1, kind: ShareKind::Screen, title: "Test screen".into() },
+                ShareSource { id: 2, kind: ShareKind::Window, title: "Test window".into() },
+            ],
+            VideoMode::Off => Vec::new(),
+            VideoMode::Platform => tokio::task::spawn_blocking(list_share_sources).await.unwrap_or_default(),
+        };
+        let _ = updates.send(CallUpdate::ShareSources(sources));
+    });
+}
+
+fn tell_media_descriptions(
+    remote: &RemoteCall,
+    links: &BTreeMap<String, String>,
+    description: MediaDescription,
+    request_id: &mut u32,
+    timeline: &Timeline,
+) {
+    let Some(url) = links.get("updateMediaDescriptions").cloned() else {
+        timeline.record("updateMediaDescriptions skipped", "no link from the mixer");
+        return;
+    };
+    *request_id += 1;
+    let request_id = *request_id;
+    let signaling = remote.signaling.clone();
+    let timeline = timeline.clone();
+    tokio::spawn(async move {
+        let sent = format!("{} {} request {request_id}", description.mid, description.direction);
+        if let Err(error) = signaling.update_media_descriptions(&url, &[description], request_id).await {
+            timeline.record("updateMediaDescriptions failed", format!("{sent}: {error}"));
+        }
+    });
+}
+
+fn send_receive_change(control: &CallControl, change: ReceiveChange) {
+    if let Some(sharer) = change.screen_sharer {
+        control.send(CallUpdate::ScreenShare(sharer));
+    }
 }
 
 fn far_future() -> Instant {
@@ -1009,6 +1229,9 @@ async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &
     }
     if let Some(broker) = live.broker.take() {
         broker.abort();
+    }
+    for task in live.video_tasks.drain(..) {
+        task.abort();
     }
     if let Some(route_id) = &live.route_id {
         inner.unregister_route(route_id);
@@ -1105,6 +1328,7 @@ struct StatsSnapshot {
     audio_level: f64,
     local_level: f64,
     echo_return_loss_enhancement: f64,
+    video: VideoReport,
     dtls_state: String,
     tls_version: String,
     dtls_cipher: String,
@@ -1131,6 +1355,22 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
             }
             RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "audio" => {
                 snapshot.outbound_packets += outbound.sent.packets_sent;
+            }
+            RtcStats::InboundRtp(inbound) if inbound.stream.kind == "video" => {
+                snapshot.video.inbound_packets += inbound.received.packets_received;
+                snapshot.video.inbound_frames_decoded += u64::from(inbound.inbound.frames_decoded);
+                snapshot.video.inbound_width = snapshot.video.inbound_width.max(inbound.inbound.frame_width);
+                snapshot.video.inbound_height = snapshot.video.inbound_height.max(inbound.inbound.frame_height);
+            }
+            RtcStats::RemoteInboundRtp(remote) if remote.stream.kind == "video" => {
+                snapshot.video.remote_reports += remote.remote_inbound.round_trip_time_measurements;
+                snapshot.video.remote_round_trip_ms = snapshot.video.remote_round_trip_ms.max(remote.remote_inbound.round_trip_time * 1000.0);
+            }
+            RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "video" => {
+                snapshot.video.outbound_packets += outbound.sent.packets_sent;
+                snapshot.video.outbound_frames_encoded += u64::from(outbound.outbound.frames_encoded);
+                snapshot.video.outbound_width = snapshot.video.outbound_width.max(outbound.outbound.frame_width);
+                snapshot.video.outbound_height = snapshot.video.outbound_height.max(outbound.outbound.frame_height);
             }
             RtcStats::Transport(transport) => {
                 snapshot.dtls_state = format!("{:?}", transport.transport.dtls_state);

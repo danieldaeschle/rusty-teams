@@ -16,6 +16,12 @@ fn print_report(report: &CallReport) {
         "# inbound audio: {} packets, {} bytes, {} s with new packets; outbound {} packets",
         report.inbound_packets, report.inbound_bytes, report.seconds_with_inbound_audio, report.outbound_packets
     );
+    let video = &report.video;
+    println!(
+        "# video: inbound {} packets, {} frames decoded ({}x{}), {} frames to the UI hub; outbound {} packets, {} frames encoded ({}x{})",
+        video.inbound_packets, video.inbound_frames_decoded, video.inbound_width, video.inbound_height, video.frames_published,
+        video.outbound_packets, video.outbound_frames_encoded, video.outbound_width, video.outbound_height
+    );
     for second in &report.seconds {
         println!(
             "#   t+{:>2}s packets={:>5} level={:.3} rms={:.3} tone440={:.2}",

@@ -1,17 +1,21 @@
 use std::time::{Duration, Instant};
 
 use calling::meeting::LiveMeeting;
-use calling::{CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, RingSignal};
+use calling::{
+    CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, RingSignal, ShareSource, VideoKey,
+};
 use gpui_kit::*;
 
 use super::demo::{DemoCall, demo_caller, demo_guests, demo_ring, start_demo_call};
 use super::model::{ActiveCall, CallModel, ended_notice};
+use super::pictures::CallPictures;
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title};
 use crate::notify::selection_for;
 
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
+const SHARE_SOURCES_EVERY_TICKS: u32 = 10;
 const NOT_CONNECTED_NOTICE: &str = "Not connected to Teams yet";
 const READ_ONLY_NOTICE: &str = "Calls are off in read-only mode";
 const NOT_CALLABLE_NOTICE: &str = "This chat cannot be called";
@@ -133,13 +137,16 @@ impl AppState {
     ) {
         self.call_count += 1;
         let call_id = self.call_count;
-        let CallHandle { commands, updates } = handle;
+        let CallHandle { commands, updates, video } = handle;
         self.call = Some(ActiveCall {
             id: call_id,
             model,
             commands,
             viewing: true,
             conversation_id,
+            video,
+            pictures: CallPictures::default(),
+            stage_fullscreen: false,
         });
         self.new_chat = false;
         self.follow_call(call_id, updates, cx);
@@ -163,11 +170,16 @@ impl AppState {
         })
         .detach();
         cx.spawn(async move |this, cx| {
+            let mut ticks = 0u32;
             loop {
                 cx.background_executor().timer(TIMER_REFRESH).await;
+                ticks += 1;
                 let running = this.update(cx, |state, cx| {
                     let running = state.call.as_ref().is_some_and(|call| call.id == call_id);
                     if running {
+                        if ticks.is_multiple_of(SHARE_SOURCES_EVERY_TICKS) {
+                            state.refresh_share_sources();
+                        }
                         cx.notify();
                     }
                     running
@@ -184,7 +196,26 @@ impl AppState {
         let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
             return;
         };
+        match update {
+            CallUpdate::VideoReady => {
+                call.pictures.apply(&call.video, cx);
+                cx.notify();
+                return;
+            }
+            CallUpdate::Notice(text) => {
+                self.raise_notice(text, None, cx);
+                return;
+            }
+            _ => {}
+        }
         call.model.apply(update);
+        if call.model.screen_sharer.is_none() {
+            call.stage_fullscreen = false;
+            call.pictures.forget(&VideoKey::Screen, cx);
+        }
+        if !call.model.camera_on {
+            call.pictures.forget(&VideoKey::LocalCamera, cx);
+        }
         let Some(reason) = call.model.ended_reason().cloned() else {
             cx.emit(AppEvent::Call);
             cx.notify();
@@ -192,6 +223,7 @@ impl AppState {
         };
         let elapsed = call.model.elapsed(Instant::now());
         let notice = ended_notice(&reason, elapsed, &call.model.peer_name);
+        call.pictures.clear(cx);
         self.call = None;
         self.raise_notice(notice, None, cx);
         cx.emit(AppEvent::Call);
@@ -208,6 +240,36 @@ impl AppState {
         let can_toggle = self.call.as_ref().is_some_and(|call| call.model.can_unmute());
         if can_toggle {
             self.send_call_command(CallCommand::Mute(MuteCommand::Toggle));
+        }
+    }
+
+    pub fn toggle_call_camera(&mut self, _cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref().filter(|call| call.model.can_use_camera()) else {
+            return;
+        };
+        let on = !call.model.camera_on;
+        self.send_call_command(CallCommand::SetCamera(on));
+    }
+
+    pub fn select_call_camera(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.model.camera = choice.clone();
+        }
+        self.send_call_command(CallCommand::SelectCamera(choice));
+    }
+
+    pub fn start_call_share(&mut self, source: ShareSource, _cx: &mut Context<Self>) {
+        self.send_call_command(CallCommand::StartShare(source));
+    }
+
+    pub fn stop_call_share(&mut self, _cx: &mut Context<Self>) {
+        self.send_call_command(CallCommand::StopShare);
+    }
+
+    pub fn refresh_share_sources(&self) {
+        let idle = self.call.as_ref().is_some_and(|call| call.model.local_share.is_none());
+        if idle {
+            self.send_call_command(CallCommand::RefreshShareSources);
         }
     }
 
@@ -249,6 +311,28 @@ impl AppState {
         if let Some(selection) = selection_for(&self.sidebar, &conversation_id) {
             self.select(selection, cx);
         }
+    }
+
+    pub fn toggle_stage_fullscreen(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut().filter(|call| call.model.screen_sharer.is_some()) else {
+            return;
+        };
+        call.stage_fullscreen = !call.stage_fullscreen;
+        cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    pub fn leave_stage_fullscreen(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut().filter(|call| call.stage_fullscreen) else {
+            return;
+        };
+        call.stage_fullscreen = false;
+        cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    pub fn stage_fullscreen(&self) -> bool {
+        self.call.as_ref().is_some_and(|call| call.stage_fullscreen && call.model.screen_sharer.is_some())
     }
 
     pub fn viewing_call(&self) -> bool {
@@ -449,7 +533,7 @@ mod tests {
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
-    use super::{ActiveCall, CallModel};
+    use super::{ActiveCall, CallModel, CallPictures};
     use crate::app_state::{AppState, Mode, Selection};
     use crate::call::demo::demo_ring;
     use crate::data::Person;
@@ -467,6 +551,9 @@ mod tests {
                     commands: handle.commands,
                     viewing: true,
                     conversation_id: None,
+                    video: handle.video,
+                    pictures: CallPictures::default(),
+                    stage_fullscreen: false,
                 });
             })
         });
@@ -537,6 +624,25 @@ mod tests {
                 assert!(state.call.is_none());
                 let notice = state.notice.as_ref().expect("notice");
                 assert_eq!(notice.text, "Call ended 00:42");
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn full_window_exists_only_while_someone_shares_and_escape_leaves_it(cx: &mut TestAppContext) {
+        let app = app_with_call(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_stage_fullscreen(cx);
+                assert!(!state.stage_fullscreen());
+                state.apply_call_update(7, CallUpdate::ScreenShare(Some("8:orgid:a".into())), cx);
+                state.toggle_stage_fullscreen(cx);
+                assert!(state.stage_fullscreen());
+                state.leave_stage_fullscreen(cx);
+                assert!(!state.stage_fullscreen());
+                state.toggle_stage_fullscreen(cx);
+                state.apply_call_update(7, CallUpdate::ScreenShare(None), cx);
+                assert!(!state.stage_fullscreen());
             })
         });
     }

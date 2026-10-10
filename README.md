@@ -60,6 +60,7 @@
 **Calls**
 - Test call to the Teams Echo bot from the avatar menu: native WebRTC audio, mute (`Ctrl+Shift+M`), device switching, mini window while you read other chats
 - Phone button in 1:1 and group chat headers: callee tiles show Calling and Ringing, Cancel while ringing, notices like "Bea declined" or "No answer"
+- Video and screen sharing: H264 tiles, shared screen on a stage (double click for full window, Esc back), camera and screen share buttons with a "You are sharing" banner. Linux needs glib at run time
 - Incoming calls: topmost ring toast with Decline and Accept, ring tone, missed calls in Activity
 - Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
 
@@ -75,7 +76,7 @@
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
 | 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222`. Built-in login is planned |
 
-Video, screen sharing and the remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
+The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 
@@ -148,7 +149,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 | `store` | SQLite cache, migrations, search, image file cache |
 | `graph` | Typed Microsoft Graph client with batching and paging |
 | `chatsvc` | Teams chat service: Trouter realtime, pins, folders, receipts |
-| `calling` | Native calls: Teams signaling, SDP translation, libwebrtc audio |
+| `calling` | Native calls: Teams signaling, SDP translation, libwebrtc audio and video |
 | `session` | `Transport` trait, CDP session, in-page fetch |
 | `webview` | Hidden WebView2 host (Windows only) |
 | `browser` | Chrome lifecycle and watchdog for the CDP transport |

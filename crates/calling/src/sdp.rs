@@ -589,6 +589,41 @@ pub fn to_browser_answer(teams_sdp: &str, offer: &SignaledOffer, browser_offer_s
     Ok(write(&SessionDescription { session, media }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamLine {
+    pub mid: String,
+    pub browser_mid: String,
+    pub role: LineRole,
+    pub source_stream_id: Option<u32>,
+}
+
+pub fn stream_lines(teams_sdp: &str, lines: &[SignaledLine]) -> Result<Vec<StreamLine>> {
+    let teams = parse(teams_sdp)?;
+    if teams.media.len() != lines.len() {
+        return Err(Error::Sdp(format!("sdp has {} m-lines, {} were signaled", teams.media.len(), lines.len())));
+    }
+    let mut streams = Vec::new();
+    for (media, line) in teams.media.iter().zip(lines) {
+        let source_stream_id = media.value("x-source-streamid").and_then(|value| value.trim().parse().ok());
+        let mid = media.mid().unwrap_or_default().to_owned();
+        match line.browser_mids.as_slice() {
+            [browser_mid] => streams.push(StreamLine {
+                mid,
+                browser_mid: browser_mid.clone(),
+                role: line.role,
+                source_stream_id,
+            }),
+            folded => streams.extend(folded.iter().map(|browser_mid| StreamLine {
+                mid: mid.clone(),
+                browser_mid: browser_mid.clone(),
+                role: line.role,
+                source_stream_id: None,
+            })),
+        }
+    }
+    Ok(streams)
+}
+
 fn transport_attributes(teams_line: &Media, session: &Session) -> Vec<Attribute> {
     ["setup", "ice-ufrag", "ice-pwd", "fingerprint"]
         .into_iter()

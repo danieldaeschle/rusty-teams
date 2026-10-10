@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::Arc;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -6,7 +7,10 @@ use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::mute::MuteCommand;
 use crate::roster::RosterEntry;
+use crate::camera::CameraDevice;
+use crate::screen::ShareSource;
 use crate::state::CallState;
+use crate::video_frame::VideoHub;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallCommand {
@@ -14,6 +18,11 @@ pub enum CallCommand {
     SelectInput(DeviceChoice),
     SelectOutput(DeviceChoice),
     RefreshDevices,
+    SetCamera(bool),
+    SelectCamera(DeviceChoice),
+    StartShare(ShareSource),
+    StopShare,
+    RefreshShareSources,
     Hangup,
     EndMeeting,
 }
@@ -38,31 +47,43 @@ pub enum CallUpdate {
     Speakers(Vec<String>),
     Lobby(bool),
     OwnIdentity { mri: String },
+    VideoReady,
+    ScreenShare(Option<String>),
+    Camera(bool),
+    Cameras(Vec<CameraDevice>),
+    LocalShare(Option<String>),
+    ShareSources(Vec<ShareSource>),
+    Notice(String),
 }
 
 pub struct CallHandle {
     pub commands: UnboundedSender<CallCommand>,
     pub updates: UnboundedReceiver<CallUpdate>,
+    pub video: Arc<VideoHub>,
 }
 
 pub struct CallControl {
     commands: UnboundedReceiver<CallCommand>,
     updates: UnboundedSender<CallUpdate>,
     deferred: Vec<CallCommand>,
+    pub video: Arc<VideoHub>,
 }
 
 pub fn call_channel() -> (CallHandle, CallControl) {
     let (command_sender, command_receiver) = unbounded_channel();
     let (update_sender, update_receiver) = unbounded_channel();
+    let video = VideoHub::new(update_sender.clone());
     (
         CallHandle {
             commands: command_sender,
             updates: update_receiver,
+            video: video.clone(),
         },
         CallControl {
             commands: command_receiver,
             updates: update_sender,
             deferred: Vec::new(),
+            video,
         },
     )
 }
@@ -70,6 +91,10 @@ pub fn call_channel() -> (CallHandle, CallControl) {
 impl CallControl {
     pub fn send(&self, update: CallUpdate) {
         let _ = self.updates.send(update);
+    }
+
+    pub fn updates(&self) -> UnboundedSender<CallUpdate> {
+        self.updates.clone()
     }
 
     pub async fn recv(&mut self) -> Option<CallCommand> {

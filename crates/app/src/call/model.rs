@@ -1,10 +1,13 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::{
-    CallCommand, CallState, CallUpdate, DeviceChoice, DeviceLists, EndKind, EndReason, Progress, RosterEntry,
-    SpeakingDetector,
+    CallCommand, CallState, CallUpdate, CameraDevice, DeviceChoice, DeviceLists, EndKind, EndReason, Progress, RosterEntry,
+    ShareKind, ShareSource, SpeakingDetector, VideoHub,
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+use super::pictures::CallPictures;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
@@ -20,6 +23,9 @@ pub struct ActiveCall {
     pub commands: UnboundedSender<CallCommand>,
     pub viewing: bool,
     pub conversation_id: Option<String>,
+    pub video: Arc<VideoHub>,
+    pub pictures: CallPictures,
+    pub stage_fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +52,7 @@ pub struct Tile {
     pub muted: bool,
     pub state: TileState,
     pub invited: bool,
+    pub has_video: bool,
 }
 
 impl Tile {
@@ -57,6 +64,7 @@ impl Tile {
             muted: false,
             state: TileState::Invited,
             invited: true,
+            has_video: false,
         }
     }
 }
@@ -132,6 +140,12 @@ pub struct CallModel {
     pub connected_since: Option<Instant>,
     pub own_mri: Option<String>,
     pub tiles: Vec<Tile>,
+    pub screen_sharer: Option<String>,
+    pub camera_on: bool,
+    pub cameras: Vec<CameraDevice>,
+    pub camera: DeviceChoice,
+    pub local_share: Option<String>,
+    pub share_sources: Vec<ShareSource>,
     local_detector: SpeakingDetector,
     remote_detector: SpeakingDetector,
 }
@@ -158,6 +172,12 @@ impl CallModel {
             connected_since: None,
             own_mri: None,
             tiles,
+            screen_sharer: None,
+            camera_on: false,
+            cameras: Vec::new(),
+            camera: DeviceChoice::SystemDefault,
+            local_share: None,
+            share_sources: Vec::new(),
             local_detector: SpeakingDetector::default(),
             remote_detector: SpeakingDetector::default(),
         }
@@ -236,6 +256,12 @@ impl CallModel {
             CallUpdate::Speakers(mris) => self.speaking_mris = mris,
             CallUpdate::Lobby(lobby) => self.lobby = lobby,
             CallUpdate::OwnIdentity { mri } => self.own_mri = Some(mri),
+            CallUpdate::ScreenShare(sharer) => self.screen_sharer = sharer,
+            CallUpdate::VideoReady | CallUpdate::Notice(_) => {}
+            CallUpdate::Camera(on) => self.camera_on = on,
+            CallUpdate::Cameras(cameras) => self.cameras = cameras,
+            CallUpdate::LocalShare(label) => self.local_share = label,
+            CallUpdate::ShareSources(sources) => self.share_sources = sources,
         }
     }
 
@@ -254,6 +280,7 @@ impl CallModel {
                 Some(tile) => {
                     tile.state = state;
                     tile.muted = entry.muted;
+                    tile.has_video = entry.has_video;
                     if tile.name.is_empty() {
                         tile.name = entry.display_name.clone();
                     }
@@ -265,6 +292,7 @@ impl CallModel {
                     muted: entry.muted,
                     state,
                     invited: false,
+                    has_video: entry.has_video,
                 }),
             }
         }
@@ -293,6 +321,24 @@ impl CallModel {
             _ => 2,
         });
         tiles
+    }
+
+    pub fn strip_tiles(&self) -> Vec<&Tile> {
+        let mut tiles = self.visible_tiles();
+        tiles.sort_by_key(|tile| !self.tile_speaking(tile));
+        tiles
+    }
+
+    pub fn sharing_label(&self) -> Option<String> {
+        let sharer = self.screen_sharer.as_ref()?;
+        let name = self
+            .tiles
+            .iter()
+            .find(|tile| &tile.mri == sharer)
+            .map(|tile| tile.name.as_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Someone");
+        Some(format!("{name} is sharing"))
     }
 
     pub fn tile_speaking(&self, tile: &Tile) -> bool {
@@ -347,6 +393,26 @@ impl CallModel {
         self.elapsed(now).map(format_elapsed).unwrap_or_default()
     }
 
+    pub fn can_use_camera(&self) -> bool {
+        !self.cameras.is_empty()
+    }
+
+    pub fn can_share(&self) -> bool {
+        !self.share_sources.is_empty() && self.is_live()
+    }
+
+    fn is_live(&self) -> bool {
+        matches!(self.state, CallState::Connected { .. } | CallState::Reconnecting { .. })
+    }
+
+    pub fn screens(&self) -> Vec<&ShareSource> {
+        self.share_sources.iter().filter(|source| source.kind == ShareKind::Screen).collect()
+    }
+
+    pub fn windows(&self) -> Vec<&ShareSource> {
+        self.share_sources.iter().filter(|source| source.kind == ShareKind::Window).collect()
+    }
+
     pub fn can_unmute(&self) -> bool {
         !self.listen_only
     }
@@ -397,6 +463,8 @@ mod tests {
             display_name: name.into(),
             muted,
             in_lobby,
+            has_video: false,
+            sharing: false,
         }
     }
 
@@ -596,6 +664,35 @@ mod tests {
         assert_eq!(tile_size(2).avatar, 96.);
         assert_eq!(tile_size(4).avatar, 72.);
         assert_eq!(tile_size(9).avatar, 56.);
+    }
+
+    #[test]
+    fn the_stage_label_names_the_sharer_and_the_strip_puts_the_speaker_first() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            entry("8:orgid:b", "Bo", false, false),
+        ]));
+        assert_eq!(model.sharing_label(), None);
+        model.apply(CallUpdate::ScreenShare(Some("8:orgid:b".into())));
+        assert_eq!(model.sharing_label().as_deref(), Some("Bo is sharing"));
+        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::Speakers(vec!["8:orgid:b".into()]));
+        let names: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        assert_eq!(names, vec!["Bo", "Ana"]);
+        model.apply(CallUpdate::ScreenShare(None));
+        assert_eq!(model.sharing_label(), None);
+    }
+
+    #[test]
+    fn roster_entries_carry_the_camera_flag_to_the_tile() {
+        let mut model = meeting_with_me();
+        let mut with_camera = entry("8:orgid:a", "Ana", false, false);
+        with_camera.has_video = true;
+        model.apply(CallUpdate::Roster(vec![with_camera]));
+        assert!(model.tiles[0].has_video);
+        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false)]));
+        assert!(!model.tiles[0].has_video);
     }
 
     #[test]
