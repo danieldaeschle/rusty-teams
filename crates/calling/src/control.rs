@@ -6,6 +6,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::mute::MuteCommand;
+use crate::reaction::Reaction;
 use crate::roster::RosterEntry;
 use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
@@ -22,7 +23,12 @@ pub enum CallCommand {
     SelectCamera(DeviceChoice),
     StartShare(ShareSource),
     StopShare,
+    SetShareSound(bool),
     RefreshShareSources,
+    SetHand(bool),
+    LowerHand { mri: String },
+    LowerAllHands,
+    SendReaction(Reaction),
     Hangup,
     EndMeeting,
 }
@@ -53,6 +59,9 @@ pub enum CallUpdate {
     Cameras(Vec<CameraDevice>),
     LocalShare(Option<String>),
     ShareSources(Vec<ShareSource>),
+    ShareSound(bool),
+    Reaction { mri: String, reaction: Reaction },
+    MeetingChat(String),
     Notice(String),
 }
 
@@ -95,6 +104,13 @@ impl CallControl {
 
     pub fn updates(&self) -> UnboundedSender<CallUpdate> {
         self.updates.clone()
+    }
+
+    pub fn try_recv_command(&mut self) -> Option<CallCommand> {
+        if !self.deferred.is_empty() {
+            return Some(self.deferred.remove(0));
+        }
+        self.commands.try_recv().ok()
     }
 
     pub async fn recv(&mut self) -> Option<CallCommand> {

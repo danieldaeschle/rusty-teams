@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::end::{EndKind, classify_end};
 use crate::error::{Error, Result};
+use crate::reaction::{ReactionEvent, parse_reactions};
 
 const CALLBACK_ROOT: &str = "callAgent/";
 const GZIP_ENCODING: &str = "gzip";
@@ -114,6 +115,7 @@ pub enum CallEvent {
     Speakers(Vec<u32>),
     AddParticipantSuccess(Value),
     AddParticipantFailure(Value),
+    Reactions(Vec<ReactionEvent>),
     End(CallEnd),
     Other { scope: String, event: String },
 }
@@ -130,6 +132,7 @@ impl CallEvent {
             CallEvent::Speakers(_) => "call/speakers".into(),
             CallEvent::AddParticipantSuccess(_) => "conversation/addParticipantSuccess".into(),
             CallEvent::AddParticipantFailure(_) => "conversation/addParticipantFailure".into(),
+            CallEvent::Reactions(_) => "conversation/receiveMessage".into(),
             CallEvent::End(_) => "call/end".into(),
             CallEvent::Other { scope, event } => format!("{scope}/{event}"),
         }
@@ -143,6 +146,7 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("conversation", "conversationUpdate") => CallEvent::ConversationUpdate(body),
         ("conversation", "rosterUpdate") => CallEvent::RosterUpdate(body),
         ("conversation", "addParticipantSuccess") => CallEvent::AddParticipantSuccess(body),
+        ("conversation", "receiveMessage") => CallEvent::Reactions(parse_reactions(&body)),
         ("conversation", "addParticipantFailure") => CallEvent::AddParticipantFailure(body),
         ("call", "acceptance") => CallEvent::Acceptance(acceptance(&body)?),
         ("call", "progress") => CallEvent::Progress(progress(&body)),

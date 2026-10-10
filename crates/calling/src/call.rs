@@ -25,13 +25,14 @@ use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
+use crate::share_audio::ShareAudio;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
 use crate::renegotiation::{MediaAction, MediaNegotiator};
 use crate::roster::Roster;
 use crate::sdp::{RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
 use crate::signaling::{
     Answer, Attached, Callee, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget, Participant, Signaling,
-    TenantRouting, find_echo_bot_thread, escalation_answer_body, renegotiation_body,
+    TenantRouting, chat_thread_id, find_echo_bot_thread, escalation_answer_body, renegotiation_body,
 };
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
@@ -628,6 +629,14 @@ async fn drive(
     let echo_thread = thread_id;
     let mut video = VideoReceive::new(own_mri.clone(), VideoRouter::default());
     let mut media_links: BTreeMap<String, String> = BTreeMap::new();
+    let mut share_audio: Option<ShareAudio> = None;
+    let mut share_sound_wanted = false;
+    let mut remote_audio: Option<RtcAudioTrack> = None;
+    let mut own_hand: Option<String> = None;
+    let mut meeting_chat = conversation.chat_thread.clone();
+    if let Some(thread) = &meeting_chat {
+        control.send(CallUpdate::MeetingChat(thread.clone()));
+    }
     loop {
         tokio::select! {
             Some(callback) = callbacks.recv() => {
@@ -761,6 +770,21 @@ async fn drive(
                             }
                         }
                     }
+                    Ok(CallEvent::ConversationUpdate(body)) => {
+                        replier.reply(request_id, 200, "");
+                        if let Some(thread) = chat_thread_id(&body)
+                            && meeting_chat.as_ref() != Some(&thread)
+                        {
+                            control.send(CallUpdate::MeetingChat(thread.clone()));
+                            meeting_chat = Some(thread);
+                        }
+                    }
+                    Ok(CallEvent::Reactions(events)) => {
+                        replier.reply(request_id, 200, "");
+                        for event in events {
+                            control.send(CallUpdate::Reaction { mri: event.mri, reaction: event.reaction });
+                        }
+                    }
                     Ok(CallEvent::Progress(status)) => {
                         replier.reply(request_id, 200, "");
                         if status == ProgressStatus::Ringing {
@@ -824,6 +848,7 @@ async fn drive(
                 }
                 PeerEvent::Track(remote_track) => {
                     timeline.record("remote audio track", "receiving");
+                    remote_audio = Some(remote_track.clone());
                     if options.record_remote {
                         tokio::spawn(record_track(remote_track, recording.clone(), options.tone_hz));
                     }
@@ -839,6 +864,11 @@ async fn drive(
                         timeline.record("escalation", "new peer connection connected, old one dropped");
                         let old = std::mem::replace(&mut current, pending.session);
                         old.peer.close();
+                        if let Some(audio) = &share_audio
+                            && let Err(error) = swap_audio_track(&current.peer, &audio.track)
+                        {
+                            timeline.record("computer sound not carried over", error.to_string());
+                        }
                         offered = pending.offered;
                         if let Some(media) = &offered
                             && let Err(error) = local_video.set_lines(media.video.clone())
@@ -863,7 +893,7 @@ async fn drive(
             },
             command = control.recv() => match command {
                 Some(CallCommand::Mute(mute)) => {
-                    muted = apply_mute(mute, muted, live.audio.as_ref().expect("audio set above"), &remote, control);
+                    muted = apply_mute(mute, muted, live.audio.as_ref().expect("audio set above"), share_audio.as_ref(), &remote, control);
                 }
                 Some(CallCommand::SelectInput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
@@ -915,6 +945,9 @@ async fn drive(
                             Ok(()) => {
                                 control.send(CallUpdate::LocalShare(Some(source.label())));
                                 tell_media_descriptions(&remote, &media_links, MediaDescription::share(true), &mut media_description_request, timeline);
+                                if share_sound_wanted && share_audio.is_none() {
+                                    share_audio = engage_share_sound(&factory, options, &input, muted, remote_audio.clone(), &current.peer, control, timeline);
+                                }
                             }
                             Err(error) => control.send(CallUpdate::Notice(format!("Sharing could not start: {error}"))),
                         }
@@ -923,11 +956,60 @@ async fn drive(
                 Some(CallCommand::StopShare) => {
                     if local_video.sharing() {
                         local_video.stop_share();
+                        release_share_sound(&current.peer, &track, &mut share_audio, control, timeline);
                         control.send(CallUpdate::LocalShare(None));
                         tell_media_descriptions(&remote, &media_links, MediaDescription::share(false), &mut media_description_request, timeline);
                     }
                 }
+                Some(CallCommand::SetShareSound(on)) => {
+                    share_sound_wanted = on;
+                    if local_video.sharing() {
+                        if on && share_audio.is_none() {
+                            share_audio = engage_share_sound(&factory, options, &input, muted, remote_audio.clone(), &current.peer, control, timeline);
+                        } else if !on {
+                            release_share_sound(&current.peer, &track, &mut share_audio, control, timeline);
+                        }
+                    }
+                }
                 Some(CallCommand::RefreshShareSources) => refresh_share_sources(control.updates(), options.video),
+                Some(CallCommand::SetHand(true)) => match remote.signaling.raise_hand(&remote.conversation, &remote.participant).await {
+                    Ok(state_id) => own_hand = state_id,
+                    Err(error) => {
+                        timeline.record("raise hand failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not raise your hand".into()));
+                    }
+                },
+                Some(CallCommand::SetHand(false)) => {
+                    let state_ids: Vec<String> = roster.hand_of(&own_mri).map(|hand| hand.state_id.clone()).or(own_hand.take()).into_iter().collect();
+                    own_hand = None;
+                    if !state_ids.is_empty()
+                        && let Err(error) = remote.signaling.lower_hands(&remote.conversation, &remote.participant, &state_ids).await
+                    {
+                        timeline.record("lower hand failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not lower your hand".into()));
+                    }
+                }
+                Some(CallCommand::LowerHand { mri }) => {
+                    let state_ids: Vec<String> = roster.hand_of(&mri).map(|hand| hand.state_id.clone()).into_iter().collect();
+                    if !state_ids.is_empty()
+                        && let Err(error) = remote.signaling.lower_hands(&remote.conversation, &remote.participant, &state_ids).await
+                    {
+                        timeline.record("lower hand failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not lower that hand".into()));
+                    }
+                }
+                Some(CallCommand::LowerAllHands) => {
+                    if let Err(error) = remote.signaling.lower_all_hands(&remote.conversation, &remote.participant).await {
+                        timeline.record("lower all hands failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not lower all hands".into()));
+                    }
+                }
+                Some(CallCommand::SendReaction(reaction)) => {
+                    if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {
+                        timeline.record("reaction failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not send the reaction".into()));
+                    }
+                }
                 Some(CallCommand::EndMeeting) => {
                     if is_meeting {
                         match remote.signaling.end_for_all(&remote.conversation, &remote.participant).await {
@@ -949,7 +1031,7 @@ async fn drive(
             _ = stats_tick.tick(), if remote_set => {
                 let snapshot = collect_stats(&current.peer).await;
                 ticks += 1;
-                let local_level = if muted { 0.0 } else { snapshot.local_level as f32 };
+                let local_level = if muted && share_audio.is_none() { 0.0 } else { snapshot.local_level as f32 };
                 control.send(CallUpdate::Levels { local: local_level, remote: snapshot.audio_level as f32 });
                 if snapshot.selected_pair.is_some() {
                     report.selected_pair = snapshot.selected_pair.clone();
@@ -1175,9 +1257,19 @@ fn far_future() -> Instant {
     Instant::now() + FAR_FUTURE
 }
 
-fn apply_mute(command: MuteCommand, currently_muted: bool, audio: &AudioSetup, remote: &RemoteCall, control: &CallControl) -> bool {
+fn apply_mute(
+    command: MuteCommand,
+    currently_muted: bool,
+    audio: &AudioSetup,
+    share_audio: Option<&ShareAudio>,
+    remote: &RemoteCall,
+    control: &CallControl,
+) -> bool {
     let effect = MuteEffect::for_muted(command.target(currently_muted));
     audio.track.set_enabled(effect.track_enabled);
+    if let Some(share_audio) = share_audio {
+        share_audio.set_microphone_muted(effect.muted);
+    }
     control.send(CallUpdate::Muted(effect.muted));
     let remote = remote.clone();
     tokio::spawn(async move {
@@ -1187,6 +1279,63 @@ fn apply_mute(command: MuteCommand, currently_muted: bool, audio: &AudioSetup, r
             .await;
     });
     effect.muted
+}
+
+fn swap_audio_track(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<()> {
+    let sender = peer
+        .senders()
+        .into_iter()
+        .find(|sender| matches!(sender.track(), Some(MediaStreamTrack::Audio(_))))
+        .ok_or_else(|| Error::Webrtc("no audio sender".into()))?;
+    sender
+        .set_track(Some(MediaStreamTrack::Audio(track.clone())))
+        .map_err(|error| Error::Webrtc(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn engage_share_sound(
+    factory: &PeerConnectionFactory,
+    options: &CallOptions,
+    input: &DeviceChoice,
+    muted: bool,
+    remote_audio: Option<RtcAudioTrack>,
+    peer: &PeerConnection,
+    control: &CallControl,
+    timeline: &Timeline,
+) -> Option<ShareAudio> {
+    let started = ShareAudio::start(factory, options.audio, options.tone_hz, input, muted, remote_audio)
+        .and_then(|audio| swap_audio_track(peer, &audio.track).map(|()| audio));
+    match started {
+        Ok(audio) => {
+            timeline.record("computer sound", format!("{:?}, own playback excluded: {}", audio.loopback, audio.loopback.excludes_own_playback()));
+            if let Some(warning) = &audio.warning {
+                timeline.record("computer sound warning", warning.clone());
+            }
+            control.send(CallUpdate::ShareSound(true));
+            Some(audio)
+        }
+        Err(error) => {
+            timeline.record("computer sound failed", error.to_string());
+            control.send(CallUpdate::Notice("Computer sound could not start, sharing without it".into()));
+            None
+        }
+    }
+}
+
+fn release_share_sound(
+    peer: &PeerConnection,
+    device_track: &RtcAudioTrack,
+    share_audio: &mut Option<ShareAudio>,
+    control: &CallControl,
+    timeline: &Timeline,
+) {
+    if share_audio.take().is_none() {
+        return;
+    }
+    if let Err(error) = swap_audio_track(peer, device_track) {
+        timeline.record("microphone track not restored", error.to_string());
+    }
+    control.send(CallUpdate::ShareSound(false));
 }
 
 async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &mut CallReport, cancelled: bool) {

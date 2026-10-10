@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::{
-    CallCommand, CallState, CallUpdate, CameraDevice, DeviceChoice, DeviceLists, EndKind, EndReason, Progress, RosterEntry,
+    CallCommand, CallState, CallUpdate, CameraDevice, DeviceChoice, DeviceLists, EndKind, EndReason, Progress, Reaction, RosterEntry,
     ShareKind, ShareSource, SpeakingDetector, VideoHub,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -16,6 +16,8 @@ pub const MAX_TILES: usize = 9;
 const ORGID_PREFIX: &str = "8:orgid:";
 const WIDE_TILES: usize = 2;
 const MEDIUM_TILES: usize = 4;
+pub const REACTION_SHOWN: Duration = Duration::from_secs(3);
+pub const CHAT_OPEN_TILES: usize = 6;
 
 pub struct ActiveCall {
     pub id: u64,
@@ -26,6 +28,20 @@ pub struct ActiveCall {
     pub video: Arc<VideoHub>,
     pub pictures: CallPictures,
     pub stage_fullscreen: bool,
+    pub chat_open: bool,
+}
+
+impl ActiveCall {
+    pub fn chat_thread(&self) -> Option<&str> {
+        chat_thread(self.model.kind, self.model.meeting_chat.as_deref(), self.conversation_id.as_deref())
+    }
+}
+
+pub fn chat_thread<'a>(kind: CallKind, meeting_chat: Option<&'a str>, conversation_id: Option<&'a str>) -> Option<&'a str> {
+    match kind {
+        CallKind::Meeting => meeting_chat.or(conversation_id),
+        CallKind::Test | CallKind::Direct | CallKind::Group => conversation_id,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +69,7 @@ pub struct Tile {
     pub state: TileState,
     pub invited: bool,
     pub has_video: bool,
+    pub hand: Option<u64>,
 }
 
 impl Tile {
@@ -65,6 +82,7 @@ impl Tile {
             state: TileState::Invited,
             invited: true,
             has_video: false,
+            hand: None,
         }
     }
 }
@@ -75,15 +93,15 @@ pub struct GridLayout {
     pub hidden: usize,
 }
 
-pub fn grid_layout(others: usize) -> GridLayout {
+pub fn grid_layout(others: usize, max_tiles: usize) -> GridLayout {
     let total = others + 1;
-    if total <= MAX_TILES {
+    if total <= max_tiles {
         return GridLayout {
             shown_others: others,
             hidden: 0,
         };
     }
-    let shown_others = MAX_TILES - 2;
+    let shown_others = max_tiles - 2;
     GridLayout {
         shown_others,
         hidden: others - shown_others,
@@ -119,6 +137,14 @@ pub fn tile_size(cells: usize) -> TileSize {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionChip {
+    pub mri: String,
+    pub reaction: Reaction,
+    pub since: Instant,
+    pub serial: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct CallModel {
     pub title: String,
@@ -146,6 +172,11 @@ pub struct CallModel {
     pub camera: DeviceChoice,
     pub local_share: Option<String>,
     pub share_sources: Vec<ShareSource>,
+    pub share_sound: bool,
+    pub own_hand: Option<u64>,
+    pub reactions: Vec<ReactionChip>,
+    reaction_serial: u64,
+    pub meeting_chat: Option<String>,
     local_detector: SpeakingDetector,
     remote_detector: SpeakingDetector,
 }
@@ -178,6 +209,11 @@ impl CallModel {
             camera: DeviceChoice::SystemDefault,
             local_share: None,
             share_sources: Vec::new(),
+            share_sound: false,
+            own_hand: None,
+            reactions: Vec::new(),
+            reaction_serial: 0,
+            meeting_chat: None,
             local_detector: SpeakingDetector::default(),
             remote_detector: SpeakingDetector::default(),
         }
@@ -260,8 +296,16 @@ impl CallModel {
             CallUpdate::VideoReady | CallUpdate::Notice(_) => {}
             CallUpdate::Camera(on) => self.camera_on = on,
             CallUpdate::Cameras(cameras) => self.cameras = cameras,
-            CallUpdate::LocalShare(label) => self.local_share = label,
+            CallUpdate::LocalShare(label) => {
+                if label.is_none() {
+                    self.share_sound = false;
+                }
+                self.local_share = label;
+            }
             CallUpdate::ShareSources(sources) => self.share_sources = sources,
+            CallUpdate::ShareSound(active) => self.share_sound = active,
+            CallUpdate::Reaction { mri, reaction } => self.note_reaction(mri, reaction, Instant::now()),
+            CallUpdate::MeetingChat(thread) => self.meeting_chat = Some(thread),
         }
     }
 
@@ -273,7 +317,46 @@ impl CallModel {
         self.remote_detector.reset();
     }
 
+    pub fn note_reaction(&mut self, mri: String, reaction: Reaction, at: Instant) {
+        self.reactions.retain(|chip| chip.mri != mri && at.saturating_duration_since(chip.since) < REACTION_SHOWN);
+        self.reaction_serial += 1;
+        self.reactions.push(ReactionChip { mri, reaction, since: at, serial: self.reaction_serial });
+    }
+
+    pub fn chip_of(&self, mri: &str, now: Instant) -> Option<&ReactionChip> {
+        self.reactions
+            .iter()
+            .find(|chip| chip.mri == mri && now.saturating_duration_since(chip.since) < REACTION_SHOWN)
+    }
+
+    pub fn own_chip(&self, now: Instant) -> Option<&ReactionChip> {
+        self.chip_of(self.own_mri.as_deref()?, now)
+    }
+
+    pub fn hand_position(&self, rank: u64) -> usize {
+        let raised = self.tiles.iter().filter_map(|tile| tile.hand).chain(self.own_hand);
+        1 + raised.filter(|other| *other < rank).count()
+    }
+
+    pub fn can_lower_hands(&self) -> bool {
+        self.can_end_meeting
+    }
+
+    pub fn any_hand_raised(&self) -> bool {
+        self.own_hand.is_some() || self.tiles.iter().any(|tile| tile.hand.is_some())
+    }
+
+    pub fn own_cell_index(&self, remote_cells: usize) -> usize {
+        let Some(own) = self.own_hand else { return remote_cells };
+        let ahead = self.visible_tiles().iter().filter(|tile| tile.hand.is_some_and(|rank| rank < own)).count();
+        ahead.min(remote_cells)
+    }
+
     fn apply_roster(&mut self, entries: &[RosterEntry]) {
+        self.own_hand = entries
+            .iter()
+            .find(|entry| Some(&entry.mri) == self.own_mri.as_ref())
+            .and_then(|entry| entry.hand.as_ref().map(|hand| hand.rank));
         for entry in entries.iter().filter(|entry| Some(&entry.mri) != self.own_mri.as_ref()) {
             let state = if entry.in_lobby { TileState::InLobby } else { TileState::Present };
             match self.tiles.iter_mut().find(|tile| tile.mri == entry.mri) {
@@ -281,6 +364,7 @@ impl CallModel {
                     tile.state = state;
                     tile.muted = entry.muted;
                     tile.has_video = entry.has_video;
+                    tile.hand = entry.hand.as_ref().map(|hand| hand.rank);
                     if tile.name.is_empty() {
                         tile.name = entry.display_name.clone();
                     }
@@ -293,6 +377,7 @@ impl CallModel {
                     state,
                     invited: false,
                     has_video: entry.has_video,
+                    hand: entry.hand.as_ref().map(|hand| hand.rank),
                 }),
             }
         }
@@ -315,17 +400,20 @@ impl CallModel {
 
     pub fn visible_tiles(&self) -> Vec<&Tile> {
         let mut tiles: Vec<&Tile> = self.tiles.iter().filter(|tile| tile.state != TileState::InLobby).collect();
-        tiles.sort_by_key(|tile| match tile.state {
-            TileState::Present => 0,
-            TileState::Invited => 1,
-            _ => 2,
+        tiles.sort_by_key(|tile| {
+            let state = match tile.state {
+                TileState::Present => 0,
+                TileState::Invited => 1,
+                _ => 2,
+            };
+            (tile.hand.is_none(), tile.hand.unwrap_or(0), state)
         });
         tiles
     }
 
     pub fn strip_tiles(&self) -> Vec<&Tile> {
         let mut tiles = self.visible_tiles();
-        tiles.sort_by_key(|tile| !self.tile_speaking(tile));
+        tiles.sort_by_key(|tile| (tile.hand.is_none(), tile.hand.unwrap_or(0), !self.tile_speaking(tile)));
         tiles
     }
 
@@ -400,6 +488,10 @@ impl CallModel {
         self.elapsed(now).map(format_elapsed).unwrap_or_default()
     }
 
+    pub fn can_react(&self) -> bool {
+        self.is_live() && !self.lobby
+    }
+
     pub fn can_use_camera(&self) -> bool {
         !self.cameras.is_empty()
     }
@@ -472,6 +564,14 @@ mod tests {
             in_lobby,
             has_video: false,
             sharing: false,
+            hand: None,
+        }
+    }
+
+    fn raised(mri: &str, name: &str, rank: u64) -> RosterEntry {
+        RosterEntry {
+            hand: Some(calling::RaisedHand { state_id: format!("s-{rank}"), rank }),
+            ..entry(mri, name, false, false)
         }
     }
 
@@ -660,10 +760,16 @@ mod tests {
 
     #[test]
     fn more_than_nine_cells_collapse_into_a_plus_n_tile() {
-        assert_eq!(grid_layout(0), GridLayout { shown_others: 0, hidden: 0 });
-        assert_eq!(grid_layout(8), GridLayout { shown_others: 8, hidden: 0 });
-        assert_eq!(grid_layout(9), GridLayout { shown_others: 7, hidden: 2 });
-        assert_eq!(grid_layout(30), GridLayout { shown_others: 7, hidden: 23 });
+        assert_eq!(grid_layout(0, MAX_TILES), GridLayout { shown_others: 0, hidden: 0 });
+        assert_eq!(grid_layout(8, MAX_TILES), GridLayout { shown_others: 8, hidden: 0 });
+        assert_eq!(grid_layout(9, MAX_TILES), GridLayout { shown_others: 7, hidden: 2 });
+        assert_eq!(grid_layout(30, MAX_TILES), GridLayout { shown_others: 7, hidden: 23 });
+    }
+
+    #[test]
+    fn an_open_chat_panel_leaves_room_for_fewer_tiles() {
+        assert_eq!(grid_layout(5, CHAT_OPEN_TILES), GridLayout { shown_others: 5, hidden: 0 });
+        assert_eq!(grid_layout(6, CHAT_OPEN_TILES), GridLayout { shown_others: 4, hidden: 2 });
     }
 
     #[test]
@@ -711,5 +817,76 @@ mod tests {
         model.apply(CallUpdate::Roster(vec![entry("8:orgid:c", "Cy", false, false)]));
         let names: Vec<&str> = model.visible_tiles().iter().map(|tile| tile.name.as_str()).collect();
         assert_eq!(names, vec!["Cy", "Bea"]);
+    }
+
+    #[test]
+    fn raised_hands_get_queue_positions_by_raise_time_and_sort_first() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            raised("8:orgid:b", "Bo", 9),
+            raised("8:orgid:c", "Cy", 4),
+            raised("8:orgid:me", "Me", 6),
+        ]));
+        assert_eq!(model.own_hand, Some(6));
+        assert!(model.any_hand_raised());
+        let names: Vec<&str> = model.visible_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        assert_eq!(names, vec!["Cy", "Bo", "Ana"]);
+        let positions: Vec<usize> = [4, 6, 9].into_iter().map(|rank| model.hand_position(rank)).collect();
+        assert_eq!(positions, vec![1, 2, 3]);
+        assert_eq!(model.own_cell_index(3), 1);
+        let strip: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        assert_eq!(strip, vec!["Cy", "Bo", "Ana"]);
+    }
+
+    #[test]
+    fn lowering_clears_the_hand_everywhere() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![raised("8:orgid:a", "Ana", 1), raised("8:orgid:me", "Me", 2)]));
+        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), entry("8:orgid:me", "Me", false, false)]));
+        assert!(!model.any_hand_raised());
+        assert_eq!(model.own_cell_index(1), 1);
+    }
+
+    #[test]
+    fn only_organizers_may_lower_hands() {
+        assert!(!CallModel::meeting("Standup", false).can_lower_hands());
+        assert!(CallModel::meeting("Standup", true).can_lower_hands());
+    }
+
+    #[test]
+    fn a_reaction_shows_for_three_seconds_on_its_sender_and_the_latest_wins() {
+        let mut model = meeting_with_me();
+        let start = Instant::now();
+        model.note_reaction("8:orgid:a".into(), Reaction::Heart, start);
+        model.note_reaction("8:orgid:me".into(), Reaction::Like, start);
+        let reaction_at = |model: &CallModel, mri: &str, seconds: u64| {
+            model.chip_of(mri, start + Duration::from_secs(seconds)).map(|chip| chip.reaction)
+        };
+        assert_eq!(reaction_at(&model, "8:orgid:a", 2), Some(Reaction::Heart));
+        assert_eq!(model.own_chip(start + Duration::from_secs(2)).map(|chip| chip.reaction), Some(Reaction::Like));
+        assert_eq!(reaction_at(&model, "8:orgid:a", 3), None);
+        model.note_reaction("8:orgid:a".into(), Reaction::Laugh, start + Duration::from_secs(1));
+        assert_eq!(reaction_at(&model, "8:orgid:a", 2), Some(Reaction::Laugh));
+        assert_eq!(model.reactions.len(), 2);
+    }
+
+    #[test]
+    fn the_chat_panel_picks_the_meeting_thread_or_the_call_chat() {
+        assert_eq!(chat_thread(CallKind::Meeting, Some("19:meeting_x"), Some("19:list")), Some("19:meeting_x"));
+        assert_eq!(chat_thread(CallKind::Meeting, None, Some("19:list")), Some("19:list"));
+        assert_eq!(chat_thread(CallKind::Direct, Some("19:meeting_x"), Some("19:dm")), Some("19:dm"));
+        assert_eq!(chat_thread(CallKind::Group, None, Some("19:group")), Some("19:group"));
+        assert_eq!(chat_thread(CallKind::Test, None, None), None);
+    }
+
+    #[test]
+    fn computer_sound_follows_the_share() {
+        let mut model = connected_model();
+        model.apply(CallUpdate::LocalShare(Some("Screen".into())));
+        model.apply(CallUpdate::ShareSound(true));
+        assert!(model.share_sound);
+        model.apply(CallUpdate::LocalShare(None));
+        assert!(!model.share_sound);
     }
 }

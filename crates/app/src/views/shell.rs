@@ -55,6 +55,7 @@ pub struct AppShell {
     state: Entity<AppState>,
     sidebar: Entity<SidebarView>,
     conversation: Entity<ConversationView>,
+    call_chat: Option<(String, Entity<ConversationView>)>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
     activity: Entity<ActivityCenter>,
@@ -73,6 +74,19 @@ pub struct AppShell {
 }
 
 impl AppShell {
+    fn sync_call_chat(&mut self, thread: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        match (thread, &self.call_chat) {
+            (Some(wanted), Some((open, _))) if &wanted == open => {}
+            (Some(wanted), _) => {
+                let app = self.state.clone();
+                let selection = Selection::Chat(wanted.clone());
+                let view = cx.new(|cx| ConversationView::pinned_to(app, selection, window, cx));
+                self.call_chat = Some((wanted, view));
+            }
+            (None, _) => self.call_chat = None,
+        }
+    }
+
     pub fn new(
         state: Entity<AppState>,
         open_target: Option<OpenTarget>,
@@ -119,6 +133,7 @@ impl AppShell {
             state,
             sidebar,
             conversation,
+            call_chat: None,
             switcher: None,
             notifications,
             activity,
@@ -513,8 +528,11 @@ impl Render for AppShell {
                 state.task_dialog.is_some() || state.status_menu_open
             };
         Overlays::update(cx, |overlays| overlays.panels = panels);
+        let chat_thread = self.state.read(cx).call_chat_thread();
+        self.sync_call_chat(chat_thread, window, cx);
+        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
         let state = self.state.read(cx);
-        let call_view = render_call_view(&self.state, state).filter(|_| state.viewing_call());
+        let call_view = render_call_view(&self.state, state, chat_panel).filter(|_| state.viewing_call());
         let call_mini = render_call_mini(&self.state, state);
         let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(

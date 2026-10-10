@@ -8,6 +8,8 @@ pub enum Error {
     Callback(String),
     #[error("webrtc: {0}")]
     Webrtc(String),
+    #[error("audio: {0}")]
+    Audio(String),
     #[error("call cancelled")]
     Cancelled,
     #[error(transparent)]

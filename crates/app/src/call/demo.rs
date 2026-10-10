@@ -4,7 +4,7 @@ use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
     AudioDevice, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, DeviceChoice, DeviceLists, EndReason,
-    IncomingRing, Progress, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
+    IncomingRing, Progress, RaisedHand, Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
 };
 use calling::CameraDevice;
 use tokio::time::{interval, sleep};
@@ -27,6 +27,8 @@ const DEMO_CAMERAS: usize = 4;
 const SCREEN_EVERY_TICKS: u32 = 4;
 const SHARE_START: Duration = Duration::from_secs(10);
 const SHARE_END: Duration = Duration::from_secs(45);
+const REACTION_EVERY_TICKS: u32 = 20;
+const DEMO_FIRST_HANDS: [(usize, u64); 2] = [(2, 1), (0, 2)];
 const GUEST_PHASE: u32 = 37;
 const SELF_PHASE: u32 = 211;
 pub const DEMO_OWN_MRI: &str = "8:orgid:demo-me";
@@ -129,6 +131,7 @@ fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
             in_lobby: false,
             has_video: index < DEMO_CAMERAS,
             sharing: false,
+            hand: None,
         })
         .collect()
 }
@@ -168,10 +171,18 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall) {
         }
         control.send(CallUpdate::Lobby(false));
     }
-    control.send(CallUpdate::Roster(roster_of(&people)));
+    let mut roster = roster_of(&people);
+    if matches!(script, DemoCall::Meeting { .. }) {
+        for (index, rank) in DEMO_FIRST_HANDS {
+            if let Some(entry) = roster.get_mut(index) {
+                entry.hand = Some(demo_hand(rank));
+            }
+        }
+    }
+    control.send(CallUpdate::Roster(roster.clone()));
     let video = !matches!(script, DemoCall::Test);
     let sharer = matches!(script, DemoCall::Meeting { .. }).then(|| people.get(1).map(|person| person.0.clone())).flatten();
-    speak_until_hangup(control, people, video, sharer).await;
+    speak_until_hangup(control, people, roster, video, sharer).await;
 }
 
 async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bool {
@@ -207,7 +218,7 @@ fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, shari
     }
 }
 
-async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video: bool, sharer: Option<String>) {
+async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut roster: Vec<RosterEntry>, video: bool, sharer: Option<String>) {
     let started = Instant::now();
     let mut video_ticks = 0u32;
     let mut sharing = false;
@@ -217,6 +228,7 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video
     let mut input = DeviceChoice::SystemDefault;
     let mut output = DeviceChoice::SystemDefault;
     let mut ticks = 0u32;
+    let mut share_sound = false;
     let mut tick = interval(LEVEL_PERIOD);
     loop {
         tokio::select! {
@@ -241,6 +253,12 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video
                     let speaker = &people[(ticks / SPEAKER_TICKS) as usize % people.len()];
                     control.send(CallUpdate::Speakers(vec![speaker.0.clone()]));
                 }
+                if ticks % REACTION_EVERY_TICKS == REACTION_EVERY_TICKS / 2
+                    && let Some((mri, _)) = people.get((ticks / REACTION_EVERY_TICKS) as usize % people.len().max(1))
+                {
+                    let reaction = Reaction::ALL[(ticks / REACTION_EVERY_TICKS) as usize % Reaction::ALL.len()];
+                    control.send(CallUpdate::Reaction { mri: mri.clone(), reaction });
+                }
                 ticks += 1;
             }
             command = control.recv() => match command {
@@ -262,8 +280,29 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video
                     control.send(CallUpdate::Camera(on));
                 }
                 Some(CallCommand::SelectCamera(_)) => {}
-                Some(CallCommand::StartShare(source)) => control.send(CallUpdate::LocalShare(Some(source.label()))),
+                Some(CallCommand::StartShare(source)) => {
+                    control.send(CallUpdate::LocalShare(Some(source.label())));
+                    if share_sound {
+                        control.send(CallUpdate::ShareSound(true));
+                    }
+                }
                 Some(CallCommand::StopShare) => control.send(CallUpdate::LocalShare(None)),
+                Some(CallCommand::SetShareSound(on)) => share_sound = on,
+                Some(CallCommand::SetHand(raised)) => {
+                    set_demo_hand(&mut roster, DEMO_OWN_MRI, raised);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::LowerHand { mri }) => {
+                    set_demo_hand(&mut roster, &mri, false);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::LowerAllHands) => {
+                    roster.iter_mut().for_each(|entry| entry.hand = None);
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::SendReaction(reaction)) => {
+                    control.send(CallUpdate::Reaction { mri: DEMO_OWN_MRI.to_owned(), reaction });
+                }
                 Some(CallCommand::RefreshShareSources) => control.send(CallUpdate::ShareSources(demo_share_sources())),
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);
@@ -271,6 +310,33 @@ async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, video
                 }
             },
         }
+    }
+}
+
+fn demo_hand(rank: u64) -> RaisedHand {
+    RaisedHand { state_id: format!("demo-hand-{rank}"), rank }
+}
+
+fn set_demo_hand(roster: &mut Vec<RosterEntry>, mri: &str, raised: bool) {
+    let next_rank = roster.iter().filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank)).max().unwrap_or(0) + 1;
+    if !raised {
+        if let Some(entry) = roster.iter_mut().find(|entry| entry.mri == mri) {
+            entry.hand = None;
+        }
+        roster.retain(|entry| entry.mri != DEMO_OWN_MRI || entry.hand.is_some());
+        return;
+    }
+    match roster.iter_mut().find(|entry| entry.mri == mri) {
+        Some(entry) => entry.hand = Some(demo_hand(next_rank)),
+        None => roster.push(RosterEntry {
+            mri: mri.to_owned(),
+            display_name: "You".to_owned(),
+            muted: false,
+            in_lobby: false,
+            has_video: false,
+            sharing: false,
+            hand: Some(demo_hand(next_rank)),
+        }),
     }
 }
 
@@ -290,6 +356,17 @@ mod tests {
         mris.sort();
         mris.dedup();
         assert_eq!(mris.len(), 11);
+    }
+
+    #[test]
+    fn demo_hands_queue_in_order_and_lowering_drops_the_own_entry() {
+        let mut roster = roster_of(&demo_guests(3));
+        set_demo_hand(&mut roster, "8:orgid:demo-guest-1", true);
+        set_demo_hand(&mut roster, DEMO_OWN_MRI, true);
+        let ranks: Vec<u64> = roster.iter().filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank)).collect();
+        assert_eq!(ranks, vec![1, 2]);
+        set_demo_hand(&mut roster, DEMO_OWN_MRI, false);
+        assert!(roster.iter().all(|entry| entry.mri != DEMO_OWN_MRI));
     }
 
     #[test]

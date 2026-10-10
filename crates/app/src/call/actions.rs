@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use calling::meeting::LiveMeeting;
 use calling::{
-    CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, RingSignal, ShareSource, VideoKey,
+    CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
 };
 use gpui_kit::*;
 
@@ -27,6 +27,11 @@ const DEMO_CROWD: usize = 11;
 const DEMO_SMALL_MEETING: usize = 4;
 const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
+pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
+
+pub fn load_share_sound(store: &store::Store) -> bool {
+    store.meta(SHARE_SOUND_META_KEY).ok().flatten().as_deref() == Some("1")
+}
 
 fn now_unix() -> i64 {
     chrono::Utc::now().timestamp()
@@ -147,7 +152,11 @@ impl AppState {
             video,
             pictures: CallPictures::default(),
             stage_fullscreen: false,
+            chat_open: false,
         });
+        if self.call_share_sound {
+            self.send_call_command(CallCommand::SetShareSound(true));
+        }
         self.new_chat = false;
         self.follow_call(call_id, updates, cx);
         cx.emit(AppEvent::Call);
@@ -320,13 +329,62 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn open_call_chat(&mut self, cx: &mut Context<Self>) {
-        let Some(conversation_id) = self.call.as_ref().and_then(|call| call.conversation_id.clone()) else {
+    pub fn toggle_call_chat(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut().filter(|call| call.chat_thread().is_some()) else {
             return;
         };
-        if let Some(selection) = selection_for(&self.sidebar, &conversation_id) {
-            self.select(selection, cx);
+        call.chat_open = !call.chat_open;
+        cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    pub fn call_chat_thread(&self) -> Option<String> {
+        let call = self.call.as_ref().filter(|call| call.chat_open)?;
+        call.chat_thread().map(str::to_owned)
+    }
+
+    pub fn call_chat_unread(&self) -> u32 {
+        let Some(thread) = self.call.as_ref().filter(|call| !call.chat_open).and_then(|call| call.chat_thread()) else {
+            return 0;
+        };
+        let counted = self.directory.unread_counts.get(thread).copied();
+        counted.unwrap_or_else(|| u32::from(self.sidebar.chats.iter().any(|chat| chat.id == thread && chat.unread)))
+    }
+
+    pub fn toggle_call_hand(&mut self, _cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref().filter(|call| call.model.is_active()) else {
+            return;
+        };
+        let raised = call.model.own_hand.is_none();
+        self.send_call_command(CallCommand::SetHand(raised));
+    }
+
+    pub fn lower_call_hand(&mut self, mri: String, _cx: &mut Context<Self>) {
+        let allowed = self.call.as_ref().is_some_and(|call| call.model.can_lower_hands());
+        if allowed {
+            self.send_call_command(CallCommand::LowerHand { mri });
         }
+    }
+
+    pub fn lower_all_call_hands(&mut self, _cx: &mut Context<Self>) {
+        let allowed = self.call.as_ref().is_some_and(|call| call.model.can_lower_hands() && call.model.any_hand_raised());
+        if allowed {
+            self.send_call_command(CallCommand::LowerAllHands);
+        }
+    }
+
+    pub fn send_call_reaction(&mut self, reaction: Reaction, _cx: &mut Context<Self>) {
+        let live = self.call.as_ref().is_some_and(|call| call.model.is_active());
+        if live {
+            self.send_call_command(CallCommand::SendReaction(reaction));
+        }
+    }
+
+    pub fn set_call_share_sound(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.call_share_sound = on;
+        let _ = self.store.set_meta(SHARE_SOUND_META_KEY, if on { "1" } else { "0" });
+        self.send_call_command(CallCommand::SetShareSound(on));
+        cx.notify();
     }
 
     pub fn toggle_stage_fullscreen(&mut self, cx: &mut Context<Self>) {
@@ -557,7 +615,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use calling::{CallState, CallUpdate, EndKind, EndReason, EngineEvent, call_channel};
+    use calling::{CallCommand, CallControl, CallState, CallUpdate, EndKind, EndReason, EngineEvent, Reaction, call_channel};
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
@@ -582,10 +640,120 @@ mod tests {
                     video: handle.video,
                     pictures: CallPictures::default(),
                     stage_fullscreen: false,
+                    chat_open: false,
                 });
             })
         });
         app
+    }
+
+    fn app_with_commands(cx: &mut TestAppContext, model: CallModel, conversation_id: Option<&str>) -> (Entity<AppState>, CallControl) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
+        let (handle, control) = call_channel();
+        let conversation_id = conversation_id.map(str::to_owned);
+        cx.update(|cx| {
+            app.update(cx, |state, _| {
+                state.call = Some(ActiveCall {
+                    id: 7,
+                    model,
+                    commands: handle.commands,
+                    viewing: true,
+                    conversation_id,
+                    video: handle.video,
+                    pictures: CallPictures::default(),
+                    stage_fullscreen: false,
+                    chat_open: false,
+                });
+            })
+        });
+        (app, control)
+    }
+
+    fn live_meeting(can_end: bool) -> CallModel {
+        let mut model = CallModel::meeting("Standup", can_end);
+        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
+        model
+    }
+
+    #[gpui_kit::test]
+    fn the_computer_sound_switch_is_remembered_and_sent_to_the_call(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        let store = cx.update(|cx| app.read(cx).store.clone());
+        assert!(!cx.update(|cx| app.read(cx).call_share_sound));
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_share_sound(true, cx)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetShareSound(true)));
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert!(cx.update(|cx| reopened.read(cx).call_share_sound));
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_share_sound(false, cx)));
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert!(!cx.update(|cx| reopened.read(cx).call_share_sound));
+    }
+
+    #[gpui_kit::test]
+    fn hands_and_reactions_become_call_commands_and_lowering_needs_the_organizer(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_call_hand(cx);
+                state.send_call_reaction(Reaction::Heart, cx);
+                state.lower_call_hand("8:orgid:a".into(), cx);
+                state.lower_all_call_hands(cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetHand(true)));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SendReaction(Reaction::Heart)));
+        assert_eq!(control.try_recv_command(), None);
+        let (organizer, mut organizer_control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| {
+            organizer.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::Roster(vec![calling::RosterEntry {
+                    mri: "8:orgid:a".into(),
+                    display_name: "Ana".into(),
+                    muted: false,
+                    in_lobby: false,
+                    has_video: false,
+                    sharing: false,
+                    hand: Some(calling::RaisedHand { state_id: "s".into(), rank: 1 }),
+                }]), cx);
+                state.lower_call_hand("8:orgid:a".into(), cx);
+                state.lower_all_call_hands(cx);
+            })
+        });
+        assert_eq!(organizer_control.try_recv_command(), Some(CallCommand::LowerHand { mri: "8:orgid:a".into() }));
+        assert_eq!(organizer_control.try_recv_command(), Some(CallCommand::LowerAllHands));
+    }
+
+    #[gpui_kit::test]
+    fn the_chat_panel_opens_the_meeting_thread_and_the_badge_counts_only_while_closed(cx: &mut TestAppContext) {
+        let (app, _control) = app_with_commands(cx, live_meeting(false), Some("19:list@thread.v2"));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.directory.unread_counts.insert("19:meeting_x@thread.v2".into(), 3);
+                assert_eq!(state.call_chat_thread(), None);
+                assert_eq!(state.call_chat_unread(), 0);
+                state.apply_call_update(7, CallUpdate::MeetingChat("19:meeting_x@thread.v2".into()), cx);
+                assert_eq!(state.call_chat_unread(), 3);
+                state.toggle_call_chat(cx);
+                assert_eq!(state.call_chat_thread().as_deref(), Some("19:meeting_x@thread.v2"));
+                assert_eq!(state.call_chat_unread(), 0);
+                state.toggle_call_chat(cx);
+                assert_eq!(state.call_chat_thread(), None);
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_call_without_a_chat_has_no_panel(cx: &mut TestAppContext) {
+        let app = app_with_call(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_call_chat(cx);
+                assert!(!state.call.as_ref().unwrap().chat_open);
+            })
+        });
     }
 
     fn app_with_chats(cx: &mut TestAppContext) -> Entity<AppState> {

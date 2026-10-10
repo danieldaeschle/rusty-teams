@@ -142,6 +142,7 @@ struct ReactionDetails {
 
 pub struct ConversationView {
     app: Entity<AppState>,
+    pinned: bool,
     scroller: Entity<MessageScrollerState>,
     composer: Entity<Composer>,
     subject: Entity<InputState>,
@@ -388,6 +389,14 @@ impl ConversationView {
     }
 
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(app, None, window, cx)
+    }
+
+    pub fn pinned_to(app: Entity<AppState>, selection: Selection, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(app, Some(selection), window, cx)
+    }
+
+    fn build(app: Entity<AppState>, pinned: Option<Selection>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
         let subject = subject_input(window, cx);
@@ -413,6 +422,7 @@ impl ConversationView {
         ];
         let mut view = ConversationView {
             app,
+            pinned: pinned.is_some(),
             scroller,
             composer,
             subject,
@@ -460,7 +470,7 @@ impl ConversationView {
             new_folder_input: None,
             _subscriptions: subscriptions,
         };
-        if let Some(selection) = view.app.read(cx).selection.clone() {
+        if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
             view.open(selection, window, cx);
         }
         view
@@ -491,6 +501,7 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) {
         match event {
+            AppEvent::Selection if self.pinned => {}
             AppEvent::Selection => {
                 self.reaction_details = None;
                 let (new_chat, selection) = {
@@ -1721,7 +1732,7 @@ impl ConversationView {
             return;
         }
         let state = self.app.read(cx);
-        if state.viewing_call() {
+        if state.viewing_call() && !self.pinned {
             return;
         }
         let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|c| c.selection.clone())
@@ -2971,7 +2982,11 @@ impl ConversationView {
         if let Some(note) = channel_note {
             subline = note.to_owned();
         }
-        let call_controls = header_call_controls(&self.app, app, &current.selection);
+        let call_controls = if self.pinned {
+            Vec::new()
+        } else {
+            header_call_controls(&self.app, app, &current.selection)
+        };
         let sync = &current.sync;
         if sync.failed {
             subline = "Not up to date".to_owned();

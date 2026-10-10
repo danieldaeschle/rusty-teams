@@ -5,6 +5,13 @@ const AUDIO: &str = "audio";
 const VIDEO: &str = "video";
 const SCREEN: &str = "applicationsharing-video";
 const SENDING_DIRECTIONS: [&str; 2] = ["sendonly", "sendrecv"];
+const RAISE_HANDS: &str = "raiseHands";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaisedHand {
+    pub state_id: String,
+    pub rank: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
@@ -16,6 +23,7 @@ pub struct Member {
     pub video_source: Option<u32>,
     pub screen_source: Option<u32>,
     pub streams: Vec<String>,
+    pub hand: Option<RaisedHand>,
     version: u64,
 }
 
@@ -27,6 +35,7 @@ pub struct RosterEntry {
     pub in_lobby: bool,
     pub has_video: bool,
     pub sharing: bool,
+    pub hand: Option<RaisedHand>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -50,6 +59,7 @@ impl Roster {
                 in_lobby: member.in_lobby,
                 has_video: member.video_source.is_some(),
                 sharing: member.screen_source.is_some(),
+                hand: member.hand.clone(),
             })
             .collect()
     }
@@ -81,6 +91,10 @@ impl Roster {
             }
         }
         *self != before
+    }
+
+    pub fn hand_of(&self, mri: &str) -> Option<&RaisedHand> {
+        self.members.iter().find(|member| member.mri == mri)?.hand.as_ref()
     }
 
     pub fn is_in_lobby(&self, mri: &str) -> Option<bool> {
@@ -147,8 +161,24 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         video_source: sending_source(&in_call, VIDEO),
         screen_source: sending_source(&in_call, SCREEN),
         streams: stream_summaries(&in_call),
+        hand: raised_hand(participant, &endpoints),
         version,
     }
+}
+
+fn raised_hand(participant: &Value, endpoints: &[&Value]) -> Option<RaisedHand> {
+    std::iter::once(participant)
+        .chain(endpoints.iter().copied())
+        .flat_map(|holder| holder["publishedStates"].as_array().into_iter().flatten())
+        .filter(|state| state["stateType"].as_str() == Some(RAISE_HANDS))
+        .find_map(|state| {
+            let state_id = match &state["stateId"] {
+                Value::String(text) => text.clone(),
+                Value::Null => return None,
+                other => other.to_string(),
+            };
+            Some(RaisedHand { state_id, rank: state["typeRank"].as_u64().unwrap_or(u64::MAX) })
+        })
 }
 
 fn stream_summaries(in_call: &[&&Value]) -> Vec<String> {
@@ -316,6 +346,46 @@ mod tests {
         assert!(entries.iter().find(|entry| entry.display_name == "Ana").unwrap().has_video);
         assert!(!entries.iter().find(|entry| entry.display_name == "Bo").unwrap().has_video);
         assert!(entries.iter().find(|entry| entry.display_name == "Cy").unwrap().sharing);
+    }
+
+    fn with_hand(mut person: Value, state_id: &str, rank: u64) -> Value {
+        person["publishedStates"] = json!([
+            {"stateType": "spotlight", "stateId": "x", "typeRank": 1},
+            {"stateType": "raiseHands", "content": {"skinTone": 2}, "stateId": state_id, "typeRank": rank},
+        ]);
+        person
+    }
+
+    #[test]
+    fn published_states_carry_the_raised_hand_and_its_queue_rank() {
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({
+            "8:orgid:a": with_hand(participant("Ana", 1, "active", false, 201), "s-1", 2),
+            "8:orgid:b": with_hand(participant("Bo", 1, "active", false, 301), "s-2", 1),
+            "8:orgid:c": participant("Cy", 1, "active", false, 401),
+        })));
+        assert_eq!(roster.hand_of("8:orgid:a"), Some(&RaisedHand { state_id: "s-1".into(), rank: 2 }));
+        assert_eq!(roster.hand_of("8:orgid:b").map(|hand| hand.rank), Some(1));
+        assert_eq!(roster.hand_of("8:orgid:c"), None);
+        let entries = roster.entries();
+        assert!(entries.iter().find(|entry| entry.display_name == "Bo").unwrap().hand.is_some());
+    }
+
+    #[test]
+    fn lowering_removes_the_key_and_the_hand() {
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({"8:orgid:a": with_hand(participant("Ana", 1, "active", false, 201), "s-1", 1)})));
+        assert!(roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 2, "active", false, 201)}))));
+        assert_eq!(roster.hand_of("8:orgid:a"), None);
+    }
+
+    #[test]
+    fn endpoint_level_published_states_count_too() {
+        let mut roster = Roster::default();
+        let mut person = participant("Ana", 1, "active", false, 201);
+        person["endpoints"]["ep"]["publishedStates"] = json!([{"stateType": "raiseHands", "stateId": 7, "typeRank": 3}]);
+        roster.apply(&delta(json!({"8:orgid:a": person})));
+        assert_eq!(roster.hand_of("8:orgid:a"), Some(&RaisedHand { state_id: "7".into(), rank: 3 }));
     }
 
     #[test]

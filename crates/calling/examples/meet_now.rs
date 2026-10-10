@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
-use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, EngineConfig, MeetingTarget, ShareKind, ShareSource};
+use calling::{CallCommand, CallEngine, CallSpec, CallState, CallUpdate, EngineConfig, MeetingTarget, Reaction, ShareKind, ShareSource};
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
 use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
@@ -24,6 +24,7 @@ const THREAD_PROPERTY_RETRIES: usize = 8;
 struct Arguments {
     camera: bool,
     share: bool,
+    extras: bool,
     stop_media_after: Option<Duration>,
     hold: Duration,
     thread_out: Option<PathBuf>,
@@ -34,6 +35,7 @@ fn arguments() -> Arguments {
     let mut parsed = Arguments {
         camera: false,
         share: false,
+        extras: false,
         stop_media_after: None,
         hold: Duration::from_secs(10),
         thread_out: None,
@@ -44,6 +46,7 @@ fn arguments() -> Arguments {
         match flag.as_str() {
             "--camera" => parsed.camera = true,
             "--share" => parsed.share = true,
+            "--extras" => parsed.extras = true,
             "--stop-media-after" => parsed.stop_media_after = input.next().and_then(|value| value.parse().ok()).map(Duration::from_secs),
             "--hold" => parsed.hold = Duration::from_secs(input.next().and_then(|value| value.parse().ok()).unwrap_or(10)),
             "--thread-out" => parsed.thread_out = input.next().map(PathBuf::from),
@@ -151,6 +154,11 @@ async fn main() {
     let mut end_sent_at = None;
     let mut media_due: Option<Instant> = None;
     let mut media_stop_due: Option<Instant> = None;
+    let mut hand_lower_due: Option<Instant> = None;
+    let mut hands_seen = 0usize;
+    let mut reactions_seen = Vec::new();
+    let mut sharing_local_level: f32 = 0.0;
+    let mut sharing = false;
     let deadline = Instant::now() + CONNECT_LIMIT + LIVE_STATE_LIMIT + WAIT_FILE_LIMIT + arguments.hold + END_LIMIT;
     let mut tick = tokio::time::interval(POLL);
     while ended.is_none() && Instant::now() < deadline {
@@ -163,10 +171,47 @@ async fn main() {
                     }
                 }
                 Some(CallUpdate::Camera(on)) => println!("# camera update: {on}"),
-                Some(CallUpdate::LocalShare(label)) => println!("# local share update: {}", label.is_some()),
+                Some(CallUpdate::LocalShare(label)) => {
+                    sharing = label.is_some();
+                    println!("# local share update: {}", label.is_some());
+                }
                 Some(CallUpdate::Notice(text)) => println!("# notice: {text}"),
                 Some(CallUpdate::State(CallState::Ended { reason })) => ended = Some(reason),
-                Some(CallUpdate::Roster(entries)) => roster_count = Some(entries.len()),
+                Some(CallUpdate::Roster(entries)) => {
+                    let hands = entries.iter().filter(|entry| entry.hand.is_some()).count();
+                    if hands != hands_seen {
+                        println!("# roster hands raised: {hands}");
+                        hands_seen = hands;
+                    }
+                    roster_count = Some(entries.len());
+                }
+                Some(CallUpdate::Reaction { reaction, .. }) => {
+                    println!("# reaction received: {reaction:?}");
+                    reactions_seen.push(reaction);
+                }
+                Some(CallUpdate::MeetingChat(thread)) => {
+                    let url = format!(
+                        "https://teams.cloud.microsoft/api/chatsvc/{CHATSVC_REGION}/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent&pageSize=5",
+                        urlencoding_component(&thread)
+                    );
+                    let read = session.request(Method::Get, &url, &ic3_scope(), None).await;
+                    match read {
+                        Ok(answer) => println!(
+                            "# meeting chat thread from join: same as meeting {}, read HTTP {}, messages {}",
+                            thread == thread_id,
+                            answer.status,
+                            answer.body.get("messages").and_then(Value::as_array).map_or(0, Vec::len)
+                        ),
+                        Err(error) => println!("# meeting chat read failed: {error}"),
+                    }
+                }
+                Some(CallUpdate::ShareSound(on)) => println!("# share sound: {on}"),
+                Some(CallUpdate::Muted(muted)) => println!("# muted: {muted}"),
+                Some(CallUpdate::Levels { local, .. }) => {
+                    if sharing {
+                        sharing_local_level = sharing_local_level.max(local);
+                    }
+                }
                 Some(CallUpdate::Stats { inbound_packets, .. }) => inbound = inbound_packets,
                 Some(_) => {}
                 None => break,
@@ -177,11 +222,23 @@ async fn main() {
                     let _ = handle.commands.send(CallCommand::SetCamera(false));
                     let _ = handle.commands.send(CallCommand::StopShare);
                 }
+                if hand_lower_due.is_some_and(|due| Instant::now() >= due) {
+                    hand_lower_due = None;
+                    let _ = handle.commands.send(CallCommand::SetHand(false));
+                }
                 if media_due.is_some_and(|due| Instant::now() >= due) {
                     media_due = None;
                     media_stop_due = arguments.stop_media_after.map(|after| Instant::now() + after);
                     if arguments.camera {
                         let _ = handle.commands.send(CallCommand::SetCamera(true));
+                    }
+                    if arguments.extras {
+                        let _ = handle.commands.send(CallCommand::SetHand(true));
+                        for reaction in Reaction::ALL {
+                            let _ = handle.commands.send(CallCommand::SendReaction(reaction));
+                        }
+                        let _ = handle.commands.send(CallCommand::SetShareSound(true));
+                        hand_lower_due = Some(Instant::now() + Duration::from_secs(6));
                     }
                     if arguments.share {
                         let source = ShareSource { id: 0, kind: ShareKind::Screen, title: String::new() };
@@ -219,6 +276,13 @@ async fn main() {
         "# connected after {connected_after:?}, live state after {live_detected_after:?}, roster {roster_count:?}, inbound packets {inbound}"
     );
     println!("# ended: {ended:?}");
+    if arguments.extras {
+        println!(
+            "# extras: reactions echoed {}/{}, max local level while sharing {sharing_local_level:.3}",
+            reactions_seen.len(),
+            Reaction::ALL.len()
+        );
+    }
     let gone_started = Instant::now();
     let mut gone_after = None;
     while gone_started.elapsed() < GONE_LIMIT {
@@ -231,4 +295,14 @@ async fn main() {
     println!("# live state gone after end: {gone_after:?}");
     engine.stop().await;
     println!("# engine stopped, total {:?}", started.elapsed());
+}
+
+fn urlencoding_component(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect()
 }

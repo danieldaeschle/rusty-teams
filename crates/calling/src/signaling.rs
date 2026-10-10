@@ -4,6 +4,7 @@ use serde_json::{Map, Value, json};
 use session::{ApiResponse, GRAPH, Method, Request, Scope, Session};
 
 use crate::error::{Error, Result};
+use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
 use crate::relay::ic3_scope;
 use crate::timeline::Timeline;
 use crate::trouter_events::{CallbackLinks, acceptance_links};
@@ -42,6 +43,7 @@ const SUBSCRIBE_LINK_NAMES: [&str; 6] = [
 const CALL_LINK_NAMES: [&str; 5] = ["progress", "mediaAnswer", "acceptance", "redirection", "end"];
 const AUDIO_MODALITIES: [&str; 1] = ["Audio"];
 const MEETING_MESSAGE_ID: &str = "0";
+const RAISE_HANDS: &str = "raiseHands";
 const CANCEL_CODE: i64 = 487;
 const DECLINE_CODE: i64 = 603;
 
@@ -108,6 +110,7 @@ impl Default for TenantRouting {
 pub struct Conversation {
     pub controller: String,
     pub links: BTreeMap<String, String>,
+    pub chat_thread: Option<String>,
 }
 
 impl Conversation {
@@ -173,6 +176,7 @@ pub struct Signaling {
     routing: TenantRouting,
     timeline: Timeline,
     endpoint_state_sequence: std::sync::atomic::AtomicU32,
+    state_sequence: std::sync::atomic::AtomicU32,
 }
 
 pub struct Invitation<'a> {
@@ -217,6 +221,7 @@ impl Signaling {
             routing,
             timeline,
             endpoint_state_sequence: std::sync::atomic::AtomicU32::new(2),
+            state_sequence: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -291,6 +296,7 @@ impl Signaling {
         Ok(Conversation {
             controller: subscribed.controller.clone(),
             links,
+            chat_thread: subscribed.chat_thread.clone(),
         })
     }
 
@@ -309,6 +315,31 @@ impl Signaling {
         });
         let url = conversation.link("updateEndpointState")?;
         self.post_json("POST updateEndpointState", url, body).await
+    }
+
+    fn next_state_sequence(&self) -> u32 {
+        self.state_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    pub async fn raise_hand(&self, conversation: &Conversation, from: &Participant) -> Result<Option<String>> {
+        let body = raise_hand_body(from.wire(), self.next_state_sequence());
+        let response = self.send("POST publishState", Method::Post, conversation.link("publishState")?, Some(body)).await?;
+        Ok(response.body["publishStateResponse"]["stateId"].as_str().map(str::to_owned))
+    }
+
+    pub async fn lower_hands(&self, conversation: &Conversation, from: &Participant, state_ids: &[String]) -> Result<()> {
+        let body = remove_states_body(from.wire(), self.next_state_sequence(), state_ids);
+        self.post_json("POST removeState", conversation.link("removeState")?, body).await
+    }
+
+    pub async fn lower_all_hands(&self, conversation: &Conversation, from: &Participant) -> Result<()> {
+        let body = remove_all_hands_body(from.wire(), self.next_state_sequence());
+        self.post_json("POST removeState", conversation.link("removeState")?, body).await
+    }
+
+    pub async fn send_reaction(&self, conversation: &Conversation, from: &Participant, reaction: Reaction) -> Result<()> {
+        let body = reaction_message(from.wire(), reaction, &uuid::Uuid::new_v4().to_string(), &uuid::Uuid::new_v4().to_string());
+        self.post_json("POST sendMessage", conversation.link("sendMessage")?, body).await
     }
 
     pub async fn update_media_descriptions(&self, url: &str, descriptions: &[MediaDescription], request_id: u32) -> Result<()> {
@@ -683,7 +714,31 @@ fn conversation_from(body: &Value) -> Result<Conversation> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Conversation { controller, links })
+    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body) })
+}
+
+pub fn raise_hand_body(from: Value, sequence_number: u32) -> Value {
+    json!({
+        "from": from,
+        "publishedState": {
+            "stateType": RAISE_HANDS,
+            "level": "user",
+            "content": {"skinTone": DEFAULT_SKIN_TONE},
+            "sequenceNumber": sequence_number,
+        },
+    })
+}
+
+pub fn remove_states_body(from: Value, sequence_number: u32, state_ids: &[String]) -> Value {
+    json!({"from": from, "sequenceNumber": sequence_number, "scope": "specified", "stateIds": state_ids})
+}
+
+pub fn remove_all_hands_body(from: Value, sequence_number: u32) -> Value {
+    json!({"from": from, "sequenceNumber": sequence_number, "scope": "all", "stateType": RAISE_HANDS})
+}
+
+pub fn chat_thread_id(body: &Value) -> Option<String> {
+    body["activeModalities"]["groupChat"]["threadId"].as_str().map(str::to_owned)
 }
 
 fn attached_from(body: &Value) -> Result<Attached> {
@@ -759,6 +814,27 @@ pub async fn find_echo_bot_thread(session: &Session, self_object_id: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raising_publishes_a_raise_hands_state_and_lowering_names_the_state() {
+        let raised = raise_hand_body(json!({"id": "8:orgid:me"}), 4);
+        assert_eq!(raised["publishedState"]["stateType"], "raiseHands");
+        assert_eq!(raised["publishedState"]["level"], "user");
+        assert_eq!(raised["publishedState"]["sequenceNumber"], 4);
+        let lowered = remove_states_body(json!({"id": "8:orgid:me"}), 5, &["s-1".to_owned()]);
+        assert_eq!(lowered["scope"], "specified");
+        assert_eq!(lowered["stateIds"][0], "s-1");
+        let all = remove_all_hands_body(json!({"id": "8:orgid:me"}), 6);
+        assert_eq!(all["scope"], "all");
+        assert_eq!(all["stateType"], "raiseHands");
+    }
+
+    #[test]
+    fn the_meeting_chat_thread_comes_from_the_group_chat_modality() {
+        let body = json!({"activeModalities": {"groupChat": {"threadId": "19:meeting_abc@thread.v2"}}});
+        assert_eq!(chat_thread_id(&body).as_deref(), Some("19:meeting_abc@thread.v2"));
+        assert_eq!(chat_thread_id(&json!({"activeModalities": {}})), None);
+    }
 
     fn from() -> Participant {
         Participant {
