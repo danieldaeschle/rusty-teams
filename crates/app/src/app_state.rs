@@ -105,6 +105,9 @@ pub struct AppState {
     pub scheduled_polling: bool,
     pub saved: SavedSet,
     pub call_history: Vec<teams_core::CallLogEntry>,
+    pub calendar_events: Vec<chatsvc::CalendarEvent>,
+    pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    pub calls_list: crate::call::CallsList,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub forward_request: Option<ForwardSource>,
     pub own_status: PresenceStatus,
@@ -201,6 +204,9 @@ impl AppState {
             scheduled_polling: false,
             saved: SavedSet::default(),
             call_history: Vec::new(),
+            calendar_events: Vec::new(),
+            calendar_nudge: None,
+            calls_list: crate::call::CallsList::default(),
             pins: HashMap::new(),
             forward_request: None,
             own_status: PresenceStatus::default(),
@@ -716,6 +722,7 @@ impl AppState {
             self.sidebar = sidebar;
             self.apply_bot_titles();
         }
+        self.calls_list.invalidate();
         if !self.mode.demo {
             self.reload_directory();
         }
@@ -730,6 +737,8 @@ impl AppState {
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Calls(launcher) => self.call_launcher = Some(launcher),
+            BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
+            BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),
             BackendEvent::Ring(event) => self.on_engine_event(event, cx),
             BackendEvent::ThreadChanged(conversation_id) => self.on_thread_changed(&conversation_id, cx),
             BackendEvent::Engine(engine) => {

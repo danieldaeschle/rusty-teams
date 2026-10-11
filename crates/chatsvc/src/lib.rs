@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod calllog;
 pub mod cards;
 pub mod channel_notifications;
@@ -19,6 +20,7 @@ pub mod saved;
 pub mod settings;
 pub mod translate;
 
+pub use calendar::{Calendar, CalendarEvent, ResponseType, meet_now_join_url, parse_calendar_events};
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,

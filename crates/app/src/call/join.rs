@@ -18,6 +18,8 @@ const BAD_ID_MESSAGE: &str = "Enter the meeting ID from the invitation.";
 const DEMO_GUEST_COUNT: usize = 4;
 const DEMO_CODE_THREAD: &str = "19:meeting_demo@thread.v2";
 const MEETING_TITLE: &str = "Meeting";
+const MEET_NOW_SUBJECT: &str = "Meet now";
+const MEET_NOW_FAILED_NOTICE: &str = "Could not start the meeting";
 
 pub fn meeting_target(meeting: &ThreadMeeting) -> MeetingTarget {
     MeetingTarget {
@@ -99,6 +101,38 @@ impl AppState {
             Some(MeetingLink::Code(code)) => self.join_meeting_code(code, cx),
             None => self.raise_notice(MEETING_UNAVAILABLE_NOTICE.to_owned(), None, cx),
         }
+    }
+
+    pub fn start_meet_now(&mut self, cx: &mut Context<Self>) {
+        if self.call.is_some() {
+            self.show_call(true, cx);
+            return;
+        }
+        if self.mode.demo {
+            let target = MeetingTarget {
+                thread_id: DEMO_CODE_THREAD.to_owned(),
+                tenant_id: "demo-tenant".to_owned(),
+                organizer_id: "demo-organizer".to_owned(),
+                meeting_data: None,
+            };
+            self.join_resolved_meeting(target, cx);
+            return;
+        }
+        let Some(launcher) = self.call_launcher.clone() else {
+            self.raise_notice(NOT_CONNECTED_NOTICE.to_owned(), None, cx);
+            return;
+        };
+        let receiver =
+            runtime::spawn(async move { launcher.create_meet_now(MEET_NOW_SUBJECT).await });
+        cx.spawn(async move |this, cx| {
+            let created = receiver.await.ok().and_then(Result::ok);
+            this.update(cx, |state, cx| match created {
+                Some(url) => state.join_meeting_link(&url, cx),
+                None => state.raise_notice(MEET_NOW_FAILED_NOTICE.to_owned(), None, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn join_meeting_from_clipboard(&mut self, cx: &mut Context<Self>) {
