@@ -7,6 +7,8 @@ use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use image::{Frame, ImageReader};
+
 use super::avatar::person_avatar;
 use super::widgets::symbol;
 use crate::app_state::AppState;
@@ -50,7 +52,7 @@ pub enum ImageViewerEvent {
 struct RotatedImage {
     url: String,
     quarter_turns: u8,
-    image: Arc<Image>,
+    render: Arc<RenderImage>,
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +74,7 @@ pub struct ImageViewer {
     pan: Pair,
     quarter_turns: u8,
     rotated: Option<RotatedImage>,
+    entered_fullscreen: bool,
     drag_from: Option<Point<Pixels>>,
     notice: Option<String>,
     notice_serial: u64,
@@ -81,19 +84,39 @@ pub struct ImageViewer {
 
 impl EventEmitter<ImageViewerEvent> for ImageViewer {}
 
-fn rotate_file(path: &Path, quarter_turns: u8) -> Option<Image> {
-    let decoded = image::open(path).ok()?;
-    let rotated = match quarter_turns {
+fn decode(path: &Path) -> Option<image::DynamicImage> {
+    ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()
+}
+
+fn rotate_decoded(decoded: image::DynamicImage, quarter_turns: u8) -> image::DynamicImage {
+    match quarter_turns {
         1 => decoded.rotate90(),
         2 => decoded.rotate180(),
         3 => decoded.rotate270(),
         _ => decoded,
-    };
+    }
+}
+
+fn rotated_render(path: &Path, quarter_turns: u8) -> Option<RenderImage> {
+    let mut pixels = rotate_decoded(decode(path)?, quarter_turns).to_rgba8();
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    Some(RenderImage::new(vec![Frame::new(pixels)]))
+}
+
+fn rotated_png(path: &Path, quarter_turns: u8) -> Option<Vec<u8>> {
+    let rotated = rotate_decoded(decode(path)?, quarter_turns);
     let mut bytes = Vec::new();
     rotated
         .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
         .ok()?;
-    Some(Image::from_bytes(ImageFormat::Png, bytes))
+    Some(bytes)
 }
 
 fn clipboard_format(bytes: &[u8]) -> Option<ImageFormat> {
@@ -107,11 +130,24 @@ fn clipboard_format(bytes: &[u8]) -> Option<ImageFormat> {
     }
 }
 
-fn suggested_name(path: &Path) -> String {
+fn clipboard_item(path: &Path, quarter_turns: u8) -> Option<ClipboardItem> {
+    if quarter_turns != 0 {
+        let bytes = rotated_png(path, quarter_turns)?;
+        return Some(ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, bytes)));
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let format = clipboard_format(&bytes)?;
+    Some(ClipboardItem::new_image(&Image::from_bytes(format, bytes)))
+}
+
+fn suggested_name(path: &Path, rotated: bool) -> String {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".to_owned());
+    if rotated {
+        return Path::new(&name).with_extension("png").to_string_lossy().into_owned();
+    }
     if path.extension().is_some() {
         return name;
     }
@@ -121,6 +157,15 @@ fn suggested_name(path: &Path) -> String {
         .and_then(|format| format.extensions_str().first().copied())
         .unwrap_or("png");
     format!("{name}.{extension}")
+}
+
+fn write_image(source: &Path, target: &Path, quarter_turns: u8) -> std::io::Result<()> {
+    if quarter_turns == 0 {
+        return std::fs::copy(source, target).map(|_| ());
+    }
+    let bytes = rotated_png(source, quarter_turns)
+        .ok_or_else(|| std::io::Error::other("rotation failed"))?;
+    std::fs::write(target, bytes)
 }
 
 fn control_button(
@@ -175,13 +220,21 @@ impl ImageViewer {
             pan: (0., 0.),
             quarter_turns: 0,
             rotated: None,
+            entered_fullscreen: false,
             drag_from: None,
             notice: None,
             notice_serial: 0,
             focus_handle,
             _observation: observation,
         };
-        viewer.preload(cx);
+        cx.on_release_in(window, |this, window, _| {
+            this.release_rotated(window);
+            if this.entered_fullscreen && window.is_fullscreen() {
+                window.toggle_fullscreen();
+            }
+        })
+        .detach();
+        viewer.preload(window, cx);
         viewer
     }
 
@@ -189,9 +242,15 @@ impl ImageViewer {
         self.focus_handle.clone()
     }
 
-    fn preload(&mut self, cx: &mut Context<Self>) {
-        let first = self.index.saturating_sub(1);
-        let last = (self.index + 1).min(self.items.len().saturating_sub(1));
+    fn preload(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let last_index = self.items.len().saturating_sub(1);
+        let visible = thumbnail_window(
+            self.index,
+            self.items.len(),
+            Self::thumbnail_capacity(window),
+        );
+        let first = visible.start.min(self.index.saturating_sub(1));
+        let last = visible.end.saturating_sub(1).max((self.index + 1).min(last_index));
         let directory = &self.app.read(cx).directory;
         let missing: Vec<_> = self
             .items
@@ -207,8 +266,31 @@ impl ImageViewer {
         }
     }
 
+    fn thumbnail_capacity(window: &Window) -> usize {
+        let width = f32::from(window.viewport_size().width);
+        ((width - 2. * SIDE_PADDING) / (THUMBNAIL_SIZE + 2. * THUMBNAIL_BORDER + THUMBNAIL_GAP))
+            .floor()
+            .max(1.) as usize
+    }
+
+    fn release_rotated(&mut self, window: &mut Window) {
+        if let Some(rotated) = self.rotated.take() {
+            window.drop_image(rotated.render).ok();
+        }
+    }
+
+    fn toggle_fullscreen(&mut self, window: &mut Window) {
+        self.entered_fullscreen = !window.is_fullscreen();
+        window.toggle_fullscreen();
+    }
+
     fn current(&self) -> Option<&GalleryItem> {
         self.items.get(self.index)
+    }
+
+    fn current_failed(&self, cx: &App) -> bool {
+        self.current()
+            .is_some_and(|item| self.app.read(cx).directory.image_failed(&item.image.url))
     }
 
     fn current_path(&self, cx: &App) -> Option<PathBuf> {
@@ -299,6 +381,10 @@ impl ImageViewer {
         let Some(layout) = self.layout(window, cx) else {
             return;
         };
+        let top = f32::from(event.position.y);
+        if top < HEADER_HEIGHT || top > HEADER_HEIGHT + layout.stage.1 {
+            return;
+        }
         let delta = event.delta.pixel_delta(px(WHEEL_LINE_HEIGHT)).y.into();
         let anchor = Self::anchor_of(event.position, window);
         self.zoom_to(wheel_scale(layout.scale, delta), anchor, window, cx);
@@ -336,7 +422,7 @@ impl ImageViewer {
         }
     }
 
-    fn jump(&mut self, index: usize, cx: &mut Context<Self>) {
+    fn jump(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if index == self.index || index >= self.items.len() {
             return;
         }
@@ -344,17 +430,17 @@ impl ImageViewer {
         self.scale = None;
         self.pan = (0., 0.);
         self.quarter_turns = 0;
-        self.rotated = None;
+        self.release_rotated(window);
         self.drag_from = None;
-        self.preload(cx);
+        self.preload(window, cx);
         cx.notify();
     }
 
-    fn go(&mut self, delta: isize, cx: &mut Context<Self>) {
-        self.jump(step_index(self.index, self.items.len(), delta), cx);
+    fn go(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        self.jump(step_index(self.index, self.items.len(), delta), window, cx);
     }
 
-    fn rotate(&mut self, cx: &mut Context<Self>) {
+    fn rotate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(path), Some(item)) = (self.current_path(cx), self.current()) else {
             return;
         };
@@ -362,25 +448,34 @@ impl ImageViewer {
         self.quarter_turns = next_rotation(self.quarter_turns);
         self.scale = None;
         self.pan = (0., 0.);
-        self.rotated = None;
+        self.release_rotated(window);
         let quarter_turns = self.quarter_turns;
         if quarter_turns != 0 {
-            cx.spawn(async move |this, cx| {
-                let task_url = url.clone();
+            cx.spawn_in(window, async move |this, cx| {
                 let rotated = cx
-                    .background_spawn(async move { rotate_file(&path, quarter_turns) })
+                    .background_spawn(async move { rotated_render(&path, quarter_turns) })
                     .await;
-                this.update(cx, |this, cx| {
+                this.update_in(cx, |this, window, cx| {
                     let still_current = this.quarter_turns == quarter_turns
-                        && this.current().is_some_and(|item| item.image.url == task_url);
-                    if let Some(image) = rotated.filter(|_| still_current) {
-                        this.rotated = Some(RotatedImage {
-                            url: task_url,
-                            quarter_turns,
-                            image: Arc::new(image),
-                        });
-                        cx.notify();
+                        && this.current().is_some_and(|item| item.image.url == url);
+                    if !still_current {
+                        return;
                     }
+                    match rotated {
+                        Some(render) => {
+                            this.release_rotated(window);
+                            this.rotated = Some(RotatedImage {
+                                url,
+                                quarter_turns,
+                                render: Arc::new(render),
+                            });
+                        }
+                        None => {
+                            this.quarter_turns = 0;
+                            this.show_notice("Could not rotate", cx);
+                        }
+                    }
+                    cx.notify();
                 })
                 .ok();
             })
@@ -407,53 +502,75 @@ impl ImageViewer {
         cx.notify();
     }
 
-    fn rotated_image(&self) -> Option<&Arc<Image>> {
+    fn rotated_render(&self) -> Option<&Arc<RenderImage>> {
         let url = &self.current()?.image.url;
         self.rotated
             .as_ref()
             .filter(|rotated| rotated.url == *url && rotated.quarter_turns == self.quarter_turns)
-            .map(|rotated| &rotated.image)
+            .map(|rotated| &rotated.render)
+    }
+
+    fn rotation_pending(&self) -> bool {
+        self.quarter_turns != 0 && self.rotated_render().is_none()
     }
 
     fn copy_image(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.current_path(cx) else {
             return;
         };
-        let item = match self.rotated_image() {
-            Some(rotated) => Some(ClipboardItem::new_image(rotated)),
-            None => std::fs::read(&path).ok().and_then(|bytes| {
-                let format = clipboard_format(&bytes)?;
-                Some(ClipboardItem::new_image(&Image::from_bytes(format, bytes)))
-            }),
-        };
-        match item {
-            Some(item) => {
-                cx.write_to_clipboard(item);
-                self.show_notice("Image copied", cx);
-            }
-            None => {
-                cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
-                self.show_notice("Copied file path", cx);
-            }
+        if self.rotation_pending() {
+            self.show_notice("Rotating", cx);
+            return;
         }
+        let quarter_turns = self.quarter_turns;
+        cx.spawn(async move |this, cx| {
+            let fallback = path.clone();
+            let item = cx
+                .background_spawn(async move { clipboard_item(&path, quarter_turns) })
+                .await;
+            this.update(cx, |this, cx| match item {
+                Some(item) => {
+                    cx.write_to_clipboard(item);
+                    this.show_notice("Image copied", cx);
+                }
+                None => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(fallback.display().to_string()));
+                    this.show_notice("Copied file path", cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn save_as(&mut self, cx: &mut Context<Self>) {
         let Some(source) = self.current_path(cx) else {
             return;
         };
-        let receiver =
-            cx.prompt_for_new_path(&downloads::downloads_directory(), Some(&suggested_name(&source)));
+        if self.rotation_pending() {
+            self.show_notice("Rotating", cx);
+            return;
+        }
+        let quarter_turns = self.quarter_turns;
         cx.spawn(async move |this, cx| {
+            let name_source = source.clone();
+            let name = cx
+                .background_spawn(async move { suggested_name(&name_source, quarter_turns != 0) })
+                .await;
+            let Ok(receiver) = this.update(cx, |_, cx| {
+                cx.prompt_for_new_path(&downloads::downloads_directory(), Some(&name))
+            }) else {
+                return;
+            };
             let Ok(Ok(Some(target))) = receiver.await else {
                 return;
             };
-            let copied = cx
+            let written = cx
                 .background_spawn(async move {
-                    std::fs::copy(&source, &target).map(|_| target)
+                    write_image(&source, &target, quarter_turns).map(|_| target)
                 })
                 .await;
-            this.update(cx, |this, cx| match copied {
+            this.update(cx, |this, cx| match written {
                 Ok(target) => {
                     let name = target
                         .file_name()
@@ -493,10 +610,10 @@ impl ImageViewer {
         let command = event.keystroke.modifiers.secondary();
         match (event.keystroke.key.as_str(), command) {
             ("escape", _) => cx.emit(ImageViewerEvent::Close),
-            ("left", false) => self.go(-1, cx),
-            ("right", false) => self.go(1, cx),
-            ("r", false) => self.rotate(cx),
-            ("f11", _) => window.toggle_fullscreen(),
+            ("left", false) => self.go(-1, window, cx),
+            ("right", false) => self.go(1, window, cx),
+            ("r", false) => self.rotate(window, cx),
+            ("f11", _) => self.toggle_fullscreen(window),
             ("=" | "+", true) => self.zoom_step(1, window, cx),
             ("-", true) => self.zoom_step(-1, window, cx),
             ("0", true) => self.zoom_fit(cx),
@@ -507,7 +624,7 @@ impl ImageViewer {
         cx.stop_propagation();
     }
 
-    fn header(&self, layout: Option<Layout>, cx: &mut Context<Self>) -> Div {
+    fn header(&self, layout: Option<Layout>, cx: &mut Context<Self>) -> Stateful<Div> {
         let item = self.current();
         let author = item.map(|item| item.author.clone()).unwrap_or_default();
         let subtitle = item
@@ -519,6 +636,7 @@ impl ImageViewer {
         let zoom_label = layout.map(|layout| percent_label(layout.scale)).unwrap_or_default();
         let loaded = layout.is_some();
         h_flex()
+            .id("viewer-header")
             .absolute()
             .top_0()
             .left_0()
@@ -598,7 +716,7 @@ impl ImageViewer {
                         "rotate_right",
                         "Rotate (R)",
                         loaded,
-                        cx.listener(|this, _, _, cx| this.rotate(cx)),
+                        cx.listener(|this, _, window, cx| this.rotate(window, cx)),
                     ))
                     .child(control_button(
                         "viewer-copy",
@@ -626,7 +744,7 @@ impl ImageViewer {
                         "fullscreen",
                         "Full screen (F11)",
                         true,
-                        cx.listener(|_, _, window, _| window.toggle_fullscreen()),
+                        cx.listener(|this, _, window, _| this.toggle_fullscreen(window)),
                     ))
                     .child(control_button(
                         "viewer-open",
@@ -643,6 +761,7 @@ impl ImageViewer {
                         cx.listener(|_, _, _, cx| cx.emit(ImageViewerEvent::Close)),
                     )),
             )
+            .on_click(|_, _, cx| cx.stop_propagation())
     }
 
     fn nav_button(
@@ -670,9 +789,9 @@ impl ImageViewer {
             .cursor_pointer()
             .hover(|button| button.bg(white().opacity(0.2)))
             .child(symbol(glyph, NAV_ICON_SIZE, white()))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.go(delta, cx);
+                this.go(delta, window, cx);
             }))
     }
 
@@ -689,7 +808,7 @@ impl ImageViewer {
                 .image(&item.image.url)
                 .map(|entry| entry.path.clone().into())
         } else {
-            self.rotated_image().map(|image| ImageSource::Image(image.clone()))
+            self.rotated_render().map(|render| ImageSource::Render(render.clone()))
         };
         let Some(source) = source else {
             return loading_placeholder();
@@ -762,18 +881,19 @@ impl ImageViewer {
                         None => frame.child(symbol("image", 18., white().opacity(0.5))),
                     }),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.jump(index, cx);
+                this.jump(index, window, cx);
             }))
     }
 
-    fn footer(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn footer(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let width = f32::from(window.viewport_size().width);
-        let capacity = ((width - 2. * SIDE_PADDING) / (THUMBNAIL_SIZE + 2. * THUMBNAIL_BORDER + THUMBNAIL_GAP))
-            .floor()
-            .max(1.) as usize;
-        let range = thumbnail_window(self.index, self.items.len(), capacity);
+        let range = thumbnail_window(
+            self.index,
+            self.items.len(),
+            Self::thumbnail_capacity(window),
+        );
         let caption = self
             .current()
             .map(|item| item.caption.clone())
@@ -783,6 +903,7 @@ impl ImageViewer {
             .clone()
             .unwrap_or_else(|| counter_label(self.index, self.items.len()));
         v_flex()
+            .id("viewer-footer")
             .absolute()
             .bottom_0()
             .left_0()
@@ -819,10 +940,11 @@ impl ImageViewer {
                     .items_center()
                     .children(range.map(|index| self.thumbnail(index, cx))),
             )
+            .on_click(|_, _, cx| cx.stop_propagation())
     }
 }
 
-fn loading_placeholder() -> AnyElement {
+fn status_placeholder(text: &'static str) -> AnyElement {
     v_flex()
         .size_full()
         .gap(px(6.))
@@ -833,9 +955,13 @@ fn loading_placeholder() -> AnyElement {
             div()
                 .text_size(px(12.))
                 .text_color(white().opacity(0.6))
-                .child("Loading image"),
+                .child(text),
         )
         .into_any_element()
+}
+
+fn loading_placeholder() -> AnyElement {
+    status_placeholder("Loading image")
 }
 
 impl Render for ImageViewer {
@@ -846,6 +972,7 @@ impl Render for ImageViewer {
         let has_next = self.index + 1 < self.items.len();
         let picture = match layout {
             Some(layout) => self.picture(layout, cx),
+            None if self.current_failed(cx) => status_placeholder("Image unavailable"),
             None => loading_placeholder(),
         };
         let header = self.header(layout, cx);

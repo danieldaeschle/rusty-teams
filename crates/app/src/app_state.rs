@@ -447,8 +447,17 @@ impl AppState {
                     changed = true;
                 }
                 None => {
-                    let done = data::fetch_image(&engine, image);
-                    self.on_done(done, cx, |_, _| {});
+                    let done = data::fetch_image(&engine, image.clone());
+                    cx.spawn(async move |this, cx| {
+                        if !matches!(done.await, Ok(Ok(()))) {
+                            this.update(cx, |state, cx| {
+                                state.directory.mark_image_failed(&image.url);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    })
+                    .detach();
                 }
             }
         }

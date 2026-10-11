@@ -133,6 +133,7 @@ pub struct Directory {
     pub(crate) presence_pending: HashSet<String>,
     pub(crate) images: HashMap<String, ImageEntry>,
     pub(crate) images_requested: HashSet<String>,
+    pub(crate) images_failed: HashSet<String>,
 }
 
 impl Directory {
@@ -142,6 +143,14 @@ impl Directory {
 
     pub fn image(&self, key: &str) -> Option<&ImageEntry> {
         self.images.get(key)
+    }
+
+    pub fn image_failed(&self, key: &str) -> bool {
+        self.images_failed.contains(key) && !self.images.contains_key(key)
+    }
+
+    pub fn mark_image_failed(&mut self, key: &str) {
+        self.images_failed.insert(key.to_owned());
     }
 
     pub fn set_image(&mut self, key: &str, path: &Path) {
@@ -593,6 +602,16 @@ mod tests {
         directory.mark_avatars_pending(&wanted);
         assert!(directory.missing_avatars(["x".to_owned()]).is_empty());
         assert_eq!(directory.pending_avatars().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_image_is_only_failed_until_it_arrives() {
+        let mut directory = Directory::default();
+        assert!(!directory.image_failed("a"));
+        directory.mark_image_failed("a");
+        assert!(directory.image_failed("a"));
+        directory.set_image("a", Path::new("a.png"));
+        assert!(!directory.image_failed("a"));
     }
 
     #[test]

@@ -312,10 +312,11 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if self.switcher.take().is_some() {
-            window.focus(&self.focus_handle, cx);
+            self.restore_focus(window, cx);
             cx.notify();
             return;
         }
+        self.close_image_viewer(window, cx);
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let switcher = cx.new(|cx| Switcher::new(app, candidates, initial_query, window, cx));
@@ -341,7 +342,7 @@ impl AppShell {
                     SwitcherEvent::Close => {}
                 }
                 this.switcher = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -371,6 +372,7 @@ impl AppShell {
         {
             return;
         }
+        self.close_image_viewer(window, cx);
         self.switcher = None;
         let app = self.state.clone();
         let dialog = cx.new(|cx| StatusMessageDialog::new(app, window, cx));
@@ -379,7 +381,7 @@ impl AppShell {
             window,
             |this, _, _: &StatusMessageDialogEvent, window, cx| {
                 this.status_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -390,10 +392,11 @@ impl AppShell {
 
     fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.shortcuts_dialog.take().is_some() {
-            window.focus(&self.focus_handle, cx);
+            self.restore_focus(window, cx);
             cx.notify();
             return;
         }
+        self.close_image_viewer(window, cx);
         self.switcher = None;
         let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
         cx.subscribe_in(
@@ -401,7 +404,7 @@ impl AppShell {
             window,
             |this, _, _: &ShortcutsDialogEvent, window, cx| {
                 this.shortcuts_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -417,6 +420,7 @@ impl AppShell {
         else {
             return;
         };
+        self.close_image_viewer(window, cx);
         if let Some(card) = &self.profile_card {
             card.update(cx, |card, cx| {
                 card.move_to(request.user_id, request.anchor, cx)
@@ -430,7 +434,7 @@ impl AppShell {
             window,
             |this, _, _: &ProfileCardEvent, window, cx| {
                 this.profile_card = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -461,6 +465,13 @@ impl AppShell {
         .detach();
         self.image_viewer = Some(viewer);
         cx.notify();
+    }
+
+    fn close_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.image_viewer.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+        }
     }
 
     fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -607,7 +618,8 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NewChat, _, cx| {
+            .on_action(cx.listener(|this, _: &NewChat, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.state.update(cx, |state, cx| state.start_new_chat(cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
@@ -616,26 +628,33 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenActivity, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenActivity, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_activity(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenSaved, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_saved(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenChatsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenChatsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenChannelsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenChannelsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_channels(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenCallsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenCallsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_calls(cx));
             }))
-            .on_action(cx.listener(|this, _: &PreviousConversation, _, cx| {
+            .on_action(cx.listener(|this, _: &PreviousConversation, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Previous, cx));
             }))
-            .on_action(cx.listener(|this, _: &NextConversation, _, cx| {
+            .on_action(cx.listener(|this, _: &NextConversation, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
             }))
@@ -655,6 +674,7 @@ impl Render for AppShell {
                 this.state.update(cx, |state, cx| state.toggle_call_share(cx));
             }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {
                     conversation.reply_to_hovered(window, cx)
                 });
