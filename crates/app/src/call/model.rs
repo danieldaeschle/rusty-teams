@@ -18,6 +18,7 @@ const ORGID_PREFIX: &str = "8:orgid:";
 const WIDE_TILES: usize = 2;
 const MEDIUM_TILES: usize = 4;
 pub const REACTION_SHOWN: Duration = Duration::from_secs(3);
+const OWN_ECHO_WINDOW: Duration = Duration::from_secs(2);
 pub const CHAT_OPEN_TILES: usize = 6;
 pub const CAPTION_SHOWN: Duration = Duration::from_secs(4);
 const CAPTION_LINES: usize = 2;
@@ -410,6 +411,7 @@ impl CallModel {
             }
             CallUpdate::ShareSources(sources) => self.share_sources = sources,
             CallUpdate::ShareSound(active) => self.share_sound = active,
+            CallUpdate::OwnHand(rank) => self.own_hand = rank,
             CallUpdate::Reaction { mri, reaction } => self.note_reaction(mri, reaction, Instant::now()),
             CallUpdate::MeetingChat(thread) => self.meeting_chat = Some(thread),
             CallUpdate::Captions(state) => {
@@ -463,6 +465,13 @@ impl CallModel {
     }
 
     pub fn note_reaction(&mut self, mri: String, reaction: Reaction, at: Instant) {
+        let own_echo = Some(&mri) == self.own_mri.as_ref()
+            && self.reactions.iter().any(|chip| {
+                chip.mri == mri && chip.reaction == reaction && at.saturating_duration_since(chip.since) < OWN_ECHO_WINDOW
+            });
+        if own_echo {
+            return;
+        }
         self.reactions.retain(|chip| chip.mri != mri && at.saturating_duration_since(chip.since) < REACTION_SHOWN);
         self.reaction_serial += 1;
         self.reactions.push(ReactionChip { mri, reaction, since: at, serial: self.reaction_serial });
@@ -539,7 +548,9 @@ impl CallModel {
 
     fn apply_roster(&mut self, entries: &[RosterEntry]) {
         let own_entry = entries.iter().find(|entry| Some(&entry.mri) == self.own_mri.as_ref());
-        self.own_hand = own_entry.and_then(|entry| entry.hand.as_ref().map(|hand| hand.rank));
+        if let Some(entry) = own_entry {
+            self.own_hand = entry.hand.as_ref().map(|hand| hand.rank);
+        }
         self.own_spotlight = own_entry.and_then(|entry| entry.spotlight.as_ref().map(|spotlight| spotlight.rank));
         if let Some(entry) = own_entry {
             self.organizer = entry.organizer;
@@ -714,6 +725,10 @@ impl CallModel {
 
     pub fn timer_text(&self, now: Instant) -> String {
         self.elapsed(now).map(format_elapsed).unwrap_or_default()
+    }
+
+    pub fn has_reaction_controls(&self) -> bool {
+        self.kind == CallKind::Meeting
     }
 
     pub fn can_react(&self) -> bool {
@@ -1078,6 +1093,41 @@ mod tests {
         assert_eq!(model.own_cell_index(3), 1);
         let strip: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
         assert_eq!(strip, vec!["Cy", "Bo", "Ana"]);
+    }
+
+    #[test]
+    fn a_roster_without_the_own_entry_keeps_the_own_hand() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::OwnHand(Some(5)));
+        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false)]));
+        assert_eq!(model.own_hand, Some(5));
+        model.apply(CallUpdate::Roster(vec![entry("8:orgid:me", "Me", false, false)]));
+        assert_eq!(model.own_hand, None);
+    }
+
+    #[test]
+    fn the_server_echo_of_an_own_reaction_does_not_restart_the_chip() {
+        let mut model = meeting_with_me();
+        let start = Instant::now();
+        model.note_reaction("8:orgid:me".into(), Reaction::Like, start);
+        let serial = model.reactions[0].serial;
+        model.note_reaction("8:orgid:me".into(), Reaction::Like, start + Duration::from_millis(1500));
+        assert_eq!(model.reactions.len(), 1);
+        assert_eq!(model.reactions[0].serial, serial);
+        model.note_reaction("8:orgid:me".into(), Reaction::Heart, start + Duration::from_millis(1600));
+        assert_eq!(model.reactions[0].reaction, Reaction::Heart);
+        model.note_reaction("8:orgid:me".into(), Reaction::Heart, start + Duration::from_secs(4));
+        assert_ne!(model.reactions[0].serial, serial);
+    }
+
+    #[test]
+    fn another_persons_repeated_reaction_restarts_the_chip() {
+        let mut model = meeting_with_me();
+        let start = Instant::now();
+        model.note_reaction("8:orgid:a".into(), Reaction::Like, start);
+        let serial = model.reactions[0].serial;
+        model.note_reaction("8:orgid:a".into(), Reaction::Like, start + Duration::from_secs(1));
+        assert_ne!(model.reactions[0].serial, serial);
     }
 
     #[test]

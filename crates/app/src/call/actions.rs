@@ -381,12 +381,18 @@ impl AppState {
         counted.unwrap_or_else(|| u32::from(self.sidebar.chats.iter().any(|chat| chat.id == thread && chat.unread)))
     }
 
-    pub fn toggle_call_hand(&mut self, _cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_ref().filter(|call| call.model.is_active()) else {
+    pub fn toggle_call_hand(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut().filter(|call| call.model.is_active() && call.model.has_reaction_controls()) else {
             return;
         };
         let raised = call.model.own_hand.is_none();
+        call.model.own_hand = raised.then_some(u64::MAX);
         self.send_call_command(CallCommand::SetHand(raised));
+        if raised {
+            self.raise_notice("Your hand is raised".to_owned(), None, cx);
+        }
+        cx.emit(AppEvent::Call);
+        cx.notify();
     }
 
     pub fn lower_call_hand(&mut self, mri: String, _cx: &mut Context<Self>) {
@@ -403,11 +409,16 @@ impl AppState {
         }
     }
 
-    pub fn send_call_reaction(&mut self, reaction: Reaction, _cx: &mut Context<Self>) {
-        let live = self.call.as_ref().is_some_and(|call| call.model.is_active());
-        if live {
-            self.send_call_command(CallCommand::SendReaction(reaction));
+    pub fn send_call_reaction(&mut self, reaction: Reaction, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut().filter(|call| call.model.is_active() && call.model.has_reaction_controls()) else {
+            return;
+        };
+        if let Some(own_mri) = call.model.own_mri.clone() {
+            call.model.note_reaction(own_mri, reaction, Instant::now());
         }
+        self.send_call_command(CallCommand::SendReaction(reaction));
+        cx.emit(AppEvent::Call);
+        cx.notify();
     }
 
     pub fn set_call_share_sound(&mut self, on: bool, cx: &mut Context<Self>) {
