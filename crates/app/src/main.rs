@@ -167,11 +167,28 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
     ))
 }
 
+const STORE_OPEN_ATTEMPTS: u32 = 20;
+const STORE_OPEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn open_store(path: &std::path::Path) -> Store {
+    for _ in 1..STORE_OPEN_ATTEMPTS {
+        match Store::open(path) {
+            Ok(store) => return store,
+            Err(_) => std::thread::sleep(STORE_OPEN_INTERVAL),
+        }
+    }
+    Store::open(path).expect("cache database")
+}
+
 fn main() {
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
-        let relaunched = std::env::var_os(updater::RELAUNCH_ENV).is_some();
+        let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();
+        if let Some(value) = &relaunch_value {
+            updater::wait_for_previous_exit(value);
+        }
+        let relaunched = relaunch_value.is_some();
         if single_instance::claim(SINGLE_INSTANCE_NAME, relaunched)
             == single_instance::Claim::Forwarded
         {
@@ -194,7 +211,7 @@ fn main() {
             .database
             .clone()
             .unwrap_or_else(|| data_path(DATABASE_FILE));
-        Store::open(&path).expect("cache database")
+        open_store(&path)
     };
     let store = Arc::new(store);
     let receiver = (!arguments.demo)
@@ -212,6 +229,11 @@ fn main() {
         .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            cx.on_app_quit(|_| {
+                updater::exit_after_grace();
+                async {}
+            })
+            .detach();
             theme::load_fonts(cx);
             theme::apply(cx);
             bind_keys(cx);
@@ -264,4 +286,6 @@ fn main() {
             .detach();
             cx.activate(true);
         });
+    #[cfg(windows)]
+    updater::exit_now();
 }

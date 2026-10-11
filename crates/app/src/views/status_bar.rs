@@ -108,6 +108,9 @@ pub fn render_status_bar(
                     .on_click(on_restart),
             )
         }
+        UpdateStatus::Installing => {
+            bar = bar.child(div().text_color(theme::accent_text()).child("Restarting..."))
+        }
         UpdateStatus::Failed(message) => {
             bar = bar.child(
                 div()

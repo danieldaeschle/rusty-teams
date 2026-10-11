@@ -189,7 +189,7 @@ impl AppShell {
 
     #[cfg_attr(not(windows), allow(dead_code))]
     fn poll_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.update, UpdateStatus::Failed(_)) {
+        if matches!(self.update, UpdateStatus::Failed(_) | UpdateStatus::Installing) {
             return;
         }
         let Some(paths) = updater::current_paths() else {
@@ -200,6 +200,9 @@ impl AppShell {
                 return;
             }
             self.update = UpdateStatus::Ready;
+            let update_exe = paths.update_exe.clone();
+            cx.background_spawn(async move { updater::prescan(&update_exe) })
+                .detach();
         }
         let conversation = self.conversation.read(cx);
         let idle = updater::is_idle(IdleInputs {
@@ -214,14 +217,27 @@ impl AppShell {
     }
 
     fn restart_into_update(&mut self, cx: &mut Context<Self>) {
+        if self.update == UpdateStatus::Installing {
+            return;
+        }
         let Some(paths) = updater::current_paths() else {
             return;
         };
-        match updater::install_and_relaunch(&paths) {
-            Ok(()) => cx.quit(),
-            Err(message) => self.update = UpdateStatus::Failed(message),
-        }
+        self.update = UpdateStatus::Installing;
         cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { updater::install_and_relaunch(&paths) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => cx.quit(),
+                    Err(message) => this.update = UpdateStatus::Failed(message),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn apply_open_target(&mut self, cx: &mut Context<Self>) {
