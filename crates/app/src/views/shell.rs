@@ -31,7 +31,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
-use crate::user_activity::UserInput;
+use crate::user_activity::{self, UserInput};
 use crate::notify::{NotificationCenter, selection_for};
 use crate::sidebar_model::Step;
 use crate::theme;
@@ -626,9 +626,6 @@ impl Render for AppShell {
             .id("app-shell")
             .key_context("AppShell")
             .track_focus(&self.focus_handle)
-            .on_mouse_move(cx.listener(|this, _, _, _| this.user_input.touch()))
-            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.user_input.touch()))
-            .on_scroll_wheel(cx.listener(|this, _, _, _| this.user_input.touch()))
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))
@@ -699,6 +696,7 @@ impl Render for AppShell {
             .text_color(theme::text())
             .text_size(px(14.))
             .child(crate::frame_log::probe("first"))
+            .child(user_activity::input_probe(self.user_input.clone()))
             .child(
                 v_flex()
                     .size_full()

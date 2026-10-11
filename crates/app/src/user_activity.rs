@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use gpui_kit::{DispatchPhase, IntoElement, MouseDownEvent, MouseMoveEvent, ScrollWheelEvent, canvas};
 use tokio::sync::watch;
 
 pub const IDLE_AFTER: Duration = Duration::from_secs(5 * 60);
@@ -12,11 +13,13 @@ pub struct UserInput {
     last_input_millis: AtomicU64,
 }
 
+const NO_INPUT: u64 = u64::MAX;
+
 impl UserInput {
     pub fn new() -> Arc<Self> {
         Arc::new(UserInput {
             origin: Instant::now(),
-            last_input_millis: AtomicU64::new(0),
+            last_input_millis: AtomicU64::new(NO_INPUT),
         })
     }
 
@@ -25,29 +28,56 @@ impl UserInput {
         self.last_input_millis.store(elapsed, Ordering::Relaxed);
     }
 
-    fn last_input(&self) -> Instant {
-        self.origin + Duration::from_millis(self.last_input_millis.load(Ordering::Relaxed))
+    fn last_input(&self) -> Option<Instant> {
+        match self.last_input_millis.load(Ordering::Relaxed) {
+            NO_INPUT => None,
+            millis => Some(self.origin + Duration::from_millis(millis)),
+        }
     }
 }
 
-pub fn latest_input(app_input: Instant, system_idle: Option<Duration>, now: Instant) -> Instant {
-    match system_idle.and_then(|idle| now.checked_sub(idle)) {
-        Some(system_input) => app_input.max(system_input),
-        None => app_input,
-    }
+pub fn input_probe(input: Arc<UserInput>) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            let moved = input.clone();
+            window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture {
+                    moved.touch();
+                }
+            });
+            let pressed = input.clone();
+            window.on_mouse_event(move |_: &MouseDownEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture {
+                    pressed.touch();
+                }
+            });
+            let scrolled = input.clone();
+            window.on_mouse_event(move |_: &ScrollWheelEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture {
+                    scrolled.touch();
+                }
+            });
+        },
+    )
 }
 
-pub fn is_active(last_input: Instant, now: Instant, idle_after: Duration) -> bool {
-    now.saturating_duration_since(last_input) < idle_after
+pub fn latest_input(app_input: Option<Instant>, system_idle: Option<Duration>, now: Instant) -> Option<Instant> {
+    let system_input = system_idle.and_then(|idle| now.checked_sub(idle));
+    app_input.max(system_input)
 }
 
-pub fn activity_change(previous: bool, last_input: Instant, now: Instant, idle_after: Duration) -> Option<bool> {
+pub fn is_active(last_input: Option<Instant>, now: Instant, idle_after: Duration) -> bool {
+    last_input.is_some_and(|last_input| now.saturating_duration_since(last_input) < idle_after)
+}
+
+pub fn activity_change(previous: bool, last_input: Option<Instant>, now: Instant, idle_after: Duration) -> Option<bool> {
     let current = is_active(last_input, now, idle_after);
     (current != previous).then_some(current)
 }
 
 pub fn track(input: Arc<UserInput>) -> watch::Receiver<bool> {
-    let (sender, receiver) = watch::channel(true);
+    let (sender, receiver) = watch::channel(false);
     crate::runtime::handle().spawn(async move {
         let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
         loop {
@@ -94,35 +124,47 @@ mod tests {
     #[test]
     fn active_until_the_idle_threshold() {
         let last_input = Instant::now();
-        assert!(is_active(last_input, last_input + seconds(299), IDLE_AFTER));
-        assert!(!is_active(last_input, last_input + seconds(300), IDLE_AFTER));
-        assert!(is_active(last_input + seconds(10), last_input, IDLE_AFTER));
+        assert!(is_active(Some(last_input), last_input + seconds(299), IDLE_AFTER));
+        assert!(!is_active(Some(last_input), last_input + seconds(300), IDLE_AFTER));
+        assert!(is_active(Some(last_input + seconds(10)), last_input, IDLE_AFTER));
+    }
+
+    #[test]
+    fn without_any_input_the_user_is_inactive() {
+        assert!(!is_active(None, Instant::now(), IDLE_AFTER));
+        assert_eq!(activity_change(false, None, Instant::now(), IDLE_AFTER), None);
     }
 
     #[test]
     fn only_a_change_of_state_is_reported() {
-        let last_input = Instant::now();
-        assert_eq!(activity_change(true, last_input, last_input + seconds(10), IDLE_AFTER), None);
-        assert_eq!(activity_change(true, last_input, last_input + seconds(301), IDLE_AFTER), Some(false));
-        assert_eq!(activity_change(false, last_input, last_input + seconds(301), IDLE_AFTER), None);
-        assert_eq!(activity_change(false, last_input + seconds(400), last_input + seconds(401), IDLE_AFTER), Some(true));
+        let last_input = Some(Instant::now());
+        let at = |offset: u64| last_input.unwrap() + seconds(offset);
+        assert_eq!(activity_change(true, last_input, at(10), IDLE_AFTER), None);
+        assert_eq!(activity_change(true, last_input, at(301), IDLE_AFTER), Some(false));
+        assert_eq!(activity_change(false, last_input, at(301), IDLE_AFTER), None);
+        assert_eq!(activity_change(false, Some(at(400)), at(401), IDLE_AFTER), Some(true));
+        assert_eq!(activity_change(false, last_input, at(10), IDLE_AFTER), Some(true));
     }
 
     #[test]
     fn system_input_counts_when_newer_than_app_input() {
         let now = Instant::now() + seconds(1000);
-        let app_input = now - seconds(900);
-        assert_eq!(latest_input(app_input, Some(seconds(20)), now), now - seconds(20));
+        let app_input = Some(now - seconds(900));
+        assert_eq!(latest_input(app_input, Some(seconds(20)), now), Some(now - seconds(20)));
         assert_eq!(latest_input(app_input, Some(seconds(2000)), now), app_input);
         assert_eq!(latest_input(app_input, None, now), app_input);
+        assert_eq!(latest_input(None, Some(seconds(20)), now), Some(now - seconds(20)));
+        assert_eq!(latest_input(None, None, now), None);
     }
 
     #[test]
-    fn touch_moves_the_last_input_forward() {
+    fn touch_sets_and_moves_the_last_input_forward() {
         let input = UserInput::new();
-        let before = input.last_input();
+        assert_eq!(input.last_input(), None);
+        input.touch();
+        let first = input.last_input().unwrap();
         std::thread::sleep(Duration::from_millis(5));
         input.touch();
-        assert!(input.last_input() > before);
+        assert!(input.last_input().unwrap() > first);
     }
 }

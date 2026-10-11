@@ -306,6 +306,7 @@
     },
     shutdown,
     setActivity,
+    resendActivity: () => transmitActivity(false),
     reply: (id, status, body) => answer(id, status, body),
     stop: async () => {
       let unregistered = null;

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use chatsvc::{PresenceService, Realtime, RealtimeConfig, RealtimeEvent, StatusKind};
+use chatsvc::{ActivityReporting, PresenceService, Realtime, RealtimeConfig, RealtimeEvent, StatusKind};
 use session::{DEFAULT_ENDPOINT, Session};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -25,8 +25,8 @@ async fn main() {
     let endpoint_id = wait_for_endpoint(&mut realtime).await;
     println!("# trouter connected");
 
-    println!("register: {}", outcome(presence.register_endpoint(&endpoint_id).await));
-    realtime.set_activity(true);
+    println!("register: {}", outcome(presence.register_endpoint(&endpoint_id, ActivityReporting::Transport).await));
+    realtime.resend_activity();
     println!("# sent active");
     tokio::time::sleep(SETTLE).await;
     print_own_presence(&presence, &user_id).await;

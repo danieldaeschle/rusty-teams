@@ -54,6 +54,21 @@ impl ForcedKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityReporting {
+    Transport,
+    Direct,
+}
+
+impl ActivityReporting {
+    fn code(self) -> &'static str {
+        match self {
+            ActivityReporting::Transport => "Transport",
+            ActivityReporting::Direct => "Direct",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForcedAvailability {
     pub kind: ForcedKind,
     pub expires_at: Option<DateTime<Utc>>,
@@ -132,9 +147,9 @@ impl<T: CardTransport> PresenceService<T> {
         self.send(request, &url).await.map(drop)
     }
 
-    pub async fn register_endpoint(&self, endpoint_id: &str) -> Result<()> {
+    pub async fn register_endpoint(&self, endpoint_id: &str, reporting: ActivityReporting) -> Result<()> {
         let url = format!("{BASE_URL}/me/endpoints/");
-        let mut request = Request::with_body(Method::Put, &url, endpoint_body(endpoint_id));
+        let mut request = Request::with_body(Method::Put, &url, endpoint_body(endpoint_id, reporting));
         request.headers = endpoint_headers(endpoint_id);
         self.send(request, &url).await.map(drop)
     }
@@ -211,16 +226,23 @@ impl<T: CardTransport> PresenceService<T> {
     }
 }
 
-pub fn is_endpoint_missing(error: &Error) -> bool {
-    matches!(error, Error::Session(session::Error::Api { status: 404, .. }))
+pub fn error_status(error: &Error) -> Option<u16> {
+    match error {
+        Error::Session(session::Error::Api { status, .. }) => Some(*status),
+        _ => None,
+    }
 }
 
-fn endpoint_body(endpoint_id: &str) -> Value {
+pub fn is_endpoint_missing(error: &Error) -> bool {
+    error_status(error) == Some(404)
+}
+
+fn endpoint_body(endpoint_id: &str, reporting: ActivityReporting) -> Value {
     json!({
         "id": endpoint_id,
         "availability": "Available",
         "activity": "Available",
-        "activityReporting": "Transport",
+        "activityReporting": reporting.code(),
         "deviceType": "Desktop",
     })
 }
@@ -480,7 +502,7 @@ mod tests {
     #[tokio::test]
     async fn register_endpoint_puts_the_transport_endpoint_as_desktop() {
         let service = service(200, Value::Null);
-        service.register_endpoint("epid-1").await.unwrap();
+        service.register_endpoint("epid-1", ActivityReporting::Transport).await.unwrap();
         let (request, scope) = only_request(&service);
         assert_eq!(request.method, Method::Put);
         assert_eq!(
@@ -506,6 +528,14 @@ mod tests {
                 ("x-ms-client-version", CLIENT_VERSION),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn register_endpoint_can_switch_to_direct_reporting() {
+        let service = service(200, Value::Null);
+        service.register_endpoint("epid-1", ActivityReporting::Direct).await.unwrap();
+        let (request, _) = only_request(&service);
+        assert_eq!(request.body.unwrap()["activityReporting"], "Direct");
     }
 
     #[tokio::test]

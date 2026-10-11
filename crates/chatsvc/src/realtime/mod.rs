@@ -4,12 +4,13 @@ mod host;
 mod runner;
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::Stream;
 use session::Session;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
 pub use event::{
@@ -79,6 +80,7 @@ pub struct Realtime {
     callbacks: Option<mpsc::UnboundedReceiver<TrouterCallback>>,
     replier: CallbackReplier,
     activity: watch::Sender<bool>,
+    resend: Arc<Notify>,
     stop: Option<oneshot::Sender<oneshot::Sender<()>>>,
     task: JoinHandle<()>,
 }
@@ -98,6 +100,7 @@ impl Realtime {
         let (callback_output, callbacks) = mpsc::unbounded_channel();
         let (reply_sender, replies) = mpsc::unbounded_channel();
         let (activity, activity_receiver) = watch::channel(config.initially_active);
+        let resend = Arc::new(Notify::new());
         let (stop, stop_receiver) = oneshot::channel();
         let mut runner = Runner::new(
             session,
@@ -110,6 +113,7 @@ impl Realtime {
                 replies,
             },
             activity_receiver,
+            resend.clone(),
         );
         if let Err(error) = runner.ensure().await {
             attached.shutdown().await;
@@ -124,6 +128,7 @@ impl Realtime {
                 sender: reply_sender,
             },
             activity,
+            resend,
             stop: Some(stop),
             task,
         })
@@ -148,6 +153,10 @@ impl Realtime {
 
     pub fn set_activity(&self, active: bool) {
         self.activity.send_replace(active);
+    }
+
+    pub fn resend_activity(&self) {
+        self.resend.notify_one();
     }
 
     /// Deletes the registration and closes the page-side socket.

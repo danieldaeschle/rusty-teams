@@ -1,8 +1,9 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use session::{App, Session, TabControl, TabEvents};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep};
 
 use super::RealtimeConfig;
@@ -59,6 +60,13 @@ impl PageScript {
             "window.{name} ? window.{name}.setActivity('{state}') : null",
             name = self.global_name,
             state = activity_label(active)
+        )
+    }
+
+    fn resend_activity_expression(&self) -> String {
+        format!(
+            "window.{name} ? window.{name}.resendActivity() : null",
+            name = self.global_name
         )
     }
 
@@ -123,6 +131,7 @@ pub(super) struct Runner {
     host: String,
     output: mpsc::UnboundedSender<RealtimeEvent>,
     activity: watch::Receiver<bool>,
+    resend: Arc<Notify>,
     force_refresh: bool,
     last_error: Option<String>,
 }
@@ -136,6 +145,7 @@ impl Runner {
         output: mpsc::UnboundedSender<RealtimeEvent>,
         callbacks: CallbackPipes,
         activity: watch::Receiver<bool>,
+        resend: Arc<Notify>,
     ) -> Self {
         Runner {
             session,
@@ -145,6 +155,7 @@ impl Runner {
             host,
             output,
             activity,
+            resend,
             force_refresh: false,
             last_error: None,
         }
@@ -234,6 +245,10 @@ impl Runner {
                     }
                 }
                 _ = tick.tick() => self.ensure_and_report().await,
+                _ = self.resend.notified() => {
+                    let expression = self.script.resend_activity_expression();
+                    let _ = attached.control.evaluate(&expression).await;
+                }
                 changed = self.activity.changed() => {
                     if changed.is_ok() {
                         let expression = self.script.set_activity_expression(*self.activity.borrow_and_update());
@@ -333,6 +348,15 @@ mod tests {
         assert_eq!(
             script.set_activity_expression(false),
             "window.__chatsvcTrouter ? window.__chatsvcTrouter.setActivity('inactive') : null"
+        );
+    }
+
+    #[test]
+    fn resend_goes_through_the_page_global() {
+        let script = PageScript::new(&RealtimeConfig::default());
+        assert_eq!(
+            script.resend_activity_expression(),
+            "window.__chatsvcTrouter ? window.__chatsvcTrouter.resendActivity() : null"
         );
     }
 
