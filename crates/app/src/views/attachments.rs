@@ -29,6 +29,7 @@ const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
 const LOCAL_IMAGE_SUFFIX: &str = "/$value";
 
 pub type FileActivate = Rc<dyn Fn(usize, &mut App)>;
+pub type ImageOpen = Rc<dyn Fn(&str, &mut App)>;
 
 #[derive(Clone)]
 pub struct FileActions {
@@ -68,7 +69,12 @@ pub fn image_size(image: &ImageRef, directory: &Directory) -> (f32, f32) {
     fit_image_within(declared_size(image).or(loaded), max_height)
 }
 
-fn image_view(image: &ImageRef, id: String, directory: &Directory) -> AnyElement {
+fn image_view(
+    image: &ImageRef,
+    id: String,
+    directory: &Directory,
+    open_image: Option<&ImageOpen>,
+) -> AnyElement {
     let (width, height) = image_size(image, directory);
     let frame = div()
         .id(ElementId::Name(id.into()))
@@ -97,6 +103,7 @@ fn image_view(image: &ImageRef, id: String, directory: &Directory) -> AnyElement
             .into_any_element();
     };
     let path = entry.path.clone();
+    let (url, open_image) = (image.url.clone(), open_image.cloned());
     frame
         .cursor_pointer()
         .child(
@@ -105,7 +112,10 @@ fn image_view(image: &ImageRef, id: String, directory: &Directory) -> AnyElement
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover),
         )
-        .on_click(move |_, _, cx| cx.open_with_system(&path))
+        .on_click(move |_, _, cx| match &open_image {
+            Some(open_image) => open_image(&url, cx),
+            None => cx.open_with_system(&path),
+        })
         .into_any_element()
 }
 
@@ -324,6 +334,7 @@ pub fn message_body(
     id: &str,
     own: bool,
     directory: &Directory,
+    open_image: Option<&ImageOpen>,
     cx: &App,
 ) -> Vec<AnyElement> {
     if !blocks
@@ -351,6 +362,7 @@ pub fn message_body(
                 &images[position],
                 format!("{id}-image-{position}"),
                 directory,
+                open_image,
             )),
             Some(Placement::Local(position)) => elements.push(local_image_view(
                 &local_images[position],
@@ -371,6 +383,7 @@ pub fn attachments_view(
     id: &str,
     directory: &Directory,
     file_actions: Option<&FileActions>,
+    open_image: Option<&ImageOpen>,
 ) -> Option<Div> {
     let placed = placements(blocks, images, local_images.len());
     let unplaced_images: Vec<(usize, &ImageRef)> = images
@@ -392,7 +405,7 @@ pub fn attachments_view(
             .items_start()
             .children(
                 unplaced_images.into_iter().map(|(index, image)| {
-                    image_view(image, format!("{id}-image-{index}"), directory)
+                    image_view(image, format!("{id}-image-{index}"), directory, open_image)
                 }),
             )
             .children(

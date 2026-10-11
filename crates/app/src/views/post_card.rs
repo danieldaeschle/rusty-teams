@@ -91,6 +91,7 @@ fn message_content(
                     &format!("message-{index}"),
                     false,
                     directory,
+                    actions.open_image.as_ref(),
                     cx,
                 )),
         );
@@ -103,6 +104,7 @@ fn message_content(
         &format!("message-{index}"),
         directory,
         actions.files.as_ref(),
+        actions.open_image.as_ref(),
     ));
     content = content.children(
         row.meeting_link

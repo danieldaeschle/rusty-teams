@@ -7,6 +7,7 @@ use teams_core::{PinnedMessage, SavedMessage};
 
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::format;
+use crate::image_view_gallery::ViewerRequest;
 use crate::notice::short_error;
 use crate::notify::selection_for;
 use crate::rows::{message_text, reply_excerpt};
@@ -333,6 +334,16 @@ impl AppState {
         });
         cx.emit(AppEvent::Forward);
         cx.notify();
+    }
+
+    pub fn request_image_viewer(&mut self, request: ViewerRequest, cx: &mut Context<Self>) {
+        self.image_viewer_request = Some(request);
+        cx.emit(AppEvent::ImageViewer);
+        cx.notify();
+    }
+
+    pub fn take_image_viewer_request(&mut self) -> Option<ViewerRequest> {
+        self.image_viewer_request.take()
     }
 
     pub fn take_forward_request(&mut self) -> Option<ForwardSource> {

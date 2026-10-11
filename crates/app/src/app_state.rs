@@ -16,6 +16,7 @@ use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
 use calling::meeting::LiveMeeting;
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::image_view_gallery::ViewerRequest;
 use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
 use crate::notice::Notice;
@@ -59,6 +60,7 @@ pub enum AppEvent {
     CallHistory,
     Translation,
     Forward,
+    ImageViewer,
     StatusMessage,
     NotificationSettings,
     Profile,
@@ -110,6 +112,7 @@ pub struct AppState {
     pub calls_list: crate::call::CallsList,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub forward_request: Option<ForwardSource>,
+    pub image_viewer_request: Option<ViewerRequest>,
     pub own_status: PresenceStatus,
     pub own_email: String,
     pub status_menu_open: bool,
@@ -211,6 +214,7 @@ impl AppState {
             calls_list: crate::call::CallsList::default(),
             pins: HashMap::new(),
             forward_request: None,
+            image_viewer_request: None,
             own_status: PresenceStatus::default(),
             own_email: String::new(),
             status_menu_open: false,

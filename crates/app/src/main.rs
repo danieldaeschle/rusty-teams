@@ -32,6 +32,8 @@ mod format;
 mod frame_log;
 mod fuzzy;
 mod gifs;
+mod image_view_gallery;
+mod image_view_math;
 mod local_previews;
 mod message_actions;
 mod notice;

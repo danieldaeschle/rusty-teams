@@ -8,6 +8,7 @@ use super::call_view::render_call_view;
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
+use super::image_viewer::{ImageViewer, ImageViewerEvent};
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
@@ -65,6 +66,7 @@ pub struct AppShell {
     notifications: Entity<NotificationCenter>,
     _call_windows: Entity<CallWindows>,
     forward_dialog: Option<Entity<ForwardDialog>>,
+    image_viewer: Option<Entity<ImageViewer>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
@@ -134,6 +136,9 @@ impl AppShell {
                 if matches!(event, AppEvent::Forward) {
                     this.open_forward_dialog(window, cx);
                 }
+                if matches!(event, AppEvent::ImageViewer) {
+                    this.open_image_viewer(window, cx);
+                }
                 if matches!(event, AppEvent::StatusMessage) {
                     this.open_status_dialog(window, cx);
                 }
@@ -173,6 +178,7 @@ impl AppShell {
             notifications,
             _call_windows: call_windows,
             forward_dialog: None,
+            image_viewer: None,
             status_dialog: None,
             shortcuts_dialog: None,
             profile_card: None,
@@ -433,6 +439,40 @@ impl AppShell {
         cx.notify();
     }
 
+    fn open_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self
+            .state
+            .update(cx, |state, _| state.take_image_viewer_request())
+        else {
+            return;
+        };
+        self.switcher = None;
+        let app = self.state.clone();
+        let viewer = cx.new(|cx| ImageViewer::new(app, request, window, cx));
+        cx.subscribe_in(
+            &viewer,
+            window,
+            |this, _, _: &ImageViewerEvent, window, cx| {
+                this.image_viewer = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.image_viewer = Some(viewer);
+        cx.notify();
+    }
+
+    fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.image_viewer {
+            Some(viewer) => {
+                let handle = viewer.read(cx).focus_handle();
+                window.focus(&handle, cx)
+            }
+            None => window.focus(&self.focus_handle, cx),
+        }
+    }
+
     fn open_forward_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(source) = self
             .state
@@ -449,7 +489,7 @@ impl AppShell {
             window,
             |this, _, event: &ForwardDialogEvent, window, cx| {
                 this.forward_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 if let ForwardDialogEvent::Sent { target, title } = event {
                     let target = target.clone();
                     let open = NoticeAction::new("Open", move |state, cx| {
@@ -531,6 +571,7 @@ impl Render for AppShell {
         }
         let panels = self.switcher.is_some()
             || self.forward_dialog.is_some()
+            || self.image_viewer.is_some()
             || self.status_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.profile_card.is_some()
@@ -633,6 +674,7 @@ impl Render for AppShell {
             )
             .children(call_mini)
             .children(stage_overlay)
+            .children(self.image_viewer.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())

@@ -47,6 +47,7 @@ use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::embedded_web::EmbeddedWeb;
 use crate::emoji;
+use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
@@ -296,6 +297,25 @@ impl ConversationView {
                 .ok();
             }),
         }
+    }
+
+    fn open_image_viewer(&mut self, message_key: &str, url: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let now = Local::now();
+        let items = collect_gallery(&self.rows.borrow(), now.date_naive(), now.offset().fix());
+        let Some(index) = position_of(&items, message_key, url) else {
+            return;
+        };
+        let request = ViewerRequest {
+            conversation_id: current.selection.conversation_id().to_owned(),
+            conversation_title: selection_title(&self.app.read(cx).sidebar, &current.selection),
+            items,
+            index,
+        };
+        self.app
+            .update(cx, |state, cx| state.request_image_viewer(request, cx));
     }
 
     fn activate_file(
@@ -564,6 +584,7 @@ impl ConversationView {
             AppEvent::TaskDialog
             | AppEvent::LocalPreviews
             | AppEvent::Forward
+            | AppEvent::ImageViewer
             | AppEvent::StatusMessage
             | AppEvent::NotificationSettings
             | AppEvent::Profile
