@@ -2,15 +2,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use calling::EngineEvent;
-use chatsvc::{Calendar, CalendarEvent, EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind, TypingEvent};
+use chatsvc::{Calendar, CalendarEvent, EventKind, MessageEvent, Pins, Realtime, RealtimeConfig, RealtimeEvent, StatusKind, TypingEvent};
 use chrono::{DateTime, Local, Offset, Utc};
 use graph::Graph;
 use session::{Session, SessionConfig, Transport};
 use store::Store;
 use teams_core::{ChatsvcFolderSource, CoreEvent, SyncEngine};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::call::{CallLauncher, fetch_window};
+use crate::presence_link::{self, LinkSignal};
 
 pub type Engine = SyncEngine<Graph>;
 
@@ -99,17 +100,31 @@ pub fn live_state_for(kind: StatusKind) -> LiveState {
     }
 }
 
+fn link_signal_for(kind: StatusKind) -> LinkSignal {
+    match kind {
+        StatusKind::Connected | StatusKind::MessageLoss => LinkSignal::Connected,
+        StatusKind::Disconnected | StatusKind::Error => LinkSignal::Disconnected,
+    }
+}
+
 pub fn start(
     store: Arc<Store>,
     transport: Arc<dyn Transport>,
     ringable: bool,
+    activity: watch::Receiver<bool>,
 ) -> mpsc::UnboundedReceiver<BackendEvent> {
     let (sender, receiver) = mpsc::unbounded_channel();
-    crate::runtime::handle().spawn(supervise(store, transport, ringable, sender));
+    crate::runtime::handle().spawn(supervise(store, transport, ringable, activity, sender));
     receiver
 }
 
-async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, ringable: bool, events: EventSender) {
+async fn supervise(
+    store: Arc<Store>,
+    transport: Arc<dyn Transport>,
+    ringable: bool,
+    activity: watch::Receiver<bool>,
+    events: EventSender,
+) {
     let _ = events.send(BackendEvent::Connection(ConnectionState::Connecting));
     let session = loop {
         match Session::with_transport(transport.clone(), SessionConfig::default()).await {
@@ -140,11 +155,14 @@ async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, ringable: b
     let _ = events.send(BackendEvent::Calls(launcher));
     tokio::spawn(forward_core_events(engine.clone(), events.clone()));
     let (nudge, nudges) = mpsc::unbounded_channel();
+    let link = presence_link::start(&session, activity.clone());
     tokio::spawn(realtime_loop(
         session.clone(),
         engine.clone(),
         events.clone(),
         nudge,
+        activity,
+        link,
     ));
     tokio::spawn(calendar_loop(session.clone(), events.clone()));
     tokio::spawn(pins_loop(session, events.clone()));
@@ -206,12 +224,26 @@ async fn realtime_loop(
     engine: Arc<Engine>,
     events: EventSender,
     nudge: mpsc::UnboundedSender<()>,
+    mut activity: watch::Receiver<bool>,
+    link: mpsc::UnboundedSender<LinkSignal>,
 ) {
     loop {
         let _ = events.send(BackendEvent::Live(LiveState::Connecting));
-        match Realtime::start(&session).await {
+        let config = RealtimeConfig {
+            initially_active: *activity.borrow(),
+            ..RealtimeConfig::default()
+        };
+        match Realtime::start_with(&session, config).await {
             Ok(mut realtime) => {
-                while let Some(event) = realtime.recv().await {
+                loop {
+                    let event = tokio::select! {
+                        event = realtime.recv() => event,
+                        Ok(()) = activity.changed() => {
+                            realtime.set_activity(*activity.borrow_and_update());
+                            continue;
+                        }
+                    };
+                    let Some(event) = event else { break };
                     match event {
                         RealtimeEvent::Message(message) => {
                             let _ = events.send(BackendEvent::Live(LiveState::Live));
@@ -235,6 +267,7 @@ async fn realtime_loop(
                         }
                         RealtimeEvent::Status(status) => {
                             let _ = events.send(BackendEvent::Live(live_state_for(status.kind)));
+                            let _ = link.send(link_signal_for(status.kind));
                             let receipt_engine = engine.clone();
                             let receipt_status = status.clone();
                             tokio::spawn(async move {
@@ -249,15 +282,18 @@ async fn realtime_loop(
                             }
                         }
                         RealtimeEvent::Endpoint(endpoint) => {
+                            let _ = link.send(LinkSignal::Endpoint(endpoint.endpoint_id.clone()));
                             let engine = engine.clone();
                             tokio::spawn(async move { engine.presence_endpoint(endpoint).await });
                         }
                     }
                 }
                 let _ = events.send(BackendEvent::Live(LiveState::Reconnecting));
+                let _ = link.send(LinkSignal::Disconnected);
             }
             Err(_) => {
                 let _ = events.send(BackendEvent::Live(LiveState::Failed));
+                let _ = link.send(LinkSignal::Disconnected);
             }
         }
         tokio::time::sleep(REALTIME_RETRY).await;
@@ -467,5 +503,13 @@ mod tests {
             ConnectionState::LoginRequired
         );
         assert_eq!(live_state_for(StatusKind::Connected), LiveState::Live);
+    }
+
+    #[test]
+    fn only_a_closed_or_failed_trouter_counts_as_down() {
+        assert_eq!(link_signal_for(StatusKind::Connected), LinkSignal::Connected);
+        assert_eq!(link_signal_for(StatusKind::MessageLoss), LinkSignal::Connected);
+        assert_eq!(link_signal_for(StatusKind::Disconnected), LinkSignal::Disconnected);
+        assert_eq!(link_signal_for(StatusKind::Error), LinkSignal::Disconnected);
     }
 }

@@ -42,6 +42,7 @@ mod notify;
 mod outbox;
 mod pending_rows;
 mod people;
+mod presence_link;
 mod profile_model;
 mod profile_state;
 mod reaction_model;
@@ -63,6 +64,7 @@ mod translation;
 mod translation_actions;
 mod typing;
 mod updater;
+mod user_activity;
 mod views;
 
 use std::path::PathBuf;
@@ -83,6 +85,7 @@ const WINDOW_WIDTH: f32 = 1240.;
 const WINDOW_HEIGHT: f32 = 820.;
 const WINDOW_MIN_WIDTH: f32 = 640.;
 const WINDOW_MIN_HEIGHT: f32 = 480.;
+const ENDPOINT_UNREGISTER_TIMEOUT: Duration = Duration::from_millis(800);
 const SINGLE_INSTANCE_NAME: &str = "rusty-teams";
 const DATABASE_FILE: &str = "cache.sqlite3";
 #[cfg(windows)]
@@ -218,10 +221,12 @@ fn main() {
         open_store(&path)
     };
     let store = Arc::new(store);
+    let user_input = user_activity::UserInput::new();
     let receiver = (!arguments.demo)
         .then(|| {
             let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
-            backend::start(store.clone(), transport, !arguments.read_only)
+            let activity = user_activity::track(user_input.clone());
+            backend::start(store.clone(), transport, !arguments.read_only, activity)
         });
 
     let mut application = gpui_kit::application();
@@ -247,6 +252,7 @@ fn main() {
                 state
             });
             cx.set_global(app_state::AppHandle(state.clone()));
+            cx.set_global(views::shell::UserInputHandle(user_input));
             if arguments.demo {
                 state.update(cx, |state, cx| {
                     demo::seed_directory(state);
@@ -290,6 +296,7 @@ fn main() {
             .detach();
             cx.activate(true);
         });
+    presence_link::unregister_on_exit(ENDPOINT_UNREGISTER_TIMEOUT);
     #[cfg(windows)]
     updater::exit_now();
 }

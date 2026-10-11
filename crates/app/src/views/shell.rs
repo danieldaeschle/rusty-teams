@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -29,6 +31,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
+use crate::user_activity::UserInput;
 use crate::notify::{NotificationCenter, selection_for};
 use crate::sidebar_model::Step;
 use crate::theme;
@@ -56,6 +59,10 @@ pub struct Startup {
 
 pub const ISLAND_GAP: f32 = 6.;
 
+pub struct UserInputHandle(pub Arc<UserInput>);
+
+impl Global for UserInputHandle {}
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -73,6 +80,7 @@ pub struct AppShell {
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
+    user_input: Arc<UserInput>,
     _subscription: Subscription,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
@@ -156,7 +164,9 @@ impl AppShell {
         cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
+        let user_input = cx.global::<UserInputHandle>().0.clone();
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
+            this.user_input.touch();
             if event.keystroke.key == "escape" {
                 this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
             }
@@ -185,6 +195,7 @@ impl AppShell {
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
+            user_input,
             _subscription: subscription,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
@@ -615,6 +626,9 @@ impl Render for AppShell {
             .id("app-shell")
             .key_context("AppShell")
             .track_focus(&self.focus_handle)
+            .on_mouse_move(cx.listener(|this, _, _, _| this.user_input.touch()))
+            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.user_input.touch()))
+            .on_scroll_wheel(cx.listener(|this, _, _, _| this.user_input.touch()))
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))

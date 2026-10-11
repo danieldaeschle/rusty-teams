@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use session::{App, Session, TabControl, TabEvents};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep};
 
 use super::RealtimeConfig;
@@ -49,8 +49,16 @@ impl PageScript {
 
     fn ensure_body(&self) -> String {
         format!(
-            "{}\nreturn window.{}.ensure({{token, host: args.host}});",
+            "{}\nreturn window.{}.ensure({{token, host: args.host, activity: args.activity}});",
             self.worker_source, self.global_name
+        )
+    }
+
+    fn set_activity_expression(&self, active: bool) -> String {
+        format!(
+            "window.{name} ? window.{name}.setActivity('{state}') : null",
+            name = self.global_name,
+            state = activity_label(active)
         )
     }
 
@@ -114,6 +122,7 @@ pub(super) struct Runner {
     callbacks: CallbackPipes,
     host: String,
     output: mpsc::UnboundedSender<RealtimeEvent>,
+    activity: watch::Receiver<bool>,
     force_refresh: bool,
     last_error: Option<String>,
 }
@@ -126,6 +135,7 @@ impl Runner {
         host: String,
         output: mpsc::UnboundedSender<RealtimeEvent>,
         callbacks: CallbackPipes,
+        activity: watch::Receiver<bool>,
     ) -> Self {
         Runner {
             session,
@@ -134,13 +144,14 @@ impl Runner {
             callbacks,
             host,
             output,
+            activity,
             force_refresh: false,
             last_error: None,
         }
     }
 
     pub(super) async fn ensure(&mut self) -> session::Result<Value> {
-        let args = json!({"host": self.host});
+        let args = json!({"host": self.host, "activity": activity_label(*self.activity.borrow())});
         let outcome = self
             .session
             .run_with_token(
@@ -223,6 +234,12 @@ impl Runner {
                     }
                 }
                 _ = tick.tick() => self.ensure_and_report().await,
+                changed = self.activity.changed() => {
+                    if changed.is_ok() {
+                        let expression = self.script.set_activity_expression(*self.activity.borrow_and_update());
+                        let _ = attached.control.evaluate(&expression).await;
+                    }
+                }
                 Some(reply) = self.callbacks.replies.recv() => {
                     let expression = reply_expression(&self.script.global_name, &reply);
                     let _ = attached.control.evaluate(&expression).await;
@@ -279,6 +296,10 @@ impl Runner {
     }
 }
 
+fn activity_label(active: bool) -> &'static str {
+    if active { "active" } else { "inactive" }
+}
+
 fn is_main_frame_navigation(method: &str, params: &Value) -> bool {
     method == "Page.frameNavigated" && params.pointer("/frame/parentId").is_none()
 }
@@ -305,6 +326,24 @@ mod tests {
     }
 
     #[test]
+    fn activity_is_labelled_and_set_through_the_page_global() {
+        assert_eq!(activity_label(true), "active");
+        assert_eq!(activity_label(false), "inactive");
+        let script = PageScript::new(&RealtimeConfig::default());
+        assert_eq!(
+            script.set_activity_expression(false),
+            "window.__chatsvcTrouter ? window.__chatsvcTrouter.setActivity('inactive') : null"
+        );
+    }
+
+    #[test]
+    fn worker_reports_activity_on_change_only() {
+        let worker = PageScript::new(&RealtimeConfig::default()).worker_source;
+        assert!(!worker.contains("activity();"));
+        assert_eq!(worker.matches("'user.activity'").count(), 1);
+    }
+
+    #[test]
     fn rejected_bearer_forces_token_refresh() {
         assert!(is_auth_failure("registrar_http_401"));
         assert!(!is_auth_failure("registrar_http_500"));
@@ -318,7 +357,7 @@ mod tests {
         assert!(
             ensure_body
                 .trim_end()
-                .ends_with("window.__chatsvcTrouter.ensure({token, host: args.host});")
+                .ends_with("window.__chatsvcTrouter.ensure({token, host: args.host, activity: args.activity});")
         );
         assert_eq!(ensure_body.matches("const VERSION").count(), 1);
     }

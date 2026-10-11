@@ -44,7 +44,7 @@ pub use pins::{
 };
 pub use presence::{
     ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote, WorkLocation,
-    WorkLocationKind, WorkLocationSource,
+    WorkLocationKind, WorkLocationSource, is_endpoint_missing,
 };
 pub use reactions::{emotion_key, emotion_keys};
 pub use realtime::{
