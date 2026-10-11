@@ -4,7 +4,7 @@ mod center;
 mod incoming;
 mod layout;
 #[cfg_attr(not(windows), allow(dead_code))]
-mod platform;
+pub(crate) mod platform;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod ring_tone;
 mod ring_view;

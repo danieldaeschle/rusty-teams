@@ -365,7 +365,7 @@ pub fn leave_button(app: &Entity<AppState>, model: &CallModel, id: &'static str,
         })
 }
 
-fn camera_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
+pub(super) fn camera_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
     let (glyph, background, foreground) = if model.camera_on {
         (IconName::Video, theme::accent(), theme::on_accent())
     } else {

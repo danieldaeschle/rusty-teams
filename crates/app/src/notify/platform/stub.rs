@@ -1,6 +1,8 @@
 use gpui_kit::Window;
 
-use super::{NativeHandle, TrayCommand, WorkArea};
+use calling::ShareKind;
+
+use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::Badge;
 use crate::notify::ring_tone::Ringtone;
 
@@ -17,6 +19,22 @@ pub fn work_area(_handle: NativeHandle) -> Option<WorkArea> {
 }
 
 pub fn place(_handle: NativeHandle, _x: i32, _y: i32, _width: i32, _height: i32) {}
+
+pub fn exclude_from_capture(_handle: NativeHandle) {}
+
+pub fn make_click_through(_handle: NativeHandle) {}
+
+pub fn window_minimized(_handle: NativeHandle) -> bool {
+    false
+}
+
+pub fn window_rect(_handle: NativeHandle) -> Option<ScreenRect> {
+    None
+}
+
+pub fn share_geometry(_kind: ShareKind, _id: u64) -> Option<ShareGeometry> {
+    None
+}
 
 pub fn system_quiet() -> bool {
     false

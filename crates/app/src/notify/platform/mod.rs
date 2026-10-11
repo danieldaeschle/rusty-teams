@@ -20,6 +20,30 @@ pub struct WorkArea {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenRect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl ScreenRect {
+    pub fn width(&self) -> i32 {
+        self.right - self.left
+    }
+
+    pub fn height(&self) -> i32 {
+        self.bottom - self.top
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShareGeometry {
+    pub target: ScreenRect,
+    pub work: WorkArea,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayCommand {
     Toggle,
     Open,

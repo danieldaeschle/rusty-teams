@@ -24,7 +24,7 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
-use crate::call::CallMedia;
+use crate::call::{CallMedia, CallWindows};
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
@@ -59,6 +59,7 @@ pub struct AppShell {
     call_chat: Option<(String, Entity<ConversationView>)>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
+    _call_windows: Entity<CallWindows>,
     activity: Entity<ActivityCenter>,
     activity_panel: Option<Entity<ActivityPanel>>,
     saved_panel: Option<Entity<SavedPanel>>,
@@ -125,6 +126,7 @@ impl AppShell {
         window.focus(&focus_handle, cx);
         cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
+        let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_observation = cx.observe(&activity, |_, _, cx| cx.notify());
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
@@ -141,6 +143,7 @@ impl AppShell {
             call_chat: None,
             switcher: None,
             notifications,
+            _call_windows: call_windows,
             activity,
             activity_panel: None,
             saved_panel: None,

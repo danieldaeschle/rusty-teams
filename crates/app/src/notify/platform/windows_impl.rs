@@ -5,21 +5,23 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use calling::ShareKind;
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{COLORREF, HWND, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-    DwmSetWindowAttribute,
+    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DONOTROUND, DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, DeleteObject, GetMonitorInfoW, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromWindow,
+    CreateBitmap, DEVMODEW, DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICEW, DeleteObject, ENUM_CURRENT_SETTINGS,
+    EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MonitorFromRect, MonitorFromWindow,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Shell::{
     ITaskbarList3, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME, QUNS_RUNNING_D3D_FULL_SCREEN,
     SHQueryUserNotificationState, TaskbarList,
@@ -30,11 +32,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, WS_CAPTION, WS_POPUP, WS_THICKFRAME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-    WS_EX_NOACTIVATE,
+    WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowDisplayAffinity,
+    WDA_EXCLUDEFROMCAPTURE, GetWindowRect,
 };
-use windows::core::{BOOL, w};
+use windows::core::{BOOL, PCWSTR, w};
 
-use super::{NativeHandle, TrayCommand, WorkArea};
+use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
 use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, ringback_cycle};
 
@@ -149,6 +152,126 @@ pub fn place(handle: NativeHandle, x: i32, y: i32, width: i32, height: i32) {
             SWP_NOACTIVATE | SWP_NOOWNERZORDER,
         );
     }
+}
+
+pub fn exclude_from_capture(handle: NativeHandle) {
+    unsafe {
+        let _ = SetWindowDisplayAffinity(hwnd(handle), WDA_EXCLUDEFROMCAPTURE);
+    }
+}
+
+pub fn make_click_through(handle: NativeHandle) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE);
+        let added = (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE).0 as isize;
+        SetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE, style | added);
+        // A layered window stays invisible until its alpha is set.
+        let _ = SetLayeredWindowAttributes(hwnd(handle), COLORREF(0), u8::MAX, LWA_ALPHA);
+    }
+}
+
+pub fn window_minimized(handle: NativeHandle) -> bool {
+    unsafe { IsIconic(hwnd(handle)).as_bool() }
+}
+
+fn screen_rect(rect: RECT) -> ScreenRect {
+    ScreenRect {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    }
+}
+
+pub fn window_rect(handle: NativeHandle) -> Option<ScreenRect> {
+    let mut rect = RECT::default();
+    unsafe { GetWindowRect(hwnd(handle), &mut rect).ok()? };
+    Some(screen_rect(rect))
+}
+
+fn visible_frame(window: HWND) -> Option<ScreenRect> {
+    let mut rect = RECT::default();
+    unsafe {
+        if IsIconic(window).as_bool() {
+            return None;
+        }
+        // Excludes the invisible resize margin that GetWindowRect includes.
+        let framed = DwmGetWindowAttribute(
+            window,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut _ as *mut c_void,
+            size_of::<RECT>() as u32,
+        );
+        if framed.is_err() {
+            GetWindowRect(window, &mut rect).ok()?;
+        }
+    }
+    Some(screen_rect(rect))
+}
+
+fn screen_frame(index: u32) -> Option<ScreenRect> {
+    unsafe {
+        let mut device = DISPLAY_DEVICEW {
+            cb: size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
+        if !EnumDisplayDevicesW(PCWSTR::null(), index, &mut device, 0).as_bool()
+            || device.StateFlags & DISPLAY_DEVICE_ACTIVE == Default::default()
+        {
+            return None;
+        }
+        let mut mode = DEVMODEW {
+            dmSize: size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
+        if !EnumDisplaySettingsW(PCWSTR(device.DeviceName.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode).as_bool() {
+            return None;
+        }
+        let position = mode.Anonymous1.Anonymous2.dmPosition;
+        Some(ScreenRect {
+            left: position.x,
+            top: position.y,
+            right: position.x + mode.dmPelsWidth as i32,
+            bottom: position.y + mode.dmPelsHeight as i32,
+        })
+    }
+}
+
+fn geometry_around(target: ScreenRect) -> Option<ShareGeometry> {
+    unsafe {
+        let rect = RECT {
+            left: target.left,
+            top: target.top,
+            right: target.right,
+            bottom: target.bottom,
+        };
+        let monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return None;
+        }
+        let (mut dpi_x, mut dpi_y) = (0, 0);
+        let scale = match GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) {
+            Ok(()) if dpi_x > 0 => dpi_x as f32 / BASE_DPI,
+            _ => 1.,
+        };
+        let RECT { left, top, right, bottom } = info.rcWork;
+        Some(ShareGeometry {
+            target,
+            work: WorkArea { left, top, right, bottom, scale },
+        })
+    }
+}
+
+pub fn share_geometry(kind: ShareKind, id: u64) -> Option<ShareGeometry> {
+    let target = match kind {
+        ShareKind::Screen => screen_frame(u32::try_from(id).ok()?)?,
+        ShareKind::Window => visible_frame(hwnd(id as NativeHandle))?,
+    };
+    geometry_around(target)
 }
 
 pub fn system_quiet() -> bool {
