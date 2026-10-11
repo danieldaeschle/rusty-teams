@@ -2,15 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use calling::EngineEvent;
-use chatsvc::{EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind, TypingEvent};
-use chrono::{DateTime, Utc};
+use chatsvc::{Calendar, CalendarEvent, EventKind, MessageEvent, Pins, Realtime, RealtimeEvent, StatusKind, TypingEvent};
+use chrono::{DateTime, Local, Offset, Utc};
 use graph::Graph;
 use session::{Session, SessionConfig, Transport};
 use store::Store;
 use teams_core::{ChatsvcFolderSource, CoreEvent, SyncEngine};
 use tokio::sync::mpsc;
 
-use crate::call::CallLauncher;
+use crate::call::{CallLauncher, fetch_window};
 
 pub type Engine = SyncEngine<Graph>;
 
@@ -18,6 +18,8 @@ const CONNECT_RETRY: Duration = Duration::from_secs(8);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 const REFRESH_SETTLE: Duration = Duration::from_secs(2);
 const PINS_INTERVAL: Duration = Duration::from_secs(90);
+const CALENDAR_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const CALENDAR_MIN_GAP: Duration = Duration::from_secs(30);
 const REALTIME_RETRY: Duration = Duration::from_secs(15);
 const PRESENCE_RESUBSCRIBE: Duration = Duration::from_secs(30 * 60);
 const MAX_ERROR_CHARS: usize = 120;
@@ -48,6 +50,8 @@ pub enum BackendEvent {
     Connection(ConnectionState),
     Engine(Arc<Engine>),
     Calls(Arc<CallLauncher>),
+    Calendar(Vec<CalendarEvent>),
+    CalendarNudge(mpsc::UnboundedSender<()>),
     Ring(EngineEvent),
     ThreadChanged(String),
     Core(CoreEvent),
@@ -142,6 +146,7 @@ async fn supervise(store: Arc<Store>, transport: Arc<dyn Transport>, ringable: b
         events.clone(),
         nudge,
     ));
+    tokio::spawn(calendar_loop(session.clone(), events.clone()));
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;
@@ -321,6 +326,38 @@ async fn handle_message_event(
     let unknown = matches!(outcome, Err(teams_core::Error::UnknownConversation(_)));
     if unknown || event.kind == EventKind::NewMessage {
         let _ = nudge.send(());
+    }
+}
+
+async fn calendar_loop(session: Session, events: EventSender) {
+    let calendar = Calendar::new(&session);
+    let (nudge, mut nudges) = mpsc::unbounded_channel();
+    let _ = events.send(BackendEvent::CalendarNudge(nudge));
+    let mut interval = tokio::time::interval(CALENDAR_INTERVAL);
+    let mut last_fetch: Option<tokio::time::Instant> = None;
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {}
+            nudge = nudges.recv() => {
+                if nudge.is_none() {
+                    return;
+                }
+                while nudges.try_recv().is_ok() {}
+                if last_fetch.is_some_and(|fetched| fetched.elapsed() < CALENDAR_MIN_GAP) {
+                    continue;
+                }
+            }
+        }
+        last_fetch = Some(tokio::time::Instant::now());
+        let (start, end) = fetch_window(Utc::now(), Local::now().offset().fix());
+        match calendar.calendar_view(start, end).await {
+            Ok(fetched) => {
+                if events.send(BackendEvent::Calendar(fetched)).is_err() {
+                    return;
+                }
+            }
+            Err(error) => eprintln!("calls: calendar not loaded: {}", shorten(&error.to_string())),
+        }
     }
 }
 

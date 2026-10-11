@@ -1,7 +1,7 @@
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -11,13 +11,17 @@ use super::avatar::person_avatar;
 use super::join_dialog::open_join_with_id;
 use super::widgets::icon;
 use crate::app_state::AppState;
-use crate::call::{CallRow, call_rows};
+use crate::call::{
+    AGENDA_ROW_HEIGHT, AgendaRow, CALL_ROW_HEIGHT, CallRow, DAY_HEIGHT, EMPTY_HEIGHT, ListEntry,
+    SECTION_HEIGHT, join_available,
+};
 use crate::theme;
 
-const ROW_HEIGHT: f32 = 54.;
+const FALLBACK_VIEWPORT: f32 = 900.;
+const VIEWPORT_MARGIN: f32 = 300.;
+const TIME_COLUMN_WIDTH: f32 = 96.;
 const AVATAR_SIZE: f32 = 36.;
 const MENU_ICON_SIZE: f32 = 15.;
-const EMPTY_TEXT: &str = "No calls yet";
 
 fn meeting_avatar() -> Div {
     div()
@@ -55,7 +59,7 @@ fn call_row(
     h_flex()
         .id(SharedString::from(format!("call-{}", row.key)))
         .mx(px(8.))
-        .h(px(ROW_HEIGHT))
+        .h(px(CALL_ROW_HEIGHT))
         .px(px(8.))
         .gap(px(10.))
         .items_center()
@@ -141,6 +145,7 @@ fn call_row(
 }
 
 fn join_buttons(state: &Entity<AppState>) -> impl IntoElement {
+    let meet_state = state.clone();
     let id_state = state.clone();
     let paste_state = state.clone();
     h_flex()
@@ -148,6 +153,16 @@ fn join_buttons(state: &Entity<AppState>) -> impl IntoElement {
         .px(px(12.))
         .pb(px(8.))
         .gap(px(8.))
+        .flex_wrap()
+        .child(
+            Button::new("meet-now")
+                .small()
+                .primary()
+                .label("Meet now")
+                .on_click(move |_, _, cx| {
+                    meet_state.update(cx, |state, cx| state.start_meet_now(cx));
+                }),
+        )
         .child(
             Button::new("join-with-id")
                 .small()
@@ -164,34 +179,154 @@ fn join_buttons(state: &Entity<AppState>) -> impl IntoElement {
         )
 }
 
-pub fn calls_body(state: &Entity<AppState>, scroll: &ScrollHandle, cx: &App) -> AnyElement {
-    let app = state.read(cx);
-    let offset = Local::now().offset().fix();
-    let rows = call_rows(&app.call_history, &app.sidebar.chats, Utc::now(), offset);
-    let list = if rows.is_empty() {
-        div()
-            .w_full()
-            .py(px(24.))
-            .flex()
-            .justify_center()
-            .text_size(px(13.))
-            .text_color(theme::text_muted())
-            .child(EMPTY_TEXT)
-            .into_any_element()
-    } else {
-        v_flex()
-            .w_full()
-            .pb(px(12.))
-            .children(rows.iter().map(|row| {
-                call_row(
-                    state,
-                    row,
-                    app.can_open_chat_of_call_row(row),
-                    &app.directory,
+fn section_header(title: &'static str) -> AnyElement {
+    div()
+        .h(px(SECTION_HEIGHT))
+        .px(px(16.))
+        .flex()
+        .items_end()
+        .pb(px(4.))
+        .text_size(px(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text_muted())
+        .child(title)
+        .into_any_element()
+}
+
+fn day_header(label: &str) -> AnyElement {
+    div()
+        .h(px(DAY_HEIGHT))
+        .px(px(16.))
+        .flex()
+        .items_center()
+        .text_size(px(11.5))
+        .text_color(theme::text_faint())
+        .child(label.to_owned())
+        .into_any_element()
+}
+
+fn empty_row(text: &'static str) -> AnyElement {
+    div()
+        .h(px(EMPTY_HEIGHT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(13.))
+        .text_color(theme::text_muted())
+        .child(text)
+        .into_any_element()
+}
+
+fn agenda_row(state: &Entity<AppState>, row: &AgendaRow, joinable: bool) -> AnyElement {
+    let click_state = state.clone();
+    let click_row = row.clone();
+    let join_state = state.clone();
+    let join_row = row.clone();
+    h_flex()
+        .id(SharedString::from(format!("agenda-{}", row.key)))
+        .mx(px(8.))
+        .h(px(AGENDA_ROW_HEIGHT))
+        .px(px(8.))
+        .gap(px(10.))
+        .items_center()
+        .rounded(px(8.))
+        .cursor_pointer()
+        .hover(|row| row.bg(theme::row_hover()))
+        .child(
+            div()
+                .w(px(TIME_COLUMN_WIDTH))
+                .flex_none()
+                .text_size(px(12.))
+                .text_color(theme::text_muted())
+                .child(row.time_label.clone()),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(14.))
+                        .text_color(theme::text())
+                        .child(row.subject.clone()),
                 )
-            }))
-            .into_any_element()
+                .when(!row.detail.is_empty(), |column| {
+                    column.child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .text_color(theme::text_muted())
+                            .child(row.detail.clone()),
+                    )
+                }),
+        )
+        .when(joinable, |line| {
+            line.child(
+                Button::new(SharedString::from(format!("agenda-join-{}", row.key)))
+                    .small()
+                    .primary()
+                    .label("Join")
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        join_state.update(cx, |state, cx| state.join_agenda_row(&join_row, cx));
+                    }),
+            )
+        })
+        .on_click(move |_, _, cx| {
+            click_state.update(cx, |state, cx| state.open_agenda_chat(&click_row, cx));
+        })
+        .into_any_element()
+}
+
+pub fn calls_body(
+    state: &Entity<AppState>,
+    scroll: &ScrollHandle,
+    window_height: f32,
+    cx: &mut App,
+) -> AnyElement {
+    let now = Utc::now();
+    let offset = Local::now().offset().fix();
+    if state.read(cx).calls_list.needs_rebuild(now, offset) {
+        let rebuild_state = state.clone();
+        cx.defer(move |cx| rebuild_state.update(cx, |state, cx| state.rebuild_calls_list(cx)));
+    }
+    let top = -f32::from(scroll.offset().y);
+    let measured = f32::from(scroll.bounds().size.height);
+    let height = if measured > 1. {
+        measured
+    } else {
+        window_height.max(FALLBACK_VIEWPORT)
     };
+    let app = state.read(cx);
+    let window = app
+        .calls_list
+        .window(top - VIEWPORT_MARGIN, top + height + VIEWPORT_MARGIN);
+    let entries = &app.calls_list.entries()[window.range.clone()];
+    let mut list = v_flex().w_full().pb(px(12.));
+    if window.before > 0. {
+        list = list.child(div().h(px(window.before)).flex_none());
+    }
+    for entry in entries {
+        list = list.child(match entry {
+            ListEntry::Section(title) => section_header(title),
+            ListEntry::Day(label) => day_header(label),
+            ListEntry::Empty(text) => empty_row(text),
+            ListEntry::Agenda(row) => {
+                agenda_row(state, row, join_available(row.start, row.end, now) && row.join_url.is_some())
+            }
+            ListEntry::Call(row) => call_row(
+                state,
+                row,
+                app.can_open_chat_of_call_row(row),
+                &app.directory,
+            ),
+        });
+    }
+    if window.after > 0. {
+        list = list.child(div().h(px(window.after)).flex_none());
+    }
     v_flex()
         .flex_1()
         .min_h_0()

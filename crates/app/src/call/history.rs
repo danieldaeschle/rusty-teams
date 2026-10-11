@@ -82,6 +82,8 @@ pub fn call_rows(
     offset: FixedOffset,
 ) -> Vec<CallRow> {
     let names = known_names(chats);
+    let chats_by_id: HashMap<&str, &ChatRecord> =
+        chats.iter().map(|chat| (chat.id.as_str(), chat)).collect();
     let today = now.with_timezone(&offset).date_naive();
     entries
         .iter()
@@ -94,7 +96,7 @@ pub fn call_rows(
             let thread_chat = entry
                 .thread_id
                 .as_deref()
-                .and_then(|thread_id| chats.iter().find(|chat| chat.id == thread_id));
+                .and_then(|thread_id| chats_by_id.get(thread_id).copied());
             let title = if entry.is_meeting {
                 thread_chat.map_or_else(|| MEETING_TITLE.to_owned(), chat_title)
             } else {
@@ -216,6 +218,7 @@ impl AppState {
     pub fn refresh_call_history(&mut self, cx: &mut Context<Self>) {
         if self.mode.demo {
             self.call_history = demo_call_log(Utc::now());
+            self.calls_list.invalidate();
             cx.emit(AppEvent::CallHistory);
             cx.notify();
             return;
@@ -228,6 +231,7 @@ impl AppState {
             Ok(Ok(entries)) => {
                 this.update(cx, |state, cx| {
                     state.call_history = entries;
+                    state.calls_list.invalidate();
                     cx.emit(AppEvent::CallHistory);
                     cx.notify();
                 })

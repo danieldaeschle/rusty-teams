@@ -71,6 +71,7 @@ pub struct AppShell {
     _subscription: Subscription,
     _activity_observation: Subscription,
     _escape_observation: Subscription,
+    _activation_observation: Subscription,
 }
 
 impl AppShell {
@@ -127,6 +128,11 @@ impl AppShell {
                 this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
             }
         });
+        let activation_observation = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.state.update(cx, |state, cx| state.refresh_calendar(cx));
+            }
+        });
         let closing = notifications.clone();
         window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
         let mut shell = AppShell {
@@ -149,6 +155,7 @@ impl AppShell {
             _subscription: subscription,
             _activity_observation: activity_observation,
             _escape_observation: escape_observation,
+            _activation_observation: activation_observation,
         };
         shell.apply_open_target(cx);
         let Startup {

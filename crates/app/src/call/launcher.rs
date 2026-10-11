@@ -94,6 +94,14 @@ impl CallLauncher {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn create_meet_now(&self, subject: &str) -> Result<String, String> {
+        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        chatsvc::Calendar::new(&session)
+            .create_meet_now(subject)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn live_meeting(&self, thread_id: &str) -> Option<LiveMeeting> {
         let session = self.engine()?.session();
         fetch_live_meeting(&session, thread_id).await.ok().flatten()

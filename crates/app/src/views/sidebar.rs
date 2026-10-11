@@ -334,6 +334,7 @@ impl SidebarView {
             if matches!(
                 event,
                 AppEvent::Sidebar
+                    | AppEvent::CallHistory
                     | AppEvent::Selection
                     | AppEvent::Directory
                     | AppEvent::Typing
@@ -378,7 +379,10 @@ impl SidebarView {
     fn open_tab(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
         self.tab = tab;
         if tab == SidebarTab::Calls {
-            self.state.update(cx, |state, cx| state.refresh_call_history(cx));
+            self.state.update(cx, |state, cx| {
+                state.refresh_call_history(cx);
+                state.refresh_calendar(cx);
+            });
         }
         cx.notify();
     }
@@ -1476,7 +1480,7 @@ impl Render for SidebarView {
         let body = match self.tab {
             SidebarTab::Chats => self.chats_body(window_height, cx),
             SidebarTab::Channels => self.channels_body(cx),
-            SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, cx),
+            SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, window_height, cx),
         };
         v_flex()
             .w(px(SIDEBAR_WIDTH))

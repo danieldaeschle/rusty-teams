@@ -1,0 +1,50 @@
+{
+  "value": [
+    {
+      "objectId": "evt-review",
+      "subject": "Design review",
+      "startTime": "2026-10-12T13:00:00.0000000",
+      "endTime": "2026-10-12T14:00:00.0000000",
+      "isAllDayEvent": false,
+      "isCancelled": false,
+      "isOnlineMeeting": true,
+      "organizerName": "Jonas Ortega",
+      "organizerAddress": "jonas@example.invalid",
+      "myResponseType": "TentativelyAccepted",
+      "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo2%40thread.v2/0",
+      "skypeTeamsData": "{\"cid\":\"19:meeting_demo2@thread.v2\",\"mid\":0}"
+    },
+    {
+      "objectId": "evt-standup",
+      "subject": "Team standup",
+      "startTime": "2026-10-12T08:30:00Z",
+      "endTime": "2026-10-12T08:45:00Z",
+      "isAllDayEvent": false,
+      "isCancelled": false,
+      "isOnlineMeeting": true,
+      "organizerName": "Mara Lindqvist",
+      "organizerAddress": "mara@example.invalid",
+      "myResponseType": "Accepted",
+      "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo1%40thread.v2/0",
+      "threadId": "19:meeting_demo1@thread.v2"
+    },
+    {
+      "objectId": "evt-offsite",
+      "subject": "Offsite day",
+      "startTime": "2026-10-12T00:00:00Z",
+      "endTime": "2026-10-13T00:00:00Z",
+      "isAllDayEvent": true,
+      "isCancelled": false,
+      "isOnlineMeeting": false
+    },
+    {
+      "objectId": "evt-cancelled",
+      "subject": "Cancelled sync",
+      "startTime": "2026-10-13T09:00:00Z",
+      "endTime": "2026-10-13T09:30:00Z",
+      "isCancelled": true,
+      "isOnlineMeeting": true,
+      "myResponseType": "None"
+    }
+  ]
+}
