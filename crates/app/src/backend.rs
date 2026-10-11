@@ -185,7 +185,11 @@ async fn refresh_loop(
         }
         match engine.refresh_sidebar().await {
             Ok(_) => {
-                let _ = engine.refresh_folders().await;
+                if let Err(error) = engine.refresh_folders().await {
+                    crate::diagnostics::record(format!(
+                        "sync: chat folders and channel layout not refreshed: {error}"
+                    ));
+                }
                 let _ = events.send(BackendEvent::Connection(ConnectionState::Online));
                 let _ = events.send(BackendEvent::Synced(Utc::now()));
             }
@@ -356,7 +360,7 @@ async fn calendar_loop(session: Session, events: EventSender) {
                     return;
                 }
             }
-            Err(error) => eprintln!("calls: calendar not loaded: {}", shorten(&error.to_string())),
+            Err(error) => crate::diagnostics::record(format!("calls: calendar not loaded: {}", shorten(&error.to_string()))),
         }
     }
 }

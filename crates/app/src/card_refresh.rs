@@ -110,7 +110,7 @@ impl AppState {
         let replaced = match answer {
             Ok((CardActionOutcome::ReplaceCard(json), _)) => self.replace_card(scope, &json, cx),
             Ok((CardActionOutcome::Failed(reason), _)) | Err(reason) => {
-                eprintln!("card refresh failed: {reason}");
+                crate::diagnostics::record(format!("card refresh failed: {reason}"));
                 false
             }
             Ok(_) => false,

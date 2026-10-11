@@ -672,7 +672,7 @@ impl ConversationView {
             if let Err(error) = sent
                 && cfg!(debug_assertions)
             {
-                eprintln!("typing indicator not sent: {error}");
+                crate::diagnostics::record(format!("typing indicator not sent: {error}"));
             }
         }));
     }

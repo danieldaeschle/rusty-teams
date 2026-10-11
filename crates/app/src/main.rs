@@ -13,6 +13,7 @@ mod card_actions;
 mod card_inputs;
 mod chat_actions;
 mod crash_log;
+mod diagnostics;
 mod card_refresh;
 mod card_state;
 mod channel_files;
@@ -182,6 +183,7 @@ fn open_store(path: &std::path::Path) -> Store {
 
 fn main() {
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
+    diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();

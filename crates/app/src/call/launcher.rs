@@ -29,7 +29,7 @@ impl CallLauncher {
         crate::runtime::handle().spawn(async move {
             let (engine, mut events) =
                 start_with_retry(|| start_engine(transport.clone(), ringable), &START_RETRY_STEPS, START_RETRY_STEADY).await;
-            eprintln!("calls: engine ready, registered with the registrar");
+            crate::diagnostics::record("calls: engine ready, registered with the registrar");
             *running.engine.lock().expect("engine lock") = Some(engine);
             while let Some(event) = events.recv().await {
                 on_event(event);
@@ -126,7 +126,7 @@ where
         let delay = steps.get(failures).copied().unwrap_or(steady);
         failures += 1;
         if failure != last_failure {
-            eprintln!("calls: engine start failed, retrying in {}s: {failure}", delay.as_secs());
+            crate::diagnostics::record(format!("calls: engine start failed, retrying in {}s: {failure}", delay.as_secs()));
             last_failure = failure;
         }
         tokio::time::sleep(delay).await;

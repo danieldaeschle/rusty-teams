@@ -329,10 +329,13 @@ impl<R: Remote> SyncEngine<R> {
 
     pub async fn refresh_folders(&self) -> Result<()> {
         let source = self.folder_source()?;
-        let (folders, channels) = tokio::try_join!(source.folders(), source.pinned_channels())?;
-        self.store_folders(&folders, &channels)?;
+        let folders = match tokio::try_join!(source.folders(), source.pinned_channels()) {
+            Ok((folders, channels)) => self.store_folders(&folders, &channels),
+            Err(error) => Err(error),
+        };
         self.refresh_section_settings(source).await;
-        self.refresh_team_layout(source).await
+        let layout = self.refresh_team_layout(source).await;
+        folders.and(layout)
     }
 
     async fn refresh_section_settings(&self, source: &Arc<dyn FolderSource>) {
