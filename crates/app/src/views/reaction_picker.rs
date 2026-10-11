@@ -194,7 +194,7 @@ impl ReactionPicker {
             .text_size(px(20.))
             .cursor_pointer()
             .when(selected, |cell| cell.bg(theme::reaction_on_own()))
-            .hover(|cell| cell.bg(theme::border_strong()))
+            .hover(|cell| cell.bg(theme::popup_hover()))
             .child(glyph)
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 this.pick(&picked, event.modifiers().shift, window, cx)
@@ -240,9 +240,7 @@ impl Render for ReactionPicker {
                     .flex()
                     .items_center()
                     .rounded(px(8.))
-                    .bg(theme::surface())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .bg(theme::popup_hover())
                     .child(Input::new(&self.input).appearance(false).bordered(false)),
             )
             .child(

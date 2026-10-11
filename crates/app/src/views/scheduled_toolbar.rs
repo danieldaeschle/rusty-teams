@@ -38,13 +38,12 @@ pub fn scheduled_toolbar(menu: ScheduledMenu) -> AnyElement {
     } = menu;
     h_flex()
         .id(element_id("scheduled-toolbar", &key))
-        .p(px(2.))
-        .gap(px(2.))
+        .h(px(36.))
+        .p(px(3.))
+        .gap(px(1.))
         .items_center()
-        .rounded(px(8.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border_strong())
+        .rounded(px(10.))
+        .bg(theme::popup())
         .occlude()
         .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {

@@ -145,8 +145,6 @@ fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
         .pr(px(6.))
         .justify_between()
         .items_center()
-        .border_b_1()
-        .border_color(theme::code_header_border())
         .font_family(theme::font_family())
         .text_size(px(11.))
         .text_color(muted)

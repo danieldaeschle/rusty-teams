@@ -9,7 +9,7 @@ use crate::theme;
 
 const BACKDROP_OPACITY: f32 = 0.55;
 const PANEL_MARGIN: f32 = 32.;
-const PANEL_RADIUS: f32 = 12.;
+const PANEL_RADIUS: f32 = 10.;
 const PANEL_PADDING: f32 = 16.;
 const HEADER_GAP: f32 = 12.;
 const TITLE_SIZE: f32 = 15.;
@@ -56,9 +56,7 @@ fn panel(dialog: &TaskDialogState, cx: &App) -> Div {
         .p(px(PANEL_PADDING))
         .gap(px(HEADER_GAP))
         .rounded(px(PANEL_RADIUS))
-        .bg(theme::background())
-        .border_1()
-        .border_color(theme::border_strong())
+        .bg(theme::popup())
         .text_color(theme::text())
         .occlude()
         .child(
@@ -84,7 +82,7 @@ fn panel(dialog: &TaskDialogState, cx: &App) -> Div {
                         .justify_center()
                         .rounded_full()
                         .cursor_pointer()
-                        .hover(|button| button.bg(theme::row_hover()))
+                        .hover(|button| button.bg(theme::popup_hover()))
                         .on_click(|_, _, cx| close(cx))
                         .child(symbol("close", CLOSE_ICON_SIZE, theme::text_muted())),
                 ),

@@ -1,7 +1,6 @@
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
-use gpui_kit::base::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
@@ -59,9 +58,9 @@ fn call_row(
     let can_call_back = !row.meeting && row.user_id.is_some();
     h_flex()
         .id(SharedString::from(format!("call-{}", row.key)))
-        .mx(px(8.))
+        .mx(px(6.))
         .h(px(CALL_ROW_HEIGHT))
-        .px(px(8.))
+        .px(px(10.))
         .gap(px(10.))
         .items_center()
         .rounded(px(8.))
@@ -145,6 +144,28 @@ fn call_row(
         .into_any_element()
 }
 
+fn join_button(id: &'static str, label: &'static str, primary: bool) -> Stateful<Div> {
+    let (fill, hover_fill, text_color) = if primary {
+        (theme::accent(), theme::accent_text(), theme::on_accent())
+    } else {
+        (theme::surface_raised(), theme::popup_hover(), theme::text_strong())
+    };
+    div()
+        .id(id)
+        .h(px(28.))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .rounded(px(7.))
+        .bg(fill)
+        .cursor_pointer()
+        .hover(move |button| button.bg(hover_fill))
+        .text_size(px(12.5))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(text_color)
+        .child(label)
+}
+
 fn join_buttons(state: &Entity<AppState>, meet_now_pending: bool) -> impl IntoElement {
     let meet_state = state.clone();
     let id_state = state.clone();
@@ -156,28 +177,24 @@ fn join_buttons(state: &Entity<AppState>, meet_now_pending: bool) -> impl IntoEl
         .gap(px(8.))
         .flex_wrap()
         .child(
-            Button::new("meet-now")
-                .small()
-                .primary()
-                .label("Meet now")
-                .disabled(meet_now_pending)
-                .on_click(move |_, _, cx| {
-                    meet_state.update(cx, |state, cx| state.start_meet_now(cx));
+            join_button("meet-now", "Meet now", true)
+                .when(meet_now_pending, |button| button.opacity(0.5))
+                .when(!meet_now_pending, |button| {
+                    button.on_click(move |_, _, cx| {
+                        meet_state.update(cx, |state, cx| state.start_meet_now(cx));
+                    })
                 }),
         )
         .child(
-            Button::new("join-with-id")
-                .small()
-                .label("Join with ID")
+            join_button("join-with-id", "Join with ID", false)
                 .on_click(move |_, window, cx| open_join_with_id(id_state.clone(), window, cx)),
         )
         .child(
-            Button::new("paste-meeting-link")
-                .small()
-                .label("Paste a meeting link")
-                .on_click(move |_, _, cx| {
+            join_button("paste-meeting-link", "Paste a meeting link", false).on_click(
+                move |_, _, cx| {
                     paste_state.update(cx, |state, cx| state.join_meeting_from_clipboard(cx));
-                }),
+                },
+            ),
         )
 }
 
@@ -226,9 +243,9 @@ fn agenda_row(state: &Entity<AppState>, row: &AgendaRow, joinable: bool) -> AnyE
     let join_row = row.clone();
     h_flex()
         .id(SharedString::from(format!("agenda-{}", row.key)))
-        .mx(px(8.))
+        .mx(px(6.))
         .h(px(AGENDA_ROW_HEIGHT))
-        .px(px(8.))
+        .px(px(10.))
         .gap(px(10.))
         .items_center()
         .rounded(px(8.))

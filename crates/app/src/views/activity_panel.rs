@@ -8,7 +8,6 @@ use gpui_kit::*;
 use store::Sidebar;
 
 use super::avatar::person_avatar;
-use super::title_bar::TITLE_BAR_HEIGHT;
 use super::widgets::{dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
 use crate::app_state::{AppState, chat_title};
@@ -17,17 +16,13 @@ use crate::format;
 use crate::people::resolve_names;
 use crate::theme;
 
-const PANEL_WIDTH: f32 = 420.;
-const PANEL_MAX_HEIGHT_RATIO: f32 = 0.7;
-const PANEL_MARGIN: f32 = 8.;
 const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 28.;
-const MARK_READ_SIZE: f32 = 24.;
+const MARK_READ_SIZE: f32 = 20.;
 const FILTER_KEY: &str = "activity_filter";
 
 pub enum ActivityPanelEvent {
-    Close,
     OpenSettings,
     Open {
         conversation_id: String,
@@ -39,7 +34,6 @@ pub struct ActivityPanel {
     app: Entity<AppState>,
     activity: Entity<ActivityCenter>,
     filter: Filter,
-    focus_handle: FocusHandle,
     scroll: ScrollHandle,
     resolved_names: HashMap<String, String>,
     looked_up: HashSet<String>,
@@ -52,11 +46,8 @@ impl ActivityPanel {
     pub fn new(
         app: Entity<AppState>,
         activity: Entity<ActivityCenter>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let focus_handle = cx.focus_handle();
-        window.focus(&focus_handle, cx);
         let observations = [
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.observe(&activity, |_, _, cx| cx.notify()),
@@ -73,7 +64,6 @@ impl ActivityPanel {
             app,
             activity,
             filter,
-            focus_handle,
             scroll: ScrollHandle::new(),
             resolved_names: HashMap::new(),
             looked_up: HashSet::new(),
@@ -94,12 +84,6 @@ impl ActivityPanel {
         cx.emit(event);
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" {
-            cx.emit(ActivityPanelEvent::Close);
-        }
-    }
-
     fn header(&self, cx: &mut Context<Self>) -> Div {
         let pills = Filter::ALL.into_iter().map(|filter| {
             let selected = filter == self.filter;
@@ -115,9 +99,7 @@ impl ActivityPanel {
                 .cursor_pointer()
                 .text_size(px(12.))
                 .when(selected, |pill| {
-                    pill.bg(theme::accent())
-                        .text_color(theme::on_accent())
-                        .font_weight(FontWeight::SEMIBOLD)
+                    pill.bg(theme::accent()).text_color(theme::on_accent())
                 })
                 .when(!selected, |pill| {
                     pill.bg(theme::surface_raised())
@@ -132,21 +114,21 @@ impl ActivityPanel {
                 }))
         });
         v_flex()
-            .px(px(12.))
-            .pt(px(10.))
+            .flex_none()
+            .pl(px(16.))
+            .pr(px(12.))
+            .pt(px(12.))
             .pb(px(8.))
             .gap(px(8.))
-            .border_b_1()
-            .border_color(theme::border())
             .child(
                 h_flex()
-                    .gap(px(8.))
+                    .gap(px(4.))
                     .items_center()
                     .child(
                         div()
                             .flex_1()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_size(px(16.))
+                            .font_weight(FontWeight::BOLD)
                             .text_color(theme::text())
                             .child("Activity"),
                     )
@@ -213,11 +195,11 @@ impl ActivityPanel {
             .id(ElementId::Name(format!("activity-row-{id}").into()))
             .group(group.clone())
             .mx(px(6.))
-            .px(px(6.))
+            .px(px(10.))
             .py(px(8.))
             .gap(px(10.))
             .items_start()
-            .rounded(px(6.))
+            .rounded(px(8.))
             .cursor_pointer()
             .hover(|row| row.bg(theme::row_hover()))
             .child(
@@ -226,7 +208,7 @@ impl ActivityPanel {
                     .flex_none()
                     .size(px(AVATAR_SIZE))
                     .child(avatar)
-                    .child(kind_marker(entry)),
+                    .child(kind_marker(entry, group.clone())),
             )
             .child(
                 v_flex()
@@ -265,7 +247,6 @@ impl ActivityPanel {
                 v_flex()
                     .flex_none()
                     .items_end()
-                    .gap(px(2.))
                     .child(
                         div()
                             .text_size(px(11.))
@@ -298,6 +279,7 @@ fn status_slot(
         div()
             .flex()
             .group_hover(group.clone(), |wrapper| wrapper.hidden())
+            .mr(px(8.))
             .child(dot(8.)),
     )
     .child(
@@ -314,7 +296,7 @@ fn status_slot(
             .border_color(theme::border_strong())
             .bg(theme::surface_raised())
             .cursor_pointer()
-            .child(icon(IconName::Check, 14., theme::text()))
+            .child(icon(IconName::Check, 12., theme::text()))
             .tooltip(|window, cx| Tooltip::new("Mark as read").build(window, cx))
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -323,7 +305,7 @@ fn status_slot(
     )
 }
 
-fn kind_marker(entry: &Entry) -> Div {
+fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
     let marker = div()
         .absolute()
         .right(px(-4.))
@@ -333,8 +315,9 @@ fn kind_marker(entry: &Entry) -> Div {
         .items_center()
         .justify_center()
         .rounded_full()
-        .border_1()
+        .border_2()
         .border_color(theme::surface())
+        .group_hover(row_group, |marker| marker.border_color(theme::row_hover()))
         .bg(theme::surface_raised())
         .text_size(px(10.));
     match entry.kind {
@@ -387,9 +370,12 @@ fn conversation_label(sidebar: &Sidebar, conversation_id: &str) -> Option<String
 
 fn date_header(label: &'static str) -> AnyElement {
     div()
-        .px(px(12.))
-        .pt(px(8.))
-        .pb(px(4.))
+        .h(px(26.))
+        .mt(px(4.))
+        .px(px(16.))
+        .flex()
+        .flex_none()
+        .items_center()
         .text_size(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
@@ -398,7 +384,7 @@ fn date_header(label: &'static str) -> AnyElement {
 }
 
 impl Render for ActivityPanel {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now: DateTime<Local> = Local::now();
         let (today, offset) = (now.date_naive(), now.offset().fix());
         let panel = cx.entity();
@@ -447,46 +433,19 @@ impl Render for ActivityPanel {
                     .into_any_element(),
             );
         }
-        let max_height = f32::from(window.viewport_size().height) * PANEL_MAX_HEIGHT_RATIO;
-        div()
-            .id("activity-layer")
-            .absolute()
-            .top(px(TITLE_BAR_HEIGHT))
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .occlude()
-            .flex()
-            .justify_end()
-            .items_start()
-            .p(px(PANEL_MARGIN))
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(ActivityPanelEvent::Close)))
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .child(self.header(cx))
             .child(
                 v_flex()
-                    .id("activity-card")
-                    .track_focus(&self.focus_handle)
-                    .w(px(PANEL_WIDTH))
-                    .max_h(px(max_height))
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(theme::border_strong())
-                    .bg(theme::surface())
-                    .shadow_lg()
-                    .overflow_hidden()
-                    .occlude()
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .on_key_down(cx.listener(Self::on_key_down))
-                    .child(self.header(cx))
-                    .child(
-                        v_flex()
-                            .id("activity-list")
-                            .flex_1()
-                            .min_h_0()
-                            .py(px(4.))
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
-                            .children(rows),
-                    ),
+                    .id("activity-list")
+                    .flex_1()
+                    .min_h_0()
+                    .pb(px(12.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .children(rows),
             )
     }
 }

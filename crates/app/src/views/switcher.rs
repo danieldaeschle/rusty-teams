@@ -329,7 +329,7 @@ impl Render for Switcher {
                 rows.push(group_header(last_group));
             }
             let selection = candidate.selection.clone();
-            let avatar = candidate_avatar(directory, &candidate.avatar, 28., theme::surface());
+            let avatar = candidate_avatar(directory, &candidate.avatar, 28., theme::popup());
             let kind_icon = match candidate.selection {
                 Selection::Chat(_) => IconName::MessageCircle,
                 Selection::Channel(_) => IconName::Hash,
@@ -344,8 +344,8 @@ impl Render for Switcher {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .when(index == highlighted, |row| row.bg(theme::surface_raised()))
-                    .hover(|row| row.bg(theme::row_hover()))
+                    .when(index == highlighted, |row| row.bg(theme::popup_hover()))
+                    .hover(|row| row.bg(theme::popup_hover()))
                     .child(avatar)
                     .child(
                         v_flex()
@@ -403,8 +403,8 @@ impl Render for Switcher {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .when(index == highlighted, |row| row.bg(theme::surface_raised()))
-                    .hover(|row| row.bg(theme::row_hover()))
+                    .when(index == highlighted, |row| row.bg(theme::popup_hover()))
+                    .hover(|row| row.bg(theme::popup_hover()))
                     .child(person_avatar(directory, None, &message.author, 28.))
                     .child(
                         v_flex()
@@ -465,8 +465,6 @@ impl Render for Switcher {
             .px(px(12.))
             .gap(px(16.))
             .items_center()
-            .border_t_1()
-            .border_color(theme::border())
             .text_size(px(11.))
             .text_color(theme::text_muted())
             .child("Enter to open")
@@ -490,18 +488,13 @@ impl Render for Switcher {
                     .w(px(CARD_WIDTH))
                     .max_h(px(640.))
                     .rounded(px(10.))
-                    .border_1()
-                    .border_color(theme::border_strong())
-                    .bg(theme::surface())
-                    .shadow_lg()
+                    .bg(theme::popup())
                     .overflow_hidden()
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(
                         div()
                             .p(px(8.))
-                            .border_b_1()
-                            .border_color(theme::border())
                             .child(Input::new(&self.input).appearance(false).bordered(false)),
                     )
                     .child(v_flex().w_full().py_1().children(rows))

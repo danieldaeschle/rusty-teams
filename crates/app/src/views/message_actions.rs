@@ -5,7 +5,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::GlobalState;
 use gpui_kit::component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
     popover::Popover,
@@ -18,7 +18,9 @@ use super::widgets::icon;
 use crate::rows::reaction_glyph;
 use crate::theme;
 
-const BAR_BUTTON: f32 = 28.;
+const BAR_BUTTON: f32 = 30.;
+const BAR_PADDING: f32 = 3.;
+const BAR_GROUP_GAP: f32 = 6.;
 pub const QUICK_REACTION_COUNT: usize = 4;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -54,6 +56,13 @@ fn element_id(prefix: &str, key: &str) -> ElementId {
     ElementId::Name(format!("{prefix}-{key}").into())
 }
 
+fn bar_variant(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .foreground(theme::text_soft())
+        .hover(theme::popup_hover())
+        .active(theme::popup_hover())
+}
+
 pub(super) fn bar_button(id: ElementId) -> Stateful<Div> {
     div()
         .id(id)
@@ -61,9 +70,9 @@ pub(super) fn bar_button(id: ElementId) -> Stateful<Div> {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(px(7.))
         .cursor_pointer()
-        .hover(|button| button.bg(theme::border_strong()))
+        .hover(|button| button.bg(theme::popup_hover()))
 }
 
 fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement {
@@ -81,7 +90,7 @@ fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement 
         .into_any_element()
 }
 
-fn picker_button(menu: &MessageMenu) -> AnyElement {
+fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     let (picker, picker_reset, react, done, mine, pin) = (
         menu.picker.clone(),
         menu.picker.clone(),
@@ -95,7 +104,8 @@ fn picker_button(menu: &MessageMenu) -> AnyElement {
         .trigger(
             Button::new(element_id("add-reaction", &menu.key))
                 .icon(IconName::Plus)
-                .ghost()
+                .custom(bar_variant(cx))
+                .rounded(px(7.))
                 .xsmall()
                 .size(px(BAR_BUTTON)),
         )
@@ -115,7 +125,7 @@ fn picker_button(menu: &MessageMenu) -> AnyElement {
         .into_any_element()
 }
 
-fn more_button(menu: &MessageMenu) -> AnyElement {
+fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     let (
         reply,
         forward,
@@ -146,7 +156,8 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
     let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
         .icon(IconName::Ellipsis)
-        .ghost()
+        .custom(bar_variant(cx))
+        .rounded(px(7.))
         .xsmall()
         .size(px(BAR_BUTTON))
         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
@@ -204,7 +215,7 @@ fn more_button(menu: &MessageMenu) -> AnyElement {
         .into_any_element()
 }
 
-pub fn message_toolbar(menu: MessageMenu) -> AnyElement {
+pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
     let hover = menu.hover.clone();
     let mut children: Vec<AnyElement> = menu
         .quick
@@ -212,14 +223,9 @@ pub fn message_toolbar(menu: MessageMenu) -> AnyElement {
         .enumerate()
         .map(|(index, glyph)| reaction_button(&menu, glyph, index))
         .collect();
-    children.push(picker_button(&menu));
+    children.push(picker_button(&menu, cx));
     children.push(
-        div()
-            .w(px(1.))
-            .h(px(18.))
-            .mx(px(2.))
-            .bg(theme::border_strong())
-            .into_any_element(),
+        div().w(px(BAR_GROUP_GAP)).into_any_element(),
     );
     if let Some(reply) = menu.reply.clone() {
         children.push(
@@ -232,16 +238,15 @@ pub fn message_toolbar(menu: MessageMenu) -> AnyElement {
                 .into_any_element(),
         );
     }
-    children.push(more_button(&menu));
+    children.push(more_button(&menu, cx));
     h_flex()
         .id(element_id("message-toolbar", &menu.key))
-        .p(px(2.))
-        .gap(px(2.))
+        .h(px(BAR_BUTTON + 2. * BAR_PADDING))
+        .p(px(BAR_PADDING))
+        .gap(px(1.))
         .items_center()
-        .rounded(px(8.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border_strong())
+        .rounded(px(10.))
+        .bg(theme::popup())
         .occlude()
         .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {

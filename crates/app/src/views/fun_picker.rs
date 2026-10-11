@@ -376,9 +376,7 @@ impl FunPicker {
             .flex_none()
             .items_center()
             .rounded(px(8.))
-            .bg(theme::surface())
-            .border_1()
-            .border_color(theme::border_strong())
+            .bg(theme::popup_hover())
             .child(Input::new(&self.input).appearance(false).bordered(false))
     }
 
@@ -422,7 +420,7 @@ impl FunPicker {
                 .rounded(px(6.))
                 .text_size(px(20.))
                 .cursor_pointer()
-                .hover(|cell| cell.bg(theme::border_strong()))
+                .hover(|cell| cell.bg(theme::popup_hover()))
                 .child(glyph.clone())
                 .on_click(cx.listener(move |this, _, _, cx| this.pick_emoji(&picked, cx)))
         });
@@ -544,11 +542,10 @@ impl FunPicker {
                             .flex()
                             .items_center()
                             .rounded(px(6.))
-                            .border_1()
-                            .border_color(theme::border_strong())
+                            .bg(theme::popup_hover())
                             .text_color(theme::text())
                             .cursor_pointer()
-                            .hover(|button| button.bg(theme::row_hover()))
+                            .hover(|button| button.bg(theme::border_strong()))
                             .child("Erneut versuchen")
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(false, cx))),
                     )
@@ -580,7 +577,7 @@ impl FunPicker {
                     .flex_none()
                     .p(px(4.))
                     .rounded(px(TILE_RADIUS))
-                    .bg(theme::surface_raised())
+                    .bg(theme::popup_hover())
                     .cursor_pointer()
                     .hover(|tile| tile.bg(theme::border_strong()))
                     .child(

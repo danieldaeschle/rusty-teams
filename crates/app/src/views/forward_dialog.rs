@@ -19,7 +19,7 @@ use crate::theme;
 
 const MAX_RESULTS: usize = 8;
 const CARD_WIDTH: f32 = 480.;
-const CARD_RADIUS: f32 = 12.;
+const CARD_RADIUS: f32 = 10.;
 const CARD_PADDING: f32 = 16.;
 const CARD_MARGIN: f32 = 32.;
 const SECTION_GAP: f32 = 12.;
@@ -243,7 +243,7 @@ impl ForwardDialog {
                     .justify_center()
                     .rounded_full()
                     .cursor_pointer()
-                    .hover(|button| button.bg(theme::row_hover()))
+                    .hover(|button| button.bg(theme::popup_hover()))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ForwardDialogEvent::Close)))
                     .child(symbol("close", 16., theme::text_muted())),
             )
@@ -257,9 +257,7 @@ impl ForwardDialog {
             .gap(px(8.))
             .items_center()
             .rounded(px(6.))
-            .bg(theme::surface())
-            .border_1()
-            .border_color(theme::border());
+            .bg(theme::popup_hover());
         match &self.target {
             Some(target) => field
                 .child(
@@ -280,7 +278,7 @@ impl ForwardDialog {
                         .justify_center()
                         .rounded(px(4.))
                         .cursor_pointer()
-                        .hover(|button| button.bg(theme::row_hover()))
+                        .hover(|button| button.bg(theme::popup_hover()))
                         .on_click(cx.listener(|this, _, window, cx| this.clear_target(window, cx)))
                         .child(icon(IconName::X, 14., theme::text_muted())),
                 )
@@ -318,13 +316,13 @@ impl ForwardDialog {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .when(highlighted || chosen, |row| row.bg(theme::surface_raised()))
-                    .hover(|row| row.bg(theme::row_hover()))
+                    .when(highlighted || chosen, |row| row.bg(theme::popup_hover()))
+                    .hover(|row| row.bg(theme::popup_hover()))
                     .child(candidate_avatar(
                         directory,
                         &candidate.avatar,
                         AVATAR_SIZE,
-                        theme::background(),
+                        theme::popup(),
                     ))
                     .child(
                         v_flex()
@@ -463,11 +461,8 @@ impl Render for ForwardDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .bg(theme::popup())
                     .text_color(theme::text())
-                    .shadow_lg()
                     .occlude()
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(self.header(cx))

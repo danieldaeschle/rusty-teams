@@ -2,10 +2,9 @@ use std::sync::{Arc, OnceLock};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{TitleBar, h_flex};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::widgets::{count_badge, icon, symbol};
+use super::widgets::icon;
 use crate::theme;
 
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
@@ -23,50 +22,8 @@ fn app_icon() -> Arc<Image> {
 
 pub fn render_title_bar(
     own: Option<AnyElement>,
-    activity_unread: usize,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_saved: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_notifications: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let saved = div()
-        .id("title-saved")
-        .occlude()
-        .size(px(28.))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .cursor_pointer()
-        .hover(|button| button.bg(theme::surface()))
-        .child(icon(IconName::Bookmark, 18., theme::text_muted()))
-        .on_click(on_saved);
-    let notifications = div()
-        .id("title-notifications")
-        .relative()
-        .occlude()
-        .size(px(28.))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded(px(6.))
-        .cursor_pointer()
-        .hover(|button| button.bg(theme::surface()))
-        .child(symbol("notifications", 18., theme::text_muted()))
-        .when(activity_unread > 0, |bell| {
-            bell.child(
-                div()
-                    .absolute()
-                    .top(px(-4.))
-                    .right(px(-6.))
-                    .child(count_badge(
-                        activity_unread.min(u32::MAX as usize) as u32,
-                        false,
-                    )),
-            )
-        })
-        .on_click(on_notifications);
     let search = h_flex()
         .id("title-search")
         .occlude()
@@ -77,12 +34,9 @@ pub fn render_title_bar(
         .items_center()
         .rounded(px(6.))
         .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
         .cursor_pointer()
         .text_size(px(12.))
         .text_color(theme::text_muted())
-        .hover(|field| field.border_color(theme::border_strong()))
         .child(icon(IconName::Search, 14., theme::text_muted()))
         .child(div().flex_1().child(SEARCH_HINT))
         .child(
@@ -90,8 +44,7 @@ pub fn render_title_bar(
                 .px(px(6.))
                 .py(px(1.))
                 .rounded(px(4.))
-                .border_1()
-                .border_color(theme::border_strong())
+                .bg(theme::surface_raised())
                 .text_size(px(11.))
                 .child(SHORTCUT_HINT),
         )
@@ -114,8 +67,6 @@ pub fn render_title_bar(
                         .child(crate::APP_NAME),
                 )
                 .child(div().flex_1().flex().justify_center().child(search))
-                .child(saved)
-                .child(notifications)
                 .children(own)
                 .child(div().w(px(4.))),
         )

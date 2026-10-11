@@ -40,6 +40,24 @@ pub fn count_badge(count: u32, muted: bool) -> Div {
         .child(format::badge_text(count))
 }
 
+pub fn page_header(title: &str) -> Div {
+    div()
+        .h(px(52.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(6.))
+        .pl(px(16.))
+        .pr(px(10.))
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(16.))
+                .font_weight(FontWeight::BOLD)
+                .child(title.to_owned()),
+        )
+}
+
 pub fn dot(size: f32) -> Div {
     div()
         .size(px(size))

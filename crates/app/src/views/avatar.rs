@@ -125,7 +125,7 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
         PresenceKind::Available => theme::green(),
         PresenceKind::Busy | PresenceKind::DoNotDisturb => theme::red(),
         PresenceKind::Away => theme::amber(),
-        PresenceKind::Offline => theme::background(),
+        PresenceKind::Offline => ring,
         PresenceKind::Unknown => return None,
     };
     let mut center = div()
@@ -262,7 +262,7 @@ pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div 
                 .items_center()
                 .justify_center()
                 .rounded_full()
-                .bg(theme::background())
+                .bg(theme::surface())
                 .child(face_circle(
                     directory,
                     face,
@@ -282,7 +282,7 @@ pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div 
                 .justify_center()
                 .rounded_full()
                 .border(px(PRESENCE_RING))
-                .border_color(theme::background())
+                .border_color(theme::surface())
                 .bg(theme::surface_raised())
                 .text_color(theme::text_soft())
                 .text_size(px(10.))

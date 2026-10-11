@@ -194,13 +194,11 @@ fn button(format: FormatButton, state: FormatState, on_press: PressHandler) -> i
         .items_center()
         .justify_center()
         .rounded(px(6.))
-        .border_1()
-        .border_color(transparent_black())
         .cursor_pointer()
         .when(on, |button| {
             button.bg(theme::accent().opacity(ACTIVE_ALPHA))
         })
-        .hover(|button| button.border_color(theme::border_strong()))
+        .hover(|button| button.bg(theme::popup_hover()))
         .tooltip(move |window, cx| Tooltip::new(format.tooltip()).build(window, cx))
         .child(format.content(color))
         .when(state == FormatState::Mixed, |button| {
@@ -227,7 +225,7 @@ fn separator() -> Div {
         .w(px(1.))
         .h(px(BUTTON - 8.))
         .mx(px(SEPARATOR_MARGIN))
-        .bg(theme::border_strong())
+        .bg(theme::popup_hover())
 }
 
 fn bar(state: &dyn Fn(FormatButton) -> FormatState, on_press: PressHandler) -> Div {
@@ -258,7 +256,7 @@ fn link_editor(field: &Entity<InputState>, refused: bool, on_apply: ApplyHandler
                 } else {
                     theme::accent()
                 })
-                .bg(theme::surface())
+                .bg(theme::popup_hover())
                 .child(Input::new(field).appearance(false).bordered(false)),
         )
         .child(
@@ -300,21 +298,13 @@ fn arrow(offset: Pixels) -> impl IntoElement {
         |_, _, _| {},
         move |bounds, _, window, _| {
             let tip = point(bounds.origin.x + offset, bounds.origin.y + px(ARROW_HEIGHT));
-            for (inset, color) in [(0., theme::border_strong()), (1.5, theme::surface_raised())] {
-                let mut builder = PathBuilder::fill();
-                builder.move_to(point(
-                    tip.x - px(ARROW_WIDTH / 2. - inset),
-                    bounds.origin.y - px(1.),
-                ));
-                builder.line_to(point(
-                    tip.x + px(ARROW_WIDTH / 2. - inset),
-                    bounds.origin.y - px(1.),
-                ));
-                builder.line_to(point(tip.x, tip.y - px(inset)));
-                builder.close();
-                if let Ok(path) = builder.build() {
-                    window.paint_path(path, color);
-                }
+            let mut builder = PathBuilder::fill();
+            builder.move_to(point(tip.x - px(ARROW_WIDTH / 2.), bounds.origin.y - px(1.)));
+            builder.line_to(point(tip.x + px(ARROW_WIDTH / 2.), bounds.origin.y - px(1.)));
+            builder.line_to(point(tip.x, tip.y));
+            builder.close();
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, theme::popup());
             }
         },
     )
@@ -342,11 +332,8 @@ pub fn render(placement: Placement, mode: Mode<'_>) -> AnyElement {
                     .child(
                         div()
                             .p(px(PADDING))
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(theme::border_strong())
-                            .bg(theme::surface_raised())
-                            .shadow_lg()
+                            .rounded(px(10.))
+                            .bg(theme::popup())
                             .child(content),
                     )
                     .child(arrow(placement.arrow_x)),

@@ -859,7 +859,7 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
             .flex_1()
             .min_w_0()
             .h_full()
-            .bg(theme::background())
+            .bg(theme::surface())
             .child(header)
             .children(lobby_banner(app, model))
             .children(sharing_banner(app, model, state.call_share_sound))

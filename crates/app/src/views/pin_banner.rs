@@ -7,8 +7,8 @@ use super::message_actions::Action;
 use super::widgets::icon;
 use crate::theme;
 
-const BANNER_HEIGHT: f32 = 40.;
-const BANNER_PADDING: f32 = 20.;
+const BANNER_HEIGHT: f32 = 36.;
+const BANNER_PADDING: f32 = 12.;
 const BUTTON_SIZE: f32 = 24.;
 const FALLBACK_PREVIEW: &str = "Pinned message";
 
@@ -47,7 +47,7 @@ fn icon_button(id: &'static str, glyph: IconName, action: Action) -> Stateful<Di
         .justify_center()
         .rounded(px(6.))
         .cursor_pointer()
-        .hover(|button| button.bg(theme::surface_raised()))
+        .hover(|button| button.bg(theme::popup_hover()))
         .child(icon(glyph, 14., theme::text_muted()))
         .on_click(move |_, window, cx| {
             cx.stop_propagation();
@@ -71,15 +71,15 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
     h_flex()
         .id("pin-banner")
         .group("pin-banner")
-        .w_full()
         .h(px(BANNER_HEIGHT))
         .flex_none()
+        .mx(px(16.))
+        .mb(px(4.))
         .px(px(BANNER_PADDING))
         .gap(px(8.))
         .items_center()
-        .bg(theme::surface())
-        .border_b_1()
-        .border_color(theme::border())
+        .rounded(px(8.))
+        .bg(theme::row_hover())
         .cursor_pointer()
         .hover(|banner| banner.bg(theme::surface_raised()))
         .on_click(move |_, window, cx| open(window, cx))

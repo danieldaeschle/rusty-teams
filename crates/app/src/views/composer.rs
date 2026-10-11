@@ -2156,9 +2156,9 @@ impl Composer {
                     .rounded(px(6.))
                     .cursor_pointer()
                     .when(index == popup.highlighted, |row| {
-                        row.bg(theme::surface_raised())
+                        row.bg(theme::popup_hover())
                     })
-                    .hover(|row| row.bg(theme::row_hover()))
+                    .hover(|row| row.bg(theme::popup_hover()))
                     .child(avatar)
                     .child(
                         v_flex()
@@ -2198,10 +2198,7 @@ impl Composer {
                 .w(px(POPUP_WIDTH))
                 .py(px(6.))
                 .rounded(px(10.))
-                .border_1()
-                .border_color(theme::border_strong())
-                .bg(theme::surface())
-                .shadow_lg()
+                .bg(theme::popup())
                 .occlude()
                 .children(rows)
                 .into_any_element(),
@@ -2754,13 +2751,13 @@ impl Render for Composer {
                         v_flex()
                             .relative()
                             .w_full()
-                            .rounded(px(10.))
-                            .bg(theme::surface())
+                            .rounded(px(12.))
+                            .bg(theme::surface_raised())
                             .border_1()
                             .border_color(if focused {
                                 theme::accent()
                             } else {
-                                theme::border_strong()
+                                transparent_black()
                             })
                             .child(
                                 canvas(

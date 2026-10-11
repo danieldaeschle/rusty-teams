@@ -12,10 +12,12 @@ use teams_core::channel_tab_link;
 
 use crate::theme;
 
-const TAB_HEIGHT: f32 = 34.;
-const TAB_GAP: f32 = 14.;
+const BAR_HEIGHT: f32 = 36.;
+const TAB_HEIGHT: f32 = 28.;
+const TAB_GAP: f32 = 4.;
+const TAB_PADDING: f32 = 12.;
 const TAB_TEXT_SIZE: f32 = 12.5;
-const BAR_PADDING: f32 = 20.;
+const BAR_PADDING: f32 = 16.;
 const CHAR_WIDTH: f32 = 6.5;
 const ARROW_WIDTH: f32 = 14.;
 const OVERFLOW_WIDTH: f32 = 44.;
@@ -65,7 +67,9 @@ pub fn fallback_tab_link(tab: &ChannelTabRecord, channel_id: &str) -> String {
 }
 
 fn label_width(label: &str, external: bool) -> f32 {
-    label.chars().count() as f32 * CHAR_WIDTH + if external { ARROW_WIDTH } else { 0. }
+    label.chars().count() as f32 * CHAR_WIDTH
+        + 2. * TAB_PADDING
+        + if external { ARROW_WIDTH } else { 0. }
 }
 
 pub fn visible_tab_count(tabs: &[ChannelTabRecord], available_width: f32) -> usize {
@@ -106,13 +110,10 @@ fn tab_label(
         .flex_none()
         .items_center()
         .gap(px(3.))
+        .px(px(TAB_PADDING))
+        .rounded(px(7.))
         .cursor_pointer()
-        .border_b_2()
-        .border_color(if active {
-            theme::accent()
-        } else {
-            transparent_black()
-        })
+        .when(active, |tab| tab.bg(theme::surface_raised()))
         .text_size(px(TAB_TEXT_SIZE))
         .font_weight(if active {
             FontWeight::SEMIBOLD
@@ -200,12 +201,11 @@ pub fn render_tab_bar(
         .collect();
     h_flex()
         .w_full()
+        .h(px(BAR_HEIGHT))
         .flex_none()
         .px(px(BAR_PADDING))
         .gap(px(TAB_GAP))
         .items_center()
-        .border_b_1()
-        .border_color(theme::border())
         .child(posts)
         .child(shared)
         .children(configured)

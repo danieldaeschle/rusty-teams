@@ -9,6 +9,7 @@ use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::profile_card::{ProfileCard, ProfileCardEvent};
+use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenChannelsTab,
@@ -52,17 +53,17 @@ pub struct Startup {
     pub reply_to_last: bool,
 }
 
+pub const ISLAND_GAP: f32 = 6.;
+
 pub struct AppShell {
     state: Entity<AppState>,
+    rail: Entity<RailView>,
     sidebar: Entity<SidebarView>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
     _call_windows: Entity<CallWindows>,
-    activity: Entity<ActivityCenter>,
-    activity_panel: Option<Entity<ActivityPanel>>,
-    saved_panel: Option<Entity<SavedPanel>>,
     forward_dialog: Option<Entity<ForwardDialog>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
@@ -72,7 +73,7 @@ pub struct AppShell {
     update: UpdateStatus,
     _subscription: Subscription,
     _call_media_observation: Subscription,
-    _activity_observation: Subscription,
+    _panel_subscriptions: [Subscription; 2],
     _escape_observation: Subscription,
     _activation_observation: Subscription,
 }
@@ -101,7 +102,29 @@ impl AppShell {
         let call_media = cx.new(|_| CallMedia);
         state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
         let call_media_observation = cx.observe(&call_media, |_, _, cx| cx.notify());
-        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), cx));
+        let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
+        let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
+        let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
+        let panel_subscriptions = [
+            cx.subscribe(&activity_panel, |this, _, event: &ActivityPanelEvent, cx| match event {
+                ActivityPanelEvent::OpenSettings => this
+                    .notifications
+                    .update(cx, |center, cx| center.open_settings(cx)),
+                ActivityPanelEvent::Open {
+                    conversation_id,
+                    message_id,
+                } => this.open_message(conversation_id, message_id, cx),
+            }),
+            cx.subscribe(&saved_panel, |this, _, event: &SavedPanelEvent, cx| {
+                let SavedPanelEvent::Open {
+                    conversation_id,
+                    message_id,
+                } = event;
+                this.open_message(conversation_id, message_id, cx);
+            }),
+        ];
+        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, cx));
+        let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
         let subscription =
             cx.subscribe_in(&state, window, |this, _, event: &AppEvent, window, cx| {
@@ -128,8 +151,6 @@ impl AppShell {
         cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
-        let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
-        let activity_observation = cx.observe(&activity, |_, _, cx| cx.notify());
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
             if event.keystroke.key == "escape" {
                 this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
@@ -144,15 +165,13 @@ impl AppShell {
         window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
         let mut shell = AppShell {
             state,
+            rail,
             sidebar,
             conversation,
             call_chat: None,
             switcher: None,
             notifications,
             _call_windows: call_windows,
-            activity,
-            activity_panel: None,
-            saved_panel: None,
             forward_dialog: None,
             status_dialog: None,
             shortcuts_dialog: None,
@@ -162,7 +181,7 @@ impl AppShell {
             update: UpdateStatus::UpToDate,
             _subscription: subscription,
             _call_media_observation: call_media_observation,
-            _activity_observation: activity_observation,
+            _panel_subscriptions: panel_subscriptions,
             _escape_observation: escape_observation,
             _activation_observation: activation_observation,
         };
@@ -291,8 +310,6 @@ impl AppShell {
             cx.notify();
             return;
         }
-        self.activity_panel = None;
-        self.saved_panel = None;
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let switcher = cx.new(|cx| Switcher::new(app, candidates, initial_query, window, cx));
@@ -327,87 +344,18 @@ impl AppShell {
         cx.notify();
     }
 
-    fn toggle_activity_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.activity_panel.take().is_some() {
-            window.focus(&self.focus_handle, cx);
-            cx.notify();
+    fn open_message(&mut self, conversation_id: &str, message_id: &str, cx: &mut Context<Self>) {
+        let Some(selection) = selection_for(&self.state.read(cx).sidebar, conversation_id) else {
             return;
-        }
-        self.switcher = None;
-        self.saved_panel = None;
-        let (app, activity) = (self.state.clone(), self.activity.clone());
-        let panel = cx.new(|cx| ActivityPanel::new(app, activity, window, cx));
-        cx.subscribe_in(
-            &panel,
-            window,
-            |this, _, event: &ActivityPanelEvent, window, cx| {
-                this.activity_panel = None;
-                window.focus(&this.focus_handle, cx);
-                match event {
-                    ActivityPanelEvent::Close => {}
-                    ActivityPanelEvent::OpenSettings => this
-                        .notifications
-                        .update(cx, |center, cx| center.open_settings(cx)),
-                    ActivityPanelEvent::Open {
-                        conversation_id,
-                        message_id,
-                    } => {
-                        let selection =
-                            selection_for(&this.state.read(cx).sidebar, conversation_id);
-                        if let Some(selection) = selection {
-                            let message_id = message_id.clone();
-                            this.state.update(cx, |state, cx| {
-                                if message_id.is_empty() {
-                                    state.select(selection, cx)
-                                } else {
-                                    state.jump_to_message(selection, message_id, cx)
-                                }
-                            });
-                        }
-                    }
-                }
-                cx.notify();
-            },
-        )
-        .detach();
-        self.activity_panel = Some(panel);
-        cx.notify();
-    }
-    fn toggle_saved_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saved_panel.take().is_some() {
-            window.focus(&self.focus_handle, cx);
-            cx.notify();
-            return;
-        }
-        self.switcher = None;
-        self.activity_panel = None;
-        let app = self.state.clone();
-        let panel = cx.new(|cx| SavedPanel::new(app, window, cx));
-        cx.subscribe_in(
-            &panel,
-            window,
-            |this, _, event: &SavedPanelEvent, window, cx| {
-                this.saved_panel = None;
-                window.focus(&this.focus_handle, cx);
-                if let SavedPanelEvent::Open {
-                    conversation_id,
-                    message_id,
-                } = event
-                {
-                    let selection = selection_for(&this.state.read(cx).sidebar, conversation_id);
-                    if let Some(selection) = selection {
-                        let message_id = message_id.clone();
-                        this.state.update(cx, |state, cx| {
-                            state.jump_to_message(selection, message_id, cx)
-                        });
-                    }
-                }
-                cx.notify();
-            },
-        )
-        .detach();
-        self.saved_panel = Some(panel);
-        cx.notify();
+        };
+        let message_id = message_id.to_owned();
+        self.state.update(cx, |state, cx| {
+            if message_id.is_empty() {
+                state.select(selection, cx)
+            } else {
+                state.jump_to_message(selection, message_id, cx)
+            }
+        });
     }
 
     fn open_status_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -418,8 +366,6 @@ impl AppShell {
             return;
         }
         self.switcher = None;
-        self.activity_panel = None;
-        self.saved_panel = None;
         let app = self.state.clone();
         let dialog = cx.new(|cx| StatusMessageDialog::new(app, window, cx));
         cx.subscribe_in(
@@ -443,8 +389,6 @@ impl AppShell {
             return;
         }
         self.switcher = None;
-        self.activity_panel = None;
-        self.saved_panel = None;
         let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
         cx.subscribe_in(
             &dialog,
@@ -497,8 +441,6 @@ impl AppShell {
             return;
         };
         self.switcher = None;
-        self.activity_panel = None;
-        self.saved_panel = None;
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let dialog = cx.new(|cx| ForwardDialog::new(app, source, candidates, window, cx));
@@ -526,6 +468,47 @@ impl AppShell {
     }
 }
 
+impl AppShell {
+    fn islands(&self, call_view: Option<AnyElement>) -> impl IntoElement {
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .gap(px(ISLAND_GAP))
+            .pr(px(ISLAND_GAP))
+            .child(self.rail.clone())
+            .child(
+                self.sidebar
+                    .clone()
+                    .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+            )
+            .child(match call_view {
+                Some(call_view) => h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .rounded(px(10.))
+                    .bg(theme::surface())
+                    .overflow_hidden()
+                    .child(call_view)
+                    .into_any_element(),
+                None => self
+                    .conversation
+                    .clone()
+                    .cached(
+                        StyleRefinement::default()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .rounded(px(10.))
+                            .bg(theme::surface())
+                            .overflow_hidden(),
+                    )
+                    .into_any_element(),
+            })
+    }
+}
+
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(dialog) = self
@@ -549,8 +532,6 @@ impl Render for AppShell {
             });
         }
         let panels = self.switcher.is_some()
-            || self.activity_panel.is_some()
-            || self.saved_panel.is_some()
             || self.forward_dialog.is_some()
             || self.status_dialog.is_some()
             || self.shortcuts_dialog.is_some()
@@ -578,10 +559,7 @@ impl Render for AppShell {
         );
         let title_bar = render_title_bar(
             own_status_button(&self.state, state),
-            self.activity.read(cx).feed().unread_count(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
-            cx.listener(|this, _, window, cx| this.toggle_saved_panel(window, cx)),
-            cx.listener(|this, _, window, cx| this.toggle_activity_panel(window, cx)),
         );
         div()
             .id("app-shell")
@@ -599,11 +577,11 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenActivity, window, cx| {
-                this.toggle_activity_panel(window, cx);
+            .on_action(cx.listener(|this, _: &OpenActivity, _, cx| {
+                this.sidebar.update(cx, |sidebar, cx| sidebar.show_activity(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
-                this.toggle_saved_panel(window, cx);
+            .on_action(cx.listener(|this, _: &OpenSaved, _, cx| {
+                this.sidebar.update(cx, |sidebar, cx| sidebar.show_saved(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChatsTab, _, cx| {
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
@@ -652,27 +630,11 @@ impl Render for AppShell {
                 v_flex()
                     .size_full()
                     .child(title_bar)
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .child(self.sidebar.clone().cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()))
-                            .child(match call_view {
-                                Some(call_view) => call_view,
-                                None => self
-                                    .conversation
-                                    .clone()
-                                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
-                                    .into_any_element(),
-                            }),
-                    )
+                    .child(self.islands(call_view))
                     .child(status),
             )
             .children(call_mini)
             .children(stage_overlay)
-            .children(self.activity_panel.clone())
-            .children(self.saved_panel.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())

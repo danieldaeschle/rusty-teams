@@ -531,7 +531,7 @@ fn skeleton(width_ratio: f32) -> Div {
         .h(px(SKELETON_HEIGHT))
         .w(relative(width_ratio))
         .rounded(px(4.))
-        .bg(theme::border_strong())
+        .bg(theme::popup_hover())
 }
 
 fn contact_row(row: ContactRow) -> Div {
@@ -566,7 +566,7 @@ fn action_button(
     let (foreground, background) = if filled {
         (theme::on_accent(), theme::accent())
     } else {
-        (theme::text_soft(), theme::surface())
+        (theme::text_soft(), theme::popup_hover())
     };
     h_flex()
         .id(id)
@@ -581,13 +581,7 @@ fn action_button(
         .text_color(foreground)
         .text_size(px(12.5))
         .font_weight(FontWeight::SEMIBOLD)
-        .when(!filled, |button| {
-            button
-                .border_1()
-                .border_color(theme::border_strong())
-                .hover(|button| button.bg(theme::row_hover()))
-        })
-        .when(filled, |button| button.hover(|button| button.opacity(0.9)))
+        .hover(|button| button.opacity(0.9))
         .child(icon(glyph, 14., foreground))
         .child(label)
 }
@@ -630,11 +624,8 @@ impl Render for ProfileCard {
             .p(px(CARD_PADDING))
             .gap(px(CARD_GAP))
             .rounded(px(CARD_RADIUS))
-            .border_1()
-            .border_color(theme::border_strong())
-            .bg(theme::surface_raised())
+            .bg(theme::popup())
             .text_color(theme::text())
-            .shadow_lg()
             .occlude()
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {

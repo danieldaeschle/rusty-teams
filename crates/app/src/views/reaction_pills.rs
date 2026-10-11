@@ -184,7 +184,7 @@ fn tab_button(tab: &ReactionTab, active: bool, select_tab: SelectTab) -> Statefu
         } else {
             theme::text_muted()
         })
-        .when(active, |button| button.bg(theme::border_strong()))
+        .when(active, |button| button.bg(theme::popup_hover()))
         .child(tab.label.clone())
         .child(tab.count.to_string())
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -248,11 +248,8 @@ fn popover(
         .w(px(POPOVER_WIDTH))
         .p(px(6.))
         .gap(px(4.))
-        .rounded(px(12.))
-        .border_1()
-        .border_color(theme::border_strong())
-        .bg(theme::surface_raised())
-        .shadow_lg()
+        .rounded(px(10.))
+        .bg(theme::popup())
         .occlude()
         .on_mouse_down_out(move |_, _, cx| close(cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {

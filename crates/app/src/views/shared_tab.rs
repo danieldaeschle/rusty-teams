@@ -225,8 +225,6 @@ fn column_header() -> Div {
         .px(px(SIDE_PADDING))
         .gap(px(12.))
         .items_center()
-        .border_b_1()
-        .border_color(theme::border())
         .text_size(px(11.5))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
@@ -519,18 +517,16 @@ fn chip(
         .rounded_full()
         .cursor_pointer()
         .text_size(px(12.))
-        .border_1()
-        .border_color(if active {
+        .bg(if active {
             theme::accent()
         } else {
-            theme::border_strong()
+            theme::surface_raised()
         })
         .text_color(if active {
-            theme::accent_text()
+            theme::on_accent()
         } else {
-            theme::text_muted()
+            theme::text_soft()
         })
-        .when(active, |chip| chip.bg(theme::accent_soft().opacity(0.12)))
         .on_click(move |_, window, cx| run(command, window, cx))
         .child(label)
 }

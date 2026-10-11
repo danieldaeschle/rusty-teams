@@ -440,8 +440,6 @@ impl NewChatDraft {
             .items_center()
             .rounded(px(13.))
             .bg(theme::surface_raised())
-            .border_1()
-            .border_color(theme::border_strong())
             .child(person_avatar(
                 directory,
                 Some(&chip.user_id),
@@ -497,9 +495,9 @@ impl NewChatDraft {
                 .rounded(px(6.))
                 .cursor_pointer()
                 .when(index == self.highlighted, |row| {
-                    row.bg(theme::border_strong())
+                    row.bg(theme::popup_hover())
                 })
-                .hover(|row| row.bg(theme::row_hover()))
+                .hover(|row| row.bg(theme::popup_hover()))
                 .child(person_avatar(
                     directory,
                     Some(&pick.user_id),
@@ -551,10 +549,7 @@ impl NewChatDraft {
                     .w(px(POPUP_WIDTH))
                     .p(px(6.))
                     .rounded(px(10.))
-                    .border_1()
-                    .border_color(theme::border_strong())
-                    .bg(theme::surface_raised())
-                    .shadow_lg()
+                    .bg(theme::popup())
                     .occlude()
                     .when(!results_empty, |popup| {
                         popup.child(
@@ -606,8 +601,6 @@ impl NewChatDraft {
             .gap(px(8.))
             .flex_wrap()
             .items_center()
-            .border_b_1()
-            .border_color(theme::border())
             .child(
                 div()
                     .text_size(px(14.))

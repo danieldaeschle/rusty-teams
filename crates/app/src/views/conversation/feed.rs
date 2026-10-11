@@ -224,7 +224,8 @@ impl ConversationView {
                     .w_full()
                     .flex_none()
                     .px(px(24.))
-                    .py(px(10.))
+                    .pt(px(2.))
+                    .pb(px(4.))
                     .child(
                         h_flex()
                             .id("new-post")
@@ -263,12 +264,12 @@ impl ConversationView {
                     .flex()
                     .items_center()
                     .rounded(px(10.))
-                    .bg(theme::surface())
+                    .bg(theme::surface_raised())
                     .border_1()
                     .border_color(if focused {
                         theme::accent()
                     } else {
-                        theme::border_strong()
+                        transparent_black()
                     })
                     .child(
                         div()
@@ -281,8 +282,6 @@ impl ConversationView {
             v_flex()
                 .w_full()
                 .flex_none()
-                .border_b_1()
-                .border_color(theme::border())
                 .children(subject)
                 .child(self.composer.clone())
                 .child(

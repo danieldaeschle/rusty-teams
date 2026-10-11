@@ -57,33 +57,20 @@ pub struct Corners {
 }
 
 pub fn bubble_corners(own: bool, series: Series) -> Corners {
+    let joined = |joined: bool| if joined { CORNER_SERIES } else { CORNER_RADIUS };
     if own {
-        let top_right = if series.has_prev || !series.has_next {
-            CORNER_SERIES
-        } else {
-            CORNER_RADIUS
-        };
-        let bottom_right = if series.has_next || !series.has_prev {
-            CORNER_SERIES
-        } else {
-            CORNER_RADIUS
-        };
         Corners {
             top_left: CORNER_RADIUS,
-            top_right,
-            bottom_right,
+            top_right: joined(series.has_prev),
+            bottom_right: joined(series.has_next),
             bottom_left: CORNER_RADIUS,
         }
     } else {
         Corners {
-            top_left: CORNER_SERIES,
+            top_left: joined(series.has_prev),
             top_right: CORNER_RADIUS,
             bottom_right: CORNER_RADIUS,
-            bottom_left: if series.has_next {
-                CORNER_SERIES
-            } else {
-                CORNER_RADIUS
-            },
+            bottom_left: joined(series.has_next),
         }
     }
 }
@@ -1361,15 +1348,15 @@ mod tests {
 
     #[test]
     fn corners_match_the_mockup_for_other_senders() {
-        assert_eq!(corners(false, false, false), [4., 14., 14., 14.]);
-        assert_eq!(corners(false, false, true), [4., 14., 14., 4.]);
+        assert_eq!(corners(false, false, false), [14., 14., 14., 14.]);
+        assert_eq!(corners(false, false, true), [14., 14., 14., 4.]);
         assert_eq!(corners(false, true, true), [4., 14., 14., 4.]);
         assert_eq!(corners(false, true, false), [4., 14., 14., 14.]);
     }
 
     #[test]
     fn corners_match_the_mockup_for_own_messages() {
-        assert_eq!(corners(true, false, false), [14., 4., 4., 14.]);
+        assert_eq!(corners(true, false, false), [14., 14., 14., 14.]);
         assert_eq!(corners(true, false, true), [14., 14., 4., 14.]);
         assert_eq!(corners(true, true, true), [14., 4., 4., 14.]);
         assert_eq!(corners(true, true, false), [14., 4., 14., 14.]);

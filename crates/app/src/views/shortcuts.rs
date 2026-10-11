@@ -142,6 +142,13 @@ impl Shortcut {
     }
 }
 
+pub fn keys_for_label(label: &str) -> Option<String> {
+    SHORTCUTS
+        .iter()
+        .find(|shortcut| shortcut.label == label)
+        .map(Shortcut::display_keys)
+}
+
 pub fn display_keys(keys: &str) -> String {
     keys.split('-')
         .map(|part| match part {

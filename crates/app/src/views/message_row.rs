@@ -61,29 +61,27 @@ pub struct RowActions {
 
 const TOOLBAR_LIFT: f32 = 22.;
 
-fn labeled_divider(label: &str, line_color: Hsla, text_color: Hsla) -> Div {
-    h_flex()
-        .w_full()
-        .items_center()
-        .gap(px(12.))
-        .mt(px(14.))
-        .mb(px(6.))
-        .child(div().flex_1().h(px(1.)).bg(line_color))
-        .child(
-            div()
-                .text_size(px(11.))
-                .text_color(text_color)
-                .child(label.to_owned()),
-        )
-        .child(div().flex_1().h(px(1.)).bg(line_color))
+fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
+    h_flex().w_full().justify_center().mt(px(14.)).mb(px(6.)).child(
+        div()
+            .h(px(22.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .rounded(px(11.))
+            .bg(fill)
+            .text_size(px(11.))
+            .text_color(text_color)
+            .child(label.to_owned()),
+    )
 }
 
 fn day_separator(label: &str) -> Div {
-    labeled_divider(label, theme::border(), theme::text_muted())
+    separator_pill(label, theme::row_hover(), theme::text_muted())
 }
 
 fn new_marker() -> Div {
-    labeled_divider("New", theme::accent(), theme::accent_text())
+    separator_pill("New", theme::mention_background(false), theme::accent_text())
 }
 
 fn bubble(
@@ -238,7 +236,7 @@ fn bubble(
                 .absolute()
                 .top(px(-TOOLBAR_LIFT))
                 .right(px(8.))
-                .child(deferred(message_toolbar(menu)).with_priority(1)),
+                .child(deferred(message_toolbar(menu, cx)).with_priority(1)),
         );
     }
     if let Some(menu) = extras.scheduled_menu {

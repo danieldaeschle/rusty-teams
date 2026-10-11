@@ -124,10 +124,8 @@ pub fn link_preview_card(
         .items_start()
         .rounded(px(9.))
         .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border_strong())
         .cursor_pointer()
-        .hover(|card| card.bg(theme::row_hover()).border_color(theme::accent()))
+        .hover(|card| card.bg(theme::row_hover()))
         .children(thumbnail(preview, &id, directory, thumb_width))
         .child(
             v_flex()

@@ -2908,7 +2908,7 @@ impl ConversationView {
                         let avatar = person_avatar(directory, user_id, name, 36.);
                         let presence = user_id.map(|id| directory.presence_of(id));
                         let avatar = match presence {
-                            Some(kind) => with_presence(avatar, kind, 36., theme::background())
+                            Some(kind) => with_presence(avatar, kind, 36., theme::surface())
                                 .into_any_element(),
                             None => avatar,
                         };
@@ -2925,7 +2925,7 @@ impl ConversationView {
                         };
                     } else {
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
-                        lead = Some(spec_avatar(directory, &pair, 36., theme::background()));
+                        lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
                         subline = format!("{} participants", chat.members.len());
                         let shown: Vec<Face> = faces.iter().cloned().map(face).collect();
                         stack = Some(member_stack(directory, &shown, shown.len()));
@@ -2952,9 +2952,7 @@ impl ConversationView {
             .flex_none()
             .px(px(20.))
             .gap(px(12.))
-            .items_center()
-            .border_b_1()
-            .border_color(theme::border());
+            .items_center();
         if matches!(current.mode, ViewMode::Thread(_)) {
             header = header.child(
                 h_flex()
@@ -3041,9 +3039,10 @@ impl Render for ConversationView {
         if self.web.is_some() && !self.web_active() {
             self.close_web();
         }
-        let background = theme::background();
+        let background = theme::surface();
         let mut root = v_flex()
             .flex_1()
+            .w_full()
             .min_w_0()
             .h_full()
             .bg(background)

@@ -17,6 +17,9 @@ pub const BACKGROUND: u32 = 0x0f0f10;
 const SURFACE: u32 = 0x161617;
 const SURFACE_RAISED: u32 = 0x232325;
 const ROW_HOVER: u32 = 0x1c1c1e;
+const POPUP: u32 = 0x2c2c2f;
+const POPUP_HOVER: u32 = 0x38383c;
+const REPLY_SURFACE: u32 = 0x19191b;
 const BORDER: u32 = 0x262628;
 const BORDER_STRONG: u32 = 0x3f3f42;
 const FOREGROUND: u32 = 0xf4f4f5;
@@ -87,6 +90,7 @@ pub fn apply(cx: &mut App) {
         if let Some(mono) = mono {
             theme.mono_font_family = mono;
         }
+        theme.radius_lg = px(10.);
         let colors = &mut theme.colors;
         colors.background = color(BACKGROUND);
         colors.foreground = color(FOREGROUND);
@@ -96,10 +100,10 @@ pub fn apply(cx: &mut App) {
         colors.sidebar = color(SURFACE);
         colors.sidebar_foreground = color(FOREGROUND);
         colors.sidebar_border = color(BORDER);
-        colors.sidebar_accent = color(SURFACE_RAISED);
+        colors.sidebar_accent = color(POPUP_HOVER);
         colors.sidebar_accent_foreground = color(FOREGROUND);
         colors.sidebar_primary = color(ACCENT);
-        colors.popover = color(SURFACE);
+        colors.popover = color(POPUP);
         colors.popover_foreground = color(FOREGROUND);
         colors.accent = color(SURFACE_RAISED);
         colors.accent_foreground = color(FOREGROUND);
@@ -159,6 +163,18 @@ pub fn surface_raised() -> Hsla {
 
 pub fn row_hover() -> Hsla {
     color(ROW_HOVER)
+}
+
+pub fn popup() -> Hsla {
+    color(POPUP)
+}
+
+pub fn popup_hover() -> Hsla {
+    color(POPUP_HOVER)
+}
+
+pub fn reply_surface() -> Hsla {
+    color(REPLY_SURFACE)
 }
 
 pub fn border() -> Hsla {

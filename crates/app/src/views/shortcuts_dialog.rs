@@ -6,7 +6,7 @@ use super::widgets::symbol;
 use crate::theme;
 
 const CARD_WIDTH: f32 = 520.;
-const CARD_RADIUS: f32 = 12.;
+const CARD_RADIUS: f32 = 10.;
 const CARD_PADDING: f32 = 16.;
 const CARD_MARGIN: f32 = 32.;
 const SECTION_GAP: f32 = 12.;
@@ -61,7 +61,7 @@ impl ShortcutsDialog {
                     .justify_center()
                     .rounded_full()
                     .cursor_pointer()
-                    .hover(|button| button.bg(theme::row_hover()))
+                    .hover(|button| button.bg(theme::popup_hover()))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(ShortcutsDialogEvent::Close)))
                     .child(symbol("close", 16., theme::text_muted())),
             )
@@ -74,9 +74,7 @@ fn key_chip(keys: String) -> Div {
         .px(px(8.))
         .py(px(2.))
         .rounded(px(6.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
+        .bg(theme::popup_hover())
         .text_size(px(12.))
         .text_color(theme::text_muted())
         .child(keys)
@@ -139,11 +137,8 @@ impl Render for ShortcutsDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .bg(theme::popup())
                     .text_color(theme::text())
-                    .shadow_lg()
                     .occlude()
                     .capture_key_down(cx.listener(Self::on_key_down))
                     .child(self.header(cx))

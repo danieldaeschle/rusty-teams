@@ -23,7 +23,7 @@ const ROOT_AVATAR: f32 = 32.;
 const REPLY_AVATAR: f32 = 24.;
 const AVATAR_GAP: f32 = 10.;
 const CARD_PADDING: f32 = 12.;
-const CARD_RADIUS: f32 = 8.;
+const CARD_RADIUS: f32 = 10.;
 const CARD_GAP: f32 = 12.;
 const SLOTS_PER_POST: usize = 64;
 const TOOLBAR_LIFT: f32 = 22.;
@@ -236,8 +236,7 @@ fn message_block(
         .when(role == Role::Reply, |block| {
             block
                 .pl(px(CARD_PADDING + ROOT_AVATAR + AVATAR_GAP))
-                .border_t_1()
-                .border_color(theme::border())
+                .bg(theme::reply_surface())
         })
         .when(highlighted, |block| block.bg(theme::accent().opacity(0.2)))
         .when_some(hovered, |block, hovered| {
@@ -267,7 +266,7 @@ fn message_block(
                     .absolute()
                     .top(px(-TOOLBAR_LIFT))
                     .right(px(8.))
-                    .child(deferred(message_toolbar(menu)).with_priority(1)),
+                    .child(deferred(message_toolbar(menu, cx)).with_priority(1)),
             )
         })
         .when_some(scheduled_menu, |block, menu| {
@@ -306,15 +305,14 @@ fn reply_footer(
     let footer = v_flex()
         .w_full()
         .px(px(CARD_PADDING))
-        .py(px(8.))
-        .border_t_1()
-        .border_color(theme::border());
+        .rounded_b(px(CARD_RADIUS))
+        .bg(theme::reply_surface());
     if let Some(editor) = editor {
-        return Some(footer.child(editor));
+        return Some(footer.py(px(8.)).child(editor));
     }
     let open = open?;
     Some(
-        footer.child(
+        footer.h(px(36.)).justify_center().child(
             h_flex().child(
                 h_flex()
                     .id(ElementId::Name(format!("post-reply-{post_index}").into()))
@@ -356,9 +354,7 @@ pub fn render_post(
     let mut card = v_flex()
         .w_full()
         .rounded(px(CARD_RADIUS))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
+        .bg(theme::row_hover())
         .child(message_block(
             &post.root,
             message_index(index, 0),
@@ -370,15 +366,21 @@ pub fn render_post(
     if let Some(label) = post.hidden_replies_label() {
         card = card.child(replies_link(label, index, open_thread));
     }
+    let has_footer = open_reply.is_some() || reply_editor.is_some();
+    let reply_count = post.replies.len();
     for (position, (reply, actions)) in post.replies.iter().zip(replies).enumerate() {
-        card = card.child(message_block(
-            reply,
-            message_index(index, position + 1),
-            Role::Reply,
-            actions,
-            directory,
-            cx,
-        ));
+        let closes_card = !has_footer && position + 1 == reply_count;
+        card = card.child(
+            message_block(
+                reply,
+                message_index(index, position + 1),
+                Role::Reply,
+                actions,
+                directory,
+                cx,
+            )
+            .when(closes_card, |block| block.rounded_b(px(CARD_RADIUS))),
+        );
     }
     card = card.children(reply_footer(index, open_reply, reply_editor));
     div()

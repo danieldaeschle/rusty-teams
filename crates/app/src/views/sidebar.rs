@@ -14,8 +14,10 @@ use store::{
 };
 
 use super::avatar::{spec_avatar, square_avatar, with_presence};
+use super::activity_panel::ActivityPanel;
 use super::calls_tab::calls_body;
-use super::widgets::{count_badge, dot, icon, unread_marker};
+use super::saved_panel::SavedPanel;
+use super::widgets::{count_badge, dot, icon, page_header, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, FolderKind};
@@ -24,13 +26,13 @@ use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
-    SectionInput, SectionKind, Step, any_unread_channel, build_sections, step_id, unread_chat_count,
+    SectionInput, SectionKind, Step, build_sections, step_id,
     visible_channel_ids,
 };
 use crate::theme;
 
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
-pub const SIDEBAR_WIDTH: f32 = 312.;
+pub const SIDEBAR_WIDTH: f32 = 300.;
 const ROW_HEIGHT: f32 = 54.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
@@ -52,10 +54,24 @@ const MUTED_ICON_SIZE: f32 = 13.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SidebarTab {
+pub enum SidebarTab {
+    Activity,
     Chats,
     Channels,
     Calls,
+    Saved,
+}
+
+impl SidebarTab {
+    fn title(self) -> &'static str {
+        match self {
+            SidebarTab::Activity => "Activity",
+            SidebarTab::Chats => "Chats",
+            SidebarTab::Channels => "Channels",
+            SidebarTab::Calls => "Calls",
+            SidebarTab::Saved => "Saved",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -267,6 +283,8 @@ fn confirm_leave(
 pub struct SidebarView {
     state: Entity<AppState>,
     tab: SidebarTab,
+    activity_panel: Entity<ActivityPanel>,
+    saved_panel: Entity<SavedPanel>,
     collapsed_teams: HashSet<String>,
     revealed_channel_teams: HashSet<String>,
     hidden_teams_open: bool,
@@ -326,7 +344,12 @@ fn local_preview_row(preview: &LocalPreview, color: Hsla) -> Div {
 }
 
 impl SidebarView {
-    pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        state: Entity<AppState>,
+        activity_panel: Entity<ActivityPanel>,
+        saved_panel: Entity<SavedPanel>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
             if matches!(event, AppEvent::Selection) {
                 if state.read(cx).new_chat {
@@ -370,6 +393,8 @@ impl SidebarView {
         SidebarView {
             state,
             tab,
+            activity_panel,
+            saved_panel,
             collapsed_teams,
             revealed_channel_teams: HashSet::new(),
             hidden_teams_open: false,
@@ -381,27 +406,39 @@ impl SidebarView {
         }
     }
 
+    pub fn tab(&self) -> SidebarTab {
+        self.tab
+    }
+
+    pub fn show_activity(&mut self, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Activity, cx);
+    }
+
     pub fn show_chats(&mut self, cx: &mut Context<Self>) {
-        self.tab = SidebarTab::Chats;
-        cx.notify();
+        self.open_tab(SidebarTab::Chats, cx);
     }
 
     pub fn show_channels(&mut self, cx: &mut Context<Self>) {
-        self.tab = SidebarTab::Channels;
-        cx.notify();
+        self.open_tab(SidebarTab::Channels, cx);
     }
 
     pub fn show_calls(&mut self, cx: &mut Context<Self>) {
         self.open_tab(SidebarTab::Calls, cx);
     }
 
-    fn open_tab(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
+    pub fn show_saved(&mut self, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Saved, cx);
+    }
+
+    pub fn open_tab(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
         self.tab = tab;
-        if tab == SidebarTab::Calls {
-            self.state.update(cx, |state, cx| {
+        match tab {
+            SidebarTab::Calls => self.state.update(cx, |state, cx| {
                 state.refresh_call_history(cx);
                 state.refresh_calendar(cx);
-            });
+            }),
+            SidebarTab::Saved => self.state.update(cx, |state, cx| state.refresh_saved(cx)),
+            _ => {}
         }
         cx.notify();
     }
@@ -414,7 +451,7 @@ impl SidebarView {
                 .adjacent_chat_id(step)
                 .map(Selection::Chat),
             SidebarTab::Channels => self.adjacent_channel_id(step, cx).map(Selection::Channel),
-            SidebarTab::Calls => None,
+            SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Saved => None,
         };
         if let Some(selection) = selection {
             self.state.update(cx, |state, cx| state.select(selection, cx));
@@ -461,70 +498,6 @@ impl SidebarView {
         }
     }
 
-    fn tab_button(
-        &self,
-        tab: SidebarTab,
-        label: &str,
-        marker: Option<AnyElement>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let active = self.tab == tab;
-        h_flex()
-            .id(SharedString::from(format!("tab-{label}")))
-            .flex_1()
-            .h(px(28.))
-            .rounded(px(6.))
-            .items_center()
-            .justify_center()
-            .gap(px(6.))
-            .cursor_pointer()
-            .text_size(px(13.))
-            .when(active, |tab| {
-                tab.bg(theme::surface_raised())
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text())
-            })
-            .when(!active, |tab| {
-                tab.text_color(theme::text_muted())
-                    .hover(|tab| tab.text_color(theme::text()))
-            })
-            .child(label.to_owned())
-            .children(marker)
-            .on_click(cx.listener(move |this, _, _, cx| this.open_tab(tab, cx)))
-    }
-
-    fn tab_bar(
-        &self,
-        unread_chats: u32,
-        channel_dot: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let chat_marker =
-            (unread_chats > 0).then(|| count_badge(unread_chats, false).into_any_element());
-        let channel_marker = channel_dot.then(|| dot(7.).into_any_element());
-        h_flex()
-            .w_full()
-            .px(px(12.))
-            .pt(px(12.))
-            .pb(px(8.))
-            .gap(px(8.))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(4.))
-                    .p(px(3.))
-                    .rounded(px(8.))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border())
-                    .child(self.tab_button(SidebarTab::Chats, "Chats", chat_marker, cx))
-                    .child(self.tab_button(SidebarTab::Channels, "Channels", channel_marker, cx))
-                    .child(self.tab_button(SidebarTab::Calls, "Calls", None, cx)),
-            )
-            .child(self.new_chat_button(cx))
-    }
-
     fn new_chat_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.state.read(cx).new_chat;
         div()
@@ -535,11 +508,10 @@ impl SidebarView {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .border_1()
-            .border_color(theme::border())
+            .bg(theme::surface_raised())
             .cursor_pointer()
-            .when(active, |button| button.bg(theme::surface_raised()))
-            .hover(|button| button.bg(theme::row_hover()))
+            .when(active, |button| button.bg(theme::popup_hover()))
+            .hover(|button| button.bg(theme::popup_hover()))
             .tooltip(|window, cx| Tooltip::new("New chat (Ctrl+N)").build(window, cx))
             .child(icon(IconName::Pencil, 16., theme::text_soft()))
             .on_click(cx.listener(|this, _, _, cx| {
@@ -550,9 +522,9 @@ impl SidebarView {
     fn draft_row(&self) -> impl IntoElement {
         h_flex()
             .id("new-chat-draft")
-            .mx(px(8.))
+            .mx(px(6.))
             .h(px(ROW_HEIGHT))
-            .px(px(8.))
+            .px(px(10.))
             .gap(px(10.))
             .items_center()
             .rounded(px(8.))
@@ -663,8 +635,8 @@ impl SidebarView {
         };
         div()
             .id(SharedString::from(format!("see-more-{}", section.id)))
-            .mx(px(8.))
-            .pl(px(54.))
+            .mx(px(6.))
+            .pl(px(56.))
             .h(px(SEE_MORE_HEIGHT))
             .flex()
             .items_center()
@@ -798,9 +770,9 @@ impl SidebarView {
         };
         h_flex()
             .id(SharedString::from(format!("chat-{}", item.id)))
-            .mx(px(8.))
+            .mx(px(6.))
             .h(px(ROW_HEIGHT))
-            .px(px(8.))
+            .px(px(10.))
             .gap(px(10.))
             .items_center()
             .rounded(px(8.))
@@ -983,9 +955,9 @@ impl SidebarView {
             .unwrap_or_default();
         h_flex()
             .id(SharedString::from(format!("pinned-{channel_id}")))
-            .mx(px(8.))
+            .mx(px(6.))
             .h(px(PINNED_CHANNEL_HEIGHT))
-            .px(px(8.))
+            .px(px(10.))
             .gap(px(10.))
             .items_center()
             .rounded(px(8.))
@@ -1089,9 +1061,9 @@ impl SidebarView {
         list = list.child(
             h_flex()
                 .id(SharedString::from(format!("team-{team_id}")))
-                .mx(px(8.))
+                .mx(px(6.))
                 .h(px(TEAM_ROW_HEIGHT))
-                .px(px(8.))
+                .px(px(10.))
                 .gap(px(8.))
                 .items_center()
                 .rounded(px(8.))
@@ -1191,10 +1163,10 @@ impl SidebarView {
     ) -> impl IntoElement {
         h_flex()
             .id(id)
-            .mx(px(8.))
+            .mx(px(6.))
             .h(px(REVEAL_ROW_HEIGHT))
             .pl(px(indent))
-            .pr(px(8.))
+            .pr(px(10.))
             .gap(px(8.))
             .items_center()
             .rounded(px(8.))
@@ -1230,10 +1202,10 @@ impl SidebarView {
         let selection = Selection::Channel(channel.id.clone());
         h_flex()
             .id(SharedString::from(format!("channel-{}", channel.id)))
-            .mx(px(8.))
+            .mx(px(6.))
             .h(px(TEAM_ROW_HEIGHT))
             .pl(px(40.))
-            .pr(px(8.))
+            .pr(px(10.))
             .gap(px(8.))
             .items_center()
             .rounded(px(8.))
@@ -1333,7 +1305,7 @@ impl SidebarView {
                 "hidden-teams".into(),
                 format!("{HIDDEN_TEAMS_LABEL} ({})", hidden_teams.len()),
                 open,
-                8.,
+                10.,
                 cx.listener(|this, _, _, cx| {
                     this.hidden_teams_open = !this.hidden_teams_open;
                     cx.notify();
@@ -1488,28 +1460,27 @@ fn with_spacer(list: Div, skipped_height: &mut f32) -> Div {
 
 impl Render for SidebarView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (unread_chats, channel_dot) = {
-            let state = self.state.read(cx);
-            (
-                unread_chat_count(&state.sidebar.chats),
-                any_unread_channel(&state.sidebar),
-            )
-        };
         let window_height = f32::from(window.viewport_size().height);
         let body = match self.tab {
+            SidebarTab::Activity => self.activity_panel.clone().into_any_element(),
             SidebarTab::Chats => self.chats_body(window_height, cx),
             SidebarTab::Channels => self.channels_body(cx),
             SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, window_height, cx),
+            SidebarTab::Saved => self.saved_panel.clone().into_any_element(),
+        };
+        let header = match self.tab {
+            SidebarTab::Chats => Some(page_header(self.tab.title()).child(self.new_chat_button(cx))),
+            SidebarTab::Channels | SidebarTab::Calls => Some(page_header(self.tab.title())),
+            SidebarTab::Activity | SidebarTab::Saved => None,
         };
         v_flex()
             .w(px(SIDEBAR_WIDTH))
             .h_full()
             .flex_none()
             .bg(theme::surface())
-            .border_r_1()
-            .border_color(theme::border())
+            .rounded(px(10.))
             .overflow_hidden()
-            .child(self.tab_bar(unread_chats, channel_dot, cx))
+            .children(header)
             .child(body)
     }
 }

@@ -25,6 +25,8 @@ use crate::views::shared_tab::{
     LibraryView, Listing, MessagesView, SharedCommand, SharedRun, SharedScope, render_library,
     render_messages,
 };
+use crate::views::rail::RAIL_WIDTH;
+use crate::views::shell::ISLAND_GAP;
 use crate::views::sidebar::SIDEBAR_WIDTH;
 
 const LIBRARY_KEY: &str = "library";
@@ -109,7 +111,7 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.channel_id().filter(|_| self.in_feed())?;
-        let available = f32::from(window.viewport_size().width) - SIDEBAR_WIDTH;
+        let available = f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 3. * ISLAND_GAP;
         let view = cx.weak_entity();
         let select = Rc::new(move |pane, cx: &mut App| {
             view.update(cx, |this, cx| this.select_pane(pane, cx)).ok();

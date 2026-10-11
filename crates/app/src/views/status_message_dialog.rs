@@ -18,7 +18,7 @@ use crate::own_status::{NOTE_DURATIONS, NOTE_LIMIT, NoteDuration, clamp_note};
 use crate::theme;
 
 const CARD_WIDTH: f32 = 440.;
-const CARD_RADIUS: f32 = 12.;
+const CARD_RADIUS: f32 = 10.;
 const CARD_PADDING: f32 = 16.;
 const CARD_MARGIN: f32 = 32.;
 const SECTION_GAP: f32 = 12.;
@@ -147,7 +147,7 @@ impl StatusMessageDialog {
                     .justify_center()
                     .rounded_full()
                     .cursor_pointer()
-                    .hover(|button| button.bg(theme::row_hover()))
+                    .hover(|button| button.bg(theme::popup_hover()))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(StatusMessageDialogEvent::Close)))
                     .child(symbol("close", 16., theme::text_muted())),
             )
@@ -163,9 +163,7 @@ impl StatusMessageDialog {
                     .px(px(10.))
                     .py(px(6.))
                     .rounded(px(6.))
-                    .bg(theme::surface())
-                    .border_1()
-                    .border_color(theme::border())
+                    .bg(theme::popup_hover())
                     .child(Textarea::new(&self.input).appearance(false).bordered(false)),
             )
             .child(
@@ -268,11 +266,8 @@ impl Render for StatusMessageDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .bg(theme::popup())
                     .text_color(theme::text())
-                    .shadow_lg()
                     .occlude()
                     .capture_key_down(cx.listener(Self::on_key_down))
                     .child(self.header(cx))

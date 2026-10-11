@@ -36,6 +36,7 @@ pub mod new_chat;
 pub mod pin_banner;
 pub mod post_card;
 pub mod profile_card;
+pub mod rail;
 pub mod reaction_picker;
 pub mod reaction_pills;
 pub mod saved_panel;

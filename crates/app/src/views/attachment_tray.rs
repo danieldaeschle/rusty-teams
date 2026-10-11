@@ -826,9 +826,7 @@ pub fn inline_preview(
         .size_full()
         .rounded(px(PREVIEW_RADIUS))
         .overflow_hidden()
-        .border_1()
-        .border_color(theme::border_strong())
-        .bg(theme::surface_raised());
+        .bg(theme::popup_hover());
     let frame = match preview {
         Some(preview) => {
             let source = match preview {
@@ -911,12 +909,12 @@ fn chip<T: 'static>(
         .items_center()
         .rounded(px(8.))
         .overflow_hidden()
-        .bg(theme::surface_raised())
+        .bg(theme::popup_hover())
         .border_1()
         .border_color(if state.failed {
             theme::red()
         } else {
-            theme::border_strong()
+            transparent_black()
         })
         .child(file_badge(FileKind::from_name(&item.name), CHIP_BADGE_SIZE))
         .child(

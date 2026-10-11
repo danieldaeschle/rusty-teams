@@ -64,8 +64,8 @@ fn menu_row(id: ElementId, highlighted: bool) -> Stateful<Div> {
         .text_size(px(13.))
         .text_color(theme::text())
         .cursor_pointer()
-        .when(highlighted, |row| row.bg(theme::row_hover()))
-        .hover(|row| row.bg(theme::row_hover()))
+        .when(highlighted, |row| row.bg(theme::popup_hover()))
+        .hover(|row| row.bg(theme::popup_hover()))
 }
 
 impl Composer {
@@ -316,11 +316,8 @@ impl Composer {
                     Stage::Picker => PICKER_WIDTH,
                 }))
                 .p(px(4.))
-                .rounded(px(8.))
-                .border_1()
-                .border_color(theme::border_strong())
-                .bg(theme::surface_raised())
-                .shadow_lg()
+                .rounded(px(10.))
+                .bg(theme::popup())
                 .occlude()
                 .on_mouse_down_out(
                     cx.listener(|this, _, window, cx| this.close_schedule(window, cx)),
@@ -374,9 +371,9 @@ impl Composer {
             .child(
                 div()
                     .h(px(1.))
-                    .mx(px(6.))
+                    .mx(px(-4.))
                     .my(px(4.))
-                    .bg(theme::border_strong()),
+                    .bg(theme::popup_hover()),
             )
             .child(
                 menu_row(
@@ -405,20 +402,15 @@ impl Composer {
                 .flex()
                 .items_center()
                 .rounded(px(6.))
-                .border_1()
-                .border_color(if selected {
-                    theme::accent()
-                } else {
-                    theme::border_strong()
-                })
                 .text_size(px(12.))
                 .cursor_pointer()
                 .when(selected, |chip| {
                     chip.bg(theme::accent()).text_color(theme::on_accent())
                 })
                 .when(!selected, |chip| {
-                    chip.text_color(theme::text_soft())
-                        .hover(|chip| chip.bg(theme::row_hover()))
+                    chip.bg(theme::popup_hover())
+                        .text_color(theme::text_soft())
+                        .hover(|chip| chip.bg(theme::border_strong()))
                 })
                 .child(day.label)
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -448,7 +440,7 @@ impl Composer {
                             .rounded(px(6.))
                             .border_1()
                             .border_color(theme::accent())
-                            .bg(theme::surface())
+                            .bg(theme::popup_hover())
                             .child(
                                 Input::new(&custom.time_field)
                                     .appearance(false)
