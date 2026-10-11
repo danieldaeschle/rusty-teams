@@ -3071,6 +3071,7 @@ impl Render for ConversationView {
             .w_full()
             .min_w_0()
             .h_full()
+            .rounded(px(10.))
             .bg(background)
             .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
