@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::call_view::{leave_button, mute_button, status_line};
@@ -13,6 +14,45 @@ pub const MINI_WIDTH: f32 = 220.;
 const MINI_RIGHT: f32 = 16.;
 const MINI_BOTTOM: f32 = 40.;
 const MUTE_SIZE: f32 = 28.;
+
+fn sharing_badge(app: &Entity<AppState>) -> Stateful<Div> {
+    let stop_app = app.clone();
+    h_flex()
+        .id("call-mini-sharing")
+        .gap(px(8.))
+        .items_center()
+        .justify_between()
+        .child(
+            h_flex()
+                .gap(px(6.))
+                .items_center()
+                .text_size(px(12.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::red())
+                .child(icon(IconName::ScreenShare, 14., theme::red()))
+                .child("Sharing"),
+        )
+        .child(
+            div()
+                .id("call-mini-stop-sharing")
+                .h(px(24.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .rounded_full()
+                .bg(theme::red())
+                .text_color(theme::white())
+                .text_size(px(12.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .hover(|button| button.opacity(0.85))
+                .child("Stop")
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    stop_app.update(cx, |state, cx| state.stop_call_share(cx));
+                }),
+        )
+}
 
 pub fn render_call_mini(app: &Entity<AppState>, state: &AppState) -> Option<AnyElement> {
     let call = state.call.as_ref().filter(|call| !call.viewing)?;
@@ -59,6 +99,7 @@ pub fn render_call_mini(app: &Entity<AppState>, state: &AppState) -> Option<AnyE
                     )
                     .child(div().text_size(px(12.)).text_color(status_color).child(status)),
             )
+            .when(model.local_share.is_some(), |mini| mini.child(sharing_badge(app)))
             .child(
                 h_flex()
                     .gap(px(8.))

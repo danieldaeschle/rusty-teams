@@ -7,6 +7,8 @@ mod history;
 mod join;
 mod launcher;
 mod model;
+mod overlay;
+mod overlay_layout;
 mod pictures;
 mod ring;
 mod target;
@@ -17,6 +19,7 @@ pub use features::TransferCandidate;
 pub use demo::DemoScene;
 pub use history::{CallRow, call_rows};
 pub use launcher::CallLauncher;
+pub use overlay::CallWindows;
 pub use model::{
     ActiveCall, CAPTION_SHOWN, CHAT_OPEN_TILES, CallKind, CallModel, Focus, GridLayout, MAX_TILES, REACTION_SHOWN, Tile, TileSize, TileState,
     grid_layout, tile_size,
