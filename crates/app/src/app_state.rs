@@ -12,7 +12,7 @@ use teams_core::{
 };
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
-use crate::call::{ActiveCall, CallLauncher, MissedCall, Rings};
+use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
 use calling::meeting::LiveMeeting;
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
@@ -114,6 +114,7 @@ pub struct AppState {
     pub profiles: ProfileCache,
     pub profile_request: Option<ProfileRequest>,
     pub call: Option<ActiveCall>,
+    pub call_media: Option<Entity<CallMedia>>,
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
     pub call_share_sound: bool,
@@ -209,6 +210,7 @@ impl AppState {
             profiles: ProfileCache::new(),
             profile_request: None,
             call: None,
+            call_media: None,
             call_launcher: None,
             call_count: 0,
             call_share_sound: false,

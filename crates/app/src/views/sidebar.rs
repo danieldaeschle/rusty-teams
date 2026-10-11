@@ -272,6 +272,7 @@ pub struct SidebarView {
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
     _subscription: Subscription,
+    _state_observation: Subscription,
 }
 
 fn preview_text(preview: &Preview) -> Option<(String, bool)> {
@@ -342,6 +343,7 @@ impl SidebarView {
                 cx.notify();
             }
         });
+        let state_observation = cx.observe(&state, |_, _, cx| cx.notify());
         let tab = if state.read(cx).start_on_channels {
             SidebarTab::Channels
         } else {
@@ -358,6 +360,7 @@ impl SidebarView {
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
+            _state_observation: state_observation,
         }
     }
 

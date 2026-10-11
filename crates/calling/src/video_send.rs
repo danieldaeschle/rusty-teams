@@ -19,14 +19,13 @@ use crate::control::CallUpdate;
 use crate::devices::DeviceChoice;
 use crate::error::{Error, Result};
 use crate::screen::{ShareSource, start_screen_capture};
-use crate::video_frame::{FrameGate, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420};
+use crate::video_frame::{FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420};
 use crate::video_layout::VideoLines;
 use crate::video_pattern::{PatternKind, spawn_pattern};
 
 pub const VIDEO_MODE_ENV: &str = "CALLING_VIDEO";
 const CAMERA_LABEL: &str = "camera";
 const SCREEN_LABEL: &str = "screen";
-const SELF_VIEW_FPS: u32 = 15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VideoMode {
@@ -59,7 +58,7 @@ pub struct LocalSink {
 impl LocalSink {
     pub fn new(source: NativeVideoSource, hub: Option<(Arc<VideoHub>, VideoKey)>) -> Self {
         let self_view = hub.map(|(hub, key)| {
-            let fps = if matches!(key, VideoKey::LocalScreen) { SCREEN_FPS } else { SELF_VIEW_FPS };
+            let fps = if matches!(key, VideoKey::LocalScreen) { SCREEN_FPS } else { PERSON_FPS };
             (hub, key, FrameGate::new(fps))
         });
         LocalSink { source, self_view }
@@ -174,8 +173,8 @@ impl LocalVideo {
         sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
     }
 
-    fn sink(&self, outgoing: &Outgoing, key: VideoKey) -> LocalSink {
-        LocalSink::new(outgoing.source.clone(), Some((self.hub.clone(), key)))
+    fn camera_sink(&self) -> LocalSink {
+        LocalSink::new(self.camera.source.clone(), Some((self.hub.clone(), VideoKey::LocalCamera)))
     }
 
     fn report_failure(&self, what: &'static str) -> impl FnOnce(String) + Send + 'static {
@@ -191,7 +190,7 @@ impl LocalVideo {
             return Err(Error::Webrtc("video is switched off".into()));
         }
         self.camera.capture = None;
-        let mut sink = self.sink(&self.camera, VideoKey::LocalCamera);
+        let mut sink = self.camera_sink();
         let capture = match self.mode {
             VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(BlurStage::new(self.blur.clone())))),
             _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
@@ -216,7 +215,7 @@ impl LocalVideo {
             return Err(Error::Webrtc("video is switched off".into()));
         }
         self.screen.capture = None;
-        let mut sink = self.sink(&self.screen, VideoKey::LocalScreen);
+        let mut sink = LocalSink::new(self.screen.source.clone(), None);
         let capture = match self.mode {
             VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
             _ => start_screen_capture(source.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
@@ -231,7 +230,6 @@ impl LocalVideo {
         if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()) {
             let _ = Self::set_active(&share.sender(), false);
         }
-        self.hub.forget(&VideoKey::LocalScreen);
     }
 
     pub fn stop_all(&mut self) {
