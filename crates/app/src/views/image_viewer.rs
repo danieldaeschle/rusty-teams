@@ -41,7 +41,7 @@ const CAPTION_HEIGHT: f32 = 22.;
 const STATUS_HEIGHT: f32 = 18.;
 const STRIP_HEIGHT: f32 = THUMBNAIL_SIZE + 2. * THUMBNAIL_BORDER;
 const WHEEL_LINE_HEIGHT: f32 = 20.;
-const BACKDROP: u32 = 0x080809f0;
+const BACKDROP: u32 = 0x080809fc;
 const DISABLED_OPACITY: f32 = 0.35;
 const NOTICE_DURATION: Duration = Duration::from_secs(2);
 
