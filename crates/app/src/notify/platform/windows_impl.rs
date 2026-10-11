@@ -10,7 +10,7 @@ use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use windows::Win32::Foundation::{COLORREF, HWND, RECT};
+use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_DONOTROUND, DwmGetWindowAttribute, DwmSetWindowAttribute,
@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, DEVMODEW, DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICEW, DeleteObject, ENUM_CURRENT_SETTINGS,
     EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromRect, MonitorFromWindow,
+    MonitorFromPoint, MonitorFromRect, MonitorFromWindow,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetDpiForMonitor, MDT_EFFECTIVE_DPI};
@@ -137,6 +137,26 @@ pub fn work_area(handle: NativeHandle) -> Option<WorkArea> {
             bottom,
             scale: if dpi == 0 { 1. } else { dpi as f32 / BASE_DPI },
         })
+    }
+}
+
+pub fn work_area_at(x: i32, y: i32) -> Option<WorkArea> {
+    unsafe {
+        let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return None;
+        }
+        let (mut dpi_x, mut dpi_y) = (0, 0);
+        let scale = match GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) {
+            Ok(()) if dpi_x > 0 => dpi_x as f32 / BASE_DPI,
+            _ => 1.,
+        };
+        let RECT { left, top, right, bottom } = info.rcWork;
+        Some(WorkArea { left, top, right, bottom, scale })
     }
 }
 

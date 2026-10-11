@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
@@ -37,6 +38,7 @@ const SECTION_GAP: f32 = 4.;
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
 const FALLBACK_VIEWPORT: f32 = 900.;
+const CALLS_REFRESH: Duration = Duration::from_secs(30);
 const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
 const PINNED_LABEL: &str = "Pinned";
@@ -351,6 +353,20 @@ impl SidebarView {
             SidebarTab::Chats
         };
         let collapsed_teams = load_collapsed_teams(&state.read(cx).store);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CALLS_REFRESH).await;
+                let alive = this.update(cx, |view, cx| {
+                    if view.tab == SidebarTab::Calls {
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         SidebarView {
             state,
             tab,

@@ -8,7 +8,7 @@ use graph::{
     OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
 };
 use serde_json::json;
-use store::{ChannelLayoutRecord, ChannelRecord, Store, TeamLayoutRecord, TeamRecord};
+use store::{ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord};
 use teams_core::{
     Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
     DeltaPage, Error, FolderKind, FolderSource, MentionCandidate, MentionInput, MentionTarget,
@@ -2249,6 +2249,8 @@ struct FakeFolders {
     channels: Vec<String>,
     layout: Vec<TeamLayoutRecord>,
     settings: ChatSectionSettings,
+    folders_fail: bool,
+    layout_fail: bool,
     calls: Mutex<Vec<String>>,
 }
 
@@ -2269,6 +2271,8 @@ impl FakeFolders {
             channels: ids(&["ch1", "ch2"]),
             layout: Vec::new(),
             settings: ChatSectionSettings::default(),
+            folders_fail: false,
+            layout_fail: false,
             calls: Mutex::new(Vec::new()),
         })
     }
@@ -2276,7 +2280,12 @@ impl FakeFolders {
 
 impl FolderSource for FakeFolders {
     fn folders(&self) -> BoxFuture<'_, Result<Vec<ChatFolder>>> {
-        Box::pin(async { Ok(self.state.lock().unwrap().clone()) })
+        Box::pin(async {
+            if self.folders_fail {
+                return Err(Error::Folders("folders down".to_owned()));
+            }
+            Ok(self.state.lock().unwrap().clone())
+        })
     }
 
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>> {
@@ -2284,7 +2293,12 @@ impl FolderSource for FakeFolders {
     }
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
-        Box::pin(async { Ok(self.layout.clone()) })
+        Box::pin(async {
+            if self.layout_fail {
+                return Err(Error::Folders("layout down".to_owned()));
+            }
+            Ok(self.layout.clone())
+        })
     }
 
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
@@ -2436,6 +2450,57 @@ async fn collapse_and_section_settings_go_through_the_source() {
         *source.calls.lock().unwrap(),
         ["expanded work false", "section Meeting false"]
     );
+}
+
+#[tokio::test]
+async fn a_failing_folder_list_still_stores_the_team_layout_and_tabs() {
+    let fake = Arc::new(Fake::default());
+    let mut source = FakeFolders::new();
+    let source_mut = Arc::get_mut(&mut source).unwrap();
+    source_mut.folders_fail = true;
+    source_mut.layout = vec![TeamLayoutRecord {
+        team_id: "alpha".into(),
+        hidden: false,
+        channels: vec![ChannelLayoutRecord {
+            channel_id: "alpha-general".into(),
+            general: true,
+            hidden: false,
+            tabs: vec![ChannelTabRecord {
+                tab_id: "tab-1".into(),
+                name: "Wiki".into(),
+                definition_id: "com.microsoft.teamspace.tab.wiki".into(),
+                open_url: None,
+            }],
+            notifications: Default::default(),
+        }],
+    }];
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+
+    let error = engine.refresh_folders().await.unwrap_err();
+
+    assert!(error.to_string().contains("folders down"));
+    assert_eq!(engine.store().channel_tabs("alpha-general").unwrap().len(), 1);
+    assert!(
+        engine
+            .store()
+            .meta_time("team_layout_refreshed_at")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn both_refresh_errors_are_reported_together() {
+    let fake = Arc::new(Fake::default());
+    let mut source = FakeFolders::new();
+    let source_mut = Arc::get_mut(&mut source).unwrap();
+    source_mut.folders_fail = true;
+    source_mut.layout_fail = true;
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+
+    let message = engine.refresh_folders().await.unwrap_err().to_string();
+
+    assert!(message.contains("folders down") && message.contains("layout down"));
 }
 
 #[tokio::test]

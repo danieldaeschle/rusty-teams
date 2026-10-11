@@ -728,7 +728,7 @@ impl CallModel {
     }
 
     pub fn has_reaction_controls(&self) -> bool {
-        self.kind == CallKind::Meeting
+        matches!(self.kind, CallKind::Group | CallKind::Meeting)
     }
 
     pub fn can_react(&self) -> bool {
@@ -1103,6 +1103,15 @@ mod tests {
         assert_eq!(model.own_hand, Some(5));
         model.apply(CallUpdate::Roster(vec![entry("8:orgid:me", "Me", false, false)]));
         assert_eq!(model.own_hand, None);
+    }
+
+    #[test]
+    fn reaction_controls_show_in_group_calls_and_meetings_only() {
+        let mut model = CallModel::test();
+        for (kind, expected) in [(CallKind::Test, false), (CallKind::Direct, false), (CallKind::Group, true), (CallKind::Meeting, true)] {
+            model.kind = kind;
+            assert_eq!(model.has_reaction_controls(), expected);
+        }
     }
 
     #[test]

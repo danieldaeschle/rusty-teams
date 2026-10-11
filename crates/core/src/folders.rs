@@ -335,7 +335,13 @@ impl<R: Remote> SyncEngine<R> {
         };
         self.refresh_section_settings(source).await;
         let layout = self.refresh_team_layout(source).await;
-        folders.and(layout)
+        match (folders, layout) {
+            (Err(folders_error), Err(layout_error)) => {
+                Err(Error::Folders(format!("{folders_error}; {layout_error}")))
+            }
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     async fn refresh_section_settings(&self, source: &Arc<dyn FolderSource>) {

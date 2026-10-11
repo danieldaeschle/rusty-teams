@@ -66,7 +66,35 @@ pub(crate) fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer
     buffer
 }
 
+fn format_rank(frame_format: FrameFormat) -> u8 {
+    match frame_format {
+        FrameFormat::NV12 => 1,
+        _ => 0,
+    }
+}
+
+fn pick_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
+    formats
+        .iter()
+        .copied()
+        .filter(|format| DIRECT_FORMATS.contains(&format.format()))
+        .filter(|format| format.frame_rate() >= CAPTURE_FPS && format.height() <= CAPTURE_HEIGHT)
+        .max_by_key(|format| (format.height(), format_rank(format.format()), format.frame_rate()))
+}
+
+fn open_picked_format(index: CameraIndex) -> std::result::Result<Camera, nokhwa::NokhwaError> {
+    let mut camera = Camera::new(index, RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate))?;
+    let formats = camera.compatible_camera_formats()?;
+    let format = pick_format(&formats).ok_or_else(|| nokhwa::NokhwaError::GeneralError("no raw camera format at 30 fps".to_owned()))?;
+    camera.set_camera_requset(RequestedFormat::new::<RgbAFormat>(RequestedFormatType::Exact(format)))?;
+    camera.open_stream()?;
+    Ok(camera)
+}
+
 fn open_camera(index: CameraIndex) -> std::result::Result<Camera, nokhwa::NokhwaError> {
+    if let Ok(camera) = open_picked_format(index.clone()) {
+        return Ok(camera);
+    }
     let wanted = Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT);
     let mut requests: Vec<RequestedFormatType> = DIRECT_FORMATS
         .into_iter()
@@ -232,6 +260,38 @@ mod tests {
     fn short_raw_frames_are_rejected() {
         assert!(i420_from_yuyv(&[0; 8], 4, 2).is_none());
         assert!(i420_from_nv12(&[0; 8], 4, 2).is_none());
+    }
+
+    fn format(width: u32, height: u32, frame_format: FrameFormat, fps: u32) -> CameraFormat {
+        CameraFormat::new(Resolution::new(width, height), frame_format, fps)
+    }
+
+    #[test]
+    fn a_c920_like_list_picks_the_raw_format_that_runs_at_30_fps() {
+        let formats = [
+            format(1280, 720, FrameFormat::YUYV, 10),
+            format(640, 480, FrameFormat::YUYV, 30),
+            format(1280, 720, FrameFormat::MJPEG, 30),
+        ];
+        assert_eq!(pick_format(&formats), Some(format(640, 480, FrameFormat::YUYV, 30)));
+    }
+
+    #[test]
+    fn the_largest_height_up_to_720_wins_then_nv12() {
+        let formats = [
+            format(1920, 1080, FrameFormat::NV12, 30),
+            format(640, 480, FrameFormat::NV12, 30),
+            format(1280, 720, FrameFormat::YUYV, 30),
+            format(1280, 720, FrameFormat::NV12, 30),
+        ];
+        assert_eq!(pick_format(&formats), Some(format(1280, 720, FrameFormat::NV12, 30)));
+    }
+
+    #[test]
+    fn no_usable_format_picks_nothing() {
+        let formats = [format(1280, 720, FrameFormat::MJPEG, 30), format(1280, 720, FrameFormat::YUYV, 15)];
+        assert_eq!(pick_format(&formats), None);
+        assert_eq!(pick_format(&[]), None);
     }
 
     #[test]

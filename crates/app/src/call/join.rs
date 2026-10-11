@@ -67,6 +67,9 @@ impl AppState {
             return;
         }
         let meeting_data = code.meeting_data();
+        if self.meet_now_pending {
+            return;
+        }
         if self.mode.demo {
             let target = MeetingTarget {
                 thread_id: DEMO_CODE_THREAD.to_owned(),
@@ -122,13 +125,19 @@ impl AppState {
             self.raise_notice(NOT_CONNECTED_NOTICE.to_owned(), None, cx);
             return;
         };
+        self.meet_now_pending = true;
+        cx.notify();
         let receiver =
             runtime::spawn(async move { launcher.create_meet_now(MEET_NOW_SUBJECT).await });
         cx.spawn(async move |this, cx| {
             let created = receiver.await.ok().and_then(Result::ok);
-            this.update(cx, |state, cx| match created {
-                Some(url) => state.join_meeting_link(&url, cx),
-                None => state.raise_notice(MEET_NOW_FAILED_NOTICE.to_owned(), None, cx),
+            this.update(cx, |state, cx| {
+                state.meet_now_pending = false;
+                match created {
+                    Some(url) => state.join_meeting_link(&url, cx),
+                    None => state.raise_notice(MEET_NOW_FAILED_NOTICE.to_owned(), None, cx),
+                }
+                cx.notify();
             })
             .ok();
         })

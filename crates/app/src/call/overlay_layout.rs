@@ -67,6 +67,10 @@ pub fn mini_rect(work: WorkArea, saved: Option<(i32, i32)>) -> ScreenRect {
     }
 }
 
+pub fn mini_work_area(main: WorkArea, saved: Option<(i32, i32)>, area_at: impl Fn(i32, i32) -> Option<WorkArea>) -> WorkArea {
+    saved.and_then(|(left, top)| area_at(left, top)).unwrap_or(main)
+}
+
 pub fn mini_wanted(call_active: bool, main_minimized: bool) -> bool {
     call_active && main_minimized
 }
@@ -156,6 +160,17 @@ mod tests {
         assert_eq!((pushed.right, pushed.top), (1920, 0));
         let pulled = mini_rect(work(1.), Some((-500, 5000)));
         assert_eq!((pulled.left, pulled.bottom), (0, 1040));
+    }
+
+    #[test]
+    fn mini_stays_on_the_monitor_that_holds_the_saved_point() {
+        let second = WorkArea { left: 1920, top: 0, right: 3840, bottom: 1040, scale: 1. };
+        let area_at = |left: i32, _: i32| (left >= 1920).then_some(second);
+        let saved = Some((3700, 900));
+        let rect = mini_rect(mini_work_area(work(1.), saved, area_at), saved);
+        assert_eq!((rect.right, rect.bottom), (3840, 1040));
+        assert_eq!(mini_work_area(work(1.), Some((100, 100)), area_at), work(1.));
+        assert_eq!(mini_work_area(work(1.), None, area_at), work(1.));
     }
 
     #[test]

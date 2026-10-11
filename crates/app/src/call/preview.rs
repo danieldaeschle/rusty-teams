@@ -21,6 +21,7 @@ pub struct CameraPreview {
     hub: Arc<VideoHub>,
     pictures: CallPictures,
     blur: Arc<BlurSettings>,
+    background_request: Arc<AtomicU64>,
     capture: Option<Capture>,
     frames: Arc<AtomicU64>,
     failure: Arc<Mutex<Option<String>>>,
@@ -35,6 +36,7 @@ impl CameraPreview {
             hub: VideoHub::new(sender),
             pictures: CallPictures::default(),
             blur: Arc::new(BlurSettings::default()),
+            background_request: Arc::new(AtomicU64::new(0)),
             capture: None,
             frames: Arc::new(AtomicU64::new(0)),
             failure: Arc::new(Mutex::new(None)),
@@ -71,13 +73,17 @@ impl CameraPreview {
     }
 
     pub fn set_background(&self, choice: BackgroundChoice) {
+        let request = self.background_request.fetch_add(1, Ordering::SeqCst) + 1;
         match choice {
             BackgroundChoice::None => self.apply_background(false, None),
             BackgroundChoice::Blur => self.apply_background(true, None),
             BackgroundChoice::Image(path) => {
                 let blur = self.blur.clone();
+                let latest_request = self.background_request.clone();
                 std::thread::spawn(move || {
-                    if let Ok(picture) = BackgroundPicture::load(&path) {
+                    if let Ok(picture) = BackgroundPicture::load(&path)
+                        && latest_request.load(Ordering::SeqCst) == request
+                    {
                         blur.set_picture(Some(Arc::new(picture)));
                         blur.set_enabled(true);
                     }

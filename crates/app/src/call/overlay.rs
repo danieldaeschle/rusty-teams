@@ -7,7 +7,7 @@ use gpui_kit::*;
 use super::model::format_elapsed;
 use super::overlay_layout::{
     MINI_POSITION_KEY, bar_collapsed, bar_rect, border_rects, border_thickness, format_position, mini_rect,
-    mini_wanted, parse_position,
+    mini_wanted, mini_work_area, parse_position,
 };
 use crate::app_state::AppState;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
@@ -15,6 +15,7 @@ use crate::views::call_mini_window::MiniWindowView;
 use crate::views::share_bar::{ShareBarView, ShareBorderView};
 
 const TICK: Duration = Duration::from_millis(100);
+const IDLE_TICK: Duration = Duration::from_secs(1);
 const SLOW_TICK_EVERY: u32 = 5;
 const BORDER_SIDES: usize = 4;
 
@@ -129,10 +130,12 @@ impl CallWindows {
             ticks: 0,
         };
         cx.spawn(async move |this, cx| {
+            let mut pause = TICK;
             loop {
-                cx.background_executor().timer(TICK).await;
-                if this.update(cx, |windows, cx| windows.tick(cx)).is_err() {
-                    break;
+                cx.background_executor().timer(pause).await;
+                match this.update(cx, |windows, cx| windows.tick(cx)) {
+                    Ok(next_pause) => pause = next_pause,
+                    Err(_) => break,
                 }
             }
         })
@@ -185,7 +188,14 @@ impl CallWindows {
         self.app.update(cx, |state, cx| state.show_call(true, cx));
     }
 
-    fn tick(&mut self, cx: &mut Context<Self>) {
+    fn idle(&self, cx: &App) -> bool {
+        self.app.read(cx).call.is_none() && self.share.is_none() && self.windows.is_empty() && self.opening.is_empty()
+    }
+
+    fn tick(&mut self, cx: &mut Context<Self>) -> Duration {
+        if self.idle(cx) {
+            return IDLE_TICK;
+        }
         self.ticks = self.ticks.wrapping_add(1);
         let slow = self.ticks % SLOW_TICK_EVERY == 0;
         self.refresh_main_window();
@@ -194,6 +204,7 @@ impl CallWindows {
         if slow {
             self.track_mini_position(cx);
         }
+        TICK
     }
 
     fn refresh_main_window(&mut self) {
@@ -273,7 +284,8 @@ impl CallWindows {
         let in_call = self.app.read(cx).call.is_some();
         let work = self.work_area.or_else(|| display_work_area(cx));
         match work.filter(|_| mini_wanted(in_call, self.minimized)) {
-            Some(work) => {
+            Some(main_work) => {
+                let work = mini_work_area(main_work, self.mini_saved, platform::work_area_at);
                 let rect = mini_rect(work, self.mini_saved);
                 self.ensure_window(Role::Mini, rect, work.scale, false, cx);
             }

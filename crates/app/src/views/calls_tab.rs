@@ -1,6 +1,7 @@
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
+use gpui_kit::base::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
@@ -144,7 +145,7 @@ fn call_row(
         .into_any_element()
 }
 
-fn join_buttons(state: &Entity<AppState>) -> impl IntoElement {
+fn join_buttons(state: &Entity<AppState>, meet_now_pending: bool) -> impl IntoElement {
     let meet_state = state.clone();
     let id_state = state.clone();
     let paste_state = state.clone();
@@ -159,6 +160,7 @@ fn join_buttons(state: &Entity<AppState>) -> impl IntoElement {
                 .small()
                 .primary()
                 .label("Meet now")
+                .disabled(meet_now_pending)
                 .on_click(move |_, _, cx| {
                     meet_state.update(cx, |state, cx| state.start_meet_now(cx));
                 }),
@@ -330,7 +332,7 @@ pub fn calls_body(
     v_flex()
         .flex_1()
         .min_h_0()
-        .child(join_buttons(state))
+        .child(join_buttons(state, app.meet_now_pending))
         .child(
             div()
                 .id("calls-scroll")

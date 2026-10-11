@@ -18,6 +18,10 @@ pub fn work_area(_handle: NativeHandle) -> Option<WorkArea> {
     None
 }
 
+pub fn work_area_at(_x: i32, _y: i32) -> Option<WorkArea> {
+    None
+}
+
 pub fn place(_handle: NativeHandle, _x: i32, _y: i32, _width: i32, _height: i32) {}
 
 pub fn exclude_from_capture(_handle: NativeHandle) {}

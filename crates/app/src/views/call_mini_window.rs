@@ -25,16 +25,23 @@ pub struct MiniWindowView {
     windows: Entity<CallWindows>,
     app: Entity<AppState>,
     _app_subscription: Subscription,
+    _media_subscription: Option<Subscription>,
 }
 
 impl MiniWindowView {
     pub fn new(windows: Entity<CallWindows>, cx: &mut Context<Self>) -> Self {
         let app = windows.read(cx).app().clone();
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
+        let media_subscription = app
+            .read(cx)
+            .call_media
+            .clone()
+            .map(|media| cx.observe(&media, |_, _, cx| cx.notify()));
         MiniWindowView {
             windows,
             app,
             _app_subscription: app_subscription,
+            _media_subscription: media_subscription,
         }
     }
 }

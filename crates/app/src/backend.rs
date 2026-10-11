@@ -339,19 +339,23 @@ async fn calendar_loop(session: Session, events: EventSender) {
     let _ = events.send(BackendEvent::CalendarNudge(nudge));
     let mut interval = tokio::time::interval(CALENDAR_INTERVAL);
     let mut last_fetch: Option<tokio::time::Instant> = None;
+    let mut deferred_fetch: Option<tokio::time::Instant> = None;
     loop {
         tokio::select! {
             _ = interval.tick() => {}
+            _ = tokio::time::sleep_until(deferred_fetch.unwrap_or_else(tokio::time::Instant::now)), if deferred_fetch.is_some() => {}
             nudge = nudges.recv() => {
                 if nudge.is_none() {
                     return;
                 }
                 while nudges.try_recv().is_ok() {}
-                if last_fetch.is_some_and(|fetched| fetched.elapsed() < CALENDAR_MIN_GAP) {
+                if let Some(fetched) = last_fetch.filter(|fetched| fetched.elapsed() < CALENDAR_MIN_GAP) {
+                    deferred_fetch = Some(fetched + CALENDAR_MIN_GAP);
                     continue;
                 }
             }
         }
+        deferred_fetch = None;
         last_fetch = Some(tokio::time::Instant::now());
         let (start, end) = fetch_window(Utc::now(), Local::now().offset().fix());
         match calendar.calendar_view(start, end).await {

@@ -16,6 +16,7 @@ use super::center::NotificationCenter;
 use super::platform;
 use super::ring_tone::Ringtone;
 use super::rules::Settings;
+use crate::app_state::AppState;
 use crate::call::{BackgroundPick, CameraPreview, preview_backgrounds};
 use crate::theme;
 
@@ -24,6 +25,11 @@ const SELECT_WIDTH: f32 = 170.;
 const PREVIEW_WIDTH: f32 = 380.;
 const PREVIEW_HEIGHT: f32 = 214.;
 const PREVIEW_RADIUS: f32 = 10.;
+const CAMERA_IN_USE: &str = "Camera is in use by the call";
+
+fn camera_in_call(state: &AppState) -> bool {
+    state.call.as_ref().is_some_and(|call| call.model.camera_on)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -86,7 +92,9 @@ pub struct SettingsView {
     cameras_requested: bool,
     camera: DeviceChoice,
     background: BackgroundPick,
+    preview_blocked: bool,
     _subscription: Subscription,
+    _app_subscription: Subscription,
     _release: Subscription,
 }
 
@@ -96,9 +104,13 @@ impl SettingsView {
 
     pub fn new(center: Entity<NotificationCenter>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.observe(&center, |_, _, cx| cx.notify());
+        let app = center.read(cx).app().clone();
+        let app_subscription = cx.observe(&app, |view, _, cx| view.sync_preview_block(cx));
         let release = cx.on_release(|view, cx| view.preview.stop(cx));
         let (preview, mut updates) = CameraPreview::new();
-        let state = center.read(cx).app().read(cx);
+        let state = app.read(cx);
+        let camera = state.call_camera.clone();
+        let preview_blocked = camera_in_call(state);
         let background = Some(state.call_background.clone())
             .filter(|pick| preview_backgrounds(&state.call_backgrounds).iter().any(|(known, _)| known == pick))
             .unwrap_or_default();
@@ -125,9 +137,11 @@ impl SettingsView {
             preview,
             cameras: camera_entries(&[]),
             cameras_requested: false,
-            camera: DeviceChoice::SystemDefault,
+            camera,
             background,
+            preview_blocked,
             _subscription: subscription,
+            _app_subscription: app_subscription,
             _release: release,
         }
     }
@@ -153,7 +167,8 @@ impl SettingsView {
             Section::Devices => {
                 self.load_cameras(cx);
                 self.apply_background(cx);
-                self.preview.start(&self.camera);
+                self.preview_blocked = camera_in_call(self.center.read(cx).app().read(cx));
+                self.start_preview();
             }
             Section::Notifications => self.preview.stop(cx),
         }
@@ -175,14 +190,38 @@ impl SettingsView {
         .detach();
     }
 
+    fn start_preview(&mut self) {
+        if !self.preview_blocked {
+            self.preview.start(&self.camera);
+        }
+    }
+
+    fn sync_preview_block(&mut self, cx: &mut Context<Self>) {
+        let blocked = camera_in_call(self.center.read(cx).app().read(cx));
+        if blocked == self.preview_blocked {
+            return;
+        }
+        self.preview_blocked = blocked;
+        if blocked {
+            self.preview.stop(cx);
+        } else if self.section == Section::Devices {
+            self.start_preview();
+        }
+        cx.notify();
+    }
+
     fn select_camera(&mut self, camera: DeviceChoice, cx: &mut Context<Self>) {
-        self.camera = camera;
-        self.preview.start(&self.camera);
+        self.camera = camera.clone();
+        let app = self.center.read(cx).app().clone();
+        app.update(cx, |state, cx| state.select_call_camera(camera, cx));
+        self.start_preview();
         cx.notify();
     }
 
     fn select_background(&mut self, pick: BackgroundPick, cx: &mut Context<Self>) {
-        self.background = pick;
+        self.background = pick.clone();
+        let app = self.center.read(cx).app().clone();
+        app.update(cx, |state, cx| state.set_call_background(pick, cx));
         self.apply_background(cx);
         cx.notify();
     }
@@ -333,14 +372,18 @@ impl SettingsView {
             .map_or("None".to_owned(), |(_, label)| label.clone());
         let current_background = self.background.clone();
         let image = self.preview.image(Instant::now());
-        let status = self.preview.failure().map_or_else(
-            || {
-                self.preview
-                    .fps()
-                    .map_or("Starting camera...".to_owned(), |fps| format!("{fps:.0} fps"))
-            },
-            |reason| format!("Camera could not start: {reason}"),
-        );
+        let status = if self.preview_blocked {
+            CAMERA_IN_USE.to_owned()
+        } else {
+            self.preview.failure().map_or_else(
+                || {
+                    self.preview
+                        .fps()
+                        .map_or("Starting camera...".to_owned(), |fps| format!("{fps:.0} fps"))
+                },
+                |reason| format!("Camera could not start: {reason}"),
+            )
+        };
         v_flex()
             .w_full()
             .child(control_row(

@@ -30,9 +30,25 @@ const DEMO_SMALL_MEETING: usize = 4;
 const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
+const CAMERA_META_KEY: &str = "call_camera";
+const DEFAULT_CAMERA_META: &str = "default";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
     store.meta(SHARE_SOUND_META_KEY).ok().flatten().as_deref() == Some("1")
+}
+
+pub fn load_camera(store: &store::Store) -> DeviceChoice {
+    match store.meta(CAMERA_META_KEY).ok().flatten() {
+        Some(key) if !key.is_empty() && key != DEFAULT_CAMERA_META => DeviceChoice::Device(key),
+        _ => DeviceChoice::SystemDefault,
+    }
+}
+
+fn camera_meta(choice: &DeviceChoice) -> &str {
+    match choice {
+        DeviceChoice::SystemDefault => DEFAULT_CAMERA_META,
+        DeviceChoice::Device(key) => key,
+    }
 }
 
 fn now_unix() -> i64 {
@@ -155,6 +171,10 @@ impl AppState {
         }
         if let Some(call) = self.call.as_mut() {
             call.model.background = self.call_background.clone();
+            call.model.camera = self.call_camera.clone();
+        }
+        if self.call_camera != DeviceChoice::SystemDefault {
+            self.send_call_command(CallCommand::SelectCamera(self.call_camera.clone()));
         }
         if self.call_background != BackgroundPick::None {
             self.send_background_command(cx);
@@ -291,6 +311,8 @@ impl AppState {
     }
 
     pub fn select_call_camera(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
+        let _ = self.store.set_meta(CAMERA_META_KEY, camera_meta(&choice));
+        self.call_camera = choice.clone();
         if let Some(call) = self.call.as_mut() {
             call.model.camera = choice.clone();
         }
@@ -824,11 +846,11 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use calling::{BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, EndKind, EndReason, EngineEvent, HoldState, Reaction, call_channel};
+    use calling::{BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, DeviceChoice, EndKind, EndReason, EngineEvent, HoldState, Reaction, call_channel};
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
-    use super::{ActiveCall, CallModel};
+    use super::{ActiveCall, CallModel, load_camera};
     use crate::app_state::{AppEvent, AppState, Mode, Selection};
     use crate::call::TransferCandidate;
     use crate::call::background::BackgroundPick;
@@ -907,6 +929,19 @@ mod tests {
         cx.update(|cx| app.update(cx, |state, cx| state.set_call_share_sound(false, cx)));
         let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
         assert!(!cx.update(|cx| reopened.read(cx).call_share_sound));
+    }
+
+    #[gpui_kit::test]
+    fn the_camera_pick_is_remembered_and_the_next_call_starts_with_it(cx: &mut TestAppContext) {
+        let (app, _control) = app_with_commands(cx, live_meeting(false), None);
+        let store = cx.update(|cx| app.read(cx).store.clone());
+        assert_eq!(load_camera(&store), DeviceChoice::SystemDefault);
+        cx.update(|cx| app.update(cx, |state, cx| state.select_call_camera(DeviceChoice::Device("cam-2".into()), cx)));
+        assert_eq!(load_camera(&store), DeviceChoice::Device("cam-2".into()));
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert_eq!(cx.update(|cx| reopened.read(cx).call_camera.clone()), DeviceChoice::Device("cam-2".into()));
+        cx.update(|cx| app.update(cx, |state, cx| state.select_call_camera(DeviceChoice::SystemDefault, cx)));
+        assert_eq!(load_camera(&store), DeviceChoice::SystemDefault);
     }
 
     #[gpui_kit::test]

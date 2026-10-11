@@ -18,7 +18,7 @@ mod preview;
 mod ring;
 mod target;
 
-pub use actions::load_share_sound;
+pub use actions::{load_camera, load_share_sound};
 pub use background::{BackgroundLibrary, BackgroundPick, default_cache_directory, demo_library, load_background, load_custom_backgrounds};
 pub use features::TransferCandidate;
 pub use demo::DemoScene;
