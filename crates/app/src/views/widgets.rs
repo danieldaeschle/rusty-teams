@@ -48,7 +48,7 @@ pub fn page_header(title: &str) -> Div {
         .items_center()
         .gap(px(6.))
         .pl(px(16.))
-        .pr(px(10.))
+        .pr(px(12.))
         .child(
             div()
                 .flex_1()

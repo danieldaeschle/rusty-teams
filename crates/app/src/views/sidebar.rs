@@ -48,7 +48,7 @@ const TEAMS_LABEL: &str = "Teams";
 const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
-const NEW_CHAT_BUTTON_SIZE: f32 = 34.;
+const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
 const MENU_ICON_SIZE: f32 = 15.;
 const MUTED_ICON_SIZE: f32 = 13.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
@@ -525,7 +525,7 @@ impl SidebarView {
             .mx(px(6.))
             .h(px(ROW_HEIGHT))
             .px(px(10.))
-            .gap(px(10.))
+            .gap(px(12.))
             .items_center()
             .rounded(px(8.))
             .bg(theme::surface_raised())
@@ -570,9 +570,8 @@ impl SidebarView {
             .id(SharedString::from(format!("section-{}", section.id)))
             .h(px(SECTION_HEIGHT))
             .mt(px(SECTION_GAP))
-            .mx(px(4.))
-            .pl(px(8.))
-            .pr(px(10.))
+            .mx(px(6.))
+            .px(px(10.))
             .gap(px(6.))
             .items_center()
             .rounded(px(6.))
@@ -636,7 +635,7 @@ impl SidebarView {
         div()
             .id(SharedString::from(format!("see-more-{}", section.id)))
             .mx(px(6.))
-            .pl(px(56.))
+            .pl(px(10. + AVATAR_SIZE + 12.))
             .h(px(SEE_MORE_HEIGHT))
             .flex()
             .items_center()
@@ -773,7 +772,7 @@ impl SidebarView {
             .mx(px(6.))
             .h(px(ROW_HEIGHT))
             .px(px(10.))
-            .gap(px(10.))
+            .gap(px(12.))
             .items_center()
             .rounded(px(8.))
             .cursor_pointer()
@@ -889,8 +888,8 @@ impl SidebarView {
                 list = with_spacer(list, &mut skipped_height);
                 list = list.child(
                     div()
-                        .ml(px(44.))
-                        .mr(px(20.))
+                        .ml(px(16.))
+                        .mr(px(16.))
                         .h(px(HINT_HEIGHT))
                         .flex()
                         .items_center()
@@ -958,7 +957,7 @@ impl SidebarView {
             .mx(px(6.))
             .h(px(PINNED_CHANNEL_HEIGHT))
             .px(px(10.))
-            .gap(px(10.))
+            .gap(px(12.))
             .items_center()
             .rounded(px(8.))
             .cursor_pointer()
@@ -1038,7 +1037,7 @@ impl SidebarView {
         div()
             .h(px(SECTION_HEIGHT))
             .mt(px(SECTION_GAP))
-            .px(px(12.))
+            .px(px(16.))
             .flex()
             .items_center()
             .text_size(px(12.))

@@ -17,7 +17,7 @@ const THUMB_WIDTH_COMPACT: f32 = 72.;
 const THUMB_MIN_HEIGHT: f32 = 48.;
 const THUMB_MAX_HEIGHT: f32 = 112.;
 const THUMB_RADIUS: f32 = 6.;
-const CLOSE_SIZE: f32 = 22.;
+const CLOSE_SIZE: f32 = 28.;
 const JOIN_CHIP_HEIGHT: f32 = 24.;
 
 pub type CloseHandler = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -97,16 +97,16 @@ pub fn link_preview_card(
         div()
             .id(ElementId::Name(format!("{id}-close").into()))
             .absolute()
-            .top(px(4.))
-            .right(px(4.))
+            .top(px(8.))
+            .right(px(8.))
             .size(px(CLOSE_SIZE))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(6.))
+            .rounded(px(7.))
             .cursor_pointer()
-            .hover(|button| button.bg(theme::row_hover()))
-            .child(icon(IconName::Close, 12., theme::text_muted()))
+            .hover(|button| button.bg(theme::popup_hover()))
+            .child(icon(IconName::Close, 14., theme::text_muted()))
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
                 close(window, cx);
@@ -119,10 +119,10 @@ pub fn link_preview_card(
         .when(compact, |card| card.w_full())
         .when(!compact, |card| card.w(px(CARD_WIDTH)))
         .max_w(relative(1.))
-        .gap(px(10.))
+        .gap(px(12.))
         .p(px(8.))
         .items_start()
-        .rounded(px(9.))
+        .rounded(px(10.))
         .bg(theme::surface())
         .cursor_pointer()
         .hover(|card| card.bg(theme::row_hover()))
@@ -167,8 +167,8 @@ pub fn meeting_join_chip(id: String, url: String) -> AnyElement {
         .flex_none()
         .self_start()
         .h(px(JOIN_CHIP_HEIGHT))
-        .px(px(10.))
-        .gap(px(5.))
+        .px(px(12.))
+        .gap(px(4.))
         .items_center()
         .rounded_full()
         .bg(theme::accent())

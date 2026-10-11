@@ -31,7 +31,7 @@ use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
-use super::message_row::{render_message_row, render_skeleton_row};
+use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
 use super::profile_card::opens_profile;
@@ -700,10 +700,15 @@ impl ConversationView {
                 .map(|face| face.name.clone())
                 .collect::<Vec<_>>(),
         );
+        let text_inset = match self.current.as_ref().map(|current| &current.mode) {
+            Some(ViewMode::Flat) => AVATAR_SIZE + AVATAR_GAP,
+            _ => 0.,
+        };
         h_flex()
             .h(px(TYPING_LINE_HEIGHT))
             .flex_none()
-            .px(px(24.))
+            .pl(px(20. + text_inset))
+            .pr(px(20.))
             .gap(px(6.))
             .items_center()
             .when(!faces.is_empty(), |line| {
@@ -2835,8 +2840,8 @@ impl ConversationView {
                         v_flex()
                             .items_center()
                             .gap(px(6.))
-                            .px(px(28.))
-                            .py(px(18.))
+                            .px(px(24.))
+                            .py(px(16.))
                             .rounded(px(12.))
                             .bg(black().opacity(0.55))
                             .child(symbol("upload", 28., theme::accent_text()))
@@ -2868,7 +2873,7 @@ impl ConversationView {
             h_flex()
                 .w_full()
                 .flex_none()
-                .px(px(24.))
+                .px(px(20.))
                 .py(px(4.))
                 .gap(px(8.))
                 .items_center()
@@ -3154,7 +3159,7 @@ impl Render for ConversationView {
         if let Some(notice) = &self.notice {
             root = root.child(
                 h_flex()
-                    .px_4()
+                    .px(px(20.))
                     .py_1()
                     .gap(px(8.))
                     .items_center()

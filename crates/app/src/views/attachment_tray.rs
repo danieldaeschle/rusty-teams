@@ -26,9 +26,10 @@ const PREVIEW_HEIGHT: f32 = 120.;
 const PREVIEW_GAP: f32 = 4.;
 const PREVIEW_RADIUS: f32 = 10.;
 const CHIP_WIDTH: f32 = 220.;
-const CHIP_HEIGHT: f32 = 48.;
+const CHIP_HEIGHT: f32 = 52.;
 const CHIP_BADGE_SIZE: f32 = 30.;
 const REMOVE_SIZE: f32 = 18.;
+const CHIP_REMOVE_SIZE: f32 = 28.;
 const TRAY_GAP: f32 = 8.;
 const PROGRESS_HEIGHT: f32 = 2.;
 
@@ -780,15 +781,15 @@ type ItemAction<T> = fn(&mut T, u64, &mut Window, &mut Context<T>);
 fn remove_button<T: 'static>(id: u64, remove: ItemAction<T>, cx: &mut Context<T>) -> Stateful<Div> {
     div()
         .id(ElementId::Name(format!("attachment-remove-{id}").into()))
-        .size(px(REMOVE_SIZE))
+        .size(px(CHIP_REMOVE_SIZE))
         .flex_none()
         .flex()
         .items_center()
         .justify_center()
-        .rounded_full()
+        .rounded(px(7.))
         .cursor_pointer()
-        .hover(|button| button.bg(theme::row_hover()))
-        .child(icon(IconName::Close, 10., theme::text_muted()))
+        .hover(|button| button.bg(theme::popup_hover()))
+        .child(icon(IconName::Close, 14., theme::text_muted()))
         .on_click(cx.listener(move |this, _, window, cx| remove(this, id, window, cx)))
 }
 
@@ -904,10 +905,10 @@ fn chip<T: 'static>(
         .w(px(CHIP_WIDTH))
         .h(px(CHIP_HEIGHT))
         .flex_none()
-        .gap(px(9.))
-        .px(px(9.))
+        .gap(px(12.))
+        .px(px(12.))
         .items_center()
-        .rounded(px(8.))
+        .rounded(px(10.))
         .overflow_hidden()
         .bg(theme::popup_hover())
         .border_1()
@@ -985,8 +986,8 @@ pub fn render_tray<T: 'static>(
             .w_full()
             .flex_wrap()
             .gap(px(TRAY_GAP))
-            .px(px(12.))
-            .pt(px(10.))
+            .px(px(8.))
+            .pt(px(8.))
             .pb(px(2.))
             .children(elements),
     )

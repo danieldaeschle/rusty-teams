@@ -476,22 +476,20 @@ impl AppShell {
             .w_full()
             .gap(px(ISLAND_GAP))
             .pr(px(ISLAND_GAP))
-            .child(self.rail.clone())
+            .py(px(ISLAND_GAP))
             .child(
-                self.sidebar
-                    .clone()
-                    .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+                h_flex()
+                    .h_full()
+                    .flex_none()
+                    .child(self.rail.clone())
+                    .child(
+                        self.sidebar
+                            .clone()
+                            .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+                    ),
             )
             .child(match call_view {
-                Some(call_view) => h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .rounded(px(10.))
-                    .bg(theme::surface())
-                    .overflow_hidden()
-                    .child(call_view)
-                    .into_any_element(),
+                Some(call_view) => call_view,
                 None => self
                     .conversation
                     .clone()

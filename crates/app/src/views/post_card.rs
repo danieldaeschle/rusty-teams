@@ -385,7 +385,7 @@ pub fn render_post(
     card = card.children(reply_footer(index, open_reply, reply_editor));
     div()
         .w_full()
-        .px(px(24.))
+        .px(px(20.))
         .pt(px(CARD_GAP))
         .child(card)
         .into_any_element()

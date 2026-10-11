@@ -18,7 +18,7 @@ use crate::theme;
 
 const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
-const BUTTON_SIZE: f32 = 28.;
+const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
 const FILTER_KEY: &str = "activity_filter";
 
@@ -92,7 +92,7 @@ impl ActivityPanel {
                     format!("activity-filter-{}", filter.label()).into(),
                 ))
                 .h(px(24.))
-                .px(px(10.))
+                .px(px(12.))
                 .flex()
                 .items_center()
                 .rounded_full()
@@ -115,13 +115,11 @@ impl ActivityPanel {
         });
         v_flex()
             .flex_none()
-            .pl(px(16.))
-            .pr(px(12.))
-            .pt(px(12.))
-            .pb(px(8.))
-            .gap(px(8.))
             .child(
                 h_flex()
+                    .h(px(52.))
+                    .pl(px(16.))
+                    .pr(px(12.))
                     .gap(px(4.))
                     .items_center()
                     .child(
@@ -139,7 +137,7 @@ impl ActivityPanel {
                             .h(px(BUTTON_SIZE))
                             .flex()
                             .items_center()
-                            .rounded(px(6.))
+                            .rounded(px(8.))
                             .cursor_pointer()
                             .text_size(px(12.))
                             .text_color(theme::accent_text())
@@ -158,7 +156,7 @@ impl ActivityPanel {
                             .flex_none()
                             .items_center()
                             .justify_center()
-                            .rounded(px(6.))
+                            .rounded(px(8.))
                             .cursor_pointer()
                             .hover(|button| button.bg(theme::surface_raised()))
                             .child(icon(IconName::Settings, 16., theme::text_muted()))
@@ -167,7 +165,13 @@ impl ActivityPanel {
                             })),
                     ),
             )
-            .child(h_flex().gap(px(6.)).children(pills))
+            .child(
+                h_flex()
+                    .px(px(16.))
+                    .pb(px(12.))
+                    .gap(px(6.))
+                    .children(pills),
+            )
     }
 
     fn row(
@@ -197,7 +201,7 @@ impl ActivityPanel {
             .mx(px(6.))
             .px(px(10.))
             .py(px(8.))
-            .gap(px(10.))
+            .gap(px(12.))
             .items_start()
             .rounded(px(8.))
             .cursor_pointer()
@@ -292,8 +296,6 @@ fn status_slot(
             .items_center()
             .justify_center()
             .rounded(px(6.))
-            .border_1()
-            .border_color(theme::border_strong())
             .bg(theme::surface_raised())
             .cursor_pointer()
             .child(icon(IconName::Check, 12., theme::text()))

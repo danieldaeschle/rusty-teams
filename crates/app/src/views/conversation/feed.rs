@@ -223,9 +223,9 @@ impl ConversationView {
                 h_flex()
                     .w_full()
                     .flex_none()
-                    .px(px(24.))
-                    .pt(px(2.))
-                    .pb(px(4.))
+                    .px(px(20.))
+                    .pt(px(12.))
+                    .pb(px(12.))
                     .child(
                         h_flex()
                             .id("new-post")
@@ -256,7 +256,7 @@ impl ConversationView {
             .focus_handle(cx)
             .contains_focused(window, cx);
         let subject = (!editing).then(|| {
-            div().w_full().px(px(24.)).pt(px(10.)).child(
+            div().w_full().px(px(20.)).pt(px(12.)).child(
                 div()
                     .w_full()
                     .h(px(36.))
@@ -287,8 +287,8 @@ impl ConversationView {
                 .child(
                     h_flex()
                         .w_full()
-                        .px(px(24.))
-                        .pb(px(10.))
+                        .px(px(20.))
+                        .pb(px(12.))
                         .justify_end()
                         .child(
                             Button::new("cancel-new-post")

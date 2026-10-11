@@ -435,7 +435,7 @@ impl NewChatDraft {
             .id(ElementId::Name(format!("new-chat-chip-{index}").into()))
             .h(px(26.))
             .pl(px(3.))
-            .pr(px(6.))
+            .pr(px(4.))
             .gap(px(6.))
             .items_center()
             .rounded(px(13.))
@@ -459,7 +459,7 @@ impl NewChatDraft {
                     .id(ElementId::Name(
                         format!("new-chat-chip-remove-{index}").into(),
                     ))
-                    .size(px(16.))
+                    .size(px(18.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -490,7 +490,7 @@ impl NewChatDraft {
                 .id(ElementId::Name(format!("new-chat-result-{index}").into()))
                 .px(px(6.))
                 .h(px(POPUP_ROW_HEIGHT))
-                .gap(px(10.))
+                .gap(px(8.))
                 .items_center()
                 .rounded(px(6.))
                 .cursor_pointer()
@@ -628,10 +628,8 @@ impl NewChatDraft {
                 .flex_none()
                 .px(px(20.))
                 .py(px(8.))
-                .gap(px(10.))
+                .gap(px(8.))
                 .items_center()
-                .border_b_1()
-                .border_color(theme::border())
                 .child(
                     div()
                         .text_size(px(14.))
@@ -642,16 +640,16 @@ impl NewChatDraft {
                     div()
                         .flex_1()
                         .h(px(32.))
-                        .px(px(10.))
+                        .px(px(12.))
                         .flex()
                         .items_center()
                         .rounded(px(8.))
-                        .bg(theme::surface())
+                        .bg(theme::surface_raised())
                         .border_1()
                         .border_color(if focused {
                             theme::accent()
                         } else {
-                            theme::border_strong()
+                            transparent_black()
                         })
                         .child(
                             div()
