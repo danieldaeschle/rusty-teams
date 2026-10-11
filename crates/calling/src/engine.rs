@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use crate::call::{AcceptMode, CallOptions, CallSpec, IncomingCall, Plan};
+use crate::devices::DeviceChoice;
 use crate::control::{CallHandle, call_channel};
 use crate::end::EndKind;
 use crate::error::{Error, Result};
@@ -109,6 +110,7 @@ pub(crate) struct Inner {
     rings: Mutex<HashMap<u64, mpsc::UnboundedSender<RingCommand>>>,
     seen: Mutex<HashMap<(String, String), Instant>>,
     next_ring_id: AtomicU64,
+    default_camera: Mutex<DeviceChoice>,
     runtime: tokio::runtime::Handle,
     events: mpsc::UnboundedSender<EngineEvent>,
     stop: Mutex<Option<oneshot::Sender<()>>>,
@@ -153,6 +155,7 @@ impl Inner {
             relay_host: self.config.relay_host.clone(),
             routing: self.config.routing.clone(),
             trace: self.config.trace,
+            camera: self.default_camera.lock().expect("default camera lock").clone(),
             ..CallOptions::default()
         }
     }
@@ -237,6 +240,7 @@ impl CallEngine {
             rings: Mutex::default(),
             seen: Mutex::default(),
             next_ring_id: AtomicU64::new(RING_ID_START),
+            default_camera: Mutex::new(DeviceChoice::SystemDefault),
             runtime: tokio::runtime::Handle::current(),
             events,
             stop: Mutex::new(Some(stop)),
@@ -279,6 +283,10 @@ impl CallEngine {
     }
 
     /// Only for a click on Decline: it ends the call for all of the user's devices.
+    pub fn set_default_camera(&self, camera: DeviceChoice) {
+        *self.inner.default_camera.lock().expect("default camera lock") = camera;
+    }
+
     pub fn decline_ring(&self, ring_id: u64) {
         self.send_ring_command(ring_id, RingCommand::Decline);
     }

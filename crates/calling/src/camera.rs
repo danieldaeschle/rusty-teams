@@ -79,7 +79,7 @@ fn pick_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
         .copied()
         .filter(|format| DIRECT_FORMATS.contains(&format.format()))
         .filter(|format| format.frame_rate() >= CAPTURE_FPS && format.height() <= CAPTURE_HEIGHT)
-        .max_by_key(|format| (format.height(), format_rank(format.format()), format.frame_rate()))
+        .max_by_key(|format| (format.height(), format_rank(format.format()), std::cmp::Reverse(format.frame_rate())))
 }
 
 fn open_picked_format(index: CameraIndex) -> std::result::Result<Camera, nokhwa::NokhwaError> {

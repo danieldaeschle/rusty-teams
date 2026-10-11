@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use calling::meeting::{LiveMeeting, fetch_live_meeting};
 use calling::{
-    AcceptMode, BackgroundCache, CallEngine, CallHandle, CallSpec, CallState, CallUpdate, DefaultBackground, EndReason, EngineConfig, EngineEvent, MeetingTarget, call_channel,
+    AcceptMode, BackgroundCache, CallEngine, DeviceChoice, CallHandle, CallSpec, CallState, CallUpdate, DefaultBackground, EndReason, EngineConfig, EngineEvent, MeetingTarget, call_channel,
 };
 use session::{Session, SessionConfig, Transport};
 
@@ -14,6 +14,7 @@ const NOT_READY: &str = "Calls are not ready yet";
 
 pub struct CallLauncher {
     engine: Mutex<Option<CallEngine>>,
+    default_camera: Mutex<DeviceChoice>,
 }
 
 impl CallLauncher {
@@ -24,12 +25,14 @@ impl CallLauncher {
     ) -> Arc<CallLauncher> {
         let launcher = Arc::new(CallLauncher {
             engine: Mutex::new(None),
+            default_camera: Mutex::new(DeviceChoice::SystemDefault),
         });
         let running = launcher.clone();
         crate::runtime::handle().spawn(async move {
             let (engine, mut events) =
                 start_with_retry(|| start_engine(transport.clone(), ringable), &START_RETRY_STEPS, START_RETRY_STEADY).await;
             crate::diagnostics::record("calls: engine ready, registered with the registrar");
+            engine.set_default_camera(running.default_camera.lock().expect("camera lock").clone());
             *running.engine.lock().expect("engine lock") = Some(engine);
             while let Some(event) = events.recv().await {
                 on_event(event);
@@ -40,6 +43,13 @@ impl CallLauncher {
 
     fn engine(&self) -> Option<CallEngine> {
         self.engine.lock().expect("engine lock").clone()
+    }
+
+    pub fn set_default_camera(&self, camera: DeviceChoice) {
+        *self.default_camera.lock().expect("camera lock") = camera.clone();
+        if let Some(engine) = self.engine() {
+            engine.set_default_camera(camera);
+        }
     }
 
     pub fn start_call(&self, spec: CallSpec) -> CallHandle {

@@ -15,7 +15,7 @@ use crate::views::call_mini_window::MiniWindowView;
 use crate::views::share_bar::{ShareBarView, ShareBorderView};
 
 const TICK: Duration = Duration::from_millis(100);
-const IDLE_TICK: Duration = Duration::from_secs(1);
+const IDLE_TICK: Duration = Duration::from_millis(250);
 const SLOW_TICK_EVERY: u32 = 5;
 const BORDER_SIDES: usize = 4;
 

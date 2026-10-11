@@ -313,6 +313,9 @@ impl AppState {
     pub fn select_call_camera(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
         let _ = self.store.set_meta(CAMERA_META_KEY, camera_meta(&choice));
         self.call_camera = choice.clone();
+        if let Some(launcher) = &self.call_launcher {
+            launcher.set_default_camera(choice.clone());
+        }
         if let Some(call) = self.call.as_mut() {
             call.model.camera = choice.clone();
         }

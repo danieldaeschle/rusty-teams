@@ -67,9 +67,6 @@ impl AppState {
             return;
         }
         let meeting_data = code.meeting_data();
-        if self.meet_now_pending {
-            return;
-        }
         if self.mode.demo {
             let target = MeetingTarget {
                 thread_id: DEMO_CODE_THREAD.to_owned(),
@@ -109,6 +106,9 @@ impl AppState {
     pub fn start_meet_now(&mut self, cx: &mut Context<Self>) {
         if self.call.is_some() {
             self.show_call(true, cx);
+            return;
+        }
+        if self.meet_now_pending {
             return;
         }
         if self.mode.demo {

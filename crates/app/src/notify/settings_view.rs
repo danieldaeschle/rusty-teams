@@ -28,7 +28,7 @@ const PREVIEW_RADIUS: f32 = 10.;
 const CAMERA_IN_USE: &str = "Camera is in use by the call";
 
 fn camera_in_call(state: &AppState) -> bool {
-    state.call.as_ref().is_some_and(|call| call.model.camera_on)
+    state.call.is_some()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

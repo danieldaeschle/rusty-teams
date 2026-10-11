@@ -741,7 +741,10 @@ impl AppState {
                 self.connection = connection;
                 cx.emit(AppEvent::Status);
             }
-            BackendEvent::Calls(launcher) => self.call_launcher = Some(launcher),
+            BackendEvent::Calls(launcher) => {
+                launcher.set_default_camera(self.call_camera.clone());
+                self.call_launcher = Some(launcher);
+            }
             BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
             BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),
             BackendEvent::Ring(event) => self.on_engine_event(event, cx),
