@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use gpui_kit::{DispatchPhase, IntoElement, MouseDownEvent, MouseMoveEvent, ScrollWheelEvent, canvas};
+use gpui_kit::{DispatchPhase, IntoElement, KeyDownEvent, MouseDownEvent, MouseMoveEvent, ScrollWheelEvent, canvas};
 use tokio::sync::watch;
 
 pub const IDLE_AFTER: Duration = Duration::from_secs(5 * 60);
@@ -56,6 +56,12 @@ pub fn input_probe(input: Arc<UserInput>) -> impl IntoElement {
             window.on_mouse_event(move |_: &ScrollWheelEvent, phase, _, _| {
                 if phase == DispatchPhase::Capture {
                     scrolled.touch();
+                }
+            });
+            let typed = input.clone();
+            window.on_key_event(move |_: &KeyDownEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture {
+                    typed.touch();
                 }
             });
         },

@@ -12,6 +12,7 @@ const FALLBACK_INTERVAL: Duration = Duration::from_secs(120);
 const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const RETRY_BASE: Duration = Duration::from_secs(30);
 const RETRY_MAX: Duration = Duration::from_secs(240);
+const PERMANENT_FAILURE_RETRY: Duration = Duration::from_secs(30 * 60);
 
 static UNREGISTER: OnceLock<mpsc::UnboundedSender<oneshot::Sender<()>>> = OnceLock::new();
 
@@ -65,13 +66,12 @@ pub fn unregister_on_exit(timeout: Duration) {
 struct RetryState {
     failures: u32,
     next_attempt: Option<Instant>,
-    blocked: bool,
     last_error: Option<String>,
 }
 
 impl RetryState {
     fn may_attempt(&self, now: Instant) -> bool {
-        !self.blocked && self.next_attempt.is_none_or(|next| now >= next)
+        self.next_attempt.is_none_or(|next| now >= next)
     }
 
     fn succeeded(&mut self) {
@@ -80,8 +80,12 @@ impl RetryState {
 
     fn failed(&mut self, now: Instant, error: &chatsvc::Error) -> Option<String> {
         self.failures += 1;
-        self.next_attempt = Some(now + retry_delay(self.failures));
-        self.blocked = is_permanent_failure(error_status(error));
+        let delay = if is_permanent_failure(error_status(error)) {
+            PERMANENT_FAILURE_RETRY
+        } else {
+            retry_delay(self.failures)
+        };
+        self.next_attempt = Some(now + delay);
         let message = error.to_string();
         let is_new = self.last_error.as_deref() != Some(message.as_str());
         self.last_error = Some(message.clone());
@@ -335,12 +339,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_permanent_failure_stops_retrying_until_a_new_endpoint() {
+    async fn a_permanent_failure_retries_only_after_half_an_hour_or_a_new_endpoint() {
         let (mut link, sent, _) = link(vec![403]);
         link.apply(LinkSignal::Endpoint("a".into())).await;
         link.reconcile(false).await;
         assert_eq!(calls(&sent).len(), 1);
-        assert!(!link.retry.may_attempt(Instant::now() + seconds(10_000)));
+        assert!(!link.retry.may_attempt(Instant::now() + seconds(29 * 60)));
+        assert!(link.retry.may_attempt(Instant::now() + seconds(31 * 60)));
         link.apply(LinkSignal::Endpoint("b".into())).await;
         assert_eq!(calls(&sent).len(), 3);
     }
@@ -352,7 +357,7 @@ mod tests {
         link.apply(LinkSignal::Endpoint("a".into())).await;
         link.apply(LinkSignal::Connected).await;
         assert_eq!(calls(&sent), ["PUT /endpoints/ Transport"]);
-        resend.notified().await;
+        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
     }
 
     #[tokio::test]
@@ -370,8 +375,8 @@ mod tests {
     async fn long_downtime_switches_to_direct_reporting_and_a_reconnect_switches_back() {
         let (mut link, sent, resend) = link(vec![]);
         link.apply(LinkSignal::Endpoint("a".into())).await;
-        resend.notified().await;
-        link.down_since = Some(Instant::now() - seconds(130));
+        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
+        link.down_since = Some(Instant::now().checked_sub(seconds(130)).unwrap_or_else(Instant::now));
         link.reconcile(false).await;
         link.apply(LinkSignal::Connected).await;
         assert_eq!(
@@ -383,7 +388,7 @@ mod tests {
                 "PUT /endpoints/ Transport",
             ]
         );
-        resend.notified().await;
+        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
     }
 
     #[tokio::test]
