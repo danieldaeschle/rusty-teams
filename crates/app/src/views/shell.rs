@@ -16,7 +16,7 @@ use super::shortcuts::{
     ToggleCallShare,
 };
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
-use super::sidebar::SidebarView;
+use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
 use super::status_bar::render_status_bar;
 use super::status_menu::own_status_button;
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
@@ -24,6 +24,7 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::call::CallMedia;
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
@@ -69,6 +70,7 @@ pub struct AppShell {
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
     _subscription: Subscription,
+    _call_media_observation: Subscription,
     _activity_observation: Subscription,
     _escape_observation: Subscription,
 }
@@ -94,6 +96,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let call_media = cx.new(|_| CallMedia);
+        state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
+        let call_media_observation = cx.observe(&call_media, |_, _, cx| cx.notify());
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
         let subscription =
@@ -147,6 +152,7 @@ impl AppShell {
             open_target,
             update: UpdateStatus::UpToDate,
             _subscription: subscription,
+            _call_media_observation: call_media_observation,
             _activity_observation: activity_observation,
             _escape_observation: escape_observation,
         };
@@ -641,10 +647,14 @@ impl Render for AppShell {
                             .flex_1()
                             .min_h_0()
                             .w_full()
-                            .child(self.sidebar.clone())
+                            .child(self.sidebar.clone().cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()))
                             .child(match call_view {
                                 Some(call_view) => call_view,
-                                None => self.conversation.clone().into_any_element(),
+                                None => self
+                                    .conversation
+                                    .clone()
+                                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                                    .into_any_element(),
                             }),
                     )
                     .child(status),

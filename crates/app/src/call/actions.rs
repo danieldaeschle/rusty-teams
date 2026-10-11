@@ -9,6 +9,7 @@ use gpui_kit::*;
 use super::background::{BACKGROUND_META_KEY, BackgroundPick, SHOWN_IMAGES, is_image_file, save_custom_backgrounds};
 use super::demo::{DemoCall, DemoScene, demo_caller, demo_guests, demo_ring, demo_video_ring, start_demo_call, start_demo_scene_call};
 use super::features::room_closed_move;
+use super::media::CallMedia;
 use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
@@ -191,7 +192,7 @@ impl AppState {
                         if ticks.is_multiple_of(SHARE_SOURCES_EVERY_TICKS) {
                             state.refresh_share_sources();
                         }
-                        cx.notify();
+                        CallMedia::changed(&state.call_media, cx);
                     }
                     running
                 });
@@ -204,13 +205,23 @@ impl AppState {
     }
 
     pub(super) fn apply_call_update(&mut self, call_id: u64, update: CallUpdate, cx: &mut Context<Self>) {
+        let media = self.call_media.clone();
         let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
             return;
         };
         match update {
             CallUpdate::VideoReady => {
                 call.pictures.apply(&call.video, cx);
-                cx.notify();
+                CallMedia::changed(&media, cx);
+                return;
+            }
+            CallUpdate::Stats { .. } => return,
+            CallUpdate::Levels { local, remote } => {
+                let before = (call.model.local_speaking, call.model.remote_speaking);
+                call.model.apply(CallUpdate::Levels { local, remote });
+                if before != (call.model.local_speaking, call.model.remote_speaking) {
+                    CallMedia::changed(&media, cx);
+                }
                 return;
             }
             CallUpdate::Notice(text) => {
@@ -807,7 +818,7 @@ mod tests {
     use store::{ChatRecord, MemberRecord, Store};
 
     use super::{ActiveCall, CallModel};
-    use crate::app_state::{AppState, Mode, Selection};
+    use crate::app_state::{AppEvent, AppState, Mode, Selection};
     use crate::call::TransferCandidate;
     use crate::call::background::BackgroundPick;
     use crate::call::demo::demo_ring;
@@ -847,6 +858,30 @@ mod tests {
         model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
         model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
         model
+    }
+
+    #[gpui_kit::test]
+    fn high_rate_updates_do_not_emit_call_events(cx: &mut TestAppContext) {
+        let app = app_with_call(cx);
+        let emitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = emitted.clone();
+        cx.update(|cx| {
+            cx.subscribe(&app, move |_, event: &AppEvent, _| {
+                if matches!(event, AppEvent::Call) {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            })
+            .detach();
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::VideoReady, cx);
+                state.apply_call_update(7, CallUpdate::Levels { local: 0.5, remote: 0.5 }, cx);
+                state.apply_call_update(7, CallUpdate::Stats { inbound_packets: 1, outbound_packets: 1 }, cx);
+            });
+        });
+        assert_eq!(emitted.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(cx.update(|cx| app.read(cx).call.as_ref().unwrap().model.remote_speaking));
+        cx.update(|cx| app.update(cx, |state, cx| state.apply_call_update(7, CallUpdate::Muted(true), cx)));
+        assert_eq!(emitted.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[gpui_kit::test]

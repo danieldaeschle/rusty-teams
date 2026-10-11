@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use calling::{DeviceEntry, Reaction, VideoKey};
 use gpui_kit::assets::IconName;
@@ -35,6 +35,8 @@ pub(super) const CONTROL_SIZE: f32 = 44.;
 const CONTROL_ICON: f32 = 20.;
 pub(super) const MENU_WIDTH: f32 = 280.;
 const PULSE_PERIOD: Duration = Duration::from_millis(1400);
+const BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
+const BLINK_DIMMED_OPACITY: f32 = 0.45;
 const DISABLED_OPACITY: f32 = 0.4;
 const TILE_GAP: f32 = 20.;
 const GRID_PADDING: f32 = 24.;
@@ -157,6 +159,11 @@ pub fn pulsing(element: impl IntoElement + 'static, id: &'static str) -> AnyElem
             },
         )
         .into_any_element()
+}
+
+fn blinking(element: impl IntoElement + 'static) -> AnyElement {
+    let dimmed = SystemTime::now().duration_since(UNIX_EPOCH).is_ok_and(|elapsed| (elapsed.as_millis() / BLINK_HALF_PERIOD.as_millis()) % 2 == 1);
+    div().child(element).opacity(if dimmed { BLINK_DIMMED_OPACITY } else { 1. }).into_any_element()
 }
 
 fn speaking_ring(avatar: AnyElement, speaking: bool) -> Div {
@@ -707,10 +714,10 @@ fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: Ti
     }
     let waiting = remote.state == TileState::Invited;
     let avatar = person_avatar(&state.directory, remote.user_id.as_deref(), &remote.name, size.avatar);
-    let avatar = if waiting { pulsing(avatar, "call-invited-pulse") } else { avatar };
+    let avatar = if waiting { blinking(avatar) } else { avatar };
     let caption = model.tile_caption(remote).map(|text| {
         let label = div().text_size(px(12.)).text_color(theme::text_muted()).child(text);
-        if waiting { pulsing(label, "call-invited-caption") } else { label.into_any_element() }
+        if waiting { blinking(label) } else { label.into_any_element() }
     });
     tile(size, avatar, &remote.name, model.tile_speaking(remote), remote.muted, caption, extras).into_any_element()
 }

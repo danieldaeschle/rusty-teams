@@ -405,6 +405,7 @@ impl ConversationView {
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
         let subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
+            cx.observe(&app, |_, _, cx| cx.notify()),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.subscribe_in(&subject, window, Self::on_subject_event),
