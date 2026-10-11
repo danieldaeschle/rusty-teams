@@ -11,7 +11,7 @@ use super::layout::{self, Slot, ring_height};
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide, in_call,
-    should_flash,
+    should_flash, should_ringback,
 };
 use super::settings;
 use super::settings_view::SettingsView;
@@ -65,6 +65,7 @@ pub struct NotificationCenter {
     ring_windows: HashMap<u64, OpenWindow>,
     ring_opening: HashSet<u64>,
     ring_tone: Option<platform::RingTone>,
+    ringback: Option<platform::RingTone>,
     demo_mode: bool,
     pill: Option<OpenWindow>,
     pill_opening: bool,
@@ -101,6 +102,7 @@ impl NotificationCenter {
             ring_windows: HashMap::new(),
             ring_opening: HashSet::new(),
             ring_tone: None,
+            ringback: None,
             demo_mode: app.read(cx).mode.demo,
             pill: None,
             pill_opening: false,
@@ -219,6 +221,7 @@ impl NotificationCenter {
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.refresh_badge(cx),
             AppEvent::Ring => self.on_rings_changed(cx),
+            AppEvent::Call => self.sync_ringback(cx),
             _ => {}
         }
     }
@@ -445,8 +448,17 @@ impl NotificationCenter {
     fn sync_ring_tone(&mut self, ringing: bool) {
         let audible = ringing && self.settings.sound && !self.demo_mode;
         match (audible, self.ring_tone.is_some()) {
-            (true, false) => self.ring_tone = platform::start_ring(),
+            (true, false) => self.ring_tone = platform::start_ring(self.settings.ringtone),
             (false, true) => self.ring_tone = None,
+            _ => {}
+        }
+    }
+
+    fn sync_ringback(&mut self, cx: &Context<Self>) {
+        let audible = should_ringback(self.app.read(cx).call.as_ref().map(|call| &call.model)) && !self.demo_mode;
+        match (audible, self.ringback.is_some()) {
+            (true, false) => self.ringback = platform::start_ringback(),
+            (false, true) => self.ringback = None,
             _ => {}
         }
     }
@@ -835,7 +847,7 @@ impl NotificationCenter {
                 cx,
             ))),
             titlebar: Some(TitlebarOptions {
-                title: Some("Notifications".into()),
+                title: Some("Settings".into()),
                 ..Default::default()
             }),
             is_resizable: false,

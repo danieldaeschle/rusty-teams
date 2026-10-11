@@ -81,6 +81,7 @@ pub enum CallUpdate {
     LocalShare(Option<String>),
     ShareSources(Vec<ShareSource>),
     ShareSound(bool),
+    OwnHand(Option<u64>),
     Reaction { mri: String, reaction: Reaction },
     Captions(CaptionState),
     Caption(CaptionEntry),

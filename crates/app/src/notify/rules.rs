@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use calling::Progress;
 use store::{ChannelNotificationLevel, ChannelNotifications};
 
-use crate::call::CallModel;
+use super::ring_tone::Ringtone;
+use crate::call::{CallKind, CallModel};
 
 pub const SOUND_THROTTLE: Duration = Duration::from_secs(10);
 
@@ -73,6 +75,7 @@ pub struct Settings {
     pub flash: bool,
     pub close_to_tray: bool,
     pub do_not_disturb: bool,
+    pub ringtone: Ringtone,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
             flash: true,
             close_to_tray: true,
             do_not_disturb: false,
+            ringtone: Ringtone::Default,
         }
     }
 }
@@ -142,6 +146,15 @@ pub struct Environment {
 
 pub fn in_call(server_in_call: bool, native_call: Option<&CallModel>) -> bool {
     server_in_call || native_call.is_some_and(CallModel::is_active)
+}
+
+pub fn should_ringback(native_call: Option<&CallModel>) -> bool {
+    native_call.is_some_and(|model| {
+        !model.incoming
+            && model.kind != CallKind::Meeting
+            && model.is_connecting()
+            && matches!(model.progress, Some(Progress::Calling | Progress::Ringing))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +332,31 @@ mod tests {
                 reason: EndReason::LocalHangup
             }))
         ));
+    }
+
+    #[test]
+    fn ringback_plays_only_while_an_outgoing_non_meeting_call_is_connecting() {
+        let callees = [("8:orgid:a".to_owned(), "Ana".to_owned())];
+        let outgoing = |progress: Option<Progress>, state: CallState| {
+            let mut model = CallModel::people("Ana", &callees);
+            model.progress = progress;
+            model.state = state;
+            model
+        };
+        let since = std::time::Instant::now();
+        assert!(!should_ringback(None));
+        assert!(!should_ringback(Some(&outgoing(None, CallState::Connecting))));
+        assert!(should_ringback(Some(&outgoing(Some(Progress::Calling), CallState::Connecting))));
+        assert!(should_ringback(Some(&outgoing(Some(Progress::Ringing), CallState::Connecting))));
+        assert!(!should_ringback(Some(&outgoing(Some(Progress::Ringing), CallState::Connected { since }))));
+        let ended = CallState::Ended { reason: EndReason::LocalHangup };
+        assert!(!should_ringback(Some(&outgoing(Some(Progress::Ringing), ended))));
+        let mut meeting = CallModel::meeting("Standup", false);
+        meeting.progress = Some(Progress::Calling);
+        assert!(!should_ringback(Some(&meeting)));
+        let mut incoming = CallModel::incoming("Bea", "8:orgid:b", "Bea");
+        incoming.progress = Some(Progress::Ringing);
+        assert!(!should_ringback(Some(&incoming)));
     }
 
     #[test]

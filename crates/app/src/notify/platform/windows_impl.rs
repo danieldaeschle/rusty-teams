@@ -36,7 +36,7 @@ use windows::core::{BOOL, w};
 
 use super::{NativeHandle, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
-use crate::notify::ring_tone::{SAMPLE_RATE, ring_cycle};
+use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, ringback_cycle};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../assets/sounds/notification.mp3");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/teams-fast-256.png");
@@ -262,7 +262,31 @@ impl Drop for RingTone {
     }
 }
 
-pub fn start_ring() -> Option<RingTone> {
+pub fn start_ring(ringtone: Ringtone) -> Option<RingTone> {
+    start_cycle(ringtone.cycle(SAMPLE_RATE))
+}
+
+pub fn start_ringback() -> Option<RingTone> {
+    start_cycle(ringback_cycle(SAMPLE_RATE))
+}
+
+pub fn play_preview(ringtone: Ringtone) {
+    let cycle = ringtone.cycle(SAMPLE_RATE);
+    std::thread::spawn(move || {
+        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+            return;
+        };
+        sink.log_on_drop(false);
+        let (Some(channels), Some(rate)) = (NonZero::new(1u16), NonZero::new(SAMPLE_RATE)) else {
+            return;
+        };
+        let player = rodio::Player::connect_new(sink.mixer());
+        player.append(rodio::buffer::SamplesBuffer::new(channels, rate, cycle));
+        player.sleep_until_end();
+    });
+}
+
+fn start_cycle(cycle: Vec<f32>) -> Option<RingTone> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     std::thread::spawn(move || {
@@ -273,7 +297,6 @@ pub fn start_ring() -> Option<RingTone> {
         let (Some(channels), Some(rate)) = (NonZero::new(1u16), NonZero::new(SAMPLE_RATE)) else {
             return;
         };
-        let cycle = ring_cycle(SAMPLE_RATE);
         while !flag.load(Ordering::SeqCst) {
             let player = rodio::Player::connect_new(sink.mixer());
             player.append(rodio::buffer::SamplesBuffer::new(channels, rate, cycle.clone()));

@@ -8,6 +8,7 @@ mod join;
 mod launcher;
 mod model;
 mod pictures;
+mod preview;
 mod ring;
 mod target;
 
@@ -21,5 +22,6 @@ pub use model::{
     ActiveCall, CAPTION_SHOWN, CHAT_OPEN_TILES, CallKind, CallModel, Focus, GridLayout, MAX_TILES, REACTION_SHOWN, Tile, TileSize, TileState,
     grid_layout, tile_size,
 };
+pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use target::plan_for_chat;

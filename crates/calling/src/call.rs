@@ -1325,15 +1325,20 @@ async fn drive(
                 }
                 Some(CallCommand::RefreshShareSources) => refresh_share_sources(control.updates(), options.video),
                 Some(CallCommand::SetHand(true)) => match remote.signaling.raise_hand(&remote.conversation, &remote.participant).await {
-                    Ok(state_id) => own_hand = state_id,
+                    Ok(receipt) => {
+                        own_hand = receipt.state_id;
+                        control.send(CallUpdate::OwnHand(Some(receipt.rank)));
+                    }
                     Err(error) => {
                         timeline.record("raise hand failed", error.to_string());
+                        control.send(CallUpdate::OwnHand(None));
                         control.send(CallUpdate::Notice("Could not raise your hand".into()));
                     }
                 },
                 Some(CallCommand::SetHand(false)) => {
                     let state_ids: Vec<String> = roster.hand_of(&own_mri).map(|hand| hand.state_id.clone()).or(own_hand.take()).into_iter().collect();
                     own_hand = None;
+                    control.send(CallUpdate::OwnHand(None));
                     if !state_ids.is_empty()
                         && let Err(error) = remote.signaling.lower_hands(&remote.conversation, &remote.participant, &state_ids).await
                     {

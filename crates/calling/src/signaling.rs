@@ -346,10 +346,10 @@ impl Signaling {
         self.state_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
     }
 
-    pub async fn raise_hand(&self, conversation: &Conversation, from: &Participant) -> Result<Option<String>> {
+    pub async fn raise_hand(&self, conversation: &Conversation, from: &Participant) -> Result<HandReceipt> {
         let body = raise_hand_body(from.wire(), self.next_state_sequence());
         let response = self.send("POST publishState", Method::Post, conversation.link("publishState")?, Some(body)).await?;
-        Ok(response.body["publishStateResponse"]["stateId"].as_str().map(str::to_owned))
+        Ok(hand_receipt_from(&response.body))
     }
 
     pub async fn lower_hands(&self, conversation: &Conversation, from: &Participant, state_ids: &[String]) -> Result<()> {
@@ -850,6 +850,20 @@ fn conversation_from(body: &Value) -> Result<Conversation> {
     Ok(Conversation { controller, links, chat_thread: chat_thread_id(body) })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandReceipt {
+    pub state_id: Option<String>,
+    pub rank: u64,
+}
+
+pub fn hand_receipt_from(body: &Value) -> HandReceipt {
+    let published = &body["publishStateResponse"];
+    HandReceipt {
+        state_id: published["stateId"].as_str().map(str::to_owned),
+        rank: published["typeRank"].as_u64().unwrap_or(u64::MAX),
+    }
+}
+
 pub fn raise_hand_body(from: Value, sequence_number: u32) -> Value {
     json!({
         "from": from,
@@ -960,6 +974,13 @@ mod tests {
         let all = remove_all_hands_body(json!({"id": "8:orgid:me"}), 6);
         assert_eq!(all["scope"], "all");
         assert_eq!(all["stateType"], "raiseHands");
+    }
+
+    #[test]
+    fn a_raised_hand_reads_state_id_and_rank_from_the_publish_response() {
+        let body = json!({"publishStateResponse": {"stateId": "s-9", "typeRank": 3}});
+        assert_eq!(hand_receipt_from(&body), HandReceipt { state_id: Some("s-9".to_owned()), rank: 3 });
+        assert_eq!(hand_receipt_from(&json!({})), HandReceipt { state_id: None, rank: u64::MAX });
     }
 
     #[test]

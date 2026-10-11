@@ -72,12 +72,13 @@ pub fn reaction_glyph(reaction: Reaction) -> String {
 #[derive(Default)]
 struct TileExtras {
     hand: Option<usize>,
+    own: bool,
     reaction: Option<(Reaction, u64)>,
     spotlight: bool,
     pinned: bool,
 }
 
-fn hand_badge(position: usize) -> Div {
+fn hand_badge(position: usize, own: bool) -> Div {
     h_flex()
         .h(px(24.))
         .px(px(8.))
@@ -88,7 +89,7 @@ fn hand_badge(position: usize) -> Div {
         .text_color(hsla(0., 0., 0.08, 1.))
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
-        .child(format!("Hand {position}"))
+        .child(if own { "Hand raised".to_owned() } else { format!("Hand {position}") })
 }
 
 fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
@@ -124,7 +125,7 @@ fn tile_overlays(extras: &TileExtras) -> Vec<AnyElement> {
             .top(px(10.))
             .left(px(10.))
             .gap(px(6.))
-            .children(extras.hand.map(hand_badge))
+            .children(extras.hand.map(|position| hand_badge(position, extras.own)))
             .when(extras.spotlight, |row| row.child(spotlight_chip()))
             .when(extras.pinned, |row| row.child(pin_chip()))
             .into_any_element()
@@ -688,6 +689,7 @@ fn devices_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement
 fn person_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, remote: &Tile, size: TileSize, now: Instant) -> AnyElement {
     let extras = TileExtras {
         hand: remote.hand.map(|rank| model.hand_position(rank)),
+        own: false,
         reaction: model.chip_of(&remote.mri, now).map(|chip| (chip.reaction, chip.serial)),
         spotlight: remote.spotlight.is_some(),
         pinned: model.is_pinned(&remote.mri),
@@ -719,6 +721,7 @@ fn own_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: T
     let own_mri = model.own_mri.clone().unwrap_or_default();
     let extras = TileExtras {
         hand: model.own_hand.map(|rank| model.hand_position(rank)),
+        own: true,
         reaction: model.own_chip(now).map(|chip| (chip.reaction, chip.serial)),
         spotlight: model.own_spotlight.is_some(),
         pinned: model.is_pinned(&own_mri),
@@ -837,8 +840,7 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
         .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
         .child(h_flex().gap(px(2.)).items_center().child(camera_button(app, model)).children(camera_menu_button(app, model, BackgroundMenu::of(state))))
         .child(share_button(app, model, state.call_share_sound))
-        .child(hand_button(app, model))
-        .child(reactions_button(app, model))
+        .when(model.has_reaction_controls(), |row| row.child(hand_button(app, model)).child(reactions_button(app, model)))
         .child(devices_button(app, model))
         .children(more_button(app, model))
         .when(call.chat_thread().is_some(), |row| row.child(chat_button(app, call.chat_open, state.call_chat_unread())))
