@@ -1,4 +1,4 @@
-use std::{ops::Range, time::Duration};
+use std::{ops::Range, rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, Axis, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
@@ -149,6 +149,11 @@ impl MessageScrollerState {
         true
     }
 
+    /// Stop following the tail until the next reset or `scroll_to_end`.
+    pub fn stop_following(&mut self) {
+        self.list_state.set_follow_mode(FollowMode::Normal);
+    }
+
     /// Resume tail following and scroll to the latest row.
     pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
         self.list_state.set_follow_mode(FollowMode::Tail);
@@ -177,6 +182,8 @@ pub struct MessageScroller {
     bottom_fade: Option<Hsla>,
     scrollbar: bool,
     jump_button: bool,
+    force_jump_button: bool,
+    on_jump: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     jump_button_label: SharedString,
 }
 
@@ -207,6 +214,8 @@ impl MessageScroller {
             bottom_fade: None,
             scrollbar: true,
             jump_button: true,
+            force_jump_button: false,
+            on_jump: None,
             jump_button_label: "Jump to latest".into(),
         }
     }
@@ -220,6 +229,18 @@ impl MessageScroller {
     /// Enable or disable the built-in jump-to-latest button.
     pub fn jump_button(mut self, jump_button: bool) -> Self {
         self.jump_button = jump_button;
+        self
+    }
+
+    /// Show the jump button even when the list is at its end.
+    pub fn force_jump_button(mut self, force: bool) -> Self {
+        self.force_jump_button = force;
+        self
+    }
+
+    /// Run `callback` on jump-button click instead of scrolling to the end.
+    pub fn on_jump(mut self, callback: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_jump = Some(Rc::new(callback));
         self
     }
 
@@ -300,7 +321,7 @@ impl RenderOnce for MessageScroller {
             let state = self.state.read(cx);
             (state.list_state.clone(), state.is_scrolled_up())
         };
-        let show_jump_button = self.jump_button && scrolled_up;
+        let show_jump_button = self.jump_button && (scrolled_up || self.force_jump_button);
         let jump_button_visibility = if self.jump_button {
             transition(
                 (root_id.clone(), "jump-button-visibility"),
@@ -408,6 +429,7 @@ impl RenderOnce for MessageScroller {
             .child(ScrollableMask::new(Axis::Vertical, &list_state).id(root_id.clone()))
             .when(self.jump_button && jump_button_visibility > 0., |this| {
                 let state = self.state.clone();
+                let on_jump = self.on_jump.clone();
 
                 this.child(
                     div()
@@ -433,8 +455,9 @@ impl RenderOnce for MessageScroller {
                                 .bg(tokens.colors.background)
                                 .text_color(tokens.colors.foreground)
                                 .refine_style(&jump_button_style)
-                                .on_click(move |_, _, cx| {
-                                    state.update(cx, |state, cx| state.scroll_to_end(cx));
+                                .on_click(move |_, window, cx| match &on_jump {
+                                    Some(on_jump) => on_jump(window, cx),
+                                    None => state.update(cx, |state, cx| state.scroll_to_end(cx)),
                                 })
                                 .when_some(jump_button_renderer, |button, renderer| {
                                     renderer(button)

@@ -2,9 +2,9 @@ use chatsvc::{
     CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState, Conversations,
     ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
     LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
-    MessageLinks, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts,
+    MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts,
     SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest, Translation,
-    TranslationTrigger, Translator, WorkLocationKind,
+    TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -298,6 +298,24 @@ pub trait Remote {
 
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
         Err(Error::Unsupported("call history"))
+    }
+
+    async fn chat_message_window(
+        &self,
+        _chat_id: &str,
+        _anchor_id: &str,
+        _direction: WindowDirection,
+        _page_size: usize,
+    ) -> Result<MessageWindow> {
+        Err(Error::Unsupported("message windows"))
+    }
+
+    async fn chat_messages_by_id(
+        &self,
+        _chat_id: &str,
+        _message_ids: &[String],
+    ) -> Result<Vec<Result<Message>>> {
+        Err(Error::Unsupported("batched message reads"))
     }
 
     async fn chat_pins(&self, _chat_id: &str) -> Result<Vec<PinnedMessage>> {
@@ -869,6 +887,30 @@ impl Remote for Graph {
 
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
         Ok(Messages::new(self.session()).list_call_logs().await?)
+    }
+
+    async fn chat_message_window(
+        &self,
+        chat_id: &str,
+        anchor_id: &str,
+        direction: WindowDirection,
+        page_size: usize,
+    ) -> Result<MessageWindow> {
+        Ok(Messages::new(self.session())
+            .message_window(chat_id, anchor_id, direction, page_size)
+            .await?)
+    }
+
+    async fn chat_messages_by_id(
+        &self,
+        chat_id: &str,
+        message_ids: &[String],
+    ) -> Result<Vec<Result<Message>>> {
+        let messages = Graph::chat_messages_by_id(self, chat_id, message_ids).await?;
+        Ok(messages
+            .into_iter()
+            .map(|message| message.map_err(Into::into))
+            .collect())
     }
 
     async fn chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {

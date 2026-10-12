@@ -1,16 +1,28 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui_kit::*;
+use store::MessageRecord;
 
 use super::ConversationView;
 use crate::app_state::Selection;
 use crate::rows::reply_excerpt;
+use crate::runtime;
 use crate::views::message_actions::Action;
 use crate::views::pin_banner::{PinBannerActions, PinBannerData, cycle_pin, render_pin_banner};
 
 pub(super) struct PinPreview {
     author: Option<String>,
     text: String,
+}
+
+impl PinPreview {
+    fn of(record: &MessageRecord) -> Self {
+        PinPreview {
+            author: record.sender_name.clone(),
+            text: reply_excerpt(record),
+        }
+    }
 }
 
 impl ConversationView {
@@ -23,6 +35,7 @@ impl ConversationView {
 
     pub(super) fn refresh_pin_previews(&mut self, cx: &mut Context<Self>) {
         self.pin_previews.clear();
+        self.pin_fetches.clear();
         self.pin_index = 0;
         let Some(chat_id) = self.chat_id() else {
             return;
@@ -51,20 +64,57 @@ impl ConversationView {
             .store
             .messages_by_id(chat_id, &ids)
             .unwrap_or_default();
-        self.pin_previews = records
+        let mut previews: HashMap<String, PinPreview> = records
             .into_iter()
-            .map(|(message_id, record)| {
-                let preview = PinPreview {
-                    author: record.sender_name.clone(),
-                    text: reply_excerpt(&record),
-                };
-                (message_id, preview)
-            })
+            .map(|(message_id, record)| (message_id, PinPreview::of(&record)))
             .collect();
+        for id in &ids {
+            if !previews.contains_key(id)
+                && let Some(preview) = self.pin_previews.remove(id)
+            {
+                previews.insert(id.clone(), preview);
+            }
+        }
+        self.pin_previews = previews;
         let count = ids.len();
         if self.pin_index >= count {
             self.pin_index = 0;
         }
+        for id in ids {
+            if !self.pin_previews.contains_key(&id) {
+                self.fetch_pin_preview(chat_id, id, cx);
+            }
+        }
+    }
+
+    fn fetch_pin_preview(&mut self, chat_id: &str, message_id: String, cx: &mut Context<Self>) {
+        let Some(engine) = self.app.read(cx).engine.clone() else {
+            return;
+        };
+        if !self.pin_fetches.insert(message_id.clone()) {
+            return;
+        }
+        let chat_id = chat_id.to_owned();
+        let task_chat_id = chat_id.clone();
+        let task_message_id = message_id.clone();
+        let receiver = runtime::spawn(async move {
+            engine
+                .fetch_chat_message(&task_chat_id, &task_message_id)
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(record))) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if this.chat_id().as_deref() == Some(chat_id.as_str()) {
+                    this.pin_previews.insert(message_id, PinPreview::of(&record));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn pin_action(

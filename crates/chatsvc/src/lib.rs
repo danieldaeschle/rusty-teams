@@ -20,6 +20,7 @@ pub mod saved;
 pub mod settings;
 pub mod transcripts;
 pub mod translate;
+pub mod window;
 
 pub use calendar::{Calendar, CalendarEvent, ResponseType, meet_now_join_url, parse_calendar_events};
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
@@ -61,3 +62,4 @@ pub use translate::{
     Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,
     TranslationStatus, TranslationTrigger, Translator, language_code,
 };
+pub use window::{MessageWindow, WindowDirection};

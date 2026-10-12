@@ -17,8 +17,11 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget};
-use teams_core::{ExecuteAction, FileCard, LinkPreview};
+use teams_core::{
+    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
+};
 
+mod detached;
 mod feed;
 mod pins;
 mod proposal;
@@ -68,6 +71,7 @@ use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
+use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
 use render_env::RenderEnv;
 use shared::SharedState;
@@ -136,6 +140,8 @@ struct Current {
     fetched: bool,
     first_unread: Option<String>,
     sync: SyncProgress,
+    detached: Option<DetachedWindow>,
+    window_request: Option<String>,
 }
 
 struct ReactionDetails {
@@ -178,6 +184,7 @@ pub struct ConversationView {
     highlighted_message: Option<String>,
     pin_index: usize,
     pin_previews: HashMap<String, pins::PinPreview>,
+    pin_fetches: HashSet<String>,
     notice: Option<String>,
     scheduled_failure: Option<scheduled::ScheduledFailure>,
     scheduled_in_flight: HashSet<String>,
@@ -492,6 +499,7 @@ impl ConversationView {
             highlighted_message: None,
             pin_index: 0,
             pin_previews: HashMap::new(),
+            pin_fetches: HashSet::new(),
             notice: None,
             scheduled_failure: None,
             scheduled_in_flight: HashSet::new(),
@@ -806,6 +814,8 @@ impl ConversationView {
             fetched: false,
             first_unread,
             sync: SyncProgress::default(),
+            detached: None,
+            window_request: None,
         });
         self.refresh_agent_runs(cx);
         self.sync_generation += 1;
@@ -1020,11 +1030,28 @@ impl ConversationView {
 
     fn jump_to_message(&mut self, conversation_id: &str, message_id: &str, cx: &mut Context<Self>) {
         let store = self.app.read(cx).store.clone();
-        let Some(record) = store
+        let record = store
             .messages_by_id(conversation_id, &[message_id.to_owned()])
             .ok()
-            .and_then(|mut found| found.remove(message_id))
-        else {
+            .and_then(|mut found| found.remove(message_id));
+        if self.chat_id().as_deref() == Some(conversation_id) {
+            let created_at = record.as_ref().map(|record| record.created_at);
+            match self.jump_plan_for(conversation_id, created_at, cx) {
+                JumpPlan::LoadWindow => {
+                    self.open_detached(conversation_id.to_owned(), message_id.to_owned(), cx);
+                    return;
+                }
+                plan => {
+                    if let Some(current) = self.current.as_mut() {
+                        current.window_request = None;
+                        if plan == JumpPlan::LeaveWindow {
+                            current.detached = None;
+                        }
+                    }
+                }
+            }
+        }
+        let Some(record) = record else {
             return;
         };
         let messages_from_target = store
@@ -1071,6 +1098,10 @@ impl ConversationView {
         };
         self.reload_pending(cx);
         self.rebuild(true, cx);
+        self.reveal_row(target_key, cx);
+    }
+
+    fn reveal_row(&mut self, target_key: String, cx: &mut Context<Self>) {
         let index = self
             .rows
             .borrow()
@@ -1360,16 +1391,33 @@ impl ConversationView {
             ViewMode::Thread(root_id) => Some(root_id.clone()),
             ViewMode::Flat | ViewMode::ThreadList => None,
         };
-        let records: Vec<MessageRecord> = match &thread_root {
-            Some(root_id) => store.thread_messages(&conversation_id, root_id),
-            None => store.messages(&conversation_id, None, limit),
-        }
-        .unwrap_or_default();
-        let sync_has_more = store
-            .sync_state(&conversation_id)
-            .ok()
-            .flatten()
-            .is_none_or(|state| state.has_more);
+        let sync_state = store.sync_state(&conversation_id).ok().flatten();
+        let window = current.detached.as_ref().map(|detached| {
+            (
+                detached.oldest,
+                detached.newest,
+                detached.older_cursor.is_some(),
+                detached.newer_cursor.is_some(),
+            )
+        });
+        let records: Vec<MessageRecord> = match (&thread_root, window) {
+            (Some(root_id), _) => store
+                .thread_messages(&conversation_id, root_id)
+                .unwrap_or_default(),
+            (None, Some((oldest, newest, _, _))) => store
+                .messages_between(&conversation_id, oldest, newest)
+                .unwrap_or_default(),
+            (None, None) if matches!(current.selection, Selection::Chat(_)) => without_islands(
+                store
+                    .messages(&conversation_id, None, limit)
+                    .unwrap_or_default(),
+                sync_state.as_ref().and_then(|state| state.oldest_loaded),
+            ),
+            (None, None) => store
+                .messages(&conversation_id, None, limit)
+                .unwrap_or_default(),
+        };
+        let sync_has_more = sync_state.as_ref().is_none_or(|state| state.has_more);
         let mut context = self.row_context(cx);
         let reactor_ids: Vec<String> = records
             .iter()
@@ -1407,14 +1455,24 @@ impl ConversationView {
                 current.has_older = false;
                 placeholder_rows()
             }
-            ViewMode::Flat => {
-                current.has_older = has_older;
-                let mut rows = flat_rows(&records, &context, has_older);
-                if !has_older && let Some(start) = start {
-                    rows.insert(0, Row::Start(start));
+            ViewMode::Flat => match window {
+                Some((_, _, has_older_window, has_newer_window)) => {
+                    current.has_older = has_older_window;
+                    let mut rows = flat_rows(&records, &context, has_older_window);
+                    if has_newer_window {
+                        rows.push(Row::LoadNewer);
+                    }
+                    rows
                 }
-                rows
-            }
+                None => {
+                    current.has_older = has_older;
+                    let mut rows = flat_rows(&records, &context, has_older);
+                    if !has_older && let Some(start) = start {
+                        rows.insert(0, Row::Start(start));
+                    }
+                    rows
+                }
+            },
             ViewMode::ThreadList => {
                 current.has_older = has_older;
                 thread_list_rows(&records, &context, has_older)
@@ -1424,12 +1482,15 @@ impl ConversationView {
                 thread_rows(&records, root_id, &context)
             }
         };
-        let local: Vec<MessageRow> = self
-            .pending
-            .iter()
-            .cloned()
-            .chain(self.scheduled_rows(context.my_user_id.as_deref(), cx))
-            .collect();
+        let local: Vec<MessageRow> = if window.is_some() {
+            Vec::new()
+        } else {
+            self.pending
+                .iter()
+                .cloned()
+                .chain(self.scheduled_rows(context.my_user_id.as_deref(), cx))
+                .collect()
+        };
         if in_feed {
             place_local_rows(&mut rows, local);
         } else {
@@ -1454,6 +1515,10 @@ impl ConversationView {
         }
         assign_series(&mut rows);
         self.apply_rows(rows, reset, cx);
+        if self.is_detached() {
+            self.scroller
+                .update(cx, |scroller, _| scroller.stop_following());
+        }
     }
 
     fn apply_rows(&mut self, new_rows: Vec<Row>, reset: bool, cx: &mut Context<Self>) {
@@ -1823,6 +1888,9 @@ impl ConversationView {
     }
 
     fn request_older(&mut self, cx: &mut Context<Self>) {
+        if self.is_detached() {
+            return self.request_window_page(WindowDirection::Backward, cx);
+        }
         let Some(engine) = self.app.read(cx).engine.clone() else {
             return;
         };
@@ -1952,6 +2020,7 @@ impl ConversationView {
     }
 
     fn send(&mut self, outgoing: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_detached(cx);
         self.send_as(new_outbox_id(), outgoing, None, window, cx);
     }
 
@@ -3143,8 +3212,11 @@ impl ConversationView {
             header_call_controls(&self.app, app, &current.selection)
         };
         let sync = &current.sync;
+        let loading_window = current.window_request.is_some();
         if sync.failed {
             subline = "Not up to date".to_owned();
+        } else if loading_window {
+            subline = "Loading message ...".to_owned();
         } else if sync.shown_at.is_some() {
             subline = if sync.slow {
                 "Taking longer than usual ..."
@@ -3157,7 +3229,7 @@ impl ConversationView {
         }
         header
             .relative()
-            .when(sync.shown_at.is_some(), |header| {
+            .when(sync.shown_at.is_some() || loading_window, |header| {
                 header.child(progress_bar())
             })
             .children(lead)
@@ -3213,6 +3285,7 @@ impl Render for ConversationView {
                 .into_any_element();
         }
         let in_feed = self.in_feed();
+        let detached = self.is_detached();
         let rows_seen = self.feed_rows_seen.replace(usize::MAX);
         if in_feed && rows_seen != usize::MAX {
             self.feed_at_top = rows_seen == 0;
@@ -3262,6 +3335,25 @@ impl Render for ConversationView {
                             .child("Loading older messages")
                             .into_any_element()
                     }
+                    Some(Row::LoadNewer) => {
+                        let view = env.view.clone();
+                        cx.defer(move |cx| {
+                            view.update(cx, |this, cx| {
+                                this.request_window_page(WindowDirection::Forward, cx)
+                            })
+                            .ok();
+                        });
+                        h_flex()
+                            .w_full()
+                            .py_2()
+                            .gap(px(6.))
+                            .justify_center()
+                            .text_size(px(12.))
+                            .text_color(theme::text_muted())
+                            .child(icon(IconName::Loader, 12., theme::text_muted()))
+                            .child("Loading newer messages")
+                            .into_any_element()
+                    }
                     Some(Row::Start(start)) => {
                         let state = env.app.read(cx);
                         v_flex()
@@ -3297,6 +3389,13 @@ impl Render for ConversationView {
         )
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
         .jump_button(!in_feed)
+        .force_jump_button(detached)
+        .when(detached, |scroller| {
+            let view = cx.weak_entity();
+            scroller.on_jump(move |_, cx| {
+                view.update(cx, |this, cx| this.leave_detached(cx)).ok();
+            })
+        })
         .with_bottom_fade(background);
 
         root = match self.current.as_ref().filter(|_| !drafting) {

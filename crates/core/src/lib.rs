@@ -32,6 +32,7 @@ mod mentions;
 mod message_actions;
 mod meeting_join;
 mod message_link;
+mod message_window;
 mod people;
 mod presence;
 mod preview;
@@ -79,7 +80,7 @@ pub use card_widgets::{
 pub use card_width::{TargetWidth, WidthClass};
 pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind, ForwardResult, Gif, PinnedMessage, PresenceStatus,
-    SavedMessage, ScheduledDraft, StatusNote, WorkLocation, WorkLocationKind, WorkLocationSource,
+    SavedMessage, ScheduledDraft, StatusNote, WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings};
 pub use draft::{
@@ -102,6 +103,7 @@ pub use download::LibraryFile;
 pub use images::StoredImage;
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
 pub use mapping::{chat_record, message_record};
+pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
 pub use mentions::MentionInput;
 pub use meeting_join::{

@@ -124,6 +124,8 @@ struct Fake {
     own_status_answer: Mutex<chatsvc::PresenceStatus>,
     availability_puts: Mutex<Vec<Option<chatsvc::ForcedAvailability>>>,
     note_puts: Mutex<Vec<Option<chatsvc::StatusNote>>>,
+    window_answer: Mutex<Option<chatsvc::MessageWindow>>,
+    window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
 }
 
 impl Fake {
@@ -260,6 +262,36 @@ impl Remote for Handle {
             matching,
             has_more.then(|| "https://graph.microsoft.com/v1.0/next".to_owned()),
         )
+    }
+
+    async fn chat_message_window(
+        &self,
+        _chat_id: &str,
+        anchor_id: &str,
+        direction: chatsvc::WindowDirection,
+        _page_size: usize,
+    ) -> Result<chatsvc::MessageWindow> {
+        self.window_requests
+            .lock()
+            .unwrap()
+            .push((anchor_id.to_owned(), direction));
+        self.window_answer
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(Error::Unsupported("no window"))
+    }
+
+    async fn chat_messages_by_id(
+        &self,
+        chat_id: &str,
+        message_ids: &[String],
+    ) -> Result<Vec<Result<Message>>> {
+        let mut messages = Vec::new();
+        for message_id in message_ids {
+            messages.push(self.chat_message(chat_id, message_id).await);
+        }
+        Ok(messages)
     }
 
     async fn chat_message(&self, _chat_id: &str, message_id: &str) -> Result<Message> {
@@ -4332,4 +4364,42 @@ async fn translating_in_an_unknown_conversation_fails() {
         )
         .await;
     assert!(matches!(outcome, Err(teams_core::Error::UnknownConversation(_))));
+}
+
+#[tokio::test]
+async fn load_window_ingests_found_messages_oldest_first_and_keeps_cursors() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(3, 3, "<p>c</p>"), message(1, 1, "<p>a</p>")]);
+    *fake.window_answer.lock().unwrap() = Some(chatsvc::MessageWindow {
+        message_ids: vec!["m0003".into(), "m0002".into(), "m0001".into()],
+        older_cursor: Some("100".into()),
+        newer_cursor: None,
+    });
+
+    let page = engine.load_window(CHAT, "m0003").await.unwrap();
+
+    let ids: Vec<&str> = page.records.iter().map(|record| record.message_id.as_str()).collect();
+    assert_eq!(ids, ["m0001", "m0003"]);
+    assert_eq!(page.oldest, Some(base() + Duration::minutes(1)));
+    assert_eq!(page.newest, Some(base() + Duration::minutes(3)));
+    assert_eq!(page.older_cursor.as_deref(), Some("100"));
+    assert_eq!(page.newer_cursor, None);
+    assert_eq!(engine.store().message_count(CHAT).unwrap(), 2);
+    assert_eq!(
+        *fake.window_requests.lock().unwrap(),
+        [("m0003".to_owned(), chatsvc::WindowDirection::Bidirectional)]
+    );
+}
+
+#[tokio::test]
+async fn fetch_chat_message_does_not_store_the_message() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    fake.set_chat_messages(vec![message(7, 7, "<p>pinned</p>")]);
+
+    let record = engine.fetch_chat_message(CHAT, "m0007").await.unwrap().unwrap();
+
+    assert_eq!(record.message_id, "m0007");
+    assert_eq!(engine.store().message_count(CHAT).unwrap(), 0);
 }

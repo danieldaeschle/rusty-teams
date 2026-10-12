@@ -62,6 +62,30 @@ impl Graph {
         Ok(serde_json::from_value(body)?)
     }
 
+    pub async fn chat_messages_by_id(
+        &self,
+        chat_id: &str,
+        message_ids: &[String],
+    ) -> Result<Vec<Result<Message>>> {
+        let scope = Scope::graph("Chat.Read");
+        let mut messages = Vec::with_capacity(message_ids.len());
+        for chunk in message_ids.chunks(BATCH_SIZE) {
+            let requests: Vec<Request> = chunk
+                .iter()
+                .map(|message_id| Request::get(urls::chat_message(chat_id, message_id)))
+                .collect();
+            let answers = self.session.batch(&requests, &scope).await?;
+            for (request, answer) in requests.iter().zip(answers) {
+                messages.push(if answer.is_success() {
+                    serde_json::from_value(answer.body).map_err(Into::into)
+                } else {
+                    Err(session::Error::api(answer.status, &request.url, answer.body).into())
+                });
+            }
+        }
+        Ok(messages)
+    }
+
     pub async fn list_chats(&self, limit: usize) -> Result<Vec<Chat>> {
         let mut page = self.chats_page(limit.clamp(1, CHAT_PAGE_SIZE)).await?;
         let mut chats = std::mem::take(&mut page.items);

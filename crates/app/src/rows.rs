@@ -21,6 +21,7 @@ use crate::translation::{TranslationContext, TranslationLine};
 const POST_VISIBLE_REPLIES: usize = 3;
 
 pub const LOAD_OLDER_KEY: &str = "load-older";
+pub const LOAD_NEWER_KEY: &str = "load-newer";
 const UNKNOWN_AUTHOR: &str = "Unknown";
 const DELETED_TEXT: &str = "Message deleted";
 const SERIES_GAP_MINUTES: i64 = 5;
@@ -148,6 +149,7 @@ pub const START_KEY: &str = "conversation-start";
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
     LoadOlder,
+    LoadNewer,
     Start(StartInfo),
     Skeleton(Skeleton),
     Message(Box<MessageRow>),
@@ -237,6 +239,7 @@ impl Row {
     pub fn key(&self) -> &str {
         match self {
             Row::LoadOlder => LOAD_OLDER_KEY,
+            Row::LoadNewer => LOAD_NEWER_KEY,
             Row::Start(_) => START_KEY,
             Row::Skeleton(skeleton) => skeleton.key,
             Row::Message(message) => &message.key,
@@ -248,7 +251,9 @@ impl Row {
         match self {
             Row::Message(message) => Box::new(std::iter::once(message.as_ref())),
             Row::Post(post) => Box::new(post.messages()),
-            Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) => Box::new(std::iter::empty()),
+            Row::LoadOlder | Row::LoadNewer | Row::Start(_) | Row::Skeleton(_) => {
+                Box::new(std::iter::empty())
+            }
         }
     }
 }
@@ -1029,7 +1034,11 @@ mod tests {
             .iter()
             .map(|row| match row {
                 Row::Message(message) => message.day_header.clone(),
-                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) | Row::Post(_) => None,
+                Row::LoadOlder
+                | Row::LoadNewer
+                | Row::Start(_)
+                | Row::Skeleton(_)
+                | Row::Post(_) => None,
             })
             .collect();
         assert_eq!(
@@ -1290,7 +1299,11 @@ mod tests {
         rows.iter()
             .filter_map(|row| match row {
                 Row::Message(message) => Some((message.series.has_prev, message.series.has_next)),
-                Row::LoadOlder | Row::Start(_) | Row::Skeleton(_) | Row::Post(_) => None,
+                Row::LoadOlder
+                | Row::LoadNewer
+                | Row::Start(_)
+                | Row::Skeleton(_)
+                | Row::Post(_) => None,
             })
             .collect()
     }

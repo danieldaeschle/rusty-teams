@@ -717,6 +717,27 @@ fn counts_messages_after_a_time_from_others() {
     assert_eq!(store.count_messages_after("c", None, "me").unwrap(), 2);
 }
 
+#[test]
+fn messages_between_is_inclusive_and_oldest_first() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_messages(&[
+            message("c", "m4", 4),
+            message("c", "m1", 1),
+            message("c", "m3", 3),
+            message("c", "m2", 2),
+            message("other", "o3", 3),
+        ])
+        .unwrap();
+    let ids: Vec<String> = store
+        .messages_between("c", at(2), at(3))
+        .unwrap()
+        .into_iter()
+        .map(|record| record.message_id)
+        .collect();
+    assert_eq!(ids, ["m2", "m3"]);
+}
+
 fn html_message(
     conversation_id: &str,
     message_id: &str,
