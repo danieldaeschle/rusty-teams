@@ -70,7 +70,8 @@ pub fn parse_folders(body: &Value) -> Result<Folders> {
         .and_then(Value::as_array)
         .ok_or_else(|| Error::UnexpectedAnswer("conversationFolders missing".into()))?;
     let mut folders: Vec<Folder> = raw.iter().filter_map(parse_folder).collect();
-    let order: Vec<String> = body
+    let parsed_ids: Vec<String> = folders.iter().map(|folder| folder.id.clone()).collect();
+    let mut order: Vec<String> = body
         .get("conversationFolderOrder")
         .and_then(Value::as_array)
         .map(|ids| {
@@ -80,7 +81,9 @@ pub fn parse_folders(body: &Value) -> Result<Folders> {
                 .collect()
         })
         .unwrap_or_default();
-    if !order.is_empty() {
+    if order.is_empty() {
+        order = parsed_ids;
+    } else {
         let rank = |folder: &Folder| {
             order
                 .iter()
@@ -294,10 +297,12 @@ impl<T: CsaTransport> Pins<T> {
 
     pub async fn delete_folder(&self, folder_id: &str) -> Result<Folders> {
         self.write(|state| {
-            if !state.folders.iter().any(|folder| folder.id == folder_id) {
+            let Some(folder) = state.folders.iter().find(|folder| folder.id == folder_id) else {
                 return Ok(None);
+            };
+            if folder.kind != FolderKind::UserCreated {
+                return Err(Error::SystemFolder(folder_id.to_owned()));
             }
-            state.user_created(folder_id)?;
             Ok(Some(FolderWrite::reread(
                 Method::Delete,
                 Some(folder_id),
@@ -427,6 +432,19 @@ mod tests {
         assert_eq!(ids, ["b", "a", "r"]);
         assert_eq!(parsed.folders[1].conversation_ids, ["c1", "c2"]);
         assert_eq!(parsed.folders[0].kind, FolderKind::Favorites);
+    }
+
+    #[test]
+    fn falls_back_to_parsed_ids_without_folder_order() {
+        let body = json!({
+            "folderHierarchyVersion": 5,
+            "conversationFolders": [
+                {"id": "a", "name": "A", "folderType": "UserCreated", "conversationFolderItems": []},
+                {"id": "r", "folderType": "RecentChats", "conversationFolderItems": []}
+            ]
+        });
+        let parsed = parse_folders(&body).unwrap();
+        assert_eq!(parsed.order, ["a", "r"]);
     }
 
     #[test]

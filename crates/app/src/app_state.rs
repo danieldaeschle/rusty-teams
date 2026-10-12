@@ -266,6 +266,9 @@ impl AppState {
     }
 
     pub fn toggle_collapsed(&mut self, section_id: &str, cx: &mut Context<Self>) {
+        if data::is_pending_folder(section_id) {
+            return;
+        }
         let now_collapsed = self.collapsed.insert(section_id.to_owned());
         if !now_collapsed {
             self.collapsed.remove(section_id);
@@ -916,6 +919,19 @@ mod tests {
             active,
             received_at: Utc::now(),
         })
+    }
+
+    #[gpui_kit::test]
+    fn toggle_collapsed_ignores_pending_sections(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_collapsed("pending-section:1", cx);
+                assert!(state.collapsed.is_empty());
+            })
+        });
     }
 
     #[gpui_kit::test]

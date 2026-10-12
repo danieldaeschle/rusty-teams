@@ -255,13 +255,13 @@ fn section_menu_targets(
     directory: &Directory,
     read_only: bool,
 ) -> Vec<SectionMenuTarget> {
-    let movable = |section: &Section| {
-        directory
-            .folders
-            .iter()
-            .any(|folder| folder.id == section.id)
-            && !is_pending_folder(&section.id)
-    };
+    let movable_ids: HashSet<&str> = directory
+        .folders
+        .iter()
+        .map(|folder| folder.id.as_str())
+        .filter(|folder_id| !is_pending_folder(folder_id))
+        .collect();
+    let movable = |section: &Section| movable_ids.contains(section.id.as_str());
     sections
         .iter()
         .enumerate()
