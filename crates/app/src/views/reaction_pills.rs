@@ -173,7 +173,7 @@ fn tab_button(tab: &ReactionTab, active: bool, select_tab: SelectTab) -> Statefu
             format!("reaction-tab-{}", glyph.as_deref().unwrap_or("all")).into(),
         ))
         .h(px(TAB_HEIGHT))
-        .px(px(10.))
+        .px(px(12.))
         .gap(px(4.))
         .items_center()
         .rounded(px(7.))
@@ -198,7 +198,7 @@ fn entry_row(entry: &ReactionEntry, directory: &Directory) -> Div {
     h_flex()
         .h(px(ENTRY_HEIGHT))
         .px(px(8.))
-        .gap(px(10.))
+        .gap(px(8.))
         .items_center()
         .child(person_avatar(
             directory,

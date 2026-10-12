@@ -32,7 +32,7 @@ use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
-use super::message_row::{render_message_row, render_skeleton_row};
+use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
 use super::profile_card::opens_profile;
@@ -48,6 +48,7 @@ use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::embedded_web::EmbeddedWeb;
 use crate::emoji;
+use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
@@ -297,6 +298,25 @@ impl ConversationView {
                 .ok();
             }),
         }
+    }
+
+    fn open_image_viewer(&mut self, message_key: &str, url: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let now = Local::now();
+        let items = collect_gallery(&self.rows.borrow(), now.date_naive(), now.offset().fix());
+        let Some(index) = position_of(&items, message_key, url) else {
+            return;
+        };
+        let request = ViewerRequest {
+            conversation_id: current.selection.conversation_id().to_owned(),
+            conversation_title: selection_title(&self.app.read(cx).sidebar, &current.selection),
+            items,
+            index,
+        };
+        self.app
+            .update(cx, |state, cx| state.request_image_viewer(request, cx));
     }
 
     fn activate_file(
@@ -565,6 +585,7 @@ impl ConversationView {
             AppEvent::TaskDialog
             | AppEvent::LocalPreviews
             | AppEvent::Forward
+            | AppEvent::ImageViewer
             | AppEvent::StatusMessage
             | AppEvent::NotificationSettings
             | AppEvent::Profile
@@ -702,10 +723,15 @@ impl ConversationView {
                 .map(|face| face.name.clone())
                 .collect::<Vec<_>>(),
         );
+        let text_inset = match self.current.as_ref().map(|current| &current.mode) {
+            Some(ViewMode::Flat) => AVATAR_SIZE + AVATAR_GAP,
+            _ => 0.,
+        };
         h_flex()
             .h(px(TYPING_LINE_HEIGHT))
             .flex_none()
-            .px(px(24.))
+            .pl(px(20. + text_inset))
+            .pr(px(20.))
             .gap(px(6.))
             .items_center()
             .when(!faces.is_empty(), |line| {
@@ -2837,8 +2863,8 @@ impl ConversationView {
                         v_flex()
                             .items_center()
                             .gap(px(6.))
-                            .px(px(28.))
-                            .py(px(18.))
+                            .px(px(24.))
+                            .py(px(16.))
                             .rounded(px(12.))
                             .bg(black().opacity(0.55))
                             .child(symbol("upload", 28., theme::accent_text()))
@@ -2870,7 +2896,7 @@ impl ConversationView {
             h_flex()
                 .w_full()
                 .flex_none()
-                .px(px(24.))
+                .px(px(20.))
                 .py(px(4.))
                 .gap(px(8.))
                 .items_center()
@@ -3047,6 +3073,7 @@ impl Render for ConversationView {
             .w_full()
             .min_w_0()
             .h_full()
+            .rounded(px(10.))
             .bg(background)
             .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
@@ -3156,7 +3183,7 @@ impl Render for ConversationView {
         if let Some(notice) = &self.notice {
             root = root.child(
                 h_flex()
-                    .px_4()
+                    .px(px(20.))
                     .py_1()
                     .gap(px(8.))
                     .items_center()

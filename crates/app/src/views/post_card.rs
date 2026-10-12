@@ -91,6 +91,7 @@ fn message_content(
                     &format!("message-{index}"),
                     false,
                     directory,
+                    actions.open_image.as_ref(),
                     cx,
                 )),
         );
@@ -103,6 +104,7 @@ fn message_content(
         &format!("message-{index}"),
         directory,
         actions.files.as_ref(),
+        actions.open_image.as_ref(),
     ));
     content = content.children(
         row.meeting_link
@@ -385,7 +387,7 @@ pub fn render_post(
     card = card.children(reply_footer(index, open_reply, reply_editor));
     div()
         .w_full()
-        .px(px(24.))
+        .px(px(20.))
         .pt(px(CARD_GAP))
         .child(card)
         .into_any_element()

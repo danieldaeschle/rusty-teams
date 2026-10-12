@@ -25,14 +25,14 @@ const PILL_HEIGHT: f32 = 26.;
 const LOBBY_LIST_WIDTH: f32 = 340.;
 const LOBBY_NAME_LIMIT: usize = 28;
 const CAPTION_WIDTH: f32 = 720.;
-const CAPTION_BOTTOM: f32 = 2. * 18. + CONTROL_SIZE + 1. + 16.;
+const CAPTION_BOTTOM: f32 = 2. * 16. + CONTROL_SIZE + 16.;
 const CAPTION_FADE_SECONDS: f32 = 1.;
 const CAPTION_BACKGROUND: f32 = 0.72;
 const FOCUS_RADIUS: f32 = 12.;
 const FOCUS_AVATAR: f32 = 140.;
 const CHIP_HEIGHT: f32 = 24.;
 const MORE_SIZE: f32 = 28.;
-const SMALL_CONTROL: f32 = 28.;
+const CAMERA_MENU_WIDTH: f32 = 28.;
 const NAME_LIMIT: usize = 32;
 
 fn dark_text() -> Hsla {
@@ -40,7 +40,7 @@ fn dark_text() -> Hsla {
 }
 
 pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) -> Stateful<Div> {
-    let (background, foreground) = if filled { (dark_text(), theme::white()) } else { (transparent_black(), dark_text()) };
+    let (background, foreground) = if filled { (dark_text(), theme::white()) } else { (dark_text().opacity(0.12), dark_text()) };
     div()
         .id(id)
         .h(px(PILL_HEIGHT))
@@ -49,8 +49,6 @@ pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) 
         .flex_none()
         .items_center()
         .rounded_full()
-        .border_1()
-        .border_color(dark_text())
         .bg(background)
         .text_color(foreground)
         .text_size(px(BANNER_TEXT))
@@ -200,7 +198,7 @@ pub fn tile_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel, mr
 
 fn more_overlay(app: &Entity<AppState>, model: &CallModel, mri: &str, name: &str, own: bool, group: SharedString) -> Div {
     let (app, model, mri_owned, name) = (app.clone(), model.clone(), mri.to_owned(), name.to_owned());
-    div().absolute().top(px(10.)).right(px(38.)).opacity(0.).group_hover(group, |more| more.opacity(1.)).child(
+    div().absolute().top(px(6.)).right(px(38.)).opacity(0.).group_hover(group, |more| more.opacity(1.)).child(
         Button::new(SharedString::from(format!("call-tile-more-{mri}")))
             .icon(IconName::Ellipsis)
             .ghost()
@@ -323,17 +321,17 @@ pub fn camera_menu_button(app: &Entity<AppState>, model: &CallModel, backgrounds
         Button::new("call-camera-menu")
             .ghost()
             .p_0()
-            .size(px(SMALL_CONTROL))
+            .w(px(CAMERA_MENU_WIDTH))
+            .h(px(super::call_view::CONTROL_SIZE))
             .rounded_full()
             .child(
                 div()
                     .id("call-camera-menu-face")
-                    .size(px(SMALL_CONTROL))
+                    .w(px(CAMERA_MENU_WIDTH))
+                    .h(px(super::call_view::CONTROL_SIZE))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded_full()
-                    .bg(theme::surface_raised())
                     .child(icon(IconName::ChevronUp, 16., theme::text())),
             )
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| camera_menu(popup, &app, &model, &backgrounds))
@@ -375,7 +373,7 @@ pub fn captions_overlay(model: &CallModel, now: Instant) -> Option<AnyElement> {
                     .max_w_full()
                     .gap(px(4.))
                     .px(px(16.))
-                    .py(px(10.))
+                    .py(px(8.))
                     .rounded(px(10.))
                     .bg(hsla(0., 0., 0., CAPTION_BACKGROUND))
                     .text_color(theme::white())
@@ -454,8 +452,8 @@ pub fn render_focus_stage(app: &Entity<AppState>, state: &AppState, focus: &Focu
         .child(
             h_flex()
                 .absolute()
-                .top(px(14.))
-                .left(px(14.))
+                .top(px(12.))
+                .left(px(12.))
                 .gap(px(6.))
                 .when(focus.spotlight, |chips| chips.child(spotlight_chip()))
                 .when(focus.pinned, |chips| chips.child(pin_chip())),
@@ -463,10 +461,10 @@ pub fn render_focus_stage(app: &Entity<AppState>, state: &AppState, focus: &Focu
         .child(
             h_flex()
                 .absolute()
-                .left(px(14.))
-                .bottom(px(14.))
+                .left(px(12.))
+                .bottom(px(12.))
                 .gap(px(8.))
-                .px(px(10.))
+                .px(px(8.))
                 .py(px(4.))
                 .rounded(px(6.))
                 .bg(hsla(0., 0., 0., 0.6))
@@ -500,7 +498,7 @@ pub fn captions_hint_chip(model: &CallModel) -> Option<AnyElement> {
             .justify_center()
             .child(
                 div()
-                    .px(px(14.))
+                    .px(px(12.))
                     .py(px(6.))
                     .rounded_full()
                     .bg(hsla(0., 0., 0., CAPTION_BACKGROUND))

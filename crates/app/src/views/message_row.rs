@@ -5,7 +5,7 @@ use gpui_kit::*;
 use std::time::Duration;
 
 use super::adaptive_card::cards_view;
-use super::attachments::{FileActions, attachments_view, message_body};
+use super::attachments::{FileActions, ImageOpen, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
@@ -24,8 +24,8 @@ use crate::theme;
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 
-const AVATAR_SIZE: f32 = 28.;
-const AVATAR_GAP: f32 = 8.;
+pub(super) const AVATAR_SIZE: f32 = 28.;
+pub(super) const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
@@ -54,6 +54,7 @@ pub struct RowActions {
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
     pub files: Option<FileActions>,
+    pub open_image: Option<ImageOpen>,
     pub highlighted: bool,
     pub saved: bool,
     pub translation: Option<TranslationActions>,
@@ -62,13 +63,13 @@ pub struct RowActions {
 const TOOLBAR_LIFT: f32 = 22.;
 
 fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
-    h_flex().w_full().justify_center().mt(px(14.)).mb(px(6.)).child(
+    h_flex().w_full().justify_center().mt(px(12.)).mb(px(6.)).child(
         div()
-            .h(px(22.))
-            .px(px(10.))
+            .h(px(24.))
+            .px(px(8.))
             .flex()
             .items_center()
-            .rounded(px(11.))
+            .rounded(px(12.))
             .bg(fill)
             .text_size(px(11.))
             .text_color(text_color)
@@ -103,8 +104,8 @@ fn bubble(
         .rounded_tr(px(corners.top_right))
         .rounded_br(px(corners.bottom_right))
         .rounded_bl(px(corners.bottom_left))
-        .px(px(11.))
-        .py(px(7.))
+        .px(px(12.))
+        .py(px(8.))
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
     if row.deleted {
@@ -161,6 +162,7 @@ fn bubble(
             &format!("message-{index}"),
             own,
             directory,
+            extras.open_image.as_ref(),
             cx,
         ));
     }
@@ -172,6 +174,7 @@ fn bubble(
         &format!("message-{index}"),
         directory,
         extras.files.as_ref(),
+        extras.open_image.as_ref(),
     ));
     content = content.children(
         row.meeting_link
@@ -225,8 +228,8 @@ fn bubble(
         element = element.child(
             div()
                 .absolute()
-                .right(px(9.))
-                .bottom(px(5.))
+                .right(px(8.))
+                .bottom(px(4.))
                 .child(bubble_meta(row, own, saved)),
         );
     }
@@ -259,6 +262,7 @@ struct BubbleExtras {
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
+    open_image: Option<ImageOpen>,
     saved: bool,
     translation: Option<TranslationActions>,
 }
@@ -369,7 +373,7 @@ pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
     div()
         .id(ElementId::Name(format!("row-{index}").into()))
         .w_full()
-        .px(px(24.))
+        .px(px(20.))
         .pt(px(SERIES_START_GAP))
         .child(pulse("skeleton", line))
         .into_any_element()
@@ -560,6 +564,7 @@ pub fn render_message_row(
         react,
         reaction_controls,
         files,
+        open_image,
         highlighted,
         saved,
         translation,
@@ -571,6 +576,7 @@ pub fn render_message_row(
         react,
         controls: reaction_controls,
         files,
+        open_image,
         saved,
         translation,
     };
@@ -580,7 +586,7 @@ pub fn render_message_row(
     } else {
         px(SERIES_START_GAP)
     };
-    let mut container = v_flex().w_full().px(px(24.));
+    let mut container = v_flex().w_full().px(px(20.));
     if let Some(day) = &row.day_header {
         container = container.child(day_separator(day));
     }

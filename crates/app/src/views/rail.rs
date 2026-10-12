@@ -3,6 +3,7 @@ use gpui_kit::component::{tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::shell::ISLAND_GAP;
 use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
 use super::widgets::icon;
@@ -12,9 +13,9 @@ use crate::format;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
 
-pub const RAIL_WIDTH: f32 = 56.;
-const ITEM_WIDTH: f32 = 44.;
-const ITEM_HEIGHT: f32 = 48.;
+pub const RAIL_WIDTH: f32 = ITEM_WIDTH + 2. * ISLAND_GAP;
+const ITEM_WIDTH: f32 = 48.;
+const ITEM_HEIGHT: f32 = 52.;
 const ICON_SIZE: f32 = 20.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,8 +138,8 @@ impl RailView {
             .flex_none()
             .items_center()
             .justify_center()
-            .gap(px(3.))
-            .rounded(px(8.))
+            .gap(px(4.))
+            .rounded(px(10.))
             .cursor_pointer()
             .when(active, |button| button.bg(theme::surface_raised()))
             .when(!active, |button| button.hover(|button| button.bg(theme::row_hover())))
@@ -164,15 +165,15 @@ fn badge(badge: RailBadge) -> Div {
         RailBadge::None => div(),
         RailBadge::Dot => div()
             .absolute()
-            .top(px(6.))
-            .right(px(9.))
+            .top(px(8.))
+            .left(px(31.))
             .size(px(7.))
             .rounded_full()
             .bg(theme::accent()),
         RailBadge::Count(count) => div()
             .absolute()
-            .top(px(3.))
-            .right(px(5.))
+            .top(px(5.))
+            .left(px(28.))
             .min_w(px(16.))
             .h(px(16.))
             .px(px(4.))
@@ -205,9 +206,8 @@ impl Render for RailView {
             .h_full()
             .flex_none()
             .items_center()
-            .gap(px(4.))
-            .pt(px(2.))
-            .mr(px(-6.))
+            .gap(px(2.))
+            .pt(px(0.))
             .children(
                 rail_items(activity_unread, unread_chats as usize, channel_dot)
                     .iter()

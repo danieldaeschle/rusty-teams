@@ -20,7 +20,8 @@ use super::call_extras::{BackgroundMenu, consent_overlay, consult_banner, hold_p
 use super::call_organizer::{camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu};
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
-use super::widgets::{count_badge, icon, symbol};
+use super::shell::ISLAND_GAP;
+use super::widgets::{count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::TileSize;
 use crate::call::{CHAT_OPEN_TILES, CallKind, CallModel, GridLayout, MAX_TILES, Tile, TileState, grid_layout, tile_size};
@@ -45,7 +46,7 @@ const STRIP_TILE: TileSize = TileSize {
     height: 131.,
     avatar: 56.,
 };
-const STRIP_GAP: f32 = 10.;
+const STRIP_GAP: f32 = 12.;
 const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
@@ -58,7 +59,6 @@ const MAX_WINDOW_ITEMS: usize = 12;
 pub const LOBBY_TEXT: &str = "Waiting in the lobby...";
 pub const CHAT_PANEL_WIDTH: f32 = 320.;
 const CHAT_HEADER_HEIGHT: f32 = 48.;
-const HAND_GLYPH: &str = "\u{270B}";
 const REACTION_RISE: f32 = 24.;
 const REACTION_FADE_FROM: f32 = 0.75;
 const REACTION_CELL: f32 = 40.;
@@ -98,15 +98,13 @@ fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
     div()
         .absolute()
         .right(px(12.))
-        .bottom(px(34.))
+        .bottom(px(32.))
         .size(px(36.))
         .flex()
         .items_center()
         .justify_center()
         .rounded_full()
-        .bg(theme::surface_raised())
-        .border_1()
-        .border_color(theme::border_strong())
+        .bg(theme::popup())
         .text_size(px(20.))
         .child(reaction_glyph(reaction))
         .with_animation(
@@ -114,7 +112,7 @@ fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
             Animation::new(REACTION_SHOWN),
             |chip, delta| {
                 let fade = ((delta - REACTION_FADE_FROM) / (1. - REACTION_FADE_FROM)).clamp(0., 1.);
-                chip.bottom(px(34. + REACTION_RISE * delta)).opacity(1. - fade)
+                chip.bottom(px(32. + REACTION_RISE * delta)).opacity(1. - fade)
             },
         )
         .into_any_element()
@@ -124,8 +122,8 @@ fn tile_overlays(extras: &TileExtras) -> Vec<AnyElement> {
     let badges = (extras.hand.is_some() || extras.spotlight || extras.pinned).then(|| {
         h_flex()
             .absolute()
-            .top(px(10.))
-            .left(px(10.))
+            .top(px(8.))
+            .left(px(8.))
             .gap(px(6.))
             .children(extras.hand.map(|position| hand_badge(position, extras.own)))
             .when(extras.spotlight, |row| row.child(spotlight_chip()))
@@ -183,8 +181,8 @@ fn speaking_ring(avatar: AnyElement, speaking: bool) -> Div {
 fn mute_badge() -> Div {
     div()
         .absolute()
-        .top(px(10.))
-        .right(px(10.))
+        .top(px(8.))
+        .right(px(8.))
         .size(px(24.))
         .flex()
         .items_center()
@@ -202,7 +200,7 @@ fn video_tile(size: TileSize, image: Arc<RenderImage>, name: &str, speaking: boo
         .flex_none()
         .overflow_hidden()
         .rounded(px(TILE_RADIUS))
-        .bg(theme::surface())
+        .bg(theme::row_hover())
         .border_2()
         .border_color(if speaking { theme::green() } else { transparent_black() })
         .child(
@@ -219,7 +217,7 @@ fn video_tile(size: TileSize, image: Arc<RenderImage>, name: &str, speaking: boo
                 .max_w(px(size.width - 24.))
                 .truncate()
                 .px(px(8.))
-                .py(px(3.))
+                .py(px(4.))
                 .rounded(px(6.))
                 .bg(hsla(0., 0., 0., NAME_PLATE_BACKGROUND))
                 .text_size(px(12.))
@@ -242,8 +240,8 @@ fn tile(
 ) -> Div {
     let badge = div()
         .absolute()
-        .top(px(10.))
-        .right(px(10.))
+        .top(px(8.))
+        .right(px(8.))
         .size(px(24.))
         .flex()
         .items_center()
@@ -259,9 +257,7 @@ fn tile(
         .justify_center()
         .gap(px(12.))
         .rounded(px(12.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
+        .bg(theme::row_hover())
         .child(speaking_ring(avatar, speaking))
         .child(
             v_flex()
@@ -289,9 +285,7 @@ fn overflow_tile(size: TileSize, hidden: usize) -> Div {
         .items_center()
         .justify_center()
         .rounded(px(12.))
-        .bg(theme::surface())
-        .border_1()
-        .border_color(theme::border())
+        .bg(theme::row_hover())
         .child(
             div()
                 .text_size(px(size.avatar * 0.5))
@@ -491,8 +485,7 @@ fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Opt
                     .flex()
                     .items_center()
                     .rounded_full()
-                    .border_1()
-                    .border_color(theme::on_accent())
+                    .bg(theme::on_accent().opacity(0.2))
                     .cursor_pointer()
                     .hover(|button| button.opacity(0.9))
                     .child(if sound { "Computer sound on" } else { "Computer sound off" })
@@ -536,7 +529,8 @@ fn chat_button(app: &Entity<AppState>, open: bool, unread: u32) -> Stateful<Div>
 fn hand_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
     let raised = model.own_hand.is_some();
     let background = if raised { theme::accent() } else { theme::surface_raised() };
-    let button = control_shell("call-hand", background).child(div().text_size(px(CONTROL_ICON)).child(HAND_GLYPH));
+    let foreground = if raised { theme::on_accent() } else { theme::text() };
+    let button = control_shell("call-hand", background).child(icon(IconName::Hand, CONTROL_ICON, foreground));
     let tooltip = if raised { "Lower hand" } else { "Raise hand" };
     let button = button.tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx));
     if !model.can_react() {
@@ -551,7 +545,7 @@ fn hand_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
 
 fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
     let face = control_shell("call-reactions-face", theme::surface_raised())
-        .child(symbol("mood", CONTROL_ICON, theme::text()));
+        .child(icon(IconName::FaceSlightlySmiling, CONTROL_ICON, theme::text()));
     if !model.can_react() {
         return face.opacity(DISABLED_OPACITY).cursor_default().into_any_element();
     }
@@ -804,8 +798,6 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
         .px(px(20.))
         .gap(px(12.))
         .items_center()
-        .border_b_1()
-        .border_color(theme::border())
         .child(icon(IconName::Phone, 18., theme::accent_text()))
         .child(
             div()
@@ -838,14 +830,12 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
     let controls = h_flex()
         .w_full()
         .flex_none()
-        .py(px(18.))
+        .py(px(16.))
         .gap(px(12.))
         .items_center()
         .justify_center()
-        .border_t_1()
-        .border_color(theme::border())
         .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
-        .child(h_flex().gap(px(2.)).items_center().child(camera_button(app, model)).children(camera_menu_button(app, model, BackgroundMenu::of(state))))
+        .child(h_flex().h(px(CONTROL_SIZE)).items_center().rounded_full().bg(theme::surface_raised()).child(camera_button(app, model)).children(camera_menu_button(app, model, BackgroundMenu::of(state))))
         .child(share_button(app, model, state.call_share_sound))
         .when(model.has_reaction_controls(), |row| row.child(hand_button(app, model)).child(reactions_button(app, model)))
         .child(devices_button(app, model))
@@ -859,6 +849,8 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
             .flex_1()
             .min_w_0()
             .h_full()
+            .rounded(px(10.))
+            .overflow_hidden()
             .bg(theme::surface())
             .child(header)
             .children(lobby_banner(app, model))
@@ -899,6 +891,7 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
             .flex_1()
             .min_w_0()
             .h_full()
+            .gap(px(ISLAND_GAP))
             .child(column)
             .children(chat.map(|chat| chat_panel(app, chat)))
             .into_any_element(),
@@ -912,18 +905,18 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
         .w(px(CHAT_PANEL_WIDTH))
         .h_full()
         .flex_none()
-        .border_l_1()
-        .border_color(theme::border())
+        .rounded(px(10.))
+        .overflow_hidden()
+        .bg(theme::surface())
         .child(
             h_flex()
                 .w_full()
                 .h(px(CHAT_HEADER_HEIGHT))
                 .flex_none()
-                .px(px(16.))
+                .pl(px(20.))
+                .pr(px(12.))
                 .items_center()
                 .justify_between()
-                .border_b_1()
-                .border_color(theme::border())
                 .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("Chat"))
                 .child(
                     div()
@@ -932,11 +925,11 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded_full()
+                        .rounded(px(7.))
                         .cursor_pointer()
                         .hover(|button| button.bg(theme::row_hover()))
                         .tooltip(|window, cx| Tooltip::new("Close the chat").build(window, cx))
-                        .child(icon(IconName::Close, 16., theme::text_muted()))
+                        .child(icon(IconName::Close, 14., theme::text_muted()))
                         .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_chat(cx))),
                 ),
         )

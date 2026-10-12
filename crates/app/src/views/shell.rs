@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -8,6 +10,7 @@ use super::call_view::render_call_view;
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
+use super::image_viewer::{ImageViewer, ImageViewerEvent};
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
@@ -28,6 +31,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
 use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
+use crate::user_activity::{self, UserInput};
 use crate::notify::{NotificationCenter, selection_for};
 use crate::sidebar_model::Step;
 use crate::theme;
@@ -55,6 +59,10 @@ pub struct Startup {
 
 pub const ISLAND_GAP: f32 = 6.;
 
+pub struct UserInputHandle(pub Arc<UserInput>);
+
+impl Global for UserInputHandle {}
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -65,12 +73,14 @@ pub struct AppShell {
     notifications: Entity<NotificationCenter>,
     _call_windows: Entity<CallWindows>,
     forward_dialog: Option<Entity<ForwardDialog>>,
+    image_viewer: Option<Entity<ImageViewer>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
+    user_input: Arc<UserInput>,
     _subscription: Subscription,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
@@ -134,6 +144,9 @@ impl AppShell {
                 if matches!(event, AppEvent::Forward) {
                     this.open_forward_dialog(window, cx);
                 }
+                if matches!(event, AppEvent::ImageViewer) {
+                    this.open_image_viewer(window, cx);
+                }
                 if matches!(event, AppEvent::StatusMessage) {
                     this.open_status_dialog(window, cx);
                 }
@@ -151,7 +164,9 @@ impl AppShell {
         cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
+        let user_input = cx.global::<UserInputHandle>().0.clone();
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
+            this.user_input.touch();
             if event.keystroke.key == "escape" {
                 this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
             }
@@ -173,12 +188,14 @@ impl AppShell {
             notifications,
             _call_windows: call_windows,
             forward_dialog: None,
+            image_viewer: None,
             status_dialog: None,
             shortcuts_dialog: None,
             profile_card: None,
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
+            user_input,
             _subscription: subscription,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
@@ -306,10 +323,11 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if self.switcher.take().is_some() {
-            window.focus(&self.focus_handle, cx);
+            self.restore_focus(window, cx);
             cx.notify();
             return;
         }
+        self.close_image_viewer(window, cx);
         let candidates = candidates_from(self.state.read(cx));
         let app = self.state.clone();
         let switcher = cx.new(|cx| Switcher::new(app, candidates, initial_query, window, cx));
@@ -335,7 +353,7 @@ impl AppShell {
                     SwitcherEvent::Close => {}
                 }
                 this.switcher = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -365,6 +383,7 @@ impl AppShell {
         {
             return;
         }
+        self.close_image_viewer(window, cx);
         self.switcher = None;
         let app = self.state.clone();
         let dialog = cx.new(|cx| StatusMessageDialog::new(app, window, cx));
@@ -373,7 +392,7 @@ impl AppShell {
             window,
             |this, _, _: &StatusMessageDialogEvent, window, cx| {
                 this.status_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -384,10 +403,11 @@ impl AppShell {
 
     fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.shortcuts_dialog.take().is_some() {
-            window.focus(&self.focus_handle, cx);
+            self.restore_focus(window, cx);
             cx.notify();
             return;
         }
+        self.close_image_viewer(window, cx);
         self.switcher = None;
         let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
         cx.subscribe_in(
@@ -395,7 +415,7 @@ impl AppShell {
             window,
             |this, _, _: &ShortcutsDialogEvent, window, cx| {
                 this.shortcuts_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
@@ -411,6 +431,7 @@ impl AppShell {
         else {
             return;
         };
+        self.close_image_viewer(window, cx);
         if let Some(card) = &self.profile_card {
             card.update(cx, |card, cx| {
                 card.move_to(request.user_id, request.anchor, cx)
@@ -424,13 +445,54 @@ impl AppShell {
             window,
             |this, _, _: &ProfileCardEvent, window, cx| {
                 this.profile_card = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 cx.notify();
             },
         )
         .detach();
         self.profile_card = Some(card);
         cx.notify();
+    }
+
+    fn open_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self
+            .state
+            .update(cx, |state, _| state.take_image_viewer_request())
+        else {
+            return;
+        };
+        self.switcher = None;
+        let app = self.state.clone();
+        let viewer = cx.new(|cx| ImageViewer::new(app, request, window, cx));
+        cx.subscribe_in(
+            &viewer,
+            window,
+            |this, _, _: &ImageViewerEvent, window, cx| {
+                this.image_viewer = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.image_viewer = Some(viewer);
+        cx.notify();
+    }
+
+    fn close_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.image_viewer.take().is_some() {
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+        }
+    }
+
+    fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.image_viewer {
+            Some(viewer) => {
+                let handle = viewer.read(cx).focus_handle();
+                window.focus(&handle, cx)
+            }
+            None => window.focus(&self.focus_handle, cx),
+        }
     }
 
     fn open_forward_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -449,7 +511,7 @@ impl AppShell {
             window,
             |this, _, event: &ForwardDialogEvent, window, cx| {
                 this.forward_dialog = None;
-                window.focus(&this.focus_handle, cx);
+                this.restore_focus(window, cx);
                 if let ForwardDialogEvent::Sent { target, title } = event {
                     let target = target.clone();
                     let open = NoticeAction::new("Open", move |state, cx| {
@@ -476,22 +538,20 @@ impl AppShell {
             .w_full()
             .gap(px(ISLAND_GAP))
             .pr(px(ISLAND_GAP))
-            .child(self.rail.clone())
+            .py(px(ISLAND_GAP))
             .child(
-                self.sidebar
-                    .clone()
-                    .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+                h_flex()
+                    .h_full()
+                    .flex_none()
+                    .child(self.rail.clone())
+                    .child(
+                        self.sidebar
+                            .clone()
+                            .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+                    ),
             )
             .child(match call_view {
-                Some(call_view) => h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .rounded(px(10.))
-                    .bg(theme::surface())
-                    .overflow_hidden()
-                    .child(call_view)
-                    .into_any_element(),
+                Some(call_view) => call_view,
                 None => self
                     .conversation
                     .clone()
@@ -533,6 +593,7 @@ impl Render for AppShell {
         }
         let panels = self.switcher.is_some()
             || self.forward_dialog.is_some()
+            || self.image_viewer.is_some()
             || self.status_dialog.is_some()
             || self.shortcuts_dialog.is_some()
             || self.profile_card.is_some()
@@ -568,7 +629,8 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NewChat, _, cx| {
+            .on_action(cx.listener(|this, _: &NewChat, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.state.update(cx, |state, cx| state.start_new_chat(cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
@@ -577,26 +639,33 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenActivity, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenActivity, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_activity(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenSaved, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_saved(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenChatsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenChatsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenChannelsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenChannelsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_channels(cx));
             }))
-            .on_action(cx.listener(|this, _: &OpenCallsTab, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenCallsTab, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar.update(cx, |sidebar, cx| sidebar.show_calls(cx));
             }))
-            .on_action(cx.listener(|this, _: &PreviousConversation, _, cx| {
+            .on_action(cx.listener(|this, _: &PreviousConversation, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Previous, cx));
             }))
-            .on_action(cx.listener(|this, _: &NextConversation, _, cx| {
+            .on_action(cx.listener(|this, _: &NextConversation, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
             }))
@@ -616,6 +685,7 @@ impl Render for AppShell {
                 this.state.update(cx, |state, cx| state.toggle_call_share(cx));
             }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
+                this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {
                     conversation.reply_to_hovered(window, cx)
                 });
@@ -626,6 +696,7 @@ impl Render for AppShell {
             .text_color(theme::text())
             .text_size(px(14.))
             .child(crate::frame_log::probe("first"))
+            .child(user_activity::input_probe(self.user_input.clone()))
             .child(
                 v_flex()
                     .size_full()
@@ -635,6 +706,7 @@ impl Render for AppShell {
             )
             .children(call_mini)
             .children(stage_overlay)
+            .children(self.image_viewer.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())

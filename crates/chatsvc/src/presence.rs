@@ -14,6 +14,9 @@ const PINNED_NOTE_SUFFIX: &str = "<pinnednote></pinnednote>";
 const NEVER_EXPIRES: &str = "9999-12-31T23:59:59.999Z";
 const NEVER_YEAR: i32 = 9999;
 const OFFLINE_ACTIVITY: &str = "OffWork";
+const DESKTOP_USER_AGENT: &str = "Teams-V2-Desktop";
+const WEB_USER_AGENT: &str = "Teams-V2-Web";
+const ENDPOINT_ID_HEADER: &str = "x-ms-endpoint-id";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForcedKind {
@@ -46,6 +49,21 @@ impl ForcedKind {
             "Away" => Some(ForcedKind::Away),
             "Offline" => Some(ForcedKind::Offline),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityReporting {
+    Transport,
+    Direct,
+}
+
+impl ActivityReporting {
+    fn code(self) -> &'static str {
+        match self {
+            ActivityReporting::Transport => "Transport",
+            ActivityReporting::Direct => "Direct",
         }
     }
 }
@@ -129,6 +147,31 @@ impl<T: CardTransport> PresenceService<T> {
         self.send(request, &url).await.map(drop)
     }
 
+    pub async fn register_endpoint(&self, endpoint_id: &str, reporting: ActivityReporting) -> Result<()> {
+        let url = format!("{BASE_URL}/me/endpoints/");
+        let mut request = Request::with_body(Method::Put, &url, endpoint_body(endpoint_id, reporting));
+        request.headers = endpoint_headers(endpoint_id);
+        self.send(request, &url).await.map(drop)
+    }
+
+    pub async fn unregister_endpoint(&self, endpoint_id: &str) -> Result<()> {
+        let url = format!("{BASE_URL}/me/endpoints/{endpoint_id}");
+        let mut request = Request {
+            method: Method::Delete,
+            ..Request::get(&url)
+        };
+        request.headers = endpoint_headers(endpoint_id);
+        self.send(request, &url).await.map(drop)
+    }
+
+    pub async fn report_activity(&self, endpoint_id: &str, active: bool) -> Result<()> {
+        let url = format!("{BASE_URL}/me/reportmyactivity/");
+        let body = json!({"endpointId": endpoint_id, "isActive": active});
+        let mut request = Request::with_body(Method::Post, &url, body);
+        request.headers = endpoint_headers(endpoint_id);
+        self.send(request, &url).await.map(drop)
+    }
+
     pub async fn set_note(&self, note: Option<&StatusNote>) -> Result<()> {
         let url = format!("{BASE_URL}/me/publishnote");
         let body = note.map_or_else(|| json!({"message": ""}), note_body);
@@ -165,7 +208,9 @@ impl<T: CardTransport> PresenceService<T> {
     }
 
     async fn send(&self, mut request: Request, url: &str) -> Result<Value> {
-        request.headers = service_headers();
+        if request.headers.is_empty() {
+            request.headers = service_headers(WEB_USER_AGENT);
+        }
         let answer = self
             .transport
             .send(request, Scope::new(PRESENCE, PRESENCE_SCOPE))
@@ -181,9 +226,36 @@ impl<T: CardTransport> PresenceService<T> {
     }
 }
 
-fn service_headers() -> Vec<(String, String)> {
+pub fn error_status(error: &Error) -> Option<u16> {
+    match error {
+        Error::Session(session::Error::Api { status, .. }) => Some(*status),
+        _ => None,
+    }
+}
+
+pub fn is_endpoint_missing(error: &Error) -> bool {
+    error_status(error) == Some(404)
+}
+
+fn endpoint_body(endpoint_id: &str, reporting: ActivityReporting) -> Value {
+    json!({
+        "id": endpoint_id,
+        "availability": "Available",
+        "activity": "Available",
+        "activityReporting": reporting.code(),
+        "deviceType": "Desktop",
+    })
+}
+
+fn endpoint_headers(endpoint_id: &str) -> Vec<(String, String)> {
+    let mut headers = service_headers(DESKTOP_USER_AGENT);
+    headers.insert(1, (ENDPOINT_ID_HEADER.into(), endpoint_id.to_owned()));
+    headers
+}
+
+fn service_headers(user_agent: &str) -> Vec<(String, String)> {
     vec![
-        ("x-ms-client-user-agent".into(), "Teams-V2-Web".into()),
+        ("x-ms-client-user-agent".into(), user_agent.into()),
         ("x-ms-correlation-id".into(), Uuid::new_v4().to_string()),
         ("x-ms-client-version".into(), CLIENT_VERSION.into()),
     ]
@@ -416,6 +488,95 @@ mod tests {
                 "x-ms-client-version"
             ]
         );
+    }
+
+    fn header_pairs(request: &Request) -> Vec<(&str, &str)> {
+        request
+            .headers
+            .iter()
+            .filter(|(name, _)| name != "x-ms-correlation-id")
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn register_endpoint_puts_the_transport_endpoint_as_desktop() {
+        let service = service(200, Value::Null);
+        service.register_endpoint("epid-1", ActivityReporting::Transport).await.unwrap();
+        let (request, scope) = only_request(&service);
+        assert_eq!(request.method, Method::Put);
+        assert_eq!(
+            request.url,
+            "https://presence.teams.microsoft.com/v1/me/endpoints/"
+        );
+        assert_eq!(
+            request.body,
+            Some(json!({
+                "id": "epid-1",
+                "availability": "Available",
+                "activity": "Available",
+                "activityReporting": "Transport",
+                "deviceType": "Desktop",
+            }))
+        );
+        assert_eq!(scope, Scope::new(PRESENCE, "user_impersonation"));
+        assert_eq!(
+            header_pairs(&request),
+            [
+                ("x-ms-client-user-agent", "Teams-V2-Desktop"),
+                ("x-ms-endpoint-id", "epid-1"),
+                ("x-ms-client-version", CLIENT_VERSION),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn register_endpoint_can_switch_to_direct_reporting() {
+        let service = service(200, Value::Null);
+        service.register_endpoint("epid-1", ActivityReporting::Direct).await.unwrap();
+        let (request, _) = only_request(&service);
+        assert_eq!(request.body.unwrap()["activityReporting"], "Direct");
+    }
+
+    #[tokio::test]
+    async fn unregister_endpoint_deletes_by_id_without_body() {
+        let service = service(200, Value::Null);
+        service.unregister_endpoint("epid-1").await.unwrap();
+        let (request, _) = only_request(&service);
+        assert_eq!(request.method, Method::Delete);
+        assert_eq!(
+            request.url,
+            "https://presence.teams.microsoft.com/v1/me/endpoints/epid-1"
+        );
+        assert_eq!(request.body, None);
+        assert!(header_pairs(&request).contains(&("x-ms-endpoint-id", "epid-1")));
+    }
+
+    #[tokio::test]
+    async fn report_activity_posts_the_state_for_the_endpoint() {
+        let service = service(200, Value::Null);
+        service.report_activity("epid-1", false).await.unwrap();
+        let (request, _) = only_request(&service);
+        assert_eq!(request.method, Method::Post);
+        assert_eq!(
+            request.url,
+            "https://presence.teams.microsoft.com/v1/me/reportmyactivity/"
+        );
+        assert_eq!(
+            request.body,
+            Some(json!({"endpointId": "epid-1", "isActive": false}))
+        );
+        assert!(header_pairs(&request).contains(&("x-ms-endpoint-id", "epid-1")));
+    }
+
+    #[tokio::test]
+    async fn not_found_marks_the_endpoint_as_missing() {
+        let service = service(404, Value::Null);
+        let error = service.report_activity("epid-1", true).await.unwrap_err();
+        assert!(is_endpoint_missing(&error));
+        let service = self::service(500, Value::Null);
+        let error = service.report_activity("epid-1", true).await.unwrap_err();
+        assert!(!is_endpoint_missing(&error));
     }
 
     #[tokio::test]

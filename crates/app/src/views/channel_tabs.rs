@@ -17,7 +17,7 @@ const TAB_HEIGHT: f32 = 28.;
 const TAB_GAP: f32 = 4.;
 const TAB_PADDING: f32 = 12.;
 const TAB_TEXT_SIZE: f32 = 12.5;
-const BAR_PADDING: f32 = 16.;
+const BAR_PADDING: f32 = 20.;
 const CHAR_WIDTH: f32 = 6.5;
 const ARROW_WIDTH: f32 = 14.;
 const OVERFLOW_WIDTH: f32 = 44.;
@@ -109,7 +109,7 @@ fn tab_label(
         .h(px(TAB_HEIGHT))
         .flex_none()
         .items_center()
-        .gap(px(3.))
+        .gap(px(4.))
         .px(px(TAB_PADDING))
         .rounded(px(7.))
         .cursor_pointer()

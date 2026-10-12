@@ -7,9 +7,9 @@ use super::message_actions::Action;
 use super::widgets::icon;
 use crate::theme;
 
-const BANNER_HEIGHT: f32 = 36.;
+const BANNER_HEIGHT: f32 = 40.;
 const BANNER_PADDING: f32 = 12.;
-const BUTTON_SIZE: f32 = 24.;
+const BUTTON_SIZE: f32 = 28.;
 const FALLBACK_PREVIEW: &str = "Pinned message";
 
 pub struct PinBannerData {
@@ -45,7 +45,7 @@ fn icon_button(id: &'static str, glyph: IconName, action: Action) -> Stateful<Di
         .flex_none()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(px(7.))
         .cursor_pointer()
         .hover(|button| button.bg(theme::popup_hover()))
         .child(icon(glyph, 14., theme::text_muted()))
@@ -73,9 +73,10 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
         .group("pin-banner")
         .h(px(BANNER_HEIGHT))
         .flex_none()
-        .mx(px(16.))
-        .mb(px(4.))
-        .px(px(BANNER_PADDING))
+        .mx(px(20.))
+        .mb(px(8.))
+        .pl(px(BANNER_PADDING))
+        .pr(px(6.))
         .gap(px(8.))
         .items_center()
         .rounded(px(8.))

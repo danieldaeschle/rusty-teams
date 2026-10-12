@@ -111,7 +111,7 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.channel_id().filter(|_| self.in_feed())?;
-        let available = f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 3. * ISLAND_GAP;
+        let available = f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 2. * ISLAND_GAP;
         let view = cx.weak_entity();
         let select = Rc::new(move |pane, cx: &mut App| {
             view.update(cx, |this, cx| this.select_pane(pane, cx)).ok();

@@ -54,7 +54,7 @@ impl SavedPanel {
             .h(px(52.))
             .flex_none()
             .pl(px(16.))
-            .pr(px(10.))
+            .pr(px(12.))
             .gap(px(8.))
             .items_center()
             .child(
@@ -93,7 +93,7 @@ impl SavedPanel {
             .relative()
             .mx(px(6.))
             .p(px(10.))
-            .gap(px(10.))
+            .gap(px(12.))
             .items_start()
             .rounded(px(8.))
             .cursor_pointer()
@@ -108,7 +108,7 @@ impl SavedPanel {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(3.))
+                    .gap(px(4.))
                     .child(
                         h_flex()
                             .gap(px(6.))

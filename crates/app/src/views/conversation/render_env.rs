@@ -12,6 +12,7 @@ use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
+use crate::views::attachments::ImageOpen;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
@@ -193,6 +194,13 @@ impl RenderEnv {
                     .read(cx)
                     .file_actions(&message.key, &message.files, view.clone())
             });
+        let open_image = (is_real && !message.deleted && !message.images.is_empty()).then(|| {
+            let (view, key) = (view.clone(), message.key.clone());
+            Rc::new(move |url: &str, cx: &mut App| {
+                view.update(cx, |this, cx| this.open_image_viewer(&key, url, cx))
+                    .ok();
+            }) as ImageOpen
+        });
         let bot = self.bot_identity(message, cx);
         let translation = (is_real && !message.deleted)
             .then(|| self.translation_actions(message))
@@ -222,6 +230,7 @@ impl RenderEnv {
             react,
             reaction_controls,
             files,
+            open_image,
             highlighted: self.highlighted.as_deref() == Some(message.key.as_str()),
             saved: self
                 .app

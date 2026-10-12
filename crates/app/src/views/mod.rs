@@ -27,6 +27,7 @@ pub mod draft_style;
 pub mod emoji_popup;
 pub mod format_toolbar;
 pub mod forward_dialog;
+pub mod image_viewer;
 pub mod join_dialog;
 pub mod link_preview;
 pub mod fun_picker;

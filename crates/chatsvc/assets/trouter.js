@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = 5;
+  const VERSION = 6;
   const GLOBAL_NAME = '__chatsvcTrouter';
   const BINDING_NAME = '__chatsvcRealtime';
   const EPID_KEY = '__chatsvcEpid';
@@ -12,6 +12,8 @@
   const REREGISTER_MS = 40 * 60 * 1000;
   const CONNECT_TIMEOUT_MS = 20000;
   const MAX_BACKOFF_MS = 30000;
+  const ACTIVITY_DEBOUNCE_MS = 1000;
+  const ACTIVITY_ACK_TIMEOUT_MS = 10000;
   const MAX_QUEUE = 200;
   const MAX_PRESENCE_ENTRIES = 1000;
   const MAX_PRESENCE_FIELD = 128;
@@ -40,7 +42,7 @@
 
   const state = {
     token: null, host: null, epid: loadEpid(), socket: null, ready: false,
-    closed: false, pendingReplies: new Map(), ackCounter: 0, lastFrameAt: 0, registeredAt: 0, retry: 0, reconnectTimer: null, queue: [],
+    closed: false, activity: 'inactive', sentActivity: null, activityAckId: 0, activityTimer: null, activityResendTimer: null, pendingReplies: new Map(), ackCounter: 0, lastFrameAt: 0, registeredAt: 0, retry: 0, reconnectTimer: null, queue: [],
   };
 
   const flush = () => {
@@ -142,7 +144,25 @@
   };
   const send = (text) => { if (state.socket && state.socket.readyState === 1) state.socket.send(text); };
   const sendEvent = (name, args) => send(`5:${++state.ackCounter}+::` + JSON.stringify({name, args}));
-  const activity = () => sendEvent('user.activity', [{state: 'active', cv: crypto.randomUUID()}]);
+  const transmitActivity = (resend) => {
+    clearTimeout(state.activityTimer);
+    clearTimeout(state.activityResendTimer);
+    if (!state.ready) return;
+    sendEvent('user.activity', [{state: state.activity, cv: crypto.randomUUID()}]);
+    state.sentActivity = state.activity;
+    state.activityAckId = state.ackCounter;
+    if (!resend) state.activityResendTimer = setTimeout(() => transmitActivity(true), ACTIVITY_ACK_TIMEOUT_MS);
+  };
+  const setActivity = (next) => {
+    if (next !== 'active' && next !== 'inactive') return;
+    state.activity = next;
+    clearTimeout(state.activityTimer);
+    if (!state.ready || next === state.sentActivity) return;
+    state.activityTimer = setTimeout(() => transmitActivity(false), ACTIVITY_DEBOUNCE_MS);
+  };
+  const acknowledgeActivity = (data) => {
+    if (Number.parseInt(data, 10) === state.activityAckId) clearTimeout(state.activityResendTimer);
+  };
 
   const register = async (surl) => {
     state.surl = surl || state.surl;
@@ -192,8 +212,8 @@
       if (event.name === 'trouter.connected') {
         try {
           await register(event.args[0].surl);
-          activity();
           state.ready = true;
+          transmitActivity(false);
           state.retry = 0;
           announceEndpoint();
           status('connected');
@@ -206,6 +226,8 @@
         const dropped = (event.args && event.args[0] && event.args[0].droppedIndicators) || [];
         status('message_loss', dropped.map((indicator) => String(indicator.tag)).join(',').slice(0, 200));
       }
+    } else if (packet.type === '6') {
+      acknowledgeActivity(packet.data);
     } else if (packet.type === '3') {
       let request;
       try { request = JSON.parse(packet.data); } catch (error) { return; }
@@ -240,6 +262,8 @@
       const wasReady = state.ready;
       state.socket = null;
       state.ready = false;
+      clearTimeout(state.activityTimer);
+      clearTimeout(state.activityResendTimer);
       if (!state.closed) status('disconnected', wasReady ? 'closed' : 'connect_failed');
       scheduleReconnect();
     };
@@ -249,7 +273,6 @@
     if (!state.socket || state.socket.readyState !== 1) return;
     if (Date.now() - state.lastFrameAt > SILENCE_LIMIT_MS) { state.socket.close(); return; }
     sendEvent('ping', []);
-    activity();
     if (state.ready && Date.now() - state.registeredAt > REREGISTER_MS) {
       register().catch((error) => status('error', registerDetail(error)));
     }
@@ -259,6 +282,8 @@
     state.closed = true;
     clearInterval(maintain);
     clearTimeout(state.reconnectTimer);
+    clearTimeout(state.activityTimer);
+    clearTimeout(state.activityResendTimer);
     for (const pending of state.pendingReplies.values()) clearTimeout(pending.timer);
     state.pendingReplies.clear();
     if (state.socket) state.socket.close();
@@ -270,6 +295,7 @@
     ensure: (config) => {
       state.token = config.token;
       state.host = config.host;
+      setActivity(config.activity);
       connect();
       if (state.ready) {
         announceEndpoint();
@@ -279,6 +305,8 @@
       return state.ready ? 'ready' : state.socket ? 'connecting' : 'waiting';
     },
     shutdown,
+    setActivity,
+    resendActivity: () => transmitActivity(false),
     reply: (id, status, body) => answer(id, status, body),
     stop: async () => {
       let unregistered = null;

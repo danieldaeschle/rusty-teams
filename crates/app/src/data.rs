@@ -133,7 +133,10 @@ pub struct Directory {
     pub(crate) presence_pending: HashSet<String>,
     pub(crate) images: HashMap<String, ImageEntry>,
     pub(crate) images_requested: HashSet<String>,
+    pub(crate) images_failed: HashMap<String, Instant>,
 }
+
+const IMAGE_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 impl Directory {
     pub fn avatar(&self, user_id: &str) -> Option<&AvatarState> {
@@ -142,6 +145,15 @@ impl Directory {
 
     pub fn image(&self, key: &str) -> Option<&ImageEntry> {
         self.images.get(key)
+    }
+
+    pub fn image_failed(&self, key: &str) -> bool {
+        self.images_failed.contains_key(key) && !self.images.contains_key(key)
+    }
+
+    pub fn mark_image_failed(&mut self, key: &str) {
+        self.images_failed.insert(key.to_owned(), Instant::now());
+        self.images_requested.remove(key);
     }
 
     pub fn set_image(&mut self, key: &str, path: &Path) {
@@ -158,7 +170,13 @@ impl Directory {
     pub fn images_to_request(&mut self, keys: impl IntoIterator<Item = String>) -> Vec<String> {
         keys.into_iter()
             .filter(|key| {
-                !self.images.contains_key(key) && self.images_requested.insert(key.clone())
+                let failed_recently = self
+                    .images_failed
+                    .get(key)
+                    .is_some_and(|failed| failed.elapsed() < IMAGE_RETRY_AFTER);
+                !self.images.contains_key(key)
+                    && !failed_recently
+                    && self.images_requested.insert(key.clone())
             })
             .collect()
     }
@@ -593,6 +611,28 @@ mod tests {
         directory.mark_avatars_pending(&wanted);
         assert!(directory.missing_avatars(["x".to_owned()]).is_empty());
         assert_eq!(directory.pending_avatars().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_image_is_requested_again_only_after_the_retry_delay() {
+        let mut directory = Directory::default();
+        assert_eq!(directory.images_to_request(["a".to_owned()]), vec!["a"]);
+        directory.mark_image_failed("a");
+        assert!(directory.images_to_request(["a".to_owned()]).is_empty());
+        directory
+            .images_failed
+            .insert("a".to_owned(), Instant::now() - IMAGE_RETRY_AFTER);
+        assert_eq!(directory.images_to_request(["a".to_owned()]), vec!["a"]);
+    }
+
+    #[test]
+    fn a_failed_image_is_only_failed_until_it_arrives() {
+        let mut directory = Directory::default();
+        assert!(!directory.image_failed("a"));
+        directory.mark_image_failed("a");
+        assert!(directory.image_failed("a"));
+        directory.set_image("a", Path::new("a.png"));
+        assert!(!directory.image_failed("a"));
     }
 
     #[test]

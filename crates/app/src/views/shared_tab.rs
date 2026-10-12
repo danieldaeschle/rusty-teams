@@ -22,7 +22,7 @@ use crate::downloads::{DownloadState, percent_label};
 use crate::format;
 use crate::theme;
 
-const SIDE_PADDING: f32 = 24.;
+const SIDE_PADDING: f32 = 20.;
 const ROW_HEIGHT: f32 = 40.;
 const BADGE_SIZE: f32 = 26.;
 const MODIFIED_WIDTH: f32 = 110.;
@@ -98,8 +98,8 @@ fn segment(
     let run = run.clone();
     div()
         .id(id)
-        .px(px(14.))
-        .py(px(5.))
+        .px(px(12.))
+        .py(px(4.))
         .rounded(px(6.))
         .cursor_pointer()
         .text_size(px(12.5))
@@ -161,7 +161,7 @@ fn header(scope: SharedScope, trailing: Option<AnyElement>, run: &SharedRun) -> 
         .w_full()
         .flex_none()
         .px(px(SIDE_PADDING))
-        .py(px(10.))
+        .py(px(8.))
         .gap(px(12.))
         .items_center()
         .child(switch(scope, run))
@@ -228,7 +228,7 @@ fn column_header() -> Div {
         .text_size(px(11.5))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
-        .child(column(None).pl(px(BADGE_SIZE + 10.)).child("Name"))
+        .child(column(None).pl(px(BADGE_SIZE + 8.)).child("Name"))
         .child(column(Some(MODIFIED_WIDTH)).child("Modified"))
         .child(column(Some(MODIFIED_BY_WIDTH)).child("Modified by"))
         .child(column(Some(SIZE_WIDTH)).child("Size"))
@@ -269,7 +269,7 @@ fn entry_row(
     let name = h_flex()
         .flex_1()
         .min_w_0()
-        .gap(px(10.))
+        .gap(px(8.))
         .items_center()
         .child(entry_badge(entry))
         .child(
@@ -354,7 +354,7 @@ fn skeleton_rows() -> impl IntoElement {
             .child(
                 h_flex()
                     .flex_1()
-                    .gap(px(10.))
+                    .gap(px(8.))
                     .items_center()
                     .child(
                         div()
@@ -605,7 +605,7 @@ fn item_row(
         .flex_none()
         .px(px(SIDE_PADDING))
         .py(px(6.))
-        .gap(px(10.))
+        .gap(px(8.))
         .items_center()
         .cursor_pointer()
         .hover(|row| row.bg(theme::row_hover()))
@@ -656,7 +656,7 @@ pub fn render_messages(view: MessagesView, run: &SharedRun) -> AnyElement {
                     .child(
                         div()
                             .px(px(SIDE_PADDING))
-                            .pt(px(10.))
+                            .pt(px(12.))
                             .pb(px(4.))
                             .text_size(px(11.5))
                             .font_weight(FontWeight::SEMIBOLD)
