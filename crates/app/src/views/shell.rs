@@ -5,7 +5,7 @@ use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::call_mini::render_call_mini;
-use super::call_stage::render_stage_overlay;
+use super::call_stage::{render_call_overlay, render_stage_overlay};
 use super::call_view::render_call_view;
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
@@ -16,8 +16,9 @@ use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenCallsTab,
-    OpenChannelsTab, OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts,
-    ToggleCallCamera, ToggleCallShare,
+    OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, Scope,
+    ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
+    ToggleCallHand, ToggleCallShare,
 };
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
@@ -91,6 +92,8 @@ pub struct AppShell {
     agent_dialog: Option<Entity<StartDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
+    call_window_fullscreen: bool,
+    window_was_fullscreen: bool,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
     user_input: Arc<UserInput>,
@@ -205,7 +208,7 @@ impl AppShell {
             this.user_input.touch();
             if event.keystroke.key == "escape" {
                 this.state
-                    .update(cx, |state, cx| state.leave_stage_fullscreen(cx));
+                    .update(cx, |state, cx| state.escape_call_fullscreen(cx));
             }
         });
         let activation_observation = cx.observe_window_activation(window, |this, window, cx| {
@@ -232,6 +235,8 @@ impl AppShell {
             agent_dialog: None,
             profile_card: None,
             focus_handle,
+            call_window_fullscreen: false,
+            window_was_fullscreen: false,
             open_target,
             update: UpdateStatus::UpToDate,
             user_input,
@@ -562,6 +567,31 @@ impl AppShell {
         cx.notify();
     }
 
+    fn start_call_in_open_chat(&mut self, with_video: bool, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            if let Some(Selection::Chat(chat_id)) = state.selection.clone() {
+                if with_video {
+                    state.start_chat_video_call(&chat_id, cx);
+                } else {
+                    state.start_chat_call(&chat_id, cx);
+                }
+            }
+        });
+    }
+
+    fn sync_window_fullscreen(&mut self, wanted: bool, window: &mut Window) {
+        if wanted == self.call_window_fullscreen {
+            return;
+        }
+        self.call_window_fullscreen = wanted;
+        if wanted {
+            self.window_was_fullscreen = window.is_fullscreen();
+        }
+        if wanted != window.is_fullscreen() && (wanted || !self.window_was_fullscreen) {
+            window.toggle_fullscreen();
+        }
+    }
+
     fn close_image_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.image_viewer.take().is_some() {
             window.focus(&self.focus_handle, cx);
@@ -683,8 +713,14 @@ impl Render for AppShell {
         self.sync_call_chat(chat_thread, window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
         let state = self.state.read(cx);
-        let call_view =
-            render_call_view(&self.state, state, chat_panel).filter(|_| state.viewing_call());
+        let call_fullscreen = state.call_fullscreen();
+        let call_view = render_call_view(&self.state, state, chat_panel, call_fullscreen)
+            .filter(|_| state.viewing_call());
+        let (call_view, call_overlay) = match call_view {
+            Some(view) if call_fullscreen => (None, Some(render_call_overlay(view))),
+            view => (view, None),
+        };
+        self.sync_window_fullscreen(call_fullscreen, window);
         let call_mini = render_call_mini(&self.state, state);
         let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(
@@ -773,6 +809,28 @@ impl Render for AppShell {
                 this.state
                     .update(cx, |state, cx| state.toggle_call_share(cx));
             }))
+            .on_action(cx.listener(|this, _: &ToggleCallHand, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.toggle_call_hand(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenLobbyList, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.open_call_lobby_list(cx));
+            }))
+            .on_action(cx.listener(|this, _: &StartAudioCall, _, cx| {
+                this.start_call_in_open_chat(false, cx);
+            }))
+            .on_action(cx.listener(|this, _: &StartVideoCall, _, cx| {
+                this.start_call_in_open_chat(true, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCallFullscreen, _, cx| {
+                if this.image_viewer.is_some() || !this.state.read(cx).viewing_call() {
+                    cx.propagate();
+                    return;
+                }
+                this.state
+                    .update(cx, |state, cx| state.toggle_call_fullscreen(cx));
+            }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {
@@ -795,6 +853,7 @@ impl Render for AppShell {
                     .child(status),
             )
             .children(call_mini)
+            .children(call_overlay)
             .children(stage_overlay)
             .children(self.image_viewer.clone())
             .children(self.switcher.clone())

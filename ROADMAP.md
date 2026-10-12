@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 89 %** (81 done, 14 partial, 4 missing of 99). Partial counts half.
+**Parity: 89 %** (81 done, 15 partial, 4 missing of 100). Partial counts half.
 
 ## By area
 
@@ -138,7 +138,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
 | Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
-| Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share screen, M mute; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
+| Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share menu, K raise hand, Y lobby, M mute, F11 full screen, Alt+Shift+A / V start an audio / video call in the open chat; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
 
 ## Presence and people
 
@@ -176,6 +176,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Hold, resume, transfer | Partial | 1:1 "..." > Hold renegotiates every line inactive, "On hold" view with Resume, "You're on hold" when the other side holds, Transfer... person picker with Transfer now (blind) and Consult first (second call, first held, Transfer now). Needs a second person; redirect and park not built |
 | Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
 | Call health and encryption | Partial | Header shows signal bars and a shield; click opens "Call health" with loss, round trip, jitter, bitrate, "Secured by Teams encryption", DTLS-SRTP cipher and media path (direct or via Microsoft media server). Unstable network banner with "Turn off incoming video", overloaded computer banner with "Turn off effects". Thresholds unit tested; not yet seen on a bad live network |
+| View and layout | Partial | "View" button between share and "...": Gallery (up to 3x3 of 16:9 tiles, "+N" tile with a pin list; visible tiles only swap after 2 s of speech, one swap per 5 s), Speaker (stage plus filmstrip of up to 6), Focus on content (only while someone shares), Hide people without video with a count chip, Hide me / Show me, Chat bubbles, Full screen (F11, controls hide after 3 s). Choice, Hide people without video and Chat bubbles are remembered. Checked with the demo gallery scene only; not yet in a large live meeting |
 | Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
 | Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |

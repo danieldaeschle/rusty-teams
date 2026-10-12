@@ -120,7 +120,13 @@ mod frames {
     };
     use store::Store;
 
+    use std::time::Instant;
+
+    use calling::{CallState, CallUpdate, RosterEntry, call_channel};
+    use gpui_kit::Entity;
+
     use crate::app_state::{AppState, Mode};
+    use crate::call::{ActiveCall, CallModel};
     use crate::demo;
     use crate::user_activity::UserInput;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals};
@@ -138,6 +144,11 @@ mod frames {
         "shell/islands/main",
         "shell/status-bar",
     ];
+    const CALL_GUARDED: &[&str] = &[
+        "shell/islands/main/call-header",
+        "shell/islands/main/call-stage",
+        "shell/islands/main/call-controls",
+    ];
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const SIZES: [(f32, f32); 2] = [(640., 480.), (1920., 1080.)];
@@ -149,6 +160,7 @@ mod frames {
     enum Screen {
         Tab(&'static str, Option<fn(&mut VisualTestContext)>),
         StatusMenu,
+        Call,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -263,12 +275,37 @@ mod frames {
         }
         GUARDED
             .iter()
+            .chain(CALL_GUARDED)
             .chain([&MENU])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
 
-    fn mount(cx: &mut TestAppContext) -> gpui_kit::AnyWindowHandle {
+    fn gallery_call() -> ActiveCall {
+        let (handle, _control) = call_channel();
+        let mut model = CallModel::meeting("Standup", false);
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
+        model.apply(CallUpdate::Roster(
+            (0..11)
+                .map(|index| RosterEntry {
+                    mri: format!("8:orgid:guard-{index}"),
+                    display_name: format!("Guest {index}"),
+                    muted: false,
+                    in_lobby: false,
+                    has_video: false,
+                    sharing: false,
+                    hand: None,
+                    spotlight: None,
+                    organizer: false,
+                })
+                .collect(),
+        ));
+        ActiveCall::new(1, model, handle.commands, None, handle.video)
+    }
+
+    fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
         cx.update(gpui_kit::init);
         cx.update(|cx| {
             crate::theme::apply(cx);
@@ -283,16 +320,18 @@ mod frames {
             let state = cx.new(|_| AppState::new(Arc::new(store), mode));
             install_globals(&state, UserInput::new(), cx);
             demo::start_session(&state, cx);
+            let shared_state = state.clone();
             let startup = Startup {
                 switcher_query: None,
                 composer_text: None,
                 reply_to_last: false,
             };
-            gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
+            let window = gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
                 cx.new(|cx| AppShell::new(state, None, startup, window, cx))
             })
             .expect("open test window")
-            .0
+            .0;
+            (window, shared_state)
         })
     }
 
@@ -329,7 +368,7 @@ mod frames {
 
     #[gpui_kit::test]
     fn no_element_overlaps_or_leaves_its_container(cx: &mut TestAppContext) {
-        let handle = mount(cx);
+        let (handle, app) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
         let mut seen_known = HashSet::new();
         let mut unexpected = Vec::new();
@@ -352,6 +391,7 @@ mod frames {
                 Screen::Tab("saved", Some(|visual| visual.dispatch_action(OpenSaved))),
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
                 Screen::StatusMenu,
+                Screen::Call,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -360,6 +400,15 @@ mod frames {
                             open(&mut visual);
                         }
                         (name, false)
+                    }
+                    Screen::Call => {
+                        visual.update(|_, cx| {
+                            app.update(cx, |state, cx| {
+                                state.call = Some(gallery_call());
+                                cx.notify();
+                            })
+                        });
+                        ("call", false)
                     }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
@@ -374,6 +423,9 @@ mod frames {
                 };
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
+                if screen_name == "call" {
+                    expected.extend(CALL_GUARDED);
+                }
                 if status_menu {
                     expected.push(MENU);
                 }
@@ -401,6 +453,14 @@ mod frames {
                     }
                     visual.simulate_keystrokes("escape");
                     visual.run_until_parked();
+                }
+                if screen_name == "call" {
+                    visual.update(|_, cx| {
+                        app.update(cx, |state, cx| {
+                            state.call = None;
+                            cx.notify();
+                        })
+                    });
                 }
                 for (key, message) in found {
                     let full_key = format!("{screen_name}@{width}x{height}:{key}");

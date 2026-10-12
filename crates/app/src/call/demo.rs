@@ -29,6 +29,8 @@ const SPEAKING_LEVEL: f32 = 0.3;
 const SPEAKER_TICKS: u32 = 10;
 const VIDEO_PERIOD: Duration = Duration::from_millis(125);
 const DEMO_CAMERAS: usize = 4;
+const GALLERY_CAMERAS: usize = 7;
+const GALLERY_SPEAKER_TICKS: u32 = 15;
 const SCREEN_EVERY_TICKS: u32 = 4;
 const SHARE_START: Duration = Duration::from_secs(10);
 const SHARE_END: Duration = Duration::from_secs(45);
@@ -60,7 +62,7 @@ const SELF_PHASE: u32 = 211;
 pub const DEMO_OWN_MRI: &str = "8:orgid:demo-me";
 pub const DEMO_RING_ID: u64 = 9001;
 const DEMO_CALLER: (&str, &str) = ("8:orgid:demo-mara", "Mara Lindqvist");
-const DEMO_GUESTS: [&str; 11] = [
+const DEMO_GUESTS: [&str; 12] = [
     "Mara Lindqvist",
     "Jonas Ortega",
     "Priya Nair",
@@ -72,6 +74,7 @@ const DEMO_GUESTS: [&str; 11] = [
     "Yuki Tanaka",
     "Carlos Mendez",
     "Sofia Rossi",
+    "Emil Nowak",
 ];
 
 pub type Person = (String, String);
@@ -88,6 +91,7 @@ pub enum DemoScene {
     Breakout,
     Whiteboard,
     Network,
+    Gallery,
 }
 
 impl DemoScene {
@@ -101,6 +105,7 @@ impl DemoScene {
             "breakout" => DemoScene::Breakout,
             "whiteboard" => DemoScene::Whiteboard,
             "network" => DemoScene::Network,
+            "gallery" => DemoScene::Gallery,
             _ => return None,
         })
     }
@@ -108,8 +113,27 @@ impl DemoScene {
     pub fn is_one_to_one(self) -> bool {
         matches!(self, DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Network)
     }
+
+    pub fn guests(self) -> Option<usize> {
+        (self == DemoScene::Gallery).then_some(DEMO_GALLERY_GUESTS)
+    }
+
+    fn cameras(self) -> usize {
+        match self {
+            DemoScene::Gallery => GALLERY_CAMERAS,
+            _ => DEMO_CAMERAS,
+        }
+    }
+
+    fn speaker_ticks(self) -> u32 {
+        match self {
+            DemoScene::Gallery => GALLERY_SPEAKER_TICKS,
+            _ => SPEAKER_TICKS,
+        }
+    }
 }
 
+pub const DEMO_GALLERY_GUESTS: usize = 12;
 const BREAKOUT_AT_TICKS: u32 = 20;
 const WHITEBOARD_AT_TICKS: u32 = 5;
 const DEMO_BOARD_URL: &str = "https://app.whiteboard.microsoft.com/me/whiteboards/demo";
@@ -218,7 +242,7 @@ pub fn start_demo_scene_call(script: DemoCall, scene: DemoScene) -> CallHandle {
     handle
 }
 
-fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
+fn roster_of(people: &[Person], cameras: usize) -> Vec<RosterEntry> {
     people
         .iter()
         .enumerate()
@@ -227,7 +251,7 @@ fn roster_of(people: &[Person]) -> Vec<RosterEntry> {
             display_name: name.clone(),
             muted: index % 3 == 1,
             in_lobby: false,
-            has_video: index < DEMO_CAMERAS,
+            has_video: index < cameras,
             sharing: false,
             hand: None,
             spotlight: None,
@@ -271,7 +295,7 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
         }
         control.send(CallUpdate::Lobby(false));
     }
-    let mut roster = roster_of(&people);
+    let mut roster = roster_of(&people, scene.cameras());
     if matches!(script, DemoCall::People(_)) {
         control.send(CallUpdate::ReplacementLink(
             DEMO_REPLACEMENT_LINK.to_owned(),
@@ -303,7 +327,8 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
     let video = !matches!(script, DemoCall::Test);
     let sharer = matches!(script, DemoCall::Meeting { .. })
         .then(|| people.get(1).map(|person| person.0.clone()))
-        .flatten();
+        .flatten()
+        .filter(|_| scene != DemoScene::Gallery);
     start_scene(&control, scene);
     speak_until_hangup(control, people, roster, video, sharer, scene).await;
 }
@@ -335,6 +360,7 @@ fn publish_demo_video(
     sharing: bool,
     sharer: Option<&str>,
     camera: Option<bool>,
+    cameras: usize,
 ) {
     if let Some(blur) = camera {
         control.video.publish(
@@ -342,7 +368,7 @@ fn publish_demo_video(
             self_view((tick + SELF_PHASE) as usize, blur),
         );
     }
-    for (index, (mri, _)) in people.iter().take(DEMO_CAMERAS).enumerate() {
+    for (index, (mri, _)) in people.iter().take(cameras).enumerate() {
         let frame = pattern_frame(PatternKind::Camera, tick + index as u32 * GUEST_PHASE);
         control
             .video
@@ -366,7 +392,11 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         DemoScene::Hold => control.send(CallUpdate::Hold(HoldState::Local)),
         DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
         DemoScene::Network => control.send(CallUpdate::Health(poor_network_health())),
-        DemoScene::Call | DemoScene::Breakout | DemoScene::Whiteboard | DemoScene::Plain => {}
+        DemoScene::Call
+        | DemoScene::Breakout
+        | DemoScene::Whiteboard
+        | DemoScene::Gallery
+        | DemoScene::Plain => {}
     }
 }
 
@@ -453,7 +483,7 @@ async fn speak_until_hangup(
                     sharing = share_now;
                     control.send(CallUpdate::ScreenShare(sharer.clone().filter(|_| sharing)));
                 }
-                publish_demo_video(&control, if incoming_video { people.as_slice() } else { &[] }, video_ticks, sharing, sharer.as_deref(), camera_on.then_some(blur));
+                publish_demo_video(&control, if incoming_video { people.as_slice() } else { &[] }, video_ticks, sharing, sharer.as_deref(), camera_on.then_some(blur), scene.cameras());
                 video_ticks += 1;
             }
             _ = tick.tick() => {
@@ -463,8 +493,8 @@ async fn speak_until_hangup(
                     local: if LOCAL_SPEAKS.contains(&phase) && !muted { SPEAKING_LEVEL } else { 0.0 },
                     remote: if remote_speaks { SPEAKING_LEVEL } else { 0.0 },
                 });
-                if people.len() > 1 && ticks.is_multiple_of(SPEAKER_TICKS) {
-                    let speaker = &people[(ticks / SPEAKER_TICKS) as usize % people.len()];
+                if people.len() > 1 && ticks.is_multiple_of(scene.speaker_ticks()) {
+                    let speaker = &people[(ticks / scene.speaker_ticks()) as usize % people.len()];
                     control.send(CallUpdate::Speakers(vec![speaker.0.clone()]));
                 }
                 if ticks % REACTION_EVERY_TICKS == REACTION_EVERY_TICKS / 2
@@ -683,17 +713,17 @@ mod tests {
 
     #[test]
     fn demo_guests_have_distinct_mris_and_names() {
-        let guests = demo_guests(11);
-        assert_eq!(guests.len(), 11);
+        let guests = demo_guests(12);
+        assert_eq!(guests.len(), 12);
         let mut mris: Vec<&String> = guests.iter().map(|guest| &guest.0).collect();
         mris.sort();
         mris.dedup();
-        assert_eq!(mris.len(), 11);
+        assert_eq!(mris.len(), 12);
     }
 
     #[test]
     fn demo_hands_queue_in_order_and_lowering_drops_the_own_entry() {
-        let mut roster = roster_of(&demo_guests(3));
+        let mut roster = roster_of(&demo_guests(3), DEMO_CAMERAS);
         set_demo_hand(&mut roster, "8:orgid:demo-guest-1", true);
         set_demo_hand(&mut roster, DEMO_OWN_MRI, true);
         let ranks: Vec<u64> = roster

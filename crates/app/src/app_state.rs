@@ -124,6 +124,7 @@ pub struct AppState {
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
     pub call_share_sound: bool,
+    pub call_view: crate::call::ViewSettings,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
     pub meet_now_pending: bool,
@@ -221,6 +222,7 @@ impl AppState {
             call_launcher: None,
             call_count: 0,
             call_share_sound: false,
+            call_view: crate::call::ViewSettings::default(),
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
             meet_now_pending: false,
@@ -239,6 +241,7 @@ impl AppState {
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
+        state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
         state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);

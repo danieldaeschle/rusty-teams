@@ -39,6 +39,7 @@ pub struct DropdownMenuPopover<T: Selectable + IntoElement + 'static> {
     trigger: T,
     builder: Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>,
     on_open_change: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
+    open: Option<bool>,
 }
 
 impl<T> DropdownMenuPopover<T>
@@ -57,7 +58,14 @@ where
             trigger,
             builder: Rc::new(builder),
             on_open_change: None,
+            open: None,
         }
+    }
+
+    /// Control the open state from outside; pair it with `on_open_change`.
+    pub fn open(mut self, open: bool) -> Self {
+        self.open = Some(open);
+        self
     }
 
     /// Set the anchor corner for the dropdown menu popover.
@@ -114,6 +122,7 @@ where
             .overlay_closable(false)
             .trigger(self.trigger)
             .anchor(self.anchor)
+            .when_some(self.open, |this, open| this.open(open))
             .when_some(self.on_open_change, |this, callback| {
                 this.on_open_change(move |open, window, cx| callback(open, window, cx))
             })

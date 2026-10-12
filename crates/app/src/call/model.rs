@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,18 +12,21 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::background::BackgroundPick;
 use super::health::{HealthBanner, HealthState};
+use super::bubbles::ChatBubble;
+use super::fullscreen::FullscreenState;
 use super::pictures::CallPictures;
+use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, VisibleRotation, split_overflow};
+use super::view_settings::{CallLayout, ViewSettings};
 
 pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
 pub const ECHO_MRI: &str = calling::signaling::ECHO_BOT_MRI;
-pub const MAX_TILES: usize = 9;
 const ORGID_PREFIX: &str = "8:orgid:";
-const WIDE_TILES: usize = 2;
-const MEDIUM_TILES: usize = 4;
+const AVATAR_SHARE: f32 = 0.42;
+const MIN_AVATAR: f32 = 32.;
+const MAX_AVATAR: f32 = 96.;
 pub const REACTION_SHOWN: Duration = Duration::from_secs(3);
 const OWN_ECHO_WINDOW: Duration = Duration::from_secs(2);
-pub const CHAT_OPEN_TILES: usize = 6;
 pub const CAPTION_SHOWN: Duration = Duration::from_secs(4);
 const CAPTION_LINES: usize = 2;
 
@@ -34,6 +39,11 @@ pub struct ActiveCall {
     pub video: Arc<VideoHub>,
     pub pictures: CallPictures,
     pub stage_fullscreen: bool,
+    pub fullscreen: Option<FullscreenState>,
+    pub stage_size: Rc<Cell<(f32, f32)>>,
+    pub bubbles: Vec<ChatBubble>,
+    pub share_menu_open: bool,
+    pub lobby_list_open: bool,
     pub chat_open: bool,
     pub meeting_target: Option<MeetingTarget>,
     pub pending_move: Option<PendingMove>,
@@ -91,6 +101,11 @@ impl ActiveCall {
             video,
             pictures: CallPictures::default(),
             stage_fullscreen: false,
+            fullscreen: None,
+            stage_size: Rc::default(),
+            bubbles: Vec::new(),
+            share_menu_open: false,
+            lobby_list_open: false,
             chat_open: false,
             meeting_target: None,
             pending_move: None,
@@ -186,27 +201,6 @@ pub struct CaptionLine {
     pub at: Instant,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GridLayout {
-    pub shown_others: usize,
-    pub hidden: usize,
-}
-
-pub fn grid_layout(others: usize, max_tiles: usize) -> GridLayout {
-    let total = others + 1;
-    if total <= max_tiles {
-        return GridLayout {
-            shown_others: others,
-            hidden: 0,
-        };
-    }
-    let shown_others = max_tiles - 2;
-    GridLayout {
-        shown_others,
-        hidden: others - shown_others,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TileSize {
     pub width: f32,
@@ -214,24 +208,13 @@ pub struct TileSize {
     pub avatar: f32,
 }
 
-pub fn tile_size(cells: usize) -> TileSize {
-    if cells <= WIDE_TILES {
+impl TileSize {
+    pub fn sixteen_by_nine(width: f32) -> TileSize {
+        let height = width * 9. / 16.;
         TileSize {
-            width: 260.,
-            height: 210.,
-            avatar: 96.,
-        }
-    } else if cells <= MEDIUM_TILES {
-        TileSize {
-            width: 220.,
-            height: 180.,
-            avatar: 72.,
-        }
-    } else {
-        TileSize {
-            width: 190.,
-            height: 150.,
-            avatar: 56.,
+            width,
+            height,
+            avatar: (height * AVATAR_SHARE).clamp(MIN_AVATAR, MAX_AVATAR),
         }
     }
 }
@@ -289,6 +272,8 @@ pub struct CallModel {
     pub reactions: Vec<ReactionChip>,
     reaction_serial: u64,
     pub meeting_chat: Option<String>,
+    pub view: ViewSettings,
+    rotation: VisibleRotation,
     local_detector: SpeakingDetector,
     remote_detector: SpeakingDetector,
 }
@@ -339,6 +324,8 @@ impl CallModel {
             reactions: Vec::new(),
             reaction_serial: 0,
             meeting_chat: None,
+            view: ViewSettings::default(),
+            rotation: VisibleRotation::default(),
             local_detector: SpeakingDetector::default(),
             remote_detector: SpeakingDetector::default(),
         }
@@ -420,8 +407,14 @@ impl CallModel {
             CallUpdate::ListenOnly(listen_only) => self.listen_only = listen_only,
             CallUpdate::Stats { .. } => {}
             CallUpdate::Progress(progress) => self.progress = Some(progress),
-            CallUpdate::Roster(entries) => self.apply_roster(&entries),
-            CallUpdate::Speakers(mris) => self.speaking_mris = mris,
+            CallUpdate::Roster(entries) => {
+                self.apply_roster(&entries);
+                self.refresh_layout(Instant::now());
+            }
+            CallUpdate::Speakers(mris) => {
+                self.speaking_mris = mris;
+                self.refresh_layout(Instant::now());
+            }
             CallUpdate::Lobby(lobby) => self.lobby = lobby,
             CallUpdate::OwnIdentity { mri } => self.own_mri = Some(mri),
             CallUpdate::ScreenShare(sharer) => self.screen_sharer = sharer,
@@ -579,6 +572,7 @@ impl CallModel {
         } else {
             Some(mri.to_owned())
         };
+        self.refresh_layout(Instant::now());
     }
 
     pub fn is_spotlighted(&self, mri: &str) -> bool {
@@ -740,6 +734,128 @@ impl CallModel {
             )
         });
         tiles
+    }
+
+    pub fn has_content(&self) -> bool {
+        self.screen_sharer.is_some() || self.whiteboard.is_some()
+    }
+
+    pub fn effective_layout(&self) -> CallLayout {
+        match self.view.layout {
+            CallLayout::Content if self.has_content() => CallLayout::Content,
+            CallLayout::Content => match self.view.layout_before_content {
+                CallLayout::Content => CallLayout::Gallery,
+                before => before,
+            },
+            layout => layout,
+        }
+    }
+
+    fn is_prioritized(&self, tile: &Tile) -> bool {
+        self.is_pinned(&tile.mri) || tile.spotlight.is_some() || tile.hand.is_some()
+    }
+
+    pub fn hidden_for_no_video(&self, tile: &Tile) -> bool {
+        self.view.hide_no_video
+            && matches!(self.kind, CallKind::Group | CallKind::Meeting)
+            && tile.state == TileState::Present
+            && !tile.has_video
+            && !self.is_pinned(&tile.mri)
+            && !self.tile_speaking(tile)
+    }
+
+    pub fn hidden_without_video(&self) -> usize {
+        self.visible_tiles()
+            .into_iter()
+            .filter(|tile| self.hidden_for_no_video(tile))
+            .count()
+    }
+
+    fn layout_members(&self) -> Vec<&Tile> {
+        let mut tiles: Vec<&Tile> = self
+            .visible_tiles()
+            .into_iter()
+            .filter(|tile| !self.hidden_for_no_video(tile))
+            .collect();
+        tiles.sort_by_key(|tile| !self.is_prioritized(tile));
+        tiles
+    }
+
+    pub fn layout_tiles(&self) -> Vec<&Tile> {
+        let members = self.layout_members();
+        let mut ordered: Vec<&Tile> = self
+            .rotation
+            .order()
+            .iter()
+            .filter_map(|mri| members.iter().find(|tile| &tile.mri == mri).copied())
+            .collect();
+        ordered.extend(
+            members
+                .into_iter()
+                .filter(|tile| !self.rotation.order().contains(&tile.mri)),
+        );
+        ordered
+    }
+
+    pub fn own_cells(&self) -> usize {
+        usize::from(!self.view.hide_me)
+    }
+
+    fn rotation_capacity(&self, others: usize) -> usize {
+        let cells = match self.effective_layout() {
+            _ if self.has_content() => return others,
+            CallLayout::Speaker => FILMSTRIP_MAX,
+            CallLayout::Gallery | CallLayout::Content => GALLERY_MAX,
+        };
+        split_overflow(others, self.own_cells(), cells).shown
+    }
+
+    pub fn refresh_layout(&mut self, now: Instant) -> bool {
+        let members: Vec<String> = self
+            .layout_members()
+            .iter()
+            .map(|tile| tile.mri.clone())
+            .collect();
+        let priority: Vec<String> = self
+            .layout_members()
+            .iter()
+            .filter(|tile| self.is_prioritized(tile))
+            .map(|tile| tile.mri.clone())
+            .collect();
+        let capacity = self.rotation_capacity(members.len());
+        let speaking = self.speaking_mris.clone();
+        self.rotation
+            .update(now, &members, &priority, &speaking, capacity)
+    }
+
+    pub fn speaker_focus(&self) -> Option<Focus> {
+        if let Some(focus) = self.focus() {
+            return Some(focus);
+        }
+        let tiles = self.layout_tiles();
+        let spoken = self
+            .speaking_mris
+            .iter()
+            .find(|mri| tiles.iter().any(|tile| &tile.mri == *mri))
+            .map(String::as_str)
+            .or_else(|| {
+                self.rotation
+                    .last_speaker()
+                    .filter(|mri| tiles.iter().any(|tile| tile.mri == *mri))
+            })
+            .or_else(|| tiles.first().map(|tile| tile.mri.as_str()));
+        let own_mri = self.own_mri.clone().filter(|_| self.own_cells() > 0);
+        let (mri, own) = match (spoken, own_mri) {
+            (Some(mri), _) => (mri.to_owned(), false),
+            (None, Some(own_mri)) => (own_mri, true),
+            (None, None) => return None,
+        };
+        Some(Focus {
+            mri,
+            own,
+            spotlight: false,
+            pinned: false,
+        })
     }
 
     pub fn sharing_label(&self) -> Option<String> {
@@ -1227,61 +1343,107 @@ mod tests {
         assert!(lone.tile_speaking(&lone.tiles[0].clone()));
     }
 
-    #[test]
-    fn more_than_nine_cells_collapse_into_a_plus_n_tile() {
-        assert_eq!(
-            grid_layout(0, MAX_TILES),
-            GridLayout {
-                shown_others: 0,
-                hidden: 0
-            }
-        );
-        assert_eq!(
-            grid_layout(8, MAX_TILES),
-            GridLayout {
-                shown_others: 8,
-                hidden: 0
-            }
-        );
-        assert_eq!(
-            grid_layout(9, MAX_TILES),
-            GridLayout {
-                shown_others: 7,
-                hidden: 2
-            }
-        );
-        assert_eq!(
-            grid_layout(30, MAX_TILES),
-            GridLayout {
-                shown_others: 7,
-                hidden: 23
-            }
-        );
+    fn crowd(count: usize) -> CallModel {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(
+            (0..count)
+                .map(|index| {
+                    entry(
+                        &format!("8:orgid:p{index}"),
+                        &format!("P{index}"),
+                        false,
+                        false,
+                    )
+                })
+                .collect(),
+        ));
+        model
+    }
+
+    fn shown_mris(model: &CallModel) -> Vec<String> {
+        model
+            .layout_tiles()
+            .iter()
+            .map(|tile| tile.mri.clone())
+            .collect()
     }
 
     #[test]
-    fn an_open_chat_panel_leaves_room_for_fewer_tiles() {
-        assert_eq!(
-            grid_layout(5, CHAT_OPEN_TILES),
-            GridLayout {
-                shown_others: 5,
-                hidden: 0
-            }
-        );
-        assert_eq!(
-            grid_layout(6, CHAT_OPEN_TILES),
-            GridLayout {
-                shown_others: 4,
-                hidden: 2
-            }
-        );
+    fn hiding_people_without_video_keeps_speakers_and_the_pinned_person() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            RosterEntry {
+                has_video: true,
+                ..entry("8:orgid:b", "Bo", false, false)
+            },
+            entry("8:orgid:c", "Cy", false, false),
+        ]));
+        model.view.hide_no_video = true;
+        assert_eq!(model.hidden_without_video(), 2);
+        assert_eq!(shown_mris(&model), vec!["8:orgid:b"]);
+        model.apply(CallUpdate::Speakers(vec!["8:orgid:a".into()]));
+        assert_eq!(model.hidden_without_video(), 1);
+        assert!(shown_mris(&model).contains(&"8:orgid:a".to_owned()));
+        model.toggle_pin("8:orgid:c");
+        assert_eq!(model.hidden_without_video(), 0);
     }
 
     #[test]
-    fn crowded_calls_get_smaller_tiles() {
-        assert_eq!(tile_size(2).avatar, 96.);
-        assert_eq!(tile_size(4).avatar, 72.);
-        assert_eq!(tile_size(9).avatar, 56.);
+    fn people_without_video_stay_in_one_to_one_calls() {
+        let mut model = CallModel::people("Bea", &[("8:orgid:b".into(), "Bea".into())]);
+        model.view.hide_no_video = true;
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:b",
+            "Bea",
+            false,
+            false,
+        )]));
+        assert_eq!(model.hidden_without_video(), 0);
+    }
+
+    #[test]
+    fn focus_on_content_falls_back_to_the_previous_layout_when_the_share_ends() {
+        let mut model = meeting_with_me();
+        model.view.choose(CallLayout::Speaker);
+        model.view.choose(CallLayout::Content);
+        assert_eq!(model.effective_layout(), CallLayout::Speaker);
+        model.apply(CallUpdate::ScreenShare(Some("8:orgid:a".into())));
+        assert_eq!(model.effective_layout(), CallLayout::Content);
+        model.apply(CallUpdate::ScreenShare(None));
+        assert_eq!(model.effective_layout(), CallLayout::Speaker);
+    }
+
+    #[test]
+    fn the_speaker_stage_follows_the_active_speaker_and_keeps_the_last_one() {
+        let mut model = crowd(3);
+        model.apply(CallUpdate::Speakers(vec!["8:orgid:p1".into()]));
+        assert_eq!(model.speaker_focus().unwrap().mri, "8:orgid:p1");
+        model.apply(CallUpdate::Speakers(Vec::new()));
+        assert_eq!(model.speaker_focus().unwrap().mri, "8:orgid:p1");
+        model.toggle_pin("8:orgid:p2");
+        let focus = model.speaker_focus().unwrap();
+        assert_eq!((focus.mri.as_str(), focus.pinned), ("8:orgid:p2", true));
+    }
+
+    #[test]
+    fn a_pinned_person_outside_the_grid_moves_into_it() {
+        let mut model = crowd(12);
+        let grid = split_overflow(12, 1, GALLERY_MAX).shown;
+        assert_eq!(grid, 7);
+        assert!(!shown_mris(&model)[..grid].contains(&"8:orgid:p11".to_owned()));
+        model.toggle_pin("8:orgid:p11");
+        assert!(shown_mris(&model)[..grid].contains(&"8:orgid:p11".to_owned()));
+        assert_eq!(model.layout_tiles().len(), 12);
+    }
+
+    #[test]
+    fn hiding_me_frees_a_grid_cell() {
+        let mut model = crowd(12);
+        assert_eq!(model.own_cells(), 1);
+        model.view.hide_me = true;
+        assert_eq!(model.own_cells(), 0);
+        assert_eq!(split_overflow(12, model.own_cells(), GALLERY_MAX).shown, 8);
     }
 
     #[test]

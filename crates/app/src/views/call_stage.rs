@@ -132,3 +132,16 @@ pub fn render_stage_overlay(app: &Entity<AppState>, state: &AppState) -> Option<
             .into_any_element(),
     )
 }
+
+pub fn render_call_overlay(view: AnyElement) -> AnyElement {
+    v_flex()
+        .id("call-fullscreen-overlay")
+        .occlude()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .bg(theme::background())
+        .child(view)
+        .into_any_element()
+}

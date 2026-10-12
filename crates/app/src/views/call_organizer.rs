@@ -111,7 +111,11 @@ fn lobby_list(app: &Entity<AppState>, guests: &[(String, String)]) -> Div {
         }))
 }
 
-pub fn lobby_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
+pub fn lobby_banner(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    list_open: bool,
+) -> Option<AnyElement> {
     if !model.can_admit() {
         return None;
     }
@@ -124,6 +128,7 @@ pub fn lobby_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElem
         return None;
     }
     let list_app = app.clone();
+    let open_app = app.clone();
     let admit_app = app.clone();
     Some(
         h_flex()
@@ -144,6 +149,10 @@ pub fn lobby_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElem
                 Popover::new("call-lobby-popover")
                     .anchor(Anchor::TopLeft)
                     .offset(px(8.))
+                    .open(list_open)
+                    .on_open_change(move |open, _, cx| {
+                        open_app.update(cx, |state, cx| state.set_call_lobby_list(*open, cx))
+                    })
                     .trigger(
                         Button::new("call-lobby-view")
                             .ghost()
@@ -196,6 +205,17 @@ fn confirm_remove(
     });
 }
 
+fn own_tile_items(popup: PopupMenu, app: &Entity<AppState>) -> PopupMenu {
+    let hide_app = app.clone();
+    popup.min_w(px(MENU_WIDTH)).item(
+        PopupMenuItem::new("Hide for me")
+            .icon(IconName::EyeOff)
+            .on_click(move |_, _, cx| {
+                hide_app.update(cx, |state, cx| state.set_call_hide_me(true, cx))
+            }),
+    )
+}
+
 pub fn tile_menu(
     popup: PopupMenu,
     app: &Entity<AppState>,
@@ -204,14 +224,16 @@ pub fn tile_menu(
     name: &str,
     own: bool,
 ) -> PopupMenu {
+    if own {
+        return own_tile_items(popup, app);
+    }
     let pinned = model.is_pinned(mri);
     let spotlighted = model.is_spotlighted(mri);
     let organizes = model.organizes_meeting();
-    let raised = !own
-        && model
-            .tiles
-            .iter()
-            .any(|tile| tile.mri == mri && tile.hand.is_some());
+    let raised = model
+        .tiles
+        .iter()
+        .any(|tile| tile.mri == mri && tile.hand.is_some());
     let muted = model.tiles.iter().any(|tile| tile.mri == mri && tile.muted);
     let mut popup = popup.min_w(px(MENU_WIDTH));
     let pin_app = app.clone();
@@ -239,7 +261,7 @@ pub fn tile_menu(
             }),
         );
     }
-    if organizes && !own {
+    if organizes {
         let (mute_app, mute_mri) = (app.clone(), mri.to_owned());
         popup = popup.item(
             PopupMenuItem::new("Mute")
@@ -258,7 +280,7 @@ pub fn tile_menu(
             hand_app.update(cx, |state, cx| state.lower_call_hand(hand_mri.clone(), cx))
         }));
     }
-    if organizes && !own {
+    if organizes {
         let (remove_app, remove_mri, remove_name) = (app.clone(), mri.to_owned(), name.to_owned());
         popup = popup.separator().item(
             PopupMenuItem::new("Remove from meeting...")
