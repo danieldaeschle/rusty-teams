@@ -279,32 +279,38 @@ fn status_slot(
     if !unread {
         return slot;
     }
-    slot.child(
-        div()
-            .flex()
-            .group_hover(group.clone(), |wrapper| wrapper.hidden())
-            .mr(px(8.))
-            .child(dot(8.)),
-    )
-    .child(
-        div()
-            .id(ElementId::Name(format!("activity-mark-read-{id}").into()))
-            .hidden()
-            .group_hover(group, |button| button.flex())
-            .size(px(MARK_READ_SIZE))
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .rounded(px(6.))
-            .bg(theme::surface_raised())
-            .cursor_pointer()
-            .child(icon(IconName::Check, 12., theme::text()))
-            .tooltip(|window, cx| Tooltip::new("Mark as read").build(window, cx))
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                activity.update(cx, |activity, cx| activity.mark_read(id, cx));
-            }),
-    )
+    // Toggle visibility, never display: gpui reads hover in prepaint and paint from different frames.
+    slot.relative()
+        .w(px(MARK_READ_SIZE))
+        .child(
+            div()
+                .flex()
+                .group_hover(group.clone(), |wrapper| wrapper.invisible())
+                .mr(px(8.))
+                .child(dot(8.)),
+        )
+        .child(
+            div()
+                .id(ElementId::Name(format!("activity-mark-read-{id}").into()))
+                .absolute()
+                .top_0()
+                .right_0()
+                .invisible()
+                .group_hover(group, |button| button.visible())
+                .size(px(MARK_READ_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .bg(theme::surface_raised())
+                .cursor_pointer()
+                .child(icon(IconName::Check, 12., theme::text()))
+                .tooltip(|window, cx| Tooltip::new("Mark as read").build(window, cx))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    activity.update(cx, |activity, cx| activity.mark_read(id, cx));
+                }),
+        )
 }
 
 fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
@@ -455,12 +461,15 @@ impl Render for ActivityPanel {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
-    use chrono::{TimeZone, Utc};
-    use store::{ChatRecord, Sidebar};
+    use chrono::{Local, Offset, TimeZone, Utc};
+    use gpui_kit::{AppContext as _, Modifiers, TestAppContext};
+    use store::{ChatRecord, Sidebar, Store};
 
-    use super::{detail, headline};
-    use crate::activity::{Actor, Entry, Kind};
+    use super::{ActivityPanel, detail, headline};
+    use crate::activity::{ActivityCenter, Actor, Entry, Filter, Kind};
+    use crate::app_state::{AppState, Mode};
 
     fn entry(kind: Kind, count: u32) -> Entry {
         Entry {
@@ -528,5 +537,52 @@ mod tests {
             headline(&stale, &sidebar, &HashMap::new()),
             "Unknown reacted"
         );
+    }
+
+    #[gpui_kit::test]
+    fn row_sliding_under_a_resting_mouse_draws(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        crate::demo::seed(&store);
+        let mode = Mode {
+            demo: true,
+            read_only: false,
+            demo_sync: None,
+        };
+        let app = cx.update(|cx| {
+            cx.new(|_| {
+                let mut state = AppState::new(store, mode);
+                crate::demo::seed_directory(&mut state);
+                state
+            })
+        });
+        let (panel, cx) = cx.add_window_view(|window, cx| {
+            let activity = cx.new(|cx| ActivityCenter::new(app.clone(), window, cx));
+            let mut panel = ActivityPanel::new(app.clone(), activity, cx);
+            panel.filter = Filter::Unread;
+            panel
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (activity, first_row) = cx.update(|_, cx| {
+            let panel = panel.read(cx);
+            (
+                panel.activity.clone(),
+                panel.scroll.bounds_for_item(1).unwrap(),
+            )
+        });
+        let first_unread = cx.update(|_, cx| {
+            let now = Local::now();
+            activity
+                .read(cx)
+                .feed()
+                .sections(Filter::Unread, now.date_naive(), now.offset().fix())[0]
+                .entries[0]
+                .id
+        });
+        cx.simulate_mouse_move(first_row.center(), None, Modifiers::none());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|_, cx| activity.update(cx, |activity, cx| activity.mark_read(first_unread, cx)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
     }
 }
