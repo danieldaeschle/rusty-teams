@@ -3,8 +3,21 @@
 set -euo pipefail
 shimDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 powershellExe=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+# WSL interop calls time out under load ("UtilAcceptVsock: accept4 failed 110"): retry each one.
+interop() {
+  local output attempt
+  for attempt in 1 2 3; do
+    if output="$("$@" 2>&1 | tr -d '\0')"; then
+      printf '%s' "$output"
+      return 0
+    fi
+    sleep "$attempt"
+  done
+  printf 'fxc-wsl: %s failed 3 times:\n%s\n' "$1" "$output" >&2
+  return 1
+}
 # UNC paths break D3DCompileFromFile includes: stage on the Windows drive.
-windowsProfile="$(cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+windowsProfile="$(cd /mnt/c && interop /mnt/c/Windows/System32/cmd.exe /c "echo %USERPROFILE%" | tr -d '\r')"
 stageDir="$(mktemp -d "$(wslpath "$windowsProfile")/AppData/Local/Temp/fxc-stage.XXXXXX")"
 trap 'rm -rf "$stageDir"' EXIT
 translatedArgs=(); headerOut=""
@@ -16,13 +29,5 @@ while (($#)); do
     *) cp "$(dirname "$1")"/*.hlsl "$stageDir/"; translatedArgs+=("$(wslpath -w "$stageDir/$(basename "$1")")"); shift ;;
   esac
 done
-# PowerShell via WSL interop fails intermittently (empty stderr) during busy builds: retry.
-for attempt in 1 2 3; do
-  if shimOutput="$("$powershellExe" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$shimDir/fxc-shim.ps1")" "${translatedArgs[@]}" 2>&1)" && [[ -s "$stageDir/out.h" ]]; then
-    cp "$stageDir/out.h" "$headerOut"
-    exit 0
-  fi
-  sleep "$attempt"
-done
-printf 'fxc failed after 3 attempts:\n%s\n' "$shimOutput" >&2
-exit 1
+interop "$powershellExe" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$shimDir/fxc-shim.ps1")" "${translatedArgs[@]}" >/dev/null
+cp "$stageDir/out.h" "$headerOut"
