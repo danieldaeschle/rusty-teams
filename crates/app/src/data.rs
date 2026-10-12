@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::{Image, ImageFormat};
 use store::{ChatRecord, Store};
 
-use teams_core::{Activity, Availability, ChatSectionSettings};
+use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange};
 use tokio::sync::oneshot;
 
 use crate::backend::Engine;
@@ -335,6 +335,68 @@ impl Directory {
             folder.conversation_ids.push(conversation_id.to_owned());
         }
     }
+
+    pub fn move_targets(&self) -> Vec<(String, String)> {
+        self.folders
+            .iter()
+            .filter(|folder| {
+                folder.kind == FolderKind::UserCreated && !is_pending_folder(&folder.id)
+            })
+            .map(|folder| (folder.id.clone(), folder.name.clone()))
+            .collect()
+    }
+
+    pub fn apply_folder_change(&mut self, change: &FolderChange, created_id: &str) {
+        let position =
+            |folders: &[FolderInfo], id: &str| folders.iter().position(|folder| folder.id == id);
+        match change {
+            FolderChange::Create { name } => {
+                let index = position(&self.folders, created_id).unwrap_or_else(|| {
+                    self.folders
+                        .iter()
+                        .position(|folder| folder.kind == FolderKind::Recent)
+                        .unwrap_or(0)
+                });
+                self.folders.retain(|folder| folder.id != created_id);
+                self.folders.insert(
+                    index.min(self.folders.len()),
+                    FolderInfo {
+                        id: created_id.to_owned(),
+                        name: name.clone(),
+                        kind: FolderKind::UserCreated,
+                        expanded: None,
+                        conversation_ids: Vec::new(),
+                    },
+                );
+            }
+            FolderChange::Rename { folder_id, name } => {
+                if let Some(index) = position(&self.folders, folder_id) {
+                    self.folders[index].name = name.clone();
+                }
+            }
+            FolderChange::Delete { folder_id } => {
+                self.folders.retain(|folder| folder.id != *folder_id)
+            }
+            FolderChange::Move {
+                folder_id,
+                target_folder_id,
+            } => {
+                if let (Some(source), Some(target)) = (
+                    position(&self.folders, folder_id),
+                    position(&self.folders, target_folder_id),
+                ) {
+                    let moved = self.folders.remove(source);
+                    self.folders.insert(target, moved);
+                }
+            }
+        }
+    }
+}
+
+pub const PENDING_FOLDER_PREFIX: &str = "pending-section:";
+
+pub fn is_pending_folder(folder_id: &str) -> bool {
+    folder_id.starts_with(PENDING_FOLDER_PREFIX)
 }
 
 pub fn image_format(content_type: &str) -> ImageFormat {
@@ -600,6 +662,90 @@ mod tests {
         assert_eq!(directory.folders[1].conversation_ids, vec!["b", "a"]);
         directory.assign("a", None);
         assert!(directory.folder_of("a").is_none());
+    }
+
+    #[test]
+    fn folder_changes_apply_locally_like_teams() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &["a"]),
+                folder("work", FolderKind::UserCreated, &["b"]),
+                folder("todo", FolderKind::UserCreated, &[]),
+                folder("recent", FolderKind::Recent, &[]),
+            ],
+            ..Default::default()
+        };
+        let order = |directory: &Directory| -> Vec<String> {
+            directory
+                .folders
+                .iter()
+                .map(|folder| folder.id.clone())
+                .collect()
+        };
+        let move_folder = |folder_id: &str, target_folder_id: &str| FolderChange::Move {
+            folder_id: folder_id.into(),
+            target_folder_id: target_folder_id.into(),
+        };
+        directory.apply_folder_change(&move_folder("todo", "work"), "");
+        assert_eq!(order(&directory), ["fav", "todo", "work", "recent"]);
+        directory.apply_folder_change(&move_folder("fav", "todo"), "");
+        assert_eq!(order(&directory), ["todo", "fav", "work", "recent"]);
+        let rename = FolderChange::Rename {
+            folder_id: "work".into(),
+            name: "Job".into(),
+        };
+        directory.apply_folder_change(&rename, "");
+        assert_eq!(directory.folders[2].name, "Job");
+        let delete = FolderChange::Delete {
+            folder_id: "work".into(),
+        };
+        directory.apply_folder_change(&delete, "");
+        assert!(directory.folder_of("b").is_none());
+    }
+
+    #[test]
+    fn created_folder_lands_before_recent_and_keeps_its_place_when_reapplied() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &[]),
+                folder("recent", FolderKind::Recent, &[]),
+                folder("muted", FolderKind::Muted, &[]),
+            ],
+            ..Default::default()
+        };
+        let create = FolderChange::Create { name: "New".into() };
+        let pending_id = format!("{PENDING_FOLDER_PREFIX}1");
+        directory.apply_folder_change(&create, &pending_id);
+        directory.apply_folder_change(&create, &pending_id);
+        let ids: Vec<&str> = directory
+            .folders
+            .iter()
+            .map(|folder| folder.id.as_str())
+            .collect();
+        assert_eq!(ids, ["fav", pending_id.as_str(), "recent", "muted"]);
+        let mut bare = Directory::default();
+        bare.apply_folder_change(&create, "x");
+        assert_eq!(bare.folders[0].id, "x");
+    }
+
+    #[test]
+    fn pending_folders_are_no_move_targets() {
+        let directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &[]),
+                folder("work", FolderKind::UserCreated, &[]),
+                folder(
+                    &format!("{PENDING_FOLDER_PREFIX}1"),
+                    FolderKind::UserCreated,
+                    &[],
+                ),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            directory.move_targets(),
+            [("work".to_owned(), "work".to_owned())]
+        );
     }
 
     #[test]

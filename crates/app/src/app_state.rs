@@ -133,6 +133,7 @@ pub struct AppState {
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
     pub translation: TranslationState,
+    pub section_changes: crate::section_actions::SectionChanges,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -233,6 +234,7 @@ impl AppState {
             live_meetings: HashMap::new(),
             live_refreshing: HashSet::new(),
             translation: TranslationState::default(),
+            section_changes: crate::section_actions::SectionChanges::default(),
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -264,6 +266,9 @@ impl AppState {
     }
 
     pub fn toggle_collapsed(&mut self, section_id: &str, cx: &mut Context<Self>) {
+        if data::is_pending_folder(section_id) {
+            return;
+        }
         let now_collapsed = self.collapsed.insert(section_id.to_owned());
         if !now_collapsed {
             self.collapsed.remove(section_id);
@@ -386,6 +391,7 @@ impl AppState {
             .flatten()
             .unwrap_or_default();
         self.directory.folders = data::folders(&self.store, &self.favorite_ids);
+        self.reapply_section_changes();
         self.directory.section_settings = teams_core::stored_section_settings(&self.store);
         self.adopt_folder_expanded();
         self.directory.pinned_channels = data::pinned_channels(&self.store);
@@ -933,6 +939,19 @@ mod tests {
             active,
             received_at: Utc::now(),
         })
+    }
+
+    #[gpui_kit::test]
+    fn toggle_collapsed_ignores_pending_sections(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_collapsed("pending-section:1", cx);
+                assert!(state.collapsed.is_empty());
+            })
+        });
     }
 
     #[gpui_kit::test]

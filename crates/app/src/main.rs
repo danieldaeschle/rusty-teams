@@ -55,6 +55,7 @@ mod runtime;
 mod schedule_time;
 mod scheduled;
 mod scheduled_rows;
+mod section_actions;
 mod single_instance;
 mod sidebar_model;
 mod stickers;

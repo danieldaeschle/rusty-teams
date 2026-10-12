@@ -10,6 +10,8 @@ pub enum Error {
     NoFavoritesFolder,
     #[error("unknown folder {0}")]
     UnknownFolder(String),
+    #[error("folder {0} is a system folder")]
+    SystemFolder(String),
     #[error("pin list changed twice while writing, giving up")]
     VersionConflict,
     #[error("GIFs are disabled by the organization")]

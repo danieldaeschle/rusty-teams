@@ -44,6 +44,7 @@ pub mod reaction_pills;
 pub mod saved_panel;
 pub mod scheduled_toolbar;
 pub mod toolbar_placement;
+pub mod section_dialog;
 pub mod share_bar;
 pub mod shared_tab;
 pub mod shell;
