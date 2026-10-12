@@ -232,9 +232,9 @@ impl<'a> Recap<'a> {
         };
         let scope = Scope::graph(ATTENDANCE_SCOPE);
         let lookup = format!(
-            "{}/v1.0/me/onlineMeetings?$filter=JoinWebUrl eq '{}'&$select=id",
+            "{}/v1.0/me/onlineMeetings?$filter={}&$select=id",
             session::GRAPH,
-            join_url.replace('\'', "''")
+            encode(&format!("JoinWebUrl eq '{}'", join_url.replace('\'', "''")))
         );
         let meeting_id = match self
             .transcripts

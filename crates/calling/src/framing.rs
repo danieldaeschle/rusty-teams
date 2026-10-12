@@ -18,6 +18,7 @@ const LOST_HOLD: f32 = 1.5;
 const MAX_STEP: f32 = 0.25;
 const SETTLED: f32 = 0.001;
 const FULL_ZOOM_LIMIT: f32 = 1.001;
+const ARRIVED: f32 = 0.01;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Subject {
@@ -119,12 +120,19 @@ pub fn step_crop(current: Crop, target: Crop, seconds: f32, deadband: bool) -> C
 pub struct CropPlanner {
     crop: Crop,
     lost_seconds: f32,
+    moving: bool,
 }
 
 impl Default for CropPlanner {
     fn default() -> Self {
-        CropPlanner { crop: FULL_FRAME, lost_seconds: 0. }
+        CropPlanner { crop: FULL_FRAME, lost_seconds: 0., moving: false }
     }
+}
+
+fn settled(current: &Crop, target: &Crop) -> bool {
+    let size = 1. / current.zoom;
+    let offset = (target.center_x - current.center_x).abs().max((target.center_y - current.center_y).abs());
+    offset / size < ARRIVED && (1. / target.zoom - size).abs() / size < ARRIVED
 }
 
 impl CropPlanner {
@@ -133,7 +141,10 @@ impl CropPlanner {
         match subject {
             Some(subject) => {
                 self.lost_seconds = 0.;
-                self.crop = step_crop(self.crop, crop_for(subject), seconds, true);
+                let target = crop_for(subject);
+                let next = step_crop(self.crop, target, seconds, !self.moving);
+                self.moving = next != self.crop && !settled(&next, &target);
+                self.crop = next;
             }
             None => {
                 self.lost_seconds += seconds;
@@ -256,8 +267,7 @@ mod tests {
         let mut planner = CropPlanner::default();
         let target = crop_for(&small_person());
         let crop = settle(&mut planner, Some(&small_person()), 20);
-        assert!((crop.zoom - target.zoom).abs() < 0.1 * target.zoom);
-        assert!((crop.center_x - target.center_x).abs() <= POSITION_DEADBAND / crop.zoom + 1e-4);
+        assert!(settled(&crop, &target));
         assert!(crop.zoom <= MAX_ZOOM && crop.zoom >= MIN_ZOOM);
     }
 
