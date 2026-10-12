@@ -3,6 +3,7 @@ use gpui_kit::component::{tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::shell::ISLAND_GAP;
 use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
 use super::widgets::icon;
@@ -12,7 +13,7 @@ use crate::format;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
 
-pub const RAIL_WIDTH: f32 = 56.;
+pub const RAIL_WIDTH: f32 = ITEM_WIDTH + 2. * ISLAND_GAP;
 const ITEM_WIDTH: f32 = 48.;
 const ITEM_HEIGHT: f32 = 52.;
 const ICON_SIZE: f32 = 20.;
