@@ -9,6 +9,7 @@ use calling::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::background::BackgroundPick;
+use super::health::{HealthBanner, HealthState};
 use super::pictures::CallPictures;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
@@ -281,6 +282,7 @@ pub struct CallModel {
     pub recording: bool,
     pub consent_required: bool,
     pub hold: HoldState,
+    pub health: HealthState,
     pub whiteboard: Option<ContentShare>,
     pub breakout: Option<BreakoutState>,
     pub main_meeting: Option<MeetingTarget>,
@@ -330,6 +332,7 @@ impl CallModel {
             recording: false,
             consent_required: false,
             hold: HoldState::Active,
+            health: HealthState::default(),
             whiteboard: None,
             breakout: None,
             main_meeting: None,
@@ -448,6 +451,8 @@ impl CallModel {
             CallUpdate::Recording(on) => self.recording = on,
             CallUpdate::ConsentRequired(required) => self.consent_required = required,
             CallUpdate::Hold(hold) => self.hold = hold,
+            CallUpdate::Health(health) => self.health.apply(health),
+            CallUpdate::IncomingVideo(enabled) => self.health.incoming_video = enabled,
             CallUpdate::Whiteboard(share) => self.whiteboard = share,
             CallUpdate::BreakoutRoom { main } => self.main_meeting = Some(main),
             CallUpdate::BlurTiming(_)
@@ -763,6 +768,10 @@ impl CallModel {
 
     pub fn whiteboard_url(&self) -> Option<&str> {
         self.whiteboard.as_ref()?.url.as_deref()
+    }
+
+    pub fn health_banner(&self) -> Option<HealthBanner> {
+        self.health.banner(self.background != BackgroundPick::None)
     }
 
     pub fn is_one_to_one(&self) -> bool {

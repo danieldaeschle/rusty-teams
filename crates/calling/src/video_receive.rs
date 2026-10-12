@@ -110,6 +110,7 @@ pub struct VideoReceive {
     screen_held: Option<Assignment>,
     history: Vec<String>,
     requester: Option<SourceRequester>,
+    incoming_enabled: bool,
 }
 
 impl VideoReceive {
@@ -122,7 +123,12 @@ impl VideoReceive {
             screen_held: None,
             history: Vec::new(),
             requester: None,
+            incoming_enabled: true,
         }
+    }
+
+    pub fn set_incoming_enabled(&mut self, enabled: bool) {
+        self.incoming_enabled = enabled;
     }
 
     pub fn router(&self) -> &VideoRouter {
@@ -156,7 +162,11 @@ impl VideoReceive {
     pub fn reselect(&mut self, roster: &Roster) -> ReceiveChange {
         let mut change = ReceiveChange::default();
         let Some(requester) = &self.requester else { return change };
-        let candidates = prioritize(roster.video_candidates(&self.own_mri), &self.history);
+        let candidates = if self.incoming_enabled {
+            prioritize(roster.video_candidates(&self.own_mri), &self.history)
+        } else {
+            Vec::new()
+        };
         let next = plan_receive(&self.held, &candidates);
         for request in requests_for(&self.held, &next, &self.table.people) {
             let slot = self.table.people.iter().position(|slot| slot.mid == request.mid);
