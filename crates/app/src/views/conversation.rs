@@ -726,16 +726,24 @@ impl ConversationView {
                 .map(|face| face.name.clone())
                 .collect::<Vec<_>>(),
         );
-        let text_inset = match self.current.as_ref().map(|current| &current.mode) {
-            Some(ViewMode::Flat) => AVATAR_SIZE + AVATAR_GAP,
-            _ => 0.,
+        let flat = matches!(
+            self.current.as_ref().map(|current| &current.mode),
+            Some(ViewMode::Flat)
+        );
+        let faces_element = match faces.as_slice() {
+            [face] if flat => person_avatar(
+                &app.directory,
+                face.user_id.as_deref(),
+                &face.name,
+                AVATAR_SIZE,
+            ),
+            _ => member_stack(&app.directory, &faces, faces.len()).into_any_element(),
         };
         h_flex()
-            .h(px(TYPING_LINE_HEIGHT))
+            .h(px(if flat { AVATAR_SIZE + 4. } else { TYPING_LINE_HEIGHT }))
             .flex_none()
-            .pl(px(20. + text_inset))
-            .pr(px(20.))
-            .gap(px(6.))
+            .px(px(20.))
+            .gap(px(if flat { AVATAR_GAP } else { 6. }))
             .items_center()
             .when(!faces.is_empty(), |line| {
                 line.child(
@@ -744,7 +752,7 @@ impl ConversationView {
                         .tooltip(move |window, cx| {
                             Tooltip::new(tooltip_text.clone()).build(window, cx)
                         })
-                        .child(member_stack(&app.directory, &faces, faces.len())),
+                        .child(faces_element),
                 )
                 .child(typing_dots())
             })
