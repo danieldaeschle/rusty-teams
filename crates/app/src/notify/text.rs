@@ -104,7 +104,10 @@ mod tests {
 
     #[test]
     fn direct_shows_sender_and_plain_preview() {
-        let text = describe(&model(ChatKind::Direct, Preview::Text("Hello".into())), true);
+        let text = describe(
+            &model(ChatKind::Direct, Preview::Text("Hello".into())),
+            true,
+        );
         assert_eq!(text.title, "Priya Nair");
         assert_eq!(text.subtitle, "Direct");
         assert_eq!(text.preview, "Hello");
@@ -113,7 +116,10 @@ mod tests {
     #[test]
     fn group_shows_chat_title_and_prefixes_sender() {
         let text = describe(
-            &model(ChatKind::Group { member_count: 5 }, Preview::Text("Hi".into())),
+            &model(
+                ChatKind::Group { member_count: 5 },
+                Preview::Text("Hi".into()),
+            ),
             true,
         );
         assert_eq!(text.title, "Retro-Team");
@@ -135,7 +141,10 @@ mod tests {
 
     #[test]
     fn preview_off_hides_content_but_keeps_name() {
-        let text = describe(&model(ChatKind::Direct, Preview::Text("geheim".into())), false);
+        let text = describe(
+            &model(ChatKind::Direct, Preview::Text("geheim".into())),
+            false,
+        );
         assert_eq!(text.preview, "New message");
         assert!(!text.narration().contains("geheim"));
     }
@@ -150,7 +159,10 @@ mod tests {
     #[test]
     fn mention_ranges_cover_first_word_after_at() {
         let text = "Ping @Jonas can you ask @Mara @";
-        let found: Vec<&str> = mention_ranges(text).into_iter().map(|range| &text[range]).collect();
+        let found: Vec<&str> = mention_ranges(text)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect();
         assert_eq!(found, ["@Jonas", "@Mara"]);
     }
 }

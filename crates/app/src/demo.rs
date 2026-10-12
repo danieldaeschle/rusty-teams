@@ -10,9 +10,9 @@ use store::{
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CardActionOutcome, ChatApp, Gif, Language, LanguageSettings,
-    LinkPreview, MentionCandidate, PersonCandidate, PersonSource, PinnedMessage, SavedMessage,
-    TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
+    Activity, CardActionOutcome, ChatApp, Gif, Language, LanguageSettings, LinkPreview,
+    MentionCandidate, PersonCandidate, PersonSource, PinnedMessage, SavedMessage, TaskDialog,
+    TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -595,8 +595,12 @@ pub fn language_stamps(conversation_id: &str) -> HashMap<String, String> {
 
 pub fn translations(message_ids: &[String]) -> Vec<Translation> {
     let translated = |message_id: &str| match message_id {
-        FRENCH_MESSAGE => Some("<p>Hello everyone, <strong>version 0.2</strong> is ready. Can you check the checklist before Friday?</p>"),
-        SPANISH_MESSAGE => Some("<p>Thanks for the heads-up. I will test the build this afternoon and let you know if anything breaks.</p>"),
+        FRENCH_MESSAGE => Some(
+            "<p>Hello everyone, <strong>version 0.2</strong> is ready. Can you check the checklist before Friday?</p>",
+        ),
+        SPANISH_MESSAGE => Some(
+            "<p>Thanks for the heads-up. I will test the build this afternoon and let you know if anything breaks.</p>",
+        ),
         _ => None,
     };
     message_ids
@@ -1221,7 +1225,9 @@ fn meeting_link_messages() -> Vec<MessageRecord> {
         None,
         mara,
         at(0, 13, 38),
-        &format!("<p>Let's sync live, here is the meeting: <a href=\"{DEMO_MEETING_LINK}\">Join the Teams meeting</a></p>"),
+        &format!(
+            "<p>Let's sync live, here is the meeting: <a href=\"{DEMO_MEETING_LINK}\">Join the Teams meeting</a></p>"
+        ),
         "[]",
         false,
     )]

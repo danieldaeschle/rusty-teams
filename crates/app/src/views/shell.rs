@@ -15,9 +15,9 @@ use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenChannelsTab,
-    OpenCallsTab, OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts, ToggleCallCamera,
-    ToggleCallShare,
+    AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenCallsTab,
+    OpenChannelsTab, OpenChatsTab, OpenSaved, PreviousConversation, Scope, ShowShortcuts,
+    ToggleCallCamera, ToggleCallShare,
 };
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
@@ -31,17 +31,24 @@ use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest}
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
 use crate::notice::NoticeAction;
-use crate::user_activity::{self, UserInput};
 use crate::notify::{NotificationCenter, selection_for};
 use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
+use crate::user_activity::{self, UserInput};
 
 actions!(teams, [OpenSwitcher, NewChat, ToggleCallMute]);
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
-    super::shortcuts::bind_scopes(cx, &[Scope::Global, Scope::OutsideComposer, Scope::GlobalOverTextFields]);
+    super::shortcuts::bind_scopes(
+        cx,
+        &[
+            Scope::Global,
+            Scope::OutsideComposer,
+            Scope::GlobalOverTextFields,
+        ],
+    );
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,7 +98,12 @@ pub struct AppShell {
 }
 
 impl AppShell {
-    fn sync_call_chat(&mut self, thread: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    fn sync_call_chat(
+        &mut self,
+        thread: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match (thread, &self.call_chat) {
             (Some(wanted), Some((open, _))) if &wanted == open => {}
             (Some(wanted), _) => {
@@ -118,15 +130,18 @@ impl AppShell {
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
         let panel_subscriptions = [
-            cx.subscribe(&activity_panel, |this, _, event: &ActivityPanelEvent, cx| match event {
-                ActivityPanelEvent::OpenSettings => this
-                    .notifications
-                    .update(cx, |center, cx| center.open_settings(cx)),
-                ActivityPanelEvent::Open {
-                    conversation_id,
-                    message_id,
-                } => this.open_message(conversation_id, message_id, cx),
-            }),
+            cx.subscribe(
+                &activity_panel,
+                |this, _, event: &ActivityPanelEvent, cx| match event {
+                    ActivityPanelEvent::OpenSettings => this
+                        .notifications
+                        .update(cx, |center, cx| center.open_settings(cx)),
+                    ActivityPanelEvent::Open {
+                        conversation_id,
+                        message_id,
+                    } => this.open_message(conversation_id, message_id, cx),
+                },
+            ),
             cx.subscribe(&saved_panel, |this, _, event: &SavedPanelEvent, cx| {
                 let SavedPanelEvent::Open {
                     conversation_id,
@@ -136,8 +151,10 @@ impl AppShell {
             }),
         ];
         let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
-            cx.subscribe_in(&runs, window, |this, _, event: &AgentRunsEvent, window, cx| {
-                match event {
+            cx.subscribe_in(
+                &runs,
+                window,
+                |this, _, event: &AgentRunsEvent, window, cx| match event {
                     AgentRunsEvent::StartRequested(request) => {
                         this.open_agent_dialog(request.clone(), window, cx)
                     }
@@ -145,8 +162,8 @@ impl AppShell {
                         .notifications
                         .update(cx, |center, cx| center.open_agent_settings(cx)),
                     AgentRunsEvent::Finished(_) => {}
-                }
-            })
+                },
+            )
         });
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
@@ -182,12 +199,14 @@ impl AppShell {
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
             this.user_input.touch();
             if event.keystroke.key == "escape" {
-                this.state.update(cx, |state, cx| state.leave_stage_fullscreen(cx));
+                this.state
+                    .update(cx, |state, cx| state.leave_stage_fullscreen(cx));
             }
         });
         let activation_observation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
-                this.state.update(cx, |state, cx| state.refresh_calendar(cx));
+                this.state
+                    .update(cx, |state, cx| state.refresh_calendar(cx));
             }
         });
         let closing = notifications.clone();
@@ -257,7 +276,10 @@ impl AppShell {
 
     #[cfg_attr(not(windows), allow(dead_code))]
     fn poll_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.update, UpdateStatus::Failed(_) | UpdateStatus::Installing) {
+        if matches!(
+            self.update,
+            UpdateStatus::Failed(_) | UpdateStatus::Installing
+        ) {
             return;
         }
         let Some(paths) = updater::current_paths() else {
@@ -444,11 +466,15 @@ impl AppShell {
         self.switcher = None;
         let app = self.state.clone();
         let dialog = cx.new(|cx| StartDialog::new(app, request, action, &agent_name, window, cx));
-        cx.subscribe_in(&dialog, window, |this, _, _: &StartDialogEvent, window, cx| {
-            this.agent_dialog = None;
-            window.focus(&this.focus_handle, cx);
-            cx.notify();
-        })
+        cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, _: &StartDialogEvent, window, cx| {
+                this.agent_dialog = None;
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        )
         .detach();
         self.agent_dialog = Some(dialog);
         cx.notify();
@@ -598,9 +624,12 @@ impl AppShell {
                     .flex_none()
                     .child(self.rail.clone())
                     .child(
-                        self.sidebar
-                            .clone()
-                            .cached(StyleRefinement::default().w(px(SIDEBAR_WIDTH)).h_full().flex_none()),
+                        self.sidebar.clone().cached(
+                            StyleRefinement::default()
+                                .w(px(SIDEBAR_WIDTH))
+                                .h_full()
+                                .flex_none(),
+                        ),
                     ),
             )
             .child(match call_view {
@@ -648,7 +677,8 @@ impl Render for AppShell {
         self.sync_call_chat(chat_thread, window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
         let state = self.state.read(cx);
-        let call_view = render_call_view(&self.state, state, chat_panel).filter(|_| state.viewing_call());
+        let call_view =
+            render_call_view(&self.state, state, chat_panel).filter(|_| state.viewing_call());
         let call_mini = render_call_mini(&self.state, state);
         let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(
@@ -676,35 +706,42 @@ impl Render for AppShell {
                 this.state.update(cx, |state, cx| state.start_new_chat(cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
-                this.state.update(cx, |state, cx| state.toggle_call_mute(cx));
+                this.state
+                    .update(cx, |state, cx| state.toggle_call_mute(cx));
             }))
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenActivity, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar.update(cx, |sidebar, cx| sidebar.show_activity(cx));
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_activity(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar.update(cx, |sidebar, cx| sidebar.show_saved(cx));
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_saved(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChatsTab, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_chats(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChannelsTab, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar.update(cx, |sidebar, cx| sidebar.show_channels(cx));
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_channels(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenCallsTab, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar.update(cx, |sidebar, cx| sidebar.show_calls(cx));
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_calls(cx));
             }))
             .on_action(cx.listener(|this, _: &PreviousConversation, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Previous, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.select_adjacent(Step::Previous, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &NextConversation, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -712,19 +749,23 @@ impl Render for AppShell {
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
             }))
             .on_action(cx.listener(|this, _: &AcceptCall, _, cx| {
-                this.state.update(cx, |state, cx| state.accept_ringing_call(cx));
+                this.state
+                    .update(cx, |state, cx| state.accept_ringing_call(cx));
             }))
             .on_action(cx.listener(|this, _: &DeclineCall, _, cx| {
-                this.state.update(cx, |state, cx| state.decline_ringing_call(cx));
+                this.state
+                    .update(cx, |state, cx| state.decline_ringing_call(cx));
             }))
             .on_action(cx.listener(|this, _: &HangUpCall, _, cx| {
                 this.state.update(cx, |state, cx| state.leave_call(cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCallCamera, _, cx| {
-                this.state.update(cx, |state, cx| state.toggle_call_camera(cx));
+                this.state
+                    .update(cx, |state, cx| state.toggle_call_camera(cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCallShare, _, cx| {
-                this.state.update(cx, |state, cx| state.toggle_call_share(cx));
+                this.state
+                    .update(cx, |state, cx| state.toggle_call_share(cx));
             }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);

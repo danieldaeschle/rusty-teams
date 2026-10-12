@@ -14,8 +14,8 @@ use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
 };
 
-use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::activity_panel::ActivityPanel;
+use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
@@ -28,8 +28,8 @@ use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
-    SectionInput, SectionKind, Step, build_sections, step_id,
-    older_chats_trigger_resets, visible_channel_ids, wants_older_chats,
+    SectionInput, SectionKind, Step, build_sections, older_chats_trigger_resets, step_id,
+    visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 
@@ -649,7 +649,8 @@ impl SidebarView {
             SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Saved => None,
         };
         if let Some(selection) = selection {
-            self.state.update(cx, |state, cx| state.select(selection, cx));
+            self.state
+                .update(cx, |state, cx| state.select(selection, cx));
         }
     }
 

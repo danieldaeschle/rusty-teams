@@ -237,7 +237,10 @@ impl AppState {
                 })
                 .ok();
             }
-            Ok(Err(error)) => crate::diagnostics::record(format!("calls: history not loaded: {}", short_error(&error))),
+            Ok(Err(error)) => crate::diagnostics::record(format!(
+                "calls: history not loaded: {}",
+                short_error(&error)
+            )),
             Err(_) => {}
         })
         .detach();

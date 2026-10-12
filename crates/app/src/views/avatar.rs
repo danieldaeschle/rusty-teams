@@ -255,20 +255,20 @@ pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div 
                 div().id(ElementId::Name(format!("member-face-{index}").into())),
                 face.user_id.as_deref(),
             )
-                .when(index > 0, |element| element.ml(px(-OVERLAP)))
-                .size(px(SIZE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .bg(theme::surface())
-                .child(face_circle(
-                    directory,
-                    face,
-                    SIZE - 2. * PRESENCE_RING,
-                    0.45,
-                )),
+            .when(index > 0, |element| element.ml(px(-OVERLAP)))
+            .size(px(SIZE))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .bg(theme::surface())
+            .child(face_circle(
+                directory,
+                face,
+                SIZE - 2. * PRESENCE_RING,
+                0.45,
+            )),
         );
     }
     if total > LIMIT {

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Local};
 use gpui_kit::*;
+use mcp::install::{Homes, Location};
 use mcp::{Access, AgentHub, AgentPolicy, McpEndpoint, Outcome, Proposal, ServerHandle};
 use store::Store;
 
@@ -45,6 +46,7 @@ pub struct AgentApi {
     status: ServerStatus,
     generation: u64,
     reinstall_note: Option<String>,
+    demo: bool,
 }
 
 struct AgentApiHandle(Entity<AgentApi>);
@@ -55,6 +57,35 @@ const DEMO_PORT_ENV: &str = "RUSTY_TEAMS_MCP_PORT";
 
 pub fn endpoint_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/mcp")
+}
+
+fn demo_port(configured: Option<String>) -> u16 {
+    configured
+        .and_then(|value| value.parse().ok())
+        .or_else(|| {
+            std::net::TcpListener::bind(("127.0.0.1", 0))
+                .and_then(|listener| listener.local_addr())
+                .map(|addr| addr.port())
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
+pub fn is_demo(cx: &App) -> bool {
+    handle(cx).is_some_and(|api| api.read(cx).demo)
+}
+
+pub fn agent_homes(demo: bool) -> Homes {
+    if demo {
+        Homes {
+            entries: vec![(
+                Location::Native,
+                std::env::temp_dir().join("rusty-teams-demo-home"),
+            )],
+        }
+    } else {
+        Homes::detect()
+    }
 }
 
 pub fn agent_label(agent: Option<&str>) -> &'static str {
@@ -69,18 +100,11 @@ pub fn agent_label(agent: Option<&str>) -> &'static str {
 pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
     let (ui, receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut policy = mcp::load_policy(&store);
-    if demo
-        && let Some(port) = std::env::var(DEMO_PORT_ENV)
-            .ok()
-            .and_then(|value| value.parse().ok())
-    {
-        policy.port = port;
+    if demo {
+        policy.port = demo_port(std::env::var(DEMO_PORT_ENV).ok());
     }
     let hub = AgentHub::new(store.clone(), policy, ui);
     let token = mcp::load_or_create_token(&store).unwrap_or_default();
-    if demo {
-        println!("mcp: {} token={token}", endpoint_url(hub.policy().port));
-    }
     let source = Arc::new(AppSource::new(store.clone()));
     let api = cx.new(|_| AgentApi {
         hub,
@@ -92,6 +116,7 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
         status: ServerStatus::Off,
         generation: 0,
         reinstall_note: None,
+        demo,
     });
     bridge::drain_ui_events(receiver, api.downgrade(), cx);
     api.update(cx, |api, cx| {
@@ -281,8 +306,9 @@ impl AgentApi {
             url: endpoint_url(self.hub.policy().port),
             token: self.token.clone(),
         };
+        let demo = self.demo;
         let task = cx.background_spawn(async move {
-            mcp::install::reinstall_all(&endpoint, &mcp::install::Homes::detect())
+            mcp::install::reinstall_all(&endpoint, &agent_homes(demo))
         });
         cx.spawn(async move |this, cx| {
             let results = task.await;
@@ -389,6 +415,9 @@ impl AgentApi {
         }
         match result {
             Ok(server) => {
+                if self.demo {
+                    println!("mcp: {} token={}", endpoint_url(port), self.token);
+                }
                 self.server = Some(server);
                 self.status = ServerStatus::Running(port);
             }
@@ -403,7 +432,16 @@ impl AgentApi {
 
 #[cfg(test)]
 mod tests {
-    use super::agent_label;
+    use super::{agent_label, demo_port};
+
+    #[test]
+    fn demo_port_is_free_unless_configured() {
+        let picked = demo_port(None);
+        assert_ne!(picked, 0);
+        assert!(std::net::TcpListener::bind(("127.0.0.1", picked)).is_ok());
+        assert_ne!(demo_port(Some("not a port".into())), 0);
+        assert_eq!(demo_port(Some("48000".into())), 48000);
+    }
 
     #[test]
     fn agent_labels_know_the_common_agents() {

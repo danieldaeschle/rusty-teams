@@ -46,14 +46,26 @@ impl Ringtone {
     }
 
     pub fn from_key(key: &str) -> Option<Ringtone> {
-        Ringtone::ALL.into_iter().find(|ringtone| ringtone.key() == key)
+        Ringtone::ALL
+            .into_iter()
+            .find(|ringtone| ringtone.key() == key)
     }
 
     pub fn cycle(self, sample_rate: u32) -> Vec<f32> {
         match self {
             Ringtone::Default => ring_cycle(sample_rate),
-            Ringtone::Chime => tone_cycle(sample_rate, &CHIME_NOTES, CHIME_NOTE_SECONDS, CHIME_CYCLE_SECONDS),
-            Ringtone::Pulse => tone_cycle(sample_rate, &PULSE_NOTES, PULSE_NOTE_SECONDS, PULSE_CYCLE_SECONDS),
+            Ringtone::Chime => tone_cycle(
+                sample_rate,
+                &CHIME_NOTES,
+                CHIME_NOTE_SECONDS,
+                CHIME_CYCLE_SECONDS,
+            ),
+            Ringtone::Pulse => tone_cycle(
+                sample_rate,
+                &PULSE_NOTES,
+                PULSE_NOTE_SECONDS,
+                PULSE_CYCLE_SECONDS,
+            ),
         }
     }
 }
@@ -63,10 +75,20 @@ pub fn ring_cycle(sample_rate: u32) -> Vec<f32> {
 }
 
 pub fn ringback_cycle(sample_rate: u32) -> Vec<f32> {
-    tone_cycle(sample_rate, &[RINGBACK_HZ], RINGBACK_ON_SECONDS, RINGBACK_CYCLE_SECONDS)
+    tone_cycle(
+        sample_rate,
+        &[RINGBACK_HZ],
+        RINGBACK_ON_SECONDS,
+        RINGBACK_CYCLE_SECONDS,
+    )
 }
 
-fn tone_cycle(sample_rate: u32, frequencies: &[f32], tone_seconds: f32, cycle_seconds: f32) -> Vec<f32> {
+fn tone_cycle(
+    sample_rate: u32,
+    frequencies: &[f32],
+    tone_seconds: f32,
+    cycle_seconds: f32,
+) -> Vec<f32> {
     let total = (cycle_seconds * sample_rate as f32) as usize;
     let tone = (tone_seconds * sample_rate as f32) as usize;
     let fade = (FADE_SECONDS * sample_rate as f32) as usize;
@@ -90,7 +112,11 @@ mod tests {
     fn a_cycle_lasts_two_and_a_half_seconds_at_most_and_stays_quiet() {
         let samples = ring_cycle(SAMPLE_RATE);
         assert_eq!(samples.len(), (CYCLE_SECONDS * SAMPLE_RATE as f32) as usize);
-        assert!(samples.iter().all(|sample| sample.abs() <= AMPLITUDE + f32::EPSILON));
+        assert!(
+            samples
+                .iter()
+                .all(|sample| sample.abs() <= AMPLITUDE + f32::EPSILON)
+        );
         assert!(samples.iter().any(|sample| sample.abs() > AMPLITUDE * 0.9));
     }
 
@@ -121,9 +147,16 @@ mod tests {
         let samples = ringback_cycle(SAMPLE_RATE);
         let rate = SAMPLE_RATE as usize;
         assert_eq!(samples.len(), 5 * rate);
-        assert!(samples[..rate].iter().any(|sample| sample.abs() > AMPLITUDE * 0.9));
+        assert!(
+            samples[..rate]
+                .iter()
+                .any(|sample| sample.abs() > AMPLITUDE * 0.9)
+        );
         assert!(samples[rate..].iter().all(|sample| *sample == 0.));
-        let crossings = samples[..rate].windows(2).filter(|pair| pair[0] < 0. && pair[1] >= 0.).count();
+        let crossings = samples[..rate]
+            .windows(2)
+            .filter(|pair| pair[0] < 0. && pair[1] >= 0.)
+            .count();
         assert!((424..=426).contains(&crossings));
     }
 
@@ -131,12 +164,22 @@ mod tests {
     fn every_ringtone_is_quiet_ends_in_silence_and_differs_from_the_others() {
         for ringtone in Ringtone::ALL {
             let samples = ringtone.cycle(SAMPLE_RATE);
-            assert!(samples.iter().all(|sample| sample.abs() <= AMPLITUDE + f32::EPSILON));
+            assert!(
+                samples
+                    .iter()
+                    .all(|sample| sample.abs() <= AMPLITUDE + f32::EPSILON)
+            );
             assert!(samples.iter().any(|sample| sample.abs() > AMPLITUDE * 0.9));
             assert_eq!(samples.last().copied(), Some(0.));
         }
-        assert_ne!(Ringtone::Default.cycle(SAMPLE_RATE), Ringtone::Chime.cycle(SAMPLE_RATE));
-        assert_ne!(Ringtone::Chime.cycle(SAMPLE_RATE), Ringtone::Pulse.cycle(SAMPLE_RATE));
+        assert_ne!(
+            Ringtone::Default.cycle(SAMPLE_RATE),
+            Ringtone::Chime.cycle(SAMPLE_RATE)
+        );
+        assert_ne!(
+            Ringtone::Chime.cycle(SAMPLE_RATE),
+            Ringtone::Pulse.cycle(SAMPLE_RATE)
+        );
     }
 
     #[test]

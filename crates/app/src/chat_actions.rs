@@ -259,9 +259,8 @@ impl AppState {
             Some(Selection::Chat(chat_id)) => Some(chat_id.clone()),
             _ => None,
         };
-        let is_listed = |state: &Self, chat_id: &str| {
-            state.sidebar.chats.iter().any(|chat| chat.id == chat_id)
-        };
+        let is_listed =
+            |state: &Self, chat_id: &str| state.sidebar.chats.iter().any(|chat| chat.id == chat_id);
         let was_listed = selected
             .as_deref()
             .is_some_and(|chat_id| is_listed(self, chat_id));

@@ -82,7 +82,6 @@ impl Tray {
     pub fn sync(&self, _sound_on: bool, _do_not_disturb: bool, _mention: bool) {}
 }
 
-
 pub fn animations_enabled() -> bool {
     true
 }

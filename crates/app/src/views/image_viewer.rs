@@ -14,12 +14,12 @@ use super::widgets::symbol;
 use crate::app_state::AppState;
 use crate::downloads;
 use crate::image_view_gallery::{GalleryItem, ViewerRequest};
-use crate::theme;
 use crate::image_view_math::{
-    MAX_ZOOM, Pair, View, clamp_pan, clamp_scale, counter_label, display_size,
-    fit_scale, image_origin, next_rotation, percent_label, rotated_size, step_index, step_scale,
+    MAX_ZOOM, Pair, View, clamp_pan, clamp_scale, counter_label, display_size, fit_scale,
+    image_origin, next_rotation, percent_label, rotated_size, step_index, step_scale,
     thumbnail_window, toggle_target, wheel_scale, zoom_at,
 };
+use crate::theme;
 
 const HEADER_HEIGHT: f32 = 52.;
 const FOOTER_HEIGHT: f32 = 120.;
@@ -133,7 +133,10 @@ fn clipboard_format(bytes: &[u8]) -> Option<ImageFormat> {
 fn clipboard_item(path: &Path, quarter_turns: u8) -> Option<ClipboardItem> {
     if quarter_turns != 0 {
         let bytes = rotated_png(path, quarter_turns)?;
-        return Some(ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, bytes)));
+        return Some(ClipboardItem::new_image(&Image::from_bytes(
+            ImageFormat::Png,
+            bytes,
+        )));
     }
     let bytes = std::fs::read(path).ok()?;
     let format = clipboard_format(&bytes)?;
@@ -146,7 +149,10 @@ fn suggested_name(path: &Path, rotated: bool) -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "image".to_owned());
     if rotated {
-        return Path::new(&name).with_extension("png").to_string_lossy().into_owned();
+        return Path::new(&name)
+            .with_extension("png")
+            .to_string_lossy()
+            .into_owned();
     }
     if path.extension().is_some() {
         return name;
@@ -250,7 +256,10 @@ impl ImageViewer {
             Self::thumbnail_capacity(window),
         );
         let first = visible.start.min(self.index.saturating_sub(1));
-        let last = visible.end.saturating_sub(1).max((self.index + 1).min(last_index));
+        let last = visible
+            .end
+            .saturating_sub(1)
+            .max((self.index + 1).min(last_index));
         let directory = &self.app.read(cx).directory;
         let missing: Vec<_> = self
             .items
@@ -411,7 +420,11 @@ impl ImageViewer {
             layout.pan.0 + f32::from(event.position.x - last.x),
             layout.pan.1 + f32::from(event.position.y - last.y),
         );
-        self.pan = clamp_pan(moved, display_size(layout.source, layout.scale), layout.stage);
+        self.pan = clamp_pan(
+            moved,
+            display_size(layout.source, layout.scale),
+            layout.stage,
+        );
         self.drag_from = Some(event.position);
         cx.notify();
     }
@@ -534,7 +547,9 @@ impl ImageViewer {
                     this.show_notice("Image copied", cx);
                 }
                 None => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(fallback.display().to_string()));
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        fallback.display().to_string(),
+                    ));
                     this.show_notice("Copied file path", cx);
                 }
             })
@@ -633,7 +648,9 @@ impl ImageViewer {
         let sender_id = item.and_then(|item| item.sender_id.clone());
         let can_zoom_out = layout.is_some_and(|layout| layout.scale > layout.fit);
         let can_zoom_in = layout.is_some_and(|layout| layout.scale < MAX_ZOOM);
-        let zoom_label = layout.map(|layout| percent_label(layout.scale)).unwrap_or_default();
+        let zoom_label = layout
+            .map(|layout| percent_label(layout.scale))
+            .unwrap_or_default();
         let loaded = layout.is_some();
         h_flex()
             .id("viewer-header")
@@ -651,17 +668,12 @@ impl ImageViewer {
                     .min_w_0()
                     .gap(px(10.))
                     .items_center()
-                    .child(
-                        div()
-                            .size(px(AVATAR_SIZE))
-                            .flex_none()
-                            .child(person_avatar(
-                                &self.app.read(cx).directory,
-                                sender_id.as_deref(),
-                                &author,
-                                AVATAR_SIZE,
-                            )),
-                    )
+                    .child(div().size(px(AVATAR_SIZE)).flex_none().child(person_avatar(
+                        &self.app.read(cx).directory,
+                        sender_id.as_deref(),
+                        &author,
+                        AVATAR_SIZE,
+                    )))
                     .child(
                         v_flex()
                             .flex_1()
@@ -808,7 +820,8 @@ impl ImageViewer {
                 .image(&item.image.url)
                 .map(|entry| entry.path.clone().into())
         } else {
-            self.rotated_render().map(|render| ImageSource::Render(render.clone()))
+            self.rotated_render()
+                .map(|render| ImageSource::Render(render.clone()))
         };
         let Some(source) = source else {
             return loading_placeholder();
@@ -873,11 +886,9 @@ impl ImageViewer {
                     .bg(white().opacity(0.08))
                     .when(!current, |frame| frame.opacity(0.7))
                     .map(|frame| match path {
-                        Some(path) => frame.child(
-                            img(path)
-                                .size_full()
-                                .object_fit(ObjectFit::Cover),
-                        ),
+                        Some(path) => {
+                            frame.child(img(path).size_full().object_fit(ObjectFit::Cover))
+                        }
                         None => frame.child(symbol("image", 18., white().opacity(0.5))),
                     }),
             )

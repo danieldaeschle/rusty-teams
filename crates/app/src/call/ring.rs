@@ -14,7 +14,11 @@ pub struct RingEntry {
 
 impl RingEntry {
     pub fn caller_user_id(&self) -> Option<String> {
-        self.ring.caller.mri.strip_prefix(ORGID_PREFIX).map(str::to_owned)
+        self.ring
+            .caller
+            .mri
+            .strip_prefix(ORGID_PREFIX)
+            .map(str::to_owned)
     }
 
     pub fn caller_name(&self) -> &str {
@@ -55,7 +59,11 @@ pub struct Rings {
 
 impl Rings {
     pub fn push(&mut self, ring: IncomingRing, demo: bool, now: Instant) {
-        if self.entries.iter().any(|entry| entry.ring.ring_id == ring.ring_id) {
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.ring.ring_id == ring.ring_id)
+        {
             return;
         }
         self.entries.push(RingEntry {
@@ -66,7 +74,9 @@ impl Rings {
     }
 
     pub fn get(&self, ring_id: u64) -> Option<&RingEntry> {
-        self.entries.iter().find(|entry| entry.ring.ring_id == ring_id)
+        self.entries
+            .iter()
+            .find(|entry| entry.ring.ring_id == ring_id)
     }
 
     pub fn ringing(&self) -> impl Iterator<Item = &RingEntry> {
@@ -85,8 +95,16 @@ impl Rings {
         self.entries.is_empty()
     }
 
-    pub fn signal(&mut self, ring_id: u64, signal: RingSignal, now: Instant) -> Option<RingOutcome> {
-        let index = self.entries.iter().position(|entry| entry.ring.ring_id == ring_id)?;
+    pub fn signal(
+        &mut self,
+        ring_id: u64,
+        signal: RingSignal,
+        now: Instant,
+    ) -> Option<RingOutcome> {
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| entry.ring.ring_id == ring_id)?;
         let next = self.entries[index].state.next(signal, now);
         self.entries[index].state = next;
         self.settle(index)
@@ -94,7 +112,11 @@ impl Rings {
 
     pub fn tick(&mut self, now: Instant) -> Vec<(u64, RingOutcome)> {
         let mut outcomes = Vec::new();
-        let ids: Vec<u64> = self.entries.iter().map(|entry| entry.ring.ring_id).collect();
+        let ids: Vec<u64> = self
+            .entries
+            .iter()
+            .map(|entry| entry.ring.ring_id)
+            .collect();
         for ring_id in ids {
             if let Some(outcome) = self.signal(ring_id, RingSignal::Tick, now) {
                 outcomes.push((ring_id, outcome));
@@ -162,7 +184,9 @@ mod tests {
         rings.push(ring(1, false), false, start);
         let outcomes = rings.tick(start + Duration::from_secs(30));
         assert_eq!(outcomes.len(), 1);
-        let (ring_id, RingOutcome::Missed(missed)) = &outcomes[0] else { panic!("not missed") };
+        let (ring_id, RingOutcome::Missed(missed)) = &outcomes[0] else {
+            panic!("not missed")
+        };
         assert_eq!(*ring_id, 1);
         assert_eq!(missed.caller_name, "Cara");
         assert_eq!(missed.thread_id.as_deref(), Some("19:a_b@unq.gbl.spaces"));
@@ -187,8 +211,14 @@ mod tests {
         let mut rings = Rings::default();
         rings.push(ring(1, false), false, start);
         rings.push(ring(2, false), false, start);
-        assert_eq!(rings.signal(1, RingSignal::Accept, start), Some(RingOutcome::Gone));
-        assert_eq!(rings.signal(2, RingSignal::Decline, start), Some(RingOutcome::Gone));
+        assert_eq!(
+            rings.signal(1, RingSignal::Accept, start),
+            Some(RingOutcome::Gone)
+        );
+        assert_eq!(
+            rings.signal(2, RingSignal::Decline, start),
+            Some(RingOutcome::Gone)
+        );
         assert!(rings.is_empty());
         assert_eq!(rings.signal(1, RingSignal::Accept, start), None);
     }
@@ -204,8 +234,15 @@ mod tests {
 
     #[test]
     fn video_calls_offer_audio_and_video_answers() {
-        let audio = RingEntry { ring: ring(1, false), state: RingState::start(Instant::now()), demo: false };
-        let video = RingEntry { ring: ring(2, true), ..audio.clone() };
+        let audio = RingEntry {
+            ring: ring(1, false),
+            state: RingState::start(Instant::now()),
+            demo: false,
+        };
+        let video = RingEntry {
+            ring: ring(2, true),
+            ..audio.clone()
+        };
         assert_eq!(audio.subtitle(), "Incoming audio call");
         assert_eq!(audio.accept_label(), "Accept");
         assert_eq!(video.subtitle(), "Incoming video call");
@@ -217,7 +254,11 @@ mod tests {
     fn group_rings_say_so() {
         let mut group = ring(3, false);
         group.is_group = true;
-        let entry = RingEntry { ring: group, state: RingState::start(Instant::now()), demo: false };
+        let entry = RingEntry {
+            ring: group,
+            state: RingState::start(Instant::now()),
+            demo: false,
+        };
         assert_eq!(entry.subtitle(), "Incoming group audio call");
     }
 }

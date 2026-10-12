@@ -62,7 +62,9 @@ fn sound_button(app: &Entity<AppState>, sound: bool) -> Stateful<Div> {
     round_control("share-bar-sound", glyph, background, foreground)
         .size(px(BUTTON_SIZE))
         .tooltip(|window, cx| Tooltip::new("Include computer sound").build(window, cx))
-        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx)))
+        .on_click(move |_, _, cx| {
+            app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx))
+        })
 }
 
 fn pin_button(windows: &Entity<CallWindows>, pinned: bool) -> Stateful<Div> {
@@ -74,7 +76,14 @@ fn pin_button(windows: &Entity<CallWindows>, pinned: bool) -> Stateful<Div> {
     };
     round_control("share-bar-pin", glyph, background, foreground)
         .size(px(BUTTON_SIZE))
-        .tooltip(move |window, cx| Tooltip::new(if pinned { "Unpin the bar" } else { "Keep the bar visible" }).build(window, cx))
+        .tooltip(move |window, cx| {
+            Tooltip::new(if pinned {
+                "Unpin the bar"
+            } else {
+                "Keep the bar visible"
+            })
+            .build(window, cx)
+        })
         .on_click(move |_, _, cx| windows.update(cx, |windows, cx| windows.toggle_pin(cx)))
 }
 
@@ -82,13 +91,20 @@ impl Render for ShareBarView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let windows = self.windows.read(cx);
         let wake = self.windows.clone();
-        let wake_on_move = move |_: &MouseMoveEvent, _: &mut Window, cx: &mut App| wake.update(cx, |windows, cx| windows.wake_bar(cx));
+        let wake_on_move = move |_: &MouseMoveEvent, _: &mut Window, cx: &mut App| {
+            wake.update(cx, |windows, cx| windows.wake_bar(cx))
+        };
         if windows.bar_collapsed() {
             return div()
                 .id("share-bar-handle")
                 .size_full()
                 .on_mouse_move(wake_on_move)
-                .child(div().size_full().rounded_b(px(HANDLE_RADIUS)).bg(theme::red()))
+                .child(
+                    div()
+                        .size_full()
+                        .rounded_b(px(HANDLE_RADIUS))
+                        .bg(theme::red()),
+                )
                 .into_any_element();
         }
         let text = windows.share_text();
@@ -111,9 +127,20 @@ impl Render for ShareBarView {
             .text_size(px(12.))
             .font_weight(FontWeight::SEMIBOLD)
             .on_mouse_move(wake_on_move)
-            .child(div().size(px(8.)).flex_none().rounded_full().bg(theme::red()))
+            .child(
+                div()
+                    .size(px(8.))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(theme::red()),
+            )
             .child(div().flex_1().min_w_0().truncate().child(text))
-            .child(mute_button(&self.app, &call.model, "share-bar-mute", BUTTON_SIZE))
+            .child(mute_button(
+                &self.app,
+                &call.model,
+                "share-bar-mute",
+                BUTTON_SIZE,
+            ))
             .child(camera_button(&self.app, &call.model).size(px(BUTTON_SIZE)))
             .child(sound_button(&self.app, state.call_share_sound))
             .child(stop_button(&self.app))

@@ -13,7 +13,6 @@ use teams_core::{
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
-use calling::meeting::LiveMeeting;
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
 use crate::image_view_gallery::ViewerRequest;
@@ -23,6 +22,7 @@ use crate::notice::Notice;
 use crate::profile_state::{ProfileCache, ProfileRequest};
 use crate::translation::TranslationState;
 use crate::typing::TypingState;
+use calling::meeting::LiveMeeting;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
 const RECENT_MESSAGES_FOR_TYPING: usize = 5;
@@ -781,7 +781,9 @@ impl AppState {
             BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
             BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),
             BackendEvent::Ring(event) => self.on_engine_event(event, cx),
-            BackendEvent::ThreadChanged(conversation_id) => self.on_thread_changed(&conversation_id, cx),
+            BackendEvent::ThreadChanged(conversation_id) => {
+                self.on_thread_changed(&conversation_id, cx)
+            }
             BackendEvent::Engine(engine) => {
                 crate::agent_api::engine_ready(engine.clone(), cx);
                 self.engine = Some(engine);

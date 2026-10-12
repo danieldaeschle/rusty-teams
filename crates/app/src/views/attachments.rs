@@ -46,9 +46,7 @@ fn fit_image_within(size: Option<(u32, u32)>, max_height: f32) -> (f32, f32) {
         return IMAGE_FALLBACK;
     };
     let (width, height) = (width as f32, height as f32);
-    let scale = (IMAGE_MAX_WIDTH / width)
-        .min(max_height / height)
-        .min(1.);
+    let scale = (IMAGE_MAX_WIDTH / width).min(max_height / height).min(1.);
     (
         (width * scale).max(IMAGE_MIN_SIDE).round(),
         (height * scale).max(IMAGE_MIN_SIDE).round(),
@@ -403,11 +401,9 @@ pub fn attachments_view(
         v_flex()
             .gap(px(6.))
             .items_start()
-            .children(
-                unplaced_images.into_iter().map(|(index, image)| {
-                    image_view(image, format!("{id}-image-{index}"), directory, open_image)
-                }),
-            )
+            .children(unplaced_images.into_iter().map(|(index, image)| {
+                image_view(image, format!("{id}-image-{index}"), directory, open_image)
+            }))
             .children(
                 unplaced_local.into_iter().map(|(index, image)| {
                     local_image_view(image, format!("{id}-local-image-{index}"))

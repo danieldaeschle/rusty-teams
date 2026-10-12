@@ -14,7 +14,11 @@ const BUTTON_SIZE: f32 = 30.;
 const GLYPH_SIZE: f32 = 16.;
 const JOIN_HEIGHT: f32 = 30.;
 
-pub fn header_call_controls(app: &Entity<AppState>, state: &AppState, selection: &Selection) -> Vec<AnyElement> {
+pub fn header_call_controls(
+    app: &Entity<AppState>,
+    state: &AppState,
+    selection: &Selection,
+) -> Vec<AnyElement> {
     let conversation_id = selection.conversation_id().to_owned();
     let mut controls = Vec::new();
     if state.running_meeting(&conversation_id).is_some() {

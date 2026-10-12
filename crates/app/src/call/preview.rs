@@ -68,12 +68,17 @@ impl CameraPreview {
         );
         match started {
             Ok(capture) => self.capture = Some(capture),
-            Err(error) => *self.failure.lock().expect("preview failure lock") = Some(error.to_string()),
+            Err(error) => {
+                *self.failure.lock().expect("preview failure lock") = Some(error.to_string())
+            }
         }
     }
 
     pub fn set_background(&self, choice: BackgroundChoice) {
-        let mut latest = self.background_request.lock().expect("background request lock");
+        let mut latest = self
+            .background_request
+            .lock()
+            .expect("background request lock");
         *latest += 1;
         let request = *latest;
         match choice {
@@ -124,7 +129,10 @@ impl CameraPreview {
         if elapsed < FPS_WINDOW {
             return;
         }
-        self.fps = self.capture.is_some().then(|| frames_per_second(total.saturating_sub(previous), elapsed));
+        self.fps = self
+            .capture
+            .is_some()
+            .then(|| frames_per_second(total.saturating_sub(previous), elapsed));
         self.counted = (now, total);
     }
 
@@ -153,23 +161,39 @@ pub fn preview_backgrounds(library: &BackgroundLibrary) -> Vec<(BackgroundPick, 
         .shown()
         .iter()
         .filter(|image| library.cached_image(&image.id).is_some())
-        .map(|image| (BackgroundPick::Default(image.id.clone()), image.name.clone()));
-    let customs = library.customs.iter().filter(|path| path.exists()).map(|path| {
-        let name = path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-        (BackgroundPick::Custom(path.clone()), name)
-    });
-    [(BackgroundPick::None, "None".to_owned()), (BackgroundPick::Blur, "Blur".to_owned())]
-        .into_iter()
-        .chain(defaults)
-        .chain(customs)
-        .collect()
+        .map(|image| {
+            (
+                BackgroundPick::Default(image.id.clone()),
+                image.name.clone(),
+            )
+        });
+    let customs = library
+        .customs
+        .iter()
+        .filter(|path| path.exists())
+        .map(|path| {
+            let name = path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            (BackgroundPick::Custom(path.clone()), name)
+        });
+    [
+        (BackgroundPick::None, "None".to_owned()),
+        (BackgroundPick::Blur, "Blur".to_owned()),
+    ]
+    .into_iter()
+    .chain(defaults)
+    .chain(customs)
+    .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{BackgroundLibrary, BackgroundPick, CameraPreview, frames_per_second, preview_backgrounds};
+    use super::{
+        BackgroundLibrary, BackgroundPick, CameraPreview, frames_per_second, preview_backgrounds,
+    };
 
     #[test]
     fn frames_per_second_divides_by_elapsed_time() {
@@ -180,8 +204,12 @@ mod tests {
 
     #[test]
     fn the_background_choices_start_with_none_and_blur() {
-        let library = BackgroundLibrary::new(std::env::temp_dir().join("teams-preview-test-no-cache"));
-        let picks: Vec<BackgroundPick> = preview_backgrounds(&library).into_iter().map(|(pick, _)| pick).collect();
+        let library =
+            BackgroundLibrary::new(std::env::temp_dir().join("teams-preview-test-no-cache"));
+        let picks: Vec<BackgroundPick> = preview_backgrounds(&library)
+            .into_iter()
+            .map(|(pick, _)| pick)
+            .collect();
         assert_eq!(picks, vec![BackgroundPick::None, BackgroundPick::Blur]);
     }
 

@@ -19,10 +19,10 @@ use super::rules::ChatKind;
 use super::stack::{ReplyState, ToastModel};
 use super::text::{ToastText, describe, mention_ranges};
 use crate::sidebar_model::{AvatarSpec, Face};
+use crate::theme;
 use crate::views::avatar::{spec_avatar, with_presence};
 use crate::views::composer::submitted_text;
 use crate::views::widgets::symbol;
-use crate::theme;
 
 const CLOSE_SIZE: f32 = 24.;
 const TOAST_RADIUS: f32 = 12.;
@@ -50,12 +50,16 @@ impl ToastView {
                 .placeholder("Reply ...")
         });
         let subscriptions = vec![
-            cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| {
-                let value = input.read(cx).value();
-                if submitted_text(event, &value).is_some() {
-                    this.submit(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &input,
+                window,
+                |this, input, event: &InputEvent, window, cx| {
+                    let value = input.read(cx).value();
+                    if submitted_text(event, &value).is_some() {
+                        this.submit(window, cx);
+                    }
+                },
+            ),
             cx.observe(&center, |_, _, cx| cx.notify()),
         ];
         ToastView {
@@ -210,14 +214,21 @@ impl ToastView {
                     user_id: None,
                     name: model.chat_title.clone(),
                 };
-                spec_avatar(directory, &AvatarSpec::Pair(sender, chat), AVATAR_SIZE, fill)
+                spec_avatar(
+                    directory,
+                    &AvatarSpec::Pair(sender, chat),
+                    AVATAR_SIZE,
+                    fill,
+                )
             }
             _ => {
                 let presence = model
                     .sender_id
                     .as_deref()
                     .map(|user_id| directory.presence_of(user_id))
-                    .unwrap_or(crate::data::Presence::Live(crate::data::PresenceKind::Unknown));
+                    .unwrap_or(crate::data::Presence::Live(
+                        crate::data::PresenceKind::Unknown,
+                    ));
                 let face = spec_avatar(directory, &AvatarSpec::Single(sender), AVATAR_SIZE, fill);
                 with_presence(face, presence, AVATAR_SIZE, fill).into_any_element()
             }
@@ -390,11 +401,10 @@ impl ToastView {
                         theme::border_strong()
                     })
                     .child(
-                        div().flex_1().min_w_0().child(
-                            Textarea::new(&self.input)
-                                .appearance(false)
-                                .bordered(false),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Textarea::new(&self.input).appearance(false).bordered(false)),
                     )
                     .child(send),
             )
@@ -447,12 +457,14 @@ impl ToastView {
                 )
             })
             .when(!sent, |row| {
-                row.child(flat_button("Retry", "reply", true, false).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.retry(cx);
-                    },
-                )))
+                row.child(
+                    flat_button("Retry", "reply", true, false).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.retry(cx);
+                        },
+                    )),
+                )
             })
     }
 }
@@ -548,10 +560,12 @@ impl Render for ToastView {
             .on_click(move |_, _, cx| {
                 center.update(cx, |center, cx| center.activate(id, cx));
             })
-            .capture_action(cx.listener(|this, _: &gpui_kit::component::input::Escape, window, cx| {
-                this.close_reply(window, cx);
-                cx.stop_propagation();
-            }))
+            .capture_action(cx.listener(
+                |this, _: &gpui_kit::component::input::Escape, window, cx| {
+                    this.close_reply(window, cx);
+                    cx.stop_propagation();
+                },
+            ))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     let id = this.id;

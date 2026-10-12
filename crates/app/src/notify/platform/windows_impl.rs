@@ -12,28 +12,30 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_DONOTROUND, DwmGetWindowAttribute, DwmSetWindowAttribute,
+    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmGetWindowAttribute,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, DEVMODEW, DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICEW, DeleteObject, ENUM_CURRENT_SETTINGS,
-    EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromPoint, MonitorFromRect, MonitorFromWindow,
+    CreateBitmap, DEVMODEW, DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICEW, DeleteObject,
+    ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW, HGDIOBJ,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, MonitorFromWindow,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Shell::{
-    ITaskbarList3, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME, QUNS_RUNNING_D3D_FULL_SCREEN,
-    SHQueryUserNotificationState, TaskbarList,
+    ITaskbarList3, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME,
+    QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState, TaskbarList,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx, GWL_EXSTYLE, GWL_STYLE,
-    GetWindowLongPtrW, HICON, HWND_TOPMOST, ICONINFO, IsIconic, SW_HIDE, SW_RESTORE, SW_SHOW, SWP_NOACTIVATE,
-    SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SWP_NOZORDER, WS_CAPTION, WS_POPUP, WS_THICKFRAME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-    WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowDisplayAffinity,
-    WDA_EXCLUDEFROMCAPTURE, GetWindowRect,
+    CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO,
+    FlashWindowEx, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, GetWindowRect, HICON, HWND_TOPMOST,
+    ICONINFO, IsIconic, LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetLayeredWindowAttributes,
+    SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+    WDA_EXCLUDEFROMCAPTURE, WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
+    WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -105,7 +107,11 @@ pub fn set_activatable(handle: NativeHandle, activatable: bool) {
     unsafe {
         let style = GetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE);
         let flag = WS_EX_NOACTIVATE.0 as isize;
-        let updated = if activatable { style & !flag } else { style | flag };
+        let updated = if activatable {
+            style & !flag
+        } else {
+            style | flag
+        };
         SetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE, updated);
         if activatable {
             let _ = SetForegroundWindow(hwnd(handle));
@@ -155,8 +161,19 @@ pub fn work_area_at(x: i32, y: i32) -> Option<WorkArea> {
             Ok(()) if dpi_x > 0 => dpi_x as f32 / BASE_DPI,
             _ => 1.,
         };
-        let RECT { left, top, right, bottom } = info.rcWork;
-        Some(WorkArea { left, top, right, bottom, scale })
+        let RECT {
+            left,
+            top,
+            right,
+            bottom,
+        } = info.rcWork;
+        Some(WorkArea {
+            left,
+            top,
+            right,
+            bottom,
+            scale,
+        })
     }
 }
 
@@ -244,7 +261,13 @@ fn screen_frame(index: u32) -> Option<ScreenRect> {
             dmSize: size_of::<DEVMODEW>() as u16,
             ..Default::default()
         };
-        if !EnumDisplaySettingsW(PCWSTR(device.DeviceName.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode).as_bool() {
+        if !EnumDisplaySettingsW(
+            PCWSTR(device.DeviceName.as_ptr()),
+            ENUM_CURRENT_SETTINGS,
+            &mut mode,
+        )
+        .as_bool()
+        {
             return None;
         }
         let position = mode.Anonymous1.Anonymous2.dmPosition;
@@ -278,10 +301,21 @@ fn geometry_around(target: ScreenRect) -> Option<ShareGeometry> {
             Ok(()) if dpi_x > 0 => dpi_x as f32 / BASE_DPI,
             _ => 1.,
         };
-        let RECT { left, top, right, bottom } = info.rcWork;
+        let RECT {
+            left,
+            top,
+            right,
+            bottom,
+        } = info.rcWork;
         Some(ShareGeometry {
             target,
-            work: WorkArea { left, top, right, bottom, scale },
+            work: WorkArea {
+                left,
+                top,
+                right,
+                bottom,
+                scale,
+            },
         })
     }
 }
@@ -348,7 +382,8 @@ pub fn stop_flash(handle: NativeHandle) {
 
 pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
     unsafe {
-        let Ok(taskbar) = CoCreateInstance::<_, ITaskbarList3>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
+        let Ok(taskbar) =
+            CoCreateInstance::<_, ITaskbarList3>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
         else {
             return;
         };
@@ -442,7 +477,11 @@ fn start_cycle(cycle: Vec<f32>) -> Option<RingTone> {
         };
         while !flag.load(Ordering::SeqCst) {
             let player = rodio::Player::connect_new(sink.mixer());
-            player.append(rodio::buffer::SamplesBuffer::new(channels, rate, cycle.clone()));
+            player.append(rodio::buffer::SamplesBuffer::new(
+                channels,
+                rate,
+                cycle.clone(),
+            ));
             while !player.empty() {
                 if flag.load(Ordering::SeqCst) {
                     player.stop();
@@ -570,7 +609,8 @@ fn tray_icons() -> Option<(Icon, Icon)> {
     let size = TRAY_ICON_SIZE as f32;
     let center = (size - TRAY_DOT_RADIUS - 1., size - TRAY_DOT_RADIUS - 1.);
     for (column, row, pixel) in dotted.enumerate_pixels_mut() {
-        let distance = ((column as f32 - center.0).powi(2) + (row as f32 - center.1).powi(2)).sqrt();
+        let distance =
+            ((column as f32 - center.0).powi(2) + (row as f32 - center.1).powi(2)).sqrt();
         if distance <= TRAY_DOT_RADIUS {
             *pixel = image::Rgba([0xef, 0x44, 0x44, 0xff]);
         }

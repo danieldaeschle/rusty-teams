@@ -94,9 +94,7 @@ pub fn step_index(current: usize, len: usize, delta: isize) -> usize {
     if len == 0 {
         return 0;
     }
-    current
-        .saturating_add_signed(delta)
-        .min(len - 1)
+    current.saturating_add_signed(delta).min(len - 1)
 }
 
 pub fn counter_label(index: usize, len: usize) -> String {
@@ -166,8 +164,14 @@ mod tests {
         let anchor = (100., 50.);
         let zoomed = zoom_at(start, 1., anchor, image, STAGE);
         assert_eq!(zoomed.scale, 1.);
-        let before = ((anchor.0 - start.pan.0) / start.scale, (anchor.1 - start.pan.1) / start.scale);
-        let after = ((anchor.0 - zoomed.pan.0) / zoomed.scale, (anchor.1 - zoomed.pan.1) / zoomed.scale);
+        let before = (
+            (anchor.0 - start.pan.0) / start.scale,
+            (anchor.1 - start.pan.1) / start.scale,
+        );
+        let after = (
+            (anchor.0 - zoomed.pan.0) / zoomed.scale,
+            (anchor.1 - zoomed.pan.1) / zoomed.scale,
+        );
         assert!((before.0 - after.0).abs() < 0.01);
         assert!((before.1 - after.1).abs() < 0.01);
     }

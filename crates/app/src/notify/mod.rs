@@ -19,9 +19,9 @@ mod toast;
 
 pub use center::{NotificationCenter, selection_for};
 pub use incoming::{IncomingTracker, preview_of};
-pub(crate) use settings_view::switch;
-pub use rules::{Incoming, Preview, channel_alerts};
-#[cfg(test)]
-pub use rules::ChatKind;
 #[cfg(windows)]
 pub use platform::native_handle;
+#[cfg(test)]
+pub use rules::ChatKind;
+pub use rules::{Incoming, Preview, channel_alerts};
+pub(crate) use settings_view::switch;

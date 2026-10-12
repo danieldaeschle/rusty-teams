@@ -4,11 +4,17 @@ use std::time::Duration;
 
 use calling::meeting::{LiveMeeting, fetch_live_meeting};
 use calling::{
-    AcceptMode, BackgroundCache, CallEngine, DeviceChoice, CallHandle, CallSpec, CallState, CallUpdate, DefaultBackground, EndReason, EngineConfig, EngineEvent, MeetingTarget, call_channel,
+    AcceptMode, BackgroundCache, CallEngine, CallHandle, CallSpec, CallState, CallUpdate,
+    DefaultBackground, DeviceChoice, EndReason, EngineConfig, EngineEvent, MeetingTarget,
+    call_channel,
 };
 use session::{Session, SessionConfig, Transport};
 
-const START_RETRY_STEPS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5)];
+const START_RETRY_STEPS: [Duration; 3] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+];
 const START_RETRY_STEADY: Duration = Duration::from_secs(10);
 const NOT_READY: &str = "Calls are not ready yet";
 const CALL_DUMPS_DIR: &str = "call-dumps";
@@ -30,8 +36,12 @@ impl CallLauncher {
         });
         let running = launcher.clone();
         crate::runtime::handle().spawn(async move {
-            let (engine, mut events) =
-                start_with_retry(|| start_engine(transport.clone(), ringable), &START_RETRY_STEPS, START_RETRY_STEADY).await;
+            let (engine, mut events) = start_with_retry(
+                || start_engine(transport.clone(), ringable),
+                &START_RETRY_STEPS,
+                START_RETRY_STEADY,
+            )
+            .await;
             crate::diagnostics::record("calls: engine ready, registered with the registrar");
             engine.set_default_camera(running.default_camera.lock().expect("camera lock").clone());
             *running.engine.lock().expect("engine lock") = Some(engine);
@@ -83,7 +93,11 @@ impl CallLauncher {
         }
     }
 
-    pub async fn refresh_backgrounds(&self, cache: &BackgroundCache, thumbnails: usize) -> Option<Vec<DefaultBackground>> {
+    pub async fn refresh_backgrounds(
+        &self,
+        cache: &BackgroundCache,
+        thumbnails: usize,
+    ) -> Option<Vec<DefaultBackground>> {
         let session = self.engine()?.session();
         let catalog = cache.refresh_catalog(&session).await.ok()?;
         for image in catalog.iter().take(thumbnails) {
@@ -92,12 +106,19 @@ impl CallLauncher {
         Some(catalog)
     }
 
-    pub async fn download_background(&self, cache: &BackgroundCache, image: &DefaultBackground) -> Option<std::path::PathBuf> {
+    pub async fn download_background(
+        &self,
+        cache: &BackgroundCache,
+        image: &DefaultBackground,
+    ) -> Option<std::path::PathBuf> {
         let session = self.engine()?.session();
         cache.ensure_image(&session, image).await.ok()
     }
 
-    pub async fn resolve_meeting(&self, meeting_data: &serde_json::Value) -> Result<MeetingTarget, String> {
+    pub async fn resolve_meeting(
+        &self,
+        meeting_data: &serde_json::Value,
+    ) -> Result<MeetingTarget, String> {
         self.engine()
             .ok_or_else(|| NOT_READY.to_owned())?
             .resolve_meeting(meeting_data)
@@ -137,7 +158,10 @@ where
         let delay = steps.get(failures).copied().unwrap_or(steady);
         failures += 1;
         if failure != last_failure {
-            crate::diagnostics::record(format!("calls: engine start failed, retrying in {}s: {failure}", delay.as_secs()));
+            crate::diagnostics::record(format!(
+                "calls: engine start failed, retrying in {}s: {failure}",
+                delay.as_secs()
+            ));
             last_failure = failure;
         }
         tokio::time::sleep(delay).await;
@@ -147,7 +171,10 @@ where
 async fn start_engine(
     transport: Arc<dyn Transport>,
     ringable: bool,
-) -> calling::Result<(CallEngine, tokio::sync::mpsc::UnboundedReceiver<EngineEvent>)> {
+) -> calling::Result<(
+    CallEngine,
+    tokio::sync::mpsc::UnboundedReceiver<EngineEvent>,
+)> {
     let session = Session::with_transport(transport.clone(), SessionConfig::default()).await?;
     let poll_session = Session::with_transport(transport, SessionConfig::default()).await?;
     let config = EngineConfig {
@@ -174,7 +201,10 @@ mod tests {
 
     #[test]
     fn engine_start_survives_errors_and_panics() {
-        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let attempts = Arc::new(AtomicU32::new(0));
         let counter = attempts.clone();
         let started = runtime.block_on(start_with_retry(

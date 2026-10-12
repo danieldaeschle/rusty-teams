@@ -28,7 +28,10 @@ const FIELD_HEIGHT: f32 = 36.;
 const CLOSE_SIZE: f32 = 28.;
 const DISABLED_OPACITY: f32 = 0.4;
 
-pub fn visible_candidates(candidates: &[(String, TransferCandidate)], query: &str) -> Vec<TransferCandidate> {
+pub fn visible_candidates(
+    candidates: &[(String, TransferCandidate)],
+    query: &str,
+) -> Vec<TransferCandidate> {
     fuzzy::rank(query, candidates, MAX_RESULTS)
 }
 
@@ -43,20 +46,42 @@ pub struct TransferPicker {
 }
 
 impl TransferPicker {
-    pub fn new(app: Entity<AppState>, candidates: Vec<TransferCandidate>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let candidates: Vec<(String, TransferCandidate)> = candidates.into_iter().map(|candidate| (candidate.name.clone(), candidate)).collect();
+    pub fn new(
+        app: Entity<AppState>,
+        candidates: Vec<TransferCandidate>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let candidates: Vec<(String, TransferCandidate)> = candidates
+            .into_iter()
+            .map(|candidate| (candidate.name.clone(), candidate))
+            .collect();
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search people"));
         let subscription = cx.subscribe_in(&search, window, Self::on_search_event);
         search.update(cx, |input, cx| input.focus(window, cx));
         let results = visible_candidates(&candidates, "");
-        TransferPicker { app, candidates, search, results, highlighted: 0, target: None, _subscription: subscription }
+        TransferPicker {
+            app,
+            candidates,
+            search,
+            results,
+            highlighted: 0,
+            target: None,
+            _subscription: subscription,
+        }
     }
 
     pub fn choose(&mut self, candidate: TransferCandidate) {
         self.target = Some(candidate);
     }
 
-    fn on_search_event(&mut self, input: &Entity<InputState>, event: &InputEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_search_event(
+        &mut self,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             InputEvent::Change => {
                 let query = input.read(cx).value().to_string();
@@ -90,7 +115,8 @@ impl TransferPicker {
     }
 
     fn close(&self, cx: &mut Context<Self>) {
-        self.app.update(cx, |state, cx| state.close_transfer_picker(cx));
+        self.app
+            .update(cx, |state, cx| state.close_transfer_picker(cx));
     }
 
     fn list(&self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -111,11 +137,28 @@ impl TransferPicker {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .when(chosen || (self.target.is_none() && index == self.highlighted), |row| row.bg(theme::surface_raised()))
+                    .when(
+                        chosen || (self.target.is_none() && index == self.highlighted),
+                        |row| row.bg(theme::surface_raised()),
+                    )
                     .hover(|row| row.bg(theme::row_hover()))
-                    .child(person_avatar(directory, candidate.user_id.as_deref(), &candidate.name, AVATAR_SIZE))
-                    .child(div().flex_1().min_w_0().truncate().text_size(px(14.)).child(candidate.name.clone()))
-                    .when(chosen, |row| row.child(icon(IconName::Check, 16., theme::accent_text())))
+                    .child(person_avatar(
+                        directory,
+                        candidate.user_id.as_deref(),
+                        &candidate.name,
+                        AVATAR_SIZE,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(14.))
+                            .child(candidate.name.clone()),
+                    )
+                    .when(chosen, |row| {
+                        row.child(icon(IconName::Check, 16., theme::accent_text()))
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose(picked.clone());
                         cx.notify();
@@ -123,17 +166,30 @@ impl TransferPicker {
                     .into_any_element()
             })
             .collect();
-        v_flex().id("transfer-targets").w_full().max_h(px(ROW_HEIGHT * MAX_RESULTS as f32)).overflow_y_scroll().children(rows)
+        v_flex()
+            .id("transfer-targets")
+            .w_full()
+            .max_h(px(ROW_HEIGHT * MAX_RESULTS as f32))
+            .overflow_y_scroll()
+            .children(rows)
     }
 
-    fn action(&self, id: &'static str, label: &'static str, primary: bool, run: fn(&mut AppState, TransferCandidate, &mut Context<AppState>)) -> AnyElement {
+    fn action(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        primary: bool,
+        run: fn(&mut AppState, TransferCandidate, &mut Context<AppState>),
+    ) -> AnyElement {
         let button = Button::new(id).label(label);
         let button = if primary { button } else { button.ghost() };
         let Some(target) = self.target.clone() else {
             return button.opacity(DISABLED_OPACITY).into_any_element();
         };
         let app = self.app.clone();
-        button.on_click(move |_, _, cx| app.update(cx, |state, cx| run(state, target.clone(), cx))).into_any_element()
+        button
+            .on_click(move |_, _, cx| app.update(cx, |state, cx| run(state, target.clone(), cx)))
+            .into_any_element()
     }
 }
 
@@ -150,14 +206,33 @@ impl Render for TransferPicker {
             .border_1()
             .border_color(theme::border())
             .child(icon(IconName::Search, 14., theme::text_muted()))
-            .child(div().flex_1().child(Input::new(&self.search).appearance(false).bordered(false)));
+            .child(
+                div()
+                    .flex_1()
+                    .child(Input::new(&self.search).appearance(false).bordered(false)),
+            );
         let actions = h_flex()
             .w_full()
             .justify_end()
             .gap(px(8.))
-            .child(Button::new("transfer-cancel").ghost().label("Cancel").on_click(cx.listener(|this, _, _, cx| this.close(cx))))
-            .child(self.action("transfer-consult", "Consult first", false, AppState::start_consult))
-            .child(self.action("transfer-now", "Transfer now", true, AppState::transfer_call_blind));
+            .child(
+                Button::new("transfer-cancel")
+                    .ghost()
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
+            )
+            .child(self.action(
+                "transfer-consult",
+                "Consult first",
+                false,
+                AppState::start_consult,
+            ))
+            .child(self.action(
+                "transfer-now",
+                "Transfer now",
+                true,
+                AppState::transfer_call_blind,
+            ));
         div()
             .id("transfer-layer")
             .absolute()
@@ -198,7 +273,13 @@ impl Render for TransferPicker {
                             .w_full()
                             .items_center()
                             .gap(px(SECTION_GAP))
-                            .child(div().flex_1().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("Transfer call"))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Transfer call"),
+                            )
                             .child(
                                 div()
                                     .id("transfer-close")
@@ -227,13 +308,28 @@ mod tests {
     use crate::call::TransferCandidate;
 
     fn candidate(name: &str) -> (String, TransferCandidate) {
-        (name.to_owned(), TransferCandidate { mri: format!("8:orgid:{name}"), name: name.to_owned(), user_id: Some(name.to_owned()), chat_id: format!("19:{name}") })
+        (
+            name.to_owned(),
+            TransferCandidate {
+                mri: format!("8:orgid:{name}"),
+                name: name.to_owned(),
+                user_id: Some(name.to_owned()),
+                chat_id: format!("19:{name}"),
+            },
+        )
     }
 
     #[test]
     fn the_search_ranks_people_by_name() {
-        let people = vec![candidate("Ana Weiss"), candidate("Bo Brandt"), candidate("Anja Vogel")];
-        let found: Vec<String> = visible_candidates(&people, "anj").into_iter().map(|person| person.name).collect();
+        let people = vec![
+            candidate("Ana Weiss"),
+            candidate("Bo Brandt"),
+            candidate("Anja Vogel"),
+        ];
+        let found: Vec<String> = visible_candidates(&people, "anj")
+            .into_iter()
+            .map(|person| person.name)
+            .collect();
         assert_eq!(found.first().map(String::as_str), Some("Anja Vogel"));
         assert_eq!(visible_candidates(&people, "").len(), 3);
         assert!(visible_candidates(&people, "zzz").is_empty());
@@ -241,7 +337,9 @@ mod tests {
 
     #[test]
     fn the_list_is_capped() {
-        let people: Vec<(String, TransferCandidate)> = (0..20).map(|index| candidate(&format!("Person {index}"))).collect();
+        let people: Vec<(String, TransferCandidate)> = (0..20)
+            .map(|index| candidate(&format!("Person {index}")))
+            .collect();
         assert_eq!(visible_candidates(&people, "").len(), MAX_RESULTS);
     }
 }

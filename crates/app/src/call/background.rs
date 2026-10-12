@@ -32,7 +32,10 @@ impl BackgroundPick {
     pub fn from_meta(value: &str) -> Self {
         match value {
             "blur" | "1" => BackgroundPick::Blur,
-            other => match (other.strip_prefix(DEFAULT_PREFIX), other.strip_prefix(FILE_PREFIX)) {
+            other => match (
+                other.strip_prefix(DEFAULT_PREFIX),
+                other.strip_prefix(FILE_PREFIX),
+            ) {
                 (Some(id), _) if !id.is_empty() => BackgroundPick::Default(id.to_owned()),
                 (_, Some(path)) if !path.is_empty() => BackgroundPick::Custom(PathBuf::from(path)),
                 _ => BackgroundPick::None,
@@ -46,7 +49,14 @@ impl BackgroundPick {
 }
 
 pub fn load_background(store: &store::Store) -> BackgroundPick {
-    store.meta(BACKGROUND_META_KEY).ok().flatten().or_else(|| store.meta("call_background_blur").ok().flatten()).map_or(BackgroundPick::None, |value| BackgroundPick::from_meta(&value))
+    store
+        .meta(BACKGROUND_META_KEY)
+        .ok()
+        .flatten()
+        .or_else(|| store.meta("call_background_blur").ok().flatten())
+        .map_or(BackgroundPick::None, |value| {
+            BackgroundPick::from_meta(&value)
+        })
 }
 
 pub fn load_custom_backgrounds(store: &store::Store) -> Vec<PathBuf> {
@@ -54,12 +64,21 @@ pub fn load_custom_backgrounds(store: &store::Store) -> Vec<PathBuf> {
         .meta(CUSTOM_BACKGROUNDS_META_KEY)
         .ok()
         .flatten()
-        .map(|value| value.lines().filter(|line| !line.is_empty()).map(PathBuf::from).collect())
+        .map(|value| {
+            value
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 pub fn save_custom_backgrounds(store: &store::Store, customs: &[PathBuf]) {
-    let joined: Vec<String> = customs.iter().map(|path| path.display().to_string()).collect();
+    let joined: Vec<String> = customs
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
     let _ = store.set_meta(CUSTOM_BACKGROUNDS_META_KEY, &joined.join("\n"));
 }
 
@@ -80,7 +99,12 @@ impl BackgroundLibrary {
     pub fn new(directory: PathBuf) -> Self {
         let cache = BackgroundCache::new(directory);
         let images = cache.cached_catalog();
-        BackgroundLibrary { cache, images, customs: Vec::new(), refreshing: false }
+        BackgroundLibrary {
+            cache,
+            images,
+            customs: Vec::new(),
+            refreshing: false,
+        }
     }
 
     pub fn shown(&self) -> &[DefaultBackground] {
@@ -107,7 +131,12 @@ impl BackgroundLibrary {
     }
 
     pub fn needs_refresh(&self) -> bool {
-        !self.refreshing && (self.images.is_empty() || self.shown().iter().any(|image| self.thumbnail(image).is_none()))
+        !self.refreshing
+            && (self.images.is_empty()
+                || self
+                    .shown()
+                    .iter()
+                    .any(|image| self.thumbnail(image).is_none()))
     }
 
     pub fn choice_for(&self, pick: &BackgroundPick) -> Option<BackgroundChoice> {
@@ -121,22 +150,41 @@ impl BackgroundLibrary {
 }
 
 const DEMO_NAMES: [&str; SHOWN_IMAGES] = [
-    "Office", "Loft", "Library", "Beach", "Forest", "Sunset", "Studio", "Garden", "Cafe", "Mountains", "Cabin", "City",
+    "Office",
+    "Loft",
+    "Library",
+    "Beach",
+    "Forest",
+    "Sunset",
+    "Studio",
+    "Garden",
+    "Cafe",
+    "Mountains",
+    "Cabin",
+    "City",
 ];
 const DEMO_THUMBNAIL: (u32, u32) = (96, 54);
 const DEMO_IMAGE: (u32, u32) = (640, 360);
 
 fn demo_gradient(index: usize, (width, height): (u32, u32)) -> image::RgbaImage {
     let hue = index as f32 / SHOWN_IMAGES as f32;
-    let channel = |offset: f32, row: f32| (((hue + offset).fract() * 0.55 + 0.25 + row * 0.2) * 255.).min(255.) as u8;
+    let channel = |offset: f32, row: f32| {
+        (((hue + offset).fract() * 0.55 + 0.25 + row * 0.2) * 255.).min(255.) as u8
+    };
     image::RgbaImage::from_fn(width, height, |_, row| {
         let row = row as f32 / height as f32;
-        image::Rgba([channel(0., row), channel(0.33, row), channel(0.66, 1. - row), 255])
+        image::Rgba([
+            channel(0., row),
+            channel(0.33, row),
+            channel(0.66, 1. - row),
+            255,
+        ])
     })
 }
 
 pub fn demo_library() -> BackgroundLibrary {
-    let directory = std::env::temp_dir().join(format!("teams-demo-backgrounds-{}", std::process::id()));
+    let directory =
+        std::env::temp_dir().join(format!("teams-demo-backgrounds-{}", std::process::id()));
     let mut library = BackgroundLibrary::new(directory);
     library.images = DEMO_NAMES
         .iter()
@@ -149,7 +197,10 @@ pub fn demo_library() -> BackgroundLibrary {
         })
         .collect();
     for (index, image) in library.images.iter().enumerate() {
-        for (path, size) in [(library.cache.thumbnail_path(image), DEMO_THUMBNAIL), (library.cache.image_path(image), DEMO_IMAGE)] {
+        for (path, size) in [
+            (library.cache.thumbnail_path(image), DEMO_THUMBNAIL),
+            (library.cache.image_path(image), DEMO_IMAGE),
+        ] {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -162,7 +213,11 @@ pub fn demo_library() -> BackgroundLibrary {
 pub fn is_image_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| ["jpg", "jpeg", "png"].iter().any(|known| extension.eq_ignore_ascii_case(known)))
+        .is_some_and(|extension| {
+            ["jpg", "jpeg", "png"]
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
 }
 
 #[cfg(test)]
@@ -193,10 +248,21 @@ mod tests {
     fn the_store_keeps_the_choice_and_the_own_images() {
         let store = store::Store::open_in_memory().unwrap();
         assert_eq!(load_background(&store), BackgroundPick::None);
-        store.set_meta(BACKGROUND_META_KEY, &BackgroundPick::Default("beach".into()).to_meta()).unwrap();
-        assert_eq!(load_background(&store), BackgroundPick::Default("beach".into()));
+        store
+            .set_meta(
+                BACKGROUND_META_KEY,
+                &BackgroundPick::Default("beach".into()).to_meta(),
+            )
+            .unwrap();
+        assert_eq!(
+            load_background(&store),
+            BackgroundPick::Default("beach".into())
+        );
         save_custom_backgrounds(&store, &[PathBuf::from("/a.png"), PathBuf::from("/b.jpg")]);
-        assert_eq!(load_custom_backgrounds(&store), vec![PathBuf::from("/a.png"), PathBuf::from("/b.jpg")]);
+        assert_eq!(
+            load_custom_backgrounds(&store),
+            vec![PathBuf::from("/a.png"), PathBuf::from("/b.jpg")]
+        );
     }
 
     #[test]
@@ -208,21 +274,35 @@ mod tests {
 
     #[test]
     fn own_images_come_first_without_duplicates_and_stay_few() {
-        let mut library = BackgroundLibrary::new(std::env::temp_dir().join("calls-test-no-such-cache"));
+        let mut library =
+            BackgroundLibrary::new(std::env::temp_dir().join("calls-test-no-such-cache"));
         for index in 0..8 {
             library.add_custom(PathBuf::from(format!("/pictures/{index}.png")));
         }
         library.add_custom(PathBuf::from("/pictures/3.png"));
         assert_eq!(library.customs.len(), MAX_CUSTOM);
         assert_eq!(library.customs[0], PathBuf::from("/pictures/3.png"));
-        assert_eq!(library.customs.iter().filter(|path| path.as_path() == Path::new("/pictures/3.png")).count(), 1);
+        assert_eq!(
+            library
+                .customs
+                .iter()
+                .filter(|path| path.as_path() == Path::new("/pictures/3.png"))
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn a_default_image_is_only_usable_once_it_is_cached() {
         let library = BackgroundLibrary::new(std::env::temp_dir().join("calls-test-no-such-cache"));
-        assert_eq!(library.choice_for(&BackgroundPick::Default("office_01".into())), None);
-        assert_eq!(library.choice_for(&BackgroundPick::Blur), Some(BackgroundChoice::Blur));
+        assert_eq!(
+            library.choice_for(&BackgroundPick::Default("office_01".into())),
+            None
+        );
+        assert_eq!(
+            library.choice_for(&BackgroundPick::Blur),
+            Some(BackgroundChoice::Blur)
+        );
         assert!(library.needs_refresh());
     }
 

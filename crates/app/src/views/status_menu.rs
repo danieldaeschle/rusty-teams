@@ -294,12 +294,10 @@ fn translation_menu(
         .collect();
     let target_label = format!("Translate to {}", state.translation.language_name(&target));
     let target_app = app.clone();
-    let mut menu = menu.check_side(Side::Right).min_w(px(MENU_WIDTH)).submenu_with_icon(
-        None,
-        target_label,
-        window,
-        cx,
-        move |submenu, _, _| {
+    let mut menu = menu
+        .check_side(Side::Right)
+        .min_w(px(MENU_WIDTH))
+        .submenu_with_icon(None, target_label, window, cx, move |submenu, _, _| {
             languages.iter().fold(
                 submenu
                     .check_side(Side::Right)
@@ -316,8 +314,7 @@ fn translation_menu(
                     )
                 },
             )
-        },
-    );
+        });
     menu = menu.separator();
     for (label, choice) in [
         ("Ask me before translating", TranslationBehavior::Ask),

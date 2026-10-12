@@ -8,7 +8,13 @@ const MAX_BYTES: u64 = 1024 * 1024;
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 
-const WEBRTC_AUDIO_MARKERS: [&str; 5] = ["AdmProxy", "audio_device", "core_audio", "WebRtcVoiceEngine", "webrtc_voice_engine"];
+const WEBRTC_AUDIO_MARKERS: [&str; 5] = [
+    "AdmProxy",
+    "audio_device",
+    "core_audio",
+    "WebRtcVoiceEngine",
+    "webrtc_voice_engine",
+];
 const WEBRTC_SKIPPED: [&str; 1] = ["audio_device_buffer"];
 const ENDPOINT_DUMP_LINES: std::ops::Range<u32> = 4040..4170;
 
@@ -40,7 +46,9 @@ impl log::Log for WebrtcAudioLog {
 }
 
 fn keeps_webrtc_line(text: &str) -> bool {
-    WEBRTC_AUDIO_MARKERS.iter().any(|marker| text.contains(marker))
+    WEBRTC_AUDIO_MARKERS
+        .iter()
+        .any(|marker| text.contains(marker))
         && !WEBRTC_SKIPPED.iter().any(|skipped| text.contains(skipped))
         && !is_endpoint_dump(text)
 }
@@ -89,10 +97,18 @@ mod tests {
     #[test]
     fn audio_lines_are_kept_and_endpoint_dumps_and_noise_are_skipped() {
         assert!(keeps_webrtc_line("(audio_device_impl.cc:123): Init"));
-        assert!(keeps_webrtc_line("(webrtc_voice_engine.cc:10): WebRtcVoiceEngine::Init"));
-        assert!(!keeps_webrtc_line("(audio_device_core_win.cc:4090): endpoint 3"));
-        assert!(keeps_webrtc_line("(audio_device_core_win.cc:412): AvRevertMmThreadCharacteristics() is OK"));
-        assert!(!keeps_webrtc_line("(audio_device_buffer.cc:450): [REC : 10000msec, 48kHz] callbacks: 1000"));
+        assert!(keeps_webrtc_line(
+            "(webrtc_voice_engine.cc:10): WebRtcVoiceEngine::Init"
+        ));
+        assert!(!keeps_webrtc_line(
+            "(audio_device_core_win.cc:4090): endpoint 3"
+        ));
+        assert!(keeps_webrtc_line(
+            "(audio_device_core_win.cc:412): AvRevertMmThreadCharacteristics() is OK"
+        ));
+        assert!(!keeps_webrtc_line(
+            "(audio_device_buffer.cc:450): [REC : 10000msec, 48kHz] callbacks: 1000"
+        ));
         assert!(!keeps_webrtc_line("(peer_connection.cc:55): something"));
     }
 }

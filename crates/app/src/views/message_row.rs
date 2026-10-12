@@ -67,18 +67,23 @@ pub struct RowActions {
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
 
 fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
-    h_flex().w_full().justify_center().mt(px(12.)).mb(px(6.)).child(
-        div()
-            .h(px(24.))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .rounded(px(12.))
-            .bg(fill)
-            .text_size(px(11.))
-            .text_color(text_color)
-            .child(label.to_owned()),
-    )
+    h_flex()
+        .w_full()
+        .justify_center()
+        .mt(px(12.))
+        .mb(px(6.))
+        .child(
+            div()
+                .h(px(24.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .rounded(px(12.))
+                .bg(fill)
+                .text_size(px(11.))
+                .text_color(text_color)
+                .child(label.to_owned()),
+        )
 }
 
 fn day_separator(label: &str) -> Div {
@@ -86,7 +91,11 @@ fn day_separator(label: &str) -> Div {
 }
 
 fn new_marker() -> Div {
-    separator_pill("New", theme::mention_background(false), theme::accent_text())
+    separator_pill(
+        "New",
+        theme::mention_background(false),
+        theme::accent_text(),
+    )
 }
 
 fn bubble(
@@ -137,14 +146,13 @@ fn bubble(
             bubble.border_1().border_color(theme::red())
         })
         .when(scheduled, |bubble| {
-            bubble
-                .border_1()
-                .border_dashed()
-                .border_color(if row.delivery == Delivery::Scheduled(ScheduledState::DeliveryFailed) {
+            bubble.border_1().border_dashed().border_color(
+                if row.delivery == Delivery::Scheduled(ScheduledState::DeliveryFailed) {
                     theme::red()
                 } else {
                     theme::accent()
-                })
+                },
+            )
         });
     let has_reactions = !row.reactions.is_empty();
     let saved = extras.saved;
@@ -414,7 +422,12 @@ pub(super) fn has_text(row: &MessageRow) -> bool {
             && row.adaptive_cards.is_empty())
 }
 
-fn delivery_link(index: usize, name: &str, label: &'static str, action: RowAction) -> Stateful<Div> {
+fn delivery_link(
+    index: usize,
+    name: &str,
+    label: &'static str,
+    action: RowAction,
+) -> Stateful<Div> {
     div()
         .id(ElementId::Name(format!("{name}-{index}").into()))
         .cursor_pointer()
@@ -492,10 +505,10 @@ fn others_row(
                     div().id(ElementId::Name(format!("author-{index}").into())),
                     profile_user,
                 )
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_soft())
-                    .child(author.clone()),
+                .text_size(px(12.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text_soft())
+                .child(author.clone()),
             ),
         );
     }

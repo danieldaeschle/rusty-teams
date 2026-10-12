@@ -47,13 +47,22 @@ impl MiniWindowView {
 }
 
 pub fn speaker_tile(model: &CallModel) -> Option<&Tile> {
-    let present: Vec<&Tile> = model.visible_tiles().into_iter().filter(|tile| tile.state == TileState::Present).collect();
+    let present: Vec<&Tile> = model
+        .visible_tiles()
+        .into_iter()
+        .filter(|tile| tile.state == TileState::Present)
+        .collect();
     let focused = model
         .focus()
         .filter(|focus| !focus.own)
         .and_then(|focus| present.iter().find(|tile| tile.mri == focus.mri).copied());
     focused
-        .or_else(|| present.iter().find(|tile| model.tile_speaking(tile)).copied())
+        .or_else(|| {
+            present
+                .iter()
+                .find(|tile| model.tile_speaking(tile))
+                .copied()
+        })
         .or_else(|| present.first().copied())
 }
 
@@ -72,7 +81,9 @@ fn chip(text: String) -> Div {
 }
 
 fn cover(image: std::sync::Arc<RenderImage>) -> Img {
-    img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Cover)
+    img(ImageSource::Render(image))
+        .size_full()
+        .object_fit(ObjectFit::Cover)
 }
 
 fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElement {
@@ -86,7 +97,13 @@ fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElemen
             .justify_center()
             .gap(px(8.))
             .child(icon(IconName::Phone, 28., theme::accent_text()))
-            .child(div().max_w_full().truncate().text_size(px(13.)).child(model.title.clone()))
+            .child(
+                div()
+                    .max_w_full()
+                    .truncate()
+                    .text_size(px(13.))
+                    .child(model.title.clone()),
+            )
             .into_any_element();
     };
     let video = (tile.has_video || model.is_one_to_one())
@@ -99,8 +116,20 @@ fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElemen
             .items_center()
             .justify_center()
             .gap(px(8.))
-            .child(person_avatar(&state.directory, tile.user_id.as_deref(), &tile.name, SPEAKER_AVATAR))
-            .child(div().max_w_full().truncate().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(tile.name.clone()))
+            .child(person_avatar(
+                &state.directory,
+                tile.user_id.as_deref(),
+                &tile.name,
+                SPEAKER_AVATAR,
+            ))
+            .child(
+                div()
+                    .max_w_full()
+                    .truncate()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(tile.name.clone()),
+            )
             .into_any_element(),
     }
 }
@@ -148,7 +177,11 @@ impl Render for MiniWindowView {
             .rounded(px(WINDOW_RADIUS))
             .bg(theme::surface())
             .border_2()
-            .border_color(if speaking { theme::green() } else { theme::border_strong() })
+            .border_color(if speaking {
+                theme::green()
+            } else {
+                theme::border_strong()
+            })
             .text_color(theme::text())
             .child(speaker_layer(state, model, now))
             .child(
@@ -161,8 +194,20 @@ impl Render for MiniWindowView {
                     .bottom(px(CONTROLS_HEIGHT))
                     .window_control_area(WindowControlArea::Drag)
                     .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
-                    .child(div().absolute().top(px(8.)).left(px(8.)).child(chip(status)))
-                    .children(speaker_name.map(|name| div().absolute().bottom(px(6.)).left(px(8.)).child(chip(name))))
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(8.))
+                            .left(px(8.))
+                            .child(chip(status)),
+                    )
+                    .children(speaker_name.map(|name| {
+                        div()
+                            .absolute()
+                            .bottom(px(6.))
+                            .left(px(8.))
+                            .child(chip(name))
+                    }))
                     .children(self_view(state, model, now)),
             )
             .child(
@@ -178,15 +223,32 @@ impl Render for MiniWindowView {
                     .bg(hsla(0., 0., 0., SHADE_BACKGROUND))
                     .opacity(0.)
                     .group_hover("call-mini-window", |controls| controls.opacity(1.))
-                    .child(mute_button(&self.app, model, "call-mini-window-mute", CONTROL_SIZE))
+                    .child(mute_button(
+                        &self.app,
+                        model,
+                        "call-mini-window-mute",
+                        CONTROL_SIZE,
+                    ))
                     .child(camera_button(&self.app, model).size(px(CONTROL_SIZE)))
                     .child(
-                        round_control("call-mini-window-back", IconName::Maximize2, theme::surface_raised(), theme::text())
-                            .size(px(CONTROL_SIZE))
-                            .tooltip(|window, cx| Tooltip::new("Back to call").build(window, cx))
-                            .on_click(move |_, _, cx| windows.update(cx, |windows, cx| windows.return_to_call(cx))),
+                        round_control(
+                            "call-mini-window-back",
+                            IconName::Maximize2,
+                            theme::surface_raised(),
+                            theme::text(),
+                        )
+                        .size(px(CONTROL_SIZE))
+                        .tooltip(|window, cx| Tooltip::new("Back to call").build(window, cx))
+                        .on_click(move |_, _, cx| {
+                            windows.update(cx, |windows, cx| windows.return_to_call(cx))
+                        }),
                     )
-                    .child(leave_button(&self.app, model, "call-mini-window-leave", true)),
+                    .child(leave_button(
+                        &self.app,
+                        model,
+                        "call-mini-window-leave",
+                        true,
+                    )),
             )
             .into_any_element()
     }
@@ -208,9 +270,15 @@ mod tests {
     fn speaker_is_the_speaking_tile_before_the_first_one() {
         let mut model = CallModel::test();
         model.tiles = vec![present("8:a", "Ada"), present("8:b", "Bo")];
-        assert_eq!(speaker_tile(&model).map(|tile| tile.name.as_str()), Some("Ada"));
+        assert_eq!(
+            speaker_tile(&model).map(|tile| tile.name.as_str()),
+            Some("Ada")
+        );
         model.speaking_mris = vec!["8:b".to_owned()];
-        assert_eq!(speaker_tile(&model).map(|tile| tile.name.as_str()), Some("Bo"));
+        assert_eq!(
+            speaker_tile(&model).map(|tile| tile.name.as_str()),
+            Some("Bo")
+        );
     }
 
     #[test]
@@ -219,7 +287,10 @@ mod tests {
         model.tiles = vec![present("8:a", "Ada"), present("8:b", "Bo")];
         model.speaking_mris = vec!["8:b".to_owned()];
         model.toggle_pin("8:a");
-        assert_eq!(speaker_tile(&model).map(|tile| tile.name.as_str()), Some("Ada"));
+        assert_eq!(
+            speaker_tile(&model).map(|tile| tile.name.as_str()),
+            Some("Ada")
+        );
     }
 
     #[test]

@@ -43,12 +43,37 @@ pub fn bar_collapsed(pinned: bool, idle: Duration) -> bool {
 
 pub fn border_rects(target: ScreenRect, thickness: i32) -> [ScreenRect; 4] {
     let thickness = thickness.clamp(1, (target.width().min(target.height()) / 2).max(1));
-    let ScreenRect { left, top, right, bottom } = target;
+    let ScreenRect {
+        left,
+        top,
+        right,
+        bottom,
+    } = target;
     [
-        ScreenRect { left, top, right, bottom: top + thickness },
-        ScreenRect { left, top: bottom - thickness, right, bottom },
-        ScreenRect { left, top: top + thickness, right: left + thickness, bottom: bottom - thickness },
-        ScreenRect { left: right - thickness, top: top + thickness, right, bottom: bottom - thickness },
+        ScreenRect {
+            left,
+            top,
+            right,
+            bottom: top + thickness,
+        },
+        ScreenRect {
+            left,
+            top: bottom - thickness,
+            right,
+            bottom,
+        },
+        ScreenRect {
+            left,
+            top: top + thickness,
+            right: left + thickness,
+            bottom: bottom - thickness,
+        },
+        ScreenRect {
+            left: right - thickness,
+            top: top + thickness,
+            right,
+            bottom: bottom - thickness,
+        },
     ]
 }
 
@@ -67,8 +92,14 @@ pub fn mini_rect(work: WorkArea, saved: Option<(i32, i32)>) -> ScreenRect {
     }
 }
 
-pub fn mini_work_area(main: WorkArea, saved: Option<(i32, i32)>, area_at: impl Fn(i32, i32) -> Option<WorkArea>) -> WorkArea {
-    saved.and_then(|(left, top)| area_at(left, top)).unwrap_or(main)
+pub fn mini_work_area(
+    main: WorkArea,
+    saved: Option<(i32, i32)>,
+    area_at: impl Fn(i32, i32) -> Option<WorkArea>,
+) -> WorkArea {
+    saved
+        .and_then(|(left, top)| area_at(left, top))
+        .unwrap_or(main)
 }
 
 pub fn mini_wanted(call_active: bool, main_minimized: bool) -> bool {
@@ -89,18 +120,33 @@ mod tests {
     use super::*;
 
     fn work(scale: f32) -> WorkArea {
-        WorkArea { left: 0, top: 0, right: 1920, bottom: 1040, scale }
+        WorkArea {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+            scale,
+        }
     }
 
     #[test]
     fn bar_is_centred_at_the_top() {
         let rect = bar_rect(work(1.), false);
-        assert_eq!((rect.left, rect.top, rect.right, rect.bottom), (770, 0, 1150, 40));
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (770, 0, 1150, 40)
+        );
     }
 
     #[test]
     fn bar_follows_a_secondary_monitor_and_scale() {
-        let second = WorkArea { left: 1920, top: 100, right: 3840, bottom: 1140, scale: 1.5 };
+        let second = WorkArea {
+            left: 1920,
+            top: 100,
+            right: 3840,
+            bottom: 1140,
+            scale: 1.5,
+        };
         let rect = bar_rect(second, false);
         assert_eq!(rect.width(), 570);
         assert_eq!(rect.height(), 60);
@@ -130,17 +176,33 @@ mod tests {
 
     #[test]
     fn border_rects_frame_the_target_without_overlap() {
-        let target = ScreenRect { left: 100, top: 50, right: 500, bottom: 350 };
+        let target = ScreenRect {
+            left: 100,
+            top: 50,
+            right: 500,
+            bottom: 350,
+        };
         let [top, bottom, left, right] = border_rects(target, 4);
-        assert_eq!((top.left, top.top, top.right, top.bottom), (100, 50, 500, 54));
+        assert_eq!(
+            (top.left, top.top, top.right, top.bottom),
+            (100, 50, 500, 54)
+        );
         assert_eq!((bottom.top, bottom.bottom), (346, 350));
-        assert_eq!((left.left, left.right, left.top, left.bottom), (100, 104, 54, 346));
+        assert_eq!(
+            (left.left, left.right, left.top, left.bottom),
+            (100, 104, 54, 346)
+        );
         assert_eq!((right.left, right.right), (496, 500));
     }
 
     #[test]
     fn border_thickness_never_exceeds_half_the_target() {
-        let target = ScreenRect { left: 0, top: 0, right: 6, bottom: 100 };
+        let target = ScreenRect {
+            left: 0,
+            top: 0,
+            right: 6,
+            bottom: 100,
+        };
         let [top, _, left, right] = border_rects(target, 4);
         assert_eq!(top.bottom, 3);
         assert_eq!(left.right, 3);
@@ -150,7 +212,10 @@ mod tests {
     #[test]
     fn mini_defaults_to_the_bottom_right_corner() {
         let rect = mini_rect(work(1.), None);
-        assert_eq!((rect.left, rect.top, rect.right, rect.bottom), (1584, 844, 1904, 1024));
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (1584, 844, 1904, 1024)
+        );
     }
 
     #[test]
@@ -164,12 +229,21 @@ mod tests {
 
     #[test]
     fn mini_stays_on_the_monitor_that_holds_the_saved_point() {
-        let second = WorkArea { left: 1920, top: 0, right: 3840, bottom: 1040, scale: 1. };
+        let second = WorkArea {
+            left: 1920,
+            top: 0,
+            right: 3840,
+            bottom: 1040,
+            scale: 1.,
+        };
         let area_at = |left: i32, _: i32| (left >= 1920).then_some(second);
         let saved = Some((3700, 900));
         let rect = mini_rect(mini_work_area(work(1.), saved, area_at), saved);
         assert_eq!((rect.right, rect.bottom), (3840, 1040));
-        assert_eq!(mini_work_area(work(1.), Some((100, 100)), area_at), work(1.));
+        assert_eq!(
+            mini_work_area(work(1.), Some((100, 100)), area_at),
+            work(1.)
+        );
         assert_eq!(mini_work_area(work(1.), None, area_at), work(1.));
     }
 
@@ -188,7 +262,10 @@ mod tests {
 
     #[test]
     fn position_round_trips() {
-        assert_eq!(parse_position(&format_position(-1200, 80)), Some((-1200, 80)));
+        assert_eq!(
+            parse_position(&format_position(-1200, 80)),
+            Some((-1200, 80))
+        );
         assert_eq!(parse_position("garbage"), None);
     }
 }

@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use gpui_kit::{DispatchPhase, IntoElement, KeyDownEvent, MouseDownEvent, MouseMoveEvent, ScrollWheelEvent, canvas};
+use gpui_kit::{
+    DispatchPhase, IntoElement, KeyDownEvent, MouseDownEvent, MouseMoveEvent, ScrollWheelEvent,
+    canvas,
+};
 use tokio::sync::watch;
 
 pub const IDLE_AFTER: Duration = Duration::from_secs(5 * 60);
@@ -68,7 +71,11 @@ pub fn input_probe(input: Arc<UserInput>) -> impl IntoElement {
     )
 }
 
-pub fn latest_input(app_input: Option<Instant>, system_idle: Option<Duration>, now: Instant) -> Option<Instant> {
+pub fn latest_input(
+    app_input: Option<Instant>,
+    system_idle: Option<Duration>,
+    now: Instant,
+) -> Option<Instant> {
     let system_input = system_idle.and_then(|idle| now.checked_sub(idle));
     app_input.max(system_input)
 }
@@ -77,7 +84,12 @@ pub fn is_active(last_input: Option<Instant>, now: Instant, idle_after: Duration
     last_input.is_some_and(|last_input| now.saturating_duration_since(last_input) < idle_after)
 }
 
-pub fn activity_change(previous: bool, last_input: Option<Instant>, now: Instant, idle_after: Duration) -> Option<bool> {
+pub fn activity_change(
+    previous: bool,
+    last_input: Option<Instant>,
+    now: Instant,
+    idle_after: Duration,
+) -> Option<bool> {
     let current = is_active(last_input, now, idle_after);
     (current != previous).then_some(current)
 }
@@ -130,15 +142,30 @@ mod tests {
     #[test]
     fn active_until_the_idle_threshold() {
         let last_input = Instant::now();
-        assert!(is_active(Some(last_input), last_input + seconds(299), IDLE_AFTER));
-        assert!(!is_active(Some(last_input), last_input + seconds(300), IDLE_AFTER));
-        assert!(is_active(Some(last_input + seconds(10)), last_input, IDLE_AFTER));
+        assert!(is_active(
+            Some(last_input),
+            last_input + seconds(299),
+            IDLE_AFTER
+        ));
+        assert!(!is_active(
+            Some(last_input),
+            last_input + seconds(300),
+            IDLE_AFTER
+        ));
+        assert!(is_active(
+            Some(last_input + seconds(10)),
+            last_input,
+            IDLE_AFTER
+        ));
     }
 
     #[test]
     fn without_any_input_the_user_is_inactive() {
         assert!(!is_active(None, Instant::now(), IDLE_AFTER));
-        assert_eq!(activity_change(false, None, Instant::now(), IDLE_AFTER), None);
+        assert_eq!(
+            activity_change(false, None, Instant::now(), IDLE_AFTER),
+            None
+        );
     }
 
     #[test]
@@ -146,20 +173,38 @@ mod tests {
         let last_input = Some(Instant::now());
         let at = |offset: u64| last_input.unwrap() + seconds(offset);
         assert_eq!(activity_change(true, last_input, at(10), IDLE_AFTER), None);
-        assert_eq!(activity_change(true, last_input, at(301), IDLE_AFTER), Some(false));
-        assert_eq!(activity_change(false, last_input, at(301), IDLE_AFTER), None);
-        assert_eq!(activity_change(false, Some(at(400)), at(401), IDLE_AFTER), Some(true));
-        assert_eq!(activity_change(false, last_input, at(10), IDLE_AFTER), Some(true));
+        assert_eq!(
+            activity_change(true, last_input, at(301), IDLE_AFTER),
+            Some(false)
+        );
+        assert_eq!(
+            activity_change(false, last_input, at(301), IDLE_AFTER),
+            None
+        );
+        assert_eq!(
+            activity_change(false, Some(at(400)), at(401), IDLE_AFTER),
+            Some(true)
+        );
+        assert_eq!(
+            activity_change(false, last_input, at(10), IDLE_AFTER),
+            Some(true)
+        );
     }
 
     #[test]
     fn system_input_counts_when_newer_than_app_input() {
         let now = Instant::now() + seconds(1000);
         let app_input = Some(now - seconds(900));
-        assert_eq!(latest_input(app_input, Some(seconds(20)), now), Some(now - seconds(20)));
+        assert_eq!(
+            latest_input(app_input, Some(seconds(20)), now),
+            Some(now - seconds(20))
+        );
         assert_eq!(latest_input(app_input, Some(seconds(2000)), now), app_input);
         assert_eq!(latest_input(app_input, None, now), app_input);
-        assert_eq!(latest_input(None, Some(seconds(20)), now), Some(now - seconds(20)));
+        assert_eq!(
+            latest_input(None, Some(seconds(20)), now),
+            Some(now - seconds(20))
+        );
         assert_eq!(latest_input(None, None, now), None);
     }
 

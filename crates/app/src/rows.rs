@@ -976,7 +976,10 @@ mod tests {
             row.translation,
             Some(TranslationLine::Offer { ref language_code, .. }) if language_code == "fr"
         ));
-        assert_eq!(row.blocks, layout_blocks(&linked_message_spans(&record("a", None, 8, 6))));
+        assert_eq!(
+            row.blocks,
+            layout_blocks(&linked_message_spans(&record("a", None, 8, 6)))
+        );
     }
 
     #[test]
@@ -1008,7 +1011,10 @@ mod tests {
     fn own_messages_get_no_offer() {
         let mut own = record("a", None, 8, 6);
         own.sender_id = Some("me".into());
-        assert_eq!(message_row(&own, &translation_context(false)).translation, None);
+        assert_eq!(
+            message_row(&own, &translation_context(false)).translation,
+            None
+        );
     }
 
     #[test]

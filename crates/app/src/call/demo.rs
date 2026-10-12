@@ -1,13 +1,14 @@
 use std::time::{Duration, Instant};
 
+use calling::CameraDevice;
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallState, CallUpdate, Caller, CaptionEntry, CaptionState,
-    ContentShare, DeviceChoice, DeviceLists, EndReason, HoldState, IncomingRing, MeetingTarget, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
-    ShareKind, ShareSource, VideoKey, call_channel,
+    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallState,
+    CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice, DeviceLists,
+    EndReason, HoldState, IncomingRing, MeetingTarget, Progress, PublishedState, RaisedHand,
+    Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
 };
-use calling::CameraDevice;
 
 use super::demo_scene::self_view;
 use tokio::time::{interval, sleep};
@@ -36,10 +37,22 @@ const DEMO_WAITING: [&str; 3] = ["Anja Vogel", "Matteo Conti", "Hannah Weiss"];
 const CAPTION_WORDS_PER_TICK: usize = 2;
 const CAPTION_HOLD_TICKS: usize = 14;
 const DEMO_CAPTIONS: [(usize, &str); 4] = [
-    (0, "Thanks everyone for joining, let us start with the release status."),
-    (1, "The build is green and the new call controls are ready for review."),
-    (2, "Can we admit the two people from the lobby before we begin?"),
-    (0, "Yes, I am letting them in now and we will share the plan on screen."),
+    (
+        0,
+        "Thanks everyone for joining, let us start with the release status.",
+    ),
+    (
+        1,
+        "The build is green and the new call controls are ready for review.",
+    ),
+    (
+        2,
+        "Can we admit the two people from the lobby before we begin?",
+    ),
+    (
+        0,
+        "Yes, I am letting them in now and we will share the plan on screen.",
+    ),
 ];
 const GUEST_PHASE: u32 = 37;
 const SELF_PHASE: u32 = 211;
@@ -103,7 +116,11 @@ const DEMO_ROOM_THREAD: &str = "19:meeting_demo-room-1@thread.v2";
 pub enum DemoCall {
     Test,
     People(Vec<Person>),
-    Meeting { guests: Vec<Person>, lobby: bool, organizer: bool },
+    Meeting {
+        guests: Vec<Person>,
+        lobby: bool,
+        organizer: bool,
+    },
     Incoming(Person),
 }
 
@@ -121,7 +138,10 @@ pub fn demo_caller() -> Person {
 }
 
 pub fn demo_video_ring() -> IncomingRing {
-    IncomingRing { video: true, ..demo_ring() }
+    IncomingRing {
+        video: true,
+        ..demo_ring()
+    }
 }
 
 pub fn demo_ring() -> IncomingRing {
@@ -146,15 +166,29 @@ fn device(index: u16, name: &str) -> AudioDevice {
 
 fn demo_cameras() -> Vec<CameraDevice> {
     vec![
-        CameraDevice { key: "0".into(), name: "Integrated Camera".into() },
-        CameraDevice { key: "1".into(), name: "Studio Webcam".into() },
+        CameraDevice {
+            key: "0".into(),
+            name: "Integrated Camera".into(),
+        },
+        CameraDevice {
+            key: "1".into(),
+            name: "Studio Webcam".into(),
+        },
     ]
 }
 
 fn demo_share_sources() -> Vec<ShareSource> {
-    let window = |id: u64, title: &str| ShareSource { id, kind: ShareKind::Window, title: title.to_owned() };
+    let window = |id: u64, title: &str| ShareSource {
+        id,
+        kind: ShareKind::Window,
+        title: title.to_owned(),
+    };
     vec![
-        ShareSource { id: 1, kind: ShareKind::Screen, title: String::new() },
+        ShareSource {
+            id: 1,
+            kind: ShareKind::Screen,
+            title: String::new(),
+        },
         window(2, "Release notes - Docs"),
         window(3, "Standup board"),
         window(4, "Terminal"),
@@ -163,7 +197,10 @@ fn demo_share_sources() -> Vec<ShareSource> {
 
 fn demo_devices() -> DeviceLists {
     DeviceLists {
-        inputs: vec![device(0, "Headset Microphone"), device(1, "Built-in Microphone")],
+        inputs: vec![
+            device(0, "Headset Microphone"),
+            device(1, "Built-in Microphone"),
+        ],
         outputs: vec![device(0, "Headset"), device(1, "Speakers")],
     }
 }
@@ -233,11 +270,24 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
     }
     let mut roster = roster_of(&people);
     if matches!(script, DemoCall::People(_)) {
-        control.send(CallUpdate::ReplacementLink(DEMO_REPLACEMENT_LINK.to_owned()));
+        control.send(CallUpdate::ReplacementLink(
+            DEMO_REPLACEMENT_LINK.to_owned(),
+        ));
     }
-    if matches!(script, DemoCall::Meeting { organizer: true, .. }) {
+    if matches!(
+        script,
+        DemoCall::Meeting {
+            organizer: true,
+            ..
+        }
+    ) {
         roster.push(demo_organizer());
-        roster.extend(DEMO_WAITING.iter().enumerate().map(|(index, name)| demo_waiting(index, name)));
+        roster.extend(
+            DEMO_WAITING
+                .iter()
+                .enumerate()
+                .map(|(index, name)| demo_waiting(index, name)),
+        );
     }
     if matches!(script, DemoCall::Meeting { .. }) {
         for (index, rank) in DEMO_FIRST_HANDS {
@@ -248,7 +298,9 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
     }
     control.send(CallUpdate::Roster(roster.clone()));
     let video = !matches!(script, DemoCall::Test);
-    let sharer = matches!(script, DemoCall::Meeting { .. }).then(|| people.get(1).map(|person| person.0.clone())).flatten();
+    let sharer = matches!(script, DemoCall::Meeting { .. })
+        .then(|| people.get(1).map(|person| person.0.clone()))
+        .flatten();
     start_scene(&control, scene);
     speak_until_hangup(control, people, roster, video, sharer, scene).await;
 }
@@ -273,16 +325,31 @@ async fn ring_until_answered(control: &mut CallControl, script: &DemoCall) -> bo
     true
 }
 
-fn publish_demo_video(control: &CallControl, people: &[Person], tick: u32, sharing: bool, sharer: Option<&str>, camera: Option<bool>) {
+fn publish_demo_video(
+    control: &CallControl,
+    people: &[Person],
+    tick: u32,
+    sharing: bool,
+    sharer: Option<&str>,
+    camera: Option<bool>,
+) {
     if let Some(blur) = camera {
-        control.video.publish(VideoKey::LocalCamera, self_view((tick + SELF_PHASE) as usize, blur));
+        control.video.publish(
+            VideoKey::LocalCamera,
+            self_view((tick + SELF_PHASE) as usize, blur),
+        );
     }
     for (index, (mri, _)) in people.iter().take(DEMO_CAMERAS).enumerate() {
         let frame = pattern_frame(PatternKind::Camera, tick + index as u32 * GUEST_PHASE);
-        control.video.publish(VideoKey::Person(mri.clone()), bgra_from_i420(frame));
+        control
+            .video
+            .publish(VideoKey::Person(mri.clone()), bgra_from_i420(frame));
     }
     if sharing && sharer.is_some() && tick.is_multiple_of(SCREEN_EVERY_TICKS) {
-        control.video.publish(VideoKey::Screen, bgra_from_i420(pattern_frame(PatternKind::Screen, tick)));
+        control.video.publish(
+            VideoKey::Screen,
+            bgra_from_i420(pattern_frame(PatternKind::Screen, tick)),
+        );
     }
 }
 
@@ -301,23 +368,39 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
 
 fn scene_tick(control: &CallControl, scene: DemoScene, ticks: u32, people: &[Person]) {
     match scene {
-        DemoScene::Breakout if ticks == BREAKOUT_AT_TICKS => control.send(CallUpdate::BreakoutMove(BreakoutMove {
-            room_name: "Room 1".to_owned(),
-            target: MeetingTarget { thread_id: DEMO_ROOM_THREAD.to_owned(), tenant_id: "demo-tenant".to_owned(), organizer_id: "demo-me".to_owned(), meeting_data: None },
-            returning: false,
-        })),
-        DemoScene::Whiteboard if ticks == WHITEBOARD_AT_TICKS => control.send(CallUpdate::Whiteboard(Some(ContentShare {
-            session_id: "demo-whiteboard".to_owned(),
-            presenter: people.first().map(|person| person.0.clone()),
-            subject: "Whiteboard".to_owned(),
-            url: Some(DEMO_BOARD_URL.to_owned()),
-            whiteboard: true,
-        }))),
+        DemoScene::Breakout if ticks == BREAKOUT_AT_TICKS => {
+            control.send(CallUpdate::BreakoutMove(BreakoutMove {
+                room_name: "Room 1".to_owned(),
+                target: MeetingTarget {
+                    thread_id: DEMO_ROOM_THREAD.to_owned(),
+                    tenant_id: "demo-tenant".to_owned(),
+                    organizer_id: "demo-me".to_owned(),
+                    meeting_data: None,
+                },
+                returning: false,
+            }))
+        }
+        DemoScene::Whiteboard if ticks == WHITEBOARD_AT_TICKS => {
+            control.send(CallUpdate::Whiteboard(Some(ContentShare {
+                session_id: "demo-whiteboard".to_owned(),
+                presenter: people.first().map(|person| person.0.clone()),
+                subject: "Whiteboard".to_owned(),
+                url: Some(DEMO_BOARD_URL.to_owned()),
+                whiteboard: true,
+            })))
+        }
         _ => {}
     }
 }
 
-async fn speak_until_hangup(mut control: CallControl, people: Vec<Person>, mut roster: Vec<RosterEntry>, video: bool, sharer: Option<String>, scene: DemoScene) {
+async fn speak_until_hangup(
+    mut control: CallControl,
+    people: Vec<Person>,
+    mut roster: Vec<RosterEntry>,
+    video: bool,
+    sharer: Option<String>,
+    scene: DemoScene,
+) {
     let started = Instant::now();
     let mut video_ticks = 0u32;
     let mut sharing = false;
@@ -497,7 +580,10 @@ fn demo_waiting(index: usize, name: &str) -> RosterEntry {
 }
 
 fn demo_spotlight(rank: u64) -> PublishedState {
-    PublishedState { state_id: format!("demo-spotlight-{rank}"), rank }
+    PublishedState {
+        state_id: format!("demo-spotlight-{rank}"),
+        rank,
+    }
 }
 
 fn demo_caption(people: &[Person], tick: usize) -> Option<CaptionEntry> {
@@ -517,11 +603,19 @@ fn demo_caption(people: &[Person], tick: usize) -> Option<CaptionEntry> {
 }
 
 fn demo_hand(rank: u64) -> RaisedHand {
-    RaisedHand { state_id: format!("demo-hand-{rank}"), rank }
+    RaisedHand {
+        state_id: format!("demo-hand-{rank}"),
+        rank,
+    }
 }
 
 fn set_demo_hand(roster: &mut Vec<RosterEntry>, mri: &str, raised: bool) {
-    let next_rank = roster.iter().filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank)).max().unwrap_or(0) + 1;
+    let next_rank = roster
+        .iter()
+        .filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank))
+        .max()
+        .unwrap_or(0)
+        + 1;
     if !raised {
         if let Some(entry) = roster.iter_mut().find(|entry| entry.mri == mri) {
             entry.hand = None;
@@ -568,7 +662,10 @@ mod tests {
         let mut roster = roster_of(&demo_guests(3));
         set_demo_hand(&mut roster, "8:orgid:demo-guest-1", true);
         set_demo_hand(&mut roster, DEMO_OWN_MRI, true);
-        let ranks: Vec<u64> = roster.iter().filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank)).collect();
+        let ranks: Vec<u64> = roster
+            .iter()
+            .filter_map(|entry| entry.hand.as_ref().map(|hand| hand.rank))
+            .collect();
         assert_eq!(ranks, vec![1, 2]);
         set_demo_hand(&mut roster, DEMO_OWN_MRI, false);
         assert!(roster.iter().all(|entry| entry.mri != DEMO_OWN_MRI));

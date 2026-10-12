@@ -58,14 +58,22 @@ fn picture(image: Option<Arc<RenderImage>>) -> AnyElement {
     }
 }
 
-pub fn render_stage(app: &Entity<AppState>, state: &AppState, fullscreen: bool) -> Option<AnyElement> {
+pub fn render_stage(
+    app: &Entity<AppState>,
+    state: &AppState,
+    fullscreen: bool,
+) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
     let label = call.model.sharing_label()?;
     let image = call.pictures.live(&VideoKey::Screen, Instant::now());
     let toggle_app = app.clone();
     Some(
         div()
-            .id(if fullscreen { "call-stage-full" } else { "call-stage" })
+            .id(if fullscreen {
+                "call-stage-full"
+            } else {
+                "call-stage"
+            })
             .relative()
             .flex_1()
             .min_w_0()

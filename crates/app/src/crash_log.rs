@@ -19,7 +19,14 @@ pub fn install(path: PathBuf) {
 fn entry(info: &PanicHookInfo<'_>, backtrace: &str) -> String {
     let location = info
         .location()
-        .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column()))
+        .map(|location| {
+            format!(
+                "{}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
+            )
+        })
         .unwrap_or_default();
     let thread = std::thread::current();
     format!(

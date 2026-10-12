@@ -20,11 +20,11 @@ use crate::views::attachment_tray::{display_name, read_attachment};
 use crate::views::channel_tabs::{
     ChannelPane, TabAction, TabBarActions, fallback_tab_link, render_tab_bar, tab_action,
 };
+use crate::views::rail::RAIL_WIDTH;
 use crate::views::shared_tab::{
     LibraryView, Listing, MessagesView, SharedCommand, SharedRun, SharedScope, render_library,
     render_messages,
 };
-use crate::views::rail::RAIL_WIDTH;
 use crate::views::shell::ISLAND_GAP;
 use crate::views::sidebar::SIDEBAR_WIDTH;
 
@@ -100,7 +100,8 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.channel_id().filter(|_| self.in_feed())?;
-        let available = f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 2. * ISLAND_GAP;
+        let available =
+            f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 2. * ISLAND_GAP;
         let view = cx.weak_entity();
         let select = Rc::new(move |pane, cx: &mut App| {
             view.update(cx, |this, cx| this.select_pane(pane, cx)).ok();
@@ -116,10 +117,7 @@ impl ConversationView {
             &self.channel_tabs,
             self.pane,
             available,
-            &TabBarActions {
-                select,
-                open,
-            },
+            &TabBarActions { select, open },
         ))
     }
 

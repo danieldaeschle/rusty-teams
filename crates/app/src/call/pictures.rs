@@ -28,8 +28,16 @@ impl CallPictures {
         let now = Instant::now();
         for (key, picture) in hub.drain() {
             let picture = Arc::try_unwrap(picture).unwrap_or_else(|shared| (*shared).clone());
-            let Some(image) = render_image(picture) else { continue };
-            if let Some(previous) = self.shown.insert(key, Shown { image, updated: now }) {
+            let Some(image) = render_image(picture) else {
+                continue;
+            };
+            if let Some(previous) = self.shown.insert(
+                key,
+                Shown {
+                    image,
+                    updated: now,
+                },
+            ) {
                 cx.drop_image(previous.image, None);
             }
         }

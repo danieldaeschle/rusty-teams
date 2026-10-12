@@ -208,11 +208,9 @@ pub struct ToastStack {
 
 impl ToastStack {
     pub fn push(&mut self, incoming: &Incoming, now: Instant) -> PushOutcome {
-        if let Some(existing) = self
-            .toasts
-            .iter_mut()
-            .find(|toast| toast.agent.is_none() && toast.conversation_id == incoming.conversation_id)
-        {
+        if let Some(existing) = self.toasts.iter_mut().find(|toast| {
+            toast.agent.is_none() && toast.conversation_id == incoming.conversation_id
+        }) {
             let became_mention = incoming.mentions_me && !existing.mentions_me;
             existing.count += 1;
             existing.mentions_me |= incoming.mentions_me;
@@ -305,9 +303,8 @@ impl ToastStack {
     }
 
     pub fn remove_conversation(&mut self, conversation_id: &str) -> Vec<u64> {
-        let matches = |toast: &ToastModel| {
-            toast.agent.is_none() && toast.conversation_id == conversation_id
-        };
+        let matches =
+            |toast: &ToastModel| toast.agent.is_none() && toast.conversation_id == conversation_id;
         let ids: Vec<u64> = self
             .toasts
             .iter()
@@ -506,8 +503,16 @@ mod tests {
         stack.remove(ids[0]);
         stack.promote(later, FADE_IN);
         assert_eq!(visible_chats(&stack), ["b", "c", "d"]);
-        assert!(!stack.expired(later + Duration::from_secs(5)).contains(&ids[3]));
-        assert!(stack.expired(later + Duration::from_secs(6)).contains(&ids[3]));
+        assert!(
+            !stack
+                .expired(later + Duration::from_secs(5))
+                .contains(&ids[3])
+        );
+        assert!(
+            stack
+                .expired(later + Duration::from_secs(6))
+                .contains(&ids[3])
+        );
     }
 
     #[test]

@@ -28,9 +28,14 @@ impl Kind {
     }
 
     fn from_key(key: &str) -> Option<Kind> {
-        [Kind::Messages, Kind::Mention, Kind::Reaction, Kind::MissedCall]
-            .into_iter()
-            .find(|kind| kind.key() == key)
+        [
+            Kind::Messages,
+            Kind::Mention,
+            Kind::Reaction,
+            Kind::MissedCall,
+        ]
+        .into_iter()
+        .find(|kind| kind.key() == key)
     }
 }
 
@@ -346,7 +351,10 @@ impl Feed {
         let open_row = self.entries.iter().position(|entry| {
             entry.kind == Kind::MissedCall
                 && !entry.read
-                && entry.actors.first().is_some_and(|known| known.user_id == actor.user_id && known.name == actor.name)
+                && entry
+                    .actors
+                    .first()
+                    .is_some_and(|known| known.user_id == actor.user_id && known.name == actor.name)
         });
         match open_row {
             Some(index) => {
@@ -872,7 +880,10 @@ mod tests {
     #[test]
     fn a_missed_call_is_one_row_per_caller_until_it_is_read() {
         let mut feed = Feed::load(Vec::new());
-        let caller = Actor { user_id: Some("u1".into()), name: "Cara".into() };
+        let caller = Actor {
+            user_id: Some("u1".into()),
+            name: "Cara".into(),
+        };
         feed.record_missed_call("19:dm", caller.clone(), at(9, 0));
         feed.record_missed_call("19:dm", caller.clone(), at(9, 5));
         assert_eq!(feed.unread_count(), 1);
@@ -883,14 +894,28 @@ mod tests {
         feed.mark_all_read();
         feed.record_missed_call("19:dm", caller, at(10, 0));
         assert_eq!(feed.unread_count(), 1);
-        feed.record_missed_call("19:other", Actor { user_id: Some("u2".into()), name: "Dan".into() }, at(10, 1));
+        feed.record_missed_call(
+            "19:other",
+            Actor {
+                user_id: Some("u2".into()),
+                name: "Dan".into(),
+            },
+            at(10, 1),
+        );
         assert_eq!(feed.unread_count(), 2);
     }
 
     #[test]
     fn missed_calls_survive_the_store_round_trip() {
         let mut feed = Feed::load(Vec::new());
-        feed.record_missed_call("19:dm", Actor { user_id: Some("u1".into()), name: "Cara".into() }, at(9, 0));
+        feed.record_missed_call(
+            "19:dm",
+            Actor {
+                user_id: Some("u1".into()),
+                name: "Cara".into(),
+            },
+            at(9, 0),
+        );
         let record = feed.get(1).unwrap().to_record();
         assert_eq!(record.kind, "missed_call");
         let restored = Entry::from_record(record).unwrap();

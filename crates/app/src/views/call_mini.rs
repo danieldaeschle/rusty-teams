@@ -97,9 +97,16 @@ pub fn render_call_mini(app: &Entity<AppState>, state: &AppState) -> Option<AnyE
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(model.title.clone()),
                     )
-                    .child(div().text_size(px(12.)).text_color(status_color).child(status)),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(status_color)
+                            .child(status),
+                    ),
             )
-            .when(model.local_share.is_some(), |mini| mini.child(sharing_badge(app)))
+            .when(model.local_share.is_some(), |mini| {
+                mini.child(sharing_badge(app))
+            })
             .child(
                 h_flex()
                     .gap(px(8.))

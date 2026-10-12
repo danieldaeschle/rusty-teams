@@ -42,7 +42,12 @@ pub(super) enum Section {
 }
 
 impl Section {
-    const ALL: [Section; 4] = [Section::Notifications, Section::Devices, Section::Agents, Section::Mcp];
+    const ALL: [Section; 4] = [
+        Section::Notifications,
+        Section::Devices,
+        Section::Agents,
+        Section::Mcp,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -126,7 +131,11 @@ impl SettingsView {
         let camera = state.call_camera.clone();
         let preview_blocked = camera_in_call(state);
         let background = Some(state.call_background.clone())
-            .filter(|pick| preview_backgrounds(&state.call_backgrounds).iter().any(|(known, _)| known == pick))
+            .filter(|pick| {
+                preview_backgrounds(&state.call_backgrounds)
+                    .iter()
+                    .any(|(known, _)| known == pick)
+            })
             .unwrap_or_default();
         cx.spawn(async move |this, cx| {
             while updates.recv().await.is_some() {
@@ -145,8 +154,8 @@ impl SettingsView {
             }
         })
         .detach();
-        let agents = crate::agents::runs_handle(cx)
-            .map(|runs| cx.new(|cx| AgentsSettings::new(runs, cx)));
+        let agents =
+            crate::agents::runs_handle(cx).map(|runs| cx.new(|cx| AgentsSettings::new(runs, cx)));
         SettingsView {
             center,
             section,
@@ -198,7 +207,10 @@ impl SettingsView {
             return;
         }
         cx.spawn(async move |this, cx| {
-            let cameras = cx.background_executor().spawn(async { list_cameras() }).await;
+            let cameras = cx
+                .background_executor()
+                .spawn(async { list_cameras() })
+                .await;
             this.update(cx, |view, cx| {
                 view.cameras = camera_entries(&cameras);
                 cx.notify();
@@ -345,7 +357,11 @@ fn section_tab(section: Section, active: bool, view: Entity<SettingsView>) -> St
         .cursor_pointer()
         .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(if active { theme::on_accent() } else { theme::text() })
+        .text_color(if active {
+            theme::on_accent()
+        } else {
+            theme::text()
+        })
         .when(active, |tab| tab.bg(theme::accent()))
         .when(!active, |tab| tab.hover(|tab| tab.bg(theme::row_hover())))
         .child(section.label())
@@ -370,14 +386,18 @@ impl SettingsView {
                         .dropdown_menu(move |menu, _, _| {
                             Ringtone::ALL.iter().fold(menu, |menu, ringtone| {
                                 let (center, ringtone) = (center.clone(), *ringtone);
-                                menu.item(PopupMenuItem::new(ringtone.label()).checked(ringtone == current).on_click(
-                                    move |_, _, cx| {
-                                        center.update(cx, |center, cx| {
-                                            center.update_settings(cx, |settings| settings.ringtone = ringtone)
-                                        });
-                                        platform::play_preview(ringtone);
-                                    },
-                                ))
+                                menu.item(
+                                    PopupMenuItem::new(ringtone.label())
+                                        .checked(ringtone == current)
+                                        .on_click(move |_, _, cx| {
+                                            center.update(cx, |center, cx| {
+                                                center.update_settings(cx, |settings| {
+                                                    settings.ringtone = ringtone
+                                                })
+                                            });
+                                            platform::play_preview(ringtone);
+                                        }),
+                                )
                             })
                         }),
                 )
@@ -395,7 +415,8 @@ impl SettingsView {
         let cameras = self.cameras.clone();
         let current_camera = self.camera.clone();
         let camera_view = view.clone();
-        let backgrounds = preview_backgrounds(&self.center.read(cx).app().read(cx).call_backgrounds);
+        let backgrounds =
+            preview_backgrounds(&self.center.read(cx).app().read(cx).call_backgrounds);
         let background_label = backgrounds
             .iter()
             .find(|(pick, _)| *pick == self.background)
@@ -409,7 +430,9 @@ impl SettingsView {
                 || {
                     self.preview
                         .fps()
-                        .map_or("Starting camera...".to_owned(), |fps| format!("{fps:.0} fps"))
+                        .map_or("Starting camera...".to_owned(), |fps| {
+                            format!("{fps:.0} fps")
+                        })
                 },
                 |reason| format!("Camera could not start: {reason}"),
             )
@@ -431,7 +454,9 @@ impl SettingsView {
                                 PopupMenuItem::new(entry.label.clone())
                                     .checked(entry.choice == current_camera)
                                     .on_click(move |_, _, cx| {
-                                        view.update(cx, |view, cx| view.select_camera(choice.clone(), cx))
+                                        view.update(cx, |view, cx| {
+                                            view.select_camera(choice.clone(), cx)
+                                        })
                                     }),
                             )
                         })
@@ -452,7 +477,9 @@ impl SettingsView {
                                 PopupMenuItem::new(label.clone())
                                     .checked(pick == current_background)
                                     .on_click(move |_, _, cx| {
-                                        view.update(cx, |view, cx| view.select_background(pick.clone(), cx))
+                                        view.update(cx, |view, cx| {
+                                            view.select_background(pick.clone(), cx)
+                                        })
                                     }),
                             )
                         })
@@ -481,7 +508,12 @@ impl SettingsView {
                                     .rounded(px(PREVIEW_RADIUS))
                             })),
                     )
-                    .child(div().text_size(px(12.)).text_color(theme::text_muted()).child(status)),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme::text_muted())
+                            .child(status),
+                    ),
             )
     }
 }
@@ -489,11 +521,9 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
-        let tabs = h_flex()
-            .w_full()
-            .px(px(20.))
-            .gap(px(8.))
-            .children(Section::ALL.map(|section| section_tab(section, section == self.section, view.clone())));
+        let tabs = h_flex().w_full().px(px(20.)).gap(px(8.)).children(
+            Section::ALL.map(|section| section_tab(section, section == self.section, view.clone())),
+        );
         let body = match self.section {
             Section::Notifications => self.notifications_section(cx).into_any_element(),
             Section::Devices => self.devices_section(cx).into_any_element(),
@@ -578,14 +608,10 @@ impl SettingsView {
                     });
                 }),
             ))
-            .child(
-                h_flex()
-                    .w_full()
-                    .px(px(20.))
-                    .pt(px(12.))
-                    .child(button("Send test notification").on_click(move |_, _, cx| {
-                        test_center.update(cx, |center, cx| center.send_test_notification(cx));
-                    })),
-            )
+            .child(h_flex().w_full().px(px(20.)).pt(px(12.)).child(
+                button("Send test notification").on_click(move |_, _, cx| {
+                    test_center.update(cx, |center, cx| center.send_test_notification(cx));
+                }),
+            ))
     }
 }

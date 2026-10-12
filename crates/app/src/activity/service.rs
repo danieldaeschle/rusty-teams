@@ -79,12 +79,20 @@ impl ActivityCenter {
     }
 
     fn on_missed_call(&mut self, missed: &MissedCall, cx: &mut Context<Self>) {
-        let conversation_id = self.app.read(cx).conversation_of_missed_call(missed).unwrap_or_default();
+        let conversation_id = self
+            .app
+            .read(cx)
+            .conversation_of_missed_call(missed)
+            .unwrap_or_default();
         let actor = Actor {
-            user_id: missed.caller_mri.strip_prefix("8:orgid:").map(str::to_owned),
+            user_id: missed
+                .caller_mri
+                .strip_prefix("8:orgid:")
+                .map(str::to_owned),
             name: missed.caller_name.clone(),
         };
-        self.feed.record_missed_call(&conversation_id, actor, missed.at);
+        self.feed
+            .record_missed_call(&conversation_id, actor, missed.at);
         self.flush(cx);
     }
 

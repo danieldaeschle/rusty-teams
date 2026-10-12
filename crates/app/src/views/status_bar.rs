@@ -109,7 +109,11 @@ pub fn render_status_bar(
             )
         }
         UpdateStatus::Installing => {
-            bar = bar.child(div().text_color(theme::accent_text()).child("Restarting..."))
+            bar = bar.child(
+                div()
+                    .text_color(theme::accent_text())
+                    .child("Restarting..."),
+            )
         }
         UpdateStatus::Failed(message) => {
             bar = bar.child(

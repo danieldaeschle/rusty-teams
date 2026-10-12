@@ -301,15 +301,11 @@ impl AttachmentTray {
 
     pub fn image(&self, id: u64) -> Option<PreviewImage> {
         self.items.iter().find_map(|item| match &item.kind {
-            ItemKind::Image { image, dimensions } if item.id == id => {
-                Some(PreviewImage::Inline {
-                    image: image.clone(),
-                    dimensions: *dimensions,
-                })
-            }
-            ItemKind::Remote(remote) if item.id == id => {
-                Some(PreviewImage::Remote(remote.clone()))
-            }
+            ItemKind::Image { image, dimensions } if item.id == id => Some(PreviewImage::Inline {
+                image: image.clone(),
+                dimensions: *dimensions,
+            }),
+            ItemKind::Remote(remote) if item.id == id => Some(PreviewImage::Remote(remote.clone())),
             _ => None,
         })
     }
@@ -509,10 +505,8 @@ impl AttachmentTray {
 
     pub fn keep_images_only(&mut self) -> Vec<UploadedFile> {
         self.notice = None;
-        let (images, others): (Vec<_>, Vec<_>) = self
-            .items
-            .drain(..)
-            .partition(|item| item.kind.is_object());
+        let (images, others): (Vec<_>, Vec<_>) =
+            self.items.drain(..).partition(|item| item.kind.is_object());
         self.items = images;
         others
             .into_iter()

@@ -23,7 +23,11 @@ pub enum LinkSignal {
     Disconnected,
 }
 
-pub fn report_due(down_for: Option<Duration>, since_last_report: Option<Duration>, activity_changed: bool) -> bool {
+pub fn report_due(
+    down_for: Option<Duration>,
+    since_last_report: Option<Duration>,
+    activity_changed: bool,
+) -> bool {
     down_for.is_some_and(|down_for| down_for >= FALLBACK_AFTER)
         && (activity_changed || since_last_report.is_none_or(|since| since >= FALLBACK_INTERVAL))
 }
@@ -59,7 +63,8 @@ pub fn unregister_on_exit(timeout: Duration) {
     if unregister.send(done).is_err() {
         return;
     }
-    let _ = crate::runtime::handle().block_on(async move { tokio::time::timeout(timeout, finished).await });
+    let _ = crate::runtime::handle()
+        .block_on(async move { tokio::time::timeout(timeout, finished).await });
 }
 
 #[derive(Default)]
@@ -106,7 +111,11 @@ struct Link<T: CardTransport> {
 }
 
 impl<T: CardTransport> Link<T> {
-    fn new(service: PresenceService<T>, activity: watch::Receiver<bool>, resend: Arc<Notify>) -> Self {
+    fn new(
+        service: PresenceService<T>,
+        activity: watch::Receiver<bool>,
+        resend: Arc<Notify>,
+    ) -> Self {
         Link {
             service,
             activity,
@@ -212,7 +221,9 @@ impl<T: CardTransport> Link<T> {
             }
             Err(error) => {
                 if let Some(message) = self.retry.failed(now, &error) {
-                    crate::diagnostics::record(format!("presence: endpoint not registered: {message}"));
+                    crate::diagnostics::record(format!(
+                        "presence: endpoint not registered: {message}"
+                    ));
                 }
             }
         }
@@ -228,7 +239,11 @@ impl<T: CardTransport> Link<T> {
                 .register_endpoint(endpoint_id, ActivityReporting::Direct)
                 .await
                 .is_ok()
-            && self.service.report_activity(endpoint_id, active).await.is_ok()
+            && self
+                .service
+                .report_activity(endpoint_id, active)
+                .await
+                .is_ok()
         {
             return;
         }
@@ -261,9 +276,16 @@ mod tests {
                 .as_ref()
                 .and_then(|body| body["activityReporting"].as_str())
                 .map(str::to_owned);
-            self.sent.lock().unwrap().push((request.method, request.url, reporting));
+            self.sent
+                .lock()
+                .unwrap()
+                .push((request.method, request.url, reporting));
             let mut statuses = self.statuses.lock().unwrap();
-            let status = if statuses.is_empty() { 200 } else { statuses.remove(0) };
+            let status = if statuses.is_empty() {
+                200
+            } else {
+                statuses.remove(0)
+            };
             Ok(ApiResponse {
                 status,
                 body: serde_json::Value::Null,
@@ -289,7 +311,11 @@ mod tests {
             .iter()
             .map(|(method, url, reporting)| {
                 let path = url.strip_prefix(PRESENCE).unwrap();
-                format!("{} {path} {}", method.as_str(), reporting.as_deref().unwrap_or("-"))
+                format!(
+                    "{} {path} {}",
+                    method.as_str(),
+                    reporting.as_deref().unwrap_or("-")
+                )
             })
             .collect()
     }
@@ -310,7 +336,9 @@ mod tests {
 
     #[test]
     fn retry_delay_doubles_up_to_four_minutes() {
-        let delays: Vec<u64> = (1..=6).map(|failures| retry_delay(failures).as_secs()).collect();
+        let delays: Vec<u64> = (1..=6)
+            .map(|failures| retry_delay(failures).as_secs())
+            .collect();
         assert_eq!(delays, [30, 60, 120, 240, 240, 240]);
     }
 
@@ -357,7 +385,9 @@ mod tests {
         link.apply(LinkSignal::Endpoint("a".into())).await;
         link.apply(LinkSignal::Connected).await;
         assert_eq!(calls(&sent), ["PUT /endpoints/ Transport"]);
-        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
+        tokio::time::timeout(Duration::from_millis(500), resend.notified())
+            .await
+            .expect("resend");
     }
 
     #[tokio::test]
@@ -367,7 +397,11 @@ mod tests {
         link.apply(LinkSignal::Endpoint("b".into())).await;
         assert_eq!(
             calls(&sent),
-            ["PUT /endpoints/ Transport", "DELETE /endpoints/a -", "PUT /endpoints/ Transport"]
+            [
+                "PUT /endpoints/ Transport",
+                "DELETE /endpoints/a -",
+                "PUT /endpoints/ Transport"
+            ]
         );
     }
 
@@ -375,8 +409,14 @@ mod tests {
     async fn long_downtime_switches_to_direct_reporting_and_a_reconnect_switches_back() {
         let (mut link, sent, resend) = link(vec![]);
         link.apply(LinkSignal::Endpoint("a".into())).await;
-        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
-        link.down_since = Some(Instant::now().checked_sub(seconds(130)).unwrap_or_else(Instant::now));
+        tokio::time::timeout(Duration::from_millis(500), resend.notified())
+            .await
+            .expect("resend");
+        link.down_since = Some(
+            Instant::now()
+                .checked_sub(seconds(130))
+                .unwrap_or_else(Instant::now),
+        );
         link.reconcile(false).await;
         link.apply(LinkSignal::Connected).await;
         assert_eq!(
@@ -388,7 +428,9 @@ mod tests {
                 "PUT /endpoints/ Transport",
             ]
         );
-        tokio::time::timeout(Duration::from_millis(500), resend.notified()).await.expect("resend");
+        tokio::time::timeout(Duration::from_millis(500), resend.notified())
+            .await
+            .expect("resend");
     }
 
     #[tokio::test]

@@ -6,8 +6,8 @@ use gpui_kit::*;
 
 use super::model::format_elapsed;
 use super::overlay_layout::{
-    MINI_POSITION_KEY, bar_collapsed, bar_rect, border_rects, border_thickness, format_position, mini_rect,
-    mini_wanted, mini_work_area, parse_position,
+    MINI_POSITION_KEY, bar_collapsed, bar_rect, border_rects, border_thickness, format_position,
+    mini_rect, mini_wanted, mini_work_area, parse_position,
 };
 use crate::app_state::AppState;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
@@ -40,7 +40,9 @@ impl Placed {
         };
         platform::place(native, rect.left, rect.top, rect.width(), rect.height());
         // WM_SIZE arrives while the app is borrowed, so GPUI drops its own resize report.
-        self.handle.update(cx, |_, window, cx| window.bounds_changed(cx)).ok();
+        self.handle
+            .update(cx, |_, window, cx| window.bounds_changed(cx))
+            .ok();
     }
 }
 
@@ -84,7 +86,10 @@ fn display_work_area(cx: &App) -> Option<WorkArea> {
 fn overlay_options(role: Role, rect: ScreenRect, scale: f32) -> WindowOptions {
     let bounds = Bounds::new(
         point(px(rect.left as f32 / scale), px(rect.top as f32 / scale)),
-        size(px(rect.width() as f32 / scale), px(rect.height() as f32 / scale)),
+        size(
+            px(rect.width() as f32 / scale),
+            px(rect.height() as f32 / scale),
+        ),
     );
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -163,7 +168,10 @@ impl CallWindows {
             Some(ShareKind::Window) => "window",
             _ => "screen",
         };
-        format!("Sharing {what} {}", format_elapsed(session.started.elapsed()))
+        format!(
+            "Sharing {what} {}",
+            format_elapsed(session.started.elapsed())
+        )
     }
 
     pub fn toggle_pin(&mut self, cx: &mut Context<Self>) {
@@ -184,12 +192,17 @@ impl CallWindows {
         if let Some(native) = self.main_native {
             platform::restore_and_raise(native);
         }
-        self.main_window.update(cx, |_, window, _| window.activate_window()).ok();
+        self.main_window
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
         self.app.update(cx, |state, cx| state.show_call(true, cx));
     }
 
     fn idle(&self, cx: &App) -> bool {
-        self.app.read(cx).call.is_none() && self.share.is_none() && self.windows.is_empty() && self.opening.is_empty()
+        self.app.read(cx).call.is_none()
+            && self.share.is_none()
+            && self.windows.is_empty()
+            && self.opening.is_empty()
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> Duration {
@@ -220,7 +233,13 @@ impl CallWindows {
     fn local_share(&self, cx: &App) -> Option<Option<ShareSource>> {
         let model = &self.app.read(cx).call.as_ref()?.model;
         let label = model.local_share.as_ref()?;
-        Some(model.share_sources.iter().find(|source| &source.label() == label).cloned())
+        Some(
+            model
+                .share_sources
+                .iter()
+                .find(|source| &source.label() == label)
+                .cloned(),
+        )
     }
 
     fn sync_share(&mut self, refresh_geometry: bool, cx: &mut Context<Self>) {
@@ -231,7 +250,11 @@ impl CallWindows {
         let mut refresh_geometry = refresh_geometry;
         if self.share.is_none() {
             self.bar_idle_since = Instant::now();
-            self.share = Some(ShareSession { started: Instant::now(), source: None, geometry: None });
+            self.share = Some(ShareSession {
+                started: Instant::now(),
+                source: None,
+                geometry: None,
+            });
             refresh_geometry = true;
         }
         let Some(session) = self.share.as_mut() else {
@@ -239,14 +262,24 @@ impl CallWindows {
         };
         session.source = source;
         if refresh_geometry {
-            session.geometry = session.source.as_ref().and_then(|source| platform::share_geometry(source.kind, source.id));
+            session.geometry = session
+                .source
+                .as_ref()
+                .and_then(|source| platform::share_geometry(source.kind, source.id));
         }
         let geometry = session.geometry;
         let elapsed_seconds = session.started.elapsed().as_secs();
-        let Some(work) = geometry.map(|geometry| geometry.work).or(self.work_area).or_else(|| display_work_area(cx)) else {
+        let Some(work) = geometry
+            .map(|geometry| geometry.work)
+            .or(self.work_area)
+            .or_else(|| display_work_area(cx))
+        else {
             return;
         };
-        let can_collapse = self.windows.get(&Role::Bar).is_some_and(|placed| placed.native.is_some());
+        let can_collapse = self
+            .windows
+            .get(&Role::Bar)
+            .is_some_and(|placed| placed.native.is_some());
         let collapsed = can_collapse && bar_collapsed(self.pinned, self.bar_idle_since.elapsed());
         if collapsed != self.bar_collapsed || elapsed_seconds != self.shown_second {
             self.bar_collapsed = collapsed;
@@ -257,7 +290,10 @@ impl CallWindows {
         match geometry {
             Some(geometry) => {
                 let thickness = border_thickness(geometry.work.scale);
-                for (side, rect) in border_rects(geometry.target, thickness).into_iter().enumerate() {
+                for (side, rect) in border_rects(geometry.target, thickness)
+                    .into_iter()
+                    .enumerate()
+                {
                     self.ensure_window(Role::Border(side), rect, geometry.work.scale, true, cx);
                 }
             }
@@ -294,7 +330,11 @@ impl CallWindows {
     }
 
     fn track_mini_position(&mut self, cx: &mut Context<Self>) {
-        let Some(native) = self.windows.get(&Role::Mini).and_then(|placed| placed.native) else {
+        let Some(native) = self
+            .windows
+            .get(&Role::Mini)
+            .and_then(|placed| placed.native)
+        else {
             return;
         };
         let Some(rect) = platform::window_rect(native) else {
@@ -305,11 +345,22 @@ impl CallWindows {
         self.mini_seen = Some(position);
         if settled && self.mini_saved != Some(position) {
             self.mini_saved = Some(position);
-            let _ = self.app.read(cx).store.set_meta(MINI_POSITION_KEY, &format_position(position.0, position.1));
+            let _ = self
+                .app
+                .read(cx)
+                .store
+                .set_meta(MINI_POSITION_KEY, &format_position(position.0, position.1));
         }
     }
 
-    fn ensure_window(&mut self, role: Role, rect: ScreenRect, scale: f32, follow: bool, cx: &mut Context<Self>) {
+    fn ensure_window(
+        &mut self,
+        role: Role,
+        rect: ScreenRect,
+        scale: f32,
+        follow: bool,
+        cx: &mut Context<Self>,
+    ) {
         match self.windows.get_mut(&role) {
             Some(placed) => {
                 if placed.rect.is_none() || follow && placed.rect != Some(rect) {
@@ -322,7 +373,10 @@ impl CallWindows {
 
     fn close(&mut self, role: Role, cx: &mut Context<Self>) {
         if let Some(placed) = self.windows.remove(&role) {
-            placed.handle.update(cx, |_, window, _| window.remove_window()).ok();
+            placed
+                .handle
+                .update(cx, |_, window, _| window.remove_window())
+                .ok();
         }
     }
 
@@ -345,7 +399,10 @@ impl CallWindows {
             });
             let placed = opened.ok().map(|handle| {
                 let handle = AnyWindowHandle::from(handle);
-                let native = handle.update(cx, |_, window, _| platform::native_handle(window)).ok().flatten();
+                let native = handle
+                    .update(cx, |_, window, _| platform::native_handle(window))
+                    .ok()
+                    .flatten();
                 if let Some(native) = native {
                     platform::prepare_toast_window(native);
                     platform::exclude_from_capture(native);
@@ -353,7 +410,11 @@ impl CallWindows {
                         platform::make_click_through(native);
                     }
                 }
-                Placed { handle, native, rect: None }
+                Placed {
+                    handle,
+                    native,
+                    rect: None,
+                }
             });
             controller.update(cx, |this, _| {
                 this.opening.remove(&role);

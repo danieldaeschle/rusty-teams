@@ -25,8 +25,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use teams_core::{
-    Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, MarkKind,
-    LinkPreview, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
+    Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, LinkPreview,
+    MarkKind, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
@@ -42,8 +42,8 @@ use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
 use super::format_toolbar::{self, FormatButton};
-use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::fun_picker::{FunPicker, FunPickerEvent};
+use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
@@ -137,7 +137,9 @@ impl Outgoing {
             match objects.next() {
                 Some(OutgoingImage::Inline(_)) => {
                     uploaded += 1;
-                    html.push_str(&format!("<img src=\"../hostedContents/{uploaded}/$value\">"));
+                    html.push_str(&format!(
+                        "<img src=\"../hostedContents/{uploaded}/$value\">"
+                    ));
                 }
                 Some(OutgoingImage::Remote(remote)) => html.push_str(&remote.html()),
                 None => {}
@@ -1332,12 +1334,9 @@ impl Composer {
             return;
         };
         self.link.lookup = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(LINK_PREVIEW_DEBOUNCE)
-                .await;
+            cx.background_executor().timer(LINK_PREVIEW_DEBOUNCE).await;
             let task_url = url.clone();
-            let receiver =
-                runtime::spawn(async move { engine.link_preview_for(&task_url).await });
+            let receiver = runtime::spawn(async move { engine.link_preview_for(&task_url).await });
             if let Ok(Ok(preview)) = receiver.await {
                 this.update(cx, |this, cx| this.finish_link_preview(&url, preview, cx))
                     .ok();
@@ -1345,7 +1344,12 @@ impl Composer {
         }));
     }
 
-    fn finish_link_preview(&mut self, url: &str, preview: Option<LinkPreview>, cx: &mut Context<Self>) {
+    fn finish_link_preview(
+        &mut self,
+        url: &str,
+        preview: Option<LinkPreview>,
+        cx: &mut Context<Self>,
+    ) {
         let image = preview.as_ref().and_then(LinkPreview::image);
         if !self.link.apply(url, preview) {
             return;
@@ -1385,15 +1389,13 @@ impl Composer {
                 })
                 .ok();
         });
-        Some(
-            div().w_full().mb(px(6.)).child(link_preview_card(
-                preview,
-                "composer-link-preview".to_owned(),
-                &self.app.read(cx).directory,
-                true,
-                Some(close),
-            )),
-        )
+        Some(div().w_full().mb(px(6.)).child(link_preview_card(
+            preview,
+            "composer-link-preview".to_owned(),
+            &self.app.read(cx).directory,
+            true,
+            Some(close),
+        )))
     }
 
     fn popup_is_open(&self) -> bool {
@@ -2334,7 +2336,9 @@ impl Composer {
                 .rounded(px(10.))
                 .bg(theme::row_hover())
                 .child(match edit.scheduled {
-                    Some(_) => symbol("schedule_send", 14., theme::accent_text()).into_any_element(),
+                    Some(_) => {
+                        symbol("schedule_send", 14., theme::accent_text()).into_any_element()
+                    }
                     None => icon(IconName::Pencil, 14., theme::accent_text()).into_any_element(),
                 })
                 .child(
@@ -2499,7 +2503,11 @@ impl Render for Composer {
                 .cursor_pointer()
                 .hover(|button| button.bg(theme::popup_hover()))
                 .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
-                .child(symbol("attach_file", COMPOSER_ICON_SIZE, theme::text_muted()))
+                .child(symbol(
+                    "attach_file",
+                    COMPOSER_ICON_SIZE,
+                    theme::text_muted(),
+                ))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
         let composer = cx.weak_entity();
@@ -2992,14 +3000,22 @@ mod tests {
     #[test]
     fn a_gif_title_is_escaped_in_the_html() {
         let outgoing = outgoing_with("\u{FFFC}", vec![remote_gif("a \"b\" <c>")]);
-        assert!(outgoing.html().contains("alt=\"a &quot;b&quot; &lt;c&gt;\""));
+        assert!(
+            outgoing
+                .html()
+                .contains("alt=\"a &quot;b&quot; &lt;c&gt;\"")
+        );
     }
 
     #[test]
     fn a_sticker_carries_the_sticker_itemtype() {
         let sticker = super::RemoteImage::sticker(crate::stickers::popular()[0]);
         let outgoing = outgoing_with("\u{FFFC}", vec![super::OutgoingImage::Remote(sticker)]);
-        assert!(outgoing.html().contains("itemtype=\"http://schema.skype.com/Sticker\""));
+        assert!(
+            outgoing
+                .html()
+                .contains("itemtype=\"http://schema.skype.com/Sticker\"")
+        );
         assert!(outgoing.html().contains("width=\"250\" height=\"250\""));
     }
 
@@ -3312,7 +3328,11 @@ mod tests {
             assert!(typist.cx.update(|cx| composer.read(cx).can_send(cx)));
             assert_eq!(typist.value(), "\u{FFFC}");
             let outgoing = typist.outgoing();
-            assert!(outgoing.html().starts_with("<img src=\"https://media0.giphy.com/"));
+            assert!(
+                outgoing
+                    .html()
+                    .starts_with("<img src=\"https://media0.giphy.com/")
+            );
             assert!(outgoing.extras().images.is_empty());
             typist.press("ctrl-z");
             assert_eq!(typist.value(), "");

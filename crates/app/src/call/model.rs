@@ -2,8 +2,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::{
-    CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare, DeviceChoice, DeviceLists, EndKind, EndReason,
-    HoldState, MeetingTarget, Progress, Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
+    DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingTarget, Progress, Reaction,
+    RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -73,7 +74,13 @@ impl ConsultCall {
 }
 
 impl ActiveCall {
-    pub fn new(id: u64, model: CallModel, commands: UnboundedSender<CallCommand>, conversation_id: Option<String>, video: Arc<VideoHub>) -> Self {
+    pub fn new(
+        id: u64,
+        model: CallModel,
+        commands: UnboundedSender<CallCommand>,
+        conversation_id: Option<String>,
+        video: Arc<VideoHub>,
+    ) -> Self {
         ActiveCall {
             id,
             model,
@@ -91,11 +98,19 @@ impl ActiveCall {
     }
 
     pub fn chat_thread(&self) -> Option<&str> {
-        chat_thread(self.model.kind, self.model.meeting_chat.as_deref(), self.conversation_id.as_deref())
+        chat_thread(
+            self.model.kind,
+            self.model.meeting_chat.as_deref(),
+            self.conversation_id.as_deref(),
+        )
     }
 }
 
-pub fn chat_thread<'a>(kind: CallKind, meeting_chat: Option<&'a str>, conversation_id: Option<&'a str>) -> Option<&'a str> {
+pub fn chat_thread<'a>(
+    kind: CallKind,
+    meeting_chat: Option<&'a str>,
+    conversation_id: Option<&'a str>,
+) -> Option<&'a str> {
     match kind {
         CallKind::Meeting => meeting_chat.or(conversation_id),
         CallKind::Test | CallKind::Direct | CallKind::Group => conversation_id,
@@ -336,12 +351,19 @@ impl CallModel {
     }
 
     pub fn people(title: &str, callees: &[(String, String)]) -> Self {
-        let kind = if callees.len() == 1 { CallKind::Direct } else { CallKind::Group };
+        let kind = if callees.len() == 1 {
+            CallKind::Direct
+        } else {
+            CallKind::Group
+        };
         let peer_name = match callees {
             [(_, name)] => name.clone(),
             _ => title.to_owned(),
         };
-        let tiles = callees.iter().map(|(mri, name)| Tile::invited(mri, name)).collect();
+        let tiles = callees
+            .iter()
+            .map(|(mri, name)| Tile::invited(mri, name))
+            .collect();
         Self::base(kind, title, &peer_name, tiles)
     }
 
@@ -412,7 +434,9 @@ impl CallModel {
             CallUpdate::ShareSources(sources) => self.share_sources = sources,
             CallUpdate::ShareSound(active) => self.share_sound = active,
             CallUpdate::OwnHand(rank) => self.own_hand = rank,
-            CallUpdate::Reaction { mri, reaction } => self.note_reaction(mri, reaction, Instant::now()),
+            CallUpdate::Reaction { mri, reaction } => {
+                self.note_reaction(mri, reaction, Instant::now())
+            }
             CallUpdate::MeetingChat(thread) => self.meeting_chat = Some(thread),
             CallUpdate::Captions(state) => {
                 if state != CaptionState::On {
@@ -438,8 +462,17 @@ impl CallModel {
         if self.captions == CaptionState::Off {
             return;
         }
-        let speaker = if entry.display_name.is_empty() { "Someone".to_owned() } else { entry.display_name };
-        let line = CaptionLine { id: entry.id, speaker, text: entry.text, at };
+        let speaker = if entry.display_name.is_empty() {
+            "Someone".to_owned()
+        } else {
+            entry.display_name
+        };
+        let line = CaptionLine {
+            id: entry.id,
+            speaker,
+            text: entry.text,
+            at,
+        };
         match self.caption_lines.last_mut() {
             Some(last) if last.id == line.id => *last = line,
             _ => self.caption_lines.push(line),
@@ -449,7 +482,10 @@ impl CallModel {
     }
 
     pub fn visible_captions(&self, now: Instant) -> Vec<&CaptionLine> {
-        self.caption_lines.iter().filter(|line| now.saturating_duration_since(line.at) < CAPTION_SHOWN).collect()
+        self.caption_lines
+            .iter()
+            .filter(|line| now.saturating_duration_since(line.at) < CAPTION_SHOWN)
+            .collect()
     }
 
     pub fn captions_on(&self) -> bool {
@@ -467,20 +503,29 @@ impl CallModel {
     pub fn note_reaction(&mut self, mri: String, reaction: Reaction, at: Instant) {
         let own_echo = Some(&mri) == self.own_mri.as_ref()
             && self.reactions.iter().any(|chip| {
-                chip.mri == mri && chip.reaction == reaction && at.saturating_duration_since(chip.since) < OWN_ECHO_WINDOW
+                chip.mri == mri
+                    && chip.reaction == reaction
+                    && at.saturating_duration_since(chip.since) < OWN_ECHO_WINDOW
             });
         if own_echo {
             return;
         }
-        self.reactions.retain(|chip| chip.mri != mri && at.saturating_duration_since(chip.since) < REACTION_SHOWN);
+        self.reactions.retain(|chip| {
+            chip.mri != mri && at.saturating_duration_since(chip.since) < REACTION_SHOWN
+        });
         self.reaction_serial += 1;
-        self.reactions.push(ReactionChip { mri, reaction, since: at, serial: self.reaction_serial });
+        self.reactions.push(ReactionChip {
+            mri,
+            reaction,
+            since: at,
+            serial: self.reaction_serial,
+        });
     }
 
     pub fn chip_of(&self, mri: &str, now: Instant) -> Option<&ReactionChip> {
-        self.reactions
-            .iter()
-            .find(|chip| chip.mri == mri && now.saturating_duration_since(chip.since) < REACTION_SHOWN)
+        self.reactions.iter().find(|chip| {
+            chip.mri == mri && now.saturating_duration_since(chip.since) < REACTION_SHOWN
+        })
     }
 
     pub fn own_chip(&self, now: Instant) -> Option<&ReactionChip> {
@@ -488,7 +533,11 @@ impl CallModel {
     }
 
     pub fn hand_position(&self, rank: u64) -> usize {
-        let raised = self.tiles.iter().filter_map(|tile| tile.hand).chain(self.own_hand);
+        let raised = self
+            .tiles
+            .iter()
+            .filter_map(|tile| tile.hand)
+            .chain(self.own_hand);
         1 + raised.filter(|other| *other < rank).count()
     }
 
@@ -505,7 +554,10 @@ impl CallModel {
     }
 
     pub fn lobby_guests(&self) -> Vec<&Tile> {
-        self.tiles.iter().filter(|tile| tile.state == TileState::InLobby).collect()
+        self.tiles
+            .iter()
+            .filter(|tile| tile.state == TileState::InLobby)
+            .collect()
     }
 
     pub fn can_admit(&self) -> bool {
@@ -517,23 +569,52 @@ impl CallModel {
     }
 
     pub fn toggle_pin(&mut self, mri: &str) {
-        self.pinned = if self.is_pinned(mri) { None } else { Some(mri.to_owned()) };
+        self.pinned = if self.is_pinned(mri) {
+            None
+        } else {
+            Some(mri.to_owned())
+        };
     }
 
     pub fn is_spotlighted(&self, mri: &str) -> bool {
         self.own_mri.as_deref() == Some(mri) && self.own_spotlight.is_some()
-            || self.tiles.iter().any(|tile| tile.mri == mri && tile.spotlight.is_some())
+            || self
+                .tiles
+                .iter()
+                .any(|tile| tile.mri == mri && tile.spotlight.is_some())
     }
 
     pub fn focus(&self) -> Option<Focus> {
         let own = |mri: &str| self.own_mri.as_deref() == Some(mri);
-        let on_stage = |mri: &str| own(mri) || self.visible_tiles().iter().any(|tile| tile.mri == mri && tile.state == TileState::Present);
+        let on_stage = |mri: &str| {
+            own(mri)
+                || self
+                    .visible_tiles()
+                    .iter()
+                    .any(|tile| tile.mri == mri && tile.state == TileState::Present)
+        };
         if let Some(pinned) = self.pinned.as_deref().filter(|mri| on_stage(mri)) {
-            return Some(Focus { mri: pinned.to_owned(), own: own(pinned), spotlight: self.is_spotlighted(pinned), pinned: true });
+            return Some(Focus {
+                mri: pinned.to_owned(),
+                own: own(pinned),
+                spotlight: self.is_spotlighted(pinned),
+                pinned: true,
+            });
         }
-        let remote = self.tiles.iter().filter(|tile| tile.state == TileState::Present).filter_map(|tile| Some((tile.spotlight?, tile.mri.as_str())));
-        let (_, mri) = remote.chain(self.own_spotlight.zip(self.own_mri.as_deref())).min_by_key(|(rank, _)| *rank)?;
-        Some(Focus { mri: mri.to_owned(), own: own(mri), spotlight: true, pinned: false })
+        let remote = self
+            .tiles
+            .iter()
+            .filter(|tile| tile.state == TileState::Present)
+            .filter_map(|tile| Some((tile.spotlight?, tile.mri.as_str())));
+        let (_, mri) = remote
+            .chain(self.own_spotlight.zip(self.own_mri.as_deref()))
+            .min_by_key(|(rank, _)| *rank)?;
+        Some(Focus {
+            mri: mri.to_owned(),
+            own: own(mri),
+            spotlight: true,
+            pinned: false,
+        })
     }
 
     pub fn any_hand_raised(&self) -> bool {
@@ -541,22 +622,38 @@ impl CallModel {
     }
 
     pub fn own_cell_index(&self, remote_cells: usize) -> usize {
-        let Some(own) = self.own_hand else { return remote_cells };
-        let ahead = self.visible_tiles().iter().filter(|tile| tile.hand.is_some_and(|rank| rank < own)).count();
+        let Some(own) = self.own_hand else {
+            return remote_cells;
+        };
+        let ahead = self
+            .visible_tiles()
+            .iter()
+            .filter(|tile| tile.hand.is_some_and(|rank| rank < own))
+            .count();
         ahead.min(remote_cells)
     }
 
     fn apply_roster(&mut self, entries: &[RosterEntry]) {
-        let own_entry = entries.iter().find(|entry| Some(&entry.mri) == self.own_mri.as_ref());
+        let own_entry = entries
+            .iter()
+            .find(|entry| Some(&entry.mri) == self.own_mri.as_ref());
         if let Some(entry) = own_entry {
             self.own_hand = entry.hand.as_ref().map(|hand| hand.rank);
         }
-        self.own_spotlight = own_entry.and_then(|entry| entry.spotlight.as_ref().map(|spotlight| spotlight.rank));
+        self.own_spotlight =
+            own_entry.and_then(|entry| entry.spotlight.as_ref().map(|spotlight| spotlight.rank));
         if let Some(entry) = own_entry {
             self.organizer = entry.organizer;
         }
-        for entry in entries.iter().filter(|entry| Some(&entry.mri) != self.own_mri.as_ref()) {
-            let state = if entry.in_lobby { TileState::InLobby } else { TileState::Present };
+        for entry in entries
+            .iter()
+            .filter(|entry| Some(&entry.mri) != self.own_mri.as_ref())
+        {
+            let state = if entry.in_lobby {
+                TileState::InLobby
+            } else {
+                TileState::Present
+            };
             match self.tiles.iter_mut().find(|tile| tile.mri == entry.mri) {
                 Some(tile) => {
                     tile.state = state;
@@ -583,7 +680,11 @@ impl CallModel {
         }
         let own_mri = self.own_mri.clone();
         let listed = |mri: &str| entries.iter().any(|entry| entry.mri == mri);
-        if self.pinned.as_deref().is_some_and(|mri| !listed(mri) && Some(mri) != own_mri.as_deref()) {
+        if self
+            .pinned
+            .as_deref()
+            .is_some_and(|mri| !listed(mri) && Some(mri) != own_mri.as_deref())
+        {
             self.pinned = None;
         }
         self.tiles.retain_mut(|tile| {
@@ -602,21 +703,37 @@ impl CallModel {
     }
 
     pub fn visible_tiles(&self) -> Vec<&Tile> {
-        let mut tiles: Vec<&Tile> = self.tiles.iter().filter(|tile| tile.state != TileState::InLobby).collect();
+        let mut tiles: Vec<&Tile> = self
+            .tiles
+            .iter()
+            .filter(|tile| tile.state != TileState::InLobby)
+            .collect();
         tiles.sort_by_key(|tile| {
             let state = match tile.state {
                 TileState::Present => 0,
                 TileState::Invited => 1,
                 _ => 2,
             };
-            (!self.is_pinned(&tile.mri), tile.hand.is_none(), tile.hand.unwrap_or(0), state)
+            (
+                !self.is_pinned(&tile.mri),
+                tile.hand.is_none(),
+                tile.hand.unwrap_or(0),
+                state,
+            )
         });
         tiles
     }
 
     pub fn strip_tiles(&self) -> Vec<&Tile> {
         let mut tiles = self.visible_tiles();
-        tiles.sort_by_key(|tile| (!self.is_pinned(&tile.mri), tile.hand.is_none(), tile.hand.unwrap_or(0), !self.tile_speaking(tile)));
+        tiles.sort_by_key(|tile| {
+            (
+                !self.is_pinned(&tile.mri),
+                tile.hand.is_none(),
+                tile.hand.unwrap_or(0),
+                !self.tile_speaking(tile),
+            )
+        });
         tiles
     }
 
@@ -744,15 +861,24 @@ impl CallModel {
     }
 
     fn is_live(&self) -> bool {
-        matches!(self.state, CallState::Connected { .. } | CallState::Reconnecting { .. })
+        matches!(
+            self.state,
+            CallState::Connected { .. } | CallState::Reconnecting { .. }
+        )
     }
 
     pub fn screens(&self) -> Vec<&ShareSource> {
-        self.share_sources.iter().filter(|source| source.kind == ShareKind::Screen).collect()
+        self.share_sources
+            .iter()
+            .filter(|source| source.kind == ShareKind::Screen)
+            .collect()
     }
 
     pub fn windows(&self) -> Vec<&ShareSource> {
-        self.share_sources.iter().filter(|source| source.kind == ShareKind::Window).collect()
+        self.share_sources
+            .iter()
+            .filter(|source| source.kind == ShareKind::Window)
+            .collect()
     }
 
     pub fn can_unmute(&self) -> bool {
@@ -815,25 +941,36 @@ mod tests {
 
     fn spotlit(mri: &str, name: &str, rank: u64) -> RosterEntry {
         RosterEntry {
-            spotlight: Some(calling::Spotlight { state_id: format!("sp-{rank}"), rank }),
+            spotlight: Some(calling::Spotlight {
+                state_id: format!("sp-{rank}"),
+                rank,
+            }),
             ..entry(mri, name, false, false)
         }
     }
 
     fn organizer_entry(mri: &str) -> RosterEntry {
-        RosterEntry { organizer: true, ..entry(mri, "Me", false, false) }
+        RosterEntry {
+            organizer: true,
+            ..entry(mri, "Me", false, false)
+        }
     }
 
     fn raised(mri: &str, name: &str, rank: u64) -> RosterEntry {
         RosterEntry {
-            hand: Some(calling::RaisedHand { state_id: format!("s-{rank}"), rank }),
+            hand: Some(calling::RaisedHand {
+                state_id: format!("s-{rank}"),
+                rank,
+            }),
             ..entry(mri, name, false, false)
         }
     }
 
     fn meeting_with_me() -> CallModel {
         let mut model = CallModel::meeting("Standup", false);
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
+        model.apply(CallUpdate::OwnIdentity {
+            mri: "8:orgid:me".into(),
+        });
         model
     }
 
@@ -896,17 +1033,44 @@ mod tests {
         let elapsed = Some(Duration::from_secs(42));
         let notice = |reason: EndReason, elapsed| ended_notice(&reason, elapsed, "Bea");
         assert_eq!(notice(EndReason::LocalHangup, elapsed), "Call ended 00:42");
-        assert_eq!(notice(EndReason::Remote(EndKind::Normal), elapsed), "Call ended 00:42");
-        assert_eq!(notice(EndReason::Remote(EndKind::Normal), None), "Call ended");
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Normal), elapsed),
+            "Call ended 00:42"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Normal), None),
+            "Call ended"
+        );
         assert_eq!(notice(EndReason::Cancelled, None), "Call cancelled");
         assert_eq!(notice(EndReason::Dropped, elapsed), "Call dropped");
-        assert_eq!(notice(EndReason::Failed("no route".into()), None), "Call failed: no route");
-        assert_eq!(notice(EndReason::Remote(EndKind::Declined), None), "Bea declined");
-        assert_eq!(notice(EndReason::Remote(EndKind::NoAnswer), None), "No answer");
-        assert_eq!(notice(EndReason::Remote(EndKind::Unavailable), None), "Bea is not available");
-        assert_eq!(notice(EndReason::Remote(EndKind::Cancelled), None), "Call ended");
-        assert_eq!(notice(EndReason::Remote(EndKind::Other), None), "Call ended");
-        assert_eq!(notice(EndReason::Remote(EndKind::AnsweredElsewhere), None), "Call ended");
+        assert_eq!(
+            notice(EndReason::Failed("no route".into()), None),
+            "Call failed: no route"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Declined), None),
+            "Bea declined"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::NoAnswer), None),
+            "No answer"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Unavailable), None),
+            "Bea is not available"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Cancelled), None),
+            "Call ended"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::Other), None),
+            "Call ended"
+        );
+        assert_eq!(
+            notice(EndReason::Remote(EndKind::AnsweredElsewhere), None),
+            "Call ended"
+        );
     }
 
     #[test]
@@ -915,8 +1079,14 @@ mod tests {
         assert_eq!(direct.connecting_text(), "Calling...");
         direct.apply(CallUpdate::Progress(Progress::Ringing));
         assert_eq!(direct.connecting_text(), "Ringing");
-        assert_eq!(CallModel::meeting("Standup", false).connecting_text(), "Joining...");
-        assert_eq!(CallModel::incoming("Bea", "8:orgid:b", "Bea").connecting_text(), "Connecting...");
+        assert_eq!(
+            CallModel::meeting("Standup", false).connecting_text(),
+            "Joining..."
+        );
+        assert_eq!(
+            CallModel::incoming("Bea", "8:orgid:b", "Bea").connecting_text(),
+            "Connecting..."
+        );
         assert_eq!(CallModel::test().connecting_text(), "Calling...");
     }
 
@@ -936,7 +1106,12 @@ mod tests {
         assert_eq!(model.tile_caption(&model.tiles[0]), Some("Calling..."));
         model.apply(CallUpdate::Progress(Progress::Ringing));
         assert_eq!(model.tile_caption(&model.tiles[0]), Some("Ringing"));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:b", "Bea", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:b",
+            "Bea",
+            false,
+            false,
+        )]));
         assert_eq!(model.tiles[0].state, TileState::Present);
         assert_eq!(model.tile_caption(&model.tiles[0]), None);
     }
@@ -945,7 +1120,10 @@ mod tests {
     fn several_callees_make_a_group_call_named_after_the_chat() {
         let model = CallModel::people(
             "Retro team",
-            &[("8:orgid:b".into(), "Bea".into()), ("8:orgid:c".into(), "Cy".into())],
+            &[
+                ("8:orgid:b".into(), "Bea".into()),
+                ("8:orgid:c".into(), "Cy".into()),
+            ],
         );
         assert_eq!(model.kind, CallKind::Group);
         assert_eq!(model.peer_name, "Retro team");
@@ -961,8 +1139,18 @@ mod tests {
             entry("8:orgid:b", "Bo", false, false),
         ]));
         assert_eq!(model.tiles.len(), 2);
-        assert!(model.tiles.iter().find(|tile| tile.name == "Ana").unwrap().muted);
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:me", "Me", false, false), entry("8:orgid:b", "Bo", false, false)]));
+        assert!(
+            model
+                .tiles
+                .iter()
+                .find(|tile| tile.name == "Ana")
+                .unwrap()
+                .muted
+        );
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:me", "Me", false, false),
+            entry("8:orgid:b", "Bo", false, false),
+        ]));
         assert_eq!(model.tiles.len(), 1);
         assert_eq!(model.tiles[0].name, "Bo");
     }
@@ -970,7 +1158,12 @@ mod tests {
     #[test]
     fn an_invited_callee_who_leaves_stays_as_left() {
         let mut model = CallModel::people("Bea", &[("8:orgid:b".into(), "Bea".into())]);
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:b", "Bea", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:b",
+            "Bea",
+            false,
+            false,
+        )]));
         model.apply(CallUpdate::Roster(Vec::new()));
         assert_eq!(model.tiles[0].state, TileState::Left);
         assert_eq!(model.tile_caption(&model.tiles[0]), Some("Left"));
@@ -983,7 +1176,11 @@ mod tests {
             entry("8:orgid:a", "Ana", false, false),
             entry("8:orgid:g", "Guest", false, true),
         ]));
-        let names: Vec<&str> = model.visible_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        let names: Vec<&str> = model
+            .visible_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Ana"]);
     }
 
@@ -1003,29 +1200,72 @@ mod tests {
             entry("8:orgid:a", "Ana", false, false),
             entry("8:orgid:b", "Bo", false, false),
         ]));
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         model.apply(CallUpdate::Speakers(vec!["8:orgid:b".into()]));
         let tiles: Vec<Tile> = model.tiles.clone();
         assert!(!model.tile_speaking(&tiles[0]));
         assert!(model.tile_speaking(&tiles[1]));
         let mut lone = CallModel::people("Bea", &[("8:orgid:b".into(), "Bea".into())]);
-        lone.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
-        lone.apply(CallUpdate::Levels { local: 0.0, remote: 0.5 });
+        lone.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
+        lone.apply(CallUpdate::Levels {
+            local: 0.0,
+            remote: 0.5,
+        });
         assert!(lone.tile_speaking(&lone.tiles[0].clone()));
     }
 
     #[test]
     fn more_than_nine_cells_collapse_into_a_plus_n_tile() {
-        assert_eq!(grid_layout(0, MAX_TILES), GridLayout { shown_others: 0, hidden: 0 });
-        assert_eq!(grid_layout(8, MAX_TILES), GridLayout { shown_others: 8, hidden: 0 });
-        assert_eq!(grid_layout(9, MAX_TILES), GridLayout { shown_others: 7, hidden: 2 });
-        assert_eq!(grid_layout(30, MAX_TILES), GridLayout { shown_others: 7, hidden: 23 });
+        assert_eq!(
+            grid_layout(0, MAX_TILES),
+            GridLayout {
+                shown_others: 0,
+                hidden: 0
+            }
+        );
+        assert_eq!(
+            grid_layout(8, MAX_TILES),
+            GridLayout {
+                shown_others: 8,
+                hidden: 0
+            }
+        );
+        assert_eq!(
+            grid_layout(9, MAX_TILES),
+            GridLayout {
+                shown_others: 7,
+                hidden: 2
+            }
+        );
+        assert_eq!(
+            grid_layout(30, MAX_TILES),
+            GridLayout {
+                shown_others: 7,
+                hidden: 23
+            }
+        );
     }
 
     #[test]
     fn an_open_chat_panel_leaves_room_for_fewer_tiles() {
-        assert_eq!(grid_layout(5, CHAT_OPEN_TILES), GridLayout { shown_others: 5, hidden: 0 });
-        assert_eq!(grid_layout(6, CHAT_OPEN_TILES), GridLayout { shown_others: 4, hidden: 2 });
+        assert_eq!(
+            grid_layout(5, CHAT_OPEN_TILES),
+            GridLayout {
+                shown_others: 5,
+                hidden: 0
+            }
+        );
+        assert_eq!(
+            grid_layout(6, CHAT_OPEN_TILES),
+            GridLayout {
+                shown_others: 4,
+                hidden: 2
+            }
+        );
     }
 
     #[test]
@@ -1045,9 +1285,15 @@ mod tests {
         assert_eq!(model.sharing_label(), None);
         model.apply(CallUpdate::ScreenShare(Some("8:orgid:b".into())));
         assert_eq!(model.sharing_label().as_deref(), Some("Bo is sharing"));
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         model.apply(CallUpdate::Speakers(vec!["8:orgid:b".into()]));
-        let names: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        let names: Vec<&str> = model
+            .strip_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Bo", "Ana"]);
         model.apply(CallUpdate::ScreenShare(None));
         assert_eq!(model.sharing_label(), None);
@@ -1060,7 +1306,12 @@ mod tests {
         with_camera.has_video = true;
         model.apply(CallUpdate::Roster(vec![with_camera]));
         assert!(model.tiles[0].has_video);
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:a",
+            "Ana",
+            false,
+            false,
+        )]));
         assert!(!model.tiles[0].has_video);
     }
 
@@ -1068,10 +1319,22 @@ mod tests {
     fn present_guests_sort_before_waiting_ones() {
         let mut model = CallModel::people(
             "Group",
-            &[("8:orgid:b".into(), "Bea".into()), ("8:orgid:c".into(), "Cy".into())],
+            &[
+                ("8:orgid:b".into(), "Bea".into()),
+                ("8:orgid:c".into(), "Cy".into()),
+            ],
         );
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:c", "Cy", false, false)]));
-        let names: Vec<&str> = model.visible_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:c",
+            "Cy",
+            false,
+            false,
+        )]));
+        let names: Vec<&str> = model
+            .visible_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Cy", "Bea"]);
     }
 
@@ -1086,12 +1349,23 @@ mod tests {
         ]));
         assert_eq!(model.own_hand, Some(6));
         assert!(model.any_hand_raised());
-        let names: Vec<&str> = model.visible_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        let names: Vec<&str> = model
+            .visible_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Cy", "Bo", "Ana"]);
-        let positions: Vec<usize> = [4, 6, 9].into_iter().map(|rank| model.hand_position(rank)).collect();
+        let positions: Vec<usize> = [4, 6, 9]
+            .into_iter()
+            .map(|rank| model.hand_position(rank))
+            .collect();
         assert_eq!(positions, vec![1, 2, 3]);
         assert_eq!(model.own_cell_index(3), 1);
-        let strip: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        let strip: Vec<&str> = model
+            .strip_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(strip, vec!["Cy", "Bo", "Ana"]);
     }
 
@@ -1099,16 +1373,31 @@ mod tests {
     fn a_roster_without_the_own_entry_keeps_the_own_hand() {
         let mut model = meeting_with_me();
         model.apply(CallUpdate::OwnHand(Some(5)));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:a",
+            "Ana",
+            false,
+            false,
+        )]));
         assert_eq!(model.own_hand, Some(5));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:me", "Me", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:me",
+            "Me",
+            false,
+            false,
+        )]));
         assert_eq!(model.own_hand, None);
     }
 
     #[test]
     fn reaction_controls_show_in_group_calls_and_meetings_only() {
         let mut model = CallModel::test();
-        for (kind, expected) in [(CallKind::Test, false), (CallKind::Direct, false), (CallKind::Group, true), (CallKind::Meeting, true)] {
+        for (kind, expected) in [
+            (CallKind::Test, false),
+            (CallKind::Direct, false),
+            (CallKind::Group, true),
+            (CallKind::Meeting, true),
+        ] {
             model.kind = kind;
             assert_eq!(model.has_reaction_controls(), expected);
         }
@@ -1120,12 +1409,24 @@ mod tests {
         let start = Instant::now();
         model.note_reaction("8:orgid:me".into(), Reaction::Like, start);
         let serial = model.reactions[0].serial;
-        model.note_reaction("8:orgid:me".into(), Reaction::Like, start + Duration::from_millis(1500));
+        model.note_reaction(
+            "8:orgid:me".into(),
+            Reaction::Like,
+            start + Duration::from_millis(1500),
+        );
         assert_eq!(model.reactions.len(), 1);
         assert_eq!(model.reactions[0].serial, serial);
-        model.note_reaction("8:orgid:me".into(), Reaction::Heart, start + Duration::from_millis(1600));
+        model.note_reaction(
+            "8:orgid:me".into(),
+            Reaction::Heart,
+            start + Duration::from_millis(1600),
+        );
         assert_eq!(model.reactions[0].reaction, Reaction::Heart);
-        model.note_reaction("8:orgid:me".into(), Reaction::Heart, start + Duration::from_secs(4));
+        model.note_reaction(
+            "8:orgid:me".into(),
+            Reaction::Heart,
+            start + Duration::from_secs(4),
+        );
         assert_ne!(model.reactions[0].serial, serial);
     }
 
@@ -1135,15 +1436,25 @@ mod tests {
         let start = Instant::now();
         model.note_reaction("8:orgid:a".into(), Reaction::Like, start);
         let serial = model.reactions[0].serial;
-        model.note_reaction("8:orgid:a".into(), Reaction::Like, start + Duration::from_secs(1));
+        model.note_reaction(
+            "8:orgid:a".into(),
+            Reaction::Like,
+            start + Duration::from_secs(1),
+        );
         assert_ne!(model.reactions[0].serial, serial);
     }
 
     #[test]
     fn lowering_clears_the_hand_everywhere() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::Roster(vec![raised("8:orgid:a", "Ana", 1), raised("8:orgid:me", "Me", 2)]));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), entry("8:orgid:me", "Me", false, false)]));
+        model.apply(CallUpdate::Roster(vec![
+            raised("8:orgid:a", "Ana", 1),
+            raised("8:orgid:me", "Me", 2),
+        ]));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            entry("8:orgid:me", "Me", false, false),
+        ]));
         assert!(!model.any_hand_raised());
         assert_eq!(model.own_cell_index(1), 1);
     }
@@ -1161,22 +1472,45 @@ mod tests {
         model.note_reaction("8:orgid:a".into(), Reaction::Heart, start);
         model.note_reaction("8:orgid:me".into(), Reaction::Like, start);
         let reaction_at = |model: &CallModel, mri: &str, seconds: u64| {
-            model.chip_of(mri, start + Duration::from_secs(seconds)).map(|chip| chip.reaction)
+            model
+                .chip_of(mri, start + Duration::from_secs(seconds))
+                .map(|chip| chip.reaction)
         };
         assert_eq!(reaction_at(&model, "8:orgid:a", 2), Some(Reaction::Heart));
-        assert_eq!(model.own_chip(start + Duration::from_secs(2)).map(|chip| chip.reaction), Some(Reaction::Like));
+        assert_eq!(
+            model
+                .own_chip(start + Duration::from_secs(2))
+                .map(|chip| chip.reaction),
+            Some(Reaction::Like)
+        );
         assert_eq!(reaction_at(&model, "8:orgid:a", 3), None);
-        model.note_reaction("8:orgid:a".into(), Reaction::Laugh, start + Duration::from_secs(1));
+        model.note_reaction(
+            "8:orgid:a".into(),
+            Reaction::Laugh,
+            start + Duration::from_secs(1),
+        );
         assert_eq!(reaction_at(&model, "8:orgid:a", 2), Some(Reaction::Laugh));
         assert_eq!(model.reactions.len(), 2);
     }
 
     #[test]
     fn the_chat_panel_picks_the_meeting_thread_or_the_call_chat() {
-        assert_eq!(chat_thread(CallKind::Meeting, Some("19:meeting_x"), Some("19:list")), Some("19:meeting_x"));
-        assert_eq!(chat_thread(CallKind::Meeting, None, Some("19:list")), Some("19:list"));
-        assert_eq!(chat_thread(CallKind::Direct, Some("19:meeting_x"), Some("19:dm")), Some("19:dm"));
-        assert_eq!(chat_thread(CallKind::Group, None, Some("19:group")), Some("19:group"));
+        assert_eq!(
+            chat_thread(CallKind::Meeting, Some("19:meeting_x"), Some("19:list")),
+            Some("19:meeting_x")
+        );
+        assert_eq!(
+            chat_thread(CallKind::Meeting, None, Some("19:list")),
+            Some("19:list")
+        );
+        assert_eq!(
+            chat_thread(CallKind::Direct, Some("19:meeting_x"), Some("19:dm")),
+            Some("19:dm")
+        );
+        assert_eq!(
+            chat_thread(CallKind::Group, None, Some("19:group")),
+            Some("19:group")
+        );
         assert_eq!(chat_thread(CallKind::Test, None, None), None);
     }
 
@@ -1193,19 +1527,30 @@ mod tests {
     #[test]
     fn lobby_guests_are_listed_for_organizers_who_may_admit() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         model.apply(CallUpdate::Roster(vec![
             entry("8:orgid:a", "Ana", false, false),
             entry("8:orgid:g1", "Gast Eins", false, true),
             entry("8:orgid:g2", "Gast Zwei", false, true),
         ]));
-        let waiting: Vec<&str> = model.lobby_guests().iter().map(|tile| tile.name.as_str()).collect();
+        let waiting: Vec<&str> = model
+            .lobby_guests()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(waiting, vec!["Gast Eins", "Gast Zwei"]);
         assert!(!model.can_admit());
-        model.apply(CallUpdate::Roster(vec![organizer_entry("8:orgid:me"), entry("8:orgid:g1", "Gast Eins", false, true)]));
+        model.apply(CallUpdate::Roster(vec![
+            organizer_entry("8:orgid:me"),
+            entry("8:orgid:g1", "Gast Eins", false, true),
+        ]));
         assert!(model.organizer && model.can_admit() && model.organizes_meeting());
         let mut owner = CallModel::meeting("Standup", true);
-        owner.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        owner.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         assert!(owner.can_admit());
         owner.apply(CallUpdate::Lobby(true));
         assert!(!owner.can_admit());
@@ -1214,33 +1559,90 @@ mod tests {
     #[test]
     fn a_spotlight_takes_the_stage_and_the_lowest_rank_wins() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), spotlit("8:orgid:b", "Bo", 4), spotlit("8:orgid:c", "Cy", 2)]));
-        assert_eq!(model.focus(), Some(Focus { mri: "8:orgid:c".into(), own: false, spotlight: true, pinned: false }));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            spotlit("8:orgid:b", "Bo", 4),
+            spotlit("8:orgid:c", "Cy", 2),
+        ]));
+        assert_eq!(
+            model.focus(),
+            Some(Focus {
+                mri: "8:orgid:c".into(),
+                own: false,
+                spotlight: true,
+                pinned: false
+            })
+        );
         assert!(model.is_spotlighted("8:orgid:b") && !model.is_spotlighted("8:orgid:a"));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), spotlit("8:orgid:b", "Bo", 4), entry("8:orgid:c", "Cy", false, false)]));
-        assert_eq!(model.focus().map(|focus| focus.mri), Some("8:orgid:b".to_owned()));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false)]));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            spotlit("8:orgid:b", "Bo", 4),
+            entry("8:orgid:c", "Cy", false, false),
+        ]));
+        assert_eq!(
+            model.focus().map(|focus| focus.mri),
+            Some("8:orgid:b".to_owned())
+        );
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:a",
+            "Ana",
+            false,
+            false,
+        )]));
         assert_eq!(model.focus(), None);
     }
 
     #[test]
     fn spotlighting_yourself_puts_your_own_tile_on_the_stage() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), spotlit("8:orgid:me", "Me", 1)]));
-        assert_eq!(model.focus(), Some(Focus { mri: "8:orgid:me".into(), own: true, spotlight: true, pinned: false }));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            spotlit("8:orgid:me", "Me", 1),
+        ]));
+        assert_eq!(
+            model.focus(),
+            Some(Focus {
+                mri: "8:orgid:me".into(),
+                own: true,
+                spotlight: true,
+                pinned: false
+            })
+        );
     }
 
     #[test]
     fn a_pin_is_local_beats_the_spotlight_and_ends_when_the_person_leaves() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", false, false), spotlit("8:orgid:b", "Bo", 1)]));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", false, false),
+            spotlit("8:orgid:b", "Bo", 1),
+        ]));
         model.toggle_pin("8:orgid:a");
-        assert_eq!(model.focus(), Some(Focus { mri: "8:orgid:a".into(), own: false, spotlight: false, pinned: true }));
-        let names: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        assert_eq!(
+            model.focus(),
+            Some(Focus {
+                mri: "8:orgid:a".into(),
+                own: false,
+                spotlight: false,
+                pinned: true
+            })
+        );
+        let names: Vec<&str> = model
+            .strip_tiles()
+            .iter()
+            .map(|tile| tile.name.as_str())
+            .collect();
         assert_eq!(names[0], "Ana");
         model.toggle_pin("8:orgid:b");
-        assert_eq!(model.focus().map(|focus| (focus.mri, focus.spotlight, focus.pinned)), Some(("8:orgid:b".to_owned(), true, true)));
+        assert_eq!(
+            model
+                .focus()
+                .map(|focus| (focus.mri, focus.spotlight, focus.pinned)),
+            Some(("8:orgid:b".to_owned(), true, true))
+        );
         model.toggle_pin("8:orgid:b");
         assert_eq!(model.pinned, None);
         model.toggle_pin("8:orgid:a");
@@ -1249,7 +1651,13 @@ mod tests {
     }
 
     fn caption(id: &str, speaker: &str, text: &str, is_final: bool) -> CaptionEntry {
-        CaptionEntry { id: id.into(), user_id: "u".into(), display_name: speaker.into(), text: text.into(), is_final }
+        CaptionEntry {
+            id: id.into(),
+            user_id: "u".into(),
+            display_name: speaker.into(),
+            text: text.into(),
+            is_final,
+        }
     }
 
     #[test]
@@ -1263,21 +1671,45 @@ mod tests {
         model.note_caption(caption("1", "Ana", "Hello there", true), start);
         assert_eq!(model.caption_lines.len(), 1);
         assert_eq!(model.caption_lines[0].text, "Hello there");
-        model.note_caption(caption("2", "", "Next", false), start + Duration::from_secs(1));
-        model.note_caption(caption("3", "Bo", "Third", false), start + Duration::from_secs(2));
-        let texts: Vec<&str> = model.caption_lines.iter().map(|line| line.text.as_str()).collect();
+        model.note_caption(
+            caption("2", "", "Next", false),
+            start + Duration::from_secs(1),
+        );
+        model.note_caption(
+            caption("3", "Bo", "Third", false),
+            start + Duration::from_secs(2),
+        );
+        let texts: Vec<&str> = model
+            .caption_lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect();
         assert_eq!(texts, vec!["Next", "Third"]);
         assert_eq!(model.caption_lines[0].speaker, "Someone");
-        assert_eq!(model.visible_captions(start + Duration::from_secs(3)).len(), 2);
-        assert_eq!(model.visible_captions(start + Duration::from_millis(5500)).len(), 1);
-        assert!(model.visible_captions(start + Duration::from_secs(7)).is_empty());
+        assert_eq!(
+            model.visible_captions(start + Duration::from_secs(3)).len(),
+            2
+        );
+        assert_eq!(
+            model
+                .visible_captions(start + Duration::from_millis(5500))
+                .len(),
+            1
+        );
+        assert!(
+            model
+                .visible_captions(start + Duration::from_secs(7))
+                .is_empty()
+        );
         model.apply(CallUpdate::Captions(CaptionState::Off));
         assert!(model.caption_lines.is_empty() && !model.captions_on());
     }
 
     fn one_to_one() -> CallModel {
         let mut model = CallModel::people("Bea", &[("8:orgid:bea".into(), "Bea".into())]);
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         model
     }
 
@@ -1291,13 +1723,24 @@ mod tests {
         assert!(!model.can_hold() && !model.can_transfer());
         let meeting = meeting_with_me();
         assert!(!meeting.can_hold() && !meeting.can_transfer());
-        assert!(!CallModel::people("Group", &[("8:orgid:a".into(), "A".into()), ("8:orgid:b".into(), "B".into())]).can_hold());
+        assert!(
+            !CallModel::people(
+                "Group",
+                &[
+                    ("8:orgid:a".into(), "A".into()),
+                    ("8:orgid:b".into(), "B".into())
+                ]
+            )
+            .can_hold()
+        );
     }
 
     #[test]
     fn recording_and_consent_follow_the_call_updates_and_only_organizers_may_record() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         assert!(!model.can_record());
         model.apply(CallUpdate::Roster(vec![organizer_entry("8:orgid:me")]));
         assert!(model.can_record());
@@ -1313,7 +1756,12 @@ mod tests {
     #[test]
     fn a_whiteboard_share_names_the_presenter_and_offers_the_browser_only_with_a_link() {
         let mut model = meeting_with_me();
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:ana", "Ana", false, false)]));
+        model.apply(CallUpdate::Roster(vec![entry(
+            "8:orgid:ana",
+            "Ana",
+            false,
+            false,
+        )]));
         assert_eq!(model.whiteboard_label(), None);
         let share = |presenter: &str, url: Option<&str>| calling::ContentShare {
             session_id: "s".into(),
@@ -1322,11 +1770,26 @@ mod tests {
             url: url.map(str::to_owned),
             whiteboard: true,
         };
-        model.apply(CallUpdate::Whiteboard(Some(share("8:orgid:ana", Some("https://app.whiteboard.microsoft.com/x")))));
-        assert_eq!(model.whiteboard_label().as_deref(), Some("Ana is sharing a whiteboard"));
-        assert_eq!(model.whiteboard_url(), Some("https://app.whiteboard.microsoft.com/x"));
-        model.apply(CallUpdate::Whiteboard(Some(share("8:orgid:stranger", None))));
-        assert_eq!(model.whiteboard_label().as_deref(), Some("Someone is sharing a whiteboard"));
+        model.apply(CallUpdate::Whiteboard(Some(share(
+            "8:orgid:ana",
+            Some("https://app.whiteboard.microsoft.com/x"),
+        ))));
+        assert_eq!(
+            model.whiteboard_label().as_deref(),
+            Some("Ana is sharing a whiteboard")
+        );
+        assert_eq!(
+            model.whiteboard_url(),
+            Some("https://app.whiteboard.microsoft.com/x")
+        );
+        model.apply(CallUpdate::Whiteboard(Some(share(
+            "8:orgid:stranger",
+            None,
+        ))));
+        assert_eq!(
+            model.whiteboard_label().as_deref(),
+            Some("Someone is sharing a whiteboard")
+        );
         assert_eq!(model.whiteboard_url(), None);
         model.apply(CallUpdate::Whiteboard(None));
         assert_eq!(model.whiteboard_label(), None);
@@ -1345,7 +1808,9 @@ mod tests {
         };
         assert_eq!(consult.status_text(), "Calling Ana...");
         assert!(!consult.ready_to_transfer());
-        consult.state = CallState::Connected { since: Instant::now() };
+        consult.state = CallState::Connected {
+            since: Instant::now(),
+        };
         assert_eq!(consult.status_text(), "Consulting Ana");
         assert!(!consult.ready_to_transfer());
         consult.replacement = Some("https://cc/replacement".into());

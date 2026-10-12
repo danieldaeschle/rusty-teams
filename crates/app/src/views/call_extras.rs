@@ -58,18 +58,36 @@ pub fn return_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEle
 
 pub fn room_chip(model: &CallModel) -> Option<AnyElement> {
     model.breakout.as_ref()?;
-    Some(div().flex_none().text_size(px(13.)).text_color(theme::text_muted()).child("Breakout room").into_any_element())
+    Some(
+        div()
+            .flex_none()
+            .text_size(px(13.))
+            .text_color(theme::text_muted())
+            .child("Breakout room")
+            .into_any_element(),
+    )
 }
 
 pub fn hold_panel(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
     let (title, detail) = match model.hold {
         HoldState::Active => return None,
-        HoldState::Local => ("On hold".to_owned(), format!("{} cannot hear you and you cannot hear them.", model.peer_name)),
-        HoldState::Remote => ("You're on hold".to_owned(), format!("{} put the call on hold.", model.peer_name)),
+        HoldState::Local => (
+            "On hold".to_owned(),
+            format!(
+                "{} cannot hear you and you cannot hear them.",
+                model.peer_name
+            ),
+        ),
+        HoldState::Remote => (
+            "You're on hold".to_owned(),
+            format!("{} put the call on hold.", model.peer_name),
+        ),
     };
     let resume = (model.hold == HoldState::Local).then(|| {
         let app = app.clone();
-        Button::new("call-resume").label("Resume").on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_hold(cx)))
+        Button::new("call-resume")
+            .label("Resume")
+            .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_hold(cx)))
     });
     Some(
         v_flex()
@@ -89,8 +107,18 @@ pub fn hold_panel(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElemen
                     .bg(theme::surface_raised())
                     .child(icon(IconName::Clock, 48., theme::text())),
             )
-            .child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(title))
-            .child(div().text_size(px(14.)).text_color(theme::text_muted()).child(detail))
+            .child(
+                div()
+                    .text_size(px(22.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(px(14.))
+                    .text_color(theme::text_muted())
+                    .child(detail),
+            )
             .children(resume)
             .into_any_element(),
     )
@@ -118,7 +146,12 @@ pub fn whiteboard_stage(app: &Entity<AppState>, model: &CallModel) -> Option<Any
             .bg(hsla(0., 0., 0.04, 1.))
             .text_color(theme::white())
             .child(icon(IconName::Pencil, 56., theme::white()))
-            .child(div().text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(label))
+            .child(
+                div()
+                    .text_size(px(18.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(label),
+            )
             .children(open)
             .into_any_element(),
     )
@@ -131,7 +164,9 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
     let (transfer_app, cancel_app) = (app.clone(), app.clone());
     let transfer = pill("call-consult-transfer", "Transfer now", true);
     let transfer = if ready {
-        transfer.on_click(move |_, _, cx| transfer_app.update(cx, |state, cx| state.transfer_consulted(cx)))
+        transfer.on_click(move |_, _, cx| {
+            transfer_app.update(cx, |state, cx| state.transfer_consulted(cx))
+        })
     } else {
         transfer.opacity(0.5).cursor_default()
     };
@@ -151,7 +186,11 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
             .font_weight(FontWeight::SEMIBOLD)
             .child(text)
             .child(transfer)
-            .child(pill("call-consult-cancel", "Cancel", false).on_click(move |_, _, cx| cancel_app.update(cx, |state, cx| state.cancel_consult(cx))))
+            .child(
+                pill("call-consult-cancel", "Cancel", false).on_click(move |_, _, cx| {
+                    cancel_app.update(cx, |state, cx| state.cancel_consult(cx))
+                }),
+            )
             .into_any_element(),
     )
 }
@@ -171,7 +210,16 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
             .flex()
             .items_center()
             .justify_center()
-            .child(div().id("call-consent-backdrop").absolute().top_0().left_0().size_full().bg(black().opacity(BACKDROP_OPACITY)).occlude())
+            .child(
+                div()
+                    .id("call-consent-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .bg(black().opacity(BACKDROP_OPACITY))
+                    .occlude(),
+            )
             .child(
                 v_flex()
                     .id("call-consent-card")
@@ -188,7 +236,12 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
                             .gap(px(8.))
                             .items_center()
                             .child(div().size(px(10.)).rounded_full().bg(theme::red()))
-                            .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child("This meeting is being recorded")),
+                            .child(
+                                div()
+                                    .text_size(px(16.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("This meeting is being recorded"),
+                            ),
                     )
                     .child(
                         div()
@@ -200,7 +253,9 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
                         h_flex().w_full().justify_end().child(
                             Button::new("call-consent-ok")
                                 .label("OK")
-                                .on_click(move |_, _, cx| app.update(cx, |state, cx| state.accept_recording_notice(cx))),
+                                .on_click(move |_, _, cx| {
+                                    app.update(cx, |state, cx| state.accept_recording_notice(cx))
+                                }),
                         ),
                     ),
             )
@@ -244,13 +299,30 @@ impl BackgroundMenu {
         let library = &state.call_backgrounds;
         BackgroundMenu {
             pick: state.call_background.clone(),
-            images: library.shown().iter().map(|image| (image.id.clone(), image.name.clone(), library.thumbnail(image))).collect(),
+            images: library
+                .shown()
+                .iter()
+                .map(|image| {
+                    (
+                        image.id.clone(),
+                        image.name.clone(),
+                        library.thumbnail(image),
+                    )
+                })
+                .collect(),
             customs: library.customs.clone(),
         }
     }
 }
 
-fn thumbnail(app: &Entity<AppState>, index: usize, label: String, path: Option<PathBuf>, selected: bool, pick: BackgroundPick) -> AnyElement {
+fn thumbnail(
+    app: &Entity<AppState>,
+    index: usize,
+    label: String,
+    path: Option<PathBuf>,
+    selected: bool,
+    pick: BackgroundPick,
+) -> AnyElement {
     let app = app.clone();
     let tooltip = label.clone();
     div()
@@ -261,43 +333,99 @@ fn thumbnail(app: &Entity<AppState>, index: usize, label: String, path: Option<P
         .overflow_hidden()
         .rounded(px(6.))
         .border_2()
-        .border_color(if selected { theme::accent() } else { transparent_black() })
+        .border_color(if selected {
+            theme::accent()
+        } else {
+            transparent_black()
+        })
         .bg(theme::surface())
         .cursor_pointer()
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .child(match path {
-            Some(path) => img(path).size_full().object_fit(ObjectFit::Cover).into_any_element(),
+            Some(path) => img(path)
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
             None => div().size_full().into_any_element(),
         })
-        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_background(pick.clone(), cx)))
+        .on_click(move |_, _, cx| {
+            app.update(cx, |state, cx| state.set_call_background(pick.clone(), cx))
+        })
         .into_any_element()
 }
 
-pub fn background_items(popup: PopupMenu, app: &Entity<AppState>, menu: &BackgroundMenu) -> PopupMenu {
-    let (none_app, blur_app, add_app, grid_app) = (app.clone(), app.clone(), app.clone(), app.clone());
+pub fn background_items(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    menu: &BackgroundMenu,
+) -> PopupMenu {
+    let (none_app, blur_app, add_app, grid_app) =
+        (app.clone(), app.clone(), app.clone(), app.clone());
     let grid_menu = menu.clone();
     let mut popup = popup
         .separator()
         .item(PopupMenuItem::label("Background"))
-        .item(PopupMenuItem::new("None").checked(menu.pick == BackgroundPick::None).on_click(move |_, _, cx| none_app.update(cx, |state, cx| state.set_call_background(BackgroundPick::None, cx))))
-        .item(PopupMenuItem::new("Blur").checked(menu.pick.is_blur()).on_click(move |_, _, cx| blur_app.update(cx, |state, cx| state.set_call_background(BackgroundPick::Blur, cx))));
+        .item(
+            PopupMenuItem::new("None")
+                .checked(menu.pick == BackgroundPick::None)
+                .on_click(move |_, _, cx| {
+                    none_app.update(cx, |state, cx| {
+                        state.set_call_background(BackgroundPick::None, cx)
+                    })
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Blur")
+                .checked(menu.pick.is_blur())
+                .on_click(move |_, _, cx| {
+                    blur_app.update(cx, |state, cx| {
+                        state.set_call_background(BackgroundPick::Blur, cx)
+                    })
+                }),
+        );
     if !menu.images.is_empty() || !menu.customs.is_empty() {
         popup = popup.item(PopupMenuItem::element(move |_, _| {
-            let defaults = grid_menu.images.iter().enumerate().map(|(index, (id, name, path))| {
-                let pick = BackgroundPick::Default(id.clone());
-                thumbnail(&grid_app, index, name.clone(), path.clone(), grid_menu.pick == pick, pick)
-            });
+            let defaults = grid_menu
+                .images
+                .iter()
+                .enumerate()
+                .map(|(index, (id, name, path))| {
+                    let pick = BackgroundPick::Default(id.clone());
+                    thumbnail(
+                        &grid_app,
+                        index,
+                        name.clone(),
+                        path.clone(),
+                        grid_menu.pick == pick,
+                        pick,
+                    )
+                });
             let customs = grid_menu.customs.iter().enumerate().map(|(index, path)| {
                 let pick = BackgroundPick::Custom(path.clone());
-                let name = path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                thumbnail(&grid_app, grid_menu.images.len() + index, name, Some(path.clone()), grid_menu.pick == pick, pick)
+                let name = path
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                thumbnail(
+                    &grid_app,
+                    grid_menu.images.len() + index,
+                    name,
+                    Some(path.clone()),
+                    grid_menu.pick == pick,
+                    pick,
+                )
             });
-            h_flex().w(px(MENU_WIDTH - MENU_PADDING)).flex_wrap().gap(px(THUMBNAIL_GAP)).children(defaults.chain(customs))
+            h_flex()
+                .w(px(MENU_WIDTH - MENU_PADDING))
+                .flex_wrap()
+                .gap(px(THUMBNAIL_GAP))
+                .children(defaults.chain(customs))
         }));
     }
     popup.item(
         PopupMenuItem::new("Add image...")
             .icon(IconName::Plus)
-            .on_click(move |_, _, cx| add_app.update(cx, |state, cx| state.add_call_background(cx))),
+            .on_click(move |_, _, cx| {
+                add_app.update(cx, |state, cx| state.add_call_background(cx))
+            }),
     )
 }

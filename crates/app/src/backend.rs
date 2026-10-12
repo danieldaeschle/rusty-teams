@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use calling::EngineEvent;
-use chatsvc::{Calendar, CalendarEvent, EventKind, MessageEvent, Pins, Realtime, RealtimeConfig, RealtimeEvent, StatusKind, TypingEvent};
+use chatsvc::{
+    Calendar, CalendarEvent, EventKind, MessageEvent, Pins, Realtime, RealtimeConfig,
+    RealtimeEvent, StatusKind, TypingEvent,
+};
 use chrono::{DateTime, Local, Offset, Utc};
 use graph::Graph;
 use session::{Session, SessionConfig, Transport};
@@ -410,7 +413,10 @@ async fn calendar_loop(session: Session, events: EventSender) {
                     return;
                 }
             }
-            Err(error) => crate::diagnostics::record(format!("calls: calendar not loaded: {}", shorten(&error.to_string()))),
+            Err(error) => crate::diagnostics::record(format!(
+                "calls: calendar not loaded: {}",
+                shorten(&error.to_string())
+            )),
         }
     }
 }
@@ -486,8 +492,14 @@ mod tests {
             thread_signal(&event(EventKind::NewMessage, Some("c"), Some("m"))).as_deref(),
             Some("c")
         );
-        assert_eq!(thread_signal(&event(EventKind::Typing, Some("c"), None)), None);
-        assert_eq!(thread_signal(&event(EventKind::ThreadUpdate, None, None)), None);
+        assert_eq!(
+            thread_signal(&event(EventKind::Typing, Some("c"), None)),
+            None
+        );
+        assert_eq!(
+            thread_signal(&event(EventKind::ThreadUpdate, None, None)),
+            None
+        );
     }
 
     #[test]
@@ -517,8 +529,14 @@ mod tests {
 
     #[test]
     fn only_connect_and_disconnect_move_the_link() {
-        assert_eq!(link_signal_for(StatusKind::Connected), Some(LinkSignal::Connected));
-        assert_eq!(link_signal_for(StatusKind::Disconnected), Some(LinkSignal::Disconnected));
+        assert_eq!(
+            link_signal_for(StatusKind::Connected),
+            Some(LinkSignal::Connected)
+        );
+        assert_eq!(
+            link_signal_for(StatusKind::Disconnected),
+            Some(LinkSignal::Disconnected)
+        );
         assert_eq!(link_signal_for(StatusKind::MessageLoss), None);
         assert_eq!(link_signal_for(StatusKind::Error), None);
     }

@@ -16,16 +16,25 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
-use super::call_extras::{BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button, room_chip, whiteboard_stage};
-use super::call_organizer::{camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu};
+use super::call_extras::{
+    BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
+    room_chip, whiteboard_stage,
+};
+use super::call_organizer::{
+    camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip,
+    render_focus_stage, spotlight_chip, with_tile_menu,
+};
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
 use super::shell::ISLAND_GAP;
 use super::widgets::{count_badge, icon};
 use crate::app_state::AppState;
-use crate::call::TileSize;
-use crate::call::{CHAT_OPEN_TILES, CallKind, CallModel, GridLayout, MAX_TILES, Tile, TileState, grid_layout, tile_size};
 use crate::call::REACTION_SHOWN;
+use crate::call::TileSize;
+use crate::call::{
+    CHAT_OPEN_TILES, CallKind, CallModel, GridLayout, MAX_TILES, Tile, TileState, grid_layout,
+    tile_size,
+};
 use crate::rows::reaction_glyph as chat_reaction_glyph;
 use crate::theme;
 
@@ -91,7 +100,11 @@ fn hand_badge(position: usize, own: bool) -> Div {
         .text_color(hsla(0., 0., 0.08, 1.))
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
-        .child(if own { "Hand raised".to_owned() } else { format!("Hand {position}") })
+        .child(if own {
+            "Hand raised".to_owned()
+        } else {
+            format!("Hand {position}")
+        })
 }
 
 fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
@@ -112,7 +125,8 @@ fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
             Animation::new(REACTION_SHOWN),
             |chip, delta| {
                 let fade = ((delta - REACTION_FADE_FROM) / (1. - REACTION_FADE_FROM)).clamp(0., 1.);
-                chip.bottom(px(32. + REACTION_RISE * delta)).opacity(1. - fade)
+                chip.bottom(px(32. + REACTION_RISE * delta))
+                    .opacity(1. - fade)
             },
         )
         .into_any_element()
@@ -130,7 +144,9 @@ fn tile_overlays(extras: &TileExtras) -> Vec<AnyElement> {
             .when(extras.pinned, |row| row.child(pin_chip()))
             .into_any_element()
     });
-    let reaction = extras.reaction.map(|(reaction, serial)| reaction_chip(reaction, serial));
+    let reaction = extras
+        .reaction
+        .map(|(reaction, serial)| reaction_chip(reaction, serial));
     badges.into_iter().chain(reaction).collect()
 }
 
@@ -161,8 +177,13 @@ pub fn pulsing(element: impl IntoElement + 'static, id: &'static str) -> AnyElem
 }
 
 fn blinking(element: impl IntoElement + 'static) -> AnyElement {
-    let dimmed = SystemTime::now().duration_since(UNIX_EPOCH).is_ok_and(|elapsed| (elapsed.as_millis() / BLINK_HALF_PERIOD.as_millis()) % 2 == 1);
-    div().child(element).opacity(if dimmed { BLINK_DIMMED_OPACITY } else { 1. }).into_any_element()
+    let dimmed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .is_ok_and(|elapsed| (elapsed.as_millis() / BLINK_HALF_PERIOD.as_millis()) % 2 == 1);
+    div()
+        .child(element)
+        .opacity(if dimmed { BLINK_DIMMED_OPACITY } else { 1. })
+        .into_any_element()
 }
 
 fn speaking_ring(avatar: AnyElement, speaking: bool) -> Div {
@@ -192,7 +213,14 @@ fn mute_badge() -> Div {
         .child(icon(IconName::MicOff, 13., theme::white()))
 }
 
-fn video_tile(size: TileSize, image: Arc<RenderImage>, name: &str, speaking: bool, muted: bool, extras: &TileExtras) -> Div {
+fn video_tile(
+    size: TileSize,
+    image: Arc<RenderImage>,
+    name: &str,
+    speaking: bool,
+    muted: bool,
+    extras: &TileExtras,
+) -> Div {
     div()
         .relative()
         .w(px(size.width))
@@ -202,7 +230,11 @@ fn video_tile(size: TileSize, image: Arc<RenderImage>, name: &str, speaking: boo
         .rounded(px(TILE_RADIUS))
         .bg(theme::row_hover())
         .border_2()
-        .border_color(if speaking { theme::green() } else { transparent_black() })
+        .border_color(if speaking {
+            theme::green()
+        } else {
+            transparent_black()
+        })
         .child(
             img(ImageSource::Render(image))
                 .size_full()
@@ -309,11 +341,21 @@ fn control_shell(id: &'static str, background: Hsla) -> Stateful<Div> {
         .hover(|button| button.opacity(0.85))
 }
 
-pub(super) fn round_control(id: &'static str, glyph: IconName, background: Hsla, foreground: Hsla) -> Stateful<Div> {
+pub(super) fn round_control(
+    id: &'static str,
+    glyph: IconName,
+    background: Hsla,
+    foreground: Hsla,
+) -> Stateful<Div> {
     control_shell(id, background).child(icon(glyph, CONTROL_ICON, foreground))
 }
 
-pub fn mute_button(app: &Entity<AppState>, model: &CallModel, id: &'static str, size: f32) -> Stateful<Div> {
+pub fn mute_button(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    id: &'static str,
+    size: f32,
+) -> Stateful<Div> {
     let (glyph, background, foreground) = if model.muted {
         (IconName::MicOff, theme::red(), theme::white())
     } else {
@@ -333,8 +375,17 @@ pub fn mute_button(app: &Entity<AppState>, model: &CallModel, id: &'static str, 
     })
 }
 
-pub fn leave_button(app: &Entity<AppState>, model: &CallModel, id: &'static str, compact: bool) -> Stateful<Div> {
-    let label = if model.is_connecting() { "Cancel" } else { "Leave" };
+pub fn leave_button(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    id: &'static str,
+    compact: bool,
+) -> Stateful<Div> {
+    let label = if model.is_connecting() {
+        "Cancel"
+    } else {
+        "Leave"
+    };
     let app = app.clone();
     h_flex()
         .id(id)
@@ -351,7 +402,11 @@ pub fn leave_button(app: &Entity<AppState>, model: &CallModel, id: &'static str,
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
-        .child(icon(IconName::PhoneOff, if compact { 14. } else { 18. }, theme::white()))
+        .child(icon(
+            IconName::PhoneOff,
+            if compact { 14. } else { 18. },
+            theme::white(),
+        ))
         .child(label)
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
@@ -394,21 +449,33 @@ fn sound_switch_item(app: &Entity<AppState>, sound: bool) -> PopupMenuItem {
     .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx)))
 }
 
-fn share_items(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel, sound: bool) -> PopupMenu {
+fn share_items(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    model: &CallModel,
+    sound: bool,
+) -> PopupMenu {
     let screens = model.screens();
     let single_screen = screens.len() == 1;
-    let mut popup = popup.min_w(px(MENU_WIDTH)).item(sound_switch_item(app, sound)).separator();
+    let mut popup = popup
+        .min_w(px(MENU_WIDTH))
+        .item(sound_switch_item(app, sound))
+        .separator();
     for (index, source) in screens.into_iter().enumerate() {
-        let label = if single_screen { "Share entire screen".to_owned() } else { format!("Share screen {}", index + 1) };
+        let label = if single_screen {
+            "Share entire screen".to_owned()
+        } else {
+            format!("Share screen {}", index + 1)
+        };
         let source = source.clone();
         let app = app.clone();
-        popup = popup.item(
-            PopupMenuItem::new(label)
-                .icon(IconName::Monitor)
-                .on_click(move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx))),
-        );
+        popup = popup.item(PopupMenuItem::new(label).icon(IconName::Monitor).on_click(
+            move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx)),
+        ));
     }
-    popup = popup.separator().item(PopupMenuItem::label("Share a window..."));
+    popup = popup
+        .separator()
+        .item(PopupMenuItem::label("Share a window..."));
     let windows = model.windows();
     if windows.is_empty() {
         return popup.item(PopupMenuItem::new(NO_WINDOWS_HINT).disabled(true));
@@ -420,7 +487,9 @@ fn share_items(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel, soun
         popup = popup.item(
             PopupMenuItem::new(label)
                 .icon(IconName::AppWindow)
-                .on_click(move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx))),
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.start_call_share(source.clone(), cx))
+                }),
         );
     }
     popup
@@ -429,15 +498,25 @@ fn share_items(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel, soun
 fn share_button(app: &Entity<AppState>, model: &CallModel, sound: bool) -> AnyElement {
     if model.local_share.is_some() {
         let app = app.clone();
-        return round_control("call-share-stop", IconName::ScreenShareOff, theme::accent(), theme::on_accent())
-            .tooltip(|window, cx| Tooltip::new("Stop sharing").build(window, cx))
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                app.update(cx, |state, cx| state.stop_call_share(cx));
-            })
-            .into_any_element();
+        return round_control(
+            "call-share-stop",
+            IconName::ScreenShareOff,
+            theme::accent(),
+            theme::on_accent(),
+        )
+        .tooltip(|window, cx| Tooltip::new("Stop sharing").build(window, cx))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            app.update(cx, |state, cx| state.stop_call_share(cx));
+        })
+        .into_any_element();
     }
-    let face = round_control("call-share-face", IconName::ScreenShare, theme::surface_raised(), theme::text());
+    let face = round_control(
+        "call-share-face",
+        IconName::ScreenShare,
+        theme::surface_raised(),
+        theme::text(),
+    );
     if !model.can_share() {
         return face
             .opacity(DISABLED_OPACITY)
@@ -453,7 +532,9 @@ fn share_button(app: &Entity<AppState>, model: &CallModel, sound: bool) -> AnyEl
         .size(px(CONTROL_SIZE))
         .rounded_full()
         .child(face)
-        .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| share_items(popup, &app, &model, sound))
+        .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
+            share_items(popup, &app, &model, sound)
+        })
         .into_any_element()
 }
 
@@ -488,8 +569,14 @@ fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Opt
                     .bg(theme::on_accent().opacity(0.2))
                     .cursor_pointer()
                     .hover(|button| button.opacity(0.9))
-                    .child(if sound { "Computer sound on" } else { "Computer sound off" })
-                    .on_click(move |_, _, cx| sound_app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx))),
+                    .child(if sound {
+                        "Computer sound on"
+                    } else {
+                        "Computer sound off"
+                    })
+                    .on_click(move |_, _, cx| {
+                        sound_app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx))
+                    }),
             )
             .child(
                 div()
@@ -504,7 +591,9 @@ fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Opt
                     .cursor_pointer()
                     .hover(|button| button.opacity(0.9))
                     .child("Stop sharing")
-                    .on_click(move |_, _, cx| app.update(cx, |state, cx| state.stop_call_share(cx))),
+                    .on_click(move |_, _, cx| {
+                        app.update(cx, |state, cx| state.stop_call_share(cx))
+                    }),
             )
             .into_any_element(),
     )
@@ -519,18 +608,43 @@ fn chat_button(app: &Entity<AppState>, open: bool, unread: u32) -> Stateful<Div>
     };
     round_control("call-chat", IconName::MessageCircle, background, foreground)
         .relative()
-        .tooltip(move |window, cx| Tooltip::new(if open { "Close the chat" } else { "Open the chat" }).build(window, cx))
+        .tooltip(move |window, cx| {
+            Tooltip::new(if open {
+                "Close the chat"
+            } else {
+                "Open the chat"
+            })
+            .build(window, cx)
+        })
         .when(unread > 0, |button| {
-            button.child(div().absolute().top(px(-4.)).right(px(-4.)).child(count_badge(unread, false)))
+            button.child(
+                div()
+                    .absolute()
+                    .top(px(-4.))
+                    .right(px(-4.))
+                    .child(count_badge(unread, false)),
+            )
         })
         .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)))
 }
 
 fn hand_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
     let raised = model.own_hand.is_some();
-    let background = if raised { theme::accent() } else { theme::surface_raised() };
-    let foreground = if raised { theme::on_accent() } else { theme::text() };
-    let button = control_shell("call-hand", background).child(icon(IconName::Hand, CONTROL_ICON, foreground));
+    let background = if raised {
+        theme::accent()
+    } else {
+        theme::surface_raised()
+    };
+    let foreground = if raised {
+        theme::on_accent()
+    } else {
+        theme::text()
+    };
+    let button = control_shell("call-hand", background).child(icon(
+        IconName::Hand,
+        CONTROL_ICON,
+        foreground,
+    ));
     let tooltip = if raised { "Lower hand" } else { "Raise hand" };
     let button = button.tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx));
     if !model.can_react() {
@@ -544,37 +658,55 @@ fn hand_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
 }
 
 fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
-    let face = control_shell("call-reactions-face", theme::surface_raised())
-        .child(icon(IconName::FaceSlightlySmiling, CONTROL_ICON, theme::text()));
+    let face = control_shell("call-reactions-face", theme::surface_raised()).child(icon(
+        IconName::FaceSlightlySmiling,
+        CONTROL_ICON,
+        theme::text(),
+    ));
     if !model.can_react() {
-        return face.opacity(DISABLED_OPACITY).cursor_default().into_any_element();
+        return face
+            .opacity(DISABLED_OPACITY)
+            .cursor_default()
+            .into_any_element();
     }
     let app = app.clone();
     Popover::new("call-reactions-popover")
         .anchor(Anchor::BottomLeft)
         .offset(px(10.))
-        .trigger(Button::new("call-reactions").ghost().p_0().size(px(CONTROL_SIZE)).rounded_full().child(face))
+        .trigger(
+            Button::new("call-reactions")
+                .ghost()
+                .p_0()
+                .size(px(CONTROL_SIZE))
+                .rounded_full()
+                .child(face),
+        )
         .content(move |_, _, cx| {
             let popover = cx.entity().downgrade();
-            h_flex().id("call-reactions-row").gap(px(4.)).children(Reaction::ALL.into_iter().map(|reaction| {
-                let app = app.clone();
-                let popover = popover.clone();
-                div()
-                    .id(reaction.name())
-                    .size(px(REACTION_CELL))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(8.))
-                    .text_size(px(24.))
-                    .cursor_pointer()
-                    .hover(|cell| cell.bg(theme::border_strong()))
-                    .child(reaction_glyph(reaction))
-                    .on_click(move |_, window, cx| {
-                        app.update(cx, |state, cx| state.send_call_reaction(reaction, cx));
-                        popover.update(cx, |state, cx| state.dismiss(window, cx)).ok();
-                    })
-            }))
+            h_flex()
+                .id("call-reactions-row")
+                .gap(px(4.))
+                .children(Reaction::ALL.into_iter().map(|reaction| {
+                    let app = app.clone();
+                    let popover = popover.clone();
+                    div()
+                        .id(reaction.name())
+                        .size(px(REACTION_CELL))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(8.))
+                        .text_size(px(24.))
+                        .cursor_pointer()
+                        .hover(|cell| cell.bg(theme::border_strong()))
+                        .child(reaction_glyph(reaction))
+                        .on_click(move |_, window, cx| {
+                            app.update(cx, |state, cx| state.send_call_reaction(reaction, cx));
+                            popover
+                                .update(cx, |state, cx| state.dismiss(window, cx))
+                                .ok();
+                        })
+                }))
         })
         .into_any_element()
 }
@@ -603,12 +735,15 @@ fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
             let popup = popup.min_w(px(MENU_WIDTH)).item(
                 PopupMenuItem::new("Leave")
                     .icon(IconName::PhoneOff)
-                    .on_click(move |_, _, cx| leave_app.update(cx, |state, cx| state.leave_call(cx))),
+                    .on_click(move |_, _, cx| {
+                        leave_app.update(cx, |state, cx| state.leave_call(cx))
+                    }),
             );
             let popup = if can_lower_all {
                 popup.item(
-                    PopupMenuItem::new("Lower all hands")
-                        .on_click(move |_, _, cx| lower_app.update(cx, |state, cx| state.lower_all_call_hands(cx))),
+                    PopupMenuItem::new("Lower all hands").on_click(move |_, _, cx| {
+                        lower_app.update(cx, |state, cx| state.lower_all_call_hands(cx))
+                    }),
                 )
             } else {
                 popup
@@ -617,7 +752,9 @@ fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
                 popup.item(
                     PopupMenuItem::new("End meeting for everyone")
                         .icon(IconName::PhoneOff)
-                        .on_click(move |_, _, cx| end_app.update(cx, |state, cx| state.end_meeting_for_all(cx))),
+                        .on_click(move |_, _, cx| {
+                            end_app.update(cx, |state, cx| state.end_meeting_for_all(cx))
+                        }),
                 )
             } else {
                 popup
@@ -645,12 +782,20 @@ pub(super) fn device_items(
 fn devices_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
     let input_app = app.clone();
     let output_app = app.clone();
-    let inputs = device_items(model.devices.input_entries(), &model.input, move |choice, cx| {
-        input_app.update(cx, |state, cx| state.select_call_input(choice, cx));
-    });
-    let outputs = device_items(model.devices.output_entries(), &model.output, move |choice, cx| {
-        output_app.update(cx, |state, cx| state.select_call_output(choice, cx));
-    });
+    let inputs = device_items(
+        model.devices.input_entries(),
+        &model.input,
+        move |choice, cx| {
+            input_app.update(cx, |state, cx| state.select_call_input(choice, cx));
+        },
+    );
+    let outputs = device_items(
+        model.devices.output_entries(),
+        &model.output,
+        move |choice, cx| {
+            output_app.update(cx, |state, cx| state.select_call_output(choice, cx));
+        },
+    );
     let mut popup = popup
         .min_w(px(MENU_WIDTH))
         .item(PopupMenuItem::label("Microphone"));
@@ -687,11 +832,20 @@ fn devices_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement
         })
 }
 
-fn person_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, remote: &Tile, size: TileSize, now: Instant) -> AnyElement {
+fn person_tile(
+    app: &Entity<AppState>,
+    state: &AppState,
+    model: &CallModel,
+    remote: &Tile,
+    size: TileSize,
+    now: Instant,
+) -> AnyElement {
     let extras = TileExtras {
         hand: remote.hand.map(|rank| model.hand_position(rank)),
         own: false,
-        reaction: model.chip_of(&remote.mri, now).map(|chip| (chip.reaction, chip.serial)),
+        reaction: model
+            .chip_of(&remote.mri, now)
+            .map(|chip| (chip.reaction, chip.serial)),
         spotlight: remote.spotlight.is_some(),
         pinned: model.is_pinned(&remote.mri),
     };
@@ -699,25 +853,70 @@ fn person_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, remo
     with_tile_menu(app, model, &remote.mri, &remote.name, false, element)
 }
 
-fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: TileSize, now: Instant, extras: &TileExtras) -> AnyElement {
+fn person_tile_body(
+    state: &AppState,
+    model: &CallModel,
+    remote: &Tile,
+    size: TileSize,
+    now: Instant,
+    extras: &TileExtras,
+) -> AnyElement {
     let video = state
         .call
         .as_ref()
         .filter(|_| remote.has_video || model.is_one_to_one())
-        .and_then(|call| call.pictures.live(&VideoKey::Person(remote.mri.clone()), now));
+        .and_then(|call| {
+            call.pictures
+                .live(&VideoKey::Person(remote.mri.clone()), now)
+        });
     if let Some(image) = video {
-        return video_tile(size, image, &remote.name, model.tile_speaking(remote), remote.muted, extras).into_any_element();
+        return video_tile(
+            size,
+            image,
+            &remote.name,
+            model.tile_speaking(remote),
+            remote.muted,
+            extras,
+        )
+        .into_any_element();
     }
     let waiting = remote.state == TileState::Invited;
-    let avatar = person_avatar(&state.directory, remote.user_id.as_deref(), &remote.name, size.avatar);
+    let avatar = person_avatar(
+        &state.directory,
+        remote.user_id.as_deref(),
+        &remote.name,
+        size.avatar,
+    );
     let caption = model.tile_caption(remote).map(|text| {
-        let label = div().text_size(px(12.)).text_color(theme::text_muted()).child(text);
-        if waiting { blinking(label) } else { label.into_any_element() }
+        let label = div()
+            .text_size(px(12.))
+            .text_color(theme::text_muted())
+            .child(text);
+        if waiting {
+            blinking(label)
+        } else {
+            label.into_any_element()
+        }
     });
-    tile(size, avatar, &remote.name, model.tile_speaking(remote), remote.muted, caption, extras).into_any_element()
+    tile(
+        size,
+        avatar,
+        &remote.name,
+        model.tile_speaking(remote),
+        remote.muted,
+        caption,
+        extras,
+    )
+    .into_any_element()
 }
 
-fn own_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: TileSize, now: Instant) -> AnyElement {
+fn own_tile(
+    app: &Entity<AppState>,
+    state: &AppState,
+    model: &CallModel,
+    size: TileSize,
+    now: Instant,
+) -> AnyElement {
     let own_mri = model.own_mri.clone().unwrap_or_default();
     let extras = TileExtras {
         hand: model.own_hand.map(|rank| model.hand_position(rank)),
@@ -733,14 +932,28 @@ fn own_tile(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: T
     with_tile_menu(app, model, &own_mri, "You", true, element)
 }
 
-fn own_tile_body(state: &AppState, model: &CallModel, size: TileSize, now: Instant, extras: &TileExtras) -> AnyElement {
+fn own_tile_body(
+    state: &AppState,
+    model: &CallModel,
+    size: TileSize,
+    now: Instant,
+    extras: &TileExtras,
+) -> AnyElement {
     let me = state.directory.me.as_ref();
     let self_view = state
         .call
         .as_ref()
         .and_then(|call| call.pictures.live(&VideoKey::LocalCamera, now));
     if let Some(image) = self_view {
-        return video_tile(size, image, "You", model.local_speaking, model.muted, extras).into_any_element();
+        return video_tile(
+            size,
+            image,
+            "You",
+            model.local_speaking,
+            model.muted,
+            extras,
+        )
+        .into_any_element();
     }
     let avatar = person_avatar(
         &state.directory,
@@ -748,10 +961,26 @@ fn own_tile_body(state: &AppState, model: &CallModel, size: TileSize, now: Insta
         me.map_or("You", |person| person.display_name.as_str()),
         size.avatar,
     );
-    tile(size, avatar, "You", model.local_speaking, model.muted, None, extras).into_any_element()
+    tile(
+        size,
+        avatar,
+        "You",
+        model.local_speaking,
+        model.muted,
+        None,
+        extras,
+    )
+    .into_any_element()
 }
 
-fn remote_tiles(app: &Entity<AppState>, state: &AppState, model: &CallModel, size: TileSize, hidden_cap: GridLayout, now: Instant) -> Vec<AnyElement> {
+fn remote_tiles(
+    app: &Entity<AppState>,
+    state: &AppState,
+    model: &CallModel,
+    size: TileSize,
+    hidden_cap: GridLayout,
+    now: Instant,
+) -> Vec<AnyElement> {
     let visible = model.visible_tiles();
     let mut cells: Vec<AnyElement> = visible
         .iter()
@@ -764,7 +993,13 @@ fn remote_tiles(app: &Entity<AppState>, state: &AppState, model: &CallModel, siz
     cells
 }
 
-fn people_strip(app: &Entity<AppState>, state: &AppState, model: &CallModel, now: Instant, focused: Option<&str>) -> Stateful<Div> {
+fn people_strip(
+    app: &Entity<AppState>,
+    state: &AppState,
+    model: &CallModel,
+    now: Instant,
+    focused: Option<&str>,
+) -> Stateful<Div> {
     let mut cells: Vec<AnyElement> = model
         .strip_tiles()
         .into_iter()
@@ -779,13 +1014,19 @@ fn people_strip(app: &Entity<AppState>, state: &AppState, model: &CallModel, now
         .id("call-strip")
         .flex_none()
         .w(px(STRIP_TILE.width))
-        .max_h(px(STRIP_VISIBLE * (STRIP_TILE.height + STRIP_GAP) - STRIP_GAP))
+        .max_h(px(
+            STRIP_VISIBLE * (STRIP_TILE.height + STRIP_GAP) - STRIP_GAP
+        ))
         .gap(px(STRIP_GAP))
         .overflow_y_scroll()
         .children(cells)
 }
 
-pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<Entity<ConversationView>>) -> Option<AnyElement> {
+pub fn render_call_view(
+    app: &Entity<AppState>,
+    state: &AppState,
+    chat: Option<Entity<ConversationView>>,
+) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
     let model = &call.model;
     let now = Instant::now();
@@ -806,15 +1047,29 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(model.title.clone()),
         )
-        .child(div().flex_none().text_size(px(13.)).text_color(status_color).child(status))
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(13.))
+                .text_color(status_color)
+                .child(status),
+        )
         .children(recording_chip(model))
         .children(room_chip(model))
         .child(div().flex_1())
         .children(return_button(app, model));
 
-    let max_tiles = if chat.is_some() { CHAT_OPEN_TILES } else { MAX_TILES };
+    let max_tiles = if chat.is_some() {
+        CHAT_OPEN_TILES
+    } else {
+        MAX_TILES
+    };
     let layout = grid_layout(model.visible_tiles().len(), max_tiles);
-    let cells_for_size = if chat.is_some() { MAX_TILES } else { layout.shown_others + usize::from(layout.hidden > 0) + 1 };
+    let cells_for_size = if chat.is_some() {
+        MAX_TILES
+    } else {
+        layout.shown_others + usize::from(layout.hidden > 0) + 1
+    };
     let size = tile_size(cells_for_size);
     let mut cells = remote_tiles(app, state, model, size, layout, now);
     let own_index = model.own_cell_index(cells.len());
@@ -822,7 +1077,11 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
     let focus = model.focus().filter(|_| model.screen_sharer.is_none());
     let stage = render_stage(app, state, false)
         .or_else(|| whiteboard_stage(app, model))
-        .or_else(|| focus.as_ref().and_then(|focus| render_focus_stage(app, state, focus, now)));
+        .or_else(|| {
+            focus
+                .as_ref()
+                .and_then(|focus| render_focus_stage(app, state, focus, now))
+        });
     let hold = hold_panel(app, model);
     let focused = focus.as_ref().map(|focus| focus.mri.as_str());
 
@@ -834,57 +1093,72 @@ pub fn render_call_view(app: &Entity<AppState>, state: &AppState, chat: Option<E
         .items_center()
         .justify_center()
         .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
-        .child(h_flex().h(px(CONTROL_SIZE)).items_center().rounded_full().bg(theme::surface_raised()).child(camera_button(app, model)).children(camera_menu_button(app, model, BackgroundMenu::of(state))))
+        .child(
+            h_flex()
+                .h(px(CONTROL_SIZE))
+                .items_center()
+                .rounded_full()
+                .bg(theme::surface_raised())
+                .child(camera_button(app, model))
+                .children(camera_menu_button(app, model, BackgroundMenu::of(state))),
+        )
         .child(share_button(app, model, state.call_share_sound))
-        .when(model.has_reaction_controls(), |row| row.child(hand_button(app, model)).child(reactions_button(app, model)))
+        .when(model.has_reaction_controls(), |row| {
+            row.child(hand_button(app, model))
+                .child(reactions_button(app, model))
+        })
         .child(devices_button(app, model))
         .children(more_button(app, model))
-        .when(call.chat_thread().is_some(), |row| row.child(chat_button(app, call.chat_open, state.call_chat_unread())))
+        .when(call.chat_thread().is_some(), |row| {
+            row.child(chat_button(app, call.chat_open, state.call_chat_unread()))
+        })
         .child(leave_button(app, model, "call-leave", false))
-        .when(model.kind == CallKind::Meeting, |row| row.child(leave_menu(app, model)));
+        .when(model.kind == CallKind::Meeting, |row| {
+            row.child(leave_menu(app, model))
+        });
 
     let column = v_flex()
-            .relative()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .rounded(px(10.))
-            .overflow_hidden()
-            .bg(theme::surface())
-            .child(header)
-            .children(lobby_banner(app, model))
-            .children(sharing_banner(app, model, state.call_share_sound))
-            .children(consult_banner(app, state))
-            .child(match stage {
-                _ if hold.is_some() => hold.expect("checked above"),
-                Some(stage) => h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .p(px(GRID_PADDING))
-                    .gap(px(TILE_GAP))
-                    .items_center()
-                    .child(stage)
-                    .child(people_strip(app, state, model, now, focused))
-                    .into_any_element(),
-                None => h_flex()
-                    .id("call-grid")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex_wrap()
-                    .content_center()
-                    .p(px(GRID_PADDING))
-                    .gap(px(TILE_GAP))
-                    .items_center()
-                    .justify_center()
-                    .children(cells)
-                    .into_any_element(),
-            })
-            .child(controls)
-            .children(captions_overlay(model, now))
-            .children(captions_hint_chip(model))
-            .children(state.transfer_picker.clone())
-            .children(consent_overlay(app, model));
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .rounded(px(10.))
+        .overflow_hidden()
+        .bg(theme::surface())
+        .child(header)
+        .children(lobby_banner(app, model))
+        .children(sharing_banner(app, model, state.call_share_sound))
+        .children(consult_banner(app, state))
+        .child(match stage {
+            _ if hold.is_some() => hold.expect("checked above"),
+            Some(stage) => h_flex()
+                .flex_1()
+                .min_h_0()
+                .p(px(GRID_PADDING))
+                .gap(px(TILE_GAP))
+                .items_center()
+                .child(stage)
+                .child(people_strip(app, state, model, now, focused))
+                .into_any_element(),
+            None => h_flex()
+                .id("call-grid")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .flex_wrap()
+                .content_center()
+                .p(px(GRID_PADDING))
+                .gap(px(TILE_GAP))
+                .items_center()
+                .justify_center()
+                .children(cells)
+                .into_any_element(),
+        })
+        .child(controls)
+        .children(captions_overlay(model, now))
+        .children(captions_hint_chip(model))
+        .children(state.transfer_picker.clone())
+        .children(consent_overlay(app, model));
     Some(
         h_flex()
             .flex_1()
@@ -916,7 +1190,12 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
                 .pr(px(12.))
                 .items_center()
                 .justify_between()
-                .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("Chat"))
+                .child(
+                    div()
+                        .text_size(px(15.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Chat"),
+                )
                 .child(
                     div()
                         .id("call-chat-close")
@@ -929,7 +1208,9 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
                         .hover(|button| button.bg(theme::row_hover()))
                         .tooltip(|window, cx| Tooltip::new("Close the chat").build(window, cx))
                         .child(icon(IconName::Close, 14., theme::text_muted()))
-                        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_chat(cx))),
+                        .on_click(move |_, _, cx| {
+                            app.update(cx, |state, cx| state.toggle_call_chat(cx))
+                        }),
                 ),
         )
         .child(chat)

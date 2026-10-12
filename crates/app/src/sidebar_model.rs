@@ -400,28 +400,33 @@ pub fn visible_channel_ids<'a>(input: &ChannelOrderInput<'a>) -> Vec<&'a str> {
             .teams
             .iter()
             .any(|entry| entry.hidden && holds_selection(entry));
-    let teams = input
-        .teams
-        .iter()
-        .filter(|entry| !entry.hidden)
-        .chain(
-            input
-                .teams
-                .iter()
-                .filter(|entry| entry.hidden && hidden_teams_shown),
-        );
+    let teams = input.teams.iter().filter(|entry| !entry.hidden).chain(
+        input
+            .teams
+            .iter()
+            .filter(|entry| entry.hidden && hidden_teams_shown),
+    );
     for entry in teams {
         if input.collapsed_teams.contains(&entry.team.id) {
             continue;
         }
         let is_hidden = |channel: &ChannelRecord| entry.hidden_channel_ids.contains(&channel.id);
-        let is_selected = |channel: &ChannelRecord| Some(channel.id.as_str()) == input.selected_channel;
+        let is_selected =
+            |channel: &ChannelRecord| Some(channel.id.as_str()) == input.selected_channel;
         let revealed = input.revealed_channel_teams.contains(&entry.team.id);
-        for channel in entry.channels.iter().filter(|channel| !is_hidden(channel) || is_selected(channel)) {
+        for channel in entry
+            .channels
+            .iter()
+            .filter(|channel| !is_hidden(channel) || is_selected(channel))
+        {
             push(&channel.id);
         }
         if revealed {
-            for channel in entry.channels.iter().filter(|channel| is_hidden(channel) && !is_selected(channel)) {
+            for channel in entry
+                .channels
+                .iter()
+                .filter(|channel| is_hidden(channel) && !is_selected(channel))
+            {
                 push(&channel.id);
             }
         }
@@ -604,11 +609,17 @@ mod tests {
     fn stepping_follows_the_visible_order_without_wrapping() {
         let ids = ["a", "b", "c"];
         assert_eq!(step_id(&ids, Some("a"), Step::Next), Some("b".to_owned()));
-        assert_eq!(step_id(&ids, Some("b"), Step::Previous), Some("a".to_owned()));
+        assert_eq!(
+            step_id(&ids, Some("b"), Step::Previous),
+            Some("a".to_owned())
+        );
         assert_eq!(step_id(&ids, Some("c"), Step::Next), None);
         assert_eq!(step_id(&ids, Some("a"), Step::Previous), None);
         assert_eq!(step_id(&ids, None, Step::Next), Some("a".to_owned()));
-        assert_eq!(step_id(&ids, Some("gone"), Step::Previous), Some("c".to_owned()));
+        assert_eq!(
+            step_id(&ids, Some("gone"), Step::Previous),
+            Some("c".to_owned())
+        );
         assert_eq!(step_id(&[], None, Step::Next), None);
     }
 
@@ -638,7 +649,12 @@ mod tests {
         assert_eq!(visible_chat_ids(&sections), vec!["fav", "other"]);
     }
 
-    fn team(id: &str, hidden: bool, channel_ids: &[&str], hidden_channel_ids: &[&str]) -> SidebarTeam {
+    fn team(
+        id: &str,
+        hidden: bool,
+        channel_ids: &[&str],
+        hidden_channel_ids: &[&str],
+    ) -> SidebarTeam {
         SidebarTeam {
             team: store::TeamRecord {
                 id: id.into(),
@@ -656,7 +672,10 @@ mod tests {
                 })
                 .collect(),
             hidden,
-            hidden_channel_ids: hidden_channel_ids.iter().map(|id| (*id).to_owned()).collect(),
+            hidden_channel_ids: hidden_channel_ids
+                .iter()
+                .map(|id| (*id).to_owned())
+                .collect(),
             notifications: HashMap::new(),
         }
     }
@@ -673,7 +692,11 @@ mod tests {
                      hidden_teams_open: bool,
                      collapsed: &[&str],
                      revealed: &[&str]| {
-            let to_set = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<HashSet<_>>();
+            let to_set = |ids: &[&str]| {
+                ids.iter()
+                    .map(|id| (*id).to_owned())
+                    .collect::<HashSet<_>>()
+            };
             let (collapsed, revealed) = (to_set(collapsed), to_set(revealed));
             let input = ChannelOrderInput {
                 teams: &teams,
@@ -683,13 +706,25 @@ mod tests {
                 hidden_teams_open,
                 selected_channel: selected,
             };
-            visible_channel_ids(&input).into_iter().map(str::to_owned).collect::<Vec<_>>()
+            visible_channel_ids(&input)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
         };
         assert_eq!(order(None, false, &[], &[]), vec!["e", "a", "c", "d"]);
-        assert_eq!(order(Some("b"), false, &[], &[]), vec!["e", "a", "b", "c", "d"]);
-        assert_eq!(order(Some("f"), false, &[], &[]), vec!["e", "a", "c", "d", "f"]);
+        assert_eq!(
+            order(Some("b"), false, &[], &[]),
+            vec!["e", "a", "b", "c", "d"]
+        );
+        assert_eq!(
+            order(Some("f"), false, &[], &[]),
+            vec!["e", "a", "c", "d", "f"]
+        );
         assert_eq!(order(None, true, &[], &[]), vec!["e", "a", "c", "d", "f"]);
-        assert_eq!(order(None, true, &["t2"], &["t1"]), vec!["e", "a", "c", "b", "f"]);
+        assert_eq!(
+            order(None, true, &["t2"], &["t1"]),
+            vec!["e", "a", "c", "b", "f"]
+        );
     }
 
     #[test]

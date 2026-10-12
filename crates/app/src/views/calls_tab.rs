@@ -148,7 +148,11 @@ fn join_button(id: &'static str, label: &'static str, primary: bool) -> Stateful
     let (fill, hover_fill, text_color) = if primary {
         (theme::accent(), theme::accent_text(), theme::on_accent())
     } else {
-        (theme::surface_raised(), theme::popup_hover(), theme::text_strong())
+        (
+            theme::surface_raised(),
+            theme::popup_hover(),
+            theme::text_strong(),
+        )
     };
     div()
         .id(id)
@@ -332,9 +336,11 @@ pub fn calls_body(
             ListEntry::Section(title) => section_header(title),
             ListEntry::Day(label) => day_header(label),
             ListEntry::Empty(text) => empty_row(text),
-            ListEntry::Agenda(row) => {
-                agenda_row(state, row, join_available(row.start, row.end, now) && row.join_url.is_some())
-            }
+            ListEntry::Agenda(row) => agenda_row(
+                state,
+                row,
+                join_available(row.start, row.end, now) && row.join_url.is_some(),
+            ),
             ListEntry::Call(row) => call_row(
                 state,
                 row,

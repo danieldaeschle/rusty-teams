@@ -211,12 +211,18 @@ mod tests {
     #[test]
     fn post_time_adds_the_day_when_not_today() {
         assert_eq!(post_time_label(utc(7, 13), today(), zero()), "13:05");
-        assert_eq!(post_time_label(utc(6, 9), today(), zero()), "Yesterday 09:05");
+        assert_eq!(
+            post_time_label(utc(6, 9), today(), zero()),
+            "Yesterday 09:05"
+        );
         assert_eq!(post_time_label(utc(5, 13), today(), zero()), "Mon 13:05");
         let september = Utc.with_ymd_and_hms(2026, 9, 30, 8, 42, 0).unwrap();
         assert_eq!(post_time_label(september, today(), zero()), "Sep 30 08:42");
         let last_year = Utc.with_ymd_and_hms(2020, 5, 22, 8, 42, 0).unwrap();
-        assert_eq!(post_time_label(last_year, today(), zero()), "May 22, 2020 08:42");
+        assert_eq!(
+            post_time_label(last_year, today(), zero()),
+            "May 22, 2020 08:42"
+        );
     }
 
     #[test]

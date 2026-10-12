@@ -145,7 +145,9 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .rounded(px(10.))
         .cursor_pointer()
         .when(active, |button| button.bg(theme::surface_raised()))
-        .when(!active, |button| button.hover(|button| button.bg(theme::row_hover())))
+        .when(!active, |button| {
+            button.hover(|button| button.bg(theme::row_hover()))
+        })
         .child(icon(item.icon, ICON_SIZE, color))
         .child(
             div()

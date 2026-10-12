@@ -35,10 +35,10 @@ use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
-use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
+use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
@@ -53,7 +53,6 @@ use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
-use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
@@ -64,9 +63,10 @@ use crate::rows::{
     reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
-use crate::translation::TranslationLine;
+use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
+use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
 use feed::{FeedStash, subject_input};
 use render_env::RenderEnv;
@@ -416,11 +416,21 @@ impl ConversationView {
         Self::build(app, None, window, cx)
     }
 
-    pub fn pinned_to(app: Entity<AppState>, selection: Selection, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn pinned_to(
+        app: Entity<AppState>,
+        selection: Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self::build(app, Some(selection), window, cx)
     }
 
-    fn build(app: Entity<AppState>, pinned: Option<Selection>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn build(
+        app: Entity<AppState>,
+        pinned: Option<Selection>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
         let subject = subject_input(window, cx);
@@ -744,7 +754,11 @@ impl ConversationView {
             _ => member_stack(&app.directory, &faces, faces.len()).into_any_element(),
         };
         h_flex()
-            .h(px(if flat { AVATAR_SIZE + 4. } else { TYPING_LINE_HEIGHT }))
+            .h(px(if flat {
+                AVATAR_SIZE + 4.
+            } else {
+                TYPING_LINE_HEIGHT
+            }))
             .flex_none()
             .px(px(20.))
             .gap(px(if flat { AVATAR_GAP } else { 6. }))
@@ -2709,8 +2723,9 @@ impl ConversationView {
                 }
             })
             .collect();
-        let manage_agents = (!entries.is_empty())
-            .then(|| Rc::new(|_: &mut Window, cx: &mut App| crate::agents::open_settings(cx)) as Action);
+        let manage_agents = (!entries.is_empty()).then(|| {
+            Rc::new(|_: &mut Window, cx: &mut App| crate::agents::open_settings(cx)) as Action
+        });
         (entries, manage_agents)
     }
 

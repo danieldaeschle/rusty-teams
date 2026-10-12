@@ -9,6 +9,7 @@ use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
 use super::layout::{self, Slot, ring_height};
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
+use super::ring_view::RingView;
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide, in_call,
     should_flash, should_ringback,
@@ -19,7 +20,6 @@ use super::stack::{
     AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
 use super::text::describe;
-use super::ring_view::RingView;
 use super::toast::{PillView, ToastView};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, Selection};
@@ -149,7 +149,8 @@ impl NotificationCenter {
             }
             if let Some(delay) = demo_ring_delay() {
                 let app = center.app.clone();
-                let video = std::env::var(DEMO_RING_KIND_ENV).is_ok_and(|kind| kind.trim() == "video");
+                let video =
+                    std::env::var(DEMO_RING_KIND_ENV).is_ok_and(|kind| kind.trim() == "video");
                 cx.spawn(async move |_, cx| {
                     cx.background_executor().timer(delay).await;
                     app.update(cx, |state, cx| {
@@ -200,7 +201,11 @@ impl NotificationCenter {
     }
 
     fn animated(&self, duration: Duration) -> Duration {
-        if self.animations { duration } else { Duration::ZERO }
+        if self.animations {
+            duration
+        } else {
+            Duration::ZERO
+        }
     }
 
     pub fn directory<'a>(&self, cx: &'a App) -> &'a Directory {
@@ -304,11 +309,8 @@ impl NotificationCenter {
         }
         let decision = decide(&self.settings, &incoming, environment);
         self.present(&incoming, decision, cx);
-        if should_flash(
-            &self.settings,
-            decision.toast,
-            self.main_window_active(cx),
-        ) && let Some(native) = self.main_native
+        if should_flash(&self.settings, decision.toast, self.main_window_active(cx))
+            && let Some(native) = self.main_native
         {
             platform::flash(native);
         }
@@ -345,12 +347,21 @@ impl NotificationCenter {
         let toast = AgentToast {
             run_id: run.id,
             session_id: run.session_id.clone(),
-            header: format!("{} - {} - {}", run.action_label, run.agent_name, run.elapsed_text()),
+            header: format!(
+                "{} - {} - {}",
+                run.action_label,
+                run.agent_name,
+                run.elapsed_text()
+            ),
             title: format!(
                 "{} {verb}: {} for {}",
                 run.agent_name, run.action_label, run.sender_name
             ),
-            body: if body.is_empty() { "Done".to_owned() } else { body },
+            body: if body.is_empty() {
+                "Done".to_owned()
+            } else {
+                body
+            },
             failed,
         };
         let now = Instant::now();
@@ -467,7 +478,13 @@ impl NotificationCenter {
         }
     }
 
-    fn open_ring_window(&mut self, ring_id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
+    fn open_ring_window(
+        &mut self,
+        ring_id: u64,
+        slot: Slot,
+        area: WorkArea,
+        cx: &mut Context<Self>,
+    ) {
         if !self.ring_opening.insert(ring_id) {
             return;
         }
@@ -498,7 +515,10 @@ impl NotificationCenter {
 
     fn on_rings_changed(&mut self, cx: &mut Context<Self>) {
         let ringing = self.app.read(cx).rings.is_ringing();
-        if ringing && !self.main_window_active(cx) && let Some(native) = self.main_native {
+        if ringing
+            && !self.main_window_active(cx)
+            && let Some(native) = self.main_native
+        {
             platform::flash(native);
         }
         self.sync_windows(cx);
@@ -516,7 +536,8 @@ impl NotificationCenter {
     }
 
     fn sync_ringback(&mut self, cx: &Context<Self>) {
-        let audible = should_ringback(self.app.read(cx).call.as_ref().map(|call| &call.model)) && !self.demo_mode;
+        let audible = should_ringback(self.app.read(cx).call.as_ref().map(|call| &call.model))
+            && !self.demo_mode;
         match (audible, self.ringback.is_some()) {
             (true, false) => self.ringback = platform::start_ringback(),
             (false, true) => self.ringback = None,
@@ -572,12 +593,7 @@ impl NotificationCenter {
         );
     }
 
-    fn sync_pill(
-        &mut self,
-        slot: Option<Slot>,
-        area: WorkArea,
-        cx: &mut Context<Self>,
-    ) {
+    fn sync_pill(&mut self, slot: Option<Slot>, area: WorkArea, cx: &mut Context<Self>) {
         let Some(slot) = slot else {
             if let Some(pill) = self.pill.take() {
                 pill.handle
@@ -670,7 +686,11 @@ impl NotificationCenter {
         if !self.app.read(cx).rings.is_empty() {
             self.app.update(cx, |state, cx| state.tick_rings(cx));
         }
-        if !self.stack.is_empty() || !self.windows.is_empty() || self.pill.is_some() || !self.ring_windows.is_empty() {
+        if !self.stack.is_empty()
+            || !self.windows.is_empty()
+            || self.pill.is_some()
+            || !self.ring_windows.is_empty()
+        {
             self.sync_windows(cx);
             cx.notify();
         }
@@ -894,7 +914,12 @@ impl NotificationCenter {
         self.show_settings(Section::Agents, true, cx);
     }
 
-    fn show_settings(&mut self, section: Section, switch_open_window: bool, cx: &mut Context<Self>) {
+    fn show_settings(
+        &mut self,
+        section: Section,
+        switch_open_window: bool,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(handle) = self.settings_window {
             let shown = handle.update(cx, |view, window, cx| {
                 window.activate_window();

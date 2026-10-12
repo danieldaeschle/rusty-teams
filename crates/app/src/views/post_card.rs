@@ -6,10 +6,10 @@ use gpui_kit::*;
 use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
-use super::profile_card::opens_profile;
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
+use super::profile_card::opens_profile;
 use super::reaction_pills::reaction_pills;
 use super::scheduled_toolbar::scheduled_toolbar;
 use super::toolbar_placement::placed_toolbar;
@@ -156,10 +156,10 @@ fn message_header(
                 div().id(ElementId::Name(format!("post-author-{index}").into())),
                 profile_user,
             )
-                .text_size(px(13.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
-                .child(author),
+            .text_size(px(13.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::text())
+            .child(author),
         )
         .child(
             div()

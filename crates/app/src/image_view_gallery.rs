@@ -130,7 +130,11 @@ mod tests {
         let mut deleted = record("d", 7, "<img src=\"https://x/deleted\">");
         deleted.deleted = true;
         let records = [
-            record("a", 6, "<p>first</p><img src=\"https://x/one\"><img src=\"https://x/two\">"),
+            record(
+                "a",
+                6,
+                "<p>first</p><img src=\"https://x/one\"><img src=\"https://x/two\">",
+            ),
             record("b", 6, "<p>no image</p>"),
             deleted,
             record("c", 7, "<img src=\"https://x/three\">"),
@@ -145,7 +149,11 @@ mod tests {
     #[test]
     fn items_carry_author_caption_and_time() {
         let records = [
-            record("a", 6, "<p>Release   notes</p><p>second line</p><img src=\"https://x/one\">"),
+            record(
+                "a",
+                6,
+                "<p>Release   notes</p><p>second line</p><img src=\"https://x/one\">",
+            ),
             record("b", 7, "<img src=\"https://x/two\">"),
         ];
         let items = collect_gallery(&rows(&records), today(), offset());

@@ -39,20 +39,23 @@ pub struct Slot {
 
 pub fn toast_height(model: &ToastModel, preview_lines: usize) -> f32 {
     if model.agent.is_some() {
-        return AGENT_CHROME_HEIGHT + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
+        return AGENT_CHROME_HEIGHT
+            + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
     }
     let base = BASE_HEIGHT + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
     match model.reply {
         ReplyState::Sent | ReplyState::Failed => CONFIRM_HEIGHT,
-        ReplyState::Open => {
-            base + REPLY_SPACING + SEND_BUTTON + REPLY_FIELD_FRAME + REPLY_HINT_ROW
-        }
+        ReplyState::Open => base + REPLY_SPACING + SEND_BUTTON + REPLY_FIELD_FRAME + REPLY_HINT_ROW,
         ReplyState::Closed => base + ACTION_ROW_SPACING + ACTION_BUTTON,
     }
 }
 
 pub fn ring_height(ends_current_call: bool) -> f32 {
-    if ends_current_call { RING_BASE_HEIGHT + RING_NOTE_HEIGHT } else { RING_BASE_HEIGHT }
+    if ends_current_call {
+        RING_BASE_HEIGHT + RING_NOTE_HEIGHT
+    } else {
+        RING_BASE_HEIGHT
+    }
 }
 
 pub struct StackSlots {
@@ -60,12 +63,7 @@ pub struct StackSlots {
     pub pill: Option<Slot>,
 }
 
-pub fn stack_slots(
-    area: WorkArea,
-    corner: Corner,
-    heights: &[f32],
-    with_pill: bool,
-) -> StackSlots {
+pub fn stack_slots(area: WorkArea, corner: Corner, heights: &[f32], with_pill: bool) -> StackSlots {
     let scale = area.scale;
     let physical = |value: f32| (value * scale).round() as i32;
     let width = physical(TOAST_WIDTH);
@@ -144,7 +142,10 @@ mod tests {
         let pill = slots.pill.unwrap();
         assert_eq!(pill.height, 36);
         assert_eq!(pill.y + pill.height + 8, slots.toasts[0].y);
-        assert_eq!((pill.x, pill.width), (slots.toasts[0].x, slots.toasts[0].width));
+        assert_eq!(
+            (pill.x, pill.width),
+            (slots.toasts[0].x, slots.toasts[0].width)
+        );
     }
 
     #[test]

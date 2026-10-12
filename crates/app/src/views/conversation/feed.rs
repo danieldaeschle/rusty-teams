@@ -247,12 +247,12 @@ impl ConversationView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .cursor_pointer()
                                     .hover(|button| button.bg(theme::accent_text()))
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.open_new_post(window, cx)),
-                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_new_post(window, cx)
+                                    }))
                                     .child(icon(IconName::Plus, 14., theme::on_accent()))
                                     .child("New post"),
-                            )
+                            ),
                     )
                     .into_any_element(),
             );

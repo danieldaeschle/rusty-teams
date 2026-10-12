@@ -9,7 +9,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use mcp::install::{Homes, InstallReport, InstallState, Location, Target};
+use mcp::install::{InstallReport, InstallState, Location, Target};
 use mcp::{Access, AgentPolicy};
 
 use super::settings_view::{control_row, switch, titled_with};
@@ -305,8 +305,9 @@ impl McpView {
         let Some(endpoint) = agent_api::configured_endpoint(cx) else {
             return;
         };
+        let demo = agent_api::is_demo(cx);
         let task = cx.background_spawn(async move {
-            let homes = Homes::detect();
+            let homes = agent_api::agent_homes(demo);
             Target::ALL
                 .map(|target| mcp::install::status(target, &endpoint, &homes))
                 .to_vec()
@@ -333,8 +334,9 @@ impl McpView {
         };
         self.install_busy = Some((target, action));
         self.install_errors.remove(&target);
+        let demo = agent_api::is_demo(cx);
         let task = cx.background_spawn(async move {
-            let homes = Homes::detect();
+            let homes = agent_api::agent_homes(demo);
             match action {
                 InstallAction::Remove => mcp::install::uninstall(target, &homes).map(|_| None),
                 _ => mcp::install::install(target, &endpoint, &homes).map(Some),

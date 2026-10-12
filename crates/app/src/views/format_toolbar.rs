@@ -299,8 +299,14 @@ fn arrow(offset: Pixels) -> impl IntoElement {
         move |bounds, _, window, _| {
             let tip = point(bounds.origin.x + offset, bounds.origin.y + px(ARROW_HEIGHT));
             let mut builder = PathBuilder::fill();
-            builder.move_to(point(tip.x - px(ARROW_WIDTH / 2.), bounds.origin.y - px(1.)));
-            builder.line_to(point(tip.x + px(ARROW_WIDTH / 2.), bounds.origin.y - px(1.)));
+            builder.move_to(point(
+                tip.x - px(ARROW_WIDTH / 2.),
+                bounds.origin.y - px(1.),
+            ));
+            builder.line_to(point(
+                tip.x + px(ARROW_WIDTH / 2.),
+                bounds.origin.y - px(1.),
+            ));
             builder.line_to(point(tip.x, tip.y));
             builder.close();
             if let Ok(path) = builder.build() {

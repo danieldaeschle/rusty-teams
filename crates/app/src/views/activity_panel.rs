@@ -165,13 +165,7 @@ impl ActivityPanel {
                             })),
                     ),
             )
-            .child(
-                h_flex()
-                    .px(px(16.))
-                    .pb(px(12.))
-                    .gap(px(6.))
-                    .children(pills),
-            )
+            .child(h_flex().px(px(16.)).pb(px(12.)).gap(px(6.)).children(pills))
     }
 
     fn row(
@@ -442,20 +436,16 @@ impl Render for ActivityPanel {
                     .into_any_element(),
             );
         }
-        v_flex()
-            .flex_1()
-            .min_h_0()
-            .child(self.header(cx))
-            .child(
-                v_flex()
-                    .id("activity-list")
-                    .flex_1()
-                    .min_h_0()
-                    .pb(px(12.))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .children(rows),
-            )
+        v_flex().flex_1().min_h_0().child(self.header(cx)).child(
+            v_flex()
+                .id("activity-list")
+                .flex_1()
+                .min_h_0()
+                .pb(px(12.))
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .children(rows),
+        )
     }
 }
 

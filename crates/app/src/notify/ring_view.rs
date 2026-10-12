@@ -39,7 +39,12 @@ impl RingView {
     }
 }
 
-fn answer_button(id: &'static str, label: &str, glyph: IconName, fill: Hsla) -> Stateful<gpui_kit::Div> {
+fn answer_button(
+    id: &'static str,
+    label: &str,
+    glyph: IconName,
+    fill: Hsla,
+) -> Stateful<gpui_kit::Div> {
     h_flex()
         .id(id)
         .h(px(BUTTON_HEIGHT))
@@ -79,7 +84,10 @@ impl Render for RingView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.app.read(cx);
         let Some(entry) = state.rings.get(self.ring_id).cloned() else {
-            return div().size_full().bg(theme::surface_raised()).into_any_element();
+            return div()
+                .size_full()
+                .bg(theme::surface_raised())
+                .into_any_element();
         };
         window.set_window_title(&format!("{}: {}", entry.caller_name(), entry.subtitle()));
         let ends_current = state.call.is_some();
@@ -87,23 +95,36 @@ impl Render for RingView {
         let ring_id = self.ring_id;
         let decline_app = self.app.clone();
         let accept_app = self.app.clone();
-        let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red()).on_click(
-            move |_, _, cx| {
+        let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red())
+            .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 decline_app.update(cx, |state, cx| state.decline_ring(ring_id, cx));
-            },
-        );
-        let accept = answer_button("ring-accept", entry.accept_label(), IconName::Phone, theme::green()).on_click(
-            move |_, _, cx| {
-                cx.stop_propagation();
-                accept_app.update(cx, |state, cx| state.accept_ring(ring_id, AcceptMode::Audio, cx));
-            },
-        );
+            });
+        let accept = answer_button(
+            "ring-accept",
+            entry.accept_label(),
+            IconName::Phone,
+            theme::green(),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            accept_app.update(cx, |state, cx| {
+                state.accept_ring(ring_id, AcceptMode::Audio, cx)
+            });
+        });
         let video_app = self.app.clone();
         let accept_video = entry.ring.video.then(|| {
-            answer_button("ring-accept-video", "Video", IconName::Video, theme::green()).on_click(move |_, _, cx| {
+            answer_button(
+                "ring-accept-video",
+                "Video",
+                IconName::Video,
+                theme::green(),
+            )
+            .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                video_app.update(cx, |state, cx| state.accept_ring(ring_id, AcceptMode::Video, cx));
+                video_app.update(cx, |state, cx| {
+                    state.accept_ring(ring_id, AcceptMode::Video, cx)
+                });
             })
         });
         div()
@@ -148,7 +169,14 @@ impl Render for RingView {
                                             .child(ENDS_CURRENT_CALL),
                                     )
                                 })
-                                .child(h_flex().mt(px(8.)).gap(px(6.)).child(decline).child(accept).children(accept_video)),
+                                .child(
+                                    h_flex()
+                                        .mt(px(8.))
+                                        .gap(px(6.))
+                                        .child(decline)
+                                        .child(accept)
+                                        .children(accept_video),
+                                ),
                         ),
                 ),
             )

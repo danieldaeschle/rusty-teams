@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
 use calling::Progress;
+use chrono::{DateTime, Utc};
 use store::{ChannelNotificationLevel, ChannelNotifications};
 
 use super::ring_tone::Ringtone;
@@ -345,12 +345,29 @@ mod tests {
         };
         let since = std::time::Instant::now();
         assert!(!should_ringback(None));
-        assert!(!should_ringback(Some(&outgoing(None, CallState::Connecting))));
-        assert!(should_ringback(Some(&outgoing(Some(Progress::Calling), CallState::Connecting))));
-        assert!(should_ringback(Some(&outgoing(Some(Progress::Ringing), CallState::Connecting))));
-        assert!(!should_ringback(Some(&outgoing(Some(Progress::Ringing), CallState::Connected { since }))));
-        let ended = CallState::Ended { reason: EndReason::LocalHangup };
-        assert!(!should_ringback(Some(&outgoing(Some(Progress::Ringing), ended))));
+        assert!(!should_ringback(Some(&outgoing(
+            None,
+            CallState::Connecting
+        ))));
+        assert!(should_ringback(Some(&outgoing(
+            Some(Progress::Calling),
+            CallState::Connecting
+        ))));
+        assert!(should_ringback(Some(&outgoing(
+            Some(Progress::Ringing),
+            CallState::Connecting
+        ))));
+        assert!(!should_ringback(Some(&outgoing(
+            Some(Progress::Ringing),
+            CallState::Connected { since }
+        ))));
+        let ended = CallState::Ended {
+            reason: EndReason::LocalHangup,
+        };
+        assert!(!should_ringback(Some(&outgoing(
+            Some(Progress::Ringing),
+            ended
+        ))));
         let mut meeting = CallModel::meeting("Standup", false);
         meeting.progress = Some(Progress::Calling);
         assert!(!should_ringback(Some(&meeting)));

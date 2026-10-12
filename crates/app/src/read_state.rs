@@ -10,11 +10,7 @@ pub struct ReadPlan {
     pub clear_divider: bool,
 }
 
-pub fn plan_read(
-    window_active: bool,
-    chat_unread: bool,
-    trigger: ReadTrigger,
-) -> Option<ReadPlan> {
+pub fn plan_read(window_active: bool, chat_unread: bool, trigger: ReadTrigger) -> Option<ReadPlan> {
     if !window_active || !chat_unread {
         return None;
     }

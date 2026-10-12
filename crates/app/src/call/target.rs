@@ -65,10 +65,17 @@ mod tests {
 
     #[test]
     fn a_one_on_one_chat_calls_the_other_person_by_name() {
-        let chat = chat("oneOnOne", "", &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea")]);
+        let chat = chat(
+            "oneOnOne",
+            "",
+            &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea")],
+        );
         let plan = plan_for_chat(&chat, Some(&me())).unwrap();
         assert_eq!(plan.title, "Bea");
-        assert_eq!(plan.callees, vec![("8:orgid:bea-id".to_owned(), "Bea".to_owned())]);
+        assert_eq!(
+            plan.callees,
+            vec![("8:orgid:bea-id".to_owned(), "Bea".to_owned())]
+        );
     }
 
     #[test]
@@ -76,7 +83,11 @@ mod tests {
         let chat = chat(
             "group",
             "Retro team",
-            &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea"), (Some("cy-id"), "Cy")],
+            &[
+                (Some("me-id"), "Me"),
+                (Some("bea-id"), "Bea"),
+                (Some("cy-id"), "Cy"),
+            ],
         );
         let plan = plan_for_chat(&chat, Some(&me())).unwrap();
         assert_eq!(plan.title, "Retro team");

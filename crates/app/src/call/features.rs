@@ -1,4 +1,6 @@
-use calling::{CallCommand, CallHandle, CallSpec, CallState, Callee, EndKind, EndReason, HoldState};
+use calling::{
+    CallCommand, CallHandle, CallSpec, CallState, Callee, EndKind, EndReason, HoldState,
+};
 use gpui_kit::*;
 
 use super::demo::{DemoCall, start_demo_call};
@@ -26,7 +28,11 @@ pub fn room_closed_move(call: &ActiveCall, reason: &EndReason) -> Option<Pending
 }
 
 fn return_move(room: &BreakoutState) -> PendingMove {
-    PendingMove { target: room.main.clone().expect("a room with a way back"), title: room.main_title.clone(), breakout: None }
+    PendingMove {
+        target: room.main.clone().expect("a room with a way back"),
+        title: room.main_title.clone(),
+        breakout: None,
+    }
 }
 
 impl AppState {
@@ -39,7 +45,11 @@ impl AppState {
     }
 
     pub fn accept_recording_notice(&mut self, _cx: &mut Context<Self>) {
-        if self.call.as_ref().is_some_and(|call| call.model.consent_required) {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.consent_required)
+        {
             self.send_call_command(CallCommand::ConsentToRecording);
         }
     }
@@ -57,7 +67,11 @@ impl AppState {
     }
 
     pub fn open_call_whiteboard(&mut self, cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_ref().filter(|call| call.model.can_open_whiteboard()) else {
+        let Some(call) = self
+            .call
+            .as_ref()
+            .filter(|call| call.model.can_open_whiteboard())
+        else {
             return;
         };
         if let Some(url) = call.model.whiteboard_url() {
@@ -69,7 +83,10 @@ impl AppState {
     }
 
     pub fn transfer_candidates(&self) -> Vec<TransferCandidate> {
-        let peer = self.call.as_ref().and_then(|call| call.model.tiles.first().map(|tile| tile.mri.clone()));
+        let peer = self
+            .call
+            .as_ref()
+            .and_then(|call| call.model.tiles.first().map(|tile| tile.mri.clone()));
         self.sidebar
             .chats
             .iter()
@@ -77,17 +94,28 @@ impl AppState {
             .filter_map(|chat| {
                 let plan = plan_for_chat(chat, self.directory.me.as_ref())?;
                 let (mri, name) = plan.callees.into_iter().next()?;
-                Some(TransferCandidate { user_id: mri.strip_prefix("8:orgid:").map(str::to_owned), mri, name, chat_id: chat.id.clone() })
+                Some(TransferCandidate {
+                    user_id: mri.strip_prefix("8:orgid:").map(str::to_owned),
+                    mri,
+                    name,
+                    chat_id: chat.id.clone(),
+                })
             })
             .filter(|candidate| Some(&candidate.mri) != peer.as_ref())
             .collect()
     }
 
     pub fn can_transfer_call(&self) -> bool {
-        self.call.as_ref().is_some_and(|call| call.model.can_transfer() && call.consult.is_none())
+        self.call
+            .as_ref()
+            .is_some_and(|call| call.model.can_transfer() && call.consult.is_none())
     }
 
-    pub fn open_transfer_picker(&mut self, picker: Entity<crate::views::transfer_picker::TransferPicker>, cx: &mut Context<Self>) {
+    pub fn open_transfer_picker(
+        &mut self,
+        picker: Entity<crate::views::transfer_picker::TransferPicker>,
+        cx: &mut Context<Self>,
+    ) {
         if self.can_transfer_call() {
             self.transfer_picker = Some(picker);
             cx.notify();
@@ -105,8 +133,14 @@ impl AppState {
         if !self.can_transfer_call() {
             return;
         }
-        let callee = Callee { mri: target.mri, display_name: target.name };
-        self.send_call_command(CallCommand::Transfer { target: callee, replaces: None });
+        let callee = Callee {
+            mri: target.mri,
+            display_name: target.name,
+        };
+        self.send_call_command(CallCommand::Transfer {
+            target: callee,
+            replaces: None,
+        });
     }
 
     pub fn start_consult(&mut self, target: TransferCandidate, cx: &mut Context<Self>) {
@@ -115,15 +149,26 @@ impl AppState {
             return;
         }
         let spec = CallSpec::People {
-            callees: vec![Callee { mri: target.mri.clone(), display_name: target.name.clone() }],
+            callees: vec![Callee {
+                mri: target.mri.clone(),
+                display_name: target.name.clone(),
+            }],
             thread_id: target.chat_id.clone(),
         };
         let handle = if self.mode.demo {
-            Some(start_demo_call(DemoCall::People(vec![(target.mri.clone(), target.name.clone())])))
+            Some(start_demo_call(DemoCall::People(vec![(
+                target.mri.clone(),
+                target.name.clone(),
+            )])))
         } else {
-            self.call_launcher.clone().map(|launcher| launcher.start_consult(spec))
+            self.call_launcher
+                .clone()
+                .map(|launcher| launcher.start_consult(spec))
         };
-        let Some(CallHandle { commands, updates, .. }) = handle else {
+        let Some(CallHandle {
+            commands, updates, ..
+        }) = handle
+        else {
             self.raise_notice("Not connected to Teams yet".to_owned(), None, cx);
             return;
         };
@@ -146,10 +191,21 @@ impl AppState {
         cx.notify();
     }
 
-    fn follow_consult(&mut self, call_id: u64, consult_id: u64, mut updates: tokio::sync::mpsc::UnboundedReceiver<calling::CallUpdate>, cx: &mut Context<Self>) {
+    fn follow_consult(
+        &mut self,
+        call_id: u64,
+        consult_id: u64,
+        mut updates: tokio::sync::mpsc::UnboundedReceiver<calling::CallUpdate>,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             while let Some(update) = updates.recv().await {
-                if this.update(cx, |state, cx| state.apply_consult_update(call_id, consult_id, update, cx)).is_err() {
+                if this
+                    .update(cx, |state, cx| {
+                        state.apply_consult_update(call_id, consult_id, update, cx)
+                    })
+                    .is_err()
+                {
                     return;
                 }
             }
@@ -157,11 +213,21 @@ impl AppState {
         .detach();
     }
 
-    pub(super) fn apply_consult_update(&mut self, call_id: u64, consult_id: u64, update: calling::CallUpdate, cx: &mut Context<Self>) {
+    pub(super) fn apply_consult_update(
+        &mut self,
+        call_id: u64,
+        consult_id: u64,
+        update: calling::CallUpdate,
+        cx: &mut Context<Self>,
+    ) {
         let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
             return;
         };
-        let Some(consult) = call.consult.as_mut().filter(|consult| consult.id == consult_id) else {
+        let Some(consult) = call
+            .consult
+            .as_mut()
+            .filter(|consult| consult.id == consult_id)
+        else {
             return;
         };
         match update {
@@ -185,13 +251,24 @@ impl AppState {
     }
 
     pub fn transfer_consulted(&mut self, _cx: &mut Context<Self>) {
-        let Some(consult) = self.call.as_mut().and_then(|call| call.consult.as_mut()).filter(|consult| consult.ready_to_transfer()) else {
+        let Some(consult) = self
+            .call
+            .as_mut()
+            .and_then(|call| call.consult.as_mut())
+            .filter(|consult| consult.ready_to_transfer())
+        else {
             return;
         };
         consult.transferring = true;
         let (mri, name) = consult.target.clone();
         let replaces = consult.replacement.clone();
-        self.send_call_command(CallCommand::Transfer { target: Callee { mri, display_name: name }, replaces });
+        self.send_call_command(CallCommand::Transfer {
+            target: Callee {
+                mri,
+                display_name: name,
+            },
+            replaces,
+        });
     }
 
     pub fn cancel_consult(&mut self, _cx: &mut Context<Self>) {
@@ -200,31 +277,69 @@ impl AppState {
         }
     }
 
-    pub(super) fn begin_breakout_move(&mut self, moved: calling::BreakoutMove, cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_mut().filter(|call| call.pending_move.is_none()) else {
+    pub(super) fn begin_breakout_move(
+        &mut self,
+        moved: calling::BreakoutMove,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.pending_move.is_none())
+        else {
             return;
         };
         let (main, main_title) = match &call.model.breakout {
-            Some(room) => (room.main.clone().or_else(|| call.model.main_meeting.clone()), room.main_title.clone()),
+            Some(room) => (
+                room.main
+                    .clone()
+                    .or_else(|| call.model.main_meeting.clone()),
+                room.main_title.clone(),
+            ),
             None => (call.meeting_target.clone(), call.model.title.clone()),
         };
         let pending = if moved.returning {
-            PendingMove { target: moved.target, title: main_title, breakout: None }
+            PendingMove {
+                target: moved.target,
+                title: main_title,
+                breakout: None,
+            }
         } else {
-            let breakout = BreakoutState { room_name: moved.room_name.clone(), main, main_title };
-            PendingMove { target: moved.target, title: moved.room_name.clone(), breakout: Some(breakout) }
+            let breakout = BreakoutState {
+                room_name: moved.room_name.clone(),
+                main,
+                main_title,
+            };
+            PendingMove {
+                target: moved.target,
+                title: moved.room_name.clone(),
+                breakout: Some(breakout),
+            }
         };
-        let notice = if moved.returning { "Moving you back to the main meeting".to_owned() } else { format!("Moving you to {}", moved.room_name) };
+        let notice = if moved.returning {
+            "Moving you back to the main meeting".to_owned()
+        } else {
+            format!("Moving you to {}", moved.room_name)
+        };
         call.pending_move = Some(pending);
         self.raise_notice(notice, None, cx);
         self.send_call_command(CallCommand::Hangup);
     }
 
     pub fn return_to_main_meeting(&mut self, _cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_mut().filter(|call| call.pending_move.is_none()) else {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.pending_move.is_none())
+        else {
             return;
         };
-        let Some(room) = call.model.breakout.as_ref().filter(|room| room.main.is_some()) else {
+        let Some(room) = call
+            .model
+            .breakout
+            .as_ref()
+            .filter(|room| room.main.is_some())
+        else {
             return;
         };
         call.pending_move = Some(return_move(room));
@@ -232,8 +347,13 @@ impl AppState {
     }
 
     pub(super) fn join_moved_call(&mut self, moved: PendingMove, cx: &mut Context<Self>) {
-        let demo = DemoCall::Meeting { guests: super::demo::demo_guests(DEMO_ROOM_GUESTS), lobby: false, organizer: false };
-        let Some(handle) = self.place_call(CallSpec::Meeting(moved.target.clone()), demo, cx) else {
+        let demo = DemoCall::Meeting {
+            guests: super::demo::demo_guests(DEMO_ROOM_GUESTS),
+            lobby: false,
+            organizer: false,
+        };
+        let Some(handle) = self.place_call(CallSpec::Meeting(moved.target.clone()), demo, cx)
+        else {
             return;
         };
         let mut model = CallModel::meeting(&moved.title, false);
