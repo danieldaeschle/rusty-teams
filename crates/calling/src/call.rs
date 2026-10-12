@@ -602,7 +602,7 @@ async fn drive(
     let device_lists = devices::list_devices(&factory);
     timeline.record(
         "audio setup",
-        format!("listen only {}, {} input(s), {} output(s)", audio.listen_only, device_lists.inputs.len(), device_lists.outputs.len()),
+        format!("listen only {}, {} input(s), {} output(s); {}", audio.listen_only, device_lists.inputs.len(), device_lists.outputs.len(), audio.adm_state),
     );
     control.send(CallUpdate::Devices(device_lists));
     control.send(CallUpdate::Selected {

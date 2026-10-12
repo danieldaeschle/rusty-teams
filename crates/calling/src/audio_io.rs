@@ -43,7 +43,12 @@ pub struct AudioSetup {
     pub track: RtcAudioTrack,
     pub listen_only: bool,
     platform_acquired: bool,
+    pub adm_state: String,
     feeder: Option<(JoinHandle<()>, Arc<AtomicBool>)>,
+}
+
+fn device_count_text(count: Option<i16>) -> String {
+    count.map_or_else(|| "n/a".to_owned(), |count| count.to_string())
 }
 
 impl AudioSetup {
@@ -55,8 +60,19 @@ impl AudioSetup {
         output: &DeviceChoice,
     ) -> Self {
         let platform_acquired = mode == AudioMode::Platform && factory.acquire_platform_adm();
-        let has_input = platform_acquired && factory.recording_devices() > 0;
-        let has_output = platform_acquired && factory.playout_devices() > 0;
+        let (recording_devices, playout_devices) = if platform_acquired {
+            (Some(factory.recording_devices()), Some(factory.playout_devices()))
+        } else {
+            (None, None)
+        };
+        let has_input = recording_devices.is_some_and(|count| count > 0);
+        let has_output = playout_devices.is_some_and(|count| count > 0);
+        let adm_state = format!(
+            "acquired {platform_acquired}, recording devices {}, playout devices {}, adm refs {}",
+            device_count_text(recording_devices),
+            device_count_text(playout_devices),
+            factory.platform_adm_ref_count()
+        );
         if platform_acquired {
             factory.set_adm_recording_enabled(has_input);
             factory.set_adm_playout_enabled(has_output);
@@ -73,6 +89,7 @@ impl AudioSetup {
                 track: factory.create_device_audio_track("microphone"),
                 listen_only: false,
                 platform_acquired,
+                adm_state,
                 feeder: None,
             };
         }
@@ -86,6 +103,7 @@ impl AudioSetup {
             track,
             listen_only: mode == AudioMode::Platform,
             platform_acquired,
+            adm_state,
             feeder: Some((task, running)),
         }
     }

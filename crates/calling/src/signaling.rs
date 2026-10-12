@@ -646,7 +646,7 @@ pub fn epconv_body(invitation: &Invitation<'_>) -> Value {
     let mut request = json!({
         "conversationType": null,
         "subject": null,
-        "suppressDialout": true,
+        "suppressDialout": to.is_empty(),
         "roster": roster_request(callbacks),
         "properties": conversation_properties(),
         "links": link_map(&CONVERSATION_LINK_NAMES, |name| callbacks.conversation(name)),
@@ -1239,6 +1239,13 @@ mod tests {
         let modalities = vec!["Audio".to_owned(), "Video".to_owned()];
         let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities });
         assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio", "Video"]));
+    }
+
+    #[test]
+    fn people_calls_dial_out_and_echo_does_not() {
+        let people = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
+        assert_eq!(body_for(&people)["conversationRequest"]["suppressDialout"], false);
+        assert_eq!(body_for(&InviteTarget::Echo)["conversationRequest"]["suppressDialout"], true);
     }
 
     #[test]
