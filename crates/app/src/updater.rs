@@ -11,6 +11,7 @@ const VERSION_MARKER: &str = concat!("teams-build:", env!("TEAMS_BUILD_VERSION")
 const UPDATE_DIRECTORY: &str = "update";
 const EXE_NAME: &str = "teams.exe";
 const OLD_EXE_NAME: &str = "teams.old.exe";
+const PDB_NAME: &str = "teams.pdb";
 const VERSION_FILE_NAME: &str = "version.txt";
 pub const RELAUNCH_ENV: &str = "RUSTY_TEAMS_RELAUNCH";
 const CLEANUP_ATTEMPTS: u32 = 30;
@@ -55,6 +56,8 @@ pub struct UpdatePaths {
     pub old_exe: PathBuf,
     pub update_exe: PathBuf,
     pub version_file: PathBuf,
+    pub pdb: PathBuf,
+    pub update_pdb: PathBuf,
 }
 
 impl UpdatePaths {
@@ -66,6 +69,8 @@ impl UpdatePaths {
             old_exe: directory.join(OLD_EXE_NAME),
             update_exe: update_directory.join(EXE_NAME),
             version_file: update_directory.join(VERSION_FILE_NAME),
+            pdb: directory.join(PDB_NAME),
+            update_pdb: update_directory.join(PDB_NAME),
         }
     }
 }
@@ -74,6 +79,7 @@ impl UpdatePaths {
 pub enum FileOperation {
     RemoveIfExists(PathBuf),
     Rename { from: PathBuf, to: PathBuf },
+    ReplaceIfPresent { from: PathBuf, to: PathBuf },
 }
 
 pub trait FileSystem {
@@ -109,6 +115,10 @@ pub fn swap_plan(paths: &UpdatePaths) -> Vec<FileOperation> {
             from: paths.update_exe.clone(),
             to: paths.exe.clone(),
         },
+        FileOperation::ReplaceIfPresent {
+            from: paths.update_pdb.clone(),
+            to: paths.pdb.clone(),
+        },
         FileOperation::RemoveIfExists(paths.version_file.clone()),
     ]
 }
@@ -122,6 +132,15 @@ fn apply_operation(files: &dyn FileSystem, operation: &FileOperation) -> io::Res
             Ok(())
         }
         FileOperation::Rename { from, to } => files.rename(from, to),
+        FileOperation::ReplaceIfPresent { from, to } => {
+            if files.exists(from) {
+                if files.exists(to) {
+                    let _ = files.remove_file(to);
+                }
+                let _ = files.rename(from, to);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -304,7 +323,7 @@ mod tests {
         let paths = UpdatePaths::beside(Path::new("/app/teams.exe"));
         assert_eq!(paths.update_exe, Path::new("/app/update/teams.exe"));
         let plan = swap_plan(&paths);
-        assert_eq!(plan.len(), 4);
+        assert_eq!(plan.len(), 5);
         assert_eq!(
             plan[1],
             FileOperation::Rename {
@@ -339,6 +358,20 @@ mod tests {
         assert_eq!(fs::read_to_string(&paths.old_exe).unwrap(), "old");
         assert!(!paths.update_exe.exists());
         assert!(!paths.version_file.exists());
+    }
+
+    #[test]
+    fn swap_moves_the_symbols_along_and_works_without_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = install(directory.path());
+        apply_plan(&RealFileSystem, &swap_plan(&paths)).unwrap();
+        assert!(!paths.pdb.exists());
+        let paths = install(directory.path());
+        fs::write(&paths.pdb, "old symbols").unwrap();
+        fs::write(&paths.update_pdb, "new symbols").unwrap();
+        apply_plan(&RealFileSystem, &swap_plan(&paths)).unwrap();
+        assert_eq!(fs::read_to_string(&paths.pdb).unwrap(), "new symbols");
+        assert!(!paths.update_pdb.exists());
     }
 
     #[test]
