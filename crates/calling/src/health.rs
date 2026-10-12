@@ -224,7 +224,9 @@ pub fn health_from_stats(stats: &[RtcStats]) -> (HealthCounters, TransportDetail
                 counters.packets_received += inbound.received.packets_received;
                 counters.packets_lost += inbound.received.packets_lost.max(0) as u64;
                 counters.bytes_received += inbound.inbound.bytes_received;
-                counters.jitter_ms = counters.jitter_ms.max(inbound.received.jitter * 1000.);
+                if inbound.stream.kind == "audio" {
+                    counters.jitter_ms = counters.jitter_ms.max(inbound.received.jitter * 1000.);
+                }
             }
             RtcStats::OutboundRtp(outbound) => {
                 counters.bytes_sent += outbound.sent.bytes_sent;
@@ -396,6 +398,7 @@ mod tests {
     fn stats_parse_into_counters_and_transport_details() {
         let stats = vec![
             RtcStats::InboundRtp(InboundRtpStats {
+                stream: RtpStreamStats { kind: "audio".into(), ..Default::default() },
                 received: ReceivedRtpStreamStats { packets_received: 50, packets_lost: 5, jitter: 0.012 },
                 inbound: InboundRtpStreamStats { bytes_received: 4000, ..Default::default() },
                 ..Default::default()
