@@ -26,7 +26,7 @@ mod target;
 mod view_actions;
 mod view_settings;
 
-pub use actions::{load_camera, load_share_sound};
+pub use actions::{load_camera, load_camera_effects, load_share_sound};
 pub use mic::load_mic;
 pub use agenda::{AgendaRow, fetch_window, join_available};
 pub use background::{

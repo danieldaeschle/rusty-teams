@@ -4,7 +4,7 @@ use libwebrtc::video_frame::I420Buffer;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::blur::BlurStage;
+use crate::effects::EffectsStage;
 use crate::video_send::LocalSink;
 
 pub const CAMERA_WIDTH: u32 = 640;
@@ -102,14 +102,14 @@ fn paint_screen(
     v_plane[..(stride_v * height / 2) as usize].fill(128);
 }
 
-pub fn spawn_pattern(mut sink: LocalSink, kind: PatternKind, mut blur: Option<BlurStage>) -> JoinHandle<()> {
+pub fn spawn_pattern(mut sink: LocalSink, kind: PatternKind, mut effects: Option<EffectsStage>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(1) / kind.fps());
         let mut tick = 0u32;
         loop {
             ticker.tick().await;
             let frame = pattern_frame(kind, tick);
-            sink.push(match blur.as_mut() {
+            sink.push(match effects.as_mut() {
                 Some(stage) => stage.apply_i420(frame),
                 None => frame,
             });

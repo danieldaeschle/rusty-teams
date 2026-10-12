@@ -1535,6 +1535,7 @@ async fn drive(
                     send_receive_change(control, video.reselect(&roster));
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
+                Some(CallCommand::SetCameraEffects(effects)) => local_video.set_effects(effects),
                 Some(CallCommand::SendReaction(reaction)) => {
                     if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {
                         timeline.record("reaction failed", error.to_string());

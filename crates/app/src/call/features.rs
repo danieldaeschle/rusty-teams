@@ -82,6 +82,13 @@ impl AppState {
 
     pub fn turn_off_call_effects(&mut self, cx: &mut Context<Self>) {
         self.set_call_background(BackgroundPick::None, cx);
+        let effects = calling::CameraEffects {
+            auto_framing: false,
+            adjust_brightness: false,
+            soft_focus: false,
+            ..self.call_effects
+        };
+        self.set_call_effects(effects, cx);
     }
 
     pub fn open_call_whiteboard(&mut self, cx: &mut Context<Self>) {

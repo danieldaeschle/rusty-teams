@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::background::BackgroundChoice;
+use crate::effects::CameraEffects;
 use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
 use crate::devices::{DeviceChoice, DeviceLists};
@@ -48,6 +49,7 @@ pub enum CallCommand {
     SetCaptions(bool),
     SetBackground(BackgroundChoice),
     SetIncomingVideo(bool),
+    SetCameraEffects(CameraEffects),
     SendReaction(Reaction),
     SetRecording { on: bool, title: String },
     ConsentToRecording,
