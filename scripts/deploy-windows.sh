@@ -17,6 +17,11 @@ updateDirectory="$installRoot/update"
 mkdir -p "$updateDirectory"
 cp "$sourceExe" "$updateDirectory/teams.exe.partial"
 mv -f "$updateDirectory/teams.exe.partial" "$updateDirectory/teams.exe"
+sourcePdb="${sourceExe%.exe}.pdb"
+if [ -f "$sourcePdb" ]; then
+  cp "$sourcePdb" "$updateDirectory/teams.pdb.partial"
+  mv -f "$updateDirectory/teams.pdb.partial" "$updateDirectory/teams.pdb"
+fi
 printf '%s\n' "$version" > "$updateDirectory/version.txt.partial"
 mv -f "$updateDirectory/version.txt.partial" "$updateDirectory/version.txt"
 echo "deployed $version to $updateDirectory"
