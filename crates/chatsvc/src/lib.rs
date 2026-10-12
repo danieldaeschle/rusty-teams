@@ -14,6 +14,7 @@ pub mod messages;
 pub mod pins;
 pub mod presence;
 pub mod reactions;
+pub mod recap;
 pub mod realtime;
 pub mod receipts;
 pub mod saved;
@@ -57,6 +58,10 @@ pub use realtime::{
 pub use receipts::{MemberHorizon, Receipts};
 pub use saved::SavedMessage;
 pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use recap::{
+    Attendance, AttendanceRecord, Occurrence, Recap, RecordingDetails, TranscriptFormat,
+    days_until_expiry,
+};
 pub use transcripts::{MeetingTranscript, TranscriptError, TranscriptTurn, Transcripts};
 pub use translate::{
     Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,

@@ -40,7 +40,7 @@ pub(super) struct SharedState {
     generation: u64,
     new_folder_open: bool,
     uploads_running: usize,
-    items: Vec<SharedItem>,
+    pub(super) items: Vec<SharedItem>,
     listed_at: Option<Instant>,
 }
 
@@ -180,16 +180,19 @@ impl ConversationView {
                 self.load_library(cx);
             }
         }
+        if pane == ChannelPane::Recap {
+            self.open_recap_pane(cx);
+        }
         cx.notify();
     }
 
     pub(super) fn refresh_shared_items(&mut self, cx: &mut Context<Self>) {
-        let Some(channel_id) = self.channel_id() else {
+        let Some(conversation_id) = self.conversation_id() else {
             return;
         };
         let store = self.app.read(cx).store.clone();
         let records = store
-            .messages(&channel_id, None, ITEM_SCAN_LIMIT)
+            .messages(&conversation_id, None, ITEM_SCAN_LIMIT)
             .unwrap_or_default();
         self.shared.items = shared_items(&records);
     }
@@ -226,7 +229,7 @@ impl ConversationView {
             .collect()
     }
 
-    fn item_download_states(&self) -> Vec<Option<crate::downloads::DownloadState>> {
+    pub(super) fn item_download_states(&self) -> Vec<Option<crate::downloads::DownloadState>> {
         let conversation_id = self.conversation_id().unwrap_or_default();
         self.shared
             .items
@@ -276,7 +279,7 @@ impl ConversationView {
         }
     }
 
-    fn run_shared(&mut self, command: SharedCommand, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn run_shared(&mut self, command: SharedCommand, window: &mut Window, cx: &mut Context<Self>) {
         let conversation_id = self.conversation_id().unwrap_or_default();
         match command {
             SharedCommand::Scope(scope) => {

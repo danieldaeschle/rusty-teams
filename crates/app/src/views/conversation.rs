@@ -25,6 +25,7 @@ mod detached;
 mod feed;
 mod pins;
 mod proposal;
+mod recap;
 mod render_env;
 mod scheduled;
 mod shared;
@@ -192,6 +193,8 @@ pub struct ConversationView {
     sync_generation: u64,
     window_active: bool,
     pane: ChannelPane,
+    recap: recap::RecapState,
+    recap_search: Entity<InputState>,
     channel_tabs: Vec<ChannelTabRecord>,
     tab_links: HashMap<String, String>,
     focus_handle: FocusHandle,
@@ -441,6 +444,7 @@ impl ConversationView {
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let composer = cx.new(|cx| Composer::new(app.clone(), window, cx));
         let subject = subject_input(window, cx);
+        let recap_search = recap::search_input(window, cx);
         let recent = cx.new(|cx| emoji::Recent::load(&app.read(cx).store));
         let picker = cx.new(|cx| ReactionPicker::new(app.clone(), recent.clone(), window, cx));
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
@@ -450,6 +454,7 @@ impl ConversationView {
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.subscribe_in(&subject, window, Self::on_subject_event),
+            cx.subscribe_in(&recap_search, window, Self::on_recap_search_event),
             cx.observe_window_activation(window, Self::on_window_activation),
             cx.on_app_quit(|this, cx| {
                 this.composer
@@ -507,6 +512,8 @@ impl ConversationView {
             sync_generation: 0,
             window_active: window.is_window_active(),
             pane: ChannelPane::Posts,
+            recap: recap::RecapState::default(),
+            recap_search,
             channel_tabs: Vec::new(),
             tab_links: HashMap::new(),
             focus_handle: cx.focus_handle(),
@@ -584,7 +591,7 @@ impl ConversationView {
                     .as_ref()
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
-                    if self.shared_active() {
+                    if self.shared_active() || self.recap_active() {
                         self.refresh_shared_items(cx);
                     }
                     self.rebuild(false, cx);
@@ -820,6 +827,7 @@ impl ConversationView {
         self.refresh_agent_runs(cx);
         self.sync_generation += 1;
         self.reset_channel_tabs(cx);
+        self.reset_recap(cx);
         self.reload_pending(cx);
         self.notice = None;
         self.scheduled_failure = None;
@@ -3402,7 +3410,10 @@ impl Render for ConversationView {
             Some(current) => root.child(self.render_header(current, cx)),
             None => root.child(self.draft.clone()),
         };
-        root = root.children(self.render_tab_bar(window, cx).filter(|_| !drafting));
+        let tab_bar = self
+            .render_tab_bar(window, cx)
+            .or_else(|| self.render_meeting_tab_bar(cx));
+        root = root.children(tab_bar.filter(|_| !drafting));
         root = root.children(self.render_pin_banner(cx).filter(|_| !drafting));
         let sync_failed = self
             .current
@@ -3430,6 +3441,7 @@ impl Render for ConversationView {
                     }),
             );
         }
+        let recap_active = self.recap_active();
         let empty_channel = in_feed && self.rows.borrow().is_empty();
         let new_post = self.render_new_post(window, cx);
         let body = if drafting && self.current.is_none() && self.rows.borrow().is_empty() {
@@ -3438,6 +3450,8 @@ impl Render for ConversationView {
             draft.render_empty(&self.app.read(cx).directory, &group_name)
         } else if self.shared_active() {
             self.render_shared(cx)
+        } else if self.recap_active() {
+            self.render_recap(cx)
         } else if empty_channel {
             div()
                 .size_full()
@@ -3469,7 +3483,7 @@ impl Render for ConversationView {
                         .child(body),
                 )
                 .children(self.render_draft_error(cx))
-                .when(!in_feed, |column| {
+                .when(!in_feed && !recap_active, |column| {
                     column
                         .child(self.render_typing_line(cx))
                         .children(self.render_proposal_card(cx))

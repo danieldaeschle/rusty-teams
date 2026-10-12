@@ -1,0 +1,22 @@
+{
+  "totalParticipantCount": 2,
+  "attendanceRecords": [
+    {
+      "emailAddress": "alex@example.com",
+      "identity": {"displayName": "Alex Example"},
+      "role": "Organizer",
+      "totalAttendanceInSeconds": 1500,
+      "attendanceIntervals": [
+        {"joinDateTime": "2026-03-02T10:10:00Z", "leaveDateTime": "2026-03-02T10:30:00Z", "durationInSeconds": 1200},
+        {"joinDateTime": "2026-03-02T10:00:00Z", "leaveDateTime": "2026-03-02T10:05:00Z", "durationInSeconds": 300}
+      ]
+    },
+    {
+      "emailAddress": "sam@example.com",
+      "identity": {"displayName": ""},
+      "role": "Attendee",
+      "totalAttendanceInSeconds": 600,
+      "attendanceIntervals": []
+    }
+  ]
+}
