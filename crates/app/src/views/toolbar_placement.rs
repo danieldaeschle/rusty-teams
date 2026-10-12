@@ -15,7 +15,7 @@ pub fn toolbar_slot(id: ElementId, hover: HoverChange, bar: impl IntoElement) ->
     div()
         .id(id)
         .py(px(TOOLBAR_GAP))
-        .occlude()
+        .block_mouse_except_scroll()
         .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .child(bar)
 }
