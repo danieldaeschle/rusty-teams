@@ -11,7 +11,7 @@ use crate::format;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
 use crate::views::profile_card::opens_profile;
-use crate::views::widgets::icon;
+use crate::views::widgets::{Corner, corner_badge, icon};
 
 const PAIR_RATIO: f32 = 24. / 36.;
 const PRESENCE_MIN: f32 = 10.;
@@ -143,10 +143,7 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
         _ => center,
     };
     Some(
-        div()
-            .absolute()
-            .right(px(-2.))
-            .bottom(px(-2.))
+        corner_badge(Corner::BottomRight, 2.)
             .size(px(outer))
             .rounded_full()
             .bg(ring)
@@ -165,10 +162,7 @@ fn presence_spinner(ring: Hsla, avatar_size: f32) -> Div {
             Animation::new(PRESENCE_SPIN_PERIOD).repeat(),
             |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
         );
-    div()
-        .absolute()
-        .right(px(-2.))
-        .bottom(px(-2.))
+    corner_badge(Corner::BottomRight, 2.)
         .size(px(outer))
         .rounded_full()
         .bg(ring)

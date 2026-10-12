@@ -302,6 +302,7 @@ impl Render for RailView {
             self.agents_running(cx),
         );
         v_flex()
+            .debug_selector(|| "shell/islands/rail".into())
             .w(px(RAIL_WIDTH))
             .h_full()
             .flex_none()

@@ -26,6 +26,7 @@ pub fn render_title_bar(
 ) -> impl IntoElement {
     let search = h_flex()
         .id("title-search")
+        .debug_selector(|| "shell/title-bar/search".into())
         .occlude()
         .w(px(SEARCH_WIDTH))
         .h(px(28.))
@@ -49,7 +50,7 @@ pub fn render_title_bar(
                 .child(SHORTCUT_HINT),
         )
         .on_click(on_search);
-    TitleBar::new()
+    let bar = TitleBar::new()
         .h(px(TITLE_BAR_HEIGHT))
         .bg(theme::background())
         .child(
@@ -69,5 +70,10 @@ pub fn render_title_bar(
                 .child(div().flex_1().flex().justify_center().child(search))
                 .children(own)
                 .child(div().w(px(4.))),
-        )
+        );
+    div()
+        .debug_selector(|| "shell/title-bar".into())
+        .flex_none()
+        .w_full()
+        .child(bar)
 }

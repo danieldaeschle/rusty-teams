@@ -8,7 +8,7 @@ use gpui_kit::*;
 use store::Sidebar;
 
 use super::avatar::person_avatar;
-use super::widgets::{dot, icon};
+use super::widgets::{Corner, corner_badge, dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
 use crate::app_state::{AppState, chat_title};
 use crate::data::is_one_on_one;
@@ -309,10 +309,7 @@ fn status_slot(
 }
 
 fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
-    let marker = div()
-        .absolute()
-        .right(px(-4.))
-        .bottom(px(-4.))
+    let marker = corner_badge(Corner::BottomRight, 4.)
         .size(px(KIND_MARKER_SIZE))
         .flex()
         .items_center()

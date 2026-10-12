@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use gpui_kit::Image;
+use gpui_kit::{App, Entity, Image};
 use store::{
     ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
@@ -633,6 +633,14 @@ pub fn read_message_ids(records: &[MessageRecord]) -> std::collections::HashSet<
         })
         .map(|record| record.message_id.clone())
         .collect()
+}
+
+pub fn start_session(state: &Entity<AppState>, cx: &mut App) {
+    state.update(cx, |state, cx| {
+        seed_directory(state);
+        state.demo_live_meetings();
+        state.select(first_selection(), cx);
+    });
 }
 
 pub fn first_selection() -> Selection {

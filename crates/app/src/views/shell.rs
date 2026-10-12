@@ -70,6 +70,11 @@ pub struct UserInputHandle(pub Arc<UserInput>);
 
 impl Global for UserInputHandle {}
 
+pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx: &mut App) {
+    cx.set_global(crate::app_state::AppHandle(state.clone()));
+    cx.set_global(UserInputHandle(user_input));
+}
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -612,6 +617,7 @@ impl AppShell {
 impl AppShell {
     fn islands(&self, call_view: Option<AnyElement>) -> impl IntoElement {
         h_flex()
+            .debug_selector(|| "shell/islands".into())
             .flex_1()
             .min_h_0()
             .w_full()
@@ -782,6 +788,7 @@ impl Render for AppShell {
             .child(user_activity::input_probe(self.user_input.clone()))
             .child(
                 v_flex()
+                    .debug_selector(|| "shell".into())
                     .size_full()
                     .child(title_bar)
                     .child(self.islands(call_view))

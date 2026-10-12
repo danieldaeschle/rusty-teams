@@ -87,19 +87,29 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
     );
     let toggle = app.clone();
     Some(
-        Button::new("title-own-status")
-            .ghost()
-            .p_0()
-            .size(px(OWN_STATUS_BUTTON_SIZE))
-            .rounded_full()
-            .child(div().p(px(PRESENCE_OVERHANG)).child(ringed))
-            .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
-                status_menu(popup, window, cx, &context)
-            })
-            .on_open_change(move |open, _, cx| {
-                let open = *open;
-                toggle.update(cx, |state, cx| state.set_status_menu_open(open, cx));
-            })
+        div()
+            .debug_selector(|| "shell/title-bar/own-status".into())
+            .flex_none()
+            .child(
+                Button::new("title-own-status")
+                    .ghost()
+                    .p_0()
+                    .size(px(OWN_STATUS_BUTTON_SIZE))
+                    .rounded_full()
+                    .child(
+                        div()
+                            .debug_selector(|| "shell/title-bar/own-status/avatar".into())
+                            .p(px(PRESENCE_OVERHANG))
+                            .child(ringed),
+                    )
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
+                        status_menu(popup, window, cx, &context)
+                    })
+                    .on_open_change(move |open, _, cx| {
+                        let open = *open;
+                        toggle.update(cx, |state, cx| state.set_status_menu_open(open, cx));
+                    }),
+            )
             .into_any_element(),
     )
 }

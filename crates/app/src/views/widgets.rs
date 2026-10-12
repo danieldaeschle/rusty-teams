@@ -17,6 +17,20 @@ pub fn symbol(name: &str, size: f32, color: Hsla) -> Icon {
         .text_color(color)
 }
 
+#[derive(Clone, Copy)]
+pub enum Corner {
+    TopRight,
+    BottomRight,
+}
+
+pub fn corner_badge(corner: Corner, overhang: f32) -> Div {
+    let badge = div().absolute().right(px(-overhang));
+    match corner {
+        Corner::TopRight => badge.top(px(-overhang)),
+        Corner::BottomRight => badge.bottom(px(-overhang)),
+    }
+}
+
 pub fn count_badge(count: u32, muted: bool) -> Div {
     let (background, foreground) = if muted {
         (theme::badge_muted(), theme::text_strong())

@@ -71,6 +71,7 @@ pub fn render_status_bar(
     };
     let live = live_text(state.live);
     let mut bar = h_flex()
+        .debug_selector(|| "shell/status-bar".into())
         .w_full()
         .h(px(24.))
         .flex_none()

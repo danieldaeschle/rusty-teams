@@ -27,7 +27,7 @@ use super::call_organizer::{
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
 use super::shell::ISLAND_GAP;
-use super::widgets::{count_badge, icon};
+use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::REACTION_SHOWN;
 use crate::call::TileSize;
@@ -617,13 +617,7 @@ fn chat_button(app: &Entity<AppState>, open: bool, unread: u32) -> Stateful<Div>
             .build(window, cx)
         })
         .when(unread > 0, |button| {
-            button.child(
-                div()
-                    .absolute()
-                    .top(px(-4.))
-                    .right(px(-4.))
-                    .child(count_badge(unread, false)),
-            )
+            button.child(corner_badge(Corner::TopRight, 4.).child(count_badge(unread, false)))
         })
         .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)))
 }
@@ -1161,6 +1155,7 @@ pub fn render_call_view(
         .children(consent_overlay(app, model));
     Some(
         h_flex()
+            .debug_selector(|| "shell/islands/main".into())
             .flex_1()
             .min_w_0()
             .h_full()

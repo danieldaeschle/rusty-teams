@@ -3193,6 +3193,9 @@ impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = theme::surface();
         let mut root = v_flex()
+            .when(!self.pinned, |root| {
+                root.debug_selector(|| "shell/islands/main".into())
+            })
             .flex_1()
             .w_full()
             .min_w_0()

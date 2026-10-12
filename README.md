@@ -101,6 +101,8 @@ cargo run -p app -- --demo
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
 | Tests | `cargo test` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
+| Layout sweep before every UI deploy: 8 screens at 640x480 and 1920x1080, PNGs in `target/layout-sweep` (look at each) | `cargo build -p app && scripts/layout-sweep.sh` |
+| Layout guard: no overlapping or clipped elements, no negative offsets outside `widgets::corner_badge` | `cargo test -p app layout_guard` |
 
 ## How it works
 

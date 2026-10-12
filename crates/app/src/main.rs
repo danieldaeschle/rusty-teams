@@ -35,6 +35,8 @@ mod fuzzy;
 mod gifs;
 mod image_view_gallery;
 mod image_view_math;
+#[cfg(test)]
+mod layout_guard;
 mod local_previews;
 mod message_actions;
 mod notice;
@@ -252,16 +254,11 @@ fn main() {
             state.start_on_channels = arguments.channels_tab;
             state
         });
-        cx.set_global(app_state::AppHandle(state.clone()));
-        cx.set_global(views::shell::UserInputHandle(user_input));
+        views::shell::install_globals(&state, user_input, cx);
         agent_api::init(state.read(cx).store.clone(), arguments.demo, cx);
         agents::install(state.clone(), cx);
         if arguments.demo {
-            state.update(cx, |state, cx| {
-                demo::seed_directory(state);
-                state.demo_live_meetings();
-                state.select(demo::first_selection(), cx);
-            });
+            demo::start_session(&state, cx);
         }
         if let Some(mut receiver) = receiver {
             let state = state.clone();

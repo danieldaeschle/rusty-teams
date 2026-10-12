@@ -1749,6 +1749,7 @@ impl Render for SidebarView {
             SidebarTab::Activity | SidebarTab::Saved => None,
         };
         v_flex()
+            .debug_selector(|| "shell/islands/sidebar".into())
             .w(px(SIDEBAR_WIDTH))
             .h_full()
             .flex_none()
