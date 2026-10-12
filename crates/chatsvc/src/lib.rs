@@ -27,7 +27,7 @@ pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
 pub use channel_notifications::{ChannelNotificationLevel, ChannelNotifications, ChannelSettings};
-pub use conversations::Conversations;
+pub use conversations::{ConversationState, Conversations};
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};

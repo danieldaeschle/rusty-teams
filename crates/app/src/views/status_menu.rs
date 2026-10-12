@@ -253,12 +253,6 @@ fn chat_list_item(
             "Show muted chats in own section",
             settings.enabled(ChatSection::Muted),
         ))
-        .item(section_toggle(
-            &app,
-            ChatSection::Meeting,
-            "Show meeting chats in own section",
-            settings.enabled(ChatSection::Meeting),
-        ))
     });
     PopupMenuItem::submenu("Chat list", submenu).icon(menu_icon(IconName::LayoutList))
 }

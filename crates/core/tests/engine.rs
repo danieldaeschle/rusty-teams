@@ -111,6 +111,8 @@ struct Fake {
     invokes: Mutex<Vec<chatsvc::InvokeRequest>>,
     invoke_answer: Mutex<Option<chatsvc::InvokeResponse>>,
     muted_states: Mutex<Vec<(String, bool)>>,
+    hidden_states: Mutex<Vec<(String, bool)>>,
+    chats_fail: Mutex<bool>,
     muted_fails: Mutex<bool>,
     link_pages: Mutex<Vec<chatsvc::MessageLinks>>,
     link_page_calls: Mutex<Vec<String>>,
@@ -193,6 +195,9 @@ impl Remote for Handle {
     }
 
     async fn chats_at(&self, next_link: &str) -> Result<ChatsPage> {
+        if *self.chats_fail.lock().unwrap() {
+            return Err(Error::Unsupported("forced failure"));
+        }
         let mut parts = next_link.trim_start_matches("chats:").split(':');
         let offset = parts.next().unwrap().parse().unwrap();
         let top = parts.next().unwrap().parse().unwrap();
@@ -451,11 +456,30 @@ impl Remote for Handle {
         Ok(())
     }
 
-    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>> {
+    async fn chat_states(&self) -> Result<Vec<chatsvc::ConversationState>> {
         if *self.muted_fails.lock().unwrap() {
             return Err(Error::Unsupported("forced failure"));
         }
-        Ok(self.muted_states.lock().unwrap().clone())
+        let muted = self.muted_states.lock().unwrap().clone();
+        let hidden = self.hidden_states.lock().unwrap().clone();
+        let mut states: Vec<chatsvc::ConversationState> = muted
+            .into_iter()
+            .map(|(id, muted)| chatsvc::ConversationState {
+                id,
+                muted,
+                hidden: None,
+            })
+            .collect();
+        states.extend(
+            hidden
+                .into_iter()
+                .map(|(id, hidden)| chatsvc::ConversationState {
+                    id,
+                    muted: false,
+                    hidden: Some(hidden),
+                }),
+        );
+        Ok(states)
     }
 
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
@@ -974,6 +998,211 @@ async fn refresh_sidebar_marks_muted_chats_and_keeps_flags_when_the_lookup_fails
 }
 
 #[tokio::test]
+async fn chatsvc_visibility_beats_the_graph_hidden_flag_and_graph_is_the_fallback() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![
+        chat("19:graph-hidden@thread.v2", Some("Kept"), 30, 30, ME, true),
+        chat(
+            "19:chatsvc-hidden@thread.v2",
+            Some("Dropped"),
+            20,
+            20,
+            ME,
+            false,
+        ),
+        chat(
+            "19:unknown-hidden@thread.v2",
+            Some("Unknown"),
+            10,
+            10,
+            ME,
+            true,
+        ),
+        chat("19:plain@thread.v2", Some("Plain"), 5, 5, ME, false),
+    ];
+    fake.hidden_states.lock().unwrap().extend([
+        ("19:graph-hidden@thread.v2".to_owned(), false),
+        ("19:chatsvc-hidden@thread.v2".to_owned(), true),
+    ]);
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.refresh_sidebar().await.unwrap();
+    let titles: Vec<String> = engine
+        .sidebar()
+        .unwrap()
+        .chats
+        .iter()
+        .map(|chat| chat.title.clone())
+        .collect();
+    assert_eq!(titles, ["Kept", "Plain"]);
+}
+
+fn numbered_chats(count: usize) -> Vec<Chat> {
+    (0..count)
+        .map(|index| {
+            chat(
+                &format!("19:c{index:03}@thread.v2"),
+                Some(&format!("Chat {index:03}")),
+                (count - index) as i64,
+                0,
+                ME,
+                false,
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn older_chats_load_page_by_page_until_the_list_ends() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(25);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_limit: 10,
+            chat_page_size: 5,
+            ..SyncConfig::default()
+        },
+    );
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 10);
+    assert!(engine.has_older_chats());
+    assert!(!engine.is_loading_older_chats());
+
+    let mut loaded = Vec::new();
+    while engine.has_older_chats() {
+        loaded.push(engine.load_older_chats().await.unwrap());
+    }
+    assert_eq!(loaded, [5, 5, 5]);
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 25);
+    assert_eq!(engine.load_older_chats().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn the_older_chat_continuation_survives_a_restart() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(12);
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let config = SyncConfig {
+        chat_limit: 4,
+        chat_page_size: 4,
+        ..SyncConfig::default()
+    };
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), config.clone());
+    engine.refresh_sidebar().await.unwrap();
+    engine.load_older_chats().await.unwrap();
+    assert_eq!(store.chat_count().unwrap(), 8);
+
+    let restarted = SyncEngine::with_config(Handle(fake.clone()), store.clone(), config);
+    assert!(restarted.has_older_chats());
+    assert_eq!(restarted.load_older_chats().await.unwrap(), 4);
+    assert!(!restarted.has_older_chats());
+    assert_eq!(store.chat_count().unwrap(), 12);
+}
+
+#[tokio::test]
+async fn a_failed_older_page_drops_the_link_and_the_next_refresh_records_a_fresh_one() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(8);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_limit: 4,
+            chat_page_size: 4,
+            ..SyncConfig::default()
+        },
+    );
+    engine.refresh_sidebar().await.unwrap();
+    *fake.chats_fail.lock().unwrap() = true;
+    assert!(engine.load_older_chats().await.is_err());
+    assert!(!engine.is_loading_older_chats());
+    assert!(!engine.has_older_chats());
+    assert_eq!(engine.load_older_chats().await.unwrap(), 0);
+
+    *fake.chats_fail.lock().unwrap() = false;
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.has_older_chats());
+    assert_eq!(engine.load_older_chats().await.unwrap(), 4);
+}
+
+#[tokio::test]
+async fn a_chat_hidden_in_the_app_stays_hidden_until_a_newer_message_arrives() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.hide_chat(CHAT).await.unwrap();
+
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+    engine.refresh_sidebar_full().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    engine.refresh_sidebar_full().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+}
+
+#[tokio::test]
+async fn undo_after_chatsvc_reported_the_hide_keeps_the_chat_visible() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.hide_chat(CHAT).await.unwrap();
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push((CHAT.to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+
+    engine.unhide_chat(CHAT).await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+}
+
+#[tokio::test]
+async fn deep_chats_that_chatsvc_reports_hidden_are_removed_on_refresh() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(8);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_limit: 4,
+            chat_page_size: 4,
+            ..SyncConfig::default()
+        },
+    );
+    engine.refresh_sidebar().await.unwrap();
+    engine.load_older_chats().await.unwrap();
+    assert_eq!(engine.store().chat_count().unwrap(), 8);
+
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push(("19:c007@thread.v2".to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.store().chat_count().unwrap(), 7);
+}
+
+#[tokio::test]
+async fn older_pages_use_fresh_chat_states_when_none_were_loaded_yet() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(8);
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push(("19:c005@thread.v2".to_owned(), true));
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    store.set_meta("chats_next_link", "chats:4:4").unwrap();
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+
+    assert_eq!(engine.load_older_chats().await.unwrap(), 4);
+    assert_eq!(store.chat_count().unwrap(), 3);
+}
+
+#[tokio::test]
 async fn chat_state_actions_call_remote_and_update_the_store() {
     let fake = Arc::new(Fake::default());
     let engine = chat_engine(&fake, small_pages()).await;
@@ -1311,7 +1540,13 @@ fn many_chats(count: i64) -> Vec<Chat> {
 async fn warm_refresh_stops_after_the_first_unchanged_page() {
     let fake = Arc::new(Fake::default());
     *fake.chats.lock().unwrap() = many_chats(120);
-    let engine = engine_with(&fake, SyncConfig::default());
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_page_size: 25,
+            ..SyncConfig::default()
+        },
+    );
     let cold = engine.refresh_sidebar().await.unwrap();
     assert!(cold.full_chat_refresh);
     assert_eq!(cold.chat_pages, 5);
@@ -1331,7 +1566,13 @@ async fn warm_refresh_stops_after_the_first_unchanged_page() {
 async fn warm_refresh_walks_on_while_pages_hold_new_activity() {
     let fake = Arc::new(Fake::default());
     *fake.chats.lock().unwrap() = many_chats(120);
-    let engine = engine_with(&fake, SyncConfig::default());
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_page_size: 25,
+            ..SyncConfig::default()
+        },
+    );
     engine.refresh_sidebar().await.unwrap();
 
     let mut chats = many_chats(120);
@@ -2251,6 +2492,7 @@ struct FakeFolders {
     settings: ChatSectionSettings,
     folders_fail: bool,
     layout_fail: bool,
+    team_order: Mutex<Option<Vec<(String, i64)>>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -2273,6 +2515,7 @@ impl FakeFolders {
             settings: ChatSectionSettings::default(),
             folders_fail: false,
             layout_fail: false,
+            team_order: Mutex::new(Some(Vec::new())),
             calls: Mutex::new(Vec::new()),
         })
     }
@@ -2303,6 +2546,16 @@ impl FolderSource for FakeFolders {
 
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
         Box::pin(async { Ok(self.settings) })
+    }
+
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async {
+            self.team_order
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or_else(|| Error::Folders("order down".to_owned()))
+        })
     }
 
     fn set_section_enabled(
@@ -2501,6 +2754,52 @@ async fn both_refresh_errors_are_reported_together() {
     let message = engine.refresh_folders().await.unwrap_err().to_string();
 
     assert!(message.contains("folders down") && message.contains("layout down"));
+}
+
+#[tokio::test]
+async fn team_order_follows_teams_order_and_survives_a_failing_order_lookup() {
+    let fake = Arc::new(Fake::default());
+    let mut source = FakeFolders::new();
+    let team = |id: &str| TeamLayoutRecord {
+        team_id: id.into(),
+        hidden: false,
+        channels: Vec::new(),
+    };
+    Arc::get_mut(&mut source).unwrap().layout = vec![team("a"), team("b"), team("c")];
+    *source.team_order.lock().unwrap() = Some(vec![("c".to_owned(), 0), ("b".to_owned(), 1)]);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            team_layout_refresh_interval: Duration::zero(),
+            ..SyncConfig::default()
+        },
+    )
+    .with_folder_source(source.clone());
+    let record = |id: &str| TeamRecord {
+        id: id.into(),
+        name: id.into(),
+    };
+    engine
+        .store()
+        .upsert_teams(&[record("a"), record("b"), record("c")])
+        .unwrap();
+    let order = |engine: &SyncEngine<Handle>| -> Vec<String> {
+        let teams = engine.store().sidebar().unwrap().teams;
+        teams.into_iter().map(|entry| entry.team.id).collect()
+    };
+
+    engine.refresh_folders().await.unwrap();
+    assert_eq!(order(&engine), ["c", "b", "a"]);
+
+    *source.team_order.lock().unwrap() = None;
+    let mut events = engine.subscribe();
+    engine.refresh_folders().await.unwrap();
+    assert_eq!(order(&engine), ["c", "b", "a"]);
+    let mut reported = false;
+    while let Ok(event) = events.try_recv() {
+        reported |= matches!(event, CoreEvent::Error { .. });
+    }
+    assert!(reported);
 }
 
 #[tokio::test]

@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chatsvc::{
     ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
     ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
 };
+use chatsvc::settings::{parse_chat_sections, parse_teams_order};
 use chrono::Utc;
+use serde_json::Value;
 use session::Session;
 use store::{ChannelLayoutRecord, ChannelTabRecord, FolderRecord, Store, TeamLayoutRecord};
 
@@ -41,6 +43,9 @@ pub trait FolderSource: Send + Sync {
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>>;
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>>;
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>>;
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn set_section_enabled(&self, section: ChatSection, enabled: bool)
     -> BoxFuture<'_, Result<()>>;
     fn set_folder_expanded<'a>(
@@ -64,6 +69,7 @@ pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
     settings: UserSettings,
     channel_settings: ChannelSettings,
+    properties: Mutex<Option<Value>>,
 }
 
 impl ChatsvcFolderSource {
@@ -72,6 +78,7 @@ impl ChatsvcFolderSource {
             pins: Pins::new(session),
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
+            properties: Mutex::new(None),
         }
     }
 }
@@ -110,7 +117,23 @@ impl FolderSource for ChatsvcFolderSource {
     }
 
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
-        Box::pin(async { Ok(self.settings.chat_sections().await?) })
+        Box::pin(async {
+            let properties = self.settings.properties().await?;
+            let sections = parse_chat_sections(&properties);
+            *self.properties.lock().unwrap() = Some(properties);
+            Ok(sections)
+        })
+    }
+
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async {
+            let cached = self.properties.lock().unwrap().take();
+            let properties = match cached {
+                Some(properties) => properties,
+                None => self.settings.properties().await?,
+            };
+            Ok(parse_teams_order(&properties))
+        })
     }
 
     fn set_section_enabled(
@@ -176,6 +199,27 @@ fn convert(folders: chatsvc::Folders) -> Vec<ChatFolder> {
             conversation_ids: folder.conversation_ids,
         })
         .collect()
+}
+
+fn stored_team_order(teams: &[store::SidebarTeam]) -> Vec<(String, i64)> {
+    teams
+        .iter()
+        .enumerate()
+        .map(|(position, team)| (team.team.id.clone(), position as i64))
+        .collect()
+}
+
+fn sort_teams_by_order(teams: &mut [TeamLayoutRecord], order: &[(String, i64)]) {
+    let positions: HashMap<&str, i64> = order
+        .iter()
+        .map(|(team_id, position)| (team_id.as_str(), *position))
+        .collect();
+    teams.sort_by_key(|team| {
+        positions
+            .get(team.team_id.as_str())
+            .copied()
+            .unwrap_or(i64::MAX)
+    });
 }
 
 fn resolve_notifications(
@@ -379,8 +423,16 @@ impl<R: Remote> SyncEngine<R> {
         if last.is_some_and(|last| Utc::now() - last < self.config.team_layout_refresh_interval) {
             return Ok(());
         }
-        let layout = source.team_layout().await?;
+        let mut layout = source.team_layout().await?;
         let before = self.store.sidebar()?.teams;
+        let order = match source.teams_order().await {
+            Ok(order) => order,
+            Err(error) => {
+                self.report(format!("cannot read the team order: {error}"));
+                stored_team_order(&before)
+            }
+        };
+        sort_teams_by_order(&mut layout, &order);
         self.store.replace_team_layout(&layout)?;
         self.store.set_meta_time(META_TEAM_LAYOUT_AT, Utc::now())?;
         if self.store.sidebar()?.teams != before {
@@ -449,6 +501,37 @@ mod tests {
             level,
             include_replies,
         }
+    }
+
+    fn team(team_id: &str) -> TeamLayoutRecord {
+        TeamLayoutRecord {
+            team_id: team_id.into(),
+            hidden: false,
+            channels: Vec::new(),
+        }
+    }
+
+    fn team_ids(teams: &[TeamLayoutRecord]) -> Vec<&str> {
+        teams.iter().map(|team| team.team_id.as_str()).collect()
+    }
+
+    #[test]
+    fn listed_teams_come_first_by_order_and_unlisted_follow_in_server_order() {
+        let mut teams = vec![team("x"), team("b"), team("y"), team("a"), team("z")];
+        let order = vec![
+            ("a".to_owned(), 0),
+            ("b".to_owned(), 1),
+            ("gone".to_owned(), 2),
+        ];
+        sort_teams_by_order(&mut teams, &order);
+        assert_eq!(team_ids(&teams), ["a", "b", "x", "y", "z"]);
+    }
+
+    #[test]
+    fn an_empty_order_keeps_the_server_order() {
+        let mut teams = vec![team("c"), team("a"), team("b")];
+        sort_teams_by_order(&mut teams, &[]);
+        assert_eq!(team_ids(&teams), ["c", "a", "b"]);
     }
 
     #[test]

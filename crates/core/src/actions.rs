@@ -420,6 +420,12 @@ impl<R: Remote> SyncEngine<R> {
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;
         self.remote.hide_chat(chat_id, &user_id, &tenant_id).await?;
+        let hidden_after = self
+            .store
+            .chat(chat_id)?
+            .and_then(|chat| chat.last_message_at)
+            .unwrap_or_else(Utc::now);
+        self.with_locally_hidden(|locally| locally.hide(chat_id, hidden_after))?;
         self.store.remove_chats(&[chat_id.to_owned()])?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
@@ -431,6 +437,8 @@ impl<R: Remote> SyncEngine<R> {
         self.remote
             .unhide_chat(chat_id, &user_id, &tenant_id)
             .await?;
+        let now = Utc::now();
+        self.with_locally_hidden(|locally| locally.unhide(chat_id, now))?;
         self.refresh_sidebar_full().await?;
         Ok(())
     }
@@ -575,10 +583,8 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn store_new_chat(&self, chat: &graph::Chat, my_user_id: &str) -> Result<String> {
-        if let Some(record) = chat_record(chat, my_user_id) {
-            self.store.upsert_chats(&[record])?;
-            let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
-        }
+        self.store.upsert_chats(&[chat_record(chat, my_user_id)])?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(chat.id.clone())
     }
 

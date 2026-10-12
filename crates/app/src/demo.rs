@@ -10,7 +10,7 @@ use store::{
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CardActionOutcome, ChatApp, ChatSection, Gif, Language, LanguageSettings,
+    Activity, CardActionOutcome, ChatApp, Gif, Language, LanguageSettings,
     LinkPreview, MentionCandidate, PersonCandidate, PersonSource, PinnedMessage, SavedMessage,
     TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
 };
@@ -905,10 +905,6 @@ pub fn seed_directory(state: &mut AppState) {
         Instant::now(),
         Utc::now(),
     );
-    state
-        .directory
-        .section_settings
-        .set(ChatSection::Meeting, true);
     state.collapsed.insert(CUSTOMERS_FOLDER.to_owned());
     state.last_sync = Some(Utc::now());
     state.apply_bot_titles();

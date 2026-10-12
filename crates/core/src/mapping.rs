@@ -10,15 +10,14 @@ use crate::stored::{AttachmentInfo, MentionInfo, QuoteInfo, ReactionInfo};
 
 const NO_NAME: &str = "?";
 
-pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
-    if chat
-        .viewpoint
+pub fn graph_hidden(chat: &Chat) -> bool {
+    chat.viewpoint
         .as_ref()
         .and_then(|viewpoint| viewpoint.is_hidden)
         == Some(true)
-    {
-        return None;
-    }
+}
+
+pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
     let others: Vec<&graph::Member> = chat
         .members
         .iter()
@@ -40,7 +39,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
         .as_ref()
         .map(OwnedPreview::from_graph);
     let last_event_system = preview.as_ref().is_some_and(|preview| preview.system);
-    Some(ChatRecord {
+    ChatRecord {
         id: chat.id.clone(),
         kind: chat.chat_type.clone(),
         title: chat.title(my_user_id),
@@ -71,7 +70,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> Option<ChatRecord> {
             .as_ref()
             .and_then(|preview| preview.sender_name.clone()),
         last_event_system,
-    })
+    }
 }
 
 fn member_name(member: &graph::Member) -> &str {
@@ -314,7 +313,7 @@ mod tests {
             "createdDateTime": "2026-10-06T10:00:00Z",
             "from": null,
         }));
-        let record = chat_record(&chat, "me").unwrap();
+        let record = chat_record(&chat, "me");
         assert!(!record.unread);
         assert!(record.last_event_system);
     }
@@ -327,7 +326,7 @@ mod tests {
             "createdDateTime": "2026-10-06T10:00:00Z",
             "from": {"user": {"id": "other"}},
         }));
-        let record = chat_record(&chat, "me").unwrap();
+        let record = chat_record(&chat, "me");
         assert!(record.unread);
         assert!(!record.last_event_system);
     }

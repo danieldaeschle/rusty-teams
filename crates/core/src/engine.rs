@@ -2,12 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use chatsvc::{ChatApp, TrouterEndpoint};
+use chatsvc::{ChatApp, ConversationState, TrouterEndpoint};
 use chrono::{DateTime, Duration, Utc};
 use graph::{DriveFolder, Graph, MESSAGE_PAGE_SIZE, Message};
 use store::{ImageFileCache, MessageRecord, Sidebar, Store, SyncState};
 use tokio::sync::{OnceCell, broadcast};
 
+use crate::chat_paging::ChatPaging;
 use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::folders::FolderSource;
@@ -42,7 +43,7 @@ impl Default for SyncConfig {
     fn default() -> Self {
         SyncConfig {
             chat_limit: 200,
-            chat_page_size: 25,
+            chat_page_size: 50,
             page_size: MESSAGE_PAGE_SIZE,
             open_limit: MESSAGE_PAGE_SIZE,
             max_catch_up_pages: 10,
@@ -127,6 +128,9 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) chat_apps: Mutex<HashMap<String, Vec<ChatApp>>>,
     pub(crate) link_previews: Mutex<HashMap<String, Option<LinkPreview>>>,
     pub(crate) links_backfilled: Mutex<HashSet<String>>,
+    pub(crate) chat_states: Mutex<HashMap<String, ConversationState>>,
+    pub(crate) chat_paging: Mutex<ChatPaging>,
+    pub(crate) locally_hidden_lock: Mutex<()>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -135,6 +139,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub fn with_config(remote: R, store: Arc<Store>, config: SyncConfig) -> Self {
+        let chat_paging = Mutex::new(crate::sidebar_sync::stored_chat_paging(&store));
         SyncEngine {
             remote,
             store,
@@ -157,6 +162,9 @@ impl<R: Remote> SyncEngine<R> {
             chat_apps: Mutex::new(HashMap::new()),
             link_previews: Mutex::new(HashMap::new()),
             links_backfilled: Mutex::new(HashSet::new()),
+            chat_states: Mutex::new(HashMap::new()),
+            chat_paging,
+            locally_hidden_lock: Mutex::new(()),
         }
     }
 

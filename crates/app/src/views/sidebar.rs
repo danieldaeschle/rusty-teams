@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -27,7 +28,7 @@ use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
     SectionInput, SectionKind, Step, build_sections, step_id,
-    visible_channel_ids,
+    older_chats_trigger_resets, visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 
@@ -40,6 +41,7 @@ const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
+const LOADING_OLDER_LABEL: &str = "Loading older chats";
 const FALLBACK_VIEWPORT: f32 = 900.;
 const CALLS_REFRESH: Duration = Duration::from_secs(30);
 const VIEWPORT_MARGIN: f32 = 300.;
@@ -290,6 +292,8 @@ pub struct SidebarView {
     revealed_channel_teams: HashSet<String>,
     hidden_teams_open: bool,
     chats_scroll: ScrollHandle,
+    older_chats_trigger_top: Cell<Option<f32>>,
+    older_chats_seen: Cell<(bool, bool)>,
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
     _subscription: Subscription,
@@ -403,6 +407,8 @@ impl SidebarView {
             revealed_channel_teams: HashSet::new(),
             hidden_teams_open: false,
             chats_scroll: ScrollHandle::new(),
+            older_chats_trigger_top: Cell::new(None),
+            older_chats_seen: Cell::new((false, false)),
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
@@ -871,6 +877,7 @@ impl SidebarView {
         let mut y = 0.;
         let mut list = v_flex().w_full().pb(px(12.));
         let mut skipped_height = 0.;
+        let mut others_end = None;
         let directory_state = self.state.clone();
         if drafting {
             list = list.child(self.draft_row());
@@ -907,6 +914,9 @@ impl SidebarView {
                 }
                 y += ROW_HEIGHT;
             }
+            if section.kind == SectionKind::Others {
+                others_end = Some(y);
+            }
             if section.hidden_count > 0 || section.list_expanded {
                 list = with_spacer(list, &mut skipped_height);
                 list = list.child(self.see_more_row(section, cx));
@@ -928,6 +938,38 @@ impl SidebarView {
                 );
                 y += HINT_HEIGHT;
             }
+        }
+        let (has_older, loading_older) = self.state.read(cx).older_chats();
+        let previous = self.older_chats_seen.replace((has_older, loading_older));
+        if older_chats_trigger_resets(previous, (has_older, loading_older)) {
+            self.older_chats_trigger_top.set(None);
+        }
+        if has_older
+            && wants_older_chats(
+                others_end,
+                top + height,
+                top,
+                self.older_chats_trigger_top.get(),
+                loading_older,
+            )
+        {
+            self.older_chats_trigger_top.set(Some(top));
+            let state = self.state.clone();
+            cx.defer(move |cx| state.read(cx).request_older_chats());
+        }
+        if loading_older {
+            list = with_spacer(list, &mut skipped_height);
+            list = list.child(
+                div()
+                    .pl(px(16. + AVATAR_SIZE + 12.))
+                    .h(px(SEE_MORE_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .text_size(px(12.5))
+                    .italic()
+                    .text_color(theme::text_faint())
+                    .child(LOADING_OLDER_LABEL),
+            );
         }
         list = with_spacer(list, &mut skipped_height);
         self.request_lazy_data(faces, presence_users, cx);

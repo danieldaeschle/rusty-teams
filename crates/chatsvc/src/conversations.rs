@@ -10,6 +10,13 @@ const PAGE_SIZE: usize = 200;
 const MAX_PAGES: usize = 100;
 const ALERTS_OFF: &str = "false";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationState {
+    pub id: String,
+    pub muted: bool,
+    pub hidden: Option<bool>,
+}
+
 pub struct Conversations<T: MessageTransport = SessionMessageTransport> {
     transport: T,
     base_url: String,
@@ -43,7 +50,7 @@ impl<T: MessageTransport> Conversations<T> {
         )
     }
 
-    pub async fn conversation_mute_states(&self) -> Result<Vec<(String, bool)>> {
+    pub async fn conversation_states(&self) -> Result<Vec<ConversationState>> {
         let url = format!(
             "{}?view=msnp24Equivalent&pageSize={PAGE_SIZE}",
             self.base_url
@@ -56,7 +63,7 @@ impl<T: MessageTransport> Conversations<T> {
             };
             let answer = self.transport.send(Request::get(&url)).await?;
             ensure_success(&answer)?;
-            states.extend(mute_states_in_page(&answer.body)?);
+            states.extend(states_in_page(&answer.body)?);
             next_url = backward_link(&answer.body).filter(|link| *link != url);
         }
         Ok(states)
@@ -101,7 +108,26 @@ fn backward_link(body: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn mute_states_in_page(body: &Value) -> Result<Vec<(String, bool)>> {
+fn hidden_flag(conversation: &Value) -> Option<bool> {
+    let flags: Vec<bool> = [
+        &conversation["properties"]["hidden"],
+        &conversation["threadProperties"]["hidden"],
+    ]
+    .into_iter()
+    .filter_map(|value| match value {
+        Value::Bool(flag) => Some(*flag),
+        Value::String(text) => text.parse().ok(),
+        _ => None,
+    })
+    .collect();
+    if flags.contains(&true) {
+        Some(true)
+    } else {
+        flags.first().copied()
+    }
+}
+
+fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
     let conversations = body
         .get("conversations")
         .and_then(Value::as_array)
@@ -111,7 +137,11 @@ fn mute_states_in_page(body: &Value) -> Result<Vec<(String, bool)>> {
         .filter_map(|conversation| {
             let id = conversation["id"].as_str()?;
             let muted = conversation["properties"]["alerts"].as_str() == Some(ALERTS_OFF);
-            Some((id.to_owned(), muted))
+            Some(ConversationState {
+                id: id.to_owned(),
+                muted,
+                hidden: hidden_flag(conversation),
+            })
         })
         .collect())
 }
@@ -149,6 +179,14 @@ mod tests {
         }
     }
 
+    fn state(id: &str, muted: bool) -> ConversationState {
+        ConversationState {
+            id: id.to_owned(),
+            muted,
+            hidden: None,
+        }
+    }
+
     const BASE: &str = "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations";
 
     #[tokio::test]
@@ -165,16 +203,16 @@ mod tests {
             }),
         )]);
         let states = Conversations::with_transport(&transport, "emea")
-            .conversation_mute_states()
+            .conversation_states()
             .await
             .unwrap();
         assert_eq!(
             states,
             vec![
-                ("19:a".to_owned(), true),
-                ("19:b".to_owned(), false),
-                ("19:c".to_owned(), false),
-                ("19:d".to_owned(), false),
+                state("19:a", true),
+                state("19:b", false),
+                state("19:c", false),
+                state("19:d", false),
             ]
         );
         let requests = transport.requests.lock().unwrap();
@@ -205,15 +243,15 @@ mod tests {
             (200, json!({"conversations": [{"id": "19:oldest"}]})),
         ]);
         let states = Conversations::with_transport(&transport, "emea")
-            .conversation_mute_states()
+            .conversation_states()
             .await
             .unwrap();
         assert_eq!(
             states,
             vec![
-                ("19:a".to_owned(), false),
-                ("19:old".to_owned(), true),
-                ("19:oldest".to_owned(), false),
+                state("19:a", false),
+                state("19:old", true),
+                state("19:oldest", false),
             ]
         );
         let requests = transport.requests.lock().unwrap();
@@ -226,10 +264,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hidden_flag_is_read_from_the_thread_properties_as_text_or_bool() {
+        let transport = canned(vec![(
+            200,
+            json!({
+                "conversations": [
+                    {"id": "19:a", "threadProperties": {"hidden": "true"}},
+                    {"id": "19:b", "threadProperties": {"hidden": "false"}},
+                    {"id": "19:c", "properties": {"hidden": true}},
+                    {"id": "19:d", "properties": {}},
+                    {"id": "19:e", "properties": {"hidden": "false"}, "threadProperties": {"hidden": "true"}},
+                    {"id": "19:f", "properties": {"hidden": "true"}, "threadProperties": {"hidden": "false"}},
+                ],
+            }),
+        )]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_states()
+            .await
+            .unwrap();
+        let hidden: Vec<Option<bool>> = states.iter().map(|state| state.hidden).collect();
+        assert_eq!(
+            hidden,
+            [Some(true), Some(false), Some(true), None, Some(true), Some(true)]
+        );
+    }
+
+    #[tokio::test]
     async fn mute_states_fail_on_an_error_status() {
         let transport = canned(vec![(500, Value::Null)]);
         let outcome = Conversations::with_transport(&transport, "emea")
-            .conversation_mute_states()
+            .conversation_states()
             .await;
         assert!(outcome.is_err());
     }

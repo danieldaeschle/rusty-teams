@@ -238,15 +238,44 @@ impl AppState {
         let _ = self.store.remove_chats(&[chat_id.to_owned()]);
         self.reload_sidebar(cx);
         if was_selected {
-            match next {
-                Some(next_id) => self.select(Selection::Chat(next_id), cx),
-                None => {
-                    self.selection = None;
-                    self.keep_unread = None;
-                    cx.emit(crate::app_state::AppEvent::Selection);
-                    cx.notify();
-                }
+            self.leave_removed_selection(next, cx);
+        }
+    }
+
+    fn leave_removed_selection(&mut self, next: Option<String>, cx: &mut Context<Self>) {
+        match next {
+            Some(next_id) => self.select(Selection::Chat(next_id), cx),
+            None => {
+                self.selection = None;
+                self.keep_unread = None;
+                cx.emit(crate::app_state::AppEvent::Selection);
+                cx.notify();
             }
+        }
+    }
+
+    pub(crate) fn reload_sidebar_after_sync(&mut self, cx: &mut Context<Self>) {
+        let selected = match &self.selection {
+            Some(Selection::Chat(chat_id)) => Some(chat_id.clone()),
+            _ => None,
+        };
+        let is_listed = |state: &Self, chat_id: &str| {
+            state.sidebar.chats.iter().any(|chat| chat.id == chat_id)
+        };
+        let was_listed = selected
+            .as_deref()
+            .is_some_and(|chat_id| is_listed(self, chat_id));
+        let next = selected
+            .as_deref()
+            .filter(|_| was_listed)
+            .and_then(|chat_id| self.next_chat_after(chat_id));
+        self.reload_sidebar(cx);
+        let removed = was_listed
+            && selected
+                .as_deref()
+                .is_some_and(|chat_id| !is_listed(self, chat_id));
+        if removed {
+            self.leave_removed_selection(next, cx);
         }
     }
 
