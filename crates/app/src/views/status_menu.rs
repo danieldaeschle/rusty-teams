@@ -28,6 +28,8 @@ pub const MENU_WIDTH: f32 = 250.;
 const TITLE_AVATAR_SIZE: f32 = 26.;
 const HEADER_AVATAR_SIZE: f32 = 40.;
 const RING_WIDTH: f32 = 2.;
+const PRESENCE_OVERHANG: f32 = 2.;
+const OWN_STATUS_BUTTON_SIZE: f32 = TITLE_AVATAR_SIZE + 2. * (1. + RING_WIDTH + PRESENCE_OVERHANG);
 const MENU_ICON_SIZE: f32 = 14.;
 const ICON_COLUMN: f32 = 16.;
 const HEADER_INSET: f32 = 24.;
@@ -61,17 +63,6 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
         summary,
         person: person.clone(),
     };
-    let avatar = with_presence(
-        person_avatar(
-            &state.directory,
-            Some(&person.user_id),
-            &person.display_name,
-            TITLE_AVATAR_SIZE,
-        ),
-        presence,
-        TITLE_AVATAR_SIZE,
-        theme::background(),
-    );
     let ringed = div()
         .p(px(1.))
         .rounded_full()
@@ -81,14 +72,27 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
         } else {
             transparent_black()
         })
-        .child(avatar);
+        .child(person_avatar(
+            &state.directory,
+            Some(&person.user_id),
+            &person.display_name,
+            TITLE_AVATAR_SIZE,
+        ))
+        .into_any_element();
+    let ringed = with_presence(
+        ringed,
+        presence,
+        TITLE_AVATAR_SIZE + 2. * (1. + RING_WIDTH),
+        theme::background(),
+    );
     let toggle = app.clone();
     Some(
         Button::new("title-own-status")
             .ghost()
             .p_0()
+            .size(px(OWN_STATUS_BUTTON_SIZE))
             .rounded_full()
-            .child(ringed)
+            .child(div().p(px(PRESENCE_OVERHANG)).child(ringed))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
                 status_menu(popup, window, cx, &context)
             })
