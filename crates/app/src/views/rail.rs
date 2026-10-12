@@ -19,6 +19,8 @@ pub const RAIL_WIDTH: f32 = ITEM_WIDTH + 2. * ISLAND_GAP;
 const ITEM_WIDTH: f32 = 48.;
 const ITEM_HEIGHT: f32 = 52.;
 const ICON_SIZE: f32 = 20.;
+const LABEL_INSET: f32 = 2.;
+const LABEL_HEIGHT: f32 = 12.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RailBadge {
@@ -141,6 +143,7 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .flex_none()
         .items_center()
         .justify_center()
+        .pt(px(2.))
         .gap(px(4.))
         .rounded(px(10.))
         .cursor_pointer()
@@ -151,13 +154,16 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .child(icon(item.icon, ICON_SIZE, color))
         .child(
             div()
-                .whitespace_nowrap()
-                .text_size(px(10.))
+                .max_w(px(ITEM_WIDTH - 2. * LABEL_INSET))
+                .truncate()
+                .h(px(LABEL_HEIGHT))
+                .text_size(px(9.))
+                .line_height(px(LABEL_HEIGHT))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(color)
                 .child(item.label),
         )
-        .child(badge(item.badge))
+        .children(badge(item.badge))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
 }
 
@@ -254,9 +260,9 @@ impl RailView {
     }
 }
 
-fn badge(badge: RailBadge) -> Div {
-    match badge {
-        RailBadge::None => div(),
+fn badge(badge: RailBadge) -> Option<Div> {
+    Some(match badge {
+        RailBadge::None => return None,
         RailBadge::Dot => div()
             .absolute()
             .top(px(8.))
@@ -281,7 +287,7 @@ fn badge(badge: RailBadge) -> Div {
             .line_height(px(16.))
             .font_weight(FontWeight::BOLD)
             .child(format::badge_text(count)),
-    }
+    })
 }
 
 impl Render for RailView {
