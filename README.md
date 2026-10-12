@@ -66,6 +66,12 @@
 - Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
 - Organizer controls: lobby banner with Admit and Deny, tile menu (pin, spotlight, mute, remove), Mute all, live captions overlay, camera background blur
 
+**Agents (MCP)**
+- Local MCP server at `http://127.0.0.1:47615/mcp`, off by default: Settings > MCP
+- Agents read allowed chats, channels, meetings and transcripts, and propose replies
+- A proposal shows as a card above the composer: Send, Edit or Discard. Agents never send
+- One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
+
 **App**
 - Dark theme, opens instantly from the cache
 - Self-update from an update folder
@@ -108,6 +114,7 @@ It signs you in through a real Teams web page and lets that page make the API ca
 |  graph    Microsoft Graph: chats, channels, messages, people, sending    |
 |  chatsvc  Teams chat service: realtime, pins, folders, read receipts     |
 |  session  runs requests inside the Teams page, one Transport trait       |
+|  mcp      local MCP server for agents, permissions, config install       |
 +------------------------------------|-------------------------------------+
                                      | DevTools protocol (CDP)
 +------------------------------------v-------------------------------------+

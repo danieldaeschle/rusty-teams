@@ -299,6 +299,16 @@ impl TeamsTools {
         if !self.hub.policy().propose {
             return Err(PROPOSE_DISABLED.to_owned());
         }
+        if let Some(message_id) = &params.reply_to_message_id {
+            let found = store
+                .messages_by_id(&params.conversation_id, std::slice::from_ref(message_id))
+                .map_err(failure)?;
+            if !found.contains_key(message_id) {
+                return Err(format!(
+                    "reply_to_message_id {message_id} is not a message of this conversation"
+                ));
+            }
+        }
         let text = params.text.trim();
         if text.is_empty() || text.chars().count() > MAX_PROPOSAL_CHARACTERS {
             return Err(format!(
@@ -321,7 +331,7 @@ impl TeamsTools {
     }
 
     #[tool(
-        description = "Wait up to timeout_seconds (default 25, max 50) for events in allowed conversations: new_message, user_typing, user_sent, proposal_resolved (outcome sent, edited, discarded, stale or superseded). Returns {events, next}. Call again with since set to next to continue without missing events. Without since, only events from now on are returned."
+        description = "Wait up to timeout_seconds (default 25, max 50) for events in allowed conversations: new_message, user_typing, user_sent, proposal_resolved (outcome sent = the user sent it unchanged and it is queued for delivery, edited, discarded, stale or superseded). Returns {events, next}. Call again with since set to next to continue without missing events. Without since, only events from now on are returned."
     )]
     async fn wait_for_event(
         &self,
@@ -395,6 +405,8 @@ impl TeamsTools {
         if !policy.enabled || !policy.transcripts {
             return Err(TRANSCRIPTS_DISABLED.to_owned());
         }
+        let store = self.store()?;
+        self.readable_kind(&store, &params.meeting_chat_id)?;
         let live_captions = self.hub.live_captions(&params.meeting_chat_id);
         match self.source.transcript(&params.meeting_chat_id).await {
             Ok(transcript) => Ok(render(json!({

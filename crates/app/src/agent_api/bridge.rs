@@ -14,6 +14,7 @@ use crate::runtime;
 
 const PREVIEW_CHARACTERS: usize = 200;
 const NEW_MESSAGE_BATCH: usize = 50;
+const CLOCK_SKEW_ALLOWANCE: chrono::TimeDelta = chrono::TimeDelta::minutes(2);
 
 pub fn drain_ui_events(
     mut receiver: UnboundedReceiver<UiEvent>,
@@ -62,7 +63,7 @@ pub fn apply(proposals: &mut HashMap<String, ProposalEntry>, event: UiEvent) {
 }
 
 pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc<AppSource>) {
-    let started_at = Utc::now();
+    let started_at = Utc::now() - CLOCK_SKEW_ALLOWANCE;
     drop(runtime::spawn(async move {
         let mut receiver = engine.subscribe();
         let mut watermarks: HashMap<String, DateTime<Utc>> = HashMap::new();
@@ -78,29 +79,36 @@ pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc
             let watermark = watermarks
                 .entry(conversation_id.clone())
                 .or_insert(started_at);
-            let Ok(messages) =
-                store.messages_after(&conversation_id, *watermark, NEW_MESSAGE_BATCH)
-            else {
-                continue;
-            };
             let my_id = mcp::TeamsSource::me_id(source.as_ref());
-            for message in messages {
-                *watermark = (*watermark).max(message.created_at);
-                if message.deleted {
-                    continue;
+            loop {
+                let Ok(messages) =
+                    store.messages_after(&conversation_id, *watermark, NEW_MESSAGE_BATCH)
+                else {
+                    break;
+                };
+                let batch_full = messages.len() == NEW_MESSAGE_BATCH;
+                for message in messages {
+                    *watermark = (*watermark).max(message.created_at);
+                    if message.deleted {
+                        continue;
+                    }
+                    let sender_is_me = my_id.is_some() && message.sender_id == my_id;
+                    let preview: String = store::plain_text(&message.body_html)
+                        .chars()
+                        .take(PREVIEW_CHARACTERS)
+                        .collect();
+                    hub.message_arrived(
+                        &conversation_id,
+                        &message.message_id,
+                        sender_is_me,
+                        message.created_at,
+                        message.sender_name,
+                        &preview,
+                    );
                 }
-                let sender_is_me = my_id.is_some() && message.sender_id == my_id;
-                let preview: String = store::plain_text(&message.body_html)
-                    .chars()
-                    .take(PREVIEW_CHARACTERS)
-                    .collect();
-                hub.message_arrived(
-                    &conversation_id,
-                    &message.message_id,
-                    sender_is_me,
-                    message.sender_name,
-                    &preview,
-                );
+                if !batch_full {
+                    break;
+                }
             }
         }
     }));

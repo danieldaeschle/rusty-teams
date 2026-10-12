@@ -273,11 +273,17 @@ impl AgentHub {
         conversation_id: &str,
         message_id: &str,
         sender_is_me: bool,
+        created_at: DateTime<Utc>,
         sender: Option<String>,
         preview: &str,
     ) {
         if sender_is_me {
-            self.stale_pending(conversation_id);
+            let answers_pending = self
+                .pending_proposal(conversation_id)
+                .is_some_and(|proposal| created_at >= proposal.created_at);
+            if answers_pending {
+                self.stale_pending(conversation_id);
+            }
             return;
         }
         self.push(EventKind::NewMessage {
@@ -466,9 +472,9 @@ mod tests {
         assert!(hub.pending_proposal("c1").is_none());
         assert_eq!(ui.try_recv().unwrap(), UiEvent::ProposalStale(stale));
         propose(&hub, "c2", "yo");
-        hub.message_arrived("c2", "m1", false, None, "other");
+        hub.message_arrived("c2", "m1", false, Utc::now(), None, "other");
         assert!(hub.pending_proposal("c2").is_some());
-        hub.message_arrived("c2", "m2", true, None, "mine");
+        hub.message_arrived("c2", "m2", true, Utc::now(), None, "mine");
         assert!(hub.pending_proposal("c2").is_none());
     }
 
@@ -521,7 +527,7 @@ mod tests {
             tokio::spawn(async move { hub.wait_events(None, Duration::from_secs(5)).await })
         };
         tokio::time::sleep(Duration::from_millis(20)).await;
-        hub.message_arrived("c1", "m1", false, Some("Ada".to_owned()), "hello");
+        hub.message_arrived("c1", "m1", false, Utc::now(), Some("Ada".to_owned()), "hello");
         let (events, next) = waiter.await.unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(next, events[0].seq);

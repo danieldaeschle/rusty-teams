@@ -265,7 +265,7 @@ impl AgentApi {
         if let Ok(token) = mcp::regenerate_token(&self.store) {
             self.token = token;
             self.reinstall_agent_configs(cx);
-            if self.server.is_some() {
+            if self.hub.policy().enabled {
                 self.start_server(cx);
             }
             cx.notify();

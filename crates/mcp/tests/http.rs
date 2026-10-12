@@ -21,6 +21,8 @@ const ALLOWED_CHAT: &str = "19:alpha@thread.v2";
 const HIDDEN_CHAT: &str = "19:beta@thread.v2";
 const CHANNEL: &str = "19:channel@thread.tacv2";
 const MEETING_CHAT: &str = "19:meeting_abc@thread.v2";
+const LIVE_MEETING_CHAT: &str = "19:meeting_live@thread.v2";
+const HIDDEN_MEETING_CHAT: &str = "19:meeting_hidden@thread.v2";
 
 struct FakeSource {
     store: Arc<Store>,
@@ -89,7 +91,11 @@ impl Harness {
         seed(&store);
         let policy = AgentPolicy {
             enabled: true,
-            chats: Access::Selected(BTreeSet::from([ALLOWED_CHAT.to_owned()])),
+            chats: Access::Selected(BTreeSet::from([
+                ALLOWED_CHAT.to_owned(),
+                MEETING_CHAT.to_owned(),
+                LIVE_MEETING_CHAT.to_owned(),
+            ])),
             channels: Access::Selected(BTreeSet::from([CHANNEL.to_owned()])),
             propose,
             calendar,
@@ -123,15 +129,22 @@ impl Harness {
 
 fn seed(store: &Store) {
     let time = |minute: u32| Utc.with_ymd_and_hms(2026, 10, 6, 9, minute, 0).unwrap();
-    let chat = |id: &str, title: &str| ChatRecord {
+    let chat_of_kind = |id: &str, kind: &str, title: &str| ChatRecord {
         id: id.to_owned(),
-        kind: "group".to_owned(),
+        kind: kind.to_owned(),
         title: title.to_owned(),
         last_message_at: Some(time(5)),
         ..ChatRecord::default()
     };
+    let chat = |id: &str, title: &str| chat_of_kind(id, "group", title);
     store
-        .upsert_chats(&[chat(ALLOWED_CHAT, "Planning"), chat(HIDDEN_CHAT, "Secrets")])
+        .upsert_chats(&[
+            chat(ALLOWED_CHAT, "Planning"),
+            chat(HIDDEN_CHAT, "Secrets"),
+            chat_of_kind(MEETING_CHAT, "meeting", "Sprint review"),
+            chat_of_kind(LIVE_MEETING_CHAT, "meeting", "Live sync"),
+            chat_of_kind(HIDDEN_MEETING_CHAT, "meeting", "Board meeting"),
+        ])
         .unwrap();
     store
         .upsert_teams(&[TeamRecord {
@@ -267,8 +280,16 @@ async fn lists_only_allowed_conversations() {
     let client = harness.client().await;
     let (_, chats) = call(&client, "list_chats", json!({})).await;
     let chats: Value = serde_json::from_str(&chats).unwrap();
-    assert_eq!(chats["chats"].as_array().unwrap().len(), 1);
-    assert_eq!(chats["chats"][0]["id"], ALLOWED_CHAT);
+    let mut ids: Vec<&str> = chats["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|chat| chat["id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    let mut expected = vec![ALLOWED_CHAT, MEETING_CHAT, LIVE_MEETING_CHAT];
+    expected.sort_unstable();
+    assert_eq!(ids, expected);
     let (_, channels) = call(&client, "list_channels", json!({})).await;
     let channels: Value = serde_json::from_str(&channels).unwrap();
     assert_eq!(channels["channels"][0]["team"], "Platform");
@@ -478,7 +499,16 @@ async fn get_transcript_returns_turns_and_live_captions() {
     assert_eq!(body["turns"][0]["text"], "Welcome everyone");
     assert!(body["live_captions"].as_array().unwrap().is_empty());
 
-    let live_chat = "19:meeting_live@thread.v2";
+    let (is_error, text) = call(
+        &client,
+        "get_transcript",
+        json!({"meeting_chat_id": HIDDEN_MEETING_CHAT}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("not found or not allowed"), "{text}");
+
+    let live_chat = LIVE_MEETING_CHAT;
     let (is_error, text) = call(
         &client,
         "get_transcript",
@@ -500,4 +530,25 @@ async fn get_transcript_returns_turns_and_live_captions() {
     assert!(body["turns"].as_array().unwrap().is_empty());
     assert_eq!(body["live_captions"][0]["speaker"], "Bo");
     assert_eq!(body["live_captions"][0]["text"], "Hi all");
+}
+
+#[tokio::test]
+async fn propose_rejects_a_reply_target_from_another_conversation() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, text) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "ok", "reply_to_message_id": "m3"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("is not a message of this conversation"), "{text}");
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "ok", "reply_to_message_id": "m1"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
 }
