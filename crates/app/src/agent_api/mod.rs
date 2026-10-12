@@ -1,4 +1,6 @@
 mod bridge;
+mod extras;
+mod image_scale;
 mod source;
 
 use std::collections::{BTreeSet, HashMap};

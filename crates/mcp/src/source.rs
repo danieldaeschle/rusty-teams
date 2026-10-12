@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use store::Store;
+use store::{MessageRecord, Store};
 
 pub type SourceFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SourceError>> + Send + 'a>>;
 
@@ -44,10 +44,98 @@ pub struct Transcript {
     pub turns: Vec<TranscriptTurn>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageKind {
+    Inline,
+    Gif,
+    Sticker,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImageInfo {
+    pub image_id: String,
+    pub kind: ImageKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReactionInfo {
+    pub emoji: String,
+    pub count: usize,
+    pub mine: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MentionInfo {
+    pub name: String,
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileInfo {
+    pub name: String,
+    pub size: Option<u64>,
+    #[serde(rename = "type")]
+    pub file_type: Option<String>,
+    pub link: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QuoteInfo {
+    pub message_id: String,
+    pub sender: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkInfo {
+    pub url: String,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageExtras {
+    pub text: String,
+    pub images: Vec<ImageInfo>,
+    pub reactions: Vec<ReactionInfo>,
+    pub mentions: Vec<MentionInfo>,
+    pub files: Vec<FileInfo>,
+    pub quote: Option<QuoteInfo>,
+    pub cards: Vec<String>,
+    pub links: Vec<LinkInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncodedImage {
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+    pub kind: ImageKind,
+    pub alt: Option<String>,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub trait TeamsSource: Send + Sync + 'static {
     fn store(&self) -> Result<Arc<Store>, SourceError>;
 
     fn me_id(&self) -> Option<String>;
+
+    fn message_extras(&self, message: &MessageRecord, my_user_id: Option<&str>) -> MessageExtras;
+
+    fn image<'a>(
+        &'a self,
+        _message: &'a MessageRecord,
+        _image_id: &'a str,
+        _max_edge: u32,
+    ) -> SourceFuture<'a, EncodedImage> {
+        Box::pin(async { Err(SourceError::Unsupported("images")) })
+    }
+
+    fn refresh_recent(&self, _conversation_ids: Vec<String>) -> SourceFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 
     fn calendar(
         &self,

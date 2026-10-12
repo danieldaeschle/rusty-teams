@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
+use crate::external_image::{external_image_url, is_giphy_url};
 use crate::markdown::escape_html;
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
@@ -72,11 +73,27 @@ pub struct ImageRef {
     pub url: String,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub alt: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Inline,
+    Gif,
+    Sticker,
 }
 
 impl ImageRef {
     pub fn key(&self) -> &str {
         &self.url
+    }
+
+    pub fn kind(&self) -> ImageKind {
+        match external_image_url(&self.url) {
+            None => ImageKind::Inline,
+            Some(direct) if is_giphy_url(&direct) => ImageKind::Gif,
+            Some(_) => ImageKind::Sticker,
+        }
     }
 }
 
@@ -178,6 +195,45 @@ pub fn quotes(record: &MessageRecord) -> Vec<QuoteInfo> {
         .collect()
 }
 
+pub fn message_quote(record: &MessageRecord) -> Option<QuoteInfo> {
+    quotes(record)
+        .into_iter()
+        .next()
+        .or_else(|| inline_reply_quote(record))
+}
+
+fn inline_reply_quote(record: &MessageRecord) -> Option<QuoteInfo> {
+    let fragment = Html::parse_fragment(&record.body_html);
+    let blockquote = fragment
+        .root_element()
+        .descendants()
+        .filter_map(ElementRef::wrap)
+        .find(|element| {
+            element.value().name() == "blockquote"
+                && element
+                    .value()
+                    .attr("itemtype")
+                    .is_some_and(|itemtype| itemtype.contains(REPLY_ITEMTYPE))
+                && !element
+                    .ancestors()
+                    .filter_map(ElementRef::wrap)
+                    .any(|ancestor| ancestor.value().name() == "blockquote")
+        })?;
+    let text_of = |property: &str| {
+        blockquote
+            .descendants()
+            .filter_map(ElementRef::wrap)
+            .find(|element| element.value().attr("itemprop") == Some(property))
+            .map(|element| element.text().collect::<String>().trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    Some(QuoteInfo {
+        message_id: blockquote.value().attr("itemid")?.to_owned(),
+        preview: text_of("preview").unwrap_or_default(),
+        sender_name: text_of("mri"),
+    })
+}
+
 pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
     if record.deleted {
         return Vec::new();
@@ -204,10 +260,15 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
         }
         let style = value.attr("style").unwrap_or_default();
         found.push(ImageRef {
-            id: image_id(url),
+            id: image_id(found.len(), url),
             url: url.to_owned(),
             width: dimension(value.attr("width"), style, "width"),
             height: dimension(value.attr("height"), style, "height"),
+            alt: value
+                .attr("alt")
+                .map(str::trim)
+                .filter(|alt| !alt.is_empty())
+                .map(str::to_owned),
         });
     }
     found
@@ -328,6 +389,66 @@ pub fn copy_text(record: &MessageRecord) -> String {
     text.trim().to_owned()
 }
 
+pub fn readable_text(record: &MessageRecord) -> String {
+    let spans: Vec<Span> = message_spans(record)
+        .into_iter()
+        .filter(|span| !matches!(span, Span::Quote(_)))
+        .collect();
+    let mut text = String::new();
+    push_plain(&mut text, &spans);
+    text.trim().to_owned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionSummary {
+    pub emoji: String,
+    pub count: usize,
+    pub mine: bool,
+}
+
+pub fn reaction_summaries(
+    record: &MessageRecord,
+    my_user_id: Option<&str>,
+) -> Vec<ReactionSummary> {
+    let mut summaries: Vec<ReactionSummary> = Vec::new();
+    for reaction in reactions(record) {
+        let emoji = base_reaction_emoji(&reaction.reaction_type);
+        let position = match summaries.iter().position(|summary| summary.emoji == emoji) {
+            Some(position) => position,
+            None => {
+                summaries.push(ReactionSummary {
+                    emoji,
+                    count: 0,
+                    mine: false,
+                });
+                summaries.len() - 1
+            }
+        };
+        let summary = &mut summaries[position];
+        summary.count += 1;
+        summary.mine |= my_user_id.is_some() && reaction.user_id.as_deref() == my_user_id;
+    }
+    summaries
+}
+
+fn base_reaction_emoji(reaction_type: &str) -> String {
+    let legacy = match reaction_type {
+        "like" => "\u{1F44D}",
+        "heart" => "\u{2764}",
+        "laugh" => "\u{1F606}",
+        "surprised" => "\u{1F62E}",
+        "sad" => "\u{1F641}",
+        "angry" => "\u{1F620}",
+        other => other,
+    };
+    legacy
+        .chars()
+        .filter(|character| {
+            *character != '\u{FE0F}' && !('\u{1F3FB}'..='\u{1F3FF}').contains(character)
+        })
+        .collect()
+}
+
 pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
     for span in spans {
         match span {
@@ -396,18 +517,12 @@ pub fn can_delete(record: &MessageRecord, my_user_id: &str) -> bool {
     can_edit(record, my_user_id)
 }
 
-fn image_id(url: &str) -> String {
-    let path = url.split(['?', '#']).next().unwrap_or(url);
-    let segments: Vec<&str> = path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    segments
-        .iter()
-        .position(|segment| matches!(*segment, "hostedContents" | "objects"))
-        .and_then(|index| segments.get(index + 1))
-        .or(segments.last())
-        .map_or_else(String::new, |segment| (*segment).to_owned())
+/// Position in the message plus an FNV-1a hash of the URL, so two GIFs from the same host never share an id.
+fn image_id(position: usize, url: &str) -> String {
+    let hash = url.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    });
+    format!("{position}-{hash:08x}")
 }
 
 fn dimension(attribute: Option<&str>, style: &str, property: &str) -> Option<u32> {
@@ -683,13 +798,129 @@ mod tests {
         );
         let found = images(&record(html, "[]"));
         assert_eq!(found.len(), 2);
-        assert_eq!(
-            (found[0].id.as_str(), found[0].width, found[0].height),
-            ("aWQ9", Some(300), Some(120))
+        assert_eq!((found[0].width, found[0].height), (Some(300), Some(120)));
+        assert_eq!((found[1].width, found[1].height), (Some(64), None));
+        assert!(found[0].id.starts_with("0-"));
+        assert!(found[1].id.starts_with("1-"));
+    }
+
+    #[test]
+    fn two_giphy_gifs_get_different_image_ids_and_the_gif_kind() {
+        let html = concat!(
+            r#"<img src="https://media0.giphy.com/media/abc/giphy.gif" alt="  dancing cat ">"#,
+            r#"<img src="https://media1.giphy.com/media/def/giphy.gif">"#,
+            r#"<img src="https://statics.teams.cdn.office.net/evergreen-assets/stickerassets/a/b.gif">"#,
+            r#"<img src="https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/aWQ9/$value">"#,
         );
+        let found = images(&record(html, "[]"));
+        let ids: std::collections::HashSet<&str> =
+            found.iter().map(|image| image.id.as_str()).collect();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(found[0].id, images(&record(html, "[]"))[0].id);
+        assert_eq!(found[0].alt.as_deref(), Some("dancing cat"));
+        assert_eq!(found[1].alt, None);
+        let kinds: Vec<ImageKind> = found.iter().map(ImageRef::kind).collect();
         assert_eq!(
-            (found[1].id.as_str(), found[1].width, found[1].height),
-            ("0-weu-d1-abc", Some(64), None)
+            kinds,
+            [
+                ImageKind::Gif,
+                ImageKind::Gif,
+                ImageKind::Sticker,
+                ImageKind::Inline
+            ]
+        );
+    }
+
+    #[test]
+    fn readable_text_keeps_lines_lists_code_and_mentions_and_drops_the_reply_quote() {
+        let html = concat!(
+            r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="Q0"><strong itemprop="mri">Bob</strong><p itemprop="preview">old words</p></blockquote>"#,
+            r#"<p>Hi <at id="0">Ada</at></p><ul><li>one</li><li>two</li></ul><pre>let x = 1;</pre><p>last</p>"#,
+        );
+        let json = r#"[{"user_id":"U1","name":"Ada","id":0,"target_id":"U1"}]"#;
+        let text = readable_text(&with_mentions(html, json));
+        assert!(!text.contains("old words"), "{text}");
+        assert!(!text.contains("Bob"), "{text}");
+        assert!(text.starts_with("Hi @Ada\n"), "{text}");
+        assert!(text.contains("- one\n- two\n"), "{text}");
+        assert!(text.contains("let x = 1;\n"), "{text}");
+        assert!(text.ends_with("last"), "{text}");
+    }
+
+    #[test]
+    fn a_reply_blockquote_in_the_body_becomes_the_quote() {
+        let html = format!(
+            "{}<p>answer</p>",
+            quote_html(&QuoteInfo {
+                message_id: "Q9".to_owned(),
+                preview: "a < b".to_owned(),
+                sender_name: Some("Ada".to_owned()),
+            })
+        );
+        let stored = record(&html, "[]");
+        assert_eq!(
+            message_quote(&stored),
+            Some(QuoteInfo {
+                message_id: "Q9".to_owned(),
+                preview: "a < b".to_owned(),
+                sender_name: Some("Ada".to_owned()),
+            })
+        );
+        assert_eq!(readable_text(&stored), "answer");
+        assert_eq!(message_quote(&record("<p>plain</p>", "[]")), None);
+    }
+
+    #[test]
+    fn a_reply_blockquote_nested_in_a_normal_blockquote_is_not_the_quote() {
+        let html = format!(
+            "<blockquote>{}</blockquote><p>answer</p>",
+            quote_html(&QuoteInfo {
+                message_id: "Q9".to_owned(),
+                preview: "inner".to_owned(),
+                sender_name: None,
+            })
+        );
+        assert_eq!(message_quote(&record(&html, "[]")), None);
+    }
+
+    #[test]
+    fn readable_text_drops_the_stored_quote_and_card_text() {
+        let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"id":"Q1","quote":{"message_id":"Q1","preview":"quoted","sender_name":"Ada"}}]"#;
+        let stored = record("<attachment id=\"Q1\"></attachment><p>answer</p>", json);
+        assert_eq!(readable_text(&stored), "answer");
+    }
+
+    #[test]
+    fn reactions_group_by_base_emoji_and_merge_skin_tones() {
+        let mut stored = record("", "[]");
+        stored.reactions_json = r#"[
+            {"reaction_type":"like","user_id":"a"},
+            {"reaction_type":"\ud83d\udc4d\ud83c\udffd","user_id":"me"},
+            {"reaction_type":"\ud83d\udc4d","user_id":"b"},
+            {"reaction_type":"heart","user_id":"a"},
+            {"reaction_type":"\u2764\ufe0f","user_id":"c"}
+        ]"#
+        .to_owned();
+        let summaries = reaction_summaries(&stored, Some("me"));
+        assert_eq!(
+            summaries,
+            vec![
+                ReactionSummary {
+                    emoji: "\u{1F44D}".to_owned(),
+                    count: 3,
+                    mine: true
+                },
+                ReactionSummary {
+                    emoji: "\u{2764}".to_owned(),
+                    count: 2,
+                    mine: false
+                },
+            ]
+        );
+        assert!(
+            reaction_summaries(&stored, None)
+                .iter()
+                .all(|summary| !summary.mine)
         );
     }
 
@@ -842,7 +1073,10 @@ mod tests {
     #[test]
     fn a_message_reference_renders_as_a_reply_quote_where_its_tag_sits() {
         let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"id":"Q1","quote":{"message_id":"Q1","preview":"a < b","sender_name":"Ada"}}]"#;
-        let stored = record("<p></p><attachment id=\"Q1\"></attachment>\ntest<p></p>", json);
+        let stored = record(
+            "<p></p><attachment id=\"Q1\"></attachment>\ntest<p></p>",
+            json,
+        );
         let spans = message_spans(&stored);
         let Some(Span::Quote(children)) = spans.first() else {
             panic!("expected a reply quote first, got {spans:?}");
@@ -893,7 +1127,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(ids, vec![Some("teams-profile:U1".to_owned()), Some("1".to_owned())]);
+        assert_eq!(
+            ids,
+            vec![Some("teams-profile:U1".to_owned()), Some("1".to_owned())]
+        );
     }
 
     #[test]

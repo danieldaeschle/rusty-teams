@@ -3103,7 +3103,7 @@ async fn images_are_fetched_once_cached_and_announced() {
     let found = teams_core::images(&record);
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].width, found[0].height), (Some(300), Some(150)));
-    assert_eq!(found[0].id, "h1");
+    assert!(found[0].id.starts_with("0-"));
     assert!(engine.image(found[0].key()).is_none());
 
     let mut events = engine.subscribe();
@@ -3131,6 +3131,7 @@ async fn gif_and_sticker_images_load_without_graph_and_keep_their_cache_key() {
         url: proxied.to_owned(),
         width: None,
         height: None,
+        alt: None,
     };
     engine.fetch_image(&image).await.unwrap();
     assert_eq!(
@@ -3149,6 +3150,7 @@ async fn a_failed_image_fetch_is_an_error_and_can_be_retried() {
         url: "https://graph.microsoft.com/v1.0/chats/broken".to_owned(),
         width: None,
         height: None,
+        alt: None,
     };
     assert!(engine.fetch_image(&image).await.is_err());
     assert!(engine.fetch_image(&image).await.is_err());
@@ -3457,6 +3459,7 @@ async fn images_land_as_lru_files_and_are_served_by_path() {
         url: HOSTED.to_owned(),
         width: None,
         height: None,
+        alt: None,
     };
     assert!(engine.image_path(&image).is_none());
     let mut events = engine.subscribe();

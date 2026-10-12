@@ -58,6 +58,7 @@ impl LinkPreview {
             url: self.image_url.clone()?,
             width: self.image_width,
             height: self.image_height,
+            alt: None,
         })
     }
 

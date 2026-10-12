@@ -123,10 +123,10 @@ pub use scheduled::NOTES_CHAT_ID;
 pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
-    AttachmentInfo, FileCard, FileKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX, QuoteInfo,
-    ReactionInfo, adaptive_cards, attachments, can_delete, can_edit, card_texts, copy_text, files,
-    images, linked_message_spans, mentions, message_spans, quotes, reactions, translated_spans,
-    user_mention_inputs,
+    AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
+    QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
+    card_texts, copy_text, files, images, linked_message_spans, mentions, message_quote,
+    message_spans, quotes, reaction_summaries, reactions, readable_text, translated_spans, user_mention_inputs,
 };
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,

@@ -815,6 +815,7 @@ impl AppState {
                             url: key.clone(),
                             width: None,
                             height: None,
+                            alt: None,
                         };
                         if let Some(path) = engine.image_path(&image) {
                             self.directory.set_image(key, &path);

@@ -28,8 +28,8 @@ pub use models::{
     ActivityRecord, AgentProposalRecord, AttachmentImage, AvatarRecord, ChannelLayoutRecord,
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, ChannelTabRecord, ChatPreview,
     ChatRecord, ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord,
-    MessageRecord, OutboxRecord, OutboxState, OutboxTarget, SearchHit, Sidebar, SidebarTeam,
-    SyncState, TeamLayoutRecord, TeamRecord,
+    MessageRecord, OutboxRecord, OutboxState, OutboxTarget, RecentScope, SearchHit, Sidebar,
+    SidebarTeam, SyncState, TeamLayoutRecord, TeamRecord,
 };
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};
 pub use store::{DATA_DIR_NAME, Store, default_database_path};

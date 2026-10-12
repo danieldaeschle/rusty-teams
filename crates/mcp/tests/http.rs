@@ -1,13 +1,16 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, Meeting, Outcome, ServerHandle, SourceError, SourceFuture,
-    TeamsSource, Transcript, TranscriptTurn,
+    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
+    MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle, SourceError,
+    SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 use rmcp::ServiceExt;
-use rmcp::model::{CallToolRequestParams, ClientConfig};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig};
 use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -23,6 +26,15 @@ const CHANNEL: &str = "19:channel@thread.tacv2";
 const MEETING_CHAT: &str = "19:meeting_abc@thread.v2";
 const LIVE_MEETING_CHAT: &str = "19:meeting_live@thread.v2";
 const HIDDEN_MEETING_CHAT: &str = "19:meeting_hidden@thread.v2";
+const RICH_MESSAGE: &str = "m5";
+const RICH_IMAGE: &str = "0-1a2b3c4d";
+const PIXEL_PNG: [u8; 67] = [
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
 
 struct FakeSource {
     store: Arc<Store>,
@@ -35,6 +47,67 @@ impl TeamsSource for FakeSource {
 
     fn me_id(&self) -> Option<String> {
         Some("user-me".to_owned())
+    }
+
+    fn message_extras(&self, message: &MessageRecord, _my_user_id: Option<&str>) -> MessageExtras {
+        let text = store::plain_text(&message.body_html);
+        if message.message_id != RICH_MESSAGE {
+            return MessageExtras {
+                text,
+                ..MessageExtras::default()
+            };
+        }
+        MessageExtras {
+            text,
+            images: vec![ImageInfo {
+                image_id: RICH_IMAGE.to_owned(),
+                kind: ImageKind::Gif,
+                alt: Some("dancing cat".to_owned()),
+            }],
+            reactions: vec![ReactionInfo {
+                emoji: "\u{1F44D}".to_owned(),
+                count: 2,
+                mine: true,
+            }],
+            mentions: vec![MentionInfo {
+                name: "Bob Sample".to_owned(),
+                user_id: Some("user-bob".to_owned()),
+            }],
+            files: vec![FileInfo {
+                name: "Plan.docx".to_owned(),
+                size: None,
+                file_type: Some("word".to_owned()),
+                link: "https://example.sharepoint.com/Plan.docx".to_owned(),
+            }],
+            quote: Some(QuoteInfo {
+                message_id: "m1".to_owned(),
+                sender: Some("Ada Example".to_owned()),
+                text: "budget plan".to_owned(),
+            }),
+            cards: vec!["Build passed".to_owned()],
+            links: vec![LinkInfo {
+                url: "https://news.example.com/story".to_owned(),
+                title: Some("A story".to_owned()),
+            }],
+        }
+    }
+
+    fn image<'a>(
+        &'a self,
+        _message: &'a MessageRecord,
+        _image_id: &'a str,
+        _max_edge: u32,
+    ) -> SourceFuture<'a, EncodedImage> {
+        Box::pin(async {
+            Ok(EncodedImage {
+                bytes: PIXEL_PNG.to_vec(),
+                mime_type: "image/png".to_owned(),
+                kind: ImageKind::Gif,
+                alt: Some("dancing cat".to_owned()),
+                width: 1,
+                height: 1,
+            })
+        })
     }
 
     fn calendar(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> SourceFuture<'_, Vec<Meeting>> {
@@ -77,6 +150,7 @@ impl TeamsSource for FakeSource {
 }
 
 struct Harness {
+    store: Arc<Store>,
     hub: Arc<AgentHub>,
     server: ServerHandle,
 }
@@ -106,13 +180,15 @@ impl Harness {
         let hub = AgentHub::new(store.clone(), policy, ui);
         let server = mcp::start(
             hub.clone(),
-            Arc::new(FakeSource { store }),
+            Arc::new(FakeSource {
+                store: store.clone(),
+            }),
             0,
             TOKEN.to_owned(),
         )
         .await
         .unwrap();
-        Harness { hub, server }
+        Harness { store, hub, server }
     }
 
     fn url(&self) -> String {
@@ -182,6 +258,12 @@ fn seed(store: &Store) {
             message(ALLOWED_CHAT, "m2", 2, "<p>lunch at noon</p>"),
             message(HIDDEN_CHAT, "m3", 3, "<p>budget secrets</p>"),
             message(CHANNEL, "m4", 4, "<p>budget channel post</p>"),
+            message(ALLOWED_CHAT, RICH_MESSAGE, 7, "<p>see the cat</p>"),
+            message(CHANNEL, "t1", 8, "<p>thread root</p>"),
+            MessageRecord {
+                reply_to_id: Some("t1".to_owned()),
+                ..message(CHANNEL, "t2", 9, "<p>thread reply</p>")
+            },
         ])
         .unwrap();
 }
@@ -203,6 +285,29 @@ async fn call(
     (result.is_error == Some(true), text)
 }
 
+async fn call_raw(
+    client: &RunningService<rmcp::RoleClient, ClientConfig>,
+    tool: &'static str,
+    arguments: Value,
+) -> CallToolResult {
+    let params = CallToolRequestParams::new(tool)
+        .with_arguments(arguments.as_object().cloned().unwrap_or_default());
+    client.call_tool(params).await.unwrap()
+}
+
+fn json_of(text: &str) -> Value {
+    serde_json::from_str(text).unwrap()
+}
+
+fn message_ids(body: &Value) -> Vec<&str> {
+    body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["message_id"].as_str().unwrap())
+        .collect()
+}
+
 async fn raw_status(addr: std::net::SocketAddr, host: &str, authorization: Option<&str>) -> u16 {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let authorization = authorization
@@ -218,26 +323,35 @@ async fn raw_status(addr: std::net::SocketAddr, host: &str, authorization: Optio
 }
 
 #[tokio::test]
-async fn lists_all_eight_tools() {
+async fn lists_all_ten_tools_and_marks_reads_read_only() {
     let harness = Harness::start(true).await;
     let client = harness.client().await;
-    let mut names: Vec<String> = client
-        .list_all_tools()
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|tool| tool.name.to_string())
-        .collect();
+    let tools = client.list_all_tools().await.unwrap();
+    let mut names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
     names.sort();
+    for tool in &tools {
+        let read_only = tool
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.read_only_hint);
+        assert_eq!(
+            read_only == Some(true),
+            tool.name != "propose_message",
+            "{}",
+            tool.name
+        );
+    }
     assert_eq!(
         names,
         [
+            "get_image",
             "get_transcript",
             "list_channels",
             "list_chats",
             "list_meetings",
             "propose_message",
             "read_messages",
+            "recent_messages",
             "search_messages",
             "wait_for_event"
         ]
@@ -543,7 +657,10 @@ async fn propose_rejects_a_reply_target_from_another_conversation() {
     )
     .await;
     assert!(is_error);
-    assert!(text.contains("is not a message of this conversation"), "{text}");
+    assert!(
+        text.contains("is not a message of this conversation"),
+        "{text}"
+    );
     let (is_error, body) = call(
         &client,
         "propose_message",
@@ -551,4 +668,293 @@ async fn propose_rejects_a_reply_target_from_another_conversation() {
     )
     .await;
     assert!(!is_error, "{body}");
+}
+
+#[tokio::test]
+async fn read_messages_adds_rich_fields_only_where_present() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (_, body) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": ALLOWED_CHAT}),
+    )
+    .await;
+    let body = json_of(&body);
+    let messages = body["messages"].as_array().unwrap();
+    let plain = &messages[0];
+    for field in [
+        "images",
+        "reactions",
+        "mentions",
+        "files",
+        "quote",
+        "cards",
+        "links",
+        "thread_root_id",
+    ] {
+        assert!(plain.get(field).is_none(), "{field}");
+    }
+    let rich = messages
+        .iter()
+        .find(|message| message["message_id"] == RICH_MESSAGE)
+        .unwrap();
+    assert_eq!(rich["text"], "see the cat");
+    assert_eq!(
+        rich["images"],
+        json!([{"image_id": RICH_IMAGE, "kind": "gif", "alt": "dancing cat"}])
+    );
+    assert_eq!(
+        rich["reactions"],
+        json!([{"emoji": "\u{1F44D}", "count": 2, "mine": true}])
+    );
+    assert_eq!(
+        rich["mentions"],
+        json!([{"name": "Bob Sample", "user_id": "user-bob"}])
+    );
+    assert_eq!(rich["files"][0]["name"], "Plan.docx");
+    assert_eq!(rich["files"][0]["type"], "word");
+    assert_eq!(rich["quote"]["message_id"], "m1");
+    assert_eq!(rich["cards"], json!(["Build passed"]));
+    assert_eq!(rich["links"][0]["title"], "A story");
+}
+
+#[tokio::test]
+async fn read_messages_filters_one_channel_thread() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (_, body) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": CHANNEL, "thread_root_id": "t1"}),
+    )
+    .await;
+    let body = json_of(&body);
+    assert_eq!(message_ids(&body), ["t1", "t2"]);
+    assert_eq!(body["messages"][1]["thread_root_id"], "t1");
+    assert_eq!(body["messages"][0]["thread_root_id"], "t1");
+
+    let (_, body) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": CHANNEL, "thread_root_id": "t1", "limit": 1}),
+    )
+    .await;
+    assert_eq!(message_ids(&json_of(&body)), ["t2"]);
+
+    let (is_error, text) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": CHANNEL, "thread_root_id": "t2"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("is a reply"), "{text}");
+
+    let (is_error, text) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": ALLOWED_CHAT, "thread_root_id": "m1"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("only works in channels"), "{text}");
+
+    let (is_error, text) = call(
+        &client,
+        "read_messages",
+        json!({"conversation_id": CHANNEL, "thread_root_id": "nope"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("unknown thread_root_id"), "{text}");
+}
+
+#[tokio::test]
+async fn get_image_returns_an_image_block_and_a_description() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let result = call_raw(
+        &client,
+        "get_image",
+        json!({"conversation_id": ALLOWED_CHAT, "message_id": RICH_MESSAGE, "image_id": RICH_IMAGE}),
+    )
+    .await;
+    assert_ne!(result.is_error, Some(true));
+    let image = result.content[0].as_image().unwrap();
+    assert_eq!(image.mime_type, "image/png");
+    assert_eq!(STANDARD.decode(&image.data).unwrap(), PIXEL_PNG);
+    let description = json_of(&result.content[1].as_text().unwrap().text);
+    assert_eq!(description["kind"], "gif");
+    assert_eq!(description["alt"], "dancing cat");
+    assert_eq!(description["width"], 1);
+}
+
+#[tokio::test]
+async fn get_image_refuses_foreign_hidden_and_unknown_targets() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let refused = |conversation_id: &str, message_id: &str, image_id: &str| json!({"conversation_id": conversation_id, "message_id": message_id, "image_id": image_id});
+    let (is_error, text) = call(&client, "get_image", refused(HIDDEN_CHAT, "m3", RICH_IMAGE)).await;
+    assert!(is_error);
+    assert!(text.contains("not allowed"), "{text}");
+
+    let (is_error, text) = call(
+        &client,
+        "get_image",
+        refused(ALLOWED_CHAT, "m3", RICH_IMAGE),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("unknown message_id"), "{text}");
+
+    let (is_error, text) = call(
+        &client,
+        "get_image",
+        refused(ALLOWED_CHAT, RICH_MESSAGE, "9-deadbeef"),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("unknown image_id"), "{text}");
+
+    let (is_error, text) = call(
+        &client,
+        "get_image",
+        refused(ALLOWED_CHAT, "m1", RICH_IMAGE),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("unknown image_id"), "{text}");
+}
+
+fn since_start_of_seed() -> Value {
+    json!("2026-10-06T00:00:00Z")
+}
+
+#[tokio::test]
+async fn recent_messages_run_newest_first_inside_the_allowed_scope() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "recent_messages",
+        json!({"since": since_start_of_seed()}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let body = json_of(&body);
+    assert_eq!(
+        message_ids(&body),
+        ["t2", "t1", RICH_MESSAGE, "m4", "m2", "m1"]
+    );
+    assert_eq!(body["messages"][0]["conversation"], "Platform / General");
+    assert_eq!(body["messages"][0]["conversation_id"], CHANNEL);
+    assert_eq!(body["messages"][0]["thread_root_id"], "t1");
+    assert_eq!(body["messages"][2]["conversation"], "Planning");
+    assert_eq!(body["messages"][2]["images"][0]["image_id"], RICH_IMAGE);
+    assert!(body["next_cursor"].is_null());
+    assert!(!body.to_string().contains("m3"));
+
+    let (_, body) = call(
+        &client,
+        "recent_messages",
+        json!({"since": "2026-10-06T09:05:00Z"}),
+    )
+    .await;
+    assert_eq!(message_ids(&json_of(&body)), ["t2", "t1", RICH_MESSAGE]);
+
+    let (_, body) = call(
+        &client,
+        "recent_messages",
+        json!({"since": since_start_of_seed(), "kinds": ["channel"]}),
+    )
+    .await;
+    assert_eq!(message_ids(&json_of(&body)), ["t2", "t1", "m4"]);
+
+    let (_, body) = call(
+        &client,
+        "recent_messages",
+        json!({"since": since_start_of_seed(), "kinds": ["chat", "meeting"]}),
+    )
+    .await;
+    assert_eq!(message_ids(&json_of(&body)), [RICH_MESSAGE, "m2", "m1"]);
+}
+
+#[tokio::test]
+async fn recent_messages_page_with_a_cursor() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let mut collected: Vec<String> = Vec::new();
+    let mut cursor = Value::Null;
+    for _ in 0..4 {
+        let mut arguments = json!({"since": since_start_of_seed(), "limit": 4});
+        if !cursor.is_null() {
+            arguments["cursor"] = cursor.clone();
+        }
+        let (is_error, body) = call(&client, "recent_messages", arguments).await;
+        assert!(!is_error, "{body}");
+        let body = json_of(&body);
+        collected.extend(message_ids(&body).into_iter().map(str::to_owned));
+        cursor = body["next_cursor"].clone();
+        if cursor.is_null() {
+            break;
+        }
+    }
+    assert_eq!(collected, ["t2", "t1", RICH_MESSAGE, "m4", "m2", "m1"]);
+
+    let (_, first_page) = call(
+        &client,
+        "recent_messages",
+        json!({"since": since_start_of_seed(), "limit": 2}),
+    )
+    .await;
+    let cursor = json_of(&first_page)["next_cursor"].clone();
+    let (_, later_page) = call(
+        &client,
+        "recent_messages",
+        json!({"since": "2030-01-01T00:00:00Z", "cursor": cursor}),
+    )
+    .await;
+    assert_eq!(
+        message_ids(&json_of(&later_page)),
+        [RICH_MESSAGE, "m4", "m2", "m1"]
+    );
+
+    let (is_error, text) = call(&client, "recent_messages", json!({"cursor": "garbage"})).await;
+    assert!(is_error);
+    assert!(text.contains("invalid cursor"), "{text}");
+}
+
+#[tokio::test]
+async fn recent_messages_unread_only_covers_chats_and_channels() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let arguments = || json!({"since": since_start_of_seed(), "unread_only": true});
+    let (_, body) = call(&client, "recent_messages", arguments()).await;
+    assert!(message_ids(&json_of(&body)).is_empty());
+
+    let read_until = Utc.with_ymd_and_hms(2026, 10, 6, 9, 2, 0).unwrap();
+    harness
+        .store
+        .mark_chat_unread(ALLOWED_CHAT, read_until)
+        .unwrap();
+    let (_, body) = call(&client, "recent_messages", arguments()).await;
+    assert_eq!(message_ids(&json_of(&body)), [RICH_MESSAGE]);
+
+    harness
+        .store
+        .upsert_channels(&[ChannelRecord {
+            id: CHANNEL.to_owned(),
+            team_id: "team-1".to_owned(),
+            name: "General".to_owned(),
+            membership_type: None,
+            last_message_at: Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 6, 0).unwrap()),
+            unread: true,
+        }])
+        .unwrap();
+    let (_, body) = call(&client, "recent_messages", arguments()).await;
+    assert_eq!(
+        message_ids(&json_of(&body)),
+        ["t2", "t1", RICH_MESSAGE, "m4"]
+    );
 }

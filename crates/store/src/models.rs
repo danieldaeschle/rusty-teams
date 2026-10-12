@@ -91,6 +91,12 @@ pub struct MessageRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct RecentScope {
+    pub conversation_id: String,
+    pub after: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SyncState {
     pub newest_seen: Option<DateTime<Utc>>,
     pub oldest_loaded: Option<DateTime<Utc>>,

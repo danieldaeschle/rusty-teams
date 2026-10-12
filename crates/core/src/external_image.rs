@@ -18,6 +18,20 @@ pub fn external_image_url(src: &str) -> Option<String> {
     direct_url(&url)
 }
 
+pub(crate) fn is_giphy_url(url: &str) -> bool {
+    Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(is_giphy_host))
+        .unwrap_or(false)
+}
+
+fn is_giphy_host(host: &str) -> bool {
+    host == GIPHY_HOST
+        || host
+            .strip_suffix(GIPHY_HOST)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
 fn is_proxy(url: &Url) -> bool {
     url.scheme() == "https"
         && url.path() == PROXY_PATH
@@ -28,11 +42,7 @@ fn is_proxy(url: &Url) -> bool {
 
 fn direct_url(url: &Url) -> Option<String> {
     let host = url.host_str()?;
-    let allowed = host == TEAMS_CDN_HOST
-        || host == GIPHY_HOST
-        || host
-            .strip_suffix(GIPHY_HOST)
-            .is_some_and(|prefix| prefix.ends_with('.'));
+    let allowed = host == TEAMS_CDN_HOST || is_giphy_host(host);
     (url.scheme() == "https" && allowed).then(|| url.to_string())
 }
 

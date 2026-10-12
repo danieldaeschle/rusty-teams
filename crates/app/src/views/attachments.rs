@@ -430,6 +430,7 @@ mod tests {
             url: url.into(),
             width: None,
             height: None,
+            alt: None,
         }
     }
 

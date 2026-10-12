@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use store::{
     AvatarRecord, ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications,
     ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord, MemberRecord,
-    MessageRecord, Store, SyncState, TeamLayoutRecord, TeamRecord,
+    MessageRecord, RecentScope, Store, SyncState, TeamLayoutRecord, TeamRecord,
 };
 
 #[test]
@@ -1212,4 +1212,74 @@ fn channel_notifications_default_to_feed_and_survive_layout_and_local_writes() {
         }])
         .unwrap();
     assert_eq!(team().channel_notifications("c2"), off);
+}
+
+#[test]
+fn recent_messages_run_newest_first_across_scopes_with_a_cursor() {
+    let store = Store::open_in_memory().unwrap();
+    let mut deleted = message("chat-a", "a3", 8);
+    deleted.deleted = true;
+    store
+        .upsert_messages(&[
+            message("chat-a", "a1", 1),
+            message("chat-a", "a2", 6),
+            deleted,
+            message("chat-b", "b1", 5),
+            message("chat-b", "b2", 7),
+            message("chat-c", "c1", 9),
+        ])
+        .unwrap();
+    let scope = |conversation_id: &str, minute: u32| RecentScope {
+        conversation_id: conversation_id.to_owned(),
+        after: at(minute),
+    };
+    let scopes = [scope("chat-a", 0), scope("chat-b", 5)];
+    let ids = |messages: Vec<MessageRecord>| -> Vec<String> {
+        messages
+            .into_iter()
+            .map(|message| message.message_id)
+            .collect()
+    };
+    assert_eq!(
+        ids(store.recent_messages(&scopes, None, 10).unwrap()),
+        ["b2", "a2", "a1"]
+    );
+    assert_eq!(
+        ids(store.recent_messages(&scopes, None, 2).unwrap()),
+        ["b2", "a2"]
+    );
+    assert_eq!(
+        ids(store
+            .recent_messages(&scopes, Some((at(6), "a2", "chat-a")), 10)
+            .unwrap()),
+        ["a1"]
+    );
+    assert!(store.recent_messages(&[], None, 10).unwrap().is_empty());
+}
+
+#[test]
+fn recent_messages_break_ties_by_conversation_across_the_cursor() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_messages(&[message("chat-a", "m1", 5), message("chat-b", "m1", 5)])
+        .unwrap();
+    let scopes: Vec<RecentScope> = ["chat-a", "chat-b"]
+        .into_iter()
+        .map(|conversation_id| RecentScope {
+            conversation_id: conversation_id.to_owned(),
+            after: at(0),
+        })
+        .collect();
+    let first = store.recent_messages(&scopes, None, 1).unwrap();
+    assert_eq!(first[0].conversation_id, "chat-b");
+    let second = store
+        .recent_messages(&scopes, Some((at(5), "m1", "chat-b")), 1)
+        .unwrap();
+    assert_eq!(second[0].conversation_id, "chat-a");
+    assert!(
+        store
+            .recent_messages(&scopes, Some((at(5), "m1", "chat-a")), 1)
+            .unwrap()
+            .is_empty()
+    );
 }

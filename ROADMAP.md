@@ -190,7 +190,7 @@ After parity. Not counted in the parity score.
 | Run status: chip under the message, Agents rail entry, toast, Open session | Done | Live step and time on the chip, Agents rail popover with running and done runs, toast on finish or failure, Open session resumes the agent session in a terminal |
 | Local API in the app | Partial | MCP only, no CLI. Tokens and chat access stay in the app |
 | CLI `rt`: watch, read, search, claim, propose, release | Missing | First. `rt watch --once` blocks until the next event, so any agent can wait on it |
-| MCP server on the same API | Done | Read tools and `propose_message` only, Settings > MCP |
+| MCP server on the same API | Done | Read tools (messages with images, reactions, files, quotes, cards, links; `get_image`; `recent_messages`) and `propose_message` only, Settings > MCP |
 | Agent permissions in Settings: chats/channels All/Selected/None, propose, calendar, transcripts | Done | Other chats are invisible to agents, search included |
 | Proposals: card above the composer, send, edit, discard | Done | Agents never send. A proposal is stale once you answered first |
 

@@ -13,7 +13,10 @@ pub use server::{ServerError, ServerHandle, start};
 pub use settings::{
     load as load_policy, load_or_create_token, regenerate_token, save as save_policy,
 };
-pub use source::{Meeting, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn};
+pub use source::{
+    EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
+    QuoteInfo, ReactionInfo, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpEndpoint {

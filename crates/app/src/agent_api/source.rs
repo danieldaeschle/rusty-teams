@@ -1,11 +1,20 @@
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use chatsvc::{Calendar, Transcripts};
 use chrono::{DateTime, Utc};
-use mcp::{Meeting, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn};
-use store::Store;
+use mcp::{
+    EncodedImage, Meeting, MessageExtras, SourceError, SourceFuture, TeamsSource, Transcript,
+    TranscriptTurn,
+};
+use store::{MessageRecord, Store};
+use teams_core::CoreEvent;
 
+use super::extras::{image_kind, message_extras};
+use super::image_scale::downscale;
 use crate::backend::Engine;
+
+const IMAGE_WAIT: Duration = Duration::from_secs(10);
 
 pub struct AppSource {
     store: Arc<Store>,
@@ -36,6 +45,68 @@ impl TeamsSource for AppSource {
 
     fn me_id(&self) -> Option<String> {
         crate::data::me(&self.store).map(|person| person.user_id)
+    }
+
+    fn message_extras(&self, message: &MessageRecord, my_user_id: Option<&str>) -> MessageExtras {
+        message_extras(message, my_user_id)
+    }
+
+    fn image<'a>(
+        &'a self,
+        message: &'a MessageRecord,
+        image_id: &'a str,
+        max_edge: u32,
+    ) -> SourceFuture<'a, EncodedImage> {
+        Box::pin(async move {
+            let engine = self.engine()?;
+            let image = teams_core::images(message)
+                .into_iter()
+                .find(|image| image.id == image_id)
+                .ok_or_else(|| SourceError::Failed(format!("unknown image_id {image_id}")))?;
+            let mut events = engine.subscribe();
+            if engine.image(image.key()).is_none() {
+                engine.fetch_image(&image).await.map_err(|error| {
+                    SourceError::Failed(format!("image could not be fetched: {error}"))
+                })?;
+            }
+            let stored = match engine.image(image.key()) {
+                Some(stored) => stored,
+                None => {
+                    wait_for_image(&mut events, image.key()).await;
+                    if engine.image(image.key()).is_none() {
+                        engine.fetch_image(&image).await.map_err(|error| {
+                            SourceError::Failed(format!("image could not be fetched: {error}"))
+                        })?;
+                    }
+                    engine.image(image.key()).ok_or_else(|| {
+                        SourceError::Failed("the image is still loading, try again".to_owned())
+                    })?
+                }
+            };
+            let kind = image.kind();
+            let scaled = tokio::task::spawn_blocking(move || downscale(&stored.bytes, max_edge))
+                .await
+                .map_err(|error| SourceError::Failed(error.to_string()))?
+                .map_err(SourceError::Failed)?;
+            Ok(EncodedImage {
+                bytes: scaled.bytes,
+                mime_type: scaled.mime_type.to_owned(),
+                kind: image_kind(kind),
+                alt: image.alt,
+                width: scaled.width,
+                height: scaled.height,
+            })
+        })
+    }
+
+    fn refresh_recent(&self, conversation_ids: Vec<String>) -> SourceFuture<'_, ()> {
+        Box::pin(async move {
+            let engine = self.engine()?;
+            for conversation_id in conversation_ids {
+                let _ = engine.fetch_newer(&conversation_id).await;
+            }
+            Ok(())
+        })
     }
 
     fn calendar(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> SourceFuture<'_, Vec<Meeting>> {
@@ -84,4 +155,19 @@ impl TeamsSource for AppSource {
             })
         })
     }
+}
+
+async fn wait_for_image(events: &mut tokio::sync::broadcast::Receiver<CoreEvent>, key: &str) {
+    let _ = tokio::time::timeout(IMAGE_WAIT, async {
+        loop {
+            match events.recv().await {
+                Ok(CoreEvent::ImagesChanged { keys }) if keys.iter().any(|known| known == key) => {
+                    return;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                _ => {}
+            }
+        }
+    })
+    .await;
 }

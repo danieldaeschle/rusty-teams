@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use crate::error::Result;
-use crate::models::MessageRecord;
+use crate::models::{MessageRecord, RecentScope};
 use crate::search::index_message;
 use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
@@ -194,6 +194,56 @@ impl Store {
         ))?;
         let messages = statement
             .query_map(params![conversation_id, root_id], message_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(messages)
+    }
+
+    pub fn recent_messages(
+        &self,
+        scopes: &[RecentScope],
+        before: Option<(DateTime<Utc>, &str, &str)>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>> {
+        let scope_json = serde_json::to_string(
+            &scopes
+                .iter()
+                .map(|scope| {
+                    serde_json::json!({
+                        "conversation_id": scope.conversation_id,
+                        "after": to_millis(scope.after),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| "[]".to_owned());
+        let (before_time, before_message_id, before_conversation_id) = match before {
+            Some((time, message_id, conversation_id)) => (
+                Some(to_millis(time)),
+                Some(message_id),
+                Some(conversation_id),
+            ),
+            None => (None, None, None),
+        };
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages
+             JOIN json_each(?1) AS scope
+               ON messages.conversation_id = json_extract(scope.value, '$.conversation_id')
+             WHERE deleted = 0 AND created_at > json_extract(scope.value, '$.after')
+               AND (?2 IS NULL OR (created_at, message_id, messages.conversation_id) < (?2, ?3, ?4))
+             ORDER BY created_at DESC, message_id DESC, messages.conversation_id DESC LIMIT ?5"
+        ))?;
+        let messages = statement
+            .query_map(
+                params![
+                    scope_json,
+                    before_time,
+                    before_message_id,
+                    before_conversation_id,
+                    limit as i64
+                ],
+                message_from_row,
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(messages)
     }

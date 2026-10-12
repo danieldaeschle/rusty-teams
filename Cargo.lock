@@ -5346,6 +5346,7 @@ name = "mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "percent-encoding",
  "rand 0.9.5",

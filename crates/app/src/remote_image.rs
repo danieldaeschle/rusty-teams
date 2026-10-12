@@ -66,6 +66,7 @@ impl RemoteImage {
             url: self.url.clone(),
             width: Some(self.width),
             height: Some(self.height),
+            alt: None,
         }
     }
 }
