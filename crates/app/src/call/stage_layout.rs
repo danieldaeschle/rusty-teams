@@ -6,6 +6,9 @@ pub const FILMSTRIP_MAX: usize = 6;
 pub const FILMSTRIP_MIN_WIDTH: f32 = 160.;
 pub const SWAP_AFTER_SPEAKING: Duration = Duration::from_secs(2);
 pub const SWAP_INTERVAL: Duration = Duration::from_secs(5);
+pub const SPEAKER_HOLD: Duration = Duration::from_millis(1500);
+pub const SPEAKER_SWITCH_AFTER: Duration = Duration::from_millis(800);
+pub const RECENT_SPEAKER: Duration = Duration::from_secs(3);
 const TILE_ASPECT: f32 = 16. / 9.;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +106,22 @@ impl VisibleRotation {
             .iter()
             .filter_map(|mri| Some((mri, self.last_spoke.get(mri)?)))
             .max_by_key(|(_, spoke)| **spoke)
+            .map(|(mri, _)| mri.as_str())
+    }
+
+    pub fn spoke_within(&self, mri: &str, now: Instant, window: Duration) -> bool {
+        self.last_spoke
+            .get(mri)
+            .is_some_and(|spoke| now.saturating_duration_since(*spoke) <= window)
+    }
+
+    pub fn steady_speaker(&self, now: Instant, members: &[String]) -> Option<&str> {
+        self.speaking_since
+            .iter()
+            .filter(|(mri, since)| {
+                members.contains(mri) && now.saturating_duration_since(**since) >= SPEAKER_SWITCH_AFTER
+            })
+            .min_by_key(|(_, since)| **since)
             .map(|(mri, _)| mri.as_str())
     }
 
@@ -210,6 +229,21 @@ mod tests {
 
     fn speak(mris: &[&str]) -> Vec<String> {
         mris.iter().map(|mri| (*mri).to_owned()).collect()
+    }
+
+    #[test]
+    fn steady_speaker_needs_a_moment_of_speech_and_stays_recent_after() {
+        let start = Instant::now();
+        let members = names(4);
+        let mut rotation = VisibleRotation::default();
+        rotation.update(start, &members, &[], &speak(&["p2"]), 4);
+        assert_eq!(rotation.steady_speaker(start + Duration::from_millis(300), &members), None);
+        rotation.update(start + SPEAKER_SWITCH_AFTER, &members, &[], &speak(&["p2"]), 4);
+        assert_eq!(rotation.steady_speaker(start + SPEAKER_SWITCH_AFTER, &members), Some("p2"));
+        let silent = start + SPEAKER_SWITCH_AFTER + Duration::from_secs(1);
+        rotation.update(silent, &members, &[], &[], 4);
+        assert!(rotation.spoke_within("p2", silent, SPEAKER_HOLD));
+        assert!(!rotation.spoke_within("p2", silent + RECENT_SPEAKER, RECENT_SPEAKER));
     }
 
     #[test]

@@ -207,7 +207,7 @@ impl AppShell {
         let user_input = cx.global::<UserInputHandle>().0.clone();
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
             this.user_input.touch();
-            if event.keystroke.key == "escape" {
+            if event.keystroke.key == "escape" && event.action.is_none() {
                 this.state
                     .update(cx, |state, cx| state.escape_call_fullscreen(cx));
             }

@@ -19,7 +19,7 @@ use super::call_view::{
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
-    ActiveCall, CallLayout, CallModel, GALLERY_MAX, Tile, TileSize, filmstrip, gallery_grid,
+    ActiveCall, CallLayout, CallModel, FILMSTRIP_MAX, GALLERY_MAX, Tile, TileSize, filmstrip, gallery_grid,
     shown_bubbles, split_overflow,
 };
 use crate::theme;
@@ -159,8 +159,9 @@ fn chat_bubbles(
     Some(
         v_flex()
             .absolute()
-            .left(px(OVERLAY_INSET))
+            .right(px(OVERLAY_INSET))
             .bottom(px(bottom))
+            .items_end()
             .gap(px(BUBBLE_GAP))
             .children(bubbles.into_iter().map(|bubble| {
                 let app = app.clone();
@@ -410,7 +411,7 @@ fn speaker_body(
     let main = focus
         .as_ref()
         .and_then(|focus| render_focus_stage(app, state, focus, now));
-    let others: Vec<&Tile> = model
+    let mut others: Vec<&Tile> = model
         .layout_tiles()
         .into_iter()
         .filter(|tile| Some(tile.mri.as_str()) != focus_mri)
@@ -423,6 +424,9 @@ fn speaker_body(
         TILE_GAP,
         FILMSTRIP_TILE_MAX,
     );
+    if plan.overflow.shown < FILMSTRIP_MAX.min(others.len()) {
+        others.sort_by_key(|tile| !model.is_recent_speaker(&tile.mri));
+    }
     let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
     let shown = &others[..plan.overflow.shown];
     let mut tiles: Vec<AnyElement> = shown

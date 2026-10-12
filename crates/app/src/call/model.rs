@@ -15,7 +15,7 @@ use super::health::{HealthBanner, HealthState};
 use super::bubbles::ChatBubble;
 use super::fullscreen::FullscreenState;
 use super::pictures::CallPictures;
-use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, VisibleRotation, split_overflow};
+use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, split_overflow};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::push_to_talk::PushToTalk;
 
@@ -277,6 +277,8 @@ pub struct CallModel {
     pub meeting_chat: Option<String>,
     pub view: ViewSettings,
     rotation: VisibleRotation,
+    stage_speaker: Option<String>,
+    recent_speakers: Vec<String>,
     local_detector: SpeakingDetector,
     remote_detector: SpeakingDetector,
 }
@@ -329,6 +331,8 @@ impl CallModel {
             meeting_chat: None,
             view: ViewSettings::default(),
             rotation: VisibleRotation::default(),
+            stage_speaker: None,
+            recent_speakers: Vec::new(),
             local_detector: SpeakingDetector::default(),
             remote_detector: SpeakingDetector::default(),
         }
@@ -765,6 +769,7 @@ impl CallModel {
             && !tile.has_video
             && !self.is_pinned(&tile.mri)
             && !self.tile_speaking(tile)
+            && !self.recent_speakers.contains(&tile.mri)
     }
 
     pub fn hidden_without_video(&self) -> usize {
@@ -800,6 +805,10 @@ impl CallModel {
         ordered
     }
 
+    pub fn is_recent_speaker(&self, mri: &str) -> bool {
+        self.recent_speakers.iter().any(|recent| recent == mri)
+    }
+
     pub fn own_cells(&self) -> usize {
         usize::from(!self.view.hide_me)
     }
@@ -827,8 +836,30 @@ impl CallModel {
             .collect();
         let capacity = self.rotation_capacity(members.len());
         let speaking = self.speaking_mris.clone();
-        self.rotation
-            .update(now, &members, &priority, &speaking, capacity)
+        let reordered = self
+            .rotation
+            .update(now, &members, &priority, &speaking, capacity);
+        let recent: Vec<String> = self
+            .tiles
+            .iter()
+            .filter(|tile| self.rotation.spoke_within(&tile.mri, now, RECENT_SPEAKER))
+            .map(|tile| tile.mri.clone())
+            .collect();
+        let held = self.stage_speaker.as_deref().is_some_and(|mri| {
+            members.iter().any(|member| member == mri) && self.rotation.spoke_within(mri, now, SPEAKER_HOLD)
+        });
+        let stage_speaker = if held {
+            self.stage_speaker.clone()
+        } else {
+            self.rotation
+                .steady_speaker(now, &members)
+                .map(str::to_owned)
+                .or_else(|| self.stage_speaker.clone().filter(|mri| members.contains(mri)))
+        };
+        let changed = reordered || recent != self.recent_speakers || stage_speaker != self.stage_speaker;
+        self.recent_speakers = recent;
+        self.stage_speaker = stage_speaker;
+        changed
     }
 
     pub fn speaker_focus(&self) -> Option<Focus> {
@@ -837,10 +868,9 @@ impl CallModel {
         }
         let tiles = self.layout_tiles();
         let spoken = self
-            .speaking_mris
-            .iter()
-            .find(|mri| tiles.iter().any(|tile| &tile.mri == *mri))
-            .map(String::as_str)
+            .stage_speaker
+            .as_deref()
+            .filter(|mri| tiles.iter().any(|tile| tile.mri == *mri))
             .or_else(|| {
                 self.rotation
                     .last_speaker()
