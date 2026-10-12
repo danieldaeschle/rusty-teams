@@ -27,6 +27,7 @@ use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
+use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
 use crate::notice::NoticeAction;
@@ -75,6 +76,7 @@ pub struct AppShell {
     image_viewer: Option<Entity<ImageViewer>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
+    agent_dialog: Option<Entity<StartDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
@@ -83,6 +85,7 @@ pub struct AppShell {
     _subscription: Subscription,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
+    _agent_subscription: Option<Subscription>,
     _escape_observation: Subscription,
     _activation_observation: Subscription,
 }
@@ -132,6 +135,19 @@ impl AppShell {
                 this.open_message(conversation_id, message_id, cx);
             }),
         ];
+        let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
+            cx.subscribe_in(&runs, window, |this, _, event: &AgentRunsEvent, window, cx| {
+                match event {
+                    AgentRunsEvent::StartRequested(request) => {
+                        this.open_agent_dialog(request.clone(), window, cx)
+                    }
+                    AgentRunsEvent::OpenSettings => this
+                        .notifications
+                        .update(cx, |center, cx| center.open_agent_settings(cx)),
+                    AgentRunsEvent::Finished(_) => {}
+                }
+            })
+        });
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
@@ -189,6 +205,7 @@ impl AppShell {
             image_viewer: None,
             status_dialog: None,
             shortcuts_dialog: None,
+            agent_dialog: None,
             profile_card: None,
             focus_handle,
             open_target,
@@ -197,6 +214,7 @@ impl AppShell {
             _subscription: subscription,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
+            _agent_subscription: agent_subscription,
             _escape_observation: escape_observation,
             _activation_observation: activation_observation,
         };
@@ -396,6 +414,43 @@ impl AppShell {
         )
         .detach();
         self.status_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    fn open_agent_dialog(
+        &mut self,
+        request: StartRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(runs) = crate::agents::runs_handle(cx) else {
+            return;
+        };
+        let settings = runs.read(cx).settings();
+        let Some(action) = settings
+            .actions
+            .iter()
+            .find(|action| action.id == request.action_id)
+            .cloned()
+        else {
+            return;
+        };
+        let agent_name = settings
+            .agents
+            .iter()
+            .find(|agent| agent.id == action.agent_id)
+            .map(|agent| agent.name.clone())
+            .unwrap_or_default();
+        self.switcher = None;
+        let app = self.state.clone();
+        let dialog = cx.new(|cx| StartDialog::new(app, request, action, &agent_name, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, _: &StartDialogEvent, window, cx| {
+            this.agent_dialog = None;
+            window.focus(&this.focus_handle, cx);
+            cx.notify();
+        })
+        .detach();
+        self.agent_dialog = Some(dialog);
         cx.notify();
     }
 
@@ -699,6 +754,7 @@ impl Render for AppShell {
             .children(self.forward_dialog.clone())
             .children(self.status_dialog.clone())
             .children(self.shortcuts_dialog.clone())
+            .children(self.agent_dialog.clone())
             .children(self.profile_card.clone())
             .child(crate::frame_log::probe("last"))
     }

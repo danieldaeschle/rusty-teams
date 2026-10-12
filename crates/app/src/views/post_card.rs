@@ -15,6 +15,7 @@ use super::scheduled_toolbar::scheduled_toolbar;
 use super::toolbar_placement::placed_toolbar;
 use super::translation_line::translation_line;
 use super::widgets::{icon, symbol};
+use crate::agents::run_chip;
 use crate::data::Directory;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::sidebar_model::DELETED_PREVIEW;
@@ -208,6 +209,7 @@ fn message_block(
         highlighted,
         translation: translation_actions,
         timeline,
+        agent_run,
         ..
     } = actions;
     let note = delivery_note(row, delivery, index);
@@ -231,7 +233,8 @@ fn message_block(
         )
         .child(content)
         .children(translation)
-        .children(note);
+        .children(note)
+        .children(agent_run.map(|run| run_chip(&run, theme::surface_raised())));
     div()
         .id(ElementId::Name(format!("post-message-{index}").into()))
         .relative()

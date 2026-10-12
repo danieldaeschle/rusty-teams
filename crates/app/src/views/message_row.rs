@@ -16,6 +16,7 @@ use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
 use super::toolbar_placement::{TimelineBounds, placed_toolbar};
 use super::translation_line::{TranslationActions, translation_line};
 use super::widgets::{icon, symbol};
+use crate::agents::{AgentRun, run_chip};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
@@ -60,6 +61,7 @@ pub struct RowActions {
     pub saved: bool,
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
+    pub agent_run: Option<AgentRun>,
 }
 
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
@@ -264,6 +266,11 @@ struct BubbleExtras {
     saved: bool,
     translation: Option<TranslationActions>,
     timeline: TimelineBounds,
+    agent_run: Option<AgentRun>,
+}
+
+fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
+    run.map(|run| div().pt(px(2.)).child(run_chip(&run, theme::row_hover())))
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -470,6 +477,7 @@ fn others_row(
     cx: &App,
 ) -> Div {
     let translation = extras.translation.take();
+    let agent_run = extras.agent_run.take();
     let first = !row.series.has_prev;
     let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
     let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
@@ -492,6 +500,7 @@ fn others_row(
         );
     }
     column = column.child(bubble(row, index, false, directory, extras, cx));
+    column = column.children(agent_chip(agent_run));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -533,12 +542,14 @@ fn own_row(
     cx: &App,
 ) -> Div {
     let translation = extras.translation.take();
+    let agent_run = extras.agent_run.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
         div()
             .max_w(relative(MAX_WIDTH_RATIO))
             .child(bubble(row, index, true, directory, extras, cx)),
     );
+    column = column.children(agent_chip(agent_run));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -568,6 +579,7 @@ pub fn render_message_row(
         saved,
         translation,
         timeline,
+        agent_run,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -580,6 +592,7 @@ pub fn render_message_row(
         saved,
         translation,
         timeline,
+        agent_run,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

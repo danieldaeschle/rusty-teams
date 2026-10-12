@@ -30,11 +30,13 @@ pub struct CardActions {
     pub discard: CardAction,
 }
 
-fn open_session_available() -> bool {
-    false
+fn open_session_available(session_id: &str, cx: &App) -> bool {
+    crate::agents::has_session(session_id, cx)
 }
 
-fn open_session(_session_id: &str, _window: &mut Window, _cx: &mut App) {}
+fn open_session(session_id: &str, _window: &mut Window, cx: &mut App) {
+    crate::agents::open_session(session_id, cx);
+}
 
 pub fn age_label(created_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let minutes = (now - created_at).num_minutes().max(0);
@@ -99,6 +101,7 @@ pub fn render(
     quote: Option<String>,
     actions: CardActions,
     now: DateTime<Utc>,
+    cx: &App,
 ) -> Div {
     let stale = matches!(entry.status, ProposalStatus::Stale { .. });
     let failed = matches!(entry.status, ProposalStatus::Failed { .. });
@@ -167,7 +170,7 @@ pub fn render(
         .proposal
         .session_id
         .clone()
-        .filter(|_| open_session_available());
+        .filter(|session_id| open_session_available(session_id, cx));
     let buttons = h_flex()
         .w_full()
         .items_center()

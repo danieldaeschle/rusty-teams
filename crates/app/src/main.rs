@@ -5,6 +5,7 @@
 
 mod activity;
 mod agent_api;
+mod agents;
 mod app_state;
 mod assets;
 mod avatar_image;
@@ -253,6 +254,7 @@ fn main() {
             cx.set_global(app_state::AppHandle(state.clone()));
             cx.set_global(views::shell::UserInputHandle(user_input));
             agent_api::init(state.read(cx).store.clone(), arguments.demo, cx);
+            agents::install(state.clone(), cx);
             if arguments.demo {
                 state.update(cx, |state, cx| {
                     demo::seed_directory(state);

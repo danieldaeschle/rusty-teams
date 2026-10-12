@@ -186,13 +186,13 @@ After parity. Not counted in the parity score.
 
 | Feature | State | Note |
 |---|---|---|
-| Local API in the app | Missing | Tokens, chat access and agent state stay in the app. CLI and MCP are thin clients |
+| Delegate a message to an agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar | Done | Robot button in the hover toolbar, actions and agents in Settings > Agents |
+| Run status: chip under the message, Agents rail entry, toast, Open session | Done | Live step and time on the chip, Agents rail popover with running and done runs, toast on finish or failure, Open session resumes the agent session in a terminal |
+| Local API in the app | Partial | MCP only, no CLI. Tokens and chat access stay in the app |
 | CLI `rt`: watch, read, search, claim, propose, release | Missing | First. `rt watch --once` blocks until the next event, so any agent can wait on it |
-| MCP server on the same API | Missing | After the CLI. `wait_for_event(timeout)` long-polls, progress pings keep it alive |
-| Agent access per chat, off by default | Missing | Other chats are invisible to agents, search included |
-| Proposals: card above the composer, send, edit, discard | Missing | Agents never send. A proposal is stale once you answered first |
-| Agent status per chat: working, proposal ready, declined | Missing | Claim with heartbeat, clears itself when the agent stops |
-| Agent sees you type or send and can abort | Missing | `user_typing` and `user_sent` events in the watch stream |
+| MCP server on the same API | Done | Read tools and `propose_message` only, Settings > MCP |
+| Agent permissions in Settings: chats/channels All/Selected/None, propose, calendar, transcripts | Done | Other chats are invisible to agents, search included |
+| Proposals: card above the composer, send, edit, discard | Done | Agents never send. A proposal is stale once you answered first |
 
 ## Out of scope
 

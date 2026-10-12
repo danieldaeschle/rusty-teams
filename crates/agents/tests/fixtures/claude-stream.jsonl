@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","cwd":"/home/user/project","model":"claude-opus-5-5"}
+{"type":"assistant","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_015zjuPdfJyvvzouR24h1knd","name":"Read","input":{"file_path":"/etc/hostname"},"caller":{"type":"direct"}}]}}
+{"type":"user","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","message":{"role":"user","content":[{"tool_use_id":"toolu_015zjuPdfJyvvzouR24h1knd","type":"tool_result","content":"1\tHOST01\n2\t"}]}}
+{"type":"assistant","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","message":{"role":"assistant","content":[{"type":"thinking","thinking":"..."}]}}
+{"type":"assistant","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","message":{"role":"assistant","content":[{"type":"text","text":"The first word in `/etc/hostname` is `HOST01`."}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":19769,"num_turns":2,"result":"The first word in `/etc/hostname` is `HOST01`.","session_id":"3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11","total_cost_usd":0.45020399999999994}
