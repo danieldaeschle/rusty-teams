@@ -285,6 +285,7 @@ dependencies = [
  "gpui-pre-reqwest-client",
  "graph",
  "image",
+ "log",
  "mcp",
  "raw-window-handle",
  "regex",

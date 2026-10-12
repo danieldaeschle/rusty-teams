@@ -8,8 +8,33 @@ const MAX_BYTES: u64 = 1024 * 1024;
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 
+const WEBRTC_AUDIO_MARKERS: [&str; 3] = ["AdmProxy", "audio_device_core_win", "core_audio"];
+
 pub fn install(path: PathBuf) {
     let _ = PATH.set(path);
+    if log::set_logger(&WebrtcAudioLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Debug);
+    }
+}
+
+struct WebrtcAudioLog;
+
+impl log::Log for WebrtcAudioLog {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.target() == "libwebrtc"
+    }
+
+    fn log(&self, entry: &log::Record<'_>) {
+        if !self.enabled(entry.metadata()) {
+            return;
+        }
+        let text = entry.args().to_string();
+        if WEBRTC_AUDIO_MARKERS.iter().any(|marker| text.contains(marker)) {
+            record(format!("webrtc: {text}"));
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 pub fn directory() -> Option<PathBuf> {
