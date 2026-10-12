@@ -26,6 +26,7 @@ gpui-kit.workspace = true
 regex.workspace = true
 reqwest_client.workspace = true
 graph.workspace = true
+mcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 session.workspace = true

@@ -34,6 +34,7 @@ use crate::theme;
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
 pub const SIDEBAR_WIDTH: f32 = 300.;
 const ROW_HEIGHT: f32 = 54.;
+const PROPOSAL_DOT_SIZE: f32 = 8.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
@@ -293,6 +294,7 @@ pub struct SidebarView {
     calls_scroll: ScrollHandle,
     _subscription: Subscription,
     _state_observation: Subscription,
+    _agent_observation: Option<Subscription>,
 }
 
 fn preview_text(preview: &Preview) -> Option<(String, bool)> {
@@ -370,6 +372,8 @@ impl SidebarView {
             }
         });
         let state_observation = cx.observe(&state, |_, _, cx| cx.notify());
+        let agent_observation =
+            crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         let tab = if state.read(cx).start_on_channels {
             SidebarTab::Channels
         } else {
@@ -403,6 +407,7 @@ impl SidebarView {
             calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
             _state_observation: state_observation,
+            _agent_observation: agent_observation,
         }
     }
 
@@ -658,6 +663,7 @@ impl SidebarView {
         item: &ChatItem,
         selected: bool,
         local_preview: Option<&LocalPreview>,
+        proposal_agent: Option<&'static str>,
         directory: &Directory,
         menu: &MenuContext,
     ) -> AnyElement {
@@ -715,9 +721,18 @@ impl SidebarView {
         } else {
             theme::text_muted()
         };
-        let preview = match local_preview {
-            Some(local) => Some(local_preview_row(local, preview_color)),
-            None => preview_text(&item.preview).map(|(text, italic)| {
+        let preview = match (proposal_agent, local_preview) {
+            (Some(agent), _) => Some(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_size(px(12.5))
+                    .text_color(theme::accent_text())
+                    .child(div().truncate().child(format!("Proposal from {agent}"))),
+            ),
+            (None, Some(local)) => Some(local_preview_row(local, preview_color)),
+            (None, None) => preview_text(&item.preview).map(|(text, italic)| {
                 let glyph = preview_icon(&text);
                 h_flex()
                     .flex_1()
@@ -749,7 +764,18 @@ impl SidebarView {
                     .gap(px(8.))
                     .items_center()
                     .child(preview.unwrap_or_else(|| div().flex_1()))
-                    .children(unread_marker(item.unread, item.muted)),
+                    .children(match proposal_agent {
+                        Some(_) => Some(
+                            div()
+                                .size(px(PROPOSAL_DOT_SIZE))
+                                .flex_none()
+                                .rounded_full()
+                                .bg(theme::accent())
+                                .into_any_element(),
+                        ),
+                        None => unread_marker(item.unread, item.muted)
+                            .map(IntoElement::into_any_element),
+                    }),
             );
         let state = self.state.clone();
         let chat_id = item.id.clone();
@@ -796,6 +822,7 @@ impl SidebarView {
     }
 
     fn chats_body(&self, window_height: f32, cx: &mut Context<Self>) -> AnyElement {
+        let proposal_agents = crate::agent_api::pending_agents(cx);
         let (sections, menu, local_previews) = {
             let state = self.state.read(cx);
             let now = Utc::now();
@@ -872,6 +899,7 @@ impl SidebarView {
                         item,
                         is_selected,
                         local_preview,
+                        proposal_agents.get(&item.id).copied(),
                         directory,
                         &menu,
                     ));

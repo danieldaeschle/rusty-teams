@@ -139,13 +139,7 @@ impl Global for AppHandle {}
 impl EventEmitter<AppEvent> for AppState {}
 
 pub fn chat_title(chat: &ChatRecord) -> String {
-    if !chat.title.trim().is_empty() {
-        chat.title.clone()
-    } else if !chat.member_summary.trim().is_empty() {
-        chat.member_summary.clone()
-    } else {
-        "Chat".to_owned()
-    }
+    chat.display_title()
 }
 
 pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
@@ -750,6 +744,7 @@ impl AppState {
             BackendEvent::Ring(event) => self.on_engine_event(event, cx),
             BackendEvent::ThreadChanged(conversation_id) => self.on_thread_changed(&conversation_id, cx),
             BackendEvent::Engine(engine) => {
+                crate::agent_api::engine_ready(engine.clone(), cx);
                 self.engine = Some(engine);
                 self.resend_outbox(cx);
                 self.refresh_scheduled(cx);

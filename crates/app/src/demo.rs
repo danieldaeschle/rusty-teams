@@ -771,6 +771,37 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&priority_messages());
     let _ = store.upsert_messages(&meeting_link_messages());
     let _ = store.upsert_messages(&bot_messages());
+    seed_agent_access(store);
+}
+
+const AGENT_DEMO_PROPOSAL: &str = "I ran the regression suite on staging: 412 passed, 0 failed. The release candidate is good to ship.";
+
+fn seed_agent_access(store: &Store) {
+    let selected =
+        |ids: &[&str]| mcp::Access::Selected(ids.iter().map(|id| (*id).to_owned()).collect());
+    mcp::save_policy(
+        store,
+        &mcp::AgentPolicy {
+            enabled: true,
+            chats: selected(&[RELEASE_CHAT, "demo-chat-mara", "demo-chat-meeting-standup"]),
+            channels: selected(&["demo-channel-1-1"]),
+            propose: true,
+            calendar: true,
+            transcripts: false,
+            ..mcp::AgentPolicy::default()
+        },
+    );
+    let _ = store.insert_agent_proposal(&store::AgentProposalRecord {
+        id: "demo-proposal".to_owned(),
+        conversation_id: RELEASE_CHAT.to_owned(),
+        reply_to_message_id: Some("m1".to_owned()),
+        text: AGENT_DEMO_PROPOSAL.to_owned(),
+        agent: Some("claude".to_owned()),
+        session_id: None,
+        created_at: Utc::now() - Duration::minutes(1),
+        state: "pending".to_owned(),
+        resolved_at: None,
+    });
 }
 
 fn photo(palette: &Palette) -> Arc<Image> {

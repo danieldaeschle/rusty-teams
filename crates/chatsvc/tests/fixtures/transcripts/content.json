@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {"speakerDisplayName": "Alex Example", "startOffset": "00:00:01.5000000", "endOffset": "00:00:04.0000000", "text": "Welcome everyone."},
+    {"speakerDisplayName": "Alex Example", "startOffset": "00:00:04.2000000", "endOffset": "00:00:07.0000000", "text": " Let us start. "},
+    {"speakerDisplayName": "Sam Sample", "startOffset": "00:00:07.5000000", "endOffset": "00:01:09.2500000", "text": "Sounds good."},
+    {"speakerDisplayName": "Sam Sample", "startOffset": "00:01:10.0000000", "endOffset": "00:01:11.0000000", "text": "   "},
+    {"startOffset": "01:00:00.0000000", "endOffset": "01:00:02.0000000", "text": "Who is this?"},
+    {"speakerDisplayName": "Alex Example", "startOffset": "01:00:03.0000000", "endOffset": "01:00:04.0000000", "text": "Back again."}
+  ]
+}

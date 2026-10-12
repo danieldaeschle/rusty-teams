@@ -177,6 +177,7 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.report_composer_activity(event, cx);
         match event {
             ComposerEvent::Submit(outgoing) => {
                 let Some(root_id) = self.reply_root.clone() else {
@@ -218,33 +219,40 @@ impl ConversationView {
         if !self.in_feed() || self.pane != ChannelPane::Posts {
             return None;
         }
+        let proposal_card = self.render_proposal_card(cx);
         if !self.new_post_open {
             return Some(
-                h_flex()
+                v_flex()
                     .w_full()
                     .flex_none()
-                    .px(px(24.))
-                    .pt(px(2.))
-                    .pb(px(4.))
+                    .children(proposal_card)
                     .child(
                         h_flex()
-                            .id("new-post")
-                            .h(px(32.))
-                            .px(px(12.))
-                            .gap(px(6.))
-                            .items_center()
-                            .rounded(px(8.))
-                            .bg(theme::accent())
-                            .text_color(theme::on_accent())
-                            .text_size(px(13.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .cursor_pointer()
-                            .hover(|button| button.bg(theme::accent_text()))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_new_post(window, cx)),
-                            )
-                            .child(icon(IconName::Plus, 14., theme::on_accent()))
-                            .child("New post"),
+                            .w_full()
+                            .flex_none()
+                            .px(px(24.))
+                            .pt(px(2.))
+                            .pb(px(4.))
+                            .child(
+                                h_flex()
+                                    .id("new-post")
+                                    .h(px(32.))
+                                    .px(px(12.))
+                                    .gap(px(6.))
+                                    .items_center()
+                                    .rounded(px(8.))
+                                    .bg(theme::accent())
+                                    .text_color(theme::on_accent())
+                                    .text_size(px(13.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .cursor_pointer()
+                                    .hover(|button| button.bg(theme::accent_text()))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_new_post(window, cx)
+                                    }))
+                                    .child(icon(IconName::Plus, 14., theme::on_accent()))
+                                    .child("New post"),
+                            ),
                     )
                     .into_any_element(),
             );
@@ -283,6 +291,7 @@ impl ConversationView {
                 .w_full()
                 .flex_none()
                 .children(subject)
+                .children(proposal_card)
                 .child(self.composer.clone())
                 .child(
                     h_flex()

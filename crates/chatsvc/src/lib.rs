@@ -18,6 +18,7 @@ pub mod realtime;
 pub mod receipts;
 pub mod saved;
 pub mod settings;
+pub mod transcripts;
 pub mod translate;
 
 pub use calendar::{Calendar, CalendarEvent, ResponseType, meet_now_join_url, parse_calendar_events};
@@ -55,6 +56,7 @@ pub use realtime::{
 pub use receipts::{MemberHorizon, Receipts};
 pub use saved::SavedMessage;
 pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use transcripts::{MeetingTranscript, TranscriptError, TranscriptTurn, Transcripts};
 pub use translate::{
     Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,
     TranslationStatus, TranslationTrigger, Translator, language_code,

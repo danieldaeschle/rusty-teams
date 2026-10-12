@@ -258,6 +258,14 @@ impl AppState {
             }
             _ => {}
         }
+        if let (CallUpdate::Caption(entry), Some(thread)) = (&update, call.chat_thread()) {
+            let speaker = if entry.display_name.is_empty() {
+                "Someone"
+            } else {
+                &entry.display_name
+            };
+            crate::agent_api::note_caption(thread, &entry.id, speaker, &entry.text, cx);
+        }
         call.model.apply(update);
         if call.model.screen_sharer.is_none() {
             call.stage_fullscreen = false;
@@ -276,6 +284,9 @@ impl AppState {
         let next_move = call.pending_move.take().or_else(|| room_closed_move(call, &reason));
         let consult = call.consult.take();
         call.pictures.clear(cx);
+        if let Some(thread) = call.chat_thread() {
+            crate::agent_api::clear_captions(thread, cx);
+        }
         self.call = None;
         if let Some(consult) = consult {
             let _ = consult.commands.send(CallCommand::Hangup);

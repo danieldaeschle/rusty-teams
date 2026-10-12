@@ -857,8 +857,8 @@ impl NotificationCenter {
         // open_window draws once right away, and SettingsView reads this entity while rendering.
         cx.defer(move |cx| {
             let view_center = center.clone();
-            let opened = gpui_kit::open_window(options, cx, move |_, cx| {
-                cx.new(|cx| SettingsView::new(view_center, cx))
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| SettingsView::new(view_center, window, cx))
             });
             center.update(cx, |this, _| {
                 this.settings_opening = false;

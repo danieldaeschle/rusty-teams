@@ -26,6 +26,18 @@ pub struct ChatRecord {
     pub last_event_system: bool,
 }
 
+impl ChatRecord {
+    pub fn display_title(&self) -> String {
+        if !self.title.trim().is_empty() {
+            self.title.clone()
+        } else if !self.member_summary.trim().is_empty() {
+            self.member_summary.clone()
+        } else {
+            "Chat".to_owned()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AvatarRecord {
     pub user_id: String,
@@ -311,4 +323,17 @@ pub struct DraftRecord {
     pub preview: String,
     pub images: Vec<AttachmentImage>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentProposalRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub reply_to_message_id: Option<String>,
+    pub text: String,
+    pub agent: Option<String>,
+    pub session_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub state: String,
+    pub resolved_at: Option<DateTime<Utc>>,
 }

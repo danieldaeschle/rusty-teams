@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::error::Result;
 use crate::models::{ConversationHit, MessageRecord, SearchHit};
-use crate::store::Store;
+use crate::store::{Store, json_ids};
 use crate::text::plain_text;
 use crate::time::from_millis;
 
@@ -122,6 +122,45 @@ impl Store {
                     snippet: row.get(4)?,
                 })
             })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(hits)
+    }
+
+    /// Like `search_messages`, restricted to `conversation_ids` before the limit applies.
+    pub fn search_messages_in(
+        &self,
+        query: &str,
+        conversation_ids: &[String],
+        limit: usize,
+    ) -> Result<Vec<SearchHit>> {
+        let Some(expression) = match_expression(query) else {
+            return Ok(Vec::new());
+        };
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT k.conversation_id, k.message_id, m.sender_name, m.created_at,
+                    snippet(message_search, 0, char({}), char({}), '...', {SNIPPET_TOKENS})
+             FROM message_search
+             JOIN search_keys k ON k.id = message_search.rowid
+             JOIN messages m ON m.conversation_id = k.conversation_id AND m.message_id = k.message_id
+             WHERE message_search MATCH ?1
+               AND k.conversation_id IN (SELECT value FROM json_each(?2))
+             ORDER BY m.created_at DESC LIMIT ?3",
+            HIGHLIGHT_START as u32, HIGHLIGHT_END as u32
+        ))?;
+        let hits = statement
+            .query_map(
+                params![expression, json_ids(conversation_ids), limit as i64],
+                |row| {
+                    Ok(SearchHit {
+                        conversation_id: row.get(0)?,
+                        message_id: row.get(1)?,
+                        sender_name: row.get(2)?,
+                        created_at: from_millis(row.get(3)?),
+                        snippet: row.get(4)?,
+                    })
+                },
+            )?
             .collect::<rusqlite::Result<_>>()?;
         Ok(hits)
     }

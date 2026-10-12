@@ -21,6 +21,7 @@ use teams_core::{ExecuteAction, FileCard, LinkPreview};
 
 mod feed;
 mod pins;
+mod proposal;
 mod render_env;
 mod scheduled;
 mod shared;
@@ -615,6 +616,7 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.report_composer_activity(event, cx);
         match event {
             ComposerEvent::Submit(outgoing) => self.submit_main((**outgoing).clone(), window, cx),
             ComposerEvent::Schedule { outgoing, send_at } => {
@@ -1067,23 +1069,16 @@ impl ConversationView {
         }
     }
 
-    fn begin_reply(&mut self, message_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(conversation_id) = self
-            .current
-            .as_ref()
-            .map(|current| current.selection.conversation_id().to_owned())
-        else {
-            return;
-        };
-        let store = self.app.read(cx).store.clone();
-        let record = store
+    fn reply_target(&self, message_id: &str, cx: &App) -> Option<(MessageRecord, ReplyPreview)> {
+        let conversation_id = self.conversation_id()?;
+        let record = self
+            .app
+            .read(cx)
+            .store
             .messages_by_id(&conversation_id, &[message_id.to_owned()])
             .ok()
             .and_then(|mut found| found.remove(message_id))
-            .filter(|record| !record.deleted);
-        let Some(record) = record else {
-            return;
-        };
+            .filter(|record| !record.deleted)?;
         let preview = ReplyPreview {
             message_id: record.message_id.clone(),
             author: record
@@ -1091,6 +1086,13 @@ impl ConversationView {
                 .clone()
                 .unwrap_or_else(|| "Unknown".to_owned()),
             excerpt: reply_excerpt(&record),
+        };
+        Some((record, preview))
+    }
+
+    fn begin_reply(&mut self, message_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((record, preview)) = self.reply_target(message_id, cx) else {
+            return;
         };
         if self.in_feed() {
             let root_id = record
@@ -3215,6 +3217,7 @@ impl Render for ConversationView {
                 .when(!in_feed, |column| {
                     column
                         .child(self.render_typing_line(cx))
+                        .children(self.render_proposal_card(cx))
                         .child(self.composer.clone())
                 })
                 .child(self.render_drop_overlay(cx)),

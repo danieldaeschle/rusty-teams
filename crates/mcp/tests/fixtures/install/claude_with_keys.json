@@ -1,0 +1,14 @@
+{
+  "numStartups": 12,
+  "theme": "dark",
+  "mcpServers": {
+    "other": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "something"]
+    }
+  },
+  "projects": {
+    "/home/user/code": { "allowedTools": [] }
+  }
+}

@@ -16,6 +16,7 @@ use super::center::NotificationCenter;
 use super::platform;
 use super::ring_tone::Ringtone;
 use super::rules::Settings;
+use super::settings_mcp::McpView;
 use crate::app_state::AppState;
 use crate::call::{BackgroundPick, CameraPreview, preview_backgrounds};
 use crate::theme;
@@ -35,15 +36,17 @@ fn camera_in_call(state: &AppState) -> bool {
 enum Section {
     Notifications,
     Devices,
+    Mcp,
 }
 
 impl Section {
-    const ALL: [Section; 2] = [Section::Notifications, Section::Devices];
+    const ALL: [Section; 3] = [Section::Notifications, Section::Devices, Section::Mcp];
 
     fn label(self) -> &'static str {
         match self {
             Section::Notifications => "Notifications",
             Section::Devices => "Devices",
+            Section::Mcp => "MCP",
         }
     }
 }
@@ -87,6 +90,7 @@ const ROWS: [Row; 5] = [
 pub struct SettingsView {
     center: Entity<NotificationCenter>,
     section: Section,
+    mcp: Entity<McpView>,
     preview: CameraPreview,
     cameras: Vec<DeviceEntry>,
     cameras_requested: bool,
@@ -102,12 +106,17 @@ impl SettingsView {
     pub const WIDTH: f32 = 420.;
     pub const HEIGHT: f32 = 540.;
 
-    pub fn new(center: Entity<NotificationCenter>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        center: Entity<NotificationCenter>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscription = cx.observe(&center, |_, _, cx| cx.notify());
         let app = center.read(cx).app().clone();
         let app_subscription = cx.observe(&app, |view, _, cx| view.sync_preview_block(cx));
         let release = cx.on_release(|view, cx| view.preview.stop(cx));
         let (preview, mut updates) = CameraPreview::new();
+        let mcp = cx.new(|cx| McpView::new(app.clone(), window, cx));
         let state = app.read(cx);
         let camera = state.call_camera.clone();
         let preview_blocked = camera_in_call(state);
@@ -134,6 +143,7 @@ impl SettingsView {
         SettingsView {
             center,
             section: Section::Notifications,
+            mcp,
             preview,
             cameras: camera_entries(&[]),
             cameras_requested: false,
@@ -170,7 +180,7 @@ impl SettingsView {
                 self.preview_blocked = camera_in_call(self.center.read(cx).app().read(cx));
                 self.start_preview();
             }
-            Section::Notifications => self.preview.stop(cx),
+            Section::Notifications | Section::Mcp => self.preview.stop(cx),
         }
         cx.notify();
     }
@@ -234,7 +244,7 @@ impl SettingsView {
     }
 }
 
-fn switch(on: bool) -> Div {
+pub(super) fn switch(on: bool) -> Div {
     div()
         .w(px(36.))
         .h(px(20.))
@@ -275,7 +285,15 @@ fn button(label: &'static str) -> Stateful<Div> {
         .child(label)
 }
 
-fn titled(title: &'static str, detail: &'static str) -> Div {
+fn titled(title: &'static str, detail: impl Into<SharedString>) -> Div {
+    titled_with(title, detail, theme::text_muted())
+}
+
+pub(super) fn titled_with(
+    title: &'static str,
+    detail: impl Into<SharedString>,
+    detail_color: Hsla,
+) -> Div {
     v_flex()
         .flex_1()
         .child(
@@ -288,12 +306,16 @@ fn titled(title: &'static str, detail: &'static str) -> Div {
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(theme::text_muted())
-                .child(detail),
+                .text_color(detail_color)
+                .child(detail.into()),
         )
 }
 
-fn control_row(title: &'static str, detail: &'static str, control: impl IntoElement) -> Div {
+pub(super) fn control_row(
+    title: &'static str,
+    detail: impl Into<SharedString>,
+    control: impl IntoElement,
+) -> Div {
     h_flex()
         .w_full()
         .px(px(20.))
@@ -467,6 +489,7 @@ impl Render for SettingsView {
         let body = match self.section {
             Section::Notifications => self.notifications_section(cx).into_any_element(),
             Section::Devices => self.devices_section(cx).into_any_element(),
+            Section::Mcp => self.mcp.clone().into_any_element(),
         };
         v_flex()
             .size_full()

@@ -1,0 +1,8 @@
+{
+  "value": [
+    {"id": "t-old", "createdDateTime": "2026-03-02T10:31:00Z", "isVisible": true},
+    {"id": "t-new", "createdDateTime": "2026-03-02T11:05:00Z", "isVisible": true},
+    {"id": "t-hidden", "createdDateTime": "2026-03-02T12:00:00Z", "isVisible": false},
+    {"createdDateTime": "2026-03-02T13:00:00Z"}
+  ]
+}

@@ -137,6 +137,28 @@ impl Store {
         Ok(messages)
     }
 
+    /// Oldest-first page of the `limit` oldest messages strictly newer than `after`.
+    pub fn messages_after(
+        &self,
+        conversation_id: &str,
+        after: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages
+             WHERE conversation_id = ?1 AND created_at > ?2
+             ORDER BY created_at ASC, message_id ASC LIMIT ?3"
+        ))?;
+        let messages = statement
+            .query_map(
+                params![conversation_id, to_millis(after), limit as i64],
+                message_from_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(messages)
+    }
+
     /// Oldest-first root and replies of one channel thread.
     pub fn thread_messages(
         &self,

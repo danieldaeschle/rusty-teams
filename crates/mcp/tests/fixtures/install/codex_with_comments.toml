@@ -1,0 +1,6 @@
+# my codex settings
+model = "gpt-5"  # default model
+
+[mcp_servers.other]
+command = "npx"
+args = ["-y", "something"]

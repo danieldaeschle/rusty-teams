@@ -10,6 +10,7 @@ mod ring_tone;
 mod ring_view;
 mod rules;
 mod settings;
+mod settings_mcp;
 mod settings_view;
 mod stack;
 mod text;
