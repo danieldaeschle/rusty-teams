@@ -872,7 +872,7 @@ impl RenderOnce for Button {
                 this
             }
         })
-        .when(is_focused && self.focus_ring_enabled, |this| {
+        .when(is_focused && self.focus_ring_enabled && window.last_input_was_keyboard(), |this| {
             focus_style(this, focus_line, window, cx)
         })
     }

@@ -710,7 +710,6 @@ fn person_tile_body(state: &AppState, model: &CallModel, remote: &Tile, size: Ti
     }
     let waiting = remote.state == TileState::Invited;
     let avatar = person_avatar(&state.directory, remote.user_id.as_deref(), &remote.name, size.avatar);
-    let avatar = if waiting { blinking(avatar) } else { avatar };
     let caption = model.tile_caption(remote).map(|text| {
         let label = div().text_size(px(12.)).text_color(theme::text_muted()).child(text);
         if waiting { blinking(label) } else { label.into_any_element() }

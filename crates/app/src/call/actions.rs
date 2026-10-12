@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use calling::meeting::LiveMeeting;
 use calling::{
-    AcceptMode, CallCommand, CallHandle, CallSpec, CallUpdate, Callee, DeviceChoice, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
+    AcceptMode, CallCommand, CallHandle, CallSpec, CallState, CallUpdate, Callee, DeviceChoice, EndReason, EngineEvent, MuteCommand, Reaction, RingSignal,
+    ShareSource, VideoKey,
 };
 use gpui_kit::*;
 
@@ -199,6 +200,7 @@ impl AppState {
                     return;
                 }
             }
+            let _ = this.update(cx, |state, cx| state.end_orphaned_call(call_id, cx));
         })
         .detach();
         cx.spawn(async move |this, cx| {
@@ -222,6 +224,14 @@ impl AppState {
             }
         })
         .detach();
+    }
+
+    fn end_orphaned_call(&mut self, call_id: u64, cx: &mut Context<Self>) {
+        let still_open = self.call.as_ref().is_some_and(|call| call.id == call_id && call.model.is_active());
+        if still_open {
+            let reason = EndReason::Failed("The call stopped unexpectedly".to_owned());
+            self.apply_call_update(call_id, CallUpdate::State(CallState::Ended { reason }), cx);
+        }
     }
 
     pub(super) fn apply_call_update(&mut self, call_id: u64, update: CallUpdate, cx: &mut Context<Self>) {

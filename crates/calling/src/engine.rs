@@ -56,6 +56,7 @@ pub struct EngineConfig {
     pub routing: TenantRouting,
     pub relay_host: String,
     pub trace: bool,
+    pub dump_dir: Option<std::path::PathBuf>,
     /// Page globals of the Trouter client; a second engine in the same tab needs its own.
     pub instance: InstanceNames,
 }
@@ -67,6 +68,7 @@ impl Default for EngineConfig {
             routing: TenantRouting::default(),
             relay_host: DEFAULT_RELAY_HOST.to_owned(),
             trace: std::env::var_os(TRACE_ENV).is_some(),
+            dump_dir: None,
             instance: calling_instance_names(),
         }
     }
@@ -155,6 +157,7 @@ impl Inner {
             relay_host: self.config.relay_host.clone(),
             routing: self.config.routing.clone(),
             trace: self.config.trace,
+            sdp_dump_dir: self.config.dump_dir.clone(),
             camera: self.default_camera.lock().expect("default camera lock").clone(),
             ..CallOptions::default()
         }

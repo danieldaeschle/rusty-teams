@@ -59,7 +59,7 @@ pub fn unregister_on_exit(timeout: Duration) {
     if unregister.send(done).is_err() {
         return;
     }
-    let _ = crate::runtime::handle().block_on(tokio::time::timeout(timeout, finished));
+    let _ = crate::runtime::handle().block_on(async move { tokio::time::timeout(timeout, finished).await });
 }
 
 #[derive(Default)]

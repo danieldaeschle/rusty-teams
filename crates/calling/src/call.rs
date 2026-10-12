@@ -335,6 +335,7 @@ pub async fn run_test_call(
         routing: options.routing.clone(),
         relay_host: options.relay_host.clone(),
         trace: options.trace,
+        dump_dir: None,
         instance: chatsvc::InstanceNames {
             global: "__testCallTrouter".into(),
             binding: "__testCallRealtime".into(),
@@ -352,6 +353,9 @@ impl CallEngine {
         let inner = self.inner.as_ref();
         let _one_call_at_a_time = if options.concurrent { None } else { Some(inner.gate.lock().await) };
         let timeline = Timeline::new(options.trace);
+        if let Some(directory) = options.sdp_dump_dir.as_ref().filter(|_| !options.concurrent) {
+            let _ = std::fs::remove_dir_all(directory);
+        }
         let mut report = CallReport::default();
         let mut state = CallState::Idle;
         advance(&mut state, CallSignal::Dial, &control);
@@ -380,6 +384,7 @@ impl CallEngine {
                 Some(error)
             }
         };
+        dump_timeline(&options, &timeline, failure.as_ref());
         let cancelled = live.cancel_leave || matches!(&state, CallState::Ended { reason: crate::state::EndReason::Cancelled });
         tear_down(live, inner, &timeline, &mut report, cancelled).await;
         let recording = recording.lock().await;
@@ -470,7 +475,7 @@ async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, tr
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let browser_offer = directions_for(layout, false, false, &offer.to_string());
-    let description = SessionDescription::parse(&browser_offer, SdpType::Offer).map_err(|error| Error::Sdp(error.description))?;
+    let description = parse_sdp(&browser_offer, SdpType::Offer)?;
     peer.set_local_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
@@ -496,8 +501,7 @@ async fn answer_offer(
     video: AnswerVideo<'_>,
 ) -> Result<AnsweredMedia> {
     let remote = from_teams_offer(teams_offer)?;
-    let description =
-        SessionDescription::parse(&remote.browser_sdp, SdpType::Offer).map_err(|error| Error::Sdp(error.description))?;
+    let description = parse_sdp(&remote.browser_sdp, SdpType::Offer)?;
     peer.set_remote_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
@@ -598,7 +602,12 @@ async fn drive(
     let mut output = options.output.clone();
     let audio = AudioSetup::start(&factory, options.audio, options.tone_hz, &input, &output);
     control.send(CallUpdate::ListenOnly(audio.listen_only));
-    control.send(CallUpdate::Devices(devices::list_devices(&factory)));
+    let device_lists = devices::list_devices(&factory);
+    timeline.record(
+        "audio setup",
+        format!("listen only {}, {} input(s), {} output(s)", audio.listen_only, device_lists.inputs.len(), device_lists.outputs.len()),
+    );
+    control.send(CallUpdate::Devices(device_lists));
     control.send(CallUpdate::Selected {
         input: input.clone(),
         output: output.clone(),
@@ -709,11 +718,11 @@ async fn drive(
                 AcceptMode::Video if local_video.is_available() => AnswerVideo::Send(&camera_track),
                 _ => AnswerVideo::Receive,
             };
+            dump_sdp(options, "3-teams-offer.sdp", &teams_offer);
             let answered = answer_offer(&current.peer, Some(&track), &teams_offer, video_answer).await?;
             layout_plan = answered.remote.plan();
             direct_video_mid = answered.camera_mid.clone();
             timeline.record("setRemoteDescription", format!("offer applied, {} signaled line(s)", answered.remote.lines.len()));
-            dump_sdp(options, "3-teams-offer.sdp", &teams_offer);
             dump_sdp(options, "4-teams-answer.sdp", &answered.answer_sdp);
             let acceptance_url = attached
                 .links
@@ -1821,7 +1830,7 @@ async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: 
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let text = directions_for(layout, hold, camera, &offer.to_string());
-    let description = SessionDescription::parse(&text, SdpType::Offer).map_err(|error| Error::Sdp(error.description))?;
+    let description = parse_sdp(&text, SdpType::Offer)?;
     peer.set_local_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
@@ -1830,8 +1839,17 @@ async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: 
     Ok((text, signaled))
 }
 
+/// libwebrtc panics while decoding some parse errors, which used to kill the call task and leave the call hanging.
+fn parse_sdp(text: &str, kind: SdpType) -> Result<SessionDescription> {
+    match std::panic::catch_unwind(|| SessionDescription::parse(text, kind)) {
+        Ok(Ok(description)) => Ok(description),
+        Ok(Err(error)) => Err(Error::Sdp(format!("{kind:?} rejected: {}", error.description))),
+        Err(_) => Err(Error::Sdp(format!("{kind:?} rejected, libwebrtc gave no readable reason"))),
+    }
+}
+
 async fn rollback_offer(peer: &PeerConnection) {
-    if let Ok(rollback) = SessionDescription::parse("", SdpType::Rollback) {
+    if let Ok(rollback) = parse_sdp("", SdpType::Rollback) {
         let _ = peer.set_local_description(rollback).await;
     }
 }
@@ -2157,8 +2175,7 @@ fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<Ca
 
 async fn apply_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
     let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
-    let description =
-        SessionDescription::parse(&answer, SdpType::Answer).map_err(|error| Error::Sdp(error.description))?;
+    let description = parse_sdp(&answer, SdpType::Answer)?;
     peer.set_remote_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))
@@ -2182,6 +2199,20 @@ fn dump_sdp(options: &CallOptions, name: &str, sdp: &str) {
         .collect();
     let _ = std::fs::create_dir_all(directory);
     let _ = std::fs::write(directory.join(name), masked.join("\n"));
+}
+
+fn dump_timeline(options: &CallOptions, timeline: &Timeline, failure: Option<&Error>) {
+    let Some(directory) = &options.sdp_dump_dir else {
+        return;
+    };
+    let mut lines: Vec<String> =
+        timeline.entries().iter().map(|entry| format!("{:>6} ms  {}  {}", entry.elapsed_ms, entry.label, entry.detail)).collect();
+    lines.push(match failure {
+        Some(error) => format!("failed: {error}"),
+        None => "ended without error".to_owned(),
+    });
+    let _ = std::fs::create_dir_all(directory);
+    let _ = std::fs::write(directory.join("timeline.txt"), lines.join("\n"));
 }
 
 fn mask_address(token: &str) -> String {
@@ -2332,6 +2363,25 @@ mod tests {
 
     fn directions(sdp: &str) -> Vec<String> {
         crate::sdp::parse(sdp).unwrap().media.iter().map(|line| line.direction().unwrap_or("none").to_owned()).collect()
+    }
+
+    async fn local_offer(layout: Layout) -> Result<OfferedMedia> {
+        use libwebrtc::audio_source::native::NativeAudioSource;
+        use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+        let factory = devices::shared_factory();
+        let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
+        let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
+        let track = factory.create_audio_track("microphone", source);
+        create_offer(&peer, &factory, &track, layout).await
+    }
+
+    #[tokio::test]
+    async fn libwebrtc_accepts_its_own_offer_after_the_direction_rewrite() {
+        for layout in [Layout::OneToOne, Layout::Conference] {
+            if let Err(error) = local_offer(layout).await {
+                panic!("{layout:?}: {error}");
+            }
+        }
     }
 
     #[test]

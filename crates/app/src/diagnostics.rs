@@ -12,6 +12,10 @@ pub fn install(path: PathBuf) {
     let _ = PATH.set(path);
 }
 
+pub fn directory() -> Option<PathBuf> {
+    PATH.get().and_then(|path| path.parent()).map(PathBuf::from)
+}
+
 pub fn record(message: impl AsRef<str>) {
     let message = message.as_ref();
     eprintln!("{message}");
