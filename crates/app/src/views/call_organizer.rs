@@ -374,10 +374,26 @@ pub fn more_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
 
 fn more_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
     let popup = popup.min_w(px(MENU_WIDTH));
-    if model.is_one_to_one() {
-        return one_to_one_items(popup, app, model);
+    let popup = if model.is_one_to_one() {
+        one_to_one_items(popup, app, model)
+    } else {
+        meeting_items(popup, app, model)
+    };
+    incoming_video_item(popup, app, model)
+}
+
+fn incoming_video_item(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+    if model.health.incoming_video {
+        return popup;
     }
-    meeting_items(popup, app, model)
+    let app = app.clone();
+    popup.item(
+        PopupMenuItem::new("Turn on incoming video")
+            .icon(IconName::Video)
+            .on_click(move |_, _, cx| {
+                app.update(cx, |state, cx| state.set_call_incoming_video(true, cx))
+            }),
+    )
 }
 
 fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {

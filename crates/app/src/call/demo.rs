@@ -4,10 +4,11 @@ use calling::CameraDevice;
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallState,
-    CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice, DeviceLists,
-    EndReason, HoldState, IncomingRing, MeetingTarget, Progress, PublishedState, RaisedHand,
-    Reaction, RosterEntry, ShareKind, ShareSource, VideoKey, call_channel,
+    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallHealth,
+    CallState, CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice,
+    DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
+    MeetingTarget, NetworkLevel, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
+    ShareKind, ShareSource, TransportDetails, VideoKey, call_channel,
 };
 
 use super::demo_scene::self_view;
@@ -86,6 +87,7 @@ pub enum DemoScene {
     Held,
     Breakout,
     Whiteboard,
+    Network,
 }
 
 impl DemoScene {
@@ -98,12 +100,13 @@ impl DemoScene {
             "held" => DemoScene::Held,
             "breakout" => DemoScene::Breakout,
             "whiteboard" => DemoScene::Whiteboard,
+            "network" => DemoScene::Network,
             _ => return None,
         })
     }
 
     pub fn is_one_to_one(self) -> bool {
-        matches!(self, DemoScene::Call | DemoScene::Hold | DemoScene::Held)
+        matches!(self, DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Network)
     }
 }
 
@@ -362,7 +365,32 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         }
         DemoScene::Hold => control.send(CallUpdate::Hold(HoldState::Local)),
         DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
+        DemoScene::Network => control.send(CallUpdate::Health(poor_network_health())),
         DemoScene::Call | DemoScene::Breakout | DemoScene::Whiteboard | DemoScene::Plain => {}
+    }
+}
+
+fn poor_network_health() -> CallHealth {
+    CallHealth {
+        level: NetworkLevel::Poor,
+        cpu_limited: false,
+        sample: HealthSample {
+            loss_percent: 7.2,
+            round_trip_ms: 310.,
+            jitter_ms: 38.,
+            sent_kbps: 420.,
+            received_kbps: 1180.,
+            limitation: Limitation::Bandwidth,
+        },
+        transport: TransportDetails {
+            dtls_state: "Connected".to_owned(),
+            tls_version: "FEFD".to_owned(),
+            dtls_cipher: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256".to_owned(),
+            srtp_cipher: "AEAD_AES_128_GCM".to_owned(),
+            local_fingerprint: String::new(),
+            remote_fingerprint: String::new(),
+        },
+        path: MediaPath::Direct,
     }
 }
 
@@ -405,6 +433,7 @@ async fn speak_until_hangup(
     let mut video_ticks = 0u32;
     let mut sharing = false;
     let mut camera_on = false;
+    let mut incoming_video = true;
     let mut blur = false;
     let mut captions_on = false;
     let mut caption_ticks = 0usize;
@@ -424,7 +453,7 @@ async fn speak_until_hangup(
                     sharing = share_now;
                     control.send(CallUpdate::ScreenShare(sharer.clone().filter(|_| sharing)));
                 }
-                publish_demo_video(&control, &people, video_ticks, sharing, sharer.as_deref(), camera_on.then_some(blur));
+                publish_demo_video(&control, if incoming_video { people.as_slice() } else { &[] }, video_ticks, sharing, sharer.as_deref(), camera_on.then_some(blur));
                 video_ticks += 1;
             }
             _ = tick.tick() => {
@@ -532,6 +561,11 @@ async fn speak_until_hangup(
                     control.send(CallUpdate::Captions(if on { CaptionState::On } else { CaptionState::Off }));
                 }
                 Some(CallCommand::SetBackground(choice)) => blur = choice != BackgroundChoice::None,
+                Some(CallCommand::SetIncomingVideo(enabled)) => {
+                    incoming_video = enabled;
+                    people.iter().for_each(|(mri, _)| control.video.forget(&VideoKey::Person(mri.clone())));
+                    control.send(CallUpdate::IncomingVideo(enabled));
+                }
                 Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),

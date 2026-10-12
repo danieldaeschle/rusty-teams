@@ -33,6 +33,7 @@ use crate::devices::{self, DeviceChoice};
 use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
+use crate::health::{CallHealth, HealthCounters, HealthSampler, QualityTracker, TransportDetails, health_from_stats};
 use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, is_hold, rewrite_directions};
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
@@ -76,6 +77,7 @@ const DATA_CHANNEL_LABEL: &str = "main-channel";
 pub const DATA_CHANNEL_ENV: &str = "CALLING_DATA_CHANNEL";
 const CAPTION_START_LIMIT: Duration = Duration::from_secs(40);
 const BLUR_TIMING_EVERY_TICKS: u32 = TICKS_PER_SECOND * 2;
+const HEALTH_EVERY_TICKS: u32 = TICKS_PER_SECOND * 2;
 const BOT_PREFIX: &str = "28:";
 const RECORDING_START_LIMIT: Duration = Duration::from_secs(40);
 const SAME_PEER_ANSWER_LIMIT: Duration = Duration::from_secs(15);
@@ -797,6 +799,8 @@ async fn drive(
     let mut lobby = false;
     let mut previous_packets = 0u64;
     let mut ticks = 0u32;
+    let mut health_sampler = HealthSampler::default();
+    let mut quality_tracker = QualityTracker::default();
     let mut second = 0u32;
     let echo_thread = thread_id;
     let mut video = VideoReceive::new(own_mri.clone(), VideoRouter::default());
@@ -1517,6 +1521,16 @@ async fn drive(
                     });
                 }
                 Some(CallCommand::SetBackground(choice)) => apply_background(choice, &local_video, control, timeline).await,
+                Some(CallCommand::SetIncomingVideo(enabled)) => {
+                    video.set_incoming_enabled(enabled);
+                    if let (Some(mid), Some(mri)) = (&direct_video_mid, &peer_mri) {
+                        let key = VideoKey::Person(mri.clone());
+                        control.video.forget(&key);
+                        video.router().set(mid, enabled.then_some(key));
+                    }
+                    send_receive_change(control, video.reselect(&roster));
+                    control.send(CallUpdate::IncomingVideo(enabled));
+                }
                 Some(CallCommand::SendReaction(reaction)) => {
                     if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {
                         timeline.record("reaction failed", error.to_string());
@@ -1560,6 +1574,19 @@ async fn drive(
                     && let Some(average_ms) = local_video.blur_average_ms()
                 {
                     control.send(CallUpdate::BlurTiming(average_ms));
+                }
+                if ticks.is_multiple_of(HEALTH_EVERY_TICKS)
+                    && snapshot.selected_pair.is_some()
+                    && let Some(sample) = health_sampler.sample(std::time::Instant::now(), snapshot.health)
+                {
+                    let quality = quality_tracker.observe(std::time::Instant::now(), &sample);
+                    control.send(CallUpdate::Health(CallHealth {
+                        level: quality.level,
+                        cpu_limited: quality.cpu_limited,
+                        sample,
+                        transport: snapshot.transport.clone(),
+                        path: negotiator.path(),
+                    }));
                 }
                 let local_level = if muted && share_audio.is_none() { 0.0 } else { snapshot.local_level as f32 };
                 control.send(CallUpdate::Levels { local: local_level, remote: snapshot.audio_level as f32 });
@@ -2328,6 +2355,8 @@ struct StatsSnapshot {
     dtls_cipher: String,
     srtp_cipher: String,
     selected_pair: Option<String>,
+    health: HealthCounters,
+    transport: TransportDetails,
 }
 
 async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
@@ -2335,6 +2364,7 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
         return StatsSnapshot::default();
     };
     let mut snapshot = StatsSnapshot::default();
+    (snapshot.health, snapshot.transport) = health_from_stats(&stats);
     let mut selected_pair_id = None;
     for entry in &stats {
         match entry {

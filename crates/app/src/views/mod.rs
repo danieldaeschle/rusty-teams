@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod avatar;
 pub mod call_controls;
 pub mod call_extras;
+pub mod call_health;
 pub mod call_mini;
 pub mod call_mini_window;
 pub mod call_organizer;

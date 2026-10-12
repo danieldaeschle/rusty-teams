@@ -20,6 +20,7 @@ use super::call_extras::{
     BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
     room_chip, whiteboard_stage,
 };
+use super::call_health::{health_banner, health_indicator};
 use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
     more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu,
@@ -1038,6 +1039,7 @@ pub fn render_call_view(
                 .text_color(status_color)
                 .child(status),
         )
+        .children(health_indicator(model))
         .children(recording_chip(model))
         .children(room_chip(model))
         .child(div().flex_1())
@@ -1118,6 +1120,7 @@ pub fn render_call_view(
         .bg(theme::surface())
         .child(header)
         .children(lobby_banner(app, model))
+        .children(health_banner(app, model))
         .children(sharing_banner(app, model, state.call_share_sound))
         .children(consult_banner(app, state))
         .child(match stage {

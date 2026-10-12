@@ -3,7 +3,9 @@ use calling::{
 };
 use gpui_kit::*;
 
+use super::background::BackgroundPick;
 use super::demo::{DemoCall, start_demo_call};
+use super::health::HealthBanner;
 use super::model::{ActiveCall, BreakoutState, CallModel, ConsultCall, PendingMove};
 use super::target::plan_for_chat;
 use crate::app_state::AppState;
@@ -64,6 +66,22 @@ impl AppState {
             _ => return,
         };
         self.send_call_command(CallCommand::Hold(hold));
+    }
+
+    pub fn set_call_incoming_video(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.send_call_command(CallCommand::SetIncomingVideo(enabled));
+        cx.notify();
+    }
+
+    pub fn close_call_health_banner(&mut self, banner: HealthBanner, cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.model.health.close_banner(banner);
+            cx.notify();
+        }
+    }
+
+    pub fn turn_off_call_effects(&mut self, cx: &mut Context<Self>) {
+        self.set_call_background(BackgroundPick::None, cx);
     }
 
     pub fn open_call_whiteboard(&mut self, cx: &mut Context<Self>) {

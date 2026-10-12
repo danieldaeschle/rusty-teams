@@ -8,6 +8,7 @@ use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
+use crate::health::CallHealth;
 use crate::hold::HoldState;
 use crate::mute::MuteCommand;
 use crate::reaction::Reaction;
@@ -44,6 +45,7 @@ pub enum CallCommand {
     RemoveParticipant { mri: String },
     SetCaptions(bool),
     SetBackground(BackgroundChoice),
+    SetIncomingVideo(bool),
     SendReaction(Reaction),
     SetRecording { on: bool, title: String },
     ConsentToRecording,
@@ -86,6 +88,8 @@ pub enum CallUpdate {
     Captions(CaptionState),
     Caption(CaptionEntry),
     BlurTiming(f32),
+    Health(CallHealth),
+    IncomingVideo(bool),
     Recording(bool),
     ConsentRequired(bool),
     Hold(HoldState),

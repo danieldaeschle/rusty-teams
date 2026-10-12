@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 62 % | 4 | 13 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 61 % | 4 | 14 | 0 |
 
 ## Next
 
@@ -175,6 +175,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Recording | Partial | Organizer "..." > Start recording / Stop recording (confirm) through the recorder bot, red dot and "Recording" in the header for everyone from the meeting state, consent notice that keeps mic and camera off until OK. Bodies unit tested; start and stop run live through `meet_now --record`, consent needs a tenant with the policy on and a second person |
 | Hold, resume, transfer | Partial | 1:1 "..." > Hold renegotiates every line inactive, "On hold" view with Resume, "You're on hold" when the other side holds, Transfer... person picker with Transfer now (blind) and Consult first (second call, first held, Transfer now). Needs a second person; redirect and park not built |
 | Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
+| Call health and encryption | Partial | Header shows signal bars and a shield; click opens "Call health" with loss, round trip, jitter, bitrate, "Secured by Teams encryption", DTLS-SRTP cipher and media path (direct or via Microsoft media server). Unstable network banner with "Turn off incoming video", overloaded computer banner with "Turn off effects". Thresholds unit tested; not yet seen on a bad live network |
 | Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
 | Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |

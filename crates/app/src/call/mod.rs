@@ -5,6 +5,7 @@ mod calendar;
 mod demo;
 mod demo_scene;
 mod features;
+mod health;
 mod history;
 mod join;
 mod launcher;
@@ -26,6 +27,7 @@ pub use background::{
 };
 pub use demo::DemoScene;
 pub use features::TransferCandidate;
+pub use health::{HealthBanner, level_text, media_text, network_rows, transport_text};
 pub use history::CallRow;
 pub use launcher::CallLauncher;
 pub use list::{
