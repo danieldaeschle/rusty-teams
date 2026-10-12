@@ -17,6 +17,7 @@ use super::platform;
 use super::ring_tone::Ringtone;
 use super::rules::Settings;
 use super::settings_mcp::McpView;
+use crate::agents::AgentsSettings;
 use crate::app_state::AppState;
 use crate::call::{BackgroundPick, CameraPreview, preview_backgrounds};
 use crate::theme;
@@ -33,19 +34,21 @@ fn camera_in_call(state: &AppState) -> bool {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Section {
+pub(super) enum Section {
     Notifications,
     Devices,
+    Agents,
     Mcp,
 }
 
 impl Section {
-    const ALL: [Section; 3] = [Section::Notifications, Section::Devices, Section::Mcp];
+    const ALL: [Section; 4] = [Section::Notifications, Section::Devices, Section::Agents, Section::Mcp];
 
     fn label(self) -> &'static str {
         match self {
             Section::Notifications => "Notifications",
             Section::Devices => "Devices",
+            Section::Agents => "Agents",
             Section::Mcp => "MCP",
         }
     }
@@ -91,6 +94,7 @@ pub struct SettingsView {
     center: Entity<NotificationCenter>,
     section: Section,
     mcp: Entity<McpView>,
+    agents: Option<Entity<AgentsSettings>>,
     preview: CameraPreview,
     cameras: Vec<DeviceEntry>,
     cameras_requested: bool,
@@ -104,10 +108,11 @@ pub struct SettingsView {
 
 impl SettingsView {
     pub const WIDTH: f32 = 420.;
-    pub const HEIGHT: f32 = 540.;
+    pub const HEIGHT: f32 = 680.;
 
     pub fn new(
         center: Entity<NotificationCenter>,
+        section: Section,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -140,10 +145,13 @@ impl SettingsView {
             }
         })
         .detach();
+        let agents = crate::agents::runs_handle(cx)
+            .map(|runs| cx.new(|cx| AgentsSettings::new(runs, cx)));
         SettingsView {
             center,
-            section: Section::Notifications,
+            section,
             mcp,
+            agents,
             preview,
             cameras: camera_entries(&[]),
             cameras_requested: false,
@@ -168,7 +176,7 @@ impl SettingsView {
         }
     }
 
-    fn select_section(&mut self, section: Section, cx: &mut Context<Self>) {
+    pub(super) fn select_section(&mut self, section: Section, cx: &mut Context<Self>) {
         if self.section == section {
             return;
         }
@@ -180,7 +188,7 @@ impl SettingsView {
                 self.preview_blocked = camera_in_call(self.center.read(cx).app().read(cx));
                 self.start_preview();
             }
-            Section::Notifications | Section::Mcp => self.preview.stop(cx),
+            Section::Notifications | Section::Agents | Section::Mcp => self.preview.stop(cx),
         }
         cx.notify();
     }
@@ -244,7 +252,7 @@ impl SettingsView {
     }
 }
 
-pub(super) fn switch(on: bool) -> Div {
+pub(crate) fn switch(on: bool) -> Div {
     div()
         .w(px(36.))
         .h(px(20.))
@@ -489,6 +497,13 @@ impl Render for SettingsView {
         let body = match self.section {
             Section::Notifications => self.notifications_section(cx).into_any_element(),
             Section::Devices => self.devices_section(cx).into_any_element(),
+            Section::Agents => div()
+                .id("agents-scroll")
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .children(self.agents.clone())
+                .into_any_element(),
             Section::Mcp => self.mcp.clone().into_any_element(),
         };
         v_flex()

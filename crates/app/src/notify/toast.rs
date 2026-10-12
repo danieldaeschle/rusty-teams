@@ -8,6 +8,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::agent_toast::agent_toast_content;
 use super::center::NotificationCenter;
 use super::layout::{
     ACTION_BUTTON, AVATAR_GAP, AVATAR_SIZE, MENTION_BORDER, PREVIEW_MAX_LINES, PREVIEW_SIZE,
@@ -477,7 +478,10 @@ impl Render for ToastView {
                 .into_any_element();
         };
         let text = describe(&model, preview_on);
-        let narration = text.narration();
+        let narration = model
+            .agent
+            .as_ref()
+            .map_or_else(|| text.narration(), |agent| agent.title.clone());
         if narration != self.last_title {
             window.set_window_title(&narration);
             self.last_title = narration;
@@ -496,6 +500,10 @@ impl Render for ToastView {
         let border_width = if mention { MENTION_BORDER } else { 1. };
         let hovered = model.hovered;
         let content = match model.reply {
+            _ if model.agent.is_some() => {
+                let agent = model.agent.as_ref().expect("checked above");
+                agent_toast_content(&self.center, id, agent, hovered)
+            }
             ReplyState::Sent | ReplyState::Failed => self.confirmation(&model, cx),
             ReplyState::Open => v_flex()
                 .w_full()

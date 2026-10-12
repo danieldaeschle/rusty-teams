@@ -20,12 +20,21 @@ use crate::theme;
 
 const BAR_BUTTON: f32 = 30.;
 const BAR_PADDING: f32 = 3.;
-const BAR_GROUP_GAP: f32 = 6.;
+const BAR_ICON: f32 = 16.;
+const DELEGATE_ITEM_WIDTH: f32 = 188.;
+const DELEGATE_AGENT_SIZE: f32 = 11.;
 pub const QUICK_REACTION_COUNT: usize = 4;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 pub type HoverChange = Rc<dyn Fn(bool, &mut App)>;
+
+#[derive(Clone)]
+pub struct DelegateEntry {
+    pub label: String,
+    pub agent_name: String,
+    pub action: Action,
+}
 
 pub struct MessageMenu {
     pub key: String,
@@ -44,6 +53,8 @@ pub struct MessageMenu {
     pub delete: Option<Action>,
     pub mark_unread: Option<Action>,
     pub refresh_card: Option<Action>,
+    pub delegate: Vec<DelegateEntry>,
+    pub manage_agents: Option<Action>,
     pub pin: OpenChange,
     pub hover: HoverChange,
     pub picker: Entity<ReactionPicker>,
@@ -103,7 +114,7 @@ fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         .anchor(Anchor::TopRight)
         .trigger(
             Button::new(element_id("add-reaction", &menu.key))
-                .child(icon(IconName::Plus, 16., theme::text_soft()))
+                .child(icon(IconName::Plus, BAR_ICON, theme::text_soft()))
                 .custom(bar_variant(cx))
                 .rounded(px(7.))
                 .size(px(BAR_BUTTON)),
@@ -154,7 +165,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     );
     let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
-        .child(icon(IconName::Ellipsis, 16., theme::text_soft()))
+        .child(icon(IconName::Ellipsis, BAR_ICON, theme::text_soft()))
         .custom(bar_variant(cx))
         .rounded(px(7.))
         .size(px(BAR_BUTTON))
@@ -213,6 +224,63 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+fn delegate_item(entry: &DelegateEntry) -> PopupMenuItem {
+    let (label, agent_name, action) = (
+        entry.label.clone(),
+        entry.agent_name.clone(),
+        entry.action.clone(),
+    );
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .w(px(DELEGATE_ITEM_WIDTH))
+            .gap(px(12.))
+            .items_center()
+            .justify_between()
+            .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(DELEGATE_AGENT_SIZE))
+                    .text_color(theme::text_faint())
+                    .child(agent_name.clone()),
+            )
+    })
+    .icon(IconName::Bot)
+    .on_click(move |_, window, cx| action(window, cx))
+}
+
+fn delegate_button(menu: &MessageMenu, cx: &App) -> AnyElement {
+    let (entries, manage_agents, pin) = (
+        menu.delegate.clone(),
+        menu.manage_agents.clone(),
+        menu.pin.clone(),
+    );
+    Button::new(element_id("message-delegate", &menu.key))
+        .child(icon(IconName::Bot, BAR_ICON, theme::text_soft()))
+        .custom(bar_variant(cx))
+        .rounded(px(7.))
+        .size(px(BAR_BUTTON))
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
+            let mut popup = popup;
+            for entry in &entries {
+                popup = popup.item(delegate_item(entry));
+            }
+            if let Some(manage_agents) = manage_agents.clone() {
+                popup = popup.separator().item(
+                    PopupMenuItem::element(|_, _| {
+                        div()
+                            .text_color(theme::text_muted())
+                            .child("Manage actions...")
+                    })
+                    .on_click(move |_, window, cx| manage_agents(window, cx)),
+                );
+            }
+            popup
+        })
+        .on_open_change(move |open, window, cx| pin(*open, window, cx))
+        .into_any_element()
+}
+
 pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
     let hover = menu.hover.clone();
     let mut children: Vec<AnyElement> = menu
@@ -223,7 +291,13 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
         .collect();
     children.push(picker_button(&menu, cx));
     children.push(
-        div().w(px(BAR_GROUP_GAP)).into_any_element(),
+        div()
+            .w(px(1.))
+            .h(px(16.))
+            .mx(px(4.))
+            .flex_none()
+            .bg(theme::popup_hover())
+            .into_any_element(),
     );
     if let Some(reply) = menu.reply.clone() {
         children.push(
@@ -235,6 +309,9 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
                 })
                 .into_any_element(),
         );
+    }
+    if !menu.delegate.is_empty() {
+        children.push(delegate_button(&menu, cx));
     }
     children.push(more_button(&menu, cx));
     let bar = h_flex()

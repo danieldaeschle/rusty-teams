@@ -61,6 +61,19 @@ pub struct EngineConfig {
     pub instance: InstanceNames,
 }
 
+const KEPT_CALL_DUMPS: usize = 5;
+
+fn next_call_dump_dir(base: &std::path::Path) -> std::path::PathBuf {
+    let mut earlier: Vec<std::path::PathBuf> =
+        std::fs::read_dir(base).into_iter().flatten().flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect();
+    earlier.sort();
+    for old in earlier.iter().take((earlier.len() + 1).saturating_sub(KEPT_CALL_DUMPS)) {
+        let _ = std::fs::remove_dir_all(old);
+    }
+    let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    base.join(format!("{:015}", started.as_millis()))
+}
+
 impl Default for EngineConfig {
     fn default() -> Self {
         EngineConfig {
@@ -157,7 +170,7 @@ impl Inner {
             relay_host: self.config.relay_host.clone(),
             routing: self.config.routing.clone(),
             trace: self.config.trace,
-            sdp_dump_dir: self.config.dump_dir.clone(),
+            sdp_dump_dir: self.config.dump_dir.as_deref().map(next_call_dump_dir),
             camera: self.default_camera.lock().expect("default camera lock").clone(),
             ..CallOptions::default()
         }
@@ -489,6 +502,20 @@ async fn ring_task(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_call_dump_keeps_only_the_newest_earlier_ones() {
+        let base = std::env::temp_dir().join(format!("call-dumps-test-{}", std::process::id()));
+        for millis in 1..=6 {
+            std::fs::create_dir_all(base.join(format!("{millis:015}"))).unwrap();
+        }
+        let next = next_call_dump_dir(&base);
+        let mut left: Vec<String> = std::fs::read_dir(&base).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(left, (3..=6).map(|millis| format!("{millis:015}")).collect::<Vec<_>>());
+        assert!(next.file_name().unwrap().to_string_lossy().into_owned() > format!("{:015}", 6));
+    }
 
     #[test]
     fn callback_base_comes_from_the_presence_uri() {

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui_kit::component::{
@@ -8,6 +10,7 @@ use gpui_kit::*;
 use teams_core::{ImageRef, LinkPreview};
 
 use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
+use crate::agents::AgentRun;
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
@@ -27,6 +30,7 @@ pub(super) struct RenderEnv {
     pub drafting: bool,
     pub reply_editor: Option<(String, Entity<Composer>)>,
     pub timeline: TimelineBounds,
+    pub agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -204,6 +208,9 @@ impl RenderEnv {
             }) as ImageOpen
         });
         let bot = self.bot_identity(message, cx);
+        let actionable_run = (is_real && !message.deleted)
+            .then(|| self.agent_runs.borrow().get(&message.key).cloned())
+            .flatten();
         let translation = (is_real && !message.deleted)
             .then(|| self.translation_actions(message))
             .flatten();
@@ -240,6 +247,7 @@ impl RenderEnv {
                 .is_saved(&message.conversation_id, &message.key),
             translation,
             timeline: self.timeline.clone(),
+            agent_run: actionable_run,
         }
     }
 

@@ -98,6 +98,7 @@ mod tests {
             queued: false,
             dismissed: false,
             fade: Fade::shown(Instant::now()),
+            agent: None,
         }
     }
 

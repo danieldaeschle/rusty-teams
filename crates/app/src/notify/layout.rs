@@ -24,6 +24,8 @@ const REPLY_FIELD_FRAME: f32 = 14.;
 const REPLY_HINT_ROW: f32 = 20.;
 const REPLY_SPACING: f32 = 8.;
 const CONFIRM_HEIGHT: f32 = 56.;
+const AGENT_CHROME_HEIGHT: f32 = 116.;
+pub const AGENT_BODY_WIDTH: f32 = TOAST_WIDTH - 2. * TOAST_PADDING - 2.;
 const RING_BASE_HEIGHT: f32 = 120.;
 const RING_NOTE_HEIGHT: f32 = 18.;
 
@@ -36,6 +38,9 @@ pub struct Slot {
 }
 
 pub fn toast_height(model: &ToastModel, preview_lines: usize) -> f32 {
+    if model.agent.is_some() {
+        return AGENT_CHROME_HEIGHT + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
+    }
     let base = BASE_HEIGHT + preview_lines.clamp(1, PREVIEW_MAX_LINES) as f32 * PREVIEW_LINE;
     match model.reply {
         ReplyState::Sent | ReplyState::Failed => CONFIRM_HEIGHT,
@@ -194,10 +199,23 @@ mod tests {
             queued: false,
             dismissed: false,
             fade: super::super::stack::Fade::shown(std::time::Instant::now()),
+            agent: None,
         };
         assert_eq!(toast_height(&model("Hi"), 1), 112.);
         assert_eq!(toast_height(&model("Hi"), 2), 130.);
         assert_eq!(toast_height(&model("Hi"), 5), 130.);
         assert_eq!(toast_height(&model("Hi"), 0), 112.);
+        let mut agent = model("Hi");
+        agent.agent = Some(super::super::stack::AgentToast {
+            run_id: 1,
+            session_id: String::new(),
+            header: String::new(),
+            title: String::new(),
+            body: "Hi".into(),
+            failed: false,
+        });
+        assert_eq!(toast_height(&agent, 1), 134.);
+        assert_eq!(toast_height(&agent, 2), 152.);
+        assert_eq!(toast_height(&agent, 6), 152.);
     }
 }

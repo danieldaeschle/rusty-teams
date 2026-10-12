@@ -353,9 +353,6 @@ impl CallEngine {
         let inner = self.inner.as_ref();
         let _one_call_at_a_time = if options.concurrent { None } else { Some(inner.gate.lock().await) };
         let timeline = Timeline::new(options.trace);
-        if let Some(directory) = options.sdp_dump_dir.as_ref().filter(|_| !options.concurrent) {
-            let _ = std::fs::remove_dir_all(directory);
-        }
         let mut report = CallReport::default();
         let mut state = CallState::Idle;
         advance(&mut state, CallSignal::Dial, &control);
@@ -2189,7 +2186,7 @@ fn dump_sdp(options: &CallOptions, name: &str, sdp: &str) {
     let masked: Vec<String> = sdp
         .lines()
         .map(|line| {
-            for prefix in ["a=ice-ufrag:", "a=ice-pwd:", "a=fingerprint:"] {
+            for prefix in ["a=ice-ufrag:", "a=ice-pwd:", "a=fingerprint:", "a=crypto:"] {
                 if line.starts_with(prefix) {
                     return format!("{prefix}<masked>");
                 }
@@ -2381,6 +2378,20 @@ mod tests {
             if let Err(error) = local_offer(layout).await {
                 panic!("{layout:?}: {error}");
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_peer_to_peer_offer_from_the_teams_client_gets_an_answer() {
+        use libwebrtc::audio_source::native::NativeAudioSource;
+        use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+        let factory = devices::shared_factory();
+        let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
+        let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
+        let track = factory.create_audio_track("microphone", source);
+        let offer = include_str!("../tests/fixtures/teams_p2p_offer.sdp");
+        if let Err(error) = answer_offer(&peer, Some(&track), offer, AnswerVideo::Receive).await {
+            panic!("{error}");
         }
     }
 

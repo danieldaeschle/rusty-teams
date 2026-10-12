@@ -140,6 +140,16 @@ pub enum ReplyState {
     Failed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentToast {
+    pub run_id: u64,
+    pub session_id: String,
+    pub header: String,
+    pub title: String,
+    pub body: String,
+    pub failed: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ToastModel {
     pub id: u64,
@@ -160,6 +170,7 @@ pub struct ToastModel {
     pub queued: bool,
     pub dismissed: bool,
     pub fade: Fade,
+    pub agent: Option<AgentToast>,
 }
 
 impl ToastModel {
@@ -200,7 +211,7 @@ impl ToastStack {
         if let Some(existing) = self
             .toasts
             .iter_mut()
-            .find(|toast| toast.conversation_id == incoming.conversation_id)
+            .find(|toast| toast.agent.is_none() && toast.conversation_id == incoming.conversation_id)
         {
             let became_mention = incoming.mentions_me && !existing.mentions_me;
             existing.count += 1;
@@ -238,12 +249,46 @@ impl ToastStack {
             queued,
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
+            agent: None,
         });
         PushOutcome {
             id: self.next_id,
             bundled: false,
             became_mention: false,
         }
+    }
+
+    pub fn push_agent(
+        &mut self,
+        agent: AgentToast,
+        conversation_id: &str,
+        message_id: &str,
+        now: Instant,
+    ) -> u64 {
+        self.next_id += 1;
+        let queued = self.toasts.len() >= MAX_VISIBLE;
+        self.toasts.push(ToastModel {
+            id: self.next_id,
+            conversation_id: conversation_id.to_owned(),
+            message_id: message_id.to_owned(),
+            kind: ChatKind::Direct,
+            chat_title: String::new(),
+            sender_id: None,
+            sender_name: String::new(),
+            preview: Preview::Text(agent.body.clone()),
+            mentions_me: false,
+            count: 1,
+            timer: ToastTimer::new(now, true),
+            reply: ReplyState::Closed,
+            reply_text: String::new(),
+            hovered: false,
+            time: String::new(),
+            queued,
+            dismissed: false,
+            fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
+            agent: Some(agent),
+        });
+        self.next_id
     }
 
     pub fn get(&self, id: u64) -> Option<&ToastModel> {
@@ -260,14 +305,16 @@ impl ToastStack {
     }
 
     pub fn remove_conversation(&mut self, conversation_id: &str) -> Vec<u64> {
+        let matches = |toast: &ToastModel| {
+            toast.agent.is_none() && toast.conversation_id == conversation_id
+        };
         let ids: Vec<u64> = self
             .toasts
             .iter()
-            .filter(|toast| toast.conversation_id == conversation_id)
+            .filter(|toast| matches(toast))
             .map(|toast| toast.id)
             .collect();
-        self.toasts
-            .retain(|toast| toast.conversation_id != conversation_id);
+        self.toasts.retain(|toast| !matches(toast));
         ids
     }
 
@@ -562,5 +609,37 @@ mod tests {
         stack.push(&incoming("b", false), now);
         assert_eq!(stack.remove_conversation("a"), vec![id]);
         assert_eq!(stack.visible().len(), 1);
+    }
+
+    fn agent_toast() -> AgentToast {
+        AgentToast {
+            run_id: 7,
+            session_id: "s".into(),
+            header: "Answer this - Claude - 1:02".into(),
+            title: "Claude finished: Answer this for Mara".into(),
+            body: "Done".into(),
+            failed: false,
+        }
+    }
+
+    #[test]
+    fn agent_toasts_never_bundle_with_messages() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let agent_id = stack.push_agent(agent_toast(), "a", "m", now);
+        let outcome = stack.push(&incoming("a", false), now);
+        assert!(!outcome.bundled);
+        assert_ne!(outcome.id, agent_id);
+        assert_eq!(stack.visible().len(), 2);
+    }
+
+    #[test]
+    fn opening_the_chat_keeps_the_agent_toast() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let agent_id = stack.push_agent(agent_toast(), "a", "m", now);
+        let message_id = stack.push(&incoming("a", false), now).id;
+        assert_eq!(stack.remove_conversation("a"), vec![message_id]);
+        assert!(stack.get(agent_id).is_some());
     }
 }

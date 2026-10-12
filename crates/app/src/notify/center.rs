@@ -14,13 +14,14 @@ use super::rules::{
     should_flash, should_ringback,
 };
 use super::settings;
-use super::settings_view::SettingsView;
+use super::settings_view::{Section, SettingsView};
 use super::stack::{
-    FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
+    AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
 use super::text::describe;
 use super::ring_view::RingView;
 use super::toast::{PillView, ToastView};
+use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
@@ -35,6 +36,7 @@ const DEMO_RING_ENV: &str = "TEAMS_DEMO_RING";
 const DEMO_RING_KIND_ENV: &str = "TEAMS_DEMO_RING_KIND";
 const DEMO_CALL_ENV: &str = "TEAMS_DEMO_CALL";
 const DEMO_SCENE_DELAY: Duration = Duration::from_millis(1500);
+const AGENT_BODY_LINES: usize = 2;
 
 struct OpenWindow {
     handle: AnyWindowHandle,
@@ -77,6 +79,7 @@ pub struct NotificationCenter {
     shown_badge: Option<Badge>,
     animations: bool,
     _subscription: Subscription,
+    _agent_subscription: Option<Subscription>,
 }
 
 impl NotificationCenter {
@@ -89,6 +92,15 @@ impl NotificationCenter {
         };
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
+        });
+        let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
+            cx.subscribe(&runs, |this, runs, event: &AgentRunsEvent, cx| {
+                if let AgentRunsEvent::Finished(run_id) = event
+                    && let Some(run) = runs.read(cx).get(*run_id).cloned()
+                {
+                    this.present_agent_run(&run, cx);
+                }
+            })
         });
         let center = NotificationCenter {
             main_window: window.window_handle(),
@@ -115,6 +127,7 @@ impl NotificationCenter {
             animations: platform::animations_enabled(),
             app,
             _subscription: subscription,
+            _agent_subscription: agent_subscription,
         };
         cx.spawn(async move |this, cx| {
             loop {
@@ -321,6 +334,51 @@ impl NotificationCenter {
         self.sync_windows(cx);
     }
 
+    pub fn present_agent_run(&mut self, run: &AgentRun, cx: &mut Context<Self>) {
+        let failed = matches!(run.state, RunState::Failed { .. });
+        let verb = if failed { "failed" } else { "finished" };
+        let body = if failed {
+            run.current_step.clone()
+        } else {
+            first_lines(&run.final_text, AGENT_BODY_LINES)
+        };
+        let toast = AgentToast {
+            run_id: run.id,
+            session_id: run.session_id.clone(),
+            header: format!("{} - {} - {}", run.action_label, run.agent_name, run.elapsed_text()),
+            title: format!(
+                "{} {verb}: {} for {}",
+                run.agent_name, run.action_label, run.sender_name
+            ),
+            body: if body.is_empty() { "Done".to_owned() } else { body },
+            failed,
+        };
+        let now = Instant::now();
+        let id = self
+            .stack
+            .push_agent(toast, &run.conversation_id, &run.message_id, now);
+        if let Some(model) = self.stack.get_mut(id) {
+            model.time = chrono::Local::now().format("%H:%M").to_string();
+        }
+        let quiet = self.settings.do_not_disturb || self.app.read(cx).mode.demo;
+        if self.settings.sound && !quiet {
+            platform::play_sound();
+        }
+        self.sync_windows(cx);
+    }
+
+    pub fn agent_toast_follow_up(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(agent) = self.stack.get(id).and_then(|toast| toast.agent.clone()) else {
+            return;
+        };
+        self.drop_toast(id, cx);
+        if agent.failed {
+            crate::agents::retry_run(agent.run_id, cx);
+        } else {
+            crate::agents::open_session(&agent.session_id, cx);
+        }
+    }
+
     fn visible_ids(&self) -> Vec<u64> {
         self.stack.visible().iter().map(|toast| toast.id).collect()
     }
@@ -379,7 +437,10 @@ impl NotificationCenter {
             .visible()
             .iter()
             .map(|toast| {
-                let lines = preview_lines(&describe(toast, self.settings.preview).preview, cx);
+                let lines = match &toast.agent {
+                    Some(agent) => wrapped_lines(&agent.body, layout::AGENT_BODY_WIDTH, cx),
+                    None => preview_lines(&describe(toast, self.settings.preview).preview, cx),
+                };
                 layout::toast_height(toast, lines)
             })
             .collect();
@@ -826,11 +887,22 @@ impl NotificationCenter {
     }
 
     pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.show_settings(Section::Notifications, false, cx);
+    }
+
+    pub fn open_agent_settings(&mut self, cx: &mut Context<Self>) {
+        self.show_settings(Section::Agents, true, cx);
+    }
+
+    fn show_settings(&mut self, section: Section, switch_open_window: bool, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
-            if handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_ok()
-            {
+            let shown = handle.update(cx, |view, window, cx| {
+                window.activate_window();
+                if switch_open_window && let Ok(view) = view.downcast::<SettingsView>() {
+                    view.update(cx, |view, cx| view.select_section(section, cx));
+                }
+            });
+            if shown.is_ok() {
                 return;
             }
             self.settings_window = None;
@@ -858,7 +930,7 @@ impl NotificationCenter {
         cx.defer(move |cx| {
             let view_center = center.clone();
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| SettingsView::new(view_center, window, cx))
+                cx.new(|cx| SettingsView::new(view_center, section, window, cx))
             });
             center.update(cx, |this, _| {
                 this.settings_opening = false;
@@ -945,7 +1017,20 @@ fn demo_ring_delay() -> Option<Duration> {
     (seconds >= 0.).then(|| Duration::from_secs_f32(seconds))
 }
 
+fn first_lines(text: &str, count: usize) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(count)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn preview_lines(text: &str, cx: &App) -> usize {
+    wrapped_lines(text, layout::PREVIEW_WIDTH, cx)
+}
+
+fn wrapped_lines(text: &str, width: f32, cx: &App) -> usize {
     let mut wrapper = cx
         .text_system()
         .line_wrapper(font(crate::theme::font_family()), px(layout::PREVIEW_SIZE));
@@ -953,7 +1038,7 @@ fn preview_lines(text: &str, cx: &App) -> usize {
         .map(|line| {
             let fragments = [LineFragment::text(line)];
             wrapper
-                .wrap_line(&fragments, px(layout::PREVIEW_WIDTH), IndentAdjustment::NoIndent)
+                .wrap_line(&fragments, px(width), IndentAdjustment::NoIndent)
                 .count()
                 + 1
         })

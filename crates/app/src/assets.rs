@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 40] = symbols![
+const SYMBOLS: [(&str, &[u8]); 42] = symbols![
     "done",
     "done_all",
     "keyboard_return",
@@ -49,6 +49,8 @@ const SYMBOLS: [(&str, &[u8]); 40] = symbols![
     "chevron_left",
     "chevron_right",
     "fullscreen",
+    "spinner_track",
+    "spinner_arc",
 ];
 
 pub struct AppAssets;

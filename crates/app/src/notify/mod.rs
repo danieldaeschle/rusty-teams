@@ -1,3 +1,4 @@
+mod agent_toast;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod badge;
 mod center;
@@ -18,6 +19,7 @@ mod toast;
 
 pub use center::{NotificationCenter, selection_for};
 pub use incoming::{IncomingTracker, preview_of};
+pub(crate) use settings_view::switch;
 pub use rules::{Incoming, Preview, channel_alerts};
 #[cfg(test)]
 pub use rules::ChatKind;

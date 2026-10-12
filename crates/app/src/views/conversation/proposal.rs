@@ -38,7 +38,7 @@ impl ConversationView {
             edit: action(Self::edit_proposal),
             discard: action(Self::discard_proposal),
         };
-        Some(proposal_card::render(&entry, quote, actions, Utc::now()).into_any_element())
+        Some(proposal_card::render(&entry, quote, actions, Utc::now(), cx).into_any_element())
     }
 
     pub(super) fn report_composer_activity(&self, event: &ComposerEvent, cx: &App) {

@@ -31,7 +31,7 @@ use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, wit
 use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
-use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
+use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
@@ -40,6 +40,7 @@ use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::widgets::{icon, symbol};
+use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
 use crate::card_state::CardScope;
@@ -52,6 +53,7 @@ use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
+use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, plan_read};
@@ -189,6 +191,8 @@ pub struct ConversationView {
     shared: SharedState,
     demo_library: DemoLibrary,
     new_folder_input: Option<Entity<InputState>>,
+    agent_layouts: HashMap<String, (usize, bool)>,
+    agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -423,7 +427,7 @@ impl ConversationView {
         let recent = cx.new(|cx| emoji::Recent::load(&app.read(cx).store));
         let picker = cx.new(|cx| ReactionPicker::new(app.clone(), recent.clone(), window, cx));
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
@@ -441,6 +445,9 @@ impl ConversationView {
                 }
             }),
         ];
+        if let Some(runs) = crate::agents::runs_handle(cx) {
+            subscriptions.push(cx.observe(&runs, |this, _, cx| this.sync_agent_chips(cx)));
+        }
         let mut view = ConversationView {
             app,
             pinned: pinned.is_some(),
@@ -488,6 +495,8 @@ impl ConversationView {
             shared: SharedState::default(),
             demo_library: DemoLibrary::default(),
             new_folder_input: None,
+            agent_layouts: HashMap::new(),
+            agent_runs: Rc::new(RefCell::new(HashMap::new())),
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -763,6 +772,8 @@ impl ConversationView {
         self.toolbar_hovered = None;
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
+        self.agent_layouts.clear();
+        self.agent_runs.borrow_mut().clear();
         let title = selection_title(&self.app.read(cx).sidebar, &selection);
         let mode = match selection {
             Selection::Chat(_) => ViewMode::Flat,
@@ -782,6 +793,7 @@ impl ConversationView {
             first_unread,
             sync: SyncProgress::default(),
         });
+        self.refresh_agent_runs(cx);
         self.sync_generation += 1;
         self.reset_channel_tabs(cx);
         self.reload_pending(cx);
@@ -2665,6 +2677,98 @@ impl ConversationView {
         .detach();
     }
 
+    fn delegate_entries(&self, key: &str, cx: &App) -> (Vec<DelegateEntry>, Option<Action>) {
+        let (Some(conversation_id), Some(runs)) =
+            (self.conversation_id(), crate::agents::runs_handle(cx))
+        else {
+            return (Vec::new(), None);
+        };
+        if key.starts_with(PENDING_KEY_PREFIX) || key.starts_with(SCHEDULED_KEY_PREFIX) {
+            return (Vec::new(), None);
+        }
+        let settings = runs.read(cx).settings();
+        let entries: Vec<DelegateEntry> = settings
+            .actions
+            .iter()
+            .map(|action| {
+                let request = StartRequest {
+                    action_id: action.id.clone(),
+                    conversation_id: conversation_id.clone(),
+                    message_id: key.to_owned(),
+                };
+                let agent_name = settings
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id == action.agent_id)
+                    .map(|agent| agent.name.clone())
+                    .unwrap_or_default();
+                DelegateEntry {
+                    label: action.label.clone(),
+                    agent_name,
+                    action: Rc::new(move |_, cx| crate::agents::delegate(request.clone(), cx)),
+                }
+            })
+            .collect();
+        let manage_agents = (!entries.is_empty())
+            .then(|| Rc::new(|_: &mut Window, cx: &mut App| crate::agents::open_settings(cx)) as Action);
+        (entries, manage_agents)
+    }
+
+    fn refresh_agent_runs(&mut self, cx: &App) -> (bool, HashSet<String>) {
+        let Some(conversation_id) = self.conversation_id() else {
+            return (false, HashSet::new());
+        };
+        let Some(runs) = crate::agents::runs_handle(cx) else {
+            return (false, HashSet::new());
+        };
+        let mut snapshot: HashMap<String, AgentRun> = HashMap::new();
+        for run in runs.read(cx).for_conversation(&conversation_id) {
+            snapshot.insert(run.message_id.clone(), run.clone());
+        }
+        let layouts: HashMap<String, (usize, bool)> = snapshot
+            .iter()
+            .map(|(key, run)| (key.clone(), run.layout_key()))
+            .collect();
+        let layout_changed: HashSet<String> = layouts
+            .iter()
+            .filter(|(key, layout)| self.agent_layouts.get(*key) != Some(layout))
+            .map(|(key, _)| key.clone())
+            .chain(
+                self.agent_layouts
+                    .keys()
+                    .filter(|key| !layouts.contains_key(*key))
+                    .cloned(),
+            )
+            .collect();
+        self.agent_layouts = layouts;
+        let snapshot_changed = *self.agent_runs.borrow() != snapshot;
+        *self.agent_runs.borrow_mut() = snapshot;
+        (snapshot_changed, layout_changed)
+    }
+
+    fn sync_agent_chips(&mut self, cx: &mut Context<Self>) {
+        let (snapshot_changed, changed) = self.refresh_agent_runs(cx);
+        let any_running = self.agent_runs.borrow().values().any(AgentRun::is_running);
+        if !changed.is_empty() {
+            let indices: Vec<usize> = self
+                .rows
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.messages().any(|message| changed.contains(&message.key)))
+                .map(|(index, _)| index)
+                .collect();
+            self.scroller.update(cx, |scroller, cx| {
+                for index in indices {
+                    scroller.remeasure_items(index..index + 1, cx);
+                }
+            });
+        }
+        if snapshot_changed || any_running {
+            cx.notify();
+        }
+    }
+
     fn message_menu(
         &self,
         message: &MessageRow,
@@ -2729,6 +2833,7 @@ impl ConversationView {
             .as_deref()
             .is_some_and(|chat_id| state.is_pinned(chat_id, key));
         let in_chat = chat_id.is_some();
+        let (delegate, manage_agents) = self.delegate_entries(key, cx);
         MessageMenu {
             key: key.to_owned(),
             react,
@@ -2749,6 +2854,8 @@ impl ConversationView {
             mark_unread: (in_chat && !own)
                 .then(|| action(|this, key, _, cx| this.mark_unread_from(key, cx))),
             refresh_card,
+            delegate,
+            manage_agents,
             pin,
             hover,
             picker: self.picker.clone(),
@@ -3101,6 +3208,7 @@ impl Render for ConversationView {
             drafting,
             reply_editor: self.reply_root.clone().zip(self.reply_composer.clone()),
             timeline: self.timeline_bounds.clone(),
+            agent_runs: self.agent_runs.clone(),
         };
         let scroller = MessageScroller::new(
             "messages",

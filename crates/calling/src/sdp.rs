@@ -796,13 +796,18 @@ fn browser_candidate(value: &str) -> String {
     if let Some(position) = parts.iter().position(|part| *part == "MTURNID") {
         parts.truncate(position);
     }
-    let passive = parts.get(2) == Some(&"tcp-pass");
-    if passive {
+    let tcp_type = match parts.get(2).map(|transport| transport.to_ascii_lowercase()).as_deref() {
+        Some("tcp-pass") => Some("passive"),
+        Some("tcp-act") => Some("active"),
+        _ => None,
+    };
+    if tcp_type.is_some() {
         parts[2] = "tcp";
     }
     let mut candidate = parts.join(" ");
-    if passive {
-        candidate.push_str(" tcptype passive");
+    if let Some(tcp_type) = tcp_type {
+        candidate.push_str(" tcptype ");
+        candidate.push_str(tcp_type);
     }
     candidate
 }
@@ -972,7 +977,7 @@ fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candi
             name if TRANSPORT_ATTRIBUTES.contains(&name) => {}
             "candidate" => {
                 if carries_candidate && !value.contains(PLACEHOLDER_CANDIDATE_TAIL) {
-                    attributes.push(attribute.clone());
+                    attributes.push(Attribute::new("candidate", browser_candidate(value)));
                 }
             }
             "ssrc" => {
@@ -1074,6 +1079,10 @@ mod tests {
         assert_eq!(
             browser_candidate("3 1 tcp-pass 18087935 52.112.0.1 3478 typ relay raddr 10.0.0.1 rport 3478"),
             "3 1 tcp 18087935 52.112.0.1 3478 typ relay raddr 10.0.0.1 rport 3478 tcptype passive"
+        );
+        assert_eq!(
+            browser_candidate("10 1 TCP-ACT 1684794366 192.0.2.1 59611 typ srflx raddr 192.0.2.1 rport 50009"),
+            "10 1 tcp 1684794366 192.0.2.1 59611 typ srflx raddr 192.0.2.1 rport 50009 tcptype active"
         );
     }
 

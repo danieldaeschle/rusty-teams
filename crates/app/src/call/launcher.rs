@@ -11,7 +11,7 @@ use session::{Session, SessionConfig, Transport};
 const START_RETRY_STEPS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5)];
 const START_RETRY_STEADY: Duration = Duration::from_secs(10);
 const NOT_READY: &str = "Calls are not ready yet";
-const LAST_CALL_DIR: &str = "last-call";
+const CALL_DUMPS_DIR: &str = "call-dumps";
 
 pub struct CallLauncher {
     engine: Mutex<Option<CallEngine>>,
@@ -152,7 +152,7 @@ async fn start_engine(
     let poll_session = Session::with_transport(transport, SessionConfig::default()).await?;
     let config = EngineConfig {
         ringable,
-        dump_dir: crate::diagnostics::directory().map(|directory| directory.join(LAST_CALL_DIR)),
+        dump_dir: crate::diagnostics::directory().map(|directory| directory.join(CALL_DUMPS_DIR)),
         ..EngineConfig::default()
     };
     CallEngine::start(session, poll_session, config).await
