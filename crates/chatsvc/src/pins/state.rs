@@ -25,7 +25,7 @@ pub(super) fn hierarchy_version(body: &Value) -> Result<i64> {
                 .as_f64()
                 .filter(|float| float.is_finite() && float.fract() == 0.0)
                 .filter(|float| {
-                    *float >= -9.223_372_036_854_775_808e18 && *float < 9.223_372_036_854_775_808e18
+                    *float >= i64::MIN as f64 && *float < i64::MAX as f64
                 })
                 .map(|float| float as i64)
         }),
