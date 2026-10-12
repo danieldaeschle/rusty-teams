@@ -274,18 +274,22 @@ impl CallEngine {
     }
 
     pub fn start_call(&self, spec: CallSpec) -> CallHandle {
-        self.start_call_with(spec, false)
+        self.start_call_with(spec, false, false)
+    }
+
+    pub fn start_video_call(&self, spec: CallSpec) -> CallHandle {
+        self.start_call_with(spec, false, true)
     }
 
     pub fn start_consult(&self, spec: CallSpec) -> CallHandle {
-        self.start_call_with(spec, true)
+        self.start_call_with(spec, true, false)
     }
 
-    fn start_call_with(&self, spec: CallSpec, concurrent: bool) -> CallHandle {
+    fn start_call_with(&self, spec: CallSpec, concurrent: bool, start_camera: bool) -> CallHandle {
         let (handle, control) = call_channel();
         let engine = self.clone();
         self.inner.runtime.spawn(async move {
-            let options = CallOptions { concurrent, ..engine.inner.call_options() };
+            let options = CallOptions { concurrent, start_camera, ..engine.inner.call_options() };
             let _ = engine.run(Plan::Outgoing(spec), options, control).await;
         });
         handle

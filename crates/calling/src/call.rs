@@ -21,9 +21,14 @@ use crate::audio::{SAMPLE_RATE, rms, tone_ratio, write_wav};
 use crate::audio_io::{AudioMode, AudioSetup};
 use crate::background::{BackgroundChoice, BackgroundPicture};
 use crate::breakout::{self, RoomWatcher};
-use crate::captions::{CAPTIONS_DATA_ID, CaptionEntry, CaptionFlow, CaptionState, CaptionStep, BotAction, parse_caption_message};
-use crate::data_channel::Depacketizer;
+use crate::callee_gate::{CalleeGate, roster_has_callee};
+use crate::camera::{CameraDevice, list_cameras};
+use crate::captions::{
+    BotAction, CAPTIONS_DATA_ID, CaptionEntry, CaptionFlow, CaptionState, CaptionStep,
+    parse_caption_message,
+};
 use crate::control::{CallCommand, CallControl, CallUpdate, Progress};
+use crate::data_channel::Depacketizer;
 use crate::devices::{self, DeviceChoice};
 use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
@@ -50,7 +55,6 @@ use crate::video_layout::{
     CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, offer_plan, one_to_one_plan,
 };
 use crate::video_send::{LocalVideo, VideoMode};
-use crate::camera::{CameraDevice, list_cameras};
 use crate::screen::{ShareKind, ShareSource, list_share_sources};
 use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
@@ -97,6 +101,7 @@ pub struct CallOptions {
     pub trace: bool,
     pub data_channel: bool,
     pub concurrent: bool,
+    pub start_camera: bool,
 }
 
 impl Default for CallOptions {
@@ -119,6 +124,7 @@ impl Default for CallOptions {
             trace: std::env::var_os(crate::engine::TRACE_ENV).is_some(),
             data_channel: data_channel_from_env(),
             concurrent: false,
+            start_camera: false,
         }
     }
 }
@@ -544,6 +550,10 @@ async fn next_peer_event(next: &mut Option<NextPeer>) -> Option<PeerEvent> {
     }
 }
 
+fn video_possible(remote_set: bool, layout: Layout, path: MediaPath) -> bool {
+    remote_set && !(layout == Layout::OneToOne && path == MediaPath::Mixer)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn drive(
     inner: &Inner,
@@ -633,6 +643,7 @@ async fn drive(
     let mut outgoing_deadline: Option<Instant> = None;
     let is_meeting = spec.as_ref().is_some_and(CallSpec::is_meeting);
     let is_echo = matches!(spec, Some(CallSpec::Echo));
+    let mut callee_gate = CalleeGate::new(spec.as_ref().is_some_and(CallSpec::is_people));
     let meeting_target = match &spec {
         Some(CallSpec::Meeting(target)) => Some(target.clone()),
         _ => None,
@@ -818,15 +829,24 @@ async fn drive(
     if let Some(thread) = &meeting_chat {
         control.send(CallUpdate::MeetingChat(thread.clone()));
     }
+    let mut start_camera_pending = options.start_camera;
     loop {
+        if start_camera_pending && video_possible(remote_set, layout, negotiator.path()) {
+            start_camera_pending = false;
+            control.defer(CallCommand::SetCamera(true));
+        }
         tokio::select! {
             Some(callback) = callbacks.recv() => {
                 let request_id = callback.request_id;
                 match handle_callback(&callback, timeline) {
                     Ok(CallEvent::Acceptance(acceptance)) => {
                         replier.reply(request_id, 200, acceptance_acknowledgement(&links).to_string());
-                        match negotiator.on_acceptance(acceptance.from_mixer) {
-                            MediaAction::ApplyAnswer => {
+                        if !acceptance.from_mixer && callee_gate.callee_joined() {
+                            advance(state, CallSignal::MediaConnected, control);
+                        }
+                        let action = negotiator.on_acceptance(acceptance.from_mixer, layout == Layout::OneToOne);
+                        match action {
+                            MediaAction::ApplyAnswer | MediaAction::ApplyAnswerThenEscalate => {
                                 let Some(media) = offered.as_ref() else { continue };
                                 dump_sdp(options, "3-teams-answer.sdp", &acceptance.sdp);
                                 if let Ok(answer) = to_browser_answer(&acceptance.sdp, &media.signaled, &media.browser_offer) {
@@ -843,7 +863,9 @@ async fn drive(
                                 if let Some(link) = acceptance.links.get("replacement") {
                                     control.send(CallUpdate::ReplacementLink(link.clone()));
                                 }
-                                outgoing_deadline = None;
+                                if !callee_gate.is_waiting() {
+                                    outgoing_deadline = None;
+                                }
                                 let directions: Vec<String> = current
                                     .peer
                                     .transceivers()
@@ -858,6 +880,10 @@ async fn drive(
                                 keep_alive_link = acceptance.links.get("callLeg").cloned();
                                 keep_alive_seconds = acceptance.keep_alive_seconds;
                                 keep_alive_at = Some(Instant::now() + keep_alive_period(keep_alive_seconds));
+                                if action == MediaAction::ApplyAnswerThenEscalate {
+                                    let pending = escalate(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
+                                    next = pending.or(next);
+                                }
                                 let remote = remote.clone();
                                 let links = links.clone();
                                 let thread_id = echo_thread.clone();
@@ -869,17 +895,8 @@ async fn drive(
                                 });
                             }
                             MediaAction::Escalate => {
-                                match start_escalation(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links).await {
-                                    Ok(pending) => {
-                                        timeline.record("escalation", "new peer connection, new offer sent");
-                                        live.peers.push(pending.session.peer.clone());
-                                        next = Some(pending);
-                                    }
-                                    Err(error) => {
-                                        negotiator.escalation_failed();
-                                        timeline.record("escalation failed", error.to_string());
-                                    }
-                                }
+                                let pending = escalate(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
+                                next = pending.or(next);
                             }
                             _ => {}
                         }
@@ -976,6 +993,12 @@ async fn drive(
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
                             control.send(CallUpdate::Roster(entries));
+                            if callee_gate.is_waiting() && roster_has_callee(roster.members().iter().map(|member| member.mri.as_str()), &own_mri) {
+                                outgoing_deadline = None;
+                                if callee_gate.callee_joined() {
+                                    advance(state, CallSignal::MediaConnected, control);
+                                }
+                            }
                             let own_streams = roster.stream_summaries(&own_mri);
                             if own_streams != report.own_streams {
                                 timeline.record("own media streams", own_streams.join("; "));
@@ -1131,7 +1154,9 @@ async fn drive(
                     match connection {
                         PeerConnectionState::Connected => {
                             reconnect_deadline = None;
-                            advance(state, CallSignal::MediaConnected, control);
+                            if callee_gate.media_connected() {
+                                advance(state, CallSignal::MediaConnected, control);
+                            }
                             if report.peer_connected_ms.is_none() {
                                 report.peer_connected_ms = Some(timeline.elapsed_ms());
                                 if let Some(hold) = options.hold_after_connected {
@@ -1242,7 +1267,7 @@ async fn drive(
                 }
                 Some(CallCommand::SetCamera(on)) => {
                     let direct = layout == Layout::OneToOne && negotiator.path() != MediaPath::Mixer;
-                    if !remote_set {
+                    if !remote_set || (on && !video_possible(remote_set, layout, negotiator.path())) {
                         control.send(CallUpdate::Notice(NOT_CONNECTED_FOR_VIDEO.into()));
                     } else if on && consent_pending {
                         control.send(CallUpdate::Notice(CONSENT_FIRST_NOTICE.into()));
@@ -1649,6 +1674,45 @@ async fn start_escalation(
         session,
         offered: Some(media),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn escalate(
+    factory: &PeerConnectionFactory,
+    grant: &RelayGrant,
+    options: &CallOptions,
+    track: &RtcAudioTrack,
+    remote: &RemoteCall,
+    links: &CallbackLinks,
+    media_leg_id: &str,
+    acceptance_links: &BTreeMap<String, String>,
+    negotiator: &mut MediaNegotiator,
+    live: &mut Live,
+    timeline: &Timeline,
+) -> Option<NextPeer> {
+    match start_escalation(
+        factory,
+        grant,
+        options,
+        track,
+        remote,
+        links,
+        media_leg_id,
+        acceptance_links,
+    )
+    .await
+    {
+        Ok(pending) => {
+            timeline.record("escalation", "new peer connection, new offer sent");
+            live.peers.push(pending.session.peer.clone());
+            Some(pending)
+        }
+        Err(error) => {
+            negotiator.escalation_failed();
+            timeline.record("escalation failed", error.to_string());
+            None
+        }
+    }
 }
 
 async fn answer_on_new_peer(
@@ -2348,6 +2412,18 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_is_possible_once_connected_and_not_waiting_on_a_mixer_escalation() {
+        assert!(video_possible(true, Layout::OneToOne, MediaPath::Direct));
+        assert!(video_possible(true, Layout::Conference, MediaPath::Mixer));
+        assert!(!video_possible(true, Layout::OneToOne, MediaPath::Mixer));
+        assert!(!video_possible(
+            false,
+            Layout::Conference,
+            MediaPath::Direct
+        ));
+    }
 
     #[test]
     fn keep_alive_fires_at_ninety_percent_of_the_interval() {

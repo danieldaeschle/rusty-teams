@@ -50,7 +50,7 @@ impl AppState {
             lobby: false,
             organizer: false,
         };
-        let Some(handle) = self.place_call(CallSpec::Meeting(target), demo, cx) else {
+        let Some(handle) = self.place_call(CallSpec::Meeting(target), demo, false, cx) else {
             return;
         };
         self.begin_call(

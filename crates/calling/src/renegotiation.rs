@@ -8,6 +8,7 @@ pub enum MediaPath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaAction {
     ApplyAnswer,
+    ApplyAnswerThenEscalate,
     Escalate,
     ApplyOnNewPeer,
     ApplyOnSamePeer,
@@ -43,8 +44,13 @@ impl MediaNegotiator {
         self.path = if from_mixer { MediaPath::Mixer } else { MediaPath::Direct };
     }
 
-    pub fn on_acceptance(&mut self, from_mixer: bool) -> MediaAction {
+    pub fn on_acceptance(&mut self, from_mixer: bool, one_to_one_layout: bool) -> MediaAction {
         match (self.path, from_mixer) {
+            (MediaPath::Pending, true) if one_to_one_layout => {
+                self.path = MediaPath::Mixer;
+                self.own_offer_pending = true;
+                MediaAction::ApplyAnswerThenEscalate
+            }
             (MediaPath::Pending, _) => {
                 self.path = if from_mixer { MediaPath::Mixer } else { MediaPath::Direct };
                 MediaAction::ApplyAnswer
@@ -107,39 +113,54 @@ mod tests {
     #[test]
     fn the_first_answer_decides_the_path() {
         let mut direct = MediaNegotiator::default();
-        assert_eq!(direct.on_acceptance(false), MediaAction::ApplyAnswer);
+        assert_eq!(direct.on_acceptance(false, false), MediaAction::ApplyAnswer);
         assert_eq!(direct.path(), MediaPath::Direct);
         let mut mixer = MediaNegotiator::default();
-        assert_eq!(mixer.on_acceptance(true), MediaAction::ApplyAnswer);
+        assert_eq!(mixer.on_acceptance(true, false), MediaAction::ApplyAnswer);
         assert_eq!(mixer.path(), MediaPath::Mixer);
     }
 
     #[test]
     fn a_mixer_answer_during_a_direct_call_escalates_once() {
         let mut negotiator = MediaNegotiator::default();
-        negotiator.on_acceptance(false);
-        assert_eq!(negotiator.on_acceptance(true), MediaAction::Escalate);
-        assert_eq!(negotiator.on_acceptance(true), MediaAction::Ignore);
+        negotiator.on_acceptance(false, false);
+        assert_eq!(negotiator.on_acceptance(true, false), MediaAction::Escalate);
+        assert_eq!(negotiator.on_acceptance(true, false), MediaAction::Ignore);
         assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnNewPeer);
         assert_eq!(negotiator.path(), MediaPath::Mixer);
-        assert_eq!(negotiator.on_acceptance(true), MediaAction::Ignore);
+        assert_eq!(negotiator.on_acceptance(true, false), MediaAction::Ignore);
+    }
+
+    #[test]
+    fn a_mixer_answer_to_a_one_to_one_offer_applies_then_escalates_once() {
+        let mut negotiator = MediaNegotiator::default();
+        assert_eq!(
+            negotiator.on_acceptance(true, true),
+            MediaAction::ApplyAnswerThenEscalate
+        );
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::Ignore);
+        assert!(!negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnNewPeer);
+        let mut direct = MediaNegotiator::default();
+        assert_eq!(direct.on_acceptance(false, true), MediaAction::ApplyAnswer);
     }
 
     #[test]
     fn later_acceptances_on_a_settled_path_are_ignored() {
         let mut mixer = MediaNegotiator::default();
-        mixer.on_acceptance(true);
-        assert_eq!(mixer.on_acceptance(true), MediaAction::Ignore);
+        mixer.on_acceptance(true, false);
+        assert_eq!(mixer.on_acceptance(true, false), MediaAction::Ignore);
         let mut direct = MediaNegotiator::default();
-        direct.on_acceptance(false);
-        assert_eq!(direct.on_acceptance(false), MediaAction::Ignore);
+        direct.on_acceptance(false, false);
+        assert_eq!(direct.on_acceptance(false, false), MediaAction::Ignore);
     }
 
     #[test]
     fn a_media_answer_without_our_offer_is_ignored() {
         let mut negotiator = MediaNegotiator::default();
         assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
-        negotiator.on_acceptance(false);
+        negotiator.on_acceptance(false, false);
         assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
     }
 
@@ -164,7 +185,7 @@ mod tests {
     #[test]
     fn an_offer_on_the_same_peer_waits_for_its_answer_and_blocks_other_offers() {
         let mut negotiator = MediaNegotiator::default();
-        negotiator.on_acceptance(false);
+        negotiator.on_acceptance(false, false);
         assert!(negotiator.begin_same_peer_offer());
         assert!(!negotiator.begin_same_peer_offer());
         assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
@@ -178,9 +199,12 @@ mod tests {
     #[test]
     fn two_offers_at_once_are_glare() {
         let mut negotiator = MediaNegotiator::default();
-        negotiator.on_acceptance(false);
-        negotiator.on_acceptance(true);
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::RejectGlare);
+        negotiator.on_acceptance(false, false);
+        negotiator.on_acceptance(true, false);
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::RejectGlare
+        );
         negotiator.escalation_failed();
         assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
     }

@@ -70,6 +70,13 @@ impl CallLauncher {
         }
     }
 
+    pub fn start_video_call(&self, spec: CallSpec) -> CallHandle {
+        match self.engine() {
+            Some(engine) => engine.start_video_call(spec),
+            None => failed_handle(NOT_READY),
+        }
+    }
+
     pub fn start_consult(&self, spec: CallSpec) -> CallHandle {
         match self.engine() {
             Some(engine) => engine.start_consult(spec),

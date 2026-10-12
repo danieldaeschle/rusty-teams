@@ -55,23 +55,32 @@ pub fn header_call_controls(
             .find(|chat| &chat.id == chat_id)
             .is_some_and(|chat| plan_for_chat(chat, state.directory.me.as_ref()).is_some()));
     if callable {
-        let call_app = app.clone();
-        controls.push(
-            Button::new("header-call")
-                .ghost()
-                .p_0()
-                .size(px(BUTTON_SIZE))
-                .tooltip("Call")
-                .child(icon(IconName::Phone, GLYPH_SIZE, theme::text_soft()))
-                .on_click(move |_, _, cx| {
-                    call_app.update(cx, |state, cx| {
-                        if let Some(Selection::Chat(chat_id)) = state.selection.clone() {
-                            state.start_chat_call(&chat_id, cx);
-                        }
-                    });
-                })
-                .into_any_element(),
-        );
+        for (id, tooltip, glyph, with_video) in [
+            ("header-video-call", "Video call", IconName::Video, true),
+            ("header-call", "Call", IconName::Phone, false),
+        ] {
+            let call_app = app.clone();
+            controls.push(
+                Button::new(id)
+                    .ghost()
+                    .p_0()
+                    .size(px(BUTTON_SIZE))
+                    .tooltip(tooltip)
+                    .child(icon(glyph, GLYPH_SIZE, theme::text_soft()))
+                    .on_click(move |_, _, cx| {
+                        call_app.update(cx, |state, cx| {
+                            if let Some(Selection::Chat(chat_id)) = state.selection.clone() {
+                                if with_video {
+                                    state.start_chat_video_call(&chat_id, cx);
+                                } else {
+                                    state.start_chat_call(&chat_id, cx);
+                                }
+                            }
+                        });
+                    })
+                    .into_any_element(),
+            );
+        }
     }
     controls
 }

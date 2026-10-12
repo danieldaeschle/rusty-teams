@@ -453,6 +453,25 @@ fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel
     )
 }
 
+pub fn chevron_button(button_id: &'static str, face_id: &'static str) -> Button {
+    Button::new(button_id)
+        .ghost()
+        .p_0()
+        .w(px(CAMERA_MENU_WIDTH))
+        .h(px(super::call_view::CONTROL_SIZE))
+        .rounded_full()
+        .child(
+            div()
+                .id(face_id)
+                .w(px(CAMERA_MENU_WIDTH))
+                .h(px(super::call_view::CONTROL_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(IconName::ChevronUp, 16., theme::text())),
+        )
+}
+
 pub fn camera_menu_button(
     app: &Entity<AppState>,
     model: &CallModel,
@@ -464,22 +483,7 @@ pub fn camera_menu_button(
     let app = app.clone();
     let model = model.clone();
     Some(
-        Button::new("call-camera-menu")
-            .ghost()
-            .p_0()
-            .w(px(CAMERA_MENU_WIDTH))
-            .h(px(super::call_view::CONTROL_SIZE))
-            .rounded_full()
-            .child(
-                div()
-                    .id("call-camera-menu-face")
-                    .w(px(CAMERA_MENU_WIDTH))
-                    .h(px(super::call_view::CONTROL_SIZE))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon(IconName::ChevronUp, 16., theme::text())),
-            )
+        chevron_button("call-camera-menu", "call-camera-menu-face")
             .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
                 camera_menu(popup, &app, &model, &backgrounds)
             })

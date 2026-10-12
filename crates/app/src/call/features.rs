@@ -352,7 +352,8 @@ impl AppState {
             lobby: false,
             organizer: false,
         };
-        let Some(handle) = self.place_call(CallSpec::Meeting(moved.target.clone()), demo, cx)
+        let Some(handle) =
+            self.place_call(CallSpec::Meeting(moved.target.clone()), demo, false, cx)
         else {
             return;
         };

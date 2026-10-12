@@ -67,13 +67,26 @@ impl AppState {
             self.show_call(true, cx);
             return;
         }
-        let Some(handle) = self.place_call(CallSpec::Echo, DemoCall::Test, cx) else {
+        let Some(handle) = self.place_call(CallSpec::Echo, DemoCall::Test, false, cx) else {
             return;
         };
         self.begin_call(handle, CallModel::test(), None, cx);
     }
 
     pub fn start_chat_call(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        self.start_chat_call_with(conversation_id, false, cx);
+    }
+
+    pub fn start_chat_video_call(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        self.start_chat_call_with(conversation_id, true, cx);
+    }
+
+    fn start_chat_call_with(
+        &mut self,
+        conversation_id: &str,
+        with_video: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.call.is_some() {
             self.show_call(true, cx);
             return;
@@ -99,7 +112,9 @@ impl AppState {
                 .collect(),
             thread_id: conversation_id.to_owned(),
         };
-        let Some(handle) = self.place_call(spec, DemoCall::People(plan.callees.clone()), cx) else {
+        let Some(handle) =
+            self.place_call(spec, DemoCall::People(plan.callees.clone()), with_video, cx)
+        else {
             return;
         };
         let user_ids = plan
@@ -110,6 +125,9 @@ impl AppState {
         self.request_avatars(user_ids, cx);
         let model = CallModel::people(&plan.title, &plan.callees);
         self.begin_call(handle, model, Some(conversation_id.to_owned()), cx);
+        if with_video && self.mode.demo {
+            self.send_call_command(CallCommand::SetCamera(true));
+        }
     }
 
     pub fn join_meeting_call(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
@@ -135,7 +153,8 @@ impl AppState {
             lobby: conversation_id == DEMO_LOBBY_MEETING,
             organizer: conversation_id != DEMO_LOBBY_MEETING,
         };
-        let Some(handle) = self.place_call(CallSpec::Meeting(target.clone()), demo, cx) else {
+        let Some(handle) = self.place_call(CallSpec::Meeting(target.clone()), demo, false, cx)
+        else {
             return;
         };
         let title = selection_for(&self.sidebar, conversation_id)
@@ -152,6 +171,7 @@ impl AppState {
         &mut self,
         spec: CallSpec,
         demo: DemoCall,
+        with_video: bool,
         cx: &mut Context<Self>,
     ) -> Option<CallHandle> {
         if self.mode.demo {
@@ -162,6 +182,7 @@ impl AppState {
             return None;
         }
         match self.call_launcher.clone() {
+            Some(launcher) if with_video => Some(launcher.start_video_call(spec)),
             Some(launcher) => Some(launcher.start_call(spec)),
             None => {
                 self.raise_notice(NOT_CONNECTED_NOTICE.to_owned(), None, cx);

@@ -140,6 +140,10 @@ impl CallControl {
         self.updates.clone()
     }
 
+    pub fn defer(&mut self, command: CallCommand) {
+        self.deferred.push(command);
+    }
+
     pub fn try_recv_command(&mut self) -> Option<CallCommand> {
         if !self.deferred.is_empty() {
             return Some(self.deferred.remove(0));

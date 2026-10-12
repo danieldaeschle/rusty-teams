@@ -21,8 +21,8 @@ use super::call_extras::{
     room_chip, whiteboard_stage,
 };
 use super::call_organizer::{
-    camera_menu_button, captions_hint_chip, captions_overlay, lobby_banner, more_button, pin_chip,
-    render_focus_stage, spotlight_chip, with_tile_menu,
+    camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
+    more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu,
 };
 use super::call_stage::render_stage;
 use super::conversation::ConversationView;
@@ -807,20 +807,10 @@ fn devices_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> 
     popup
 }
 
-fn devices_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
+fn mic_menu_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
     let app = app.clone();
     let model = model.clone();
-    Button::new("call-devices")
-        .ghost()
-        .p_0()
-        .size(px(CONTROL_SIZE))
-        .rounded_full()
-        .child(round_control(
-            "call-devices-face",
-            IconName::Volume2,
-            theme::surface_raised(),
-            theme::text(),
-        ))
+    chevron_button("call-mic-menu", "call-mic-menu-face")
         .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
             devices_menu(popup, &app, &model)
         })
@@ -1086,7 +1076,15 @@ pub fn render_call_view(
         .gap(px(12.))
         .items_center()
         .justify_center()
-        .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
+        .child(
+            h_flex()
+                .h(px(CONTROL_SIZE))
+                .items_center()
+                .rounded_full()
+                .bg(theme::surface_raised())
+                .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
+                .child(mic_menu_button(app, model)),
+        )
         .child(
             h_flex()
                 .h(px(CONTROL_SIZE))
@@ -1101,7 +1099,6 @@ pub fn render_call_view(
             row.child(hand_button(app, model))
                 .child(reactions_button(app, model))
         })
-        .child(devices_button(app, model))
         .children(more_button(app, model))
         .when(call.chat_thread().is_some(), |row| {
             row.child(chat_button(app, call.chat_open, state.call_chat_unread()))
