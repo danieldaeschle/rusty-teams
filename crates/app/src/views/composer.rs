@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{
         Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, InlineToken, InputContent,
@@ -2465,7 +2465,12 @@ impl Render for Composer {
                 .p_0()
                 .trigger(
                     Button::new("composer-fun")
-                        .ghost()
+                        .custom(
+                            ButtonCustomVariant::new(cx)
+                                .hover(theme::popup_hover())
+                                .active(theme::popup_hover()),
+                        )
+                        .rounded(px(8.))
                         .with_size(px(COMPOSER_ICON_SIZE / BUTTON_ICON_SCALE))
                         .size(px(32.))
                         .tooltip("Emoji, GIFs und Sticker")
@@ -2492,7 +2497,7 @@ impl Render for Composer {
                 .justify_center()
                 .rounded(px(8.))
                 .cursor_pointer()
-                .hover(|button| button.bg(theme::row_hover()))
+                .hover(|button| button.bg(theme::popup_hover()))
                 .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
                 .child(symbol("attach_file", COMPOSER_ICON_SIZE, theme::text_muted()))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))

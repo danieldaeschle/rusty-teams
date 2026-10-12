@@ -647,10 +647,7 @@ impl RenderOnce for Button {
             .items_center()
             .justify_center()
             .cursor_default()
-            .when(
-                interactive && (self.variant.is_link() || self.variant.is_text()),
-                |this| this.cursor_pointer(),
-            )
+            .when(interactive, |this| this.cursor_pointer())
             .when(
                 !disabled && cx.theme().shadow && normal_style.shadow,
                 |this| this.shadow_xs(),

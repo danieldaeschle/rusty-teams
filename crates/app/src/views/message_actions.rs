@@ -4,7 +4,6 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::GlobalState;
 use gpui_kit::component::{
-    Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -103,10 +102,9 @@ fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         .anchor(Anchor::TopRight)
         .trigger(
             Button::new(element_id("add-reaction", &menu.key))
-                .icon(IconName::Plus)
+                .child(icon(IconName::Plus, 16., theme::text_soft()))
                 .custom(bar_variant(cx))
                 .rounded(px(7.))
-                .xsmall()
                 .size(px(BAR_BUTTON)),
         )
         .on_open_change(move |open, window, cx| {
@@ -155,10 +153,9 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     );
     let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
-        .icon(IconName::Ellipsis)
+        .child(icon(IconName::Ellipsis, 16., theme::text_soft()))
         .custom(bar_variant(cx))
         .rounded(px(7.))
-        .xsmall()
         .size(px(BAR_BUTTON))
         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
             let item = |label: &'static str, glyph: IconName, action: Action| {
