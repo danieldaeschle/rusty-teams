@@ -573,7 +573,7 @@ fn item_badge(item: &SharedItem) -> Div {
     }
 }
 
-fn item_row(
+pub fn item_row(
     index: usize,
     item: &SharedItem,
     download: Option<String>,

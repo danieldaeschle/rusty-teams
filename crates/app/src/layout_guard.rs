@@ -120,9 +120,10 @@ mod frames {
     };
     use store::Store;
 
-    use crate::app_state::{AppState, Mode};
+    use crate::app_state::{AppState, Mode, Selection};
     use crate::demo;
     use crate::user_activity::UserInput;
+    use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals};
     use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
 
@@ -140,6 +141,8 @@ mod frames {
     ];
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
+    const RECAP_TAB: &str = "shell/islands/main/recap-tab";
+    const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
     const SIZES: [(f32, f32); 2] = [(640., 480.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
@@ -263,12 +266,12 @@ mod frames {
         }
         GUARDED
             .iter()
-            .chain([&MENU])
+            .chain([&MENU, &RECAP_TAB, &RECAP_REGION])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
 
-    fn mount(cx: &mut TestAppContext) -> gpui_kit::AnyWindowHandle {
+    fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<AppState>) {
         cx.update(gpui_kit::init);
         cx.update(|cx| {
             crate::theme::apply(cx);
@@ -288,11 +291,13 @@ mod frames {
                 composer_text: None,
                 reply_to_last: false,
             };
-            gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
-                cx.new(|cx| AppShell::new(state, None, startup, window, cx))
+            let shell_state = state.clone();
+            let handle = gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
+                cx.new(|cx| AppShell::new(shell_state, None, startup, window, cx))
             })
             .expect("open test window")
-            .0
+            .0;
+            (handle, state)
         })
     }
 
@@ -329,7 +334,7 @@ mod frames {
 
     #[gpui_kit::test]
     fn no_element_overlaps_or_leaves_its_container(cx: &mut TestAppContext) {
-        let handle = mount(cx);
+        let (handle, _) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
         let mut seen_known = HashSet::new();
         let mut unexpected = Vec::new();
@@ -426,5 +431,33 @@ mod frames {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+    }
+    #[gpui_kit::test]
+    fn recap_tab_stays_inside_the_main_island(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.select(Selection::Chat(RECAP_MEETING_CHAT.to_owned()), cx)
+                })
+            });
+            collect(&mut visual, Some(RECAP_TAB));
+            let tab = visual.debug_bounds(RECAP_TAB).expect("recap tab rendered");
+            visual.simulate_click(tab.center(), Default::default());
+            let tags = collect(&mut visual, Some(RECAP_REGION));
+            let mut expected = GUARDED.to_vec();
+            expected.extend([RECAP_TAB, RECAP_REGION]);
+            let found: Vec<String> = violations(&tags, window, &expected)
+                .into_iter()
+                .map(|(key, message)| format!("recap@{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
     }
 }

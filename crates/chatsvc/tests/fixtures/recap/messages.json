@@ -1,0 +1,35 @@
+{
+  "value": [
+    {
+      "id": "2003",
+      "createdDateTime": "2026-03-09T10:31:00Z",
+      "eventDetail": {
+        "@odata.type": "#microsoft.graph.callRecordingEventMessageDetail",
+        "callRecordingStatus": "failure",
+        "callRecordingUrl": "https://contoso-my.sharepoint.com/failed.mp4"
+      }
+    },
+    {
+      "id": "2002",
+      "createdDateTime": "2026-03-09T10:30:00Z",
+      "eventDetail": {
+        "@odata.type": "#microsoft.graph.callRecordingEventMessageDetail",
+        "callRecordingStatus": "success",
+        "callRecordingDisplayName": "Weekly sync-20260309_100000-Meeting Recording.mp4",
+        "callRecordingDuration": "PT30M32S",
+        "callRecordingUrl": "https://contoso-my.sharepoint.com/personal/alex_example_contoso_com/Documents/Recordings/second.mp4",
+        "meetingOrganizer": {"user": {"id": "user-organizer"}}
+      }
+    },
+    {
+      "id": "2001",
+      "createdDateTime": "2026-03-02T10:30:00Z",
+      "eventDetail": {
+        "@odata.type": "#microsoft.graph.callRecordingEventMessageDetail",
+        "callRecordingStatus": "success",
+        "callRecordingUrl": "https://contoso-my.sharepoint.com/personal/alex_example_contoso_com/Documents/Recordings/first.mp4"
+      }
+    },
+    {"id": "2000", "createdDateTime": "2026-03-02T10:00:00Z", "body": {"content": "hello"}}
+  ]
+}

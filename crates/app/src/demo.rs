@@ -782,6 +782,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&channel_messages());
     let _ = store.upsert_messages(&priority_messages());
     let _ = store.upsert_messages(&meeting_link_messages());
+    let _ = store.upsert_messages(&standup_messages());
     let _ = store.upsert_messages(&bot_messages());
     seed_agent_access(store);
 }
@@ -1239,6 +1240,36 @@ fn meeting_link_messages() -> Vec<MessageRecord> {
         "[]",
         false,
     )]
+}
+
+fn standup_messages() -> Vec<MessageRecord> {
+    let jonas = (JONAS_ID, "Jonas Ortega");
+    let priya = (PRIYA_ID, "Priya Nair");
+    vec![
+        with_attachments(
+            message(
+                "demo-chat-meeting-standup",
+                "su1",
+                None,
+                priya,
+                at(0, 9, 30),
+                "<p>Notes from today.</p>",
+                "[]",
+                false,
+            ),
+            r#"[{"content_type":"reference","name":"Standup-notes.docx","url":"https://example.com/files/standup-notes.docx","text":null,"size":38900}]"#,
+        ),
+        message(
+            "demo-chat-meeting-standup",
+            "su2",
+            None,
+            jonas,
+            at(0, 9, 45),
+            "<p>Recording is available</p>",
+            "[]",
+            false,
+        ),
+    ]
 }
 
 fn priority_messages() -> Vec<MessageRecord> {

@@ -25,11 +25,14 @@ const EXTERNAL_ARROW: &str = "\u{2197}";
 
 pub const POSTS_LABEL: &str = "Posts";
 pub const SHARED_LABEL: &str = "Shared";
+pub const CHAT_LABEL: &str = "Chat";
+pub const RECAP_LABEL: &str = "Recap";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelPane {
     Posts,
     Shared,
+    Recap,
 }
 
 pub type SelectPane = Rc<dyn Fn(ChannelPane, &mut App)>;
@@ -194,6 +197,37 @@ pub fn render_tab_bar(
         .when(!hidden.is_empty(), |bar| {
             bar.child(overflow_button(&hidden, actions))
         })
+        .into_any_element()
+}
+
+pub fn render_meeting_bar(pane: ChannelPane, select: SelectPane) -> AnyElement {
+    let chat = tab_label(
+        "meeting-tab-chat".into(),
+        CHAT_LABEL,
+        pane == ChannelPane::Posts,
+        false,
+        {
+            let select = select.clone();
+            move |_, cx| select(ChannelPane::Posts, cx)
+        },
+    );
+    let recap = tab_label(
+        "meeting-tab-recap".into(),
+        RECAP_LABEL,
+        pane == ChannelPane::Recap,
+        false,
+        move |_, cx| select(ChannelPane::Recap, cx),
+    )
+    .debug_selector(|| "shell/islands/main/recap-tab".into());
+    h_flex()
+        .w_full()
+        .h(px(BAR_HEIGHT))
+        .flex_none()
+        .px(px(BAR_PADDING))
+        .gap(px(TAB_GAP))
+        .items_center()
+        .child(chat)
+        .child(recap)
         .into_any_element()
 }
 

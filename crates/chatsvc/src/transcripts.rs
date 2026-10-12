@@ -144,7 +144,7 @@ impl<'a> Transcripts<'a> {
         }
     }
 
-    async fn get(
+    pub(crate) async fn get(
         &self,
         url: &str,
         scope: &Scope,
