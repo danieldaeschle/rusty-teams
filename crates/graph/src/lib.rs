@@ -27,6 +27,7 @@ pub use models::{
 };
 pub use outgoing::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, OutgoingMention,
+    hosted_image_order,
 };
 pub use page::Page;
 pub use people::MAX_PRESENCE_IDS;

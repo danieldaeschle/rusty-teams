@@ -102,6 +102,7 @@ struct Fake {
     external_requests: Mutex<Vec<String>>,
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
     extras_sent: Mutex<Vec<MessageExtras>>,
+    send_answer_body: Mutex<Option<String>>,
     folder_requests: Mutex<usize>,
     directory_users: Mutex<Vec<User>>,
     horizons: Mutex<Vec<chatsvc::MemberHorizon>>,
@@ -389,7 +390,13 @@ impl Remote for Handle {
         self.sent.lock().unwrap().push(html.to_owned());
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
         self.extras_sent.lock().unwrap().push(extras.clone());
-        Ok(message(9000, 500, html))
+        let body = self
+            .send_answer_body
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| html.to_owned());
+        Ok(message(9000, 500, &body))
     }
 
     async fn send_channel_message(
@@ -2028,6 +2035,41 @@ async fn send_with_extras_hands_images_and_files_to_the_remote() {
     let sent = fake.extras_sent.lock().unwrap();
     assert_eq!(sent[0], extras);
     assert!(sent[1].is_empty());
+}
+
+#[tokio::test]
+async fn a_sent_image_is_cached_under_the_server_url_without_a_download() {
+    let directory = tempfile::tempdir().unwrap();
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    *fake.send_answer_body.lock().unwrap() = Some(format!("<p>look</p><img src=\"{HOSTED}\">"));
+    let engine = engine_with(&fake, small_pages())
+        .with_image_dir(directory.path(), 1024 * 1024)
+        .unwrap();
+    engine.refresh_sidebar().await.unwrap();
+    let extras = MessageExtras {
+        kept: Vec::new(),
+        images: vec![HostedImage {
+            content_type: "image/png".into(),
+            bytes: Arc::new(vec![9, 8, 7]),
+        }],
+        files: Vec::new(),
+    };
+    let mut events = engine.subscribe();
+
+    engine
+        .send_message_with_extras(CHAT, "look", None, &[], &extras)
+        .await
+        .unwrap();
+
+    assert_eq!(engine.image(HOSTED).unwrap().bytes, vec![9, 8, 7]);
+    assert!(fake.hosted_requests.lock().unwrap().is_empty());
+    let mut seeded = false;
+    while let Ok(event) = events.try_recv() {
+        seeded |=
+            matches!(event, CoreEvent::ImagesChanged { keys } if keys == vec![HOSTED.to_owned()]);
+    }
+    assert!(seeded);
 }
 
 #[tokio::test]

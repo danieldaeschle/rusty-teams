@@ -2,11 +2,13 @@ use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, Utc};
 use graph::{
     FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
+    hosted_image_order,
 };
 use store::MessageRecord;
 
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::{Error, Result};
+use crate::external_image::external_image_url;
 use crate::links::LinkPreview;
 use crate::mapping::{chat_record, message_record};
 use crate::markdown::markdown_to_html;
@@ -79,7 +81,7 @@ impl<R: Remote> SyncEngine<R> {
                 ));
             }
         };
-        self.cache_sent(conversation_id, &sent)
+        self.cache_sent(conversation_id, &sent, &html, extras)
     }
 
     /// Chat: quoted reply (Graph beta `replyWithQuote`). Channel: reply in the thread of `message_id`.
@@ -145,7 +147,7 @@ impl<R: Remote> SyncEngine<R> {
                     .await?
             }
         };
-        self.cache_sent(conversation_id, &sent)
+        self.cache_sent(conversation_id, &sent, &html, extras)
     }
 
     /// Own and not deleted. Chat messages, channel posts and channel replies alike.
@@ -211,7 +213,7 @@ impl<R: Remote> SyncEngine<R> {
             .remote
             .send_channel_message(team_id, channel_id, &html, subject, &mentions, extras)
             .await?;
-        self.cache_sent(channel_id, &sent)
+        self.cache_sent(channel_id, &sent, &html, extras)
     }
 
     /// Upload then share; the app uses the two steps apart so a failed share does not upload again.
@@ -588,9 +590,38 @@ impl<R: Remote> SyncEngine<R> {
         Ok(chat.id.clone())
     }
 
-    fn cache_sent(&self, conversation_id: &str, sent: &graph::Message) -> Result<MessageRecord> {
+    fn seed_sent_images(
+        &self,
+        record: &MessageRecord,
+        html: &str,
+        extras: &MessageExtras,
+    ) -> Result<()> {
+        let uploaded: Vec<_> = crate::stored::images(record)
+            .into_iter()
+            .filter(|image| external_image_url(&image.url).is_none())
+            .collect();
+        let order = hosted_image_order(html, extras);
+        if uploaded.len() != order.len() {
+            return Ok(());
+        }
+        let seeds: Vec<_> = uploaded
+            .iter()
+            .zip(order)
+            .map(|(image, index)| (image.key(), &extras.images[index]))
+            .collect();
+        self.seed_images(&seeds)
+    }
+
+    fn cache_sent(
+        &self,
+        conversation_id: &str,
+        sent: &graph::Message,
+        html: &str,
+        extras: &MessageExtras,
+    ) -> Result<MessageRecord> {
         let record = message_record(conversation_id, sent)
             .ok_or(Error::Unsupported("a send answer without a creation time"))?;
+        let _ = self.seed_sent_images(&record, html, extras);
         self.store.upsert_messages(std::slice::from_ref(&record))?;
         self.update_chat_preview(std::slice::from_ref(&record))?;
         let mut state = self.store.sync_state(conversation_id)?.unwrap_or_default();

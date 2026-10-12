@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use graph::HostedImage;
 use store::{ImageFileCache, ImageRecord};
 
 use crate::engine::SyncEngine;
@@ -78,28 +79,56 @@ impl<R: Remote> SyncEngine<R> {
             Some(url) => self.remote.external_image(&url).await?,
             None => self.remote.hosted_content(key).await?,
         };
-        let path = match &self.image_files {
+        let path = self.store_image(key, photo.bytes, photo.content_type)?;
+        let _ = self.events.send(CoreEvent::ImagesChanged {
+            keys: vec![key.to_owned()],
+        });
+        Ok(path)
+    }
+
+    pub(crate) fn seed_images(&self, images: &[(&str, &HostedImage)]) -> Result<()> {
+        let mut seeded = Vec::new();
+        for (key, image) in images {
+            let cached = match &self.image_files {
+                Some(files) => files.path(key).is_some(),
+                None => self.store.has_image(key)?,
+            };
+            if cached {
+                continue;
+            }
+            self.store_image(key, image.bytes.to_vec(), image.content_type.clone())?;
+            seeded.push((*key).to_owned());
+        }
+        if !seeded.is_empty() {
+            let _ = self.events.send(CoreEvent::ImagesChanged { keys: seeded });
+        }
+        Ok(())
+    }
+
+    fn store_image(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        content_type: String,
+    ) -> Result<Option<PathBuf>> {
+        match &self.image_files {
             Some(files) => {
-                let extension = file_extension(&photo.content_type, &photo.bytes);
-                Some(files.put(key, &photo.bytes, extension)?)
+                let extension = file_extension(&content_type, &bytes);
+                Ok(Some(files.put(key, &bytes, extension)?))
             }
             None => {
                 self.store.put_image(
                     &ImageRecord {
                         key: key.to_owned(),
-                        bytes: photo.bytes,
-                        content_type: photo.content_type,
+                        bytes,
+                        content_type,
                         fetched_at: Utc::now(),
                     },
                     IMAGE_CACHE_MAX_BYTES,
                 )?;
-                None
+                Ok(None)
             }
-        };
-        let _ = self.events.send(CoreEvent::ImagesChanged {
-            keys: vec![key.to_owned()],
-        });
-        Ok(path)
+        }
     }
 
     fn claim_image(&self, key: &str) -> bool {

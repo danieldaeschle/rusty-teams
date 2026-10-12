@@ -101,6 +101,27 @@ fn extras_html(html: &str, extras: &MessageExtras) -> String {
     content
 }
 
+pub fn hosted_image_order(html: &str, extras: &MessageExtras) -> Vec<usize> {
+    const PREFIX: &str = "../hostedContents/";
+    const SUFFIX: &str = "/$value";
+    let content = extras_html(html, extras);
+    content
+        .match_indices(PREFIX)
+        .filter_map(|(position, _)| {
+            let rest = &content[position + PREFIX.len()..];
+            let (digits, tail) =
+                rest.split_at(rest.find(|character: char| !character.is_ascii_digit())?);
+            if !tail.starts_with(SUFFIX) {
+                return None;
+            }
+            let index = digits.parse::<usize>().ok()?;
+            (1..=extras.images.len())
+                .contains(&index)
+                .then(|| index - 1)
+        })
+        .collect()
+}
+
 pub(crate) fn message_body(
     html: &str,
     mentions: &[OutgoingMention],
@@ -264,6 +285,22 @@ mod tests {
             ])
         );
         assert!(body.get("attachments").is_none());
+    }
+
+    #[test]
+    fn hosted_image_order_follows_the_body_and_skips_other_images() {
+        let extras = MessageExtras {
+            kept: Vec::new(),
+            images: vec![
+                image("image/png", &[1]),
+                image("image/png", &[2]),
+                image("image/png", &[3]),
+            ],
+            files: Vec::new(),
+        };
+        let html = "a <img src=\"../hostedContents/3/$value\"> <img src=\"https://giphy.com/x.gif\"> <img src=\"../hostedContents/1/$value\">";
+        assert_eq!(hosted_image_order(html, &extras), vec![2, 0, 1]);
+        assert_eq!(hosted_image_order("<p>none</p>", &extras), vec![0, 1, 2]);
     }
 
     #[test]
