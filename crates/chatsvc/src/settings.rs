@@ -79,10 +79,6 @@ impl<T: MessageTransport> UserSettings<T> {
         Ok(parse_chat_sections(&self.properties().await?))
     }
 
-    pub async fn teams_order(&self) -> Result<Vec<(String, i64)>> {
-        Ok(parse_teams_order(&self.properties().await?))
-    }
-
     pub async fn set_chat_section(&self, section: ChatSection, enabled: bool) -> Result<()> {
         let properties = self.properties().await?;
         let merged = merge_chat_section(&properties, section, enabled);
@@ -95,7 +91,7 @@ impl<T: MessageTransport> UserSettings<T> {
         ensure_success(&answer)
     }
 
-    async fn properties(&self) -> Result<Value> {
+    pub async fn properties(&self) -> Result<Value> {
         let answer = self.transport.send(Request::get(&self.base_url)).await?;
         ensure_success(&answer)?;
         if answer.body.is_object() {
@@ -140,6 +136,7 @@ pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
                     let position = entry.get("order")?;
                     let position = position
                         .as_i64()
+                        .or_else(|| position.as_f64().map(|float| float as i64))
                         .or_else(|| position.as_str()?.parse().ok())?;
                     Some((team_id, position))
                 })
@@ -209,9 +206,16 @@ mod tests {
     #[test]
     fn teams_order_is_read_from_the_json_string_sorted_by_order() {
         let parsed = parse_teams_order(&json!({
-            TEAMS_ORDER_KEY: r#"[{"teamId":"19:b","order":1},{"teamId":"19:a","order":"0"},{"teamId":"19:c"},{"order":2}]"#,
+            TEAMS_ORDER_KEY: r#"[{"teamId":"19:b","order":1},{"teamId":"19:a","order":"0"},{"teamId":"19:c"},{"order":2},{"teamId":"19:d","order":2.0}]"#,
         }));
-        assert_eq!(parsed, vec![("19:a".to_owned(), 0), ("19:b".to_owned(), 1)]);
+        assert_eq!(
+            parsed,
+            vec![
+                ("19:a".to_owned(), 0),
+                ("19:b".to_owned(), 1),
+                ("19:d".to_owned(), 2)
+            ]
+        );
     }
 
     #[test]

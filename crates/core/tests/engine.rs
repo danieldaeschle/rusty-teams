@@ -1100,7 +1100,7 @@ async fn the_older_chat_continuation_survives_a_restart() {
 }
 
 #[tokio::test]
-async fn a_failed_older_page_stalls_until_the_next_refresh() {
+async fn a_failed_older_page_drops_the_link_and_the_next_refresh_records_a_fresh_one() {
     let fake = Arc::new(Fake::default());
     *fake.chats.lock().unwrap() = numbered_chats(8);
     let engine = engine_with(
@@ -1115,12 +1115,73 @@ async fn a_failed_older_page_stalls_until_the_next_refresh() {
     *fake.chats_fail.lock().unwrap() = true;
     assert!(engine.load_older_chats().await.is_err());
     assert!(!engine.is_loading_older_chats());
-    assert!(engine.has_older_chats());
+    assert!(!engine.has_older_chats());
     assert_eq!(engine.load_older_chats().await.unwrap(), 0);
 
     *fake.chats_fail.lock().unwrap() = false;
     engine.refresh_sidebar().await.unwrap();
+    assert!(engine.has_older_chats());
     assert_eq!(engine.load_older_chats().await.unwrap(), 4);
+}
+
+#[tokio::test]
+async fn a_chat_hidden_in_the_app_stays_hidden_until_a_newer_message_arrives() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.hide_chat(CHAT).await.unwrap();
+
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+    engine.refresh_sidebar_full().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    engine.refresh_sidebar_full().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+}
+
+#[tokio::test]
+async fn deep_chats_that_chatsvc_reports_hidden_are_removed_on_refresh() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(8);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            chat_limit: 4,
+            chat_page_size: 4,
+            ..SyncConfig::default()
+        },
+    );
+    engine.refresh_sidebar().await.unwrap();
+    engine.load_older_chats().await.unwrap();
+    assert_eq!(engine.store().chat_count().unwrap(), 8);
+
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push(("19:c007@thread.v2".to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.store().chat_count().unwrap(), 7);
+}
+
+#[tokio::test]
+async fn older_pages_use_fresh_chat_states_when_none_were_loaded_yet() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = numbered_chats(8);
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push(("19:c005@thread.v2".to_owned(), true));
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    store.set_meta("chats_next_link", "chats:4:4").unwrap();
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+
+    assert_eq!(engine.load_older_chats().await.unwrap(), 4);
+    assert_eq!(store.chat_count().unwrap(), 3);
 }
 
 #[tokio::test]
@@ -2413,6 +2474,7 @@ struct FakeFolders {
     settings: ChatSectionSettings,
     folders_fail: bool,
     layout_fail: bool,
+    team_order: Mutex<Option<Vec<(String, i64)>>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -2435,6 +2497,7 @@ impl FakeFolders {
             settings: ChatSectionSettings::default(),
             folders_fail: false,
             layout_fail: false,
+            team_order: Mutex::new(Some(Vec::new())),
             calls: Mutex::new(Vec::new()),
         })
     }
@@ -2465,6 +2528,16 @@ impl FolderSource for FakeFolders {
 
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
         Box::pin(async { Ok(self.settings) })
+    }
+
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async {
+            self.team_order
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or_else(|| Error::Folders("order down".to_owned()))
+        })
     }
 
     fn set_section_enabled(
@@ -2663,6 +2736,52 @@ async fn both_refresh_errors_are_reported_together() {
     let message = engine.refresh_folders().await.unwrap_err().to_string();
 
     assert!(message.contains("folders down") && message.contains("layout down"));
+}
+
+#[tokio::test]
+async fn team_order_follows_teams_order_and_survives_a_failing_order_lookup() {
+    let fake = Arc::new(Fake::default());
+    let mut source = FakeFolders::new();
+    let team = |id: &str| TeamLayoutRecord {
+        team_id: id.into(),
+        hidden: false,
+        channels: Vec::new(),
+    };
+    Arc::get_mut(&mut source).unwrap().layout = vec![team("a"), team("b"), team("c")];
+    *source.team_order.lock().unwrap() = Some(vec![("c".to_owned(), 0), ("b".to_owned(), 1)]);
+    let engine = engine_with(
+        &fake,
+        SyncConfig {
+            team_layout_refresh_interval: Duration::zero(),
+            ..SyncConfig::default()
+        },
+    )
+    .with_folder_source(source.clone());
+    let record = |id: &str| TeamRecord {
+        id: id.into(),
+        name: id.into(),
+    };
+    engine
+        .store()
+        .upsert_teams(&[record("a"), record("b"), record("c")])
+        .unwrap();
+    let order = |engine: &SyncEngine<Handle>| -> Vec<String> {
+        let teams = engine.store().sidebar().unwrap().teams;
+        teams.into_iter().map(|entry| entry.team.id).collect()
+    };
+
+    engine.refresh_folders().await.unwrap();
+    assert_eq!(order(&engine), ["c", "b", "a"]);
+
+    *source.team_order.lock().unwrap() = None;
+    let mut events = engine.subscribe();
+    engine.refresh_folders().await.unwrap();
+    assert_eq!(order(&engine), ["c", "b", "a"]);
+    let mut reported = false;
+    while let Ok(event) = events.try_recv() {
+        reported |= matches!(event, CoreEvent::Error { .. });
+    }
+    assert!(reported);
 }
 
 #[tokio::test]

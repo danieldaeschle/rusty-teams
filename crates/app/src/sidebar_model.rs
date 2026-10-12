@@ -308,6 +308,15 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
     sections
 }
 
+pub fn wants_older_chats(
+    others_end: Option<f32>,
+    viewport_bottom: f32,
+    scroll_top: f32,
+    last_trigger_top: Option<f32>,
+) -> bool {
+    others_end.is_some_and(|end| end <= viewport_bottom) && last_trigger_top != Some(scroll_top)
+}
+
 pub fn visible_chat_ids(sections: &[Section]) -> Vec<&str> {
     sections
         .iter()
@@ -947,6 +956,15 @@ mod tests {
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
         assert_eq!(section_ids(&sections), vec![OTHERS_ID, MUTED_ID]);
         assert_eq!(item_ids(&sections[0]), vec!["sync"]);
+    }
+
+    #[test]
+    fn older_chats_load_only_when_the_end_of_other_chats_is_on_screen_once_per_scroll_position() {
+        assert!(wants_older_chats(Some(900.), 1000., 0., None));
+        assert!(!wants_older_chats(Some(1500.), 1000., 0., None));
+        assert!(!wants_older_chats(None, 1000., 0., None));
+        assert!(!wants_older_chats(Some(900.), 1000., 0., Some(0.)));
+        assert!(wants_older_chats(Some(900.), 1000., 120., Some(0.)));
     }
 
     #[test]

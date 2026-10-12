@@ -109,16 +109,22 @@ fn backward_link(body: &Value) -> Option<String> {
 }
 
 fn hidden_flag(conversation: &Value) -> Option<bool> {
-    [
-        &conversation["threadProperties"]["hidden"],
+    let flags: Vec<bool> = [
         &conversation["properties"]["hidden"],
+        &conversation["threadProperties"]["hidden"],
     ]
     .into_iter()
-    .find_map(|value| match value {
+    .filter_map(|value| match value {
         Value::Bool(flag) => Some(*flag),
         Value::String(text) => text.parse().ok(),
         _ => None,
     })
+    .collect();
+    if flags.contains(&true) {
+        Some(true)
+    } else {
+        flags.first().copied()
+    }
 }
 
 fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
@@ -267,6 +273,8 @@ mod tests {
                     {"id": "19:b", "threadProperties": {"hidden": "false"}},
                     {"id": "19:c", "properties": {"hidden": true}},
                     {"id": "19:d", "properties": {}},
+                    {"id": "19:e", "properties": {"hidden": "false"}, "threadProperties": {"hidden": "true"}},
+                    {"id": "19:f", "properties": {"hidden": "true"}, "threadProperties": {"hidden": "false"}},
                 ],
             }),
         )]);
@@ -275,7 +283,10 @@ mod tests {
             .await
             .unwrap();
         let hidden: Vec<Option<bool>> = states.iter().map(|state| state.hidden).collect();
-        assert_eq!(hidden, [Some(true), Some(false), Some(true), None]);
+        assert_eq!(
+            hidden,
+            [Some(true), Some(false), Some(true), None, Some(true), Some(true)]
+        );
     }
 
     #[tokio::test]

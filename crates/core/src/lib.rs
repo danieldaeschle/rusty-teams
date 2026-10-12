@@ -19,6 +19,7 @@ mod events;
 mod external_image;
 mod folders;
 mod gifs;
+mod hidden_chats;
 mod image_size;
 mod images;
 mod italic;

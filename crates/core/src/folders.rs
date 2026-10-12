@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chatsvc::{
     ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
     ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
 };
+use chatsvc::settings::{parse_chat_sections, parse_teams_order};
 use chrono::Utc;
+use serde_json::Value;
 use session::Session;
 use store::{ChannelLayoutRecord, ChannelTabRecord, FolderRecord, Store, TeamLayoutRecord};
 
@@ -41,6 +43,9 @@ pub trait FolderSource: Send + Sync {
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>>;
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>>;
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>>;
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn set_section_enabled(&self, section: ChatSection, enabled: bool)
     -> BoxFuture<'_, Result<()>>;
     fn set_folder_expanded<'a>(
@@ -64,6 +69,7 @@ pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
     settings: UserSettings,
     channel_settings: ChannelSettings,
+    properties: Mutex<Option<Value>>,
 }
 
 impl ChatsvcFolderSource {
@@ -72,6 +78,7 @@ impl ChatsvcFolderSource {
             pins: Pins::new(session),
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
+            properties: Mutex::new(None),
         }
     }
 }
@@ -102,18 +109,31 @@ impl FolderSource for ChatsvcFolderSource {
                     .await
                     .unwrap_or_default()
             };
-            let order = self.settings.teams_order().await.unwrap_or_default();
-            let mut records: Vec<TeamLayoutRecord> = layout
+            Ok(layout
                 .into_iter()
                 .map(|team| layout_record(team, &fallback))
-                .collect();
-            sort_teams_by_order(&mut records, &order);
-            Ok(records)
+                .collect())
         })
     }
 
     fn section_settings(&self) -> BoxFuture<'_, Result<ChatSectionSettings>> {
-        Box::pin(async { Ok(self.settings.chat_sections().await?) })
+        Box::pin(async {
+            let properties = self.settings.properties().await?;
+            let sections = parse_chat_sections(&properties);
+            *self.properties.lock().unwrap() = Some(properties);
+            Ok(sections)
+        })
+    }
+
+    fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
+        Box::pin(async {
+            let cached = self.properties.lock().unwrap().take();
+            let properties = match cached {
+                Some(properties) => properties,
+                None => self.settings.properties().await?,
+            };
+            Ok(parse_teams_order(&properties))
+        })
     }
 
     fn set_section_enabled(
@@ -178,6 +198,14 @@ fn convert(folders: chatsvc::Folders) -> Vec<ChatFolder> {
             expanded: folder.expanded,
             conversation_ids: folder.conversation_ids,
         })
+        .collect()
+}
+
+fn stored_team_order(teams: &[store::SidebarTeam]) -> Vec<(String, i64)> {
+    teams
+        .iter()
+        .enumerate()
+        .map(|(position, team)| (team.team.id.clone(), position as i64))
         .collect()
 }
 
@@ -395,8 +423,16 @@ impl<R: Remote> SyncEngine<R> {
         if last.is_some_and(|last| Utc::now() - last < self.config.team_layout_refresh_interval) {
             return Ok(());
         }
-        let layout = source.team_layout().await?;
+        let mut layout = source.team_layout().await?;
         let before = self.store.sidebar()?.teams;
+        let order = match source.teams_order().await {
+            Ok(order) => order,
+            Err(error) => {
+                self.report(format!("cannot read the team order: {error}"));
+                stored_team_order(&before)
+            }
+        };
+        sort_teams_by_order(&mut layout, &order);
         self.store.replace_team_layout(&layout)?;
         self.store.set_meta_time(META_TEAM_LAYOUT_AT, Utc::now())?;
         if self.store.sidebar()?.teams != before {

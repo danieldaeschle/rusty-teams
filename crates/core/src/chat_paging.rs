@@ -3,7 +3,7 @@ pub struct ChatPaging {
     next_link: Option<String>,
     exhausted: bool,
     loading: bool,
-    stalled: bool,
+    epoch: u64,
 }
 
 impl ChatPaging {
@@ -35,31 +35,37 @@ impl ChatPaging {
         self.exhausted
     }
 
-    pub fn begin(&mut self) -> Option<String> {
-        if self.loading || self.stalled {
+    pub fn is_current(&self, epoch: u64) -> bool {
+        self.epoch == epoch
+    }
+
+    pub fn begin(&mut self) -> Option<(String, u64)> {
+        if self.loading {
             return None;
         }
         let link = self.next_link.clone()?;
         self.loading = true;
-        Some(link)
+        Some((link, self.epoch))
     }
 
-    pub fn finish(&mut self, next_link: Option<String>) {
+    pub fn finish(&mut self, epoch: u64, next_link: Option<String>) {
         self.loading = false;
-        self.exhausted = next_link.is_none();
-        self.next_link = next_link;
+        if self.is_current(epoch) {
+            self.exhausted = next_link.is_none();
+            self.next_link = next_link;
+        }
     }
 
-    pub fn fail(&mut self) {
+    pub fn fail(&mut self, epoch: u64) {
         self.loading = false;
-        self.stalled = true;
-    }
-
-    pub fn retry(&mut self) {
-        self.stalled = false;
+        if self.is_current(epoch) {
+            self.next_link = None;
+            self.exhausted = false;
+        }
     }
 
     pub fn adopt_continuation(&mut self, next_link: Option<String>) {
+        let before = (self.next_link.clone(), self.exhausted);
         match next_link {
             Some(link) if self.next_link.is_none() => {
                 self.next_link = Some(link);
@@ -70,6 +76,9 @@ impl ChatPaging {
                 self.next_link = None;
                 self.exhausted = true;
             }
+        }
+        if before != (self.next_link.clone(), self.exhausted) {
+            self.epoch += 1;
         }
     }
 }
@@ -93,7 +102,7 @@ mod tests {
     #[test]
     fn begin_hands_out_the_link_once_while_a_page_is_in_flight() {
         let mut paging = with_link("page2");
-        assert_eq!(paging.begin(), Some("page2".to_owned()));
+        assert_eq!(paging.begin(), Some(("page2".to_owned(), 0)));
         assert!(paging.is_loading());
         assert_eq!(paging.begin(), None);
     }
@@ -101,18 +110,18 @@ mod tests {
     #[test]
     fn finish_with_a_link_allows_the_next_page() {
         let mut paging = with_link("page2");
-        paging.begin();
-        paging.finish(Some("page3".to_owned()));
+        let (_, epoch) = paging.begin().unwrap();
+        paging.finish(epoch, Some("page3".to_owned()));
         assert!(!paging.is_loading());
         assert!(paging.has_more());
-        assert_eq!(paging.begin(), Some("page3".to_owned()));
+        assert_eq!(paging.begin(), Some(("page3".to_owned(), 0)));
     }
 
     #[test]
     fn finish_without_a_link_is_done_for_good() {
         let mut paging = with_link("page2");
-        paging.begin();
-        paging.finish(None);
+        let (_, epoch) = paging.begin().unwrap();
+        paging.finish(epoch, None);
         assert!(!paging.has_more());
         assert!(paging.is_exhausted());
         assert!(paging.is_known());
@@ -120,15 +129,17 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_page_stalls_until_the_next_refresh_retries() {
+    fn a_failed_page_drops_the_link_so_the_next_refresh_walks_again() {
         let mut paging = with_link("page2");
-        paging.begin();
-        paging.fail();
+        let (_, epoch) = paging.begin().unwrap();
+        paging.fail(epoch);
         assert!(!paging.is_loading());
-        assert!(paging.has_more());
+        assert!(!paging.has_more());
+        assert!(!paging.is_exhausted());
+        assert!(!paging.is_known());
         assert_eq!(paging.begin(), None);
-        paging.retry();
-        assert_eq!(paging.begin(), Some("page2".to_owned()));
+        paging.adopt_continuation(Some("fresh".to_owned()));
+        assert_eq!(paging.next_link(), Some("fresh"));
     }
 
     #[test]
@@ -148,5 +159,25 @@ mod tests {
         paging.adopt_continuation(None);
         assert!(!paging.has_more());
         assert!(paging.is_exhausted());
+    }
+
+    #[test]
+    fn a_result_from_before_a_refresh_changed_the_state_is_ignored() {
+        let mut paging = with_link("page2");
+        let (_, epoch) = paging.begin().unwrap();
+        paging.adopt_continuation(None);
+        assert!(!paging.is_current(epoch));
+        paging.finish(epoch, Some("stale".to_owned()));
+        assert!(!paging.is_loading());
+        assert_eq!(paging.next_link(), None);
+        assert!(paging.is_exhausted());
+    }
+
+    #[test]
+    fn an_unchanged_adoption_keeps_the_page_in_flight_valid() {
+        let mut paging = with_link("deep");
+        let (_, epoch) = paging.begin().unwrap();
+        paging.adopt_continuation(Some("shallow".to_owned()));
+        assert!(paging.is_current(epoch));
     }
 }

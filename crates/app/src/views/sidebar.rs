@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -27,7 +28,7 @@ use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
     SectionInput, SectionKind, Step, build_sections, step_id,
-    visible_channel_ids,
+    visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 
@@ -291,6 +292,7 @@ pub struct SidebarView {
     revealed_channel_teams: HashSet<String>,
     hidden_teams_open: bool,
     chats_scroll: ScrollHandle,
+    older_chats_trigger_top: Cell<Option<f32>>,
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
     _subscription: Subscription,
@@ -404,6 +406,7 @@ impl SidebarView {
             revealed_channel_teams: HashSet::new(),
             hidden_teams_open: false,
             chats_scroll: ScrollHandle::new(),
+            older_chats_trigger_top: Cell::new(None),
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
@@ -872,6 +875,7 @@ impl SidebarView {
         let mut y = 0.;
         let mut list = v_flex().w_full().pb(px(12.));
         let mut skipped_height = 0.;
+        let mut others_end = None;
         let directory_state = self.state.clone();
         if drafting {
             list = list.child(self.draft_row());
@@ -908,6 +912,9 @@ impl SidebarView {
                 }
                 y += ROW_HEIGHT;
             }
+            if section.kind == SectionKind::Others {
+                others_end = Some(y);
+            }
             if section.hidden_count > 0 || section.list_expanded {
                 list = with_spacer(list, &mut skipped_height);
                 list = list.child(self.see_more_row(section, cx));
@@ -931,7 +938,15 @@ impl SidebarView {
             }
         }
         let (has_older, loading_older) = self.state.read(cx).older_chats();
-        if has_older && y <= visible_to {
+        if has_older
+            && wants_older_chats(
+                others_end,
+                top + height,
+                top,
+                self.older_chats_trigger_top.get(),
+            )
+        {
+            self.older_chats_trigger_top.set(Some(top));
             let state = self.state.clone();
             cx.defer(move |cx| state.read(cx).request_older_chats());
         }
