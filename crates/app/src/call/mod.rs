@@ -1,10 +1,12 @@
 mod actions;
 mod agenda;
 mod background;
+mod bubbles;
 mod calendar;
 mod demo;
 mod demo_scene;
 mod features;
+mod fullscreen;
 mod history;
 mod join;
 mod launcher;
@@ -16,7 +18,10 @@ mod overlay_layout;
 mod pictures;
 mod preview;
 mod ring;
+mod stage_layout;
 mod target;
+mod view_actions;
+mod view_settings;
 
 pub use actions::{load_camera, load_share_sound};
 pub use agenda::{AgendaRow, fetch_window, join_available};
@@ -24,6 +29,7 @@ pub use background::{
     BackgroundLibrary, BackgroundPick, default_cache_directory, demo_library, load_background,
     load_custom_backgrounds,
 };
+pub use bubbles::{BUBBLE_SHOWN, shown_bubbles};
 pub use demo::DemoScene;
 pub use features::TransferCandidate;
 pub use history::CallRow;
@@ -34,10 +40,12 @@ pub use list::{
 };
 pub use media::CallMedia;
 pub use model::{
-    ActiveCall, CAPTION_SHOWN, CHAT_OPEN_TILES, CallKind, CallModel, Focus, GridLayout, MAX_TILES,
-    REACTION_SHOWN, Tile, TileSize, TileState, grid_layout, tile_size,
+    ActiveCall, CAPTION_SHOWN, CallKind, CallModel, Focus, REACTION_SHOWN, Tile, TileSize,
+    TileState,
 };
 pub use overlay::CallWindows;
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
+pub use stage_layout::{GALLERY_MAX, filmstrip, gallery_grid, split_overflow};
 pub use target::plan_for_chat;
+pub use view_settings::{CallLayout, ViewSettings};

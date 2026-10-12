@@ -218,6 +218,8 @@ impl AppState {
         if let Some(call) = self.call.as_mut() {
             call.model.background = self.call_background.clone();
             call.model.camera = self.call_camera.clone();
+            call.model.view = self.call_view;
+            call.model.refresh_layout(Instant::now());
         }
         if self.call_camera != DeviceChoice::SystemDefault {
             self.send_call_command(CallCommand::SelectCamera(self.call_camera.clone()));
@@ -260,6 +262,7 @@ impl AppState {
                         if ticks.is_multiple_of(SHARE_SOURCES_EVERY_TICKS) {
                             state.refresh_share_sources();
                         }
+                        state.tick_call_layout(cx);
                         CallMedia::changed(&state.call_media, cx);
                     }
                     running
@@ -409,22 +412,6 @@ impl AppState {
 
     pub fn start_call_share(&mut self, source: ShareSource, _cx: &mut Context<Self>) {
         self.send_call_command(CallCommand::StartShare(source));
-    }
-
-    pub fn toggle_call_share(&mut self, cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_ref() else {
-            return;
-        };
-        if call.model.local_share.is_some() {
-            self.stop_call_share(cx);
-            return;
-        }
-        if !call.model.can_share() {
-            return;
-        }
-        if let Some(source) = call.model.screens().first().map(|source| (*source).clone()) {
-            self.start_call_share(source, cx);
-        }
     }
 
     pub fn stop_call_share(&mut self, _cx: &mut Context<Self>) {
@@ -857,7 +844,7 @@ impl AppState {
             )
         } else {
             let script = DemoCall::Meeting {
-                guests: demo_guests(DEMO_SMALL_MEETING),
+                guests: demo_guests(scene.guests().unwrap_or(DEMO_SMALL_MEETING)),
                 lobby: false,
                 organizer: true,
             };
@@ -876,6 +863,9 @@ impl AppState {
                 organizer_id: "demo-me".to_owned(),
                 meeting_data: None,
             });
+        }
+        if scene == DemoScene::Gallery {
+            self.queue_demo_bubbles(conversation_id, cx);
         }
     }
 

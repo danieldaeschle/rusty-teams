@@ -302,6 +302,20 @@ impl NotificationCenter {
     }
 
     pub fn handle_incoming(&mut self, incoming: Incoming, cx: &mut Context<Self>) {
+        let bubble_text = match &incoming.preview {
+            Preview::Text(text) => text.replace('\n', " "),
+            Preview::Image => "Sent a picture".to_owned(),
+        };
+        self.app.update(cx, |state, cx| {
+            state.note_call_chat_message(
+                &incoming.conversation_id,
+                &incoming.message_id,
+                incoming.sender_id.clone(),
+                &incoming.sender_name,
+                &bubble_text,
+                cx,
+            )
+        });
         let environment = self.environment(&incoming.conversation_id, cx);
         if !environment.chat_in_foreground && incoming.mentions_me {
             self.unread_mentions

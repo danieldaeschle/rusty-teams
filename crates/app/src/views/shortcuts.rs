@@ -25,6 +25,11 @@ actions!(
         HangUpCall,
         ToggleCallCamera,
         ToggleCallShare,
+        ToggleCallHand,
+        OpenLobbyList,
+        StartAudioCall,
+        StartVideoCall,
+        ToggleCallFullscreen,
         ShowShortcuts
     ]
 );
@@ -112,7 +117,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Calls, GlobalOverTextFields, "Hang up or leave", "ctrl-shift-h", Some("cmd-shift-h"), HangUpCall),
     shortcut!(Calls, GlobalOverTextFields, "Mute or unmute", "ctrl-shift-m", None, ToggleCallMute),
     shortcut!(Calls, GlobalOverTextFields, "Turn camera on or off", "ctrl-shift-o", Some("cmd-shift-o"), ToggleCallCamera),
-    shortcut!(Calls, GlobalOverTextFields, "Start or stop sharing the screen", "ctrl-shift-e", Some("cmd-shift-e"), ToggleCallShare),
+    shortcut!(Calls, GlobalOverTextFields, "Open the share menu or stop sharing", "ctrl-shift-e", Some("cmd-shift-e"), ToggleCallShare),
+    shortcut!(Calls, GlobalOverTextFields, "Raise or lower hand", "ctrl-shift-k", Some("cmd-shift-k"), ToggleCallHand),
+    shortcut!(Calls, GlobalOverTextFields, "Open the lobby list", "ctrl-shift-y", Some("cmd-shift-y"), OpenLobbyList),
+    shortcut!(Calls, GlobalOverTextFields, "Start an audio call in this chat", "alt-shift-a", None, StartAudioCall),
+    shortcut!(Calls, GlobalOverTextFields, "Start a video call in this chat", "alt-shift-v", None, StartVideoCall),
+    shortcut!(Calls, GlobalOverTextFields, "Full screen", "f11", None, ToggleCallFullscreen),
 ];
 
 impl Shortcut {

@@ -20,21 +20,20 @@ use super::call_extras::{
     BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
     room_chip, whiteboard_stage,
 };
+use super::call_layouts::stage_region;
 use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
-    more_button, pin_chip, render_focus_stage, spotlight_chip, with_tile_menu,
+    more_button, pin_chip, spotlight_chip, with_tile_menu,
 };
 use super::call_stage::render_stage;
+use super::call_view_menu::view_button;
 use super::conversation::ConversationView;
 use super::shell::ISLAND_GAP;
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::REACTION_SHOWN;
 use crate::call::TileSize;
-use crate::call::{
-    CHAT_OPEN_TILES, CallKind, CallModel, GridLayout, MAX_TILES, Tile, TileState, grid_layout,
-    tile_size,
-};
+use crate::call::{CallKind, CallModel, Tile, TileState};
 use crate::rows::reaction_glyph as chat_reaction_glyph;
 use crate::theme;
 
@@ -47,16 +46,16 @@ pub(super) const MENU_WIDTH: f32 = 280.;
 const PULSE_PERIOD: Duration = Duration::from_millis(1400);
 const BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const BLINK_DIMMED_OPACITY: f32 = 0.45;
-const DISABLED_OPACITY: f32 = 0.4;
-const TILE_GAP: f32 = 20.;
-const GRID_PADDING: f32 = 24.;
-const STRIP_TILE: TileSize = TileSize {
+pub(super) const DISABLED_OPACITY: f32 = 0.4;
+pub(super) const TILE_GAP: f32 = 20.;
+pub(super) const GRID_PADDING: f32 = 24.;
+pub(super) const STRIP_TILE: TileSize = TileSize {
     width: 232.,
     height: 131.,
     avatar: 56.,
 };
-const STRIP_GAP: f32 = 12.;
-const STRIP_VISIBLE: f32 = 4.;
+pub(super) const STRIP_GAP: f32 = 12.;
+pub(super) const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";
@@ -310,23 +309,6 @@ fn tile(
         .children(tile_overlays(extras))
 }
 
-fn overflow_tile(size: TileSize, hidden: usize) -> Div {
-    v_flex()
-        .w(px(size.width))
-        .h(px(size.height))
-        .items_center()
-        .justify_center()
-        .rounded(px(12.))
-        .bg(theme::row_hover())
-        .child(
-            div()
-                .text_size(px(size.avatar * 0.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text_muted())
-                .child(format!("+{hidden}")),
-        )
-}
-
 fn control_shell(id: &'static str, background: Hsla) -> Stateful<Div> {
     div()
         .id(id)
@@ -495,7 +477,12 @@ fn share_items(
     popup
 }
 
-fn share_button(app: &Entity<AppState>, model: &CallModel, sound: bool) -> AnyElement {
+fn share_button(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    sound: bool,
+    menu_open: bool,
+) -> AnyElement {
     if model.local_share.is_some() {
         let app = app.clone();
         return round_control(
@@ -525,6 +512,7 @@ fn share_button(app: &Entity<AppState>, model: &CallModel, sound: bool) -> AnyEl
             .into_any_element();
     }
     let app = app.clone();
+    let open_app = app.clone();
     let model = model.clone();
     Button::new("call-share")
         .ghost()
@@ -534,6 +522,10 @@ fn share_button(app: &Entity<AppState>, model: &CallModel, sound: bool) -> AnyEl
         .child(face)
         .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
             share_items(popup, &app, &model, sound)
+        })
+        .open(menu_open)
+        .on_open_change(move |open, _, cx| {
+            open_app.update(cx, |state, cx| state.set_call_share_menu(*open, cx))
         })
         .into_any_element()
 }
@@ -816,7 +808,7 @@ fn mic_menu_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElemen
         })
 }
 
-fn person_tile(
+pub(super) fn person_tile(
     app: &Entity<AppState>,
     state: &AppState,
     model: &CallModel,
@@ -894,7 +886,7 @@ fn person_tile_body(
     .into_any_element()
 }
 
-fn own_tile(
+pub(super) fn own_tile(
     app: &Entity<AppState>,
     state: &AppState,
     model: &CallModel,
@@ -957,59 +949,11 @@ fn own_tile_body(
     .into_any_element()
 }
 
-fn remote_tiles(
-    app: &Entity<AppState>,
-    state: &AppState,
-    model: &CallModel,
-    size: TileSize,
-    hidden_cap: GridLayout,
-    now: Instant,
-) -> Vec<AnyElement> {
-    let visible = model.visible_tiles();
-    let mut cells: Vec<AnyElement> = visible
-        .iter()
-        .take(hidden_cap.shown_others)
-        .map(|remote| person_tile(app, state, model, remote, size, now))
-        .collect();
-    if hidden_cap.hidden > 0 {
-        cells.push(overflow_tile(size, hidden_cap.hidden).into_any_element());
-    }
-    cells
-}
-
-fn people_strip(
-    app: &Entity<AppState>,
-    state: &AppState,
-    model: &CallModel,
-    now: Instant,
-    focused: Option<&str>,
-) -> Stateful<Div> {
-    let mut cells: Vec<AnyElement> = model
-        .strip_tiles()
-        .into_iter()
-        .filter(|remote| Some(remote.mri.as_str()) != focused)
-        .map(|remote| person_tile(app, state, model, remote, STRIP_TILE, now))
-        .collect();
-    if focused.is_none() || focused != model.own_mri.as_deref() {
-        let own_index = model.own_cell_index(cells.len());
-        cells.insert(own_index, own_tile(app, state, model, STRIP_TILE, now));
-    }
-    v_flex()
-        .id("call-strip")
-        .flex_none()
-        .w(px(STRIP_TILE.width))
-        .max_h(px(
-            STRIP_VISIBLE * (STRIP_TILE.height + STRIP_GAP) - STRIP_GAP
-        ))
-        .gap(px(STRIP_GAP))
-        .overflow_y_scroll()
-        .children(cells)
-}
-
 pub fn render_call_view(
     app: &Entity<AppState>,
     state: &AppState,
     chat: Option<Entity<ConversationView>>,
+    fullscreen: bool,
 ) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
     let model = &call.model;
@@ -1043,31 +987,9 @@ pub fn render_call_view(
         .child(div().flex_1())
         .children(return_button(app, model));
 
-    let max_tiles = if chat.is_some() {
-        CHAT_OPEN_TILES
-    } else {
-        MAX_TILES
-    };
-    let layout = grid_layout(model.visible_tiles().len(), max_tiles);
-    let cells_for_size = if chat.is_some() {
-        MAX_TILES
-    } else {
-        layout.shown_others + usize::from(layout.hidden > 0) + 1
-    };
-    let size = tile_size(cells_for_size);
-    let mut cells = remote_tiles(app, state, model, size, layout, now);
-    let own_index = model.own_cell_index(cells.len());
-    cells.insert(own_index, own_tile(app, state, model, size, now));
-    let focus = model.focus().filter(|_| model.screen_sharer.is_none());
-    let stage = render_stage(app, state, false)
-        .or_else(|| whiteboard_stage(app, model))
-        .or_else(|| {
-            focus
-                .as_ref()
-                .and_then(|focus| render_focus_stage(app, state, focus, now))
-        });
     let hold = hold_panel(app, model);
-    let focused = focus.as_ref().map(|focus| focus.mri.as_str());
+    let share_stage = render_stage(app, state, false).or_else(|| whiteboard_stage(app, model));
+    let region = stage_region(app, state, call, now, hold, share_stage);
 
     let controls = h_flex()
         .w_full()
@@ -1094,11 +1016,17 @@ pub fn render_call_view(
                 .child(camera_button(app, model))
                 .children(camera_menu_button(app, model, BackgroundMenu::of(state))),
         )
-        .child(share_button(app, model, state.call_share_sound))
+        .child(share_button(
+            app,
+            model,
+            state.call_share_sound,
+            call.share_menu_open,
+        ))
         .when(model.has_reaction_controls(), |row| {
             row.child(hand_button(app, model))
                 .child(reactions_button(app, model))
         })
+        .child(view_button(app, model, fullscreen))
         .children(more_button(app, model))
         .when(call.chat_thread().is_some(), |row| {
             row.child(chat_button(app, call.chat_open, state.call_chat_unread()))
@@ -1108,51 +1036,51 @@ pub fn render_call_view(
             row.child(leave_menu(app, model))
         });
 
-    let column = v_flex()
+    let top = v_flex()
+        .w_full()
+        .flex_none()
+        .child(header)
+        .children(lobby_banner(app, model, call.lobby_list_open))
+        .children(sharing_banner(app, model, state.call_share_sound))
+        .children(consult_banner(app, state));
+
+    let chrome_visible = call
+        .fullscreen
+        .is_none_or(|fullscreen| fullscreen.chrome_visible(now));
+    let move_app = app.clone();
+    let base = v_flex()
         .relative()
         .flex_1()
         .min_w_0()
         .h_full()
-        .rounded(px(10.))
         .overflow_hidden()
-        .bg(theme::surface())
-        .child(header)
-        .children(lobby_banner(app, model))
-        .children(sharing_banner(app, model, state.call_share_sound))
-        .children(consult_banner(app, state))
-        .child(match stage {
-            _ if hold.is_some() => hold.expect("checked above"),
-            Some(stage) => h_flex()
-                .flex_1()
-                .min_h_0()
-                .p(px(GRID_PADDING))
-                .gap(px(TILE_GAP))
-                .items_center()
-                .child(stage)
-                .child(people_strip(app, state, model, now, focused))
-                .into_any_element(),
-            None => h_flex()
-                .id("call-grid")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .flex_wrap()
-                .content_center()
-                .p(px(GRID_PADDING))
-                .gap(px(TILE_GAP))
-                .items_center()
-                .justify_center()
-                .children(cells)
-                .into_any_element(),
+        .bg(theme::surface());
+    let column = if fullscreen {
+        base.on_mouse_move(move |_, _, cx| {
+            move_app.update(cx, |state, cx| state.touch_call_chrome(cx))
         })
-        .child(controls)
-        .children(captions_overlay(model, now))
-        .children(captions_hint_chip(model))
-        .children(state.transfer_picker.clone())
-        .children(consent_overlay(app, model));
+        .when(chrome_visible, |column| {
+            column.child(fullscreen_chrome("call-chrome-top", app, top))
+        })
+        .child(region)
+        .when(chrome_visible, |column| {
+            column.child(fullscreen_chrome("call-chrome-bottom", app, controls))
+        })
+    } else {
+        base.rounded(px(10.))
+            .child(top.debug_selector(|| "shell/islands/main/call-header".into()))
+            .child(region)
+            .child(controls.debug_selector(|| "shell/islands/main/call-controls".into()))
+    }
+    .children(captions_overlay(model, now))
+    .children(captions_hint_chip(model))
+    .children(state.transfer_picker.clone())
+    .children(consent_overlay(app, model));
     Some(
         h_flex()
-            .debug_selector(|| "shell/islands/main".into())
+            .when(!fullscreen, |row| {
+                row.debug_selector(|| "shell/islands/main".into())
+            })
             .flex_1()
             .min_w_0()
             .h_full()
@@ -1161,6 +1089,18 @@ pub fn render_call_view(
             .children(chat.map(|chat| chat_panel(app, chat)))
             .into_any_element(),
     )
+}
+
+fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> Stateful<Div> {
+    let hover_app = app.clone();
+    div()
+        .id(id)
+        .w_full()
+        .flex_none()
+        .on_hover(move |hovered, _, cx| {
+            hover_app.update(cx, |state, cx| state.set_call_chrome_hovered(*hovered, cx))
+        })
+        .child(content)
 }
 
 fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElement {
