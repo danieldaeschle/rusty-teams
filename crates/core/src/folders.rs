@@ -36,6 +36,24 @@ pub struct ChatFolder {
     pub conversation_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderChange {
+    Create {
+        name: String,
+    },
+    Rename {
+        folder_id: String,
+        name: String,
+    },
+    Delete {
+        folder_id: String,
+    },
+    Move {
+        folder_id: String,
+        target_folder_id: String,
+    },
+}
+
 pub trait FolderSource: Send + Sync {
     fn folders(&self) -> BoxFuture<'_, Result<Vec<ChatFolder>>>;
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>>;
@@ -58,6 +76,7 @@ pub trait FolderSource: Send + Sync {
         conversation_id: &'a str,
         folder_id: &'a str,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>>;
+    fn change_folders(&self, change: FolderChange) -> BoxFuture<'_, Result<Vec<ChatFolder>>>;
 }
 
 pub struct ChatsvcFolderSource {
@@ -154,6 +173,23 @@ impl FolderSource for ChatsvcFolderSource {
                     .remove_from_folder(conversation_id, folder_id)
                     .await?,
             ))
+        })
+    }
+
+    fn change_folders(&self, change: FolderChange) -> BoxFuture<'_, Result<Vec<ChatFolder>>> {
+        Box::pin(async move {
+            let folders = match &change {
+                FolderChange::Create { name } => self.pins.create_folder(name).await?,
+                FolderChange::Rename { folder_id, name } => {
+                    self.pins.rename_folder(folder_id, name).await?
+                }
+                FolderChange::Delete { folder_id } => self.pins.delete_folder(folder_id).await?,
+                FolderChange::Move {
+                    folder_id,
+                    target_folder_id,
+                } => self.pins.move_folder(folder_id, target_folder_id).await?,
+            };
+            Ok(convert(folders))
         })
     }
 }
@@ -406,6 +442,11 @@ impl<R: Remote> SyncEngine<R> {
             .folder_source()?
             .remove_from_folder(conversation_id, folder_id)
             .await?;
+        self.store_folders(&folders, &self.store.pinned_channel_ids()?)
+    }
+
+    pub async fn change_folders(&self, change: FolderChange) -> Result<()> {
+        let folders = self.folder_source()?.change_folders(change).await?;
         self.store_folders(&folders, &self.store.pinned_channel_ids()?)
     }
 

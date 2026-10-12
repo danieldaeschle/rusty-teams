@@ -517,3 +517,129 @@ async fn collapse_gives_up_after_a_second_version_mismatch() {
         .await;
     assert!(matches!(outcome, Err(Error::VersionConflict)));
 }
+
+fn ordered_sections(version: i64, order: &[&str]) -> Value {
+    let mut state = sections(version, &[("t~u~A", &["c"]), ("t~u~B", &[])], &[]);
+    state["conversationFolderOrder"] = json!(order);
+    state
+}
+
+const FOLDER_URL: &str =
+    "https://teams.cloud.microsoft/api/csa/emea/api/v1/teams/users/me/conversationFolders";
+const FOLDER_QUERY: &str = "?supportsAdditionalSystemGeneratedFolders=true&supportsSliceItems=true";
+
+#[tokio::test]
+async fn create_folder_posts_add_folder_with_the_name() {
+    let mock = Mock::new(vec![
+        (200, sections(10, &[], &[])),
+        (200, sections(11, &[("new", &[])], &[])),
+    ]);
+    let state = pins(&mock).create_folder("zz").await.unwrap();
+    assert_eq!(state.folders.len(), 2);
+    let requests = sent(&mock);
+    assert_eq!(requests[1].0, "POST");
+    assert_eq!(requests[1].1, format!("{FOLDER_URL}{FOLDER_QUERY}"));
+    assert_eq!(
+        requests[1].2,
+        Some(json!({
+            "folderHierarchyVersion": 10,
+            "supportsAdditionalSystemGeneratedFolders": true,
+            "supportsSliceItems": true,
+            "folderName": "zz",
+            "actions": [{"action": "AddFolder"}],
+        }))
+    );
+}
+
+#[tokio::test]
+async fn create_folder_rereads_after_a_partial_answer() {
+    let mut partial = sections(11, &[("new", &[])], &[]);
+    partial["isPartialResponse"] = json!(true);
+    let mock = Mock::new(vec![
+        (200, sections(10, &[], &[])),
+        (200, partial),
+        (200, sections(11, &[("t~u~A", &[]), ("new", &[])], &[])),
+    ]);
+    let state = pins(&mock).create_folder("zz").await.unwrap();
+    assert_eq!(sent(&mock).len(), 3);
+    assert_eq!(state.folders.len(), 3);
+}
+
+#[tokio::test]
+async fn rename_folder_puts_the_name_on_the_folder_url() {
+    let mock = Mock::new(vec![
+        (200, sections(10, &[("t~u~A", &[])], &[])),
+        (200, sections(11, &[("t~u~A", &[])], &[])),
+    ]);
+    pins(&mock).rename_folder("t~u~A", "Todo").await.unwrap();
+    let requests = sent(&mock);
+    assert_eq!(requests[1].0, "PUT");
+    assert_eq!(requests[1].1, format!("{FOLDER_URL}/t~u~A{FOLDER_QUERY}"));
+    assert_eq!(requests[1].2.as_ref().unwrap()["folderName"], "Todo");
+    assert_eq!(
+        requests[1].2.as_ref().unwrap()["folderHierarchyVersion"],
+        10
+    );
+}
+
+#[tokio::test]
+async fn rename_or_delete_of_a_system_folder_sends_nothing() {
+    let mock = Mock::new(vec![
+        (200, sections(10, &[], &[])),
+        (200, sections(10, &[], &[])),
+    ]);
+    let rename = pins(&mock).rename_folder(FOLDER, "x").await.unwrap_err();
+    let delete = pins(&mock).delete_folder(FOLDER).await.unwrap_err();
+    assert!(matches!(rename, Error::SystemFolder(_)));
+    assert!(matches!(delete, Error::SystemFolder(_)));
+    assert_eq!(sent(&mock).len(), 2);
+}
+
+#[tokio::test]
+async fn delete_folder_sends_delete_with_only_the_lock() {
+    let mock = Mock::new(vec![
+        (200, sections(10, &[("t~u~A", &["c"])], &[])),
+        (200, sections(11, &[], &[])),
+    ]);
+    let state = pins(&mock).delete_folder("t~u~A").await.unwrap();
+    assert_eq!(state.folders.len(), 1);
+    let requests = sent(&mock);
+    assert_eq!(requests[1].0, "DELETE");
+    assert_eq!(requests[1].1, format!("{FOLDER_URL}/t~u~A{FOLDER_QUERY}"));
+    assert_eq!(
+        requests[1].2,
+        Some(json!({
+            "folderHierarchyVersion": 10,
+            "supportsAdditionalSystemGeneratedFolders": true,
+            "supportsSliceItems": true,
+        }))
+    );
+    let gone = Mock::new(vec![(200, sections(10, &[], &[]))]);
+    pins(&gone).delete_folder("t~u~A").await.unwrap();
+    assert_eq!(sent(&gone).len(), 1);
+}
+
+#[tokio::test]
+async fn move_folder_sends_the_full_order_with_the_folder_swapped() {
+    let order = ["q", "t~u~A", FOLDER, "t~u~B", "r"];
+    let swapped = ["q", FOLDER, "t~u~A", "t~u~B", "r"];
+    let mock = Mock::new(vec![
+        (200, ordered_sections(10, &order)),
+        (200, ordered_sections(11, &swapped)),
+    ]);
+    let state = pins(&mock).move_folder("t~u~A", FOLDER).await.unwrap();
+    assert_eq!(state.order, swapped);
+    let requests = sent(&mock);
+    assert_eq!(requests[1].0, "POST");
+    assert_eq!(
+        requests[1].2.as_ref().unwrap()["actions"],
+        json!([{"action": "ReorderFolders", "newFoldersOrder": swapped}])
+    );
+}
+
+#[tokio::test]
+async fn move_folder_onto_itself_sends_nothing() {
+    let mock = Mock::new(vec![(200, ordered_sections(10, &["t~u~A", "t~u~B"]))]);
+    pins(&mock).move_folder("t~u~A", "t~u~A").await.unwrap();
+    assert_eq!(sent(&mock).len(), 1);
+}

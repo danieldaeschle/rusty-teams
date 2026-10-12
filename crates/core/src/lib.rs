@@ -89,8 +89,8 @@ pub use error::{Error, Result};
 pub use events::CoreEvent;
 pub use external_image::external_image_url;
 pub use folders::{
-    BoxFuture, ChatFolder, ChatsvcFolderSource, FolderKind, FolderSource, store_section_settings,
-    stored_section_settings,
+    BoxFuture, ChatFolder, ChatsvcFolderSource, FolderChange, FolderKind, FolderSource,
+    store_section_settings, stored_section_settings,
 };
 pub use graph::{
     DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,

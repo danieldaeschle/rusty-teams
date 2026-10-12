@@ -11,8 +11,8 @@ use serde_json::json;
 use store::{ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord};
 use teams_core::{
     Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
-    DeltaPage, Error, FolderKind, FolderSource, MentionCandidate, MentionInput, MentionTarget,
-    PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
+    DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
+    MentionTarget, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
 };
 
 const ME: &str = "user-me";
@@ -2380,6 +2380,96 @@ impl FolderSource for FakeFolders {
             Ok(state.clone())
         })
     }
+
+    fn change_folders(&self, change: FolderChange) -> BoxFuture<'_, Result<Vec<ChatFolder>>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!("{change:?}"));
+            let mut state = self.state.lock().unwrap();
+            match change {
+                FolderChange::Create { name } => state.push(ChatFolder {
+                    id: name.clone(),
+                    name,
+                    kind: FolderKind::UserCreated,
+                    expanded: true,
+                    conversation_ids: Vec::new(),
+                }),
+                FolderChange::Rename { folder_id, name } => {
+                    state
+                        .iter_mut()
+                        .find(|folder| folder.id == folder_id)
+                        .unwrap()
+                        .name = name;
+                }
+                FolderChange::Delete { folder_id } => state.retain(|folder| folder.id != folder_id),
+                FolderChange::Move {
+                    folder_id,
+                    target_folder_id,
+                } => {
+                    let source = state
+                        .iter()
+                        .position(|folder| folder.id == folder_id)
+                        .unwrap();
+                    let target = state
+                        .iter()
+                        .position(|folder| folder.id == target_folder_id)
+                        .unwrap();
+                    state.swap(source, target);
+                }
+            }
+            Ok(state.clone())
+        })
+    }
+}
+
+#[tokio::test]
+async fn folder_create_rename_move_and_delete_update_the_cache() {
+    let fake = Arc::new(Fake::default());
+    let source = FakeFolders::new();
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    engine.refresh_folders().await.unwrap();
+    let mut events = engine.subscribe();
+    let names = |engine: &SyncEngine<_>| -> Vec<String> {
+        engine
+            .chat_folders()
+            .unwrap()
+            .into_iter()
+            .map(|folder| folder.name)
+            .collect()
+    };
+
+    engine
+        .change_folders(FolderChange::Create {
+            name: "todo".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(names(&engine), ["fav", "work", "todo"]);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::FoldersChanged);
+
+    engine
+        .change_folders(FolderChange::Rename {
+            folder_id: "todo".into(),
+            name: "later".into(),
+        })
+        .await
+        .unwrap();
+    engine
+        .change_folders(FolderChange::Move {
+            folder_id: "todo".into(),
+            target_folder_id: "work".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(names(&engine), ["fav", "later", "work"]);
+
+    engine
+        .change_folders(FolderChange::Delete {
+            folder_id: "work".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(names(&engine), ["fav", "later"]);
+    assert_eq!(source.calls.lock().unwrap().len(), 4);
 }
 
 #[tokio::test]

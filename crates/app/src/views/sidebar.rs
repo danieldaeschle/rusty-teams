@@ -5,7 +5,7 @@ use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -17,10 +17,11 @@ use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::activity_panel::ActivityPanel;
 use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
+use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, dot, icon, page_header, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
-use crate::data::{Directory, FolderKind};
+use crate::data::{Directory, FolderKind, PENDING_FOLDER_PREFIX};
 use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
@@ -236,6 +237,167 @@ fn chat_menu(
         );
     }
     popup
+}
+
+#[derive(Clone)]
+struct SectionMenuTarget {
+    id: String,
+    name: String,
+    user_created: bool,
+    previous_id: Option<String>,
+    next_id: Option<String>,
+    movable: bool,
+}
+
+fn section_menu_targets(sections: &[Section], directory: &Directory) -> Vec<SectionMenuTarget> {
+    let movable = |section: &Section| {
+        directory
+            .folders
+            .iter()
+            .any(|folder| folder.id == section.id)
+            && !section.id.starts_with(PENDING_FOLDER_PREFIX)
+    };
+    sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| SectionMenuTarget {
+            id: section.id.clone(),
+            name: section.name.clone(),
+            user_created: section.kind == SectionKind::Folder && movable(section),
+            previous_id: sections[..index]
+                .iter()
+                .rev()
+                .find(|other| movable(other))
+                .map(|other| other.id.clone()),
+            next_id: sections[index + 1..]
+                .iter()
+                .find(|other| movable(other))
+                .map(|other| other.id.clone()),
+            movable: movable(section),
+        })
+        .collect()
+}
+
+fn new_section_item(state: &Entity<AppState>) -> PopupMenuItem {
+    let state = state.clone();
+    PopupMenuItem::new("New section")
+        .icon(menu_icon(IconName::Plus))
+        .on_click(move |_, window, cx| {
+            open_section_name_dialog(state.clone(), SectionNameTarget::New, window, cx);
+        })
+}
+
+fn move_section_item(
+    state: &Entity<AppState>,
+    label: &'static str,
+    glyph: IconName,
+    folder_id: &str,
+    target_id: Option<&String>,
+) -> PopupMenuItem {
+    let state = state.clone();
+    let folder_id = folder_id.to_owned();
+    let target_id = target_id.cloned();
+    PopupMenuItem::new(label)
+        .icon(menu_icon(glyph))
+        .disabled(target_id.is_none())
+        .on_click(move |_, _, cx| {
+            if let Some(target_id) = &target_id {
+                state.update(cx, |state, cx| {
+                    state.move_section(&folder_id, target_id, cx)
+                });
+            }
+        })
+}
+
+fn section_menu(
+    popup: PopupMenu,
+    state: &Entity<AppState>,
+    target: &SectionMenuTarget,
+) -> PopupMenu {
+    let mut popup = popup;
+    if target.user_created {
+        let rename_state = state.clone();
+        let rename_target = SectionNameTarget::Rename {
+            folder_id: target.id.clone(),
+            name: target.name.clone(),
+        };
+        popup = popup.item(
+            PopupMenuItem::new("Rename section")
+                .icon(menu_icon(IconName::Pencil))
+                .on_click(move |_, window, cx| {
+                    open_section_name_dialog(
+                        rename_state.clone(),
+                        rename_target.clone(),
+                        window,
+                        cx,
+                    );
+                }),
+        );
+    }
+    if target.movable {
+        popup = popup
+            .item(move_section_item(
+                state,
+                "Move up",
+                IconName::ArrowUp,
+                &target.id,
+                target.previous_id.as_ref(),
+            ))
+            .item(move_section_item(
+                state,
+                "Move down",
+                IconName::ArrowDown,
+                &target.id,
+                target.next_id.as_ref(),
+            ))
+            .separator();
+    }
+    popup = popup.item(new_section_item(state));
+    if target.user_created {
+        let delete_state = state.clone();
+        let (folder_id, name) = (target.id.clone(), target.name.clone());
+        popup = popup.separator().item(
+            PopupMenuItem::element(|_, _| {
+                div().text_color(theme::red_soft()).child("Delete section")
+            })
+            .icon(icon(IconName::Trash, MENU_ICON_SIZE, theme::red_soft()))
+            .on_click(move |_, window, cx| {
+                confirm_delete_section(&delete_state, &folder_id, &name, window, cx);
+            }),
+        );
+    }
+    popup
+}
+
+fn confirm_delete_section(
+    state: &Entity<AppState>,
+    folder_id: &str,
+    name: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let state = state.clone();
+    let folder_id = folder_id.to_owned();
+    let heading = format!("Delete section \"{}\"?", truncated(name, TITLE_LIMIT));
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let state = state.clone();
+        let folder_id = folder_id.clone();
+        let cancel = Button::new("delete-section-cancel")
+            .label("Cancel")
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let delete = Button::new("delete-section-confirm")
+            .label("Delete")
+            .danger()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |state, cx| state.delete_section(&folder_id, cx));
+                window.close_dialog(cx);
+            });
+        alert
+            .title(heading.clone())
+            .description("Chats in it move back to Chats.")
+            .footer(DialogFooter::new().child(cancel).child(delete))
+            .on_ok(|_, _, _| false)
+    });
 }
 
 fn leave_description(member_count: usize) -> String {
@@ -524,6 +686,17 @@ impl SidebarView {
             }))
     }
 
+    fn chat_list_menu_button(&self) -> impl IntoElement {
+        let state = self.state.clone();
+        Button::new("chat-list-more")
+            .icon(IconName::Ellipsis)
+            .ghost()
+            .size(px(NEW_CHAT_BUTTON_SIZE))
+            .rounded(px(8.))
+            .tooltip("More options")
+            .dropdown_menu(move |menu, _, _| menu.item(new_section_item(&state)))
+    }
+
     fn draft_row(&self) -> impl IntoElement {
         h_flex()
             .id("new-chat-draft")
@@ -567,10 +740,16 @@ impl SidebarView {
             )
     }
 
-    fn section_header(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
+    fn section_header(
+        &self,
+        section: &Section,
+        menu: SectionMenuTarget,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let drop_target = matches!(section.kind, SectionKind::Favorites | SectionKind::Folder)
             .then(|| section.id.clone());
         let toggle_id = section.id.clone();
+        let menu_state = self.state.clone();
         h_flex()
             .id(SharedString::from(format!("section-{}", section.id)))
             .h(px(SECTION_HEIGHT))
@@ -628,6 +807,7 @@ impl SidebarView {
                 this.state
                     .update(cx, |state, cx| state.toggle_collapsed(&id, cx));
             }))
+            .context_menu(move |popup, _, _| section_menu(popup, &menu_state, &menu))
     }
 
     fn see_more_row(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
@@ -822,7 +1002,7 @@ impl SidebarView {
 
     fn chats_body(&self, window_height: f32, cx: &mut Context<Self>) -> AnyElement {
         let proposal_agents = crate::agent_api::pending_agents(cx);
-        let (sections, menu, local_previews) = {
+        let (sections, section_menus, menu, local_previews) = {
             let state = self.state.read(cx);
             let now = Utc::now();
             let offset = Local::now().offset().fix();
@@ -847,7 +1027,8 @@ impl SidebarView {
                     .collect(),
                 favorites_id: state.directory.favorites().map(|folder| folder.id.clone()),
             };
-            (sections, menu, state.local_previews.clone())
+            let section_menus = section_menu_targets(&sections, &state.directory);
+            (sections, section_menus, menu, state.local_previews.clone())
         };
 
         let top = -f32::from(self.chats_scroll.offset().y);
@@ -876,9 +1057,9 @@ impl SidebarView {
             list = list.child(self.draft_row());
             y += ROW_HEIGHT;
         }
-        for section in &sections {
+        for (section, section_menu) in sections.iter().zip(section_menus) {
             list = with_spacer(list, &mut skipped_height);
-            list = list.child(self.section_header(section, cx));
+            list = list.child(self.section_header(section, section_menu, cx));
             y += SECTION_GAP + SECTION_HEIGHT;
             if section.collapsed {
                 continue;
@@ -1496,7 +1677,11 @@ impl Render for SidebarView {
             SidebarTab::Saved => self.saved_panel.clone().into_any_element(),
         };
         let header = match self.tab {
-            SidebarTab::Chats => Some(page_header(self.tab.title()).child(self.new_chat_button(cx))),
+            SidebarTab::Chats => Some(
+                page_header(self.tab.title())
+                    .child(self.chat_list_menu_button())
+                    .child(self.new_chat_button(cx)),
+            ),
             SidebarTab::Channels | SidebarTab::Calls => Some(page_header(self.tab.title())),
             SidebarTab::Activity | SidebarTab::Saved => None,
         };

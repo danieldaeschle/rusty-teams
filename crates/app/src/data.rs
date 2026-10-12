@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::{Image, ImageFormat};
 use store::{ChatRecord, Store};
 
-use teams_core::{Activity, Availability, ChatSectionSettings};
+use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange};
 use tokio::sync::oneshot;
 
 use crate::backend::Engine;
@@ -335,7 +335,43 @@ impl Directory {
             folder.conversation_ids.push(conversation_id.to_owned());
         }
     }
+
+    pub fn apply_folder_change(&mut self, change: &FolderChange) {
+        let position =
+            |folders: &[FolderInfo], id: &str| folders.iter().position(|folder| folder.id == id);
+        match change {
+            FolderChange::Create { name } => self.folders.push(FolderInfo {
+                id: format!("{PENDING_FOLDER_PREFIX}{name}"),
+                name: name.clone(),
+                kind: FolderKind::UserCreated,
+                expanded: None,
+                conversation_ids: Vec::new(),
+            }),
+            FolderChange::Rename { folder_id, name } => {
+                if let Some(index) = position(&self.folders, folder_id) {
+                    self.folders[index].name = name.clone();
+                }
+            }
+            FolderChange::Delete { folder_id } => {
+                self.folders.retain(|folder| folder.id != *folder_id)
+            }
+            FolderChange::Move {
+                folder_id,
+                target_folder_id,
+            } => {
+                if let (Some(source), Some(target)) = (
+                    position(&self.folders, folder_id),
+                    position(&self.folders, target_folder_id),
+                ) {
+                    let moved = self.folders.remove(source);
+                    self.folders.insert(target, moved);
+                }
+            }
+        }
+    }
 }
+
+pub const PENDING_FOLDER_PREFIX: &str = "pending-section:";
 
 pub fn image_format(content_type: &str) -> ImageFormat {
     let lowered = content_type.to_ascii_lowercase();
@@ -600,6 +636,47 @@ mod tests {
         assert_eq!(directory.folders[1].conversation_ids, vec!["b", "a"]);
         directory.assign("a", None);
         assert!(directory.folder_of("a").is_none());
+    }
+
+    #[test]
+    fn folder_changes_apply_locally_like_teams() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &["a"]),
+                folder("work", FolderKind::UserCreated, &["b"]),
+                folder("todo", FolderKind::UserCreated, &[]),
+            ],
+            ..Default::default()
+        };
+        let order = |directory: &Directory| -> Vec<String> {
+            directory
+                .folders
+                .iter()
+                .map(|folder| folder.id.clone())
+                .collect()
+        };
+        directory.apply_folder_change(&FolderChange::Move {
+            folder_id: "todo".into(),
+            target_folder_id: "work".into(),
+        });
+        assert_eq!(order(&directory), ["fav", "todo", "work"]);
+        directory.apply_folder_change(&FolderChange::Move {
+            folder_id: "fav".into(),
+            target_folder_id: "todo".into(),
+        });
+        assert_eq!(order(&directory), ["todo", "fav", "work"]);
+        directory.apply_folder_change(&FolderChange::Rename {
+            folder_id: "work".into(),
+            name: "Job".into(),
+        });
+        assert_eq!(directory.folders[2].name, "Job");
+        directory.apply_folder_change(&FolderChange::Delete {
+            folder_id: "work".into(),
+        });
+        assert!(directory.folder_of("b").is_none());
+        directory.apply_folder_change(&FolderChange::Create { name: "New".into() });
+        assert_eq!(directory.folders[2].name, "New");
+        assert!(directory.folders[2].id.starts_with(PENDING_FOLDER_PREFIX));
     }
 
     #[test]
