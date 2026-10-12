@@ -120,7 +120,8 @@ pub(super) fn ensure_success(answer: &ApiResponse) -> Result<()> {
 pub(super) fn describe_answer(answer: &ApiResponse) -> String {
     let shape = match &answer.body {
         Value::Object(fields) => {
-            let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+            let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+            keys.sort_unstable();
             format!("object with keys [{}]", keys.join(", "))
         }
         Value::Array(items) => format!("array of {} items", items.len()),
