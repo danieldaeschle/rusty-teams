@@ -133,6 +133,7 @@ pub struct AppState {
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
     pub translation: TranslationState,
+    pub section_changes: crate::section_actions::SectionChanges,
 }
 
 pub struct AppHandle(pub Entity<AppState>);
@@ -233,6 +234,7 @@ impl AppState {
             live_meetings: HashMap::new(),
             live_refreshing: HashSet::new(),
             translation: TranslationState::default(),
+            section_changes: crate::section_actions::SectionChanges::default(),
         };
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
@@ -366,6 +368,7 @@ impl AppState {
             .flatten()
             .unwrap_or_default();
         self.directory.folders = data::folders(&self.store, &self.favorite_ids);
+        self.reapply_section_changes();
         self.directory.section_settings = teams_core::stored_section_settings(&self.store);
         self.adopt_folder_expanded();
         self.directory.pinned_channels = data::pinned_channels(&self.store);

@@ -155,6 +155,7 @@ struct FolderWrite {
     method: Method,
     folder_id: Option<String>,
     fields: Value,
+    answer_is_state: bool,
 }
 
 impl FolderWrite {
@@ -163,6 +164,16 @@ impl FolderWrite {
             method: Method::Post,
             folder_id: None,
             fields: json!({"actions": actions}),
+            answer_is_state: true,
+        }
+    }
+
+    fn reread(method: Method, folder_id: Option<&str>, fields: Value) -> Self {
+        FolderWrite {
+            method,
+            folder_id: folder_id.map(str::to_owned),
+            fields,
+            answer_is_state: false,
         }
     }
 
@@ -258,11 +269,11 @@ impl<T: CsaTransport> Pins<T> {
 
     pub async fn create_folder(&self, name: &str) -> Result<Folders> {
         self.write(|_| {
-            Ok(Some(FolderWrite {
-                method: Method::Post,
-                folder_id: None,
-                fields: json!({"folderName": name, "actions": [{"action": "AddFolder"}]}),
-            }))
+            Ok(Some(FolderWrite::reread(
+                Method::Post,
+                None,
+                json!({"folderName": name, "actions": [{"action": "AddFolder"}]}),
+            )))
         })
         .await
     }
@@ -272,11 +283,11 @@ impl<T: CsaTransport> Pins<T> {
             if state.user_created(folder_id)?.name == name {
                 return Ok(None);
             }
-            Ok(Some(FolderWrite {
-                method: Method::Put,
-                folder_id: Some(folder_id.to_owned()),
-                fields: json!({"folderName": name}),
-            }))
+            Ok(Some(FolderWrite::reread(
+                Method::Put,
+                Some(folder_id),
+                json!({"folderName": name}),
+            )))
         })
         .await
     }
@@ -287,11 +298,11 @@ impl<T: CsaTransport> Pins<T> {
                 return Ok(None);
             }
             state.user_created(folder_id)?;
-            Ok(Some(FolderWrite {
-                method: Method::Delete,
-                folder_id: Some(folder_id.to_owned()),
-                fields: json!({}),
-            }))
+            Ok(Some(FolderWrite::reread(
+                Method::Delete,
+                Some(folder_id),
+                json!({}),
+            )))
         })
         .await
     }
@@ -368,7 +379,9 @@ impl<T: CsaTransport> Pins<T> {
             match answer.status {
                 200..=299 => {
                     return match parse_folders(&answer.body) {
-                        Ok(current) if is_full_state(&answer.body) => Ok(current),
+                        Ok(current) if write.answer_is_state && is_full_state(&answer.body) => {
+                            Ok(current)
+                        }
                         _ => self.folders().await,
                     };
                 }
@@ -465,11 +478,7 @@ mod tests {
 
     #[test]
     fn write_body_puts_the_lock_before_the_fields() {
-        let write = FolderWrite {
-            method: Method::Put,
-            folder_id: Some("a".into()),
-            fields: json!({"folderName": "B"}),
-        };
+        let write = FolderWrite::reread(Method::Put, Some("a"), json!({"folderName": "B"}));
         assert_eq!(
             write.body(3),
             json!({

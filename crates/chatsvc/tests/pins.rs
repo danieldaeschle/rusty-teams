@@ -533,9 +533,11 @@ async fn create_folder_posts_add_folder_with_the_name() {
     let mock = Mock::new(vec![
         (200, sections(10, &[], &[])),
         (200, sections(11, &[("new", &[])], &[])),
+        (200, sections(11, &[("new", &[])], &[])),
     ]);
     let state = pins(&mock).create_folder("zz").await.unwrap();
     assert_eq!(state.folders.len(), 2);
+    assert_eq!(sent(&mock)[2].0, "GET");
     let requests = sent(&mock);
     assert_eq!(requests[1].0, "POST");
     assert_eq!(requests[1].1, format!("{FOLDER_URL}{FOLDER_QUERY}"));
@@ -552,23 +554,51 @@ async fn create_folder_posts_add_folder_with_the_name() {
 }
 
 #[tokio::test]
-async fn create_folder_rereads_after_a_partial_answer() {
-    let mut partial = sections(11, &[("new", &[])], &[]);
+async fn folder_create_rename_delete_ignore_a_trimmed_answer_and_reread() {
+    let full = || sections(11, &[("t~u~A", &[]), ("t~u~B", &[])], &[]);
+    let trimmed = json!({"folderHierarchyVersion": 11, "conversationFolders": []});
+    for operation in ["create", "rename", "delete"] {
+        let mock = Mock::new(vec![
+            (200, sections(10, &[("t~u~A", &[]), ("t~u~B", &[])], &[])),
+            (200, trimmed.clone()),
+            (200, full()),
+        ]);
+        let pins = pins(&mock);
+        let state = match operation {
+            "create" => pins.create_folder("zz").await,
+            "rename" => pins.rename_folder("t~u~A", "x").await,
+            _ => pins.delete_folder("t~u~A").await,
+        }
+        .unwrap();
+        assert_eq!(state.folders.len(), 3, "{operation}");
+        assert_eq!(sent(&mock).len(), 3, "{operation}");
+    }
+}
+
+#[tokio::test]
+async fn folder_action_posts_still_take_a_full_answer_as_state() {
+    let mut partial = sections(11, &[("t~u~B", &["c"])], &[]);
     partial["isPartialResponse"] = json!(true);
     let mock = Mock::new(vec![
-        (200, sections(10, &[], &[])),
+        (200, sections(10, &[("t~u~B", &[])], &[])),
         (200, partial),
-        (200, sections(11, &[("t~u~A", &[]), ("new", &[])], &[])),
+        (200, sections(11, &[("t~u~B", &["c"])], &[])),
     ]);
-    let state = pins(&mock).create_folder("zz").await.unwrap();
+    pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
     assert_eq!(sent(&mock).len(), 3);
-    assert_eq!(state.folders.len(), 3);
+    let idle = Mock::new(vec![
+        (200, sections(10, &[("t~u~B", &[])], &[])),
+        (200, sections(11, &[("t~u~B", &["c"])], &[])),
+    ]);
+    pins(&idle).move_to_folder("c", "t~u~B").await.unwrap();
+    assert_eq!(sent(&idle).len(), 2);
 }
 
 #[tokio::test]
 async fn rename_folder_puts_the_name_on_the_folder_url() {
     let mock = Mock::new(vec![
         (200, sections(10, &[("t~u~A", &[])], &[])),
+        (200, sections(11, &[("t~u~A", &[])], &[])),
         (200, sections(11, &[("t~u~A", &[])], &[])),
     ]);
     pins(&mock).rename_folder("t~u~A", "Todo").await.unwrap();
@@ -599,6 +629,7 @@ async fn rename_or_delete_of_a_system_folder_sends_nothing() {
 async fn delete_folder_sends_delete_with_only_the_lock() {
     let mock = Mock::new(vec![
         (200, sections(10, &[("t~u~A", &["c"])], &[])),
+        (200, json!({})),
         (200, sections(11, &[], &[])),
     ]);
     let state = pins(&mock).delete_folder("t~u~A").await.unwrap();

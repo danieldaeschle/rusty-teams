@@ -21,7 +21,7 @@ use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, dot, icon, page_header, unread_marker};
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
-use crate::data::{Directory, FolderKind, PENDING_FOLDER_PREFIX};
+use crate::data::{Directory, is_pending_folder};
 use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
@@ -247,15 +247,20 @@ struct SectionMenuTarget {
     previous_id: Option<String>,
     next_id: Option<String>,
     movable: bool,
+    read_only: bool,
 }
 
-fn section_menu_targets(sections: &[Section], directory: &Directory) -> Vec<SectionMenuTarget> {
+fn section_menu_targets(
+    sections: &[Section],
+    directory: &Directory,
+    read_only: bool,
+) -> Vec<SectionMenuTarget> {
     let movable = |section: &Section| {
         directory
             .folders
             .iter()
             .any(|folder| folder.id == section.id)
-            && !section.id.starts_with(PENDING_FOLDER_PREFIX)
+            && !is_pending_folder(&section.id)
     };
     sections
         .iter()
@@ -274,14 +279,26 @@ fn section_menu_targets(sections: &[Section], directory: &Directory) -> Vec<Sect
                 .find(|other| movable(other))
                 .map(|other| other.id.clone()),
             movable: movable(section),
+            read_only,
         })
         .collect()
 }
 
-fn new_section_item(state: &Entity<AppState>) -> PopupMenuItem {
+fn drop_target(section: &Section) -> Option<Option<String>> {
+    if is_pending_folder(&section.id) {
+        return None;
+    }
+    Some(
+        matches!(section.kind, SectionKind::Favorites | SectionKind::Folder)
+            .then(|| section.id.clone()),
+    )
+}
+
+fn new_section_item(state: &Entity<AppState>, read_only: bool) -> PopupMenuItem {
     let state = state.clone();
     PopupMenuItem::new("New section")
         .icon(menu_icon(IconName::Plus))
+        .disabled(read_only)
         .on_click(move |_, window, cx| {
             open_section_name_dialog(state.clone(), SectionNameTarget::New, window, cx);
         })
@@ -293,13 +310,14 @@ fn move_section_item(
     glyph: IconName,
     folder_id: &str,
     target_id: Option<&String>,
+    read_only: bool,
 ) -> PopupMenuItem {
     let state = state.clone();
     let folder_id = folder_id.to_owned();
     let target_id = target_id.cloned();
     PopupMenuItem::new(label)
         .icon(menu_icon(glyph))
-        .disabled(target_id.is_none())
+        .disabled(read_only || target_id.is_none())
         .on_click(move |_, _, cx| {
             if let Some(target_id) = &target_id {
                 state.update(cx, |state, cx| {
@@ -324,6 +342,7 @@ fn section_menu(
         popup = popup.item(
             PopupMenuItem::new("Rename section")
                 .icon(menu_icon(IconName::Pencil))
+                .disabled(target.read_only)
                 .on_click(move |_, window, cx| {
                     open_section_name_dialog(
                         rename_state.clone(),
@@ -342,6 +361,7 @@ fn section_menu(
                 IconName::ArrowUp,
                 &target.id,
                 target.previous_id.as_ref(),
+                target.read_only,
             ))
             .item(move_section_item(
                 state,
@@ -349,10 +369,11 @@ fn section_menu(
                 IconName::ArrowDown,
                 &target.id,
                 target.next_id.as_ref(),
+                target.read_only,
             ))
             .separator();
     }
-    popup = popup.item(new_section_item(state));
+    popup = popup.item(new_section_item(state, target.read_only));
     if target.user_created {
         let delete_state = state.clone();
         let (folder_id, name) = (target.id.clone(), target.name.clone());
@@ -361,6 +382,7 @@ fn section_menu(
                 div().text_color(theme::red_soft()).child("Delete section")
             })
             .icon(icon(IconName::Trash, MENU_ICON_SIZE, theme::red_soft()))
+            .disabled(target.read_only)
             .on_click(move |_, window, cx| {
                 confirm_delete_section(&delete_state, &folder_id, &name, window, cx);
             }),
@@ -686,15 +708,16 @@ impl SidebarView {
             }))
     }
 
-    fn chat_list_menu_button(&self) -> impl IntoElement {
+    fn chat_list_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
+        let read_only = self.state.read(cx).mode.read_only;
         Button::new("chat-list-more")
             .icon(IconName::Ellipsis)
             .ghost()
             .size(px(NEW_CHAT_BUTTON_SIZE))
             .rounded(px(8.))
             .tooltip("More options")
-            .dropdown_menu(move |menu, _, _| menu.item(new_section_item(&state)))
+            .dropdown_menu(move |menu, _, _| menu.item(new_section_item(&state, read_only)))
     }
 
     fn draft_row(&self) -> impl IntoElement {
@@ -746,8 +769,7 @@ impl SidebarView {
         menu: SectionMenuTarget,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let drop_target = matches!(section.kind, SectionKind::Favorites | SectionKind::Folder)
-            .then(|| section.id.clone());
+        let drop_target = drop_target(section);
         let toggle_id = section.id.clone();
         let menu_state = self.state.clone();
         h_flex()
@@ -761,19 +783,22 @@ impl SidebarView {
             .rounded(px(6.))
             .cursor_pointer()
             .hover(|header| header.bg(theme::row_hover()))
-            .drag_over::<DraggedChat>(|style, _, _, _| {
-                style
-                    .bg(theme::drop_background())
-                    .border_1()
-                    .border_dashed()
-                    .border_color(theme::accent())
+            .when_some(drop_target, |header, drop_target| {
+                header
+                    .drag_over::<DraggedChat>(|style, _, _, _| {
+                        style
+                            .bg(theme::drop_background())
+                            .border_1()
+                            .border_dashed()
+                            .border_color(theme::accent())
+                    })
+                    .on_drop(cx.listener(move |this, dragged: &DraggedChat, _, cx| {
+                        let target = drop_target.clone();
+                        this.state.update(cx, |state, cx| {
+                            state.move_chat(&dragged.id, target.as_deref(), cx)
+                        });
+                    }))
             })
-            .on_drop(cx.listener(move |this, dragged: &DraggedChat, _, cx| {
-                let target = drop_target.clone();
-                this.state.update(cx, |state, cx| {
-                    state.move_chat(&dragged.id, target.as_deref(), cx)
-                });
-            }))
             .child(icon(
                 if section.collapsed {
                     IconName::ChevronRight
@@ -1018,16 +1043,11 @@ impl SidebarView {
             let sections = build_sections(&input);
             let menu = MenuContext {
                 state: self.state.clone(),
-                folders: state
-                    .directory
-                    .folders
-                    .iter()
-                    .filter(|folder| folder.kind == FolderKind::UserCreated)
-                    .map(|folder| (folder.id.clone(), folder.name.clone()))
-                    .collect(),
+                folders: state.directory.move_targets(),
                 favorites_id: state.directory.favorites().map(|folder| folder.id.clone()),
             };
-            let section_menus = section_menu_targets(&sections, &state.directory);
+            let section_menus =
+                section_menu_targets(&sections, &state.directory, state.mode.read_only);
             (sections, section_menus, menu, state.local_previews.clone())
         };
 
@@ -1679,7 +1699,7 @@ impl Render for SidebarView {
         let header = match self.tab {
             SidebarTab::Chats => Some(
                 page_header(self.tab.title())
-                    .child(self.chat_list_menu_button())
+                    .child(self.chat_list_menu_button(cx))
                     .child(self.new_chat_button(cx)),
             ),
             SidebarTab::Channels | SidebarTab::Calls => Some(page_header(self.tab.title())),
@@ -1702,8 +1722,40 @@ mod tests {
     use std::collections::HashSet;
 
     use super::{
-        leave_description, parse_collapsed_teams, serialize_collapsed_teams, team_expanded,
+        drop_target, leave_description, parse_collapsed_teams, serialize_collapsed_teams,
+        team_expanded,
     };
+    use crate::data::PENDING_FOLDER_PREFIX;
+    use crate::sidebar_model::{Section, SectionKind};
+
+    fn section(id: &str, kind: SectionKind) -> Section {
+        Section {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            kind,
+            collapsed: false,
+            count: 0,
+            unread_chats: 0,
+            items: Vec::new(),
+            hidden_count: 0,
+            list_expanded: false,
+            show_empty_hint: false,
+        }
+    }
+
+    #[test]
+    fn pending_sections_take_no_dropped_chats() {
+        let pending = format!("{PENDING_FOLDER_PREFIX}1");
+        assert_eq!(drop_target(&section(&pending, SectionKind::Folder)), None);
+        assert_eq!(
+            drop_target(&section("work", SectionKind::Folder)),
+            Some(Some("work".to_owned()))
+        );
+        assert_eq!(
+            drop_target(&section("recent", SectionKind::Others)),
+            Some(None)
+        );
+    }
 
     #[test]
     fn teams_start_expanded() {

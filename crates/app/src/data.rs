@@ -336,17 +336,39 @@ impl Directory {
         }
     }
 
-    pub fn apply_folder_change(&mut self, change: &FolderChange) {
+    pub fn move_targets(&self) -> Vec<(String, String)> {
+        self.folders
+            .iter()
+            .filter(|folder| {
+                folder.kind == FolderKind::UserCreated && !is_pending_folder(&folder.id)
+            })
+            .map(|folder| (folder.id.clone(), folder.name.clone()))
+            .collect()
+    }
+
+    pub fn apply_folder_change(&mut self, change: &FolderChange, created_id: &str) {
         let position =
             |folders: &[FolderInfo], id: &str| folders.iter().position(|folder| folder.id == id);
         match change {
-            FolderChange::Create { name } => self.folders.push(FolderInfo {
-                id: format!("{PENDING_FOLDER_PREFIX}{name}"),
-                name: name.clone(),
-                kind: FolderKind::UserCreated,
-                expanded: None,
-                conversation_ids: Vec::new(),
-            }),
+            FolderChange::Create { name } => {
+                let index = position(&self.folders, created_id).unwrap_or_else(|| {
+                    self.folders
+                        .iter()
+                        .position(|folder| folder.kind == FolderKind::Recent)
+                        .unwrap_or(0)
+                });
+                self.folders.retain(|folder| folder.id != created_id);
+                self.folders.insert(
+                    index.min(self.folders.len()),
+                    FolderInfo {
+                        id: created_id.to_owned(),
+                        name: name.clone(),
+                        kind: FolderKind::UserCreated,
+                        expanded: None,
+                        conversation_ids: Vec::new(),
+                    },
+                );
+            }
             FolderChange::Rename { folder_id, name } => {
                 if let Some(index) = position(&self.folders, folder_id) {
                     self.folders[index].name = name.clone();
@@ -372,6 +394,10 @@ impl Directory {
 }
 
 pub const PENDING_FOLDER_PREFIX: &str = "pending-section:";
+
+pub fn is_pending_folder(folder_id: &str) -> bool {
+    folder_id.starts_with(PENDING_FOLDER_PREFIX)
+}
 
 pub fn image_format(content_type: &str) -> ImageFormat {
     let lowered = content_type.to_ascii_lowercase();
@@ -645,6 +671,7 @@ mod tests {
                 folder("fav", FolderKind::Favorites, &["a"]),
                 folder("work", FolderKind::UserCreated, &["b"]),
                 folder("todo", FolderKind::UserCreated, &[]),
+                folder("recent", FolderKind::Recent, &[]),
             ],
             ..Default::default()
         };
@@ -655,28 +682,70 @@ mod tests {
                 .map(|folder| folder.id.clone())
                 .collect()
         };
-        directory.apply_folder_change(&FolderChange::Move {
-            folder_id: "todo".into(),
-            target_folder_id: "work".into(),
-        });
-        assert_eq!(order(&directory), ["fav", "todo", "work"]);
-        directory.apply_folder_change(&FolderChange::Move {
-            folder_id: "fav".into(),
-            target_folder_id: "todo".into(),
-        });
-        assert_eq!(order(&directory), ["todo", "fav", "work"]);
-        directory.apply_folder_change(&FolderChange::Rename {
+        let move_folder = |folder_id: &str, target_folder_id: &str| FolderChange::Move {
+            folder_id: folder_id.into(),
+            target_folder_id: target_folder_id.into(),
+        };
+        directory.apply_folder_change(&move_folder("todo", "work"), "");
+        assert_eq!(order(&directory), ["fav", "todo", "work", "recent"]);
+        directory.apply_folder_change(&move_folder("fav", "todo"), "");
+        assert_eq!(order(&directory), ["todo", "fav", "work", "recent"]);
+        let rename = FolderChange::Rename {
             folder_id: "work".into(),
             name: "Job".into(),
-        });
+        };
+        directory.apply_folder_change(&rename, "");
         assert_eq!(directory.folders[2].name, "Job");
-        directory.apply_folder_change(&FolderChange::Delete {
+        let delete = FolderChange::Delete {
             folder_id: "work".into(),
-        });
+        };
+        directory.apply_folder_change(&delete, "");
         assert!(directory.folder_of("b").is_none());
-        directory.apply_folder_change(&FolderChange::Create { name: "New".into() });
-        assert_eq!(directory.folders[2].name, "New");
-        assert!(directory.folders[2].id.starts_with(PENDING_FOLDER_PREFIX));
+    }
+
+    #[test]
+    fn created_folder_lands_before_recent_and_keeps_its_place_when_reapplied() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &[]),
+                folder("recent", FolderKind::Recent, &[]),
+                folder("muted", FolderKind::Muted, &[]),
+            ],
+            ..Default::default()
+        };
+        let create = FolderChange::Create { name: "New".into() };
+        let pending_id = format!("{PENDING_FOLDER_PREFIX}1");
+        directory.apply_folder_change(&create, &pending_id);
+        directory.apply_folder_change(&create, &pending_id);
+        let ids: Vec<&str> = directory
+            .folders
+            .iter()
+            .map(|folder| folder.id.as_str())
+            .collect();
+        assert_eq!(ids, ["fav", pending_id.as_str(), "recent", "muted"]);
+        let mut bare = Directory::default();
+        bare.apply_folder_change(&create, "x");
+        assert_eq!(bare.folders[0].id, "x");
+    }
+
+    #[test]
+    fn pending_folders_are_no_move_targets() {
+        let directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &[]),
+                folder("work", FolderKind::UserCreated, &[]),
+                folder(
+                    &format!("{PENDING_FOLDER_PREFIX}1"),
+                    FolderKind::UserCreated,
+                    &[],
+                ),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            directory.move_targets(),
+            [("work".to_owned(), "work".to_owned())]
+        );
     }
 
     #[test]
