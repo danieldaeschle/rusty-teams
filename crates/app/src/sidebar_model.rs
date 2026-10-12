@@ -313,8 +313,16 @@ pub fn wants_older_chats(
     viewport_bottom: f32,
     scroll_top: f32,
     last_trigger_top: Option<f32>,
+    loading: bool,
 ) -> bool {
-    others_end.is_some_and(|end| end <= viewport_bottom) && last_trigger_top != Some(scroll_top)
+    !loading
+        && others_end.is_some_and(|end| end <= viewport_bottom)
+        && last_trigger_top != Some(scroll_top)
+}
+
+pub fn older_chats_trigger_resets(previous: (bool, bool), current: (bool, bool)) -> bool {
+    let ((had_more, was_loading), (has_more, is_loading)) = (previous, current);
+    (was_loading && !is_loading) || (!had_more && has_more)
 }
 
 pub fn visible_chat_ids(sections: &[Section]) -> Vec<&str> {
@@ -960,11 +968,26 @@ mod tests {
 
     #[test]
     fn older_chats_load_only_when_the_end_of_other_chats_is_on_screen_once_per_scroll_position() {
-        assert!(wants_older_chats(Some(900.), 1000., 0., None));
-        assert!(!wants_older_chats(Some(1500.), 1000., 0., None));
-        assert!(!wants_older_chats(None, 1000., 0., None));
-        assert!(!wants_older_chats(Some(900.), 1000., 0., Some(0.)));
-        assert!(wants_older_chats(Some(900.), 1000., 120., Some(0.)));
+        assert!(wants_older_chats(Some(900.), 1000., 0., None, false));
+        assert!(!wants_older_chats(Some(1500.), 1000., 0., None, false));
+        assert!(!wants_older_chats(None, 1000., 0., None, false));
+        assert!(!wants_older_chats(Some(900.), 1000., 0., Some(0.), false));
+        assert!(wants_older_chats(Some(900.), 1000., 120., Some(0.), false));
+    }
+
+    #[test]
+    fn a_running_load_never_consumes_the_trigger() {
+        assert!(!wants_older_chats(Some(900.), 1000., 0., None, true));
+    }
+
+    #[test]
+    fn the_trigger_resets_when_a_load_ends_or_more_chats_appear_but_not_while_idle() {
+        assert!(older_chats_trigger_resets((true, true), (true, false)));
+        assert!(older_chats_trigger_resets((true, true), (false, false)));
+        assert!(older_chats_trigger_resets((false, false), (true, false)));
+        assert!(!older_chats_trigger_resets((true, false), (true, false)));
+        assert!(!older_chats_trigger_resets((true, false), (true, true)));
+        assert!(!older_chats_trigger_resets((false, false), (false, false)));
     }
 
     #[test]

@@ -28,7 +28,7 @@ use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
     SectionInput, SectionKind, Step, build_sections, step_id,
-    visible_channel_ids, wants_older_chats,
+    older_chats_trigger_resets, visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 
@@ -293,6 +293,7 @@ pub struct SidebarView {
     hidden_teams_open: bool,
     chats_scroll: ScrollHandle,
     older_chats_trigger_top: Cell<Option<f32>>,
+    older_chats_seen: Cell<(bool, bool)>,
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
     _subscription: Subscription,
@@ -407,6 +408,7 @@ impl SidebarView {
             hidden_teams_open: false,
             chats_scroll: ScrollHandle::new(),
             older_chats_trigger_top: Cell::new(None),
+            older_chats_seen: Cell::new((false, false)),
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
             _subscription: subscription,
@@ -938,12 +940,17 @@ impl SidebarView {
             }
         }
         let (has_older, loading_older) = self.state.read(cx).older_chats();
+        let previous = self.older_chats_seen.replace((has_older, loading_older));
+        if older_chats_trigger_resets(previous, (has_older, loading_older)) {
+            self.older_chats_trigger_top.set(None);
+        }
         if has_older
             && wants_older_chats(
                 others_end,
                 top + height,
                 top,
                 self.older_chats_trigger_top.get(),
+                loading_older,
             )
         {
             self.older_chats_trigger_top.set(Some(top));

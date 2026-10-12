@@ -70,13 +70,11 @@ impl<R: Remote> SyncEngine<R> {
         let mut continuation = None;
         let states = self.refresh_chat_states().await;
         self.drop_chats_hidden_by_chatsvc(states.as_deref())?;
-        let mut locally = LocallyHidden::load(&self.store);
-        let locally_before = locally.clone();
         let mut page = self.remote.chats_page(self.config.chat_page_size).await?;
         loop {
             refresh.pages += 1;
             refresh.fetched += page.items.len();
-            let (records, hidden) = split_hidden(&page, &my_user_id, &self.chat_states.lock().unwrap(), &mut locally);
+            let (records, hidden) = self.split_page(&page, &my_user_id)?;
             let any_changed = self.any_chat_changed(&records)?;
             self.store.upsert_chats(&records)?;
             kept_ids.extend(records.iter().map(|record| record.id.clone()));
@@ -94,9 +92,6 @@ impl<R: Remote> SyncEngine<R> {
             page = self.remote.chats_at(&link).await?;
         }
         self.store.remove_chats(&hidden_ids)?;
-        if locally != locally_before {
-            locally.save(&self.store)?;
-        }
         self.apply_muted_chats(states);
         if full {
             if complete {
@@ -125,12 +120,20 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn drop_chats_hidden_by_chatsvc(&self, states: Option<&[ConversationState]>) -> Result<()> {
-        let hidden: Vec<String> = states
+        let reported: Vec<&str> = states
             .unwrap_or_default()
             .iter()
             .filter(|state| state.hidden == Some(true))
-            .map(|state| state.id.clone())
+            .map(|state| state.id.as_str())
             .collect();
+        let now = Utc::now();
+        let hidden: Vec<String> = self.with_locally_hidden(|locally| {
+            reported
+                .iter()
+                .filter(|chat_id| locally.reported_hidden(chat_id, now))
+                .map(|chat_id| (*chat_id).to_owned())
+                .collect()
+        })?;
         self.store.remove_chats(&hidden)?;
         Ok(())
     }
@@ -222,19 +225,9 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn store_older_page(&self, my_user_id: &str, page: &ChatsPage) -> Result<()> {
-        let mut locally = LocallyHidden::load(&self.store);
-        let locally_before = locally.clone();
-        let (records, hidden) = split_hidden(
-            page,
-            my_user_id,
-            &self.chat_states.lock().unwrap(),
-            &mut locally,
-        );
+        let (records, hidden) = self.split_page(page, my_user_id)?;
         self.store.upsert_chats(&records)?;
         self.store.remove_chats(&hidden)?;
-        if locally != locally_before {
-            locally.save(&self.store)?;
-        }
         let muted: Vec<(String, bool)> = {
             let states = self.chat_states.lock().unwrap();
             records
@@ -245,6 +238,23 @@ impl<R: Remote> SyncEngine<R> {
         };
         self.store.apply_muted_states(&muted)?;
         Ok(())
+    }
+
+    fn split_page(
+        &self,
+        page: &ChatsPage,
+        my_user_id: &str,
+    ) -> Result<(Vec<ChatRecord>, Vec<String>)> {
+        let now = Utc::now();
+        self.with_locally_hidden(|locally| {
+            split_hidden(
+                page,
+                my_user_id,
+                &self.chat_states.lock().unwrap(),
+                locally,
+                now,
+            )
+        })
     }
 
     fn any_chat_changed(&self, records: &[ChatRecord]) -> Result<bool> {
@@ -323,11 +333,12 @@ fn split_hidden(
     my_user_id: &str,
     states: &HashMap<String, ConversationState>,
     locally: &mut LocallyHidden,
+    now: DateTime<Utc>,
 ) -> (Vec<ChatRecord>, Vec<String>) {
     let mut records = Vec::new();
     let mut hidden = Vec::new();
     for chat in &page.items {
-        if resolve_hidden(chat, states, locally) {
+        if resolve_hidden(chat, states, locally, now) {
             hidden.push(chat.id.clone());
         } else {
             records.push(chat_record(chat, my_user_id));

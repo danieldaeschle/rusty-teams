@@ -130,6 +130,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) links_backfilled: Mutex<HashSet<String>>,
     pub(crate) chat_states: Mutex<HashMap<String, ConversationState>>,
     pub(crate) chat_paging: Mutex<ChatPaging>,
+    pub(crate) locally_hidden_lock: Mutex<()>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -163,6 +164,7 @@ impl<R: Remote> SyncEngine<R> {
             links_backfilled: Mutex::new(HashSet::new()),
             chat_states: Mutex::new(HashMap::new()),
             chat_paging,
+            locally_hidden_lock: Mutex::new(()),
         }
     }
 

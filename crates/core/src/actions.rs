@@ -7,7 +7,6 @@ use store::MessageRecord;
 
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::{Error, Result};
-use crate::hidden_chats::LocallyHidden;
 use crate::links::LinkPreview;
 use crate::mapping::{chat_record, message_record};
 use crate::markdown::markdown_to_html;
@@ -421,9 +420,12 @@ impl<R: Remote> SyncEngine<R> {
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;
         self.remote.hide_chat(chat_id, &user_id, &tenant_id).await?;
-        let mut locally = LocallyHidden::load(&self.store);
-        locally.insert(chat_id, Utc::now());
-        locally.save(&self.store)?;
+        let hidden_after = self
+            .store
+            .chat(chat_id)?
+            .and_then(|chat| chat.last_message_at)
+            .unwrap_or_else(Utc::now);
+        self.with_locally_hidden(|locally| locally.hide(chat_id, hidden_after))?;
         self.store.remove_chats(&[chat_id.to_owned()])?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
@@ -435,10 +437,8 @@ impl<R: Remote> SyncEngine<R> {
         self.remote
             .unhide_chat(chat_id, &user_id, &tenant_id)
             .await?;
-        let mut locally = LocallyHidden::load(&self.store);
-        if locally.remove(chat_id) {
-            locally.save(&self.store)?;
-        }
+        let now = Utc::now();
+        self.with_locally_hidden(|locally| locally.unhide(chat_id, now))?;
         self.refresh_sidebar_full().await?;
         Ok(())
     }

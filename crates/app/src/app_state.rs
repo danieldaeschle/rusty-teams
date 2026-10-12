@@ -787,7 +787,7 @@ impl AppState {
                 self.refresh_own_status(cx);
                 cx.emit(AppEvent::Status);
             }
-            BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar(cx),
+            BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar_after_sync(cx),
             BackendEvent::Core(
                 CoreEvent::MessagesChanged { conversation_id }
                 | CoreEvent::ReceiptsChanged { conversation_id },

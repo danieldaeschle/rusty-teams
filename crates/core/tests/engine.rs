@@ -1145,6 +1145,24 @@ async fn a_chat_hidden_in_the_app_stays_hidden_until_a_newer_message_arrives() {
 }
 
 #[tokio::test]
+async fn undo_after_chatsvc_reported_the_hide_keeps_the_chat_visible() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.hide_chat(CHAT).await.unwrap();
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push((CHAT.to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.sidebar().unwrap().chats.is_empty());
+
+    engine.unhide_chat(CHAT).await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
+}
+
+#[tokio::test]
 async fn deep_chats_that_chatsvc_reports_hidden_are_removed_on_refresh() {
     let fake = Arc::new(Fake::default());
     *fake.chats.lock().unwrap() = numbered_chats(8);
