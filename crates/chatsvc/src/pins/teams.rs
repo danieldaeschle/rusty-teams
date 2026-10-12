@@ -1,3 +1,4 @@
+use percent_encoding::percent_decode_str;
 use serde_json::Value;
 use session::Request;
 
@@ -68,6 +69,12 @@ fn tab_open_url(settings: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn decode_tab_name(name: &str) -> String {
+    percent_decode_str(name)
+        .decode_utf8()
+        .map_or_else(|_| name.to_owned(), |decoded| decoded.into_owned())
+}
+
 fn parse_tab(tab: &Value) -> Option<(i64, ChannelTab)> {
     let definition_id = tab.get("definitionId")?.as_str()?;
     if definition_id == WIKI_DEFINITION_ID {
@@ -82,7 +89,7 @@ fn parse_tab(tab: &Value) -> Option<(i64, ChannelTab)> {
         order,
         ChannelTab {
             id: tab.get("id")?.as_str()?.to_owned(),
-            name: tab.get("name")?.as_str()?.to_owned(),
+            name: decode_tab_name(tab.get("name")?.as_str()?),
             definition_id: definition_id.to_owned(),
             open_url: tab_open_url(settings),
         },
@@ -256,6 +263,24 @@ mod tests {
         assert_eq!(
             (channels[2].notifications, channels[2].followed),
             (None, false)
+        );
+    }
+
+    #[test]
+    fn percent_encoded_tab_names_are_decoded() {
+        let channel = json!({"id": "19:a@thread.tacv2", "tabs": [
+            {"id": "t1", "name": "Lunch%20Order%20Board%20%F0%9F%8D%BD%EF%B8%8F",
+             "definitionId": "com.microsoft.teamspace.tab.web", "order": 1},
+            {"id": "t2", "name": "100% done", "definitionId": "com.microsoft.teamspace.tab.web", "order": 2},
+            {"id": "t3", "name": "Bad%FFbytes", "definitionId": "com.microsoft.teamspace.tab.web", "order": 3}
+        ]});
+        let names: Vec<String> = parse_channel_tabs(&channel)
+            .into_iter()
+            .map(|tab| tab.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["Lunch Order Board \u{1F37D}\u{FE0F}", "100% done", "Bad%FFbytes"]
         );
     }
 

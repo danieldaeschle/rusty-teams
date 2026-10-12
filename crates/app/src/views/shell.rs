@@ -29,7 +29,6 @@ use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::call::{CallMedia, CallWindows};
-use crate::embedded_web::{Overlays, RootFocus};
 use crate::notice::NoticeAction;
 use crate::user_activity::{self, UserInput};
 use crate::notify::{NotificationCenter, selection_for};
@@ -161,7 +160,6 @@ impl AppShell {
             });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
-        cx.set_global(RootFocus(focus_handle.clone()));
         let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
         let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
         let user_input = cx.global::<UserInputHandle>().0.clone();
@@ -591,17 +589,6 @@ impl Render for AppShell {
                 });
             });
         }
-        let panels = self.switcher.is_some()
-            || self.forward_dialog.is_some()
-            || self.image_viewer.is_some()
-            || self.status_dialog.is_some()
-            || self.shortcuts_dialog.is_some()
-            || self.profile_card.is_some()
-            || {
-                let state = self.state.read(cx);
-                state.task_dialog.is_some() || state.status_menu_open
-            };
-        Overlays::update(cx, |overlays| overlays.panels = panels);
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());

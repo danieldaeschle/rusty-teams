@@ -27,7 +27,6 @@ mod demo_input_cards;
 mod demo_library;
 mod demo_profiles;
 mod downloads;
-mod embedded_web;
 mod emoji;
 mod format;
 mod frame_log;
@@ -159,7 +158,6 @@ fn transport(endpoint: Option<&str>, database: Option<&std::path::Path>) -> Arc<
             Some(directory) => directory.join(WEBVIEW_FOLDER),
             None => data_path(WEBVIEW_FOLDER),
         };
-        embedded_web::configure(user_data_folder.clone());
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),

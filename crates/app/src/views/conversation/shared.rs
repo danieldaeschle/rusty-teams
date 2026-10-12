@@ -14,7 +14,6 @@ use crate::channel_files::{
     library_file, shared_items, sorted_entries,
 };
 use crate::downloads::DownloadKey;
-use crate::embedded_web::{self, EmbeddedWeb, EmbeddedWebEvent};
 use crate::notice::short_error;
 use crate::runtime;
 use crate::views::attachment_tray::{display_name, read_attachment};
@@ -73,18 +72,8 @@ impl ConversationView {
         self.pane == ChannelPane::Shared && self.in_feed()
     }
 
-    pub(super) fn web_active(&self) -> bool {
-        self.pane == ChannelPane::Web && self.web.is_some() && self.in_feed()
-    }
-
-    pub(super) fn close_web(&mut self) {
-        self.web = None;
-        self.web_subscription = None;
-    }
-
     pub(super) fn reset_channel_tabs(&mut self, cx: &mut Context<Self>) {
         self.pane = ChannelPane::Posts;
-        self.close_web();
         self.tab_links.clear();
         self.shared = SharedState {
             generation: self.shared.generation + 1,
@@ -118,21 +107,14 @@ impl ConversationView {
         });
         let open = {
             let view = cx.weak_entity();
-            Rc::new(move |index: usize, window: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| this.open_channel_tab(index, window, cx))
+            Rc::new(move |index: usize, _: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| this.open_channel_tab(index, cx))
                     .ok();
             })
         };
-        let active_tab_id = self
-            .web
-            .as_ref()
-            .filter(|_| self.web_active())
-            .map(|web| web.read(cx).tab_id().to_owned());
         Some(render_tab_bar(
             &self.channel_tabs,
             self.pane,
-            active_tab_id.as_deref(),
-            embedded_web::available(),
             available,
             &TabBarActions {
                 select,
@@ -141,54 +123,17 @@ impl ConversationView {
         ))
     }
 
-    fn open_channel_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_channel_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         let (Some(tab), Some(channel_id)) =
             (self.channel_tabs.get(index).cloned(), self.channel_id())
         else {
             return;
         };
         let resolved = self.tab_links.get(&tab.tab_id).map(String::as_str);
-        match tab_action(&tab, embedded_web::available(), resolved) {
-            TabAction::Embed(url) => self.show_web_tab(tab.tab_id, url, window, cx),
+        match tab_action(&tab, resolved) {
             TabAction::Browser(url) => cx.open_url(&url),
             TabAction::ResolveLink => self.resolve_tab_link(tab, channel_id, cx),
         }
-    }
-
-    fn show_web_tab(
-        &mut self,
-        tab_id: String,
-        url: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.web_active()
-            && self
-                .web
-                .as_ref()
-                .is_some_and(|web| web.read(cx).tab_id() == tab_id)
-        {
-            return;
-        }
-        self.close_web();
-        let Some((native, events)) = embedded_web::Native::open(&url, window) else {
-            cx.open_url(&url);
-            return;
-        };
-        let web = cx.new(|cx| {
-            EmbeddedWeb::new(tab_id, url, native, events, self.focus_handle.clone(), cx)
-        });
-        self.web_subscription =
-            Some(cx.subscribe(&web, |this, _, event: &EmbeddedWebEvent, cx| {
-                let EmbeddedWebEvent::Closed { start_url } = event;
-                this.close_web();
-                this.pane = ChannelPane::Posts;
-                cx.open_url(start_url);
-                cx.notify();
-            }));
-        self.web = Some(web);
-        self.pane = ChannelPane::Web;
-        cx.notify();
     }
 
     fn resolve_tab_link(
@@ -231,7 +176,6 @@ impl ConversationView {
             return;
         }
         self.pane = pane;
-        self.close_web();
         if pane == ChannelPane::Shared {
             self.refresh_shared_items(cx);
             if self.shared.path.is_none() {

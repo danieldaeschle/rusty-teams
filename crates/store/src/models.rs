@@ -169,14 +169,6 @@ pub struct ChannelTabRecord {
     pub open_url: Option<String>,
 }
 
-const WEBSITE_DEFINITION_ID: &str = "com.microsoft.teamspace.tab.web";
-
-impl ChannelTabRecord {
-    pub fn is_website(&self) -> bool {
-        self.definition_id == WEBSITE_DEFINITION_ID && self.open_url.is_some()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelLayoutRecord {
     pub channel_id: String,

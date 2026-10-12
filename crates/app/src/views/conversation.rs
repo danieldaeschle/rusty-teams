@@ -47,7 +47,6 @@ use crate::channel_files::DownloadSource;
 use crate::data::{is_one_on_one, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
-use crate::embedded_web::EmbeddedWeb;
 use crate::emoji;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
@@ -186,9 +185,7 @@ pub struct ConversationView {
     pane: ChannelPane,
     channel_tabs: Vec<ChannelTabRecord>,
     tab_links: HashMap<String, String>,
-    web: Option<Entity<EmbeddedWeb>>,
     focus_handle: FocusHandle,
-    web_subscription: Option<Subscription>,
     shared: SharedState,
     demo_library: DemoLibrary,
     new_folder_input: Option<Entity<InputState>>,
@@ -487,9 +484,7 @@ impl ConversationView {
             pane: ChannelPane::Posts,
             channel_tabs: Vec::new(),
             tab_links: HashMap::new(),
-            web: None,
             focus_handle: cx.focus_handle(),
-            web_subscription: None,
             shared: SharedState::default(),
             demo_library: DemoLibrary::default(),
             new_folder_input: None,
@@ -1029,7 +1024,6 @@ impl ConversationView {
         let in_channel = matches!(current.selection, Selection::Channel(_));
         if in_channel {
             self.pane = ChannelPane::Posts;
-            self.close_web();
             match record.reply_to_id.clone() {
                 Some(root_id) => {
                     self.enter_thread_mode(root_id.clone(), cx);
@@ -3075,9 +3069,6 @@ impl ConversationView {
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.web.is_some() && !self.web_active() {
-            self.close_web();
-        }
         let background = theme::surface();
         let mut root = v_flex()
             .flex_1()
@@ -3222,8 +3213,6 @@ impl Render for ConversationView {
             draft.render_empty(&self.app.read(cx).directory, &group_name)
         } else if self.shared_active() {
             self.render_shared(cx)
-        } else if let Some(web) = self.web.clone().filter(|_| self.web_active()) {
-            web.into_any_element()
         } else if empty_channel {
             div()
                 .size_full()

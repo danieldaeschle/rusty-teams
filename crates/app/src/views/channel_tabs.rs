@@ -30,7 +30,6 @@ pub const SHARED_LABEL: &str = "Shared";
 pub enum ChannelPane {
     Posts,
     Shared,
-    Web,
 }
 
 pub type SelectPane = Rc<dyn Fn(ChannelPane, &mut App)>;
@@ -44,18 +43,12 @@ pub struct TabBarActions {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
-    Embed(String),
     Browser(String),
     ResolveLink,
 }
 
-pub fn tab_action(
-    tab: &ChannelTabRecord,
-    embedding: bool,
-    resolved_link: Option<&str>,
-) -> TabAction {
+pub fn tab_action(tab: &ChannelTabRecord, resolved_link: Option<&str>) -> TabAction {
     match (&tab.open_url, resolved_link) {
-        (Some(url), _) if embedding && tab.is_website() => TabAction::Embed(url.clone()),
         (Some(url), _) => TabAction::Browser(url.clone()),
         (None, Some(link)) => TabAction::Browser(link.to_owned()),
         (None, None) => TabAction::ResolveLink,
@@ -129,11 +122,7 @@ fn tab_label(
         })
 }
 
-fn overflow_button(
-    hidden: &[(usize, String, bool)],
-    embedding: bool,
-    actions: &TabBarActions,
-) -> impl IntoElement {
+fn overflow_button(hidden: &[(usize, String)], actions: &TabBarActions) -> impl IntoElement {
     let entries = hidden.to_vec();
     let open = actions.open.clone();
     Button::new("channel-tab-overflow")
@@ -141,15 +130,10 @@ fn overflow_button(
         .compact()
         .label(format!("+{}", hidden.len()))
         .dropdown_menu(move |menu, _, _| {
-            entries.iter().fold(menu, |menu, (index, name, website)| {
+            entries.iter().fold(menu, |menu, (index, name)| {
                 let (open, index) = (open.clone(), *index);
-                let label = if embedding && *website {
-                    name.clone()
-                } else {
-                    format!("{name} {EXTERNAL_ARROW}")
-                };
                 menu.item(
-                    PopupMenuItem::new(label)
+                    PopupMenuItem::new(format!("{name} {EXTERNAL_ARROW}"))
                         .on_click(move |_, window, cx| open(index, window, cx)),
                 )
             })
@@ -159,8 +143,6 @@ fn overflow_button(
 pub fn render_tab_bar(
     tabs: &[ChannelTabRecord],
     pane: ChannelPane,
-    active_tab_id: Option<&str>,
-    embedding: bool,
     available_width: f32,
     actions: &TabBarActions,
 ) -> AnyElement {
@@ -188,16 +170,16 @@ pub fn render_tab_bar(
         tab_label(
             ElementId::NamedInteger("channel-tab".into(), index as u64),
             &tab.name,
-            active_tab_id == Some(tab.tab_id.as_str()),
-            !(embedding && tab.is_website()),
+            false,
+            true,
             move |window, cx| open(index, window, cx),
         )
     });
-    let hidden: Vec<(usize, String, bool)> = tabs
+    let hidden: Vec<(usize, String)> = tabs
         .iter()
         .enumerate()
         .skip(visible)
-        .map(|(index, tab)| (index, tab.name.clone(), tab.is_website()))
+        .map(|(index, tab)| (index, tab.name.clone()))
         .collect();
     h_flex()
         .w_full()
@@ -210,7 +192,7 @@ pub fn render_tab_bar(
         .child(shared)
         .children(configured)
         .when(!hidden.is_empty(), |bar| {
-            bar.child(overflow_button(&hidden, embedding, actions))
+            bar.child(overflow_button(&hidden, actions))
         })
         .into_any_element()
 }
@@ -238,14 +220,9 @@ mod tests {
     }
 
     #[test]
-    fn website_tabs_embed_only_where_the_host_can() {
-        let docs = website("https://docs.example");
+    fn website_tabs_open_in_the_browser() {
         assert_eq!(
-            tab_action(&docs, true, None),
-            TabAction::Embed("https://docs.example".to_owned())
-        );
-        assert_eq!(
-            tab_action(&docs, false, None),
+            tab_action(&website("https://docs.example"), None),
             TabAction::Browser("https://docs.example".to_owned())
         );
     }
@@ -254,7 +231,7 @@ mod tests {
     fn other_tabs_with_a_page_open_it_in_the_browser() {
         let notes = tab("Notes", Some("https://onenote.example/web"));
         assert_eq!(
-            tab_action(&notes, true, None),
+            tab_action(&notes, None),
             TabAction::Browser("https://onenote.example/web".to_owned())
         );
     }
@@ -262,9 +239,9 @@ mod tests {
     #[test]
     fn app_tabs_resolve_their_link_once_and_then_reuse_it() {
         let board = tab("Board", None);
-        assert_eq!(tab_action(&board, true, None), TabAction::ResolveLink);
+        assert_eq!(tab_action(&board, None), TabAction::ResolveLink);
         assert_eq!(
-            tab_action(&board, true, Some("https://teams.example/l/tab")),
+            tab_action(&board, Some("https://teams.example/l/tab")),
             TabAction::Browser("https://teams.example/l/tab".to_owned())
         );
     }
