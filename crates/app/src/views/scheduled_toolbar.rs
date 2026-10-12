@@ -4,6 +4,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::*;
 
 use super::message_actions::{Action, HoverChange, bar_button};
+use super::toolbar_placement::{TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
 use crate::theme;
 
@@ -36,16 +37,13 @@ pub fn scheduled_toolbar(menu: ScheduledMenu) -> AnyElement {
         delete,
         hover,
     } = menu;
-    h_flex()
-        .id(element_id("scheduled-toolbar", &key))
-        .h(px(36.))
+    let bar = h_flex()
+        .h(px(TOOLBAR_HEIGHT))
         .p(px(3.))
         .gap(px(1.))
         .items_center()
         .rounded(px(10.))
         .bg(theme::popup())
-        .occlude()
-        .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             GlobalState::suppress_text_selection(cx)
         })
@@ -72,6 +70,6 @@ pub fn scheduled_toolbar(menu: ScheduledMenu) -> AnyElement {
                     cx.stop_propagation();
                     delete(window, cx);
                 }),
-        )
-        .into_any_element()
+        );
+    toolbar_slot(element_id("scheduled-toolbar", &key), hover, bar).into_any_element()
 }

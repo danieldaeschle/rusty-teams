@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
+use super::toolbar_placement::{TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
 use crate::rows::reaction_glyph;
 use crate::theme;
@@ -236,19 +237,16 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
         );
     }
     children.push(more_button(&menu, cx));
-    h_flex()
-        .id(element_id("message-toolbar", &menu.key))
-        .h(px(BAR_BUTTON + 2. * BAR_PADDING))
+    let bar = h_flex()
+        .h(px(TOOLBAR_HEIGHT))
         .p(px(BAR_PADDING))
         .gap(px(1.))
         .items_center()
         .rounded(px(10.))
         .bg(theme::popup())
-        .occlude()
-        .on_hover(move |hovered, _, cx| hover(*hovered, cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             GlobalState::suppress_text_selection(cx)
         })
-        .children(children)
-        .into_any_element()
+        .children(children);
+    toolbar_slot(element_id("message-toolbar", &menu.key), hover, bar).into_any_element()
 }

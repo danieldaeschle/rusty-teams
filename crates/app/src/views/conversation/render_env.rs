@@ -17,6 +17,7 @@ use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
+use crate::views::toolbar_placement::TimelineBounds;
 use crate::views::translation_line::{LineAction, TranslationActions};
 
 pub(super) struct RenderEnv {
@@ -25,6 +26,7 @@ pub(super) struct RenderEnv {
     pub highlighted: Option<String>,
     pub drafting: bool,
     pub reply_editor: Option<(String, Entity<Composer>)>,
+    pub timeline: TimelineBounds,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -237,6 +239,7 @@ impl RenderEnv {
                 .read(cx)
                 .is_saved(&message.conversation_id, &message.key),
             translation,
+            timeline: self.timeline.clone(),
         }
     }
 

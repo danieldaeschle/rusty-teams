@@ -43,6 +43,7 @@ pub mod reaction_picker;
 pub mod reaction_pills;
 pub mod saved_panel;
 pub mod scheduled_toolbar;
+pub mod toolbar_placement;
 pub mod share_bar;
 pub mod shared_tab;
 pub mod shell;

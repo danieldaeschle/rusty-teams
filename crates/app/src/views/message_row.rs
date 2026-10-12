@@ -13,6 +13,7 @@ use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
+use super::toolbar_placement::{TimelineBounds, placed_toolbar};
 use super::translation_line::{TranslationActions, translation_line};
 use super::widgets::{icon, symbol};
 use crate::card_state::BotIdentity;
@@ -58,9 +59,10 @@ pub struct RowActions {
     pub highlighted: bool,
     pub saved: bool,
     pub translation: Option<TranslationActions>,
+    pub timeline: TimelineBounds,
 }
 
-const TOOLBAR_LIFT: f32 = 22.;
+const TOOLBAR_RIGHT_INSET: f32 = 0.;
 
 fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
     h_flex().w_full().justify_center().mt(px(12.)).mb(px(6.)).child(
@@ -234,22 +236,18 @@ fn bubble(
         );
     }
     if let Some(menu) = extras.menu {
-        element = element.child(
-            div()
-                .absolute()
-                .top(px(-TOOLBAR_LIFT))
-                .right(px(8.))
-                .child(deferred(message_toolbar(menu, cx)).with_priority(1)),
-        );
+        element = element.child(placed_toolbar(
+            message_toolbar(menu, cx),
+            extras.timeline.clone(),
+            TOOLBAR_RIGHT_INSET,
+        ));
     }
     if let Some(menu) = extras.scheduled_menu {
-        element = element.child(
-            div()
-                .absolute()
-                .top(px(-TOOLBAR_LIFT))
-                .right(px(8.))
-                .child(deferred(scheduled_toolbar(menu)).with_priority(1)),
-        );
+        element = element.child(placed_toolbar(
+            scheduled_toolbar(menu),
+            extras.timeline.clone(),
+            TOOLBAR_RIGHT_INSET,
+        ));
     }
     element
 }
@@ -265,6 +263,7 @@ struct BubbleExtras {
     open_image: Option<ImageOpen>,
     saved: bool,
     translation: Option<TranslationActions>,
+    timeline: TimelineBounds,
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -568,6 +567,7 @@ pub fn render_message_row(
         highlighted,
         saved,
         translation,
+        timeline,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -579,6 +579,7 @@ pub fn render_message_row(
         open_image,
         saved,
         translation,
+        timeline,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

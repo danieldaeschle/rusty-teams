@@ -12,6 +12,7 @@ use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
 use super::reaction_pills::reaction_pills;
 use super::scheduled_toolbar::scheduled_toolbar;
+use super::toolbar_placement::placed_toolbar;
 use super::translation_line::translation_line;
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
@@ -26,7 +27,7 @@ const CARD_PADDING: f32 = 12.;
 const CARD_RADIUS: f32 = 10.;
 const CARD_GAP: f32 = 12.;
 const SLOTS_PER_POST: usize = 64;
-const TOOLBAR_LIFT: f32 = 22.;
+const TOOLBAR_RIGHT_INSET: f32 = 8.;
 const SUBJECT_SIZE: f32 = 14.;
 
 pub type PostAction = Box<dyn Fn(&mut Window, &mut App)>;
@@ -206,6 +207,7 @@ fn message_block(
         scheduled_menu,
         highlighted,
         translation: translation_actions,
+        timeline,
         ..
     } = actions;
     let note = delivery_note(row, delivery, index);
@@ -263,22 +265,18 @@ fn message_block(
                 .child(body),
         )
         .when_some(menu, |block, menu| {
-            block.child(
-                div()
-                    .absolute()
-                    .top(px(-TOOLBAR_LIFT))
-                    .right(px(8.))
-                    .child(deferred(message_toolbar(menu, cx)).with_priority(1)),
-            )
+            block.child(placed_toolbar(
+                message_toolbar(menu, cx),
+                timeline.clone(),
+                TOOLBAR_RIGHT_INSET,
+            ))
         })
         .when_some(scheduled_menu, |block, menu| {
-            block.child(
-                div()
-                    .absolute()
-                    .top(px(-TOOLBAR_LIFT))
-                    .right(px(8.))
-                    .child(deferred(scheduled_toolbar(menu)).with_priority(1)),
-            )
+            block.child(placed_toolbar(
+                scheduled_toolbar(menu),
+                timeline.clone(),
+                TOOLBAR_RIGHT_INSET,
+            ))
         })
 }
 

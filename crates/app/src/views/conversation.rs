@@ -35,6 +35,7 @@ use super::message_actions::{Action, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
 use super::post_card::render_post;
+use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
@@ -167,6 +168,7 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
+    timeline_bounds: TimelineBounds,
     toolbar_pinned: Option<String>,
     toolbar_suppressed: Option<String>,
     recent: Entity<emoji::Recent>,
@@ -467,6 +469,7 @@ impl ConversationView {
             downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
+            timeline_bounds: TimelineBounds::default(),
             toolbar_pinned: None,
             toolbar_suppressed: None,
             recent,
@@ -3098,6 +3101,7 @@ impl Render for ConversationView {
             highlighted: self.highlighted_message.clone(),
             drafting,
             reply_editor: self.reply_root.clone().zip(self.reply_composer.clone()),
+            timeline: self.timeline_bounds.clone(),
         };
         let scroller = MessageScroller::new(
             "messages",
@@ -3233,8 +3237,10 @@ impl Render for ConversationView {
                 .children(new_post)
                 .child(
                     div()
+                        .relative()
                         .flex_1()
                         .min_h_0()
+                        .child(record_bounds(&self.timeline_bounds))
                         .on_scroll_wheel(
                             cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
                         )
