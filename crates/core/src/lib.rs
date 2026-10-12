@@ -10,6 +10,7 @@ mod card_table;
 mod card_widgets;
 mod card_width;
 mod channel_sync;
+mod chat_paging;
 mod download;
 mod draft;
 mod engine;

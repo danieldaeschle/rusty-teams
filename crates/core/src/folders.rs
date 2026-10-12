@@ -102,10 +102,13 @@ impl FolderSource for ChatsvcFolderSource {
                     .await
                     .unwrap_or_default()
             };
-            Ok(layout
+            let order = self.settings.teams_order().await.unwrap_or_default();
+            let mut records: Vec<TeamLayoutRecord> = layout
                 .into_iter()
                 .map(|team| layout_record(team, &fallback))
-                .collect())
+                .collect();
+            sort_teams_by_order(&mut records, &order);
+            Ok(records)
         })
     }
 
@@ -176,6 +179,19 @@ fn convert(folders: chatsvc::Folders) -> Vec<ChatFolder> {
             conversation_ids: folder.conversation_ids,
         })
         .collect()
+}
+
+fn sort_teams_by_order(teams: &mut [TeamLayoutRecord], order: &[(String, i64)]) {
+    let positions: HashMap<&str, i64> = order
+        .iter()
+        .map(|(team_id, position)| (team_id.as_str(), *position))
+        .collect();
+    teams.sort_by_key(|team| {
+        positions
+            .get(team.team_id.as_str())
+            .copied()
+            .unwrap_or(i64::MAX)
+    });
 }
 
 fn resolve_notifications(
@@ -449,6 +465,37 @@ mod tests {
             level,
             include_replies,
         }
+    }
+
+    fn team(team_id: &str) -> TeamLayoutRecord {
+        TeamLayoutRecord {
+            team_id: team_id.into(),
+            hidden: false,
+            channels: Vec::new(),
+        }
+    }
+
+    fn team_ids(teams: &[TeamLayoutRecord]) -> Vec<&str> {
+        teams.iter().map(|team| team.team_id.as_str()).collect()
+    }
+
+    #[test]
+    fn listed_teams_come_first_by_order_and_unlisted_follow_in_server_order() {
+        let mut teams = vec![team("x"), team("b"), team("y"), team("a"), team("z")];
+        let order = vec![
+            ("a".to_owned(), 0),
+            ("b".to_owned(), 1),
+            ("gone".to_owned(), 2),
+        ];
+        sort_teams_by_order(&mut teams, &order);
+        assert_eq!(team_ids(&teams), ["a", "b", "x", "y", "z"]);
+    }
+
+    #[test]
+    fn an_empty_order_keeps_the_server_order() {
+        let mut teams = vec![team("c"), team("a"), team("b")];
+        sort_teams_by_order(&mut teams, &[]);
+        assert_eq!(team_ids(&teams), ["c", "a", "b"]);
     }
 
     #[test]

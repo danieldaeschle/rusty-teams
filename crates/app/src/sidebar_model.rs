@@ -14,8 +14,6 @@ use crate::typing::{TypingState, preview_label};
 pub const FAVORITES_FALLBACK_NAME: &str = "Pinned";
 pub const OTHERS_NAME: &str = "Other chats";
 pub const OTHERS_ID: &str = "others";
-pub const MEETING_NAME: &str = "Meeting chats";
-pub const MEETING_ID: &str = "meeting_chats";
 pub const MUTED_NAME: &str = "Muted";
 pub const MUTED_ID: &str = "muted_chats";
 pub const SECTION_PAGE_SIZE: usize = 5;
@@ -23,7 +21,6 @@ pub const EMPTY_FOLDER_HINT: &str = "Empty. Drag chats here.";
 pub const DELETED_PREVIEW: &str = "Message deleted";
 const OWN_PREFIX: &str = "You";
 const GROUP_KIND: &str = "group";
-const MEETING_KIND: &str = "meeting";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Preview {
@@ -82,7 +79,6 @@ pub enum SectionKind {
     Favorites,
     Folder,
     Others,
-    Meeting,
     Muted,
 }
 
@@ -261,7 +257,6 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
         .collect();
     let settings = &input.directory.section_settings;
     let mut muted = Vec::new();
-    let mut meeting = Vec::new();
     let mut rest = Vec::new();
     for chat in input
         .chats
@@ -271,9 +266,6 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
         let item = chat_item(chat, input, None);
         if chat.muted && settings.enabled(ChatSection::Muted) {
             muted.push(item);
-        } else if !chat.muted && chat.kind == MEETING_KIND && settings.enabled(ChatSection::Meeting)
-        {
-            meeting.push(item);
         } else {
             rest.push(item);
         }
@@ -293,15 +285,6 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
         rest,
         input,
     ));
-    let mut meeting = (!meeting.is_empty()).then(|| {
-        section(
-            folder_id(FolderKind::Meeting, MEETING_ID),
-            MEETING_NAME.to_owned(),
-            SectionKind::Meeting,
-            meeting,
-            input,
-        )
-    });
     let mut muted = (!muted.is_empty()).then(|| {
         section(
             folder_id(FolderKind::Muted, MUTED_ID),
@@ -316,11 +299,10 @@ pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
         match folder.kind {
             FolderKind::Favorites | FolderKind::UserCreated => sections.extend(section.take()),
             FolderKind::Recent => sections.extend(others.take()),
-            FolderKind::Meeting => sections.extend(meeting.take()),
+            FolderKind::Meeting => {}
             FolderKind::Muted => sections.extend(muted.take()),
         }
     }
-    sections.extend(meeting);
     sections.extend(others);
     sections.extend(muted);
     sections
@@ -443,7 +425,7 @@ fn section(
         .iter()
         .filter(|item| item.unread.is_unread() && !item.muted)
         .count() as u32;
-    let paged = matches!(kind, SectionKind::Meeting | SectionKind::Muted);
+    let paged = kind == SectionKind::Muted;
     let list_expanded = paged && count > SECTION_PAGE_SIZE && input.expanded_lists.contains(&id);
     let hidden_count = if paged && !list_expanded {
         count.saturating_sub(SECTION_PAGE_SIZE)
@@ -535,15 +517,12 @@ mod tests {
         chat(id, "meeting", false)
     }
 
-    fn sectioned_directory(muted: bool, meeting: bool, folders: Vec<FolderInfo>) -> Directory {
+    fn sectioned_directory(muted: bool, folders: Vec<FolderInfo>) -> Directory {
         let mut directory = Directory {
             folders,
             ..Default::default()
         };
         directory.section_settings.set(ChatSection::Muted, muted);
-        directory
-            .section_settings
-            .set(ChatSection::Meeting, meeting);
         directory
     }
 
@@ -622,7 +601,6 @@ mod tests {
         chats.extend((0..7).map(|index| muted_chat(&format!("m{index}"))));
         chats.push(chat("other", "group", false));
         let directory = sectioned_directory(
-            true,
             true,
             vec![
                 folder("fav-folder", FolderKind::Favorites, &["fav"]),
@@ -921,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn muted_and_meeting_chats_leave_others_unless_pinned_or_in_a_custom_section() {
+    fn muted_chats_leave_others_unless_pinned_or_in_a_custom_section_and_meeting_chats_stay() {
         let chats = vec![
             chat("plain", "group", false),
             muted_chat("quiet"),
@@ -935,7 +913,6 @@ mod tests {
         ];
         let directory = sectioned_directory(
             true,
-            true,
             vec![
                 folder("fav", FolderKind::Favorites, &["pinned-quiet"]),
                 folder("work", FolderKind::UserCreated, &["custom-sync"]),
@@ -944,28 +921,27 @@ mod tests {
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
         assert_eq!(
             section_ids(&sections),
-            vec!["fav", "work", MEETING_ID, OTHERS_ID, MUTED_ID]
+            vec!["fav", "work", OTHERS_ID, MUTED_ID]
         );
         assert_eq!(item_ids(&sections[0]), vec!["pinned-quiet"]);
         assert_eq!(item_ids(&sections[1]), vec!["custom-sync"]);
-        assert_eq!(item_ids(&sections[2]), vec!["sync"]);
-        assert_eq!(item_ids(&sections[3]), vec!["plain"]);
-        assert_eq!(item_ids(&sections[4]), vec!["quiet", "quiet-sync"]);
-        assert_eq!(sections[4].kind, SectionKind::Muted);
-        assert_eq!(sections[4].count, 2);
+        assert_eq!(item_ids(&sections[2]), vec!["plain", "sync"]);
+        assert_eq!(item_ids(&sections[3]), vec!["quiet", "quiet-sync"]);
+        assert_eq!(sections[3].kind, SectionKind::Muted);
+        assert_eq!(sections[3].count, 2);
     }
 
     #[test]
-    fn turning_a_section_off_puts_its_chats_back_in_others() {
+    fn turning_the_muted_section_off_puts_its_chats_back_in_others() {
         let chats = vec![muted_chat("quiet"), meeting_chat("sync")];
-        let directory = sectioned_directory(false, false, Vec::new());
+        let directory = sectioned_directory(false, Vec::new());
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
         assert_eq!(section_ids(&sections), vec![OTHERS_ID]);
         assert_eq!(item_ids(&sections[0]), vec!["quiet", "sync"]);
     }
 
     #[test]
-    fn muted_is_on_and_meeting_is_off_until_the_user_chooses() {
+    fn muted_is_on_until_the_user_chooses_and_meeting_chats_stay_in_others() {
         let chats = vec![muted_chat("quiet"), meeting_chat("sync")];
         let directory = Directory::default();
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
@@ -976,7 +952,7 @@ mod tests {
     #[test]
     fn empty_system_sections_are_hidden() {
         let chats = vec![chat("a", "group", false)];
-        let directory = sectioned_directory(true, true, Vec::new());
+        let directory = sectioned_directory(true, Vec::new());
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
         assert_eq!(section_ids(&sections), vec![OTHERS_ID]);
     }
@@ -990,7 +966,6 @@ mod tests {
         ];
         let directory = sectioned_directory(
             true,
-            true,
             vec![
                 folder("muted-id", FolderKind::Muted, &[]),
                 folder("fav", FolderKind::Favorites, &[]),
@@ -1000,13 +975,10 @@ mod tests {
         );
         let collapsed: HashSet<String> = ["muted-id".to_owned()].into();
         let sections = build_sections(&input(&chats, &directory, &collapsed));
-        assert_eq!(
-            section_ids(&sections),
-            vec!["muted-id", "fav", "recent-id", "meeting-id"]
-        );
+        assert_eq!(section_ids(&sections), vec!["muted-id", "fav", "recent-id"]);
         assert!(sections[0].collapsed);
         assert_eq!(sections[0].name, MUTED_NAME);
-        assert_eq!(sections[3].name, MEETING_NAME);
+        assert_eq!(item_ids(&sections[2]), vec!["a", "sync"]);
     }
 
     #[test]
@@ -1070,14 +1042,14 @@ mod tests {
     }
 
     #[test]
-    fn meeting_chats_keep_their_unread_count() {
+    fn meeting_chats_keep_their_unread_count_in_others() {
         let mut sync = meeting_chat("sync");
         sync.unread = true;
         let chats = vec![sync];
-        let mut directory = sectioned_directory(true, true, Vec::new());
+        let mut directory = sectioned_directory(true, Vec::new());
         directory.unread_counts.insert("sync".into(), 3);
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
-        assert_eq!(sections[0].id, MEETING_ID);
+        assert_eq!(sections[0].id, OTHERS_ID);
         assert_eq!(sections[0].items[0].unread, Unread::Count(3));
         assert_eq!(sections[0].unread_chats, 1);
     }

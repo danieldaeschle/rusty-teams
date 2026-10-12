@@ -1,14 +1,21 @@
-use chrono::{DateTime, Duration, Utc};
-use store::ChatRecord;
+use std::collections::HashMap;
 
+use chatsvc::ConversationState;
+use chrono::{DateTime, Duration, Utc};
+use graph::Chat;
+use store::{ChatRecord, Store};
+
+use crate::chat_paging::ChatPaging;
 use crate::engine::{SidebarSummary, SyncEngine};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::events::CoreEvent;
-use crate::mapping::{channel_record, chat_record, team_record};
+use crate::mapping::{channel_record, chat_record, graph_hidden, team_record};
 use crate::remote::{ChatsPage, Remote};
 
 const META_CHATS_FULL_AT: &str = "chats_full_refreshed_at";
 const META_TEAMS_AT: &str = "teams_refreshed_at";
+const META_CHATS_NEXT_LINK: &str = "chats_next_link";
+const META_CHATS_EXHAUSTED: &str = "chats_exhausted";
 
 #[derive(Default)]
 struct ChatRefresh {
@@ -60,11 +67,13 @@ impl<R: Remote> SyncEngine<R> {
         let mut kept_ids = Vec::new();
         let mut hidden_ids = Vec::new();
         let mut complete = false;
+        let mut continuation = None;
+        let states = self.refresh_chat_states().await;
         let mut page = self.remote.chats_page(self.config.chat_page_size).await?;
         loop {
             refresh.pages += 1;
             refresh.fetched += page.items.len();
-            let (records, hidden) = split_hidden(&page, &my_user_id);
+            let (records, hidden) = self.split_hidden(&page, &my_user_id);
             let any_changed = self.any_chat_changed(&records)?;
             self.store.upsert_chats(&records)?;
             kept_ids.extend(records.iter().map(|record| record.id.clone()));
@@ -76,27 +85,49 @@ impl<R: Remote> SyncEngine<R> {
                 break;
             };
             if !wants_more || !within_limit {
+                continuation = Some(link);
                 break;
             }
             page = self.remote.chats_at(&link).await?;
         }
         self.store.remove_chats(&hidden_ids)?;
-        self.refresh_muted_chats().await;
+        self.apply_muted_chats(states);
         if full {
             if complete {
                 self.store.remove_chats_except(&kept_ids)?;
             }
             self.store.set_meta_time(META_CHATS_FULL_AT, Utc::now())?;
+            self.remember_chat_continuation(continuation.filter(|_| !complete))?;
         }
+        self.chat_paging.lock().unwrap().retry();
         Ok(refresh)
     }
 
-    async fn refresh_muted_chats(&self) {
-        let outcome = match self.remote.muted_chat_states().await {
-            Ok(states) => self.store.apply_muted_states(&states).map_err(Error::from),
-            Err(error) => Err(error),
+    async fn refresh_chat_states(&self) -> Option<Vec<ConversationState>> {
+        match self.remote.chat_states().await {
+            Ok(states) => {
+                *self.chat_states.lock().unwrap() = states
+                    .iter()
+                    .map(|state| (state.id.clone(), state.clone()))
+                    .collect();
+                Some(states)
+            }
+            Err(error) => {
+                self.report(format!("cannot refresh muted chats: {error}"));
+                None
+            }
+        }
+    }
+
+    fn apply_muted_chats(&self, states: Option<Vec<ConversationState>>) {
+        let Some(states) = states else {
+            return;
         };
-        if let Err(error) = outcome {
+        let muted: Vec<(String, bool)> = states
+            .into_iter()
+            .map(|state| (state.id, state.muted))
+            .collect();
+        if let Err(error) = self.store.apply_muted_states(&muted) {
             self.report(format!("cannot refresh muted chats: {error}"));
         }
     }
@@ -104,7 +135,66 @@ impl<R: Remote> SyncEngine<R> {
     fn chat_refresh_is_full(&self) -> Result<bool> {
         let last_full = self.store.meta_time(META_CHATS_FULL_AT)?;
         Ok(self.store.chat_count()? == 0
+            || !self.chat_paging.lock().unwrap().is_known()
             || is_due(last_full, self.config.full_chat_refresh_interval))
+    }
+
+    fn remember_chat_continuation(&self, continuation: Option<String>) -> Result<()> {
+        let mut paging = self.chat_paging.lock().unwrap();
+        paging.adopt_continuation(continuation);
+        store_chat_paging(&self.store, &paging)
+    }
+
+    pub fn has_older_chats(&self) -> bool {
+        self.chat_paging.lock().unwrap().has_more()
+    }
+
+    pub fn is_loading_older_chats(&self) -> bool {
+        self.chat_paging.lock().unwrap().is_loading()
+    }
+
+    pub async fn load_older_chats(&self) -> Result<usize> {
+        let Some(link) = self.chat_paging.lock().unwrap().begin() else {
+            return Ok(0);
+        };
+        let _ = self.events.send(CoreEvent::SidebarChanged);
+        let outcome = self.load_chats_page(&link).await;
+        let mut paging = self.chat_paging.lock().unwrap();
+        let loaded = match outcome {
+            Ok((loaded, next_link)) => {
+                paging.finish(next_link);
+                store_chat_paging(&self.store, &paging).map(|()| loaded)
+            }
+            Err(error) => {
+                paging.fail();
+                Err(error)
+            }
+        };
+        drop(paging);
+        let _ = self.events.send(CoreEvent::SidebarChanged);
+        loaded
+    }
+
+    async fn load_chats_page(&self, link: &str) -> Result<(usize, Option<String>)> {
+        let my_user_id = self.my_user_id().await?;
+        let page = self.remote.chats_at(link).await?;
+        let (records, hidden) = self.split_hidden(&page, &my_user_id);
+        self.store.upsert_chats(&records)?;
+        self.store.remove_chats(&hidden)?;
+        let muted: Vec<(String, bool)> = {
+            let states = self.chat_states.lock().unwrap();
+            records
+                .iter()
+                .filter_map(|record| states.get(&record.id))
+                .map(|state| (state.id.clone(), state.muted))
+                .collect()
+        };
+        self.store.apply_muted_states(&muted)?;
+        Ok((page.items.len(), page.next_link))
+    }
+
+    fn split_hidden(&self, page: &ChatsPage, my_user_id: &str) -> (Vec<ChatRecord>, Vec<String>) {
+        split_hidden(page, my_user_id, &self.chat_states.lock().unwrap())
     }
 
     fn any_chat_changed(&self, records: &[ChatRecord]) -> Result<bool> {
@@ -178,14 +268,42 @@ fn is_due(last: Option<DateTime<Utc>>, interval: Duration) -> bool {
     last.is_none_or(|last| Utc::now() - last >= interval)
 }
 
-fn split_hidden(page: &ChatsPage, my_user_id: &str) -> (Vec<ChatRecord>, Vec<String>) {
+fn is_hidden(chat: &Chat, states: &HashMap<String, ConversationState>) -> bool {
+    states
+        .get(&chat.id)
+        .and_then(|state| state.hidden)
+        .unwrap_or_else(|| graph_hidden(chat))
+}
+
+fn split_hidden(
+    page: &ChatsPage,
+    my_user_id: &str,
+    states: &HashMap<String, ConversationState>,
+) -> (Vec<ChatRecord>, Vec<String>) {
     let mut records = Vec::new();
     let mut hidden = Vec::new();
     for chat in &page.items {
-        match chat_record(chat, my_user_id) {
-            Some(record) => records.push(record),
-            None => hidden.push(chat.id.clone()),
+        if is_hidden(chat, states) {
+            hidden.push(chat.id.clone());
+        } else {
+            records.push(chat_record(chat, my_user_id));
         }
     }
     (records, hidden)
+}
+
+pub(crate) fn stored_chat_paging(store: &Store) -> ChatPaging {
+    let next_link = store
+        .meta(META_CHATS_NEXT_LINK)
+        .ok()
+        .flatten()
+        .filter(|link| !link.is_empty());
+    let exhausted = store.meta(META_CHATS_EXHAUSTED).ok().flatten().as_deref() == Some("true");
+    ChatPaging::restored(next_link, exhausted)
+}
+
+fn store_chat_paging(store: &Store, paging: &ChatPaging) -> Result<()> {
+    store.set_meta(META_CHATS_NEXT_LINK, paging.next_link().unwrap_or_default())?;
+    store.set_meta(META_CHATS_EXHAUSTED, &paging.is_exhausted().to_string())?;
+    Ok(())
 }

@@ -1,9 +1,10 @@
 use chatsvc::{
-    CallLogEntry, CardActions, ChatApp, ConversationRef, Conversations, ForcedAvailability, ForwardResult, Gif,
-    Gifs, InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient,
-    LinkInfo, MemberHorizon, MessageLanguage, MessageLinks, Messages, PinnedMessage, Pins,
-    PresenceService, PresenceStatus, Receipts, SavedMessage, ScheduledDraft, ScheduledDrafts,
-    StatusNote, TranslateRequest, Translation, TranslationTrigger, Translator, WorkLocationKind,
+    CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState, Conversations,
+    ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
+    LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
+    MessageLinks, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts,
+    SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest, Translation,
+    TranslationTrigger, Translator, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -120,7 +121,7 @@ pub trait Remote {
     async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()>;
-    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>>;
+    async fn chat_states(&self) -> Result<Vec<ConversationState>>;
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_channel_notifications(
         &self,
@@ -592,9 +593,9 @@ impl Remote for Graph {
         Ok(Graph::leave_chat(self, chat_id, user_id).await?)
     }
 
-    async fn muted_chat_states(&self) -> Result<Vec<(String, bool)>> {
+    async fn chat_states(&self) -> Result<Vec<ConversationState>> {
         Ok(Conversations::new(self.session())
-            .conversation_mute_states()
+            .conversation_states()
             .await?)
     }
 

@@ -274,6 +274,26 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn older_chats(&self) -> (bool, bool) {
+        self.engine.as_ref().map_or((false, false), |engine| {
+            (engine.has_older_chats(), engine.is_loading_older_chats())
+        })
+    }
+
+    pub fn request_older_chats(&self) {
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        if !engine.has_older_chats() || engine.is_loading_older_chats() {
+            return;
+        }
+        drop(crate::runtime::spawn(async move {
+            if let Err(error) = engine.load_older_chats().await {
+                crate::diagnostics::record(format!("sync: older chats not loaded: {error}"));
+            }
+        }));
+    }
+
     pub fn toggle_list_expanded(&mut self, section_id: &str, cx: &mut Context<Self>) {
         if !self.expanded_lists.remove(section_id) {
             self.expanded_lists.insert(section_id.to_owned());

@@ -575,10 +575,8 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn store_new_chat(&self, chat: &graph::Chat, my_user_id: &str) -> Result<String> {
-        if let Some(record) = chat_record(chat, my_user_id) {
-            self.store.upsert_chats(&[record])?;
-            let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
-        }
+        self.store.upsert_chats(&[chat_record(chat, my_user_id)])?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(chat.id.clone())
     }
 

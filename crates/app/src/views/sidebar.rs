@@ -40,6 +40,7 @@ const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
+const LOADING_OLDER_LABEL: &str = "Loading older chats";
 const FALLBACK_VIEWPORT: f32 = 900.;
 const CALLS_REFRESH: Duration = Duration::from_secs(30);
 const VIEWPORT_MARGIN: f32 = 300.;
@@ -928,6 +929,25 @@ impl SidebarView {
                 );
                 y += HINT_HEIGHT;
             }
+        }
+        let (has_older, loading_older) = self.state.read(cx).older_chats();
+        if has_older && y <= visible_to {
+            let state = self.state.clone();
+            cx.defer(move |cx| state.read(cx).request_older_chats());
+        }
+        if loading_older {
+            list = with_spacer(list, &mut skipped_height);
+            list = list.child(
+                div()
+                    .pl(px(16. + AVATAR_SIZE + 12.))
+                    .h(px(SEE_MORE_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .text_size(px(12.5))
+                    .italic()
+                    .text_color(theme::text_faint())
+                    .child(LOADING_OLDER_LABEL),
+            );
         }
         list = with_spacer(list, &mut skipped_height);
         self.request_lazy_data(faces, presence_users, cx);

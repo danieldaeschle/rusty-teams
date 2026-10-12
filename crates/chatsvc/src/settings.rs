@@ -7,6 +7,7 @@ use crate::pins::DEFAULT_REGION;
 
 const SETTINGS_KEY: &str = "simpleCollabUserSettings";
 const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
+const TEAMS_ORDER_KEY: &str = "teamsOrder";
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
 const MUTED_DEFAULT: bool = true;
@@ -78,6 +79,10 @@ impl<T: MessageTransport> UserSettings<T> {
         Ok(parse_chat_sections(&self.properties().await?))
     }
 
+    pub async fn teams_order(&self) -> Result<Vec<(String, i64)>> {
+        Ok(parse_teams_order(&self.properties().await?))
+    }
+
     pub async fn set_chat_section(&self, section: ChatSection, enabled: bool) -> Result<()> {
         let properties = self.properties().await?;
         let merged = merge_chat_section(&properties, section, enabled);
@@ -116,6 +121,33 @@ pub fn parse_chat_sections(properties: &Value) -> ChatSectionSettings {
         muted: settings.get(MUTED_FIELD).and_then(Value::as_bool),
         meeting: settings.get(MEETING_FIELD).and_then(Value::as_bool),
     }
+}
+
+pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
+    let entries = match properties.get(TEAMS_ORDER_KEY) {
+        Some(Value::String(text)) => serde_json::from_str::<Value>(text).ok(),
+        Some(other) => Some(other.clone()),
+        None => None,
+    };
+    let mut order: Vec<(String, i64)> = entries
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let team_id = entry.get("teamId")?.as_str()?.to_owned();
+                    let position = entry.get("order")?;
+                    let position = position
+                        .as_i64()
+                        .or_else(|| position.as_str()?.parse().ok())?;
+                    Some((team_id, position))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    order.sort_by_key(|(_, position)| *position);
+    order
 }
 
 pub fn merge_chat_section(properties: &Value, section: ChatSection, enabled: bool) -> String {
@@ -172,6 +204,21 @@ mod tests {
         ));
         assert!(!parsed.enabled(ChatSection::Muted));
         assert!(parsed.enabled(ChatSection::Meeting));
+    }
+
+    #[test]
+    fn teams_order_is_read_from_the_json_string_sorted_by_order() {
+        let parsed = parse_teams_order(&json!({
+            TEAMS_ORDER_KEY: r#"[{"teamId":"19:b","order":1},{"teamId":"19:a","order":"0"},{"teamId":"19:c"},{"order":2}]"#,
+        }));
+        assert_eq!(parsed, vec![("19:a".to_owned(), 0), ("19:b".to_owned(), 1)]);
+    }
+
+    #[test]
+    fn teams_order_is_empty_when_missing_or_malformed() {
+        assert!(parse_teams_order(&json!({})).is_empty());
+        assert!(parse_teams_order(&json!({TEAMS_ORDER_KEY: "not json"})).is_empty());
+        assert!(parse_teams_order(&json!({TEAMS_ORDER_KEY: "{}"})).is_empty());
     }
 
     #[test]

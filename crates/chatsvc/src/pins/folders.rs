@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use session::{Method, Request};
 
 use super::Pins;
-use super::chats::{FOLDER_QUERY, NO_OP_CODES, api_error, ensure_success};
+use super::chats::{FOLDER_QUERY, NO_OP_CODES, api_error, ensure_success, with_answer_context};
 use super::state::error_code;
 use super::transport::CsaTransport;
 use crate::error::{Error, Result};
@@ -132,7 +132,7 @@ impl<T: CsaTransport> Pins<T> {
         let url = format!("{}/conversationFolders?{FOLDER_QUERY}", self.base_url);
         let answer = self.transport.send(Request::get(url)).await?;
         ensure_success(&answer)?;
-        parse_folders(&answer.body)
+        with_answer_context(parse_folders(&answer.body), &answer)
     }
 
     pub async fn move_to_folder(
