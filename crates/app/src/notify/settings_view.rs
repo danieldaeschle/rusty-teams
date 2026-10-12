@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use calling::camera::{DEFAULT_CAMERA_LABEL, list_cameras};
-use calling::{DeviceChoice, DeviceEntry, camera_entries};
+use calling::{DeviceChoice, DeviceEntry, MicSettings, NoiseSuppression, camera_entries};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::Button,
@@ -9,6 +9,7 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
+use gpui_kit::base::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -67,7 +68,7 @@ struct Row {
     field: Accessor,
 }
 
-const ROWS: [Row; 5] = [
+const ROWS: [Row; 6] = [
     Row {
         title: "Sound",
         detail: "Messages and mentions",
@@ -87,6 +88,11 @@ const ROWS: [Row; 5] = [
         title: "Flash taskbar",
         detail: "On new messages, until you open the window",
         field: |settings| &mut settings.flash,
+    },
+    Row {
+        title: "Mute notifications during calls and meetings",
+        detail: "No message toasts while a call is active",
+        field: |settings| &mut settings.mute_in_calls,
     },
     Row {
         title: "Minimize to tray on close",
@@ -245,6 +251,12 @@ impl SettingsView {
         let app = self.center.read(cx).app().clone();
         app.update(cx, |state, cx| state.select_call_camera(camera, cx));
         self.start_preview();
+        cx.notify();
+    }
+
+    fn set_mic(&mut self, settings: MicSettings, cx: &mut Context<Self>) {
+        let app = self.center.read(cx).app().clone();
+        app.update(cx, |state, cx| state.set_call_mic(settings, cx));
         cx.notify();
     }
 
@@ -422,6 +434,9 @@ impl SettingsView {
             .find(|(pick, _)| *pick == self.background)
             .map_or("None".to_owned(), |(_, label)| label.clone());
         let current_background = self.background.clone();
+        let mic = self.center.read(cx).app().read(cx).call_mic;
+        let noise_view = view.clone();
+        let music_view = view.clone();
         let image = self.preview.image(Instant::now());
         let status = if self.preview_blocked {
             CAMERA_IN_USE.to_owned()
@@ -485,6 +500,61 @@ impl SettingsView {
                         })
                     }),
             ))
+            .child(control_row(
+                "Noise suppression",
+                if mic.music_mode {
+                    "Off while music mode is on"
+                } else {
+                    "Echo, hum and background noise"
+                },
+                Button::new("noise-suppression-select")
+                    .outline()
+                    .w(px(SELECT_WIDTH))
+                    .label(mic.noise_suppression.label())
+                    .icon(IconName::ChevronDown)
+                    .disabled(mic.music_mode)
+                    .dropdown_menu(move |menu, _, _| {
+                        NoiseSuppression::ALL.iter().fold(menu, |menu, level| {
+                            let (view, level) = (noise_view.clone(), *level);
+                            menu.item(
+                                PopupMenuItem::new(level.label())
+                                    .checked(level == mic.noise_suppression)
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |view, cx| {
+                                            view.set_mic(
+                                                MicSettings {
+                                                    noise_suppression: level,
+                                                    ..mic
+                                                },
+                                                cx,
+                                            )
+                                        })
+                                    }),
+                            )
+                        })
+                    }),
+            ))
+            .child(
+                control_row(
+                    "Music mode",
+                    "Keeps echo cancellation, turns off the rest",
+                    switch(mic.music_mode),
+                )
+                .id("music-mode-row")
+                .cursor_pointer()
+                .hover(|row| row.bg(theme::row_hover()))
+                .on_click(move |_, _, cx| {
+                    music_view.update(cx, |view, cx| {
+                        view.set_mic(
+                            MicSettings {
+                                music_mode: !mic.music_mode,
+                                ..mic
+                            },
+                            cx,
+                        )
+                    })
+                }),
+            )
             .child(
                 v_flex()
                     .w_full()

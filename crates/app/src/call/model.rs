@@ -17,6 +17,7 @@ use super::fullscreen::FullscreenState;
 use super::pictures::CallPictures;
 use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, VisibleRotation, split_overflow};
 use super::view_settings::{CallLayout, ViewSettings};
+use super::push_to_talk::PushToTalk;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
@@ -48,6 +49,7 @@ pub struct ActiveCall {
     pub meeting_target: Option<MeetingTarget>,
     pub pending_move: Option<PendingMove>,
     pub consult: Option<ConsultCall>,
+    pub push_to_talk: PushToTalk,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +112,7 @@ impl ActiveCall {
             meeting_target: None,
             pending_move: None,
             consult: None,
+            push_to_talk: PushToTalk::default(),
         }
     }
 

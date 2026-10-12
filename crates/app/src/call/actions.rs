@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use calling::meeting::LiveMeeting;
 use calling::{
     AcceptMode, CallCommand, CallHandle, CallSpec, CallState, CallUpdate, Callee, DeviceChoice,
-    EndReason, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
+    EndReason, EngineEvent, MicSettings, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
 };
 use gpui_kit::*;
 
@@ -16,6 +16,7 @@ use super::demo::{
 };
 use super::features::room_closed_move;
 use super::media::CallMedia;
+use super::mic::save_mic;
 use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
@@ -215,6 +216,9 @@ impl AppState {
         if self.call_share_sound {
             self.send_call_command(CallCommand::SetShareSound(true));
         }
+        if self.call_mic != MicSettings::default() {
+            self.send_call_command(CallCommand::SetMicSettings(self.call_mic));
+        }
         if let Some(call) = self.call.as_mut() {
             call.model.background = self.call_background.clone();
             call.model.camera = self.call_camera.clone();
@@ -396,6 +400,35 @@ impl AppState {
         };
         let on = !call.model.camera_on;
         self.send_call_command(CallCommand::SetCamera(on));
+    }
+
+    pub fn set_call_mic(&mut self, settings: MicSettings, cx: &mut Context<Self>) {
+        self.call_mic = settings;
+        save_mic(&self.store, settings);
+        self.send_call_command(CallCommand::SetMicSettings(settings));
+        cx.notify();
+    }
+
+    pub fn press_push_to_talk(&mut self, _cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        let command = call
+            .push_to_talk
+            .press(call.model.muted, call.model.can_unmute());
+        if let Some(command) = command {
+            self.send_call_command(CallCommand::Mute(command));
+        }
+    }
+
+    pub fn release_push_to_talk(&mut self, _cx: &mut Context<Self>) {
+        let command = self
+            .call
+            .as_mut()
+            .and_then(|call| call.push_to_talk.release());
+        if let Some(command) = command {
+            self.send_call_command(CallCommand::Mute(command));
+        }
     }
 
     pub fn select_call_camera(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {

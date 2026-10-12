@@ -9,6 +9,7 @@ use super::shell::{NewChat, OpenSwitcher, ToggleCallMute};
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";
+const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input";
 
 actions!(
     teams,
@@ -30,6 +31,7 @@ actions!(
         StartAudioCall,
         StartVideoCall,
         ToggleCallFullscreen,
+        PushToTalk,
         ShowShortcuts
     ]
 );
@@ -65,6 +67,7 @@ pub enum Scope {
     Global,
     OutsideComposer,
     GlobalOverTextFields,
+    OutsideTextFields,
     Composer,
 }
 
@@ -123,6 +126,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Calls, GlobalOverTextFields, "Start an audio call in this chat", "alt-shift-a", None, StartAudioCall),
     shortcut!(Calls, GlobalOverTextFields, "Start a video call in this chat", "alt-shift-v", None, StartVideoCall),
     shortcut!(Calls, GlobalOverTextFields, "Full screen", "f11", None, ToggleCallFullscreen),
+    shortcut!(Calls, OutsideTextFields, "Hold to talk while muted", "ctrl-space", None, PushToTalk),
 ];
 
 impl Shortcut {
@@ -142,6 +146,7 @@ impl Shortcut {
             Scope::Global => &[None],
             Scope::OutsideComposer => &[Some(OUTSIDE_COMPOSER_CONTEXT)],
             Scope::GlobalOverTextFields => &[None, Some(TEXT_FIELD_CONTEXT)],
+            Scope::OutsideTextFields => &[Some(OUTSIDE_TEXT_FIELD_CONTEXT)],
             Scope::Composer => &[Some(COMPOSER_CONTEXT)],
         };
         let mut keys = vec![self.keys];
@@ -169,6 +174,7 @@ pub fn display_keys(keys: &str) -> String {
             "up" => "Up".to_owned(),
             "down" => "Down".to_owned(),
             "enter" => "Enter".to_owned(),
+            "space" => "Space".to_owned(),
             other => other.to_uppercase(),
         })
         .collect::<Vec<_>>()
@@ -229,7 +235,7 @@ mod tests {
         for shortcut in SHORTCUTS {
             let contexts: &[&str] = match shortcut.scope {
                 Scope::Global | Scope::OutsideComposer => &["AppShell"],
-                Scope::GlobalOverTextFields => &["AppShell"],
+                Scope::GlobalOverTextFields | Scope::OutsideTextFields => &["AppShell"],
                 Scope::Composer => &["AppShell", "Composer"],
             };
             assert_eq!(
@@ -257,6 +263,16 @@ mod tests {
                 shortcut.keys
             );
         }
+    }
+
+    #[gpui_kit::test]
+    fn push_to_talk_is_not_bound_while_typing_in_a_text_field(cx: &mut TestAppContext) {
+        registered(cx);
+        assert!(bound_action(cx, "ctrl-space", &["AppShell"]).is_some());
+        assert_eq!(
+            bound_action(cx, "ctrl-space", &["AppShell", "Composer", "Input"]),
+            None
+        );
     }
 
     #[gpui_kit::test]
@@ -300,5 +316,6 @@ mod tests {
         assert_eq!(display_keys("ctrl-shift-a"), "Ctrl+Shift+A");
         assert_eq!(display_keys("alt-up"), "Alt+Up");
         assert_eq!(display_keys("ctrl-."), "Ctrl+.");
+        assert_eq!(display_keys("ctrl-space"), "Ctrl+Space");
     }
 }

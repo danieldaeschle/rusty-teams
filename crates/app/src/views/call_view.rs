@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use calling::{DeviceEntry, Reaction, VideoKey};
+use calling::{DeviceEntry, MicSettings, NoiseSuppression, Reaction, VideoKey};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -34,7 +34,7 @@ use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::REACTION_SHOWN;
 use crate::call::TileSize;
-use crate::call::{CallKind, CallModel, Tile, TileState};
+use crate::call::{ActiveCall, CallKind, CallModel, Tile, TileState};
 use crate::rows::reaction_glyph as chat_reaction_glyph;
 use crate::theme;
 
@@ -72,6 +72,10 @@ const REACTION_RISE: f32 = 24.;
 const REACTION_FADE_FROM: f32 = 0.75;
 const REACTION_CELL: f32 = 40.;
 const SHARE_SOUND_LABEL: &str = "Include computer sound";
+const NOISE_SUPPRESSION_LABEL: &str = "Noise suppression";
+const MUSIC_MODE_LABEL: &str = "Music mode";
+const PUSH_TO_TALK_HINT: &str = "Unmuted - release Ctrl+Space to mute";
+const PUSH_TO_TALK_TOP: f32 = 12.;
 
 pub fn reaction_glyph(reaction: Reaction) -> String {
     match reaction {
@@ -432,6 +436,54 @@ fn sound_switch_item(app: &Entity<AppState>, sound: bool) -> PopupMenuItem {
     .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx)))
 }
 
+fn music_mode_item(app: &Entity<AppState>, mic: MicSettings) -> PopupMenuItem {
+    let app = app.clone();
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .id("call-music-mode-row")
+            .w_full()
+            .gap(px(16.))
+            .items_center()
+            .justify_between()
+            .child(MUSIC_MODE_LABEL)
+            .child(Switch::new("call-music-mode").checked(mic.music_mode))
+    })
+    .on_click(move |_, _, cx| {
+        app.update(cx, |state, cx| {
+            let settings = MicSettings {
+                music_mode: !mic.music_mode,
+                ..state.call_mic
+            };
+            state.set_call_mic(settings, cx)
+        })
+    })
+}
+
+fn push_to_talk_chip(call: &ActiveCall) -> Option<AnyElement> {
+    call.push_to_talk.is_held().then(|| {
+        div()
+            .id("call-push-to-talk")
+            .absolute()
+            .top(px(HEADER_HEIGHT + PUSH_TO_TALK_TOP))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .debug_selector(|| "call/push-to-talk".into())
+                    .px(px(12.))
+                    .py(px(6.))
+                    .rounded_full()
+                    .bg(hsla(0., 0., 0., NAME_PLATE_BACKGROUND))
+                    .text_color(theme::white())
+                    .text_size(px(13.))
+                    .child(PUSH_TO_TALK_HINT),
+            )
+            .into_any_element()
+    })
+}
+
 fn share_items(
     popup: PopupMenu,
     app: &Entity<AppState>,
@@ -766,7 +818,12 @@ pub(super) fn device_items(
         .collect()
 }
 
-fn devices_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+fn devices_menu(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    model: &CallModel,
+    mic: MicSettings,
+) -> PopupMenu {
     let input_app = app.clone();
     let output_app = app.clone();
     let inputs = device_items(
@@ -793,19 +850,42 @@ fn devices_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> 
             popup = popup.item(item);
         }
     }
-    popup = popup.separator().item(PopupMenuItem::label("Speaker"));
+    popup = popup
+        .separator()
+        .item(PopupMenuItem::label(NOISE_SUPPRESSION_LABEL));
+    for level in NoiseSuppression::ALL {
+        let level_app = app.clone();
+        popup = popup.item(
+            PopupMenuItem::new(level.label())
+                .checked(level == mic.noise_suppression)
+                .disabled(mic.music_mode)
+                .on_click(move |_, _, cx| {
+                    level_app.update(cx, |state, cx| {
+                        let settings = MicSettings {
+                            noise_suppression: level,
+                            ..state.call_mic
+                        };
+                        state.set_call_mic(settings, cx)
+                    })
+                }),
+        );
+    }
+    popup = popup
+        .item(music_mode_item(app, mic))
+        .separator()
+        .item(PopupMenuItem::label("Speaker"));
     for item in outputs {
         popup = popup.item(item);
     }
     popup
 }
 
-fn mic_menu_button(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
+fn mic_menu_button(app: &Entity<AppState>, model: &CallModel, mic: MicSettings) -> impl IntoElement {
     let app = app.clone();
     let model = model.clone();
     chevron_button("call-mic-menu", "call-mic-menu-face")
         .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
-            devices_menu(popup, &app, &model)
+            devices_menu(popup, &app, &model, mic)
         })
 }
 
@@ -1007,7 +1087,7 @@ pub fn render_call_view(
                 .rounded_full()
                 .bg(theme::surface_raised())
                 .child(mute_button(app, model, "call-mute", CONTROL_SIZE))
-                .child(mic_menu_button(app, model)),
+                .child(mic_menu_button(app, model, state.call_mic)),
         )
         .child(
             h_flex()
@@ -1077,6 +1157,7 @@ pub fn render_call_view(
     }
     .children(captions_overlay(model, now))
     .children(captions_hint_chip(model))
+    .children(push_to_talk_chip(call))
     .children(state.transfer_picker.clone())
     .children(consent_overlay(app, model));
     Some(

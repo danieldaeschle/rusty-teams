@@ -16,7 +16,7 @@ use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenCallsTab,
-    OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, Scope,
+    OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk, Scope,
     ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare,
 };
@@ -48,6 +48,7 @@ pub fn bind_keys(cx: &mut App) {
             Scope::Global,
             Scope::OutsideComposer,
             Scope::GlobalOverTextFields,
+            Scope::OutsideTextFields,
         ],
     );
 }
@@ -215,6 +216,9 @@ impl AppShell {
             if window.is_window_active() {
                 this.state
                     .update(cx, |state, cx| state.refresh_calendar(cx));
+            } else {
+                this.state
+                    .update(cx, |state, cx| state.release_push_to_talk(cx));
             }
         });
         let closing = notifications.clone();
@@ -750,6 +754,22 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleCallMute, _, cx| {
                 this.state
                     .update(cx, |state, cx| state.toggle_call_mute(cx));
+            }))
+            .on_action(cx.listener(|this, _: &PushToTalk, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.press_push_to_talk(cx));
+            }))
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, cx| {
+                if event.keystroke.key == "space" {
+                    this.state
+                        .update(cx, |state, cx| state.release_push_to_talk(cx));
+                }
+            }))
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                if !event.modifiers.control {
+                    this.state
+                        .update(cx, |state, cx| state.release_push_to_talk(cx));
+                }
             }))
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);
