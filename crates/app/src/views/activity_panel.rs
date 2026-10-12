@@ -197,6 +197,7 @@ impl ActivityPanel {
         let group = SharedString::from(format!("activity-row-group-{id}"));
         h_flex()
             .id(ElementId::Name(format!("activity-row-{id}").into()))
+            .debug_selector(|| format!("activity-row-{id}"))
             .group(group.clone())
             .mx(px(6.))
             .px(px(10.))
@@ -563,13 +564,7 @@ mod tests {
             panel
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        let (activity, first_row) = cx.update(|_, cx| {
-            let panel = panel.read(cx);
-            (
-                panel.activity.clone(),
-                panel.scroll.bounds_for_item(1).unwrap(),
-            )
-        });
+        let activity = cx.update(|_, cx| panel.read(cx).activity.clone());
         let first_unread = cx.update(|_, cx| {
             let now = Local::now();
             activity
@@ -579,10 +574,11 @@ mod tests {
                 .entries[0]
                 .id
         });
+        let selector: &'static str = format!("activity-row-{first_unread}").leak();
+        let first_row = cx.debug_bounds(selector).unwrap();
         cx.simulate_mouse_move(first_row.center(), None, Modifiers::none());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|_, cx| activity.update(cx, |activity, cx| activity.mark_read(first_unread, cx)));
-        cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
     }
 }

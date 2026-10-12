@@ -59,3 +59,45 @@ pub mod title_bar;
 pub mod transfer_picker;
 pub mod translation_line;
 pub mod widgets;
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    fn rust_files(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn hover_styles_never_toggle_display() {
+        let toggle = regex::Regex::new(
+            r"hover\([^|]*\|\w+\|\s*\w+\s*\.\s*(hidden|flex|block|grid)\(\)",
+        )
+        .unwrap();
+        let mut files = Vec::new();
+        rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        let offenders: Vec<String> = files
+            .iter()
+            .flat_map(|path| {
+                let source = std::fs::read_to_string(path).unwrap();
+                source
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, line)| toggle.is_match(line))
+                    .map(|(index, _)| format!("{}:{}", path.display(), index + 1))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "hover styles must toggle visible()/invisible(), not display (gpui panics \"must call prepaint before paint\"): {offenders:?}"
+        );
+    }
+}
