@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 const CLAUDE_COMMAND: &str =
     "claude -p --output-format stream-json --verbose --session-id {session_id}";
 const COPILOT_COMMAND: &str = "copilot -p {prompt} --output-format json --session-id {session_id}";
+pub(crate) const LEGACY_CLAUDE_WSL_OPEN_SESSION: &str =
+    "wt.exe wsl.exe --cd {cwd} -e claude --resume {session_id}";
+pub(crate) const LEGACY_COPILOT_WSL_OPEN_SESSION: &str =
+    "wt.exe wsl.exe --cd {cwd} -e copilot --resume {session_id}";
+const CLAUDE_WSL_OPEN_SESSION: &str =
+    "wt.exe wsl.exe --cd {cwd} -e sh -lc \"exec claude --resume {session_id}\"";
+const COPILOT_WSL_OPEN_SESSION: &str =
+    "wt.exe wsl.exe --cd {cwd} -e sh -lc \"exec copilot --resume {session_id}\"";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Environment {
@@ -34,6 +42,15 @@ pub struct AgentProfile {
 }
 
 impl AgentProfile {
+    pub(crate) fn migrate_open_session_command(&mut self) {
+        let replacement = match self.open_session_command.as_str() {
+            LEGACY_CLAUDE_WSL_OPEN_SESSION => CLAUDE_WSL_OPEN_SESSION,
+            LEGACY_COPILOT_WSL_OPEN_SESSION => COPILOT_WSL_OPEN_SESSION,
+            _ => return,
+        };
+        self.open_session_command = replacement.to_string();
+    }
+
     pub fn claude_wsl() -> Self {
         Self {
             id: "claude".to_string(),
@@ -41,8 +58,7 @@ impl AgentProfile {
             environment: Environment::Wsl { distro: None },
             command: CLAUDE_COMMAND.to_string(),
             output: OutputFormat::ClaudeStreamJson,
-            open_session_command: "wt.exe wsl.exe --cd {cwd} -e claude --resume {session_id}"
-                .to_string(),
+            open_session_command: CLAUDE_WSL_OPEN_SESSION.to_string(),
             mcp_config_flag: "--mcp-config".to_string(),
         }
     }
@@ -66,8 +82,7 @@ impl AgentProfile {
             environment: Environment::Wsl { distro: None },
             command: COPILOT_COMMAND.to_string(),
             output: OutputFormat::CopilotJsonl,
-            open_session_command: "wt.exe wsl.exe --cd {cwd} -e copilot --resume {session_id}"
-                .to_string(),
+            open_session_command: COPILOT_WSL_OPEN_SESSION.to_string(),
             mcp_config_flag: "--additional-mcp-config".to_string(),
         }
     }

@@ -57,7 +57,11 @@ impl AgentSettings {
     }
 
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+        let mut settings: Self = serde_json::from_str(json)?;
+        for agent in &mut settings.agents {
+            agent.migrate_open_session_command();
+        }
+        Ok(settings)
     }
 
     pub fn validate(&self) -> Vec<SettingsProblem> {
@@ -101,6 +105,28 @@ mod tests {
         let loaded = AgentSettings::from_json(&settings.to_json()).unwrap();
         assert_eq!(loaded, settings);
         assert!(settings.validate().is_empty());
+    }
+
+    #[test]
+    fn from_json_migrates_legacy_wsl_open_session_commands_only() {
+        let legacy = AgentSettings::from_json(&format!(
+            r#"{{"agents":[{{"id":"claude","open_session_command":"{}"}},{{"id":"copilot","open_session_command":"{}"}},{{"id":"mine","open_session_command":"wt.exe wsl.exe -e claude --resume {{session_id}}"}}]}}"#,
+            crate::profile::LEGACY_CLAUDE_WSL_OPEN_SESSION,
+            crate::profile::LEGACY_COPILOT_WSL_OPEN_SESSION,
+        ))
+        .unwrap();
+        assert_eq!(
+            legacy.agents[0].open_session_command,
+            AgentProfile::claude_wsl().open_session_command
+        );
+        assert_eq!(
+            legacy.agents[1].open_session_command,
+            AgentProfile::copilot_wsl().open_session_command
+        );
+        assert_eq!(
+            legacy.agents[2].open_session_command,
+            "wt.exe wsl.exe -e claude --resume {session_id}"
+        );
     }
 
     #[test]

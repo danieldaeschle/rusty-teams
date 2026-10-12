@@ -493,7 +493,16 @@ mod tests {
         assert_eq!(invocation.program, "wt.exe");
         assert_eq!(
             invocation.args,
-            ["wsl.exe", "--cd", "~", "-e", "claude", "--resume", "sid-4"].map(String::from)
+            [
+                "wsl.exe",
+                "--cd",
+                "~",
+                "-e",
+                "sh",
+                "-lc",
+                "exec claude --resume sid-4"
+            ]
+            .map(String::from)
         );
     }
 
