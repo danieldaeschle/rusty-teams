@@ -47,6 +47,13 @@ pub struct VideoPicture {
 }
 
 impl VideoPicture {
+    pub fn flip_horizontally(&mut self) {
+        for row in self.bgra.chunks_exact_mut(self.width as usize * BYTES_PER_PIXEL) {
+            let (pixels, _) = row.as_chunks_mut::<BYTES_PER_PIXEL>();
+            pixels.reverse();
+        }
+    }
+
     pub fn solid(width: u32, height: u32, blue: u8, green: u8, red: u8) -> Self {
         let pixel = [blue, green, red, u8::MAX];
         VideoPicture {
@@ -150,6 +157,14 @@ pub fn bgra_from_i420(i420: I420Buffer) -> VideoPicture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flipping_mirrors_every_row() {
+        let mut picture = VideoPicture { width: 3, height: 2, bgra: (0u8..24).collect() };
+        picture.flip_horizontally();
+        assert_eq!(&picture.bgra[..12], &[8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3]);
+        assert_eq!(&picture.bgra[12..16], &[20, 21, 22, 23]);
+    }
 
     #[test]
     fn the_gate_caps_a_fast_source_at_thirty_frames_a_second() {

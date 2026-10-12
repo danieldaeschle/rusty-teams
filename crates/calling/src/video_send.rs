@@ -12,7 +12,8 @@ use libwebrtc::video_track::RtcVideoTrack;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::background::BackgroundPicture;
-use crate::blur::{BlurSettings, BlurStage};
+use crate::blur::BlurSettings;
+use crate::effects::{CameraEffects, EffectsStage};
 use crate::camera::start_camera;
 use crate::capture::Capture;
 use crate::control::CallUpdate;
@@ -53,6 +54,7 @@ impl VideoMode {
 pub struct LocalSink {
     source: NativeVideoSource,
     self_view: Option<(Arc<VideoHub>, VideoKey, FrameGate)>,
+    mirror: Option<Arc<BlurSettings>>,
 }
 
 impl LocalSink {
@@ -61,7 +63,12 @@ impl LocalSink {
             let fps = if matches!(key, VideoKey::LocalScreen) { SCREEN_FPS } else { PERSON_FPS };
             (hub, key, FrameGate::new(fps))
         });
-        LocalSink { source, self_view }
+        LocalSink { source, self_view, mirror: None }
+    }
+
+    pub fn mirrored_by(mut self, settings: Arc<BlurSettings>) -> Self {
+        self.mirror = Some(settings);
+        self
     }
 
     pub fn push(&mut self, buffer: I420Buffer) {
@@ -70,8 +77,11 @@ impl LocalSink {
         self.source.capture_frame(&frame);
         let Some((hub, key, gate)) = &mut self.self_view else { return };
         if gate.admit(Instant::now())
-            && let Some(picture) = picture_from_i420(frame.buffer, key.max_width())
+            && let Some(mut picture) = picture_from_i420(frame.buffer, key.max_width())
         {
+            if self.mirror.as_ref().is_some_and(|settings| settings.effects().mirror) {
+                picture.flip_horizontally();
+            }
             hub.publish(key.clone(), picture);
         }
     }
@@ -121,12 +131,16 @@ impl LocalVideo {
         self.blur.set_enabled(enabled);
     }
 
+    pub fn set_effects(&self, effects: CameraEffects) {
+        self.blur.set_effects(effects);
+    }
+
     pub fn camera_track(&self) -> RtcVideoTrack {
         self.camera.track.clone()
     }
 
     pub fn blur_average_ms(&self) -> Option<f32> {
-        (self.camera_on() && self.blur.enabled()).then(|| self.blur.average_ms())
+        (self.camera_on() && self.blur.active()).then(|| self.blur.average_ms())
     }
 
     pub fn has_lines(&self) -> bool {
@@ -174,7 +188,7 @@ impl LocalVideo {
     }
 
     fn camera_sink(&self) -> LocalSink {
-        LocalSink::new(self.camera.source.clone(), Some((self.hub.clone(), VideoKey::LocalCamera)))
+        LocalSink::new(self.camera.source.clone(), Some((self.hub.clone(), VideoKey::LocalCamera))).mirrored_by(self.blur.clone())
     }
 
     fn report_failure(&self, what: &'static str) -> impl FnOnce(String) + Send + 'static {
@@ -192,7 +206,7 @@ impl LocalVideo {
         self.camera.capture = None;
         let mut sink = self.camera_sink();
         let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(BlurStage::new(self.blur.clone())))),
+            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(EffectsStage::new(self.blur.clone())))),
             _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
         };
         Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;

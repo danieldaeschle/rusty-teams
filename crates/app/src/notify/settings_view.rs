@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use calling::camera::{DEFAULT_CAMERA_LABEL, list_cameras};
-use calling::{DeviceChoice, DeviceEntry, camera_entries};
+use calling::{CameraEffects, DeviceChoice, DeviceEntry, camera_entries};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::Button,
@@ -27,6 +27,7 @@ const SELECT_WIDTH: f32 = 170.;
 const PREVIEW_WIDTH: f32 = 380.;
 const PREVIEW_HEIGHT: f32 = 214.;
 const PREVIEW_RADIUS: f32 = 10.;
+const SOFT_FOCUS_LEVELS: [(&str, u8); 3] = [("Low", 25), ("Medium", 50), ("High", 75)];
 const CAMERA_IN_USE: &str = "Camera is in use by the call";
 
 fn camera_in_call(state: &AppState) -> bool {
@@ -129,6 +130,7 @@ impl SettingsView {
         let mcp = cx.new(|cx| McpView::new(app.clone(), window, cx));
         let state = app.read(cx);
         let camera = state.call_camera.clone();
+        preview.set_effects(state.call_effects);
         let preview_blocked = camera_in_call(state);
         let background = Some(state.call_background.clone())
             .filter(|pick| {
@@ -194,6 +196,8 @@ impl SettingsView {
             Section::Devices => {
                 self.load_cameras(cx);
                 self.apply_background(cx);
+                self.preview
+                    .set_effects(self.center.read(cx).app().read(cx).call_effects);
                 self.preview_blocked = camera_in_call(self.center.read(cx).app().read(cx));
                 self.start_preview();
             }
@@ -246,6 +250,84 @@ impl SettingsView {
         app.update(cx, |state, cx| state.select_call_camera(camera, cx));
         self.start_preview();
         cx.notify();
+    }
+
+    fn change_effects(&mut self, change: fn(&mut CameraEffects), cx: &mut Context<Self>) {
+        let app = self.center.read(cx).app().clone();
+        let mut effects = app.read(cx).call_effects;
+        change(&mut effects);
+        self.preview.set_effects(effects);
+        app.update(cx, |state, cx| state.set_call_effects(effects, cx));
+        cx.notify();
+    }
+
+    fn effect_row(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        on: bool,
+        change: fn(&mut CameraEffects),
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let view = cx.entity();
+        h_flex()
+            .id(id)
+            .w_full()
+            .px(px(20.))
+            .py(px(6.))
+            .gap(px(12.))
+            .items_center()
+            .cursor_pointer()
+            .hover(|row| row.bg(theme::row_hover()))
+            .on_click(move |_, _, cx| view.update(cx, |view, cx| view.change_effects(change, cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text())
+                    .child(title),
+            )
+            .child(switch(on))
+    }
+
+    fn strength_row(&self, strength: u8, cx: &mut Context<Self>) -> Stateful<Div> {
+        let levels = SOFT_FOCUS_LEVELS.map(|(label, level)| {
+            let view = cx.entity();
+            let app = self.center.read(cx).app().clone();
+            button(label)
+                .when(strength == level, |button| {
+                    button.bg(theme::accent()).text_color(theme::on_accent())
+                })
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| {
+                        let effects = CameraEffects {
+                            soft_focus_strength: level,
+                            ..state.call_effects
+                        };
+                        state.set_call_effects(effects, cx);
+                        view.update(cx, |view, cx| {
+                            view.preview.set_effects(effects);
+                            cx.notify();
+                        });
+                    })
+                })
+        });
+        h_flex()
+            .id("effect-soft-focus-strength")
+            .w_full()
+            .px(px(20.))
+            .py(px(6.))
+            .gap(px(8.))
+            .items_center()
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(12.))
+                    .text_color(theme::text_muted())
+                    .child("Soft focus strength"),
+            )
+            .children(levels)
     }
 
     fn select_background(&mut self, pick: BackgroundPick, cx: &mut Context<Self>) {
@@ -422,6 +504,7 @@ impl SettingsView {
             .find(|(pick, _)| *pick == self.background)
             .map_or("None".to_owned(), |(_, label)| label.clone());
         let current_background = self.background.clone();
+        let effects = self.center.read(cx).app().read(cx).call_effects;
         let image = self.preview.image(Instant::now());
         let status = if self.preview_blocked {
             CAMERA_IN_USE.to_owned()
@@ -514,6 +597,43 @@ impl SettingsView {
                             .text_color(theme::text_muted())
                             .child(status),
                     ),
+            )
+            .child(
+                v_flex()
+                    .id("camera-effects")
+                    .w_full()
+                    .pt(px(8.))
+                    .child(self.effect_row(
+                        "effect-mirror",
+                        "Mirror my video",
+                        effects.mirror,
+                        |effects| effects.mirror = !effects.mirror,
+                        cx,
+                    ))
+                    .child(self.effect_row(
+                        "effect-framing",
+                        "Auto framing",
+                        effects.auto_framing,
+                        |effects| effects.auto_framing = !effects.auto_framing,
+                        cx,
+                    ))
+                    .child(self.effect_row(
+                        "effect-brightness",
+                        "Adjust brightness",
+                        effects.adjust_brightness,
+                        |effects| effects.adjust_brightness = !effects.adjust_brightness,
+                        cx,
+                    ))
+                    .child(self.effect_row(
+                        "effect-soft-focus",
+                        "Soft focus",
+                        effects.soft_focus,
+                        |effects| effects.soft_focus = !effects.soft_focus,
+                        cx,
+                    ))
+                    .when(effects.soft_focus, |column| {
+                        column.child(self.strength_row(effects.soft_focus_strength, cx))
+                    }),
             )
     }
 }

@@ -532,6 +532,7 @@ async fn speak_until_hangup(
                     control.send(CallUpdate::Captions(if on { CaptionState::On } else { CaptionState::Off }));
                 }
                 Some(CallCommand::SetBackground(choice)) => blur = choice != BackgroundChoice::None,
+                Some(CallCommand::SetCameraEffects(_)) => {}
                 Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),

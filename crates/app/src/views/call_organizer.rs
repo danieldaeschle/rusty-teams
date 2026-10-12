@@ -13,7 +13,7 @@ use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::call_extras::{
-    BackgroundMenu, background_items, confirm_stop_recording, open_transfer_picker,
+    CameraMenu, background_items, confirm_stop_recording, effect_items, open_transfer_picker,
 };
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::icon;
@@ -475,7 +475,7 @@ pub fn chevron_button(button_id: &'static str, face_id: &'static str) -> Button 
 pub fn camera_menu_button(
     app: &Entity<AppState>,
     model: &CallModel,
-    backgrounds: BackgroundMenu,
+    backgrounds: CameraMenu,
 ) -> Option<AnyElement> {
     if !model.can_use_camera() {
         return None;
@@ -495,7 +495,7 @@ fn camera_menu(
     popup: PopupMenu,
     app: &Entity<AppState>,
     model: &CallModel,
-    backgrounds: &BackgroundMenu,
+    backgrounds: &CameraMenu,
 ) -> PopupMenu {
     let camera_app = app.clone();
     let cameras = super::call_view::device_items(
@@ -511,7 +511,11 @@ fn camera_menu(
     for item in cameras {
         popup = popup.item(item);
     }
-    background_items(popup, app, backgrounds)
+    background_items(
+        effect_items(popup, app, backgrounds.effects),
+        app,
+        backgrounds,
+    )
 }
 
 pub fn captions_overlay(model: &CallModel, now: Instant) -> Option<AnyElement> {

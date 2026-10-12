@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use calling::HoldState;
+use calling::{CameraEffects, HoldState};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::*;
@@ -288,16 +289,17 @@ pub fn open_transfer_picker(app: &Entity<AppState>, window: &mut Window, cx: &mu
 }
 
 #[derive(Clone)]
-pub struct BackgroundMenu {
+pub struct CameraMenu {
     pub pick: BackgroundPick,
     pub images: Vec<(String, String, Option<PathBuf>)>,
     pub customs: Vec<PathBuf>,
+    pub effects: CameraEffects,
 }
 
-impl BackgroundMenu {
+impl CameraMenu {
     pub fn of(state: &AppState) -> Self {
         let library = &state.call_backgrounds;
-        BackgroundMenu {
+        CameraMenu {
             pick: state.call_background.clone(),
             images: library
                 .shown()
@@ -311,6 +313,7 @@ impl BackgroundMenu {
                 })
                 .collect(),
             customs: library.customs.clone(),
+            effects: state.call_effects,
         }
     }
 }
@@ -354,11 +357,75 @@ fn thumbnail(
         .into_any_element()
 }
 
-pub fn background_items(
-    popup: PopupMenu,
+fn effect_change(
     app: &Entity<AppState>,
-    menu: &BackgroundMenu,
-) -> PopupMenu {
+    change: fn(&mut CameraEffects),
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let app = app.clone();
+    move |_, _, cx| {
+        app.update(cx, |state, cx| {
+            let mut effects = state.call_effects;
+            change(&mut effects);
+            state.set_call_effects(effects, cx);
+        })
+    }
+}
+
+fn effect_switch_item(
+    app: &Entity<AppState>,
+    id: &'static str,
+    label: &'static str,
+    on: bool,
+    change: fn(&mut CameraEffects),
+) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .id(id)
+            .w_full()
+            .gap(px(16.))
+            .items_center()
+            .justify_between()
+            .child(label)
+            .child(Switch::new(id).checked(on))
+    })
+    .on_click(effect_change(app, change))
+}
+
+pub fn effect_items(popup: PopupMenu, app: &Entity<AppState>, effects: CameraEffects) -> PopupMenu {
+    popup
+        .separator()
+        .item(PopupMenuItem::label("Effects"))
+        .item(
+            PopupMenuItem::new("Mirror my video")
+                .checked(effects.mirror)
+                .on_click(effect_change(app, |effects| {
+                    effects.mirror = !effects.mirror
+                })),
+        )
+        .item(effect_switch_item(
+            app,
+            "call-effect-framing",
+            "Auto framing",
+            effects.auto_framing,
+            |effects| effects.auto_framing = !effects.auto_framing,
+        ))
+        .item(effect_switch_item(
+            app,
+            "call-effect-brightness",
+            "Adjust brightness",
+            effects.adjust_brightness,
+            |effects| effects.adjust_brightness = !effects.adjust_brightness,
+        ))
+        .item(effect_switch_item(
+            app,
+            "call-effect-soft-focus",
+            "Soft focus",
+            effects.soft_focus,
+            |effects| effects.soft_focus = !effects.soft_focus,
+        ))
+}
+
+pub fn background_items(popup: PopupMenu, app: &Entity<AppState>, menu: &CameraMenu) -> PopupMenu {
     let (none_app, blur_app, add_app, grid_app) =
         (app.clone(), app.clone(), app.clone(), app.clone());
     let grid_menu = menu.clone();

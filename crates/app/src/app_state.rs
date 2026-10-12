@@ -126,6 +126,7 @@ pub struct AppState {
     pub call_share_sound: bool,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
+    pub call_effects: calling::CameraEffects,
     pub meet_now_pending: bool,
     pub call_backgrounds: crate::call::BackgroundLibrary,
     pub transfer_picker: Option<Entity<crate::views::transfer_picker::TransferPicker>>,
@@ -223,6 +224,7 @@ impl AppState {
             call_share_sound: false,
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
+            call_effects: calling::CameraEffects::default(),
             meet_now_pending: false,
             call_backgrounds: if mode.demo {
                 crate::call::demo_library()
@@ -241,6 +243,7 @@ impl AppState {
         state.call_share_sound = crate::call::load_share_sound(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
+        state.call_effects = crate::call::load_camera_effects(&state.store);
         state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);
         state.load_cached_translation_settings();
         if !mode.demo {

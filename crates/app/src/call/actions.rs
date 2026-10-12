@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use calling::meeting::LiveMeeting;
 use calling::{
-    AcceptMode, CallCommand, CallHandle, CallSpec, CallState, CallUpdate, Callee, DeviceChoice,
-    EndReason, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
+    AcceptMode, CallCommand, CallHandle, CallSpec, CallState, CallUpdate, Callee, CameraEffects,
+    DeviceChoice, EndReason, EngineEvent, MuteCommand, Reaction, RingSignal, ShareSource, VideoKey,
 };
 use gpui_kit::*;
 
@@ -37,6 +37,7 @@ const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
 const CAMERA_META_KEY: &str = "call_camera";
+const EFFECTS_META_KEY: &str = "call_camera_effects";
 const DEFAULT_CAMERA_META: &str = "default";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
@@ -48,6 +49,16 @@ pub fn load_camera(store: &store::Store) -> DeviceChoice {
         Some(key) if !key.is_empty() && key != DEFAULT_CAMERA_META => DeviceChoice::Device(key),
         _ => DeviceChoice::SystemDefault,
     }
+}
+
+pub fn load_camera_effects(store: &store::Store) -> CameraEffects {
+    store
+        .meta(EFFECTS_META_KEY)
+        .ok()
+        .flatten()
+        .map_or_else(CameraEffects::default, |value| {
+            CameraEffects::from_meta(&value)
+        })
 }
 
 fn camera_meta(choice: &DeviceChoice) -> &str {
@@ -225,6 +236,7 @@ impl AppState {
         if self.call_background != BackgroundPick::None {
             self.send_background_command(cx);
         }
+        self.send_call_command(CallCommand::SetCameraEffects(self.call_effects));
         self.refresh_call_backgrounds(cx);
         self.new_chat = false;
         self.follow_call(call_id, updates, cx);
@@ -671,6 +683,13 @@ impl AppState {
         self.send_call_command(CallCommand::SetCaptions(on));
     }
 
+    pub fn set_call_effects(&mut self, effects: CameraEffects, cx: &mut Context<Self>) {
+        let _ = self.store.set_meta(EFFECTS_META_KEY, &effects.to_meta());
+        self.call_effects = effects;
+        self.send_call_command(CallCommand::SetCameraEffects(effects));
+        cx.notify();
+    }
+
     pub fn set_call_background(&mut self, pick: BackgroundPick, cx: &mut Context<Self>) {
         let _ = self.store.set_meta(BACKGROUND_META_KEY, &pick.to_meta());
         self.call_background = pick.clone();
@@ -1086,13 +1105,13 @@ mod tests {
     use std::path::PathBuf;
 
     use calling::{
-        BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, DeviceChoice, EndKind,
-        EndReason, EngineEvent, HoldState, Reaction, call_channel,
+        BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, CameraEffects,
+        DeviceChoice, EndKind, EndReason, EngineEvent, HoldState, Reaction, call_channel,
     };
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
-    use super::{ActiveCall, CallModel, load_camera};
+    use super::{ActiveCall, CallModel, load_camera, load_camera_effects};
     use crate::app_state::{AppEvent, AppState, Mode, Selection};
     use crate::call::TransferCandidate;
     use crate::call::background::BackgroundPick;
@@ -1236,6 +1255,28 @@ mod tests {
             })
         });
         assert_eq!(load_camera(&store), DeviceChoice::SystemDefault);
+    }
+
+    #[gpui_kit::test]
+    fn the_camera_effects_are_remembered_and_sent_to_the_call(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        let store = cx.update(|cx| app.read(cx).store.clone());
+        assert_eq!(load_camera_effects(&store), CameraEffects::default());
+        let effects = CameraEffects {
+            mirror: false,
+            auto_framing: true,
+            soft_focus: true,
+            soft_focus_strength: 75,
+            ..CameraEffects::default()
+        };
+        cx.update(|cx| app.update(cx, |state, cx| state.set_call_effects(effects, cx)));
+        assert_eq!(
+            control.try_recv_command(),
+            Some(CallCommand::SetCameraEffects(effects))
+        );
+        assert_eq!(load_camera_effects(&store), effects);
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert_eq!(cx.update(|cx| reopened.read(cx).call_effects), effects);
     }
 
     #[gpui_kit::test]

@@ -8,7 +8,8 @@ use nokhwa::utils::{ApiBackend, CameraFormat, CameraIndex, FrameFormat, Requeste
 use nokhwa::{Camera, query};
 use std::sync::atomic::Ordering;
 
-use crate::blur::{BlurSettings, BlurStage};
+use crate::blur::BlurSettings;
+use crate::effects::EffectsStage;
 use crate::capture::Capture;
 use crate::devices::{DeviceChoice, DeviceEntry};
 use crate::error::{Error, Result};
@@ -176,7 +177,7 @@ pub fn start_camera(
             Ok(camera) => camera,
             Err(error) => return failed(error.to_string()),
         };
-        let mut blur_stage = BlurStage::new(blur.clone());
+        let mut stage = EffectsStage::new(blur);
         let mut warned_undecodable = false;
         while !stop.load(Ordering::SeqCst) {
             let Ok(frame) = camera.frame() else {
@@ -188,21 +189,19 @@ pub fn start_camera(
             if width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
                 continue;
             }
-            if !blur.enabled()
-                && let Some(buffer) = direct_i420(frame.source_frame_format(), frame.buffer(), width, height)
-            {
-                deliver(buffer);
-                continue;
-            }
-            let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
-                if !std::mem::replace(&mut warned_undecodable, true) {
-                    eprintln!("calls: camera delivers {} and no decoder is available", frame.source_frame_format());
+            let buffer = match direct_i420(frame.source_frame_format(), frame.buffer(), width, height) {
+                Some(buffer) => buffer,
+                None => {
+                    let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
+                        if !std::mem::replace(&mut warned_undecodable, true) {
+                            eprintln!("calls: camera delivers {} and no decoder is available", frame.source_frame_format());
+                        }
+                        continue;
+                    };
+                    i420_from_rgba(&decoded.into_raw(), width, height)
                 }
-                continue;
             };
-            let mut rgba = decoded.into_raw();
-            blur_stage.apply_rgba(&mut rgba, width as usize, height as usize);
-            deliver(i420_from_rgba(&rgba, width, height));
+            deliver(stage.apply_i420(buffer));
         }
         let _ = camera.stop_stream();
     })

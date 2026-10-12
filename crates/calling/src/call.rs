@@ -1517,6 +1517,7 @@ async fn drive(
                     });
                 }
                 Some(CallCommand::SetBackground(choice)) => apply_background(choice, &local_video, control, timeline).await,
+                Some(CallCommand::SetCameraEffects(effects)) => local_video.set_effects(effects),
                 Some(CallCommand::SendReaction(reaction)) => {
                     if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {
                         timeline.record("reaction failed", error.to_string());

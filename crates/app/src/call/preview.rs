@@ -7,7 +7,7 @@ use calling::blur::BlurSettings;
 use calling::camera::start_camera;
 use calling::capture::Capture;
 use calling::video_frame::picture_from_i420;
-use calling::{BackgroundChoice, CallUpdate, DeviceChoice, VideoHub, VideoKey};
+use calling::{BackgroundChoice, CallUpdate, CameraEffects, DeviceChoice, VideoHub, VideoKey};
 use gpui_kit::*;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -55,12 +55,16 @@ impl CameraPreview {
         let hub = self.hub.clone();
         let frames = self.frames.clone();
         let failure = self.failure.clone();
+        let mirror = self.blur.clone();
         let started = start_camera(
             choice,
             self.blur.clone(),
             move |buffer| {
                 frames.fetch_add(1, Ordering::Relaxed);
-                if let Some(picture) = picture_from_i420(buffer, PREVIEW_MAX_WIDTH) {
+                if let Some(mut picture) = picture_from_i420(buffer, PREVIEW_MAX_WIDTH) {
+                    if mirror.effects().mirror {
+                        picture.flip_horizontally();
+                    }
                     hub.publish(VideoKey::LocalCamera, picture);
                 }
             },
@@ -99,6 +103,10 @@ impl CameraPreview {
                 });
             }
         }
+    }
+
+    pub fn set_effects(&self, effects: CameraEffects) {
+        self.blur.set_effects(effects);
     }
 
     fn apply_background(&self, enabled: bool, picture: Option<Arc<BackgroundPicture>>) {

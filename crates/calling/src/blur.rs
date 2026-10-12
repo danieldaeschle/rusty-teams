@@ -3,12 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use libwebrtc::native::yuv_helper::i420_to_abgr;
-use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use tract_onnx::prelude::*;
 
 use crate::background::BackgroundPicture;
-use crate::camera::i420_from_rgba;
+use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
 
 const MODEL: &[u8] = include_bytes!("../assets/selfie_segmentation_landscape.onnx");
@@ -24,7 +22,6 @@ const OPAQUE: f32 = 0.985;
 const MASK_SMOOTHING: f32 = 0.35;
 const SLOW_INFERENCE: Duration = Duration::from_millis(22);
 const VERY_SLOW_INFERENCE: Duration = Duration::from_millis(45);
-const AVERAGE_WEIGHT: f64 = 0.1;
 const MAX_BANDS: usize = 4;
 
 type Plan = std::sync::Arc<TypedRunnableModel>;
@@ -84,13 +81,13 @@ fn smoothstep(value: f32) -> f32 {
     t * t * (3. - 2. * t)
 }
 
-struct Axis {
-    first: Vec<usize>,
-    second: Vec<usize>,
-    weight: Vec<f32>,
+pub(crate) struct Axis {
+    pub(crate) first: Vec<usize>,
+    pub(crate) second: Vec<usize>,
+    pub(crate) weight: Vec<f32>,
 }
 
-fn axis(output: usize, input: usize) -> Axis {
+pub(crate) fn axis(output: usize, input: usize) -> Axis {
     let mut axis = Axis { first: Vec::with_capacity(output), second: Vec::with_capacity(output), weight: Vec::with_capacity(output) };
     for index in 0..output {
         let position = ((index as f32 + 0.5) * input as f32 / output as f32 - 0.5).clamp(0., (input - 1) as f32);
@@ -234,6 +231,7 @@ pub struct BlurSettings {
     enabled: AtomicBool,
     average_micros: AtomicU32,
     picture: Mutex<Option<Arc<BackgroundPicture>>>,
+    effects: Mutex<CameraEffects>,
 }
 
 impl BlurSettings {
@@ -253,16 +251,30 @@ impl BlurSettings {
         self.picture.lock().expect("picture lock").clone()
     }
 
+    pub fn set_effects(&self, effects: CameraEffects) {
+        *self.effects.lock().expect("effects lock") = effects;
+    }
+
+    pub fn effects(&self) -> CameraEffects {
+        *self.effects.lock().expect("effects lock")
+    }
+
+    pub fn active(&self) -> bool {
+        self.enabled() || self.effects().alters_frame()
+    }
+
     pub fn average_ms(&self) -> f32 {
         self.average_micros.load(Ordering::Relaxed) as f32 / 1000.
     }
+
+    pub fn set_average_ms(&self, average_ms: f64) {
+        self.average_micros.store((average_ms * 1000.) as u32, Ordering::Relaxed);
+    }
 }
 
-/// Runs on the capture thread; loads the model on first use and stays out of the way while the setting is off.
+/// Replaces the background of a frame; the mask comes from the shared `MaskSource`.
 pub struct BlurStage {
     settings: Arc<BlurSettings>,
-    blur: Option<BackgroundBlur>,
-    unavailable: bool,
     covered: Option<CoveredPicture>,
 }
 
@@ -275,7 +287,7 @@ struct CoveredPicture {
 
 impl BlurStage {
     pub fn new(settings: Arc<BlurSettings>) -> Self {
-        BlurStage { settings, blur: None, unavailable: false, covered: None }
+        BlurStage { settings, covered: None }
     }
 
     fn refresh_covered(&mut self, width: usize, height: usize) {
@@ -290,73 +302,47 @@ impl BlurStage {
         }
     }
 
-    pub fn apply_rgba(&mut self, rgba: &mut [u8], width: usize, height: usize) {
-        if !self.settings.enabled() || self.unavailable {
-            return;
-        }
-        if self.blur.is_none() {
-            match BackgroundBlur::new() {
-                Ok(blur) => self.blur = Some(blur),
-                Err(_) => {
-                    self.unavailable = true;
-                    return;
-                }
-            }
-        }
+    pub fn compose(&mut self, rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
         self.refresh_covered(width, height);
-        if let Some(blur) = self.blur.as_mut() {
-            blur.apply(rgba, width, height, self.covered.as_ref().map(|covered| covered.rgb.as_slice()));
-            self.settings.average_micros.store((blur.average_ms() * 1000.) as u32, Ordering::Relaxed);
+        match &self.covered {
+            Some(covered) => compose_image(rgba, width, height, mask, &covered.rgb),
+            None => compose(rgba, width, height, mask),
         }
-    }
-
-    pub fn apply_i420(&mut self, buffer: I420Buffer) -> I420Buffer {
-        if !self.settings.enabled() || self.unavailable {
-            return buffer;
-        }
-        let (width, height) = (buffer.width() as usize, buffer.height() as usize);
-        let (stride_y, stride_u, stride_v) = buffer.strides();
-        let (plane_y, plane_u, plane_v) = buffer.data();
-        let mut rgba = vec![0u8; width * height * CHANNELS];
-        i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, (width * CHANNELS) as u32, width as i32, height as i32);
-        self.apply_rgba(&mut rgba, width, height);
-        i420_from_rgba(&rgba, width as u32, height as u32)
     }
 }
 
-/// Background blur for camera frames: segments every `stride` frames and slows down when inference is slow.
-pub struct BackgroundBlur {
+/// One segmentation mask for every effect: segments every `stride` frames and slows down when inference is slow.
+pub struct MaskSource {
     segmenter: Segmenter,
     mask: Vec<f32>,
     frames: u64,
     stride: u64,
-    average_ms: f64,
-    processed: u64,
 }
 
-impl BackgroundBlur {
+impl MaskSource {
     pub fn new() -> Result<Self> {
-        Ok(BackgroundBlur { segmenter: Segmenter::new()?, mask: Vec::new(), frames: 0, stride: 1, average_ms: 0., processed: 0 })
+        Ok(MaskSource { segmenter: Segmenter::new()?, mask: Vec::new(), frames: 0, stride: 1 })
     }
 
-    pub fn apply(&mut self, rgba: &mut [u8], width: usize, height: usize, covered: Option<&[u8]>) {
-        let started = Instant::now();
-        if self.frames.is_multiple_of(self.stride) || self.mask.is_empty() {
-            self.segment(rgba, width, height, started);
-        }
+    pub fn due(&self) -> bool {
+        self.frames.is_multiple_of(self.stride) || self.mask.is_empty()
+    }
+
+    pub fn mask(&self) -> &[f32] {
+        &self.mask
+    }
+
+    /// Call once per frame; `rgba` is only read when `due`. Answers whether the mask changed.
+    pub fn refresh(&mut self, rgba: impl FnOnce() -> (Vec<u8>, usize, usize)) -> bool {
+        let due = self.due();
         self.frames += 1;
-        match covered {
-            Some(covered) => compose_image(rgba, width, height, &self.mask, covered),
-            None => compose(rgba, width, height, &self.mask),
+        if !due {
+            return false;
         }
-        let elapsed = started.elapsed().as_secs_f64() * 1000.;
-        self.average_ms = if self.processed == 0 { elapsed } else { self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT };
-        self.processed += 1;
-    }
-
-    fn segment(&mut self, rgba: &[u8], width: usize, height: usize, started: Instant) {
-        let Ok(fresh) = self.segmenter.mask(rgba, width, height) else {
-            return;
+        let (rgba, width, height) = rgba();
+        let started = Instant::now();
+        let Ok(fresh) = self.segmenter.mask(&rgba, width, height) else {
+            return false;
         };
         let inference = started.elapsed();
         self.stride = if inference > VERY_SLOW_INFERENCE {
@@ -368,15 +354,12 @@ impl BackgroundBlur {
         };
         if self.mask.is_empty() {
             self.mask = fresh;
-            return;
+            return true;
         }
         for (current, new) in self.mask.iter_mut().zip(fresh) {
             *current += (new - *current) * (1. - MASK_SMOOTHING);
         }
-    }
-
-    pub fn average_ms(&self) -> f64 {
-        self.average_ms
+        true
     }
 }
 
@@ -496,12 +479,13 @@ mod tests {
     }
 
     #[test]
-    fn the_blur_keeps_a_running_average_and_a_mask() {
-        let mut blur = BackgroundBlur::new().expect("model loads");
-        let mut frame = checkerboard();
-        blur.apply(&mut frame, WIDTH, HEIGHT, None);
-        blur.apply(&mut frame, WIDTH, HEIGHT, None);
-        assert!(blur.average_ms() > 0.);
-        assert_eq!(blur.mask.len(), MASK_WIDTH * MASK_HEIGHT);
+    fn the_mask_source_segments_when_due_and_keeps_one_mask() {
+        let mut source = MaskSource::new().expect("model loads");
+        let frame = || (checkerboard(), WIDTH, HEIGHT);
+        assert!(source.refresh(frame));
+        assert_eq!(source.mask().len(), MASK_WIDTH * MASK_HEIGHT);
+        source.stride = 3;
+        assert!(!source.due());
+        assert!(!source.refresh(|| unreachable!("a skipped frame is not read")));
     }
 }

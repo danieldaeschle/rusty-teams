@@ -17,7 +17,7 @@ use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::call_extras::{
-    BackgroundMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
+    CameraMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
     room_chip, whiteboard_stage,
 };
 use super::call_organizer::{
@@ -1092,7 +1092,7 @@ pub fn render_call_view(
                 .rounded_full()
                 .bg(theme::surface_raised())
                 .child(camera_button(app, model))
-                .children(camera_menu_button(app, model, BackgroundMenu::of(state))),
+                .children(camera_menu_button(app, model, CameraMenu::of(state))),
         )
         .child(share_button(app, model, state.call_share_sound))
         .when(model.has_reaction_controls(), |row| {
