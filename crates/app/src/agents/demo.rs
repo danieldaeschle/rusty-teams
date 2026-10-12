@@ -51,6 +51,7 @@ fn run_for(
         ended_at: finished.then(|| started_at + ChronoDuration::seconds(elapsed_seconds)),
         expanded: false,
         dismissed: false,
+        process_id: None,
     }
 }
 

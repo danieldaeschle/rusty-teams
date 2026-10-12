@@ -24,6 +24,7 @@ pub enum SettingsProblem {
 pub struct AgentSettings {
     pub agents: Vec<AgentProfile>,
     pub actions: Vec<AgentAction>,
+    pub resume_interrupted_runs: bool,
 }
 
 impl Default for AgentSettings {
@@ -34,6 +35,7 @@ impl Default for AgentSettings {
                 AgentAction::answer_this("claude"),
                 AgentAction::build_this("claude"),
             ],
+            resume_interrupted_runs: true,
         }
     }
 }
@@ -135,6 +137,17 @@ mod tests {
             AgentSettings::from_json("{}").unwrap(),
             AgentSettings::default()
         );
+    }
+
+    #[test]
+    fn resume_defaults_on_and_can_be_switched_off() {
+        assert!(
+            AgentSettings::from_json("{}")
+                .unwrap()
+                .resume_interrupted_runs
+        );
+        let off = AgentSettings::from_json(r#"{"resume_interrupted_runs":false}"#).unwrap();
+        assert!(!off.resume_interrupted_runs);
     }
 
     #[test]

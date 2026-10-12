@@ -12,6 +12,7 @@ use gpui_kit::*;
 use super::environment_label;
 use super::runs::AgentRuns;
 use super::settings_controls::{Choice, MenuEntry, PAGE_PADDING, link_dropdown, section_header};
+use super::settings_forms::resume_toggle;
 use crate::runtime;
 use crate::theme;
 use crate::views::widgets::icon;
@@ -316,6 +317,12 @@ impl AgentsSettings {
 
     pub(super) fn set_action_agent(&mut self, agent_id: String, cx: &mut Context<Self>) {
         self.update_action(cx, move |action| action.agent_id = agent_id);
+    }
+
+    pub(super) fn set_resume_interrupted_runs(&mut self, resume: bool, cx: &mut Context<Self>) {
+        self.runs.update(cx, |runs, cx| {
+            runs.update_settings(|settings| settings.resume_interrupted_runs = resume, cx)
+        });
     }
 
     pub(super) fn set_ask_extra(&mut self, ask: bool, cx: &mut Context<Self>) {
@@ -665,6 +672,7 @@ impl AgentsSettings {
                 Some(add_action.into_any_element()),
             ))
             .child(v_flex().w_full().px(px(8.)).children(action_rows))
+            .child(resume_toggle(settings.resume_interrupted_runs, this))
             .child(
                 div()
                     .w_full()

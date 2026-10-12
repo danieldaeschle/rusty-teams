@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -13,6 +15,7 @@ const CHIP_HEIGHT: f32 = 28.;
 const CHIP_MAX_WIDTH: f32 = 310.;
 const BUTTON_HEIGHT: f32 = 22.;
 const STATUS_ICON: f32 = 12.;
+const STEP_TIME_WIDTH: f32 = 30.;
 
 fn with_runs(cx: &mut App, change: impl FnOnce(&mut AgentRuns, &mut Context<AgentRuns>)) {
     cx.global::<AgentRunsHandle>().0.clone().update(cx, change);
@@ -101,9 +104,10 @@ fn chip_row(run: &AgentRun, fill: Hsla) -> Stateful<Div> {
     let action_label = run.action_label.clone();
     match &run.state {
         RunState::Running => row
+            .w(px(CHIP_MAX_WIDTH))
             .child(spinner(STATUS_ICON))
             .child(label(action_label, theme::text_soft()))
-            .child(step_text(run.current_step.clone()))
+            .child(step_text(run.current_step.clone()).flex_1())
             .child(elapsed_text(run))
             .child(
                 div()
@@ -191,7 +195,10 @@ fn step_row(elapsed: String, text: String, current: bool) -> Div {
         })
         .child(
             div()
+                .w(px(STEP_TIME_WIDTH))
                 .flex_none()
+                .text_right()
+                .font_features(FontFeatures(Arc::new(vec![("tnum".to_owned(), 1)])))
                 .text_color(theme::text_faint())
                 .child(elapsed),
         )

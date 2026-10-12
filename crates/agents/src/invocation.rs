@@ -5,6 +5,8 @@ use crate::profile::{AgentProfile, Environment};
 use crate::template::{UnknownPlaceholder, Values, placeholders_in, render, split_command};
 
 const WSL_PROGRAM: &str = "wsl.exe";
+const SESSION_FLAG: &str = "--session-id {session_id}";
+const RESUME_FLAG: &str = "--resume {session_id}";
 const WSL_SCRIPT: &str = r#"case "$1" in "~"*) dir="$HOME${1#\~}";; *) dir="$1";; esac; cd "$dir" && shift && exec "$@""#;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +38,8 @@ pub enum InvocationError {
     UnknownPlaceholder(#[from] UnknownPlaceholder),
     #[error("cannot write the MCP config: {0}")]
     McpConfig(String),
+    #[error("the agent command has no \"{SESSION_FLAG}\" to resume with")]
+    CannotResume,
 }
 
 fn expand_home(path: &str) -> String {
@@ -209,6 +213,75 @@ pub fn build_invocation(
             })
         }
     }
+}
+
+fn is_plain_session_id(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+}
+
+pub fn kill_process_invocation(process_id: u32, session_id: &str) -> Option<Invocation> {
+    if !is_plain_session_id(session_id) {
+        return None;
+    }
+    if cfg!(windows) {
+        let script = format!(
+            "$p = Get-CimInstance Win32_Process -Filter 'ProcessId={process_id}'; if ($p -and $p.CommandLine -like '*{session_id}*') {{ taskkill /PID {process_id} /T /F }}"
+        );
+        return Some(Invocation {
+            program: "powershell".to_string(),
+            args: ["-NoProfile", "-Command", &script]
+                .map(String::from)
+                .to_vec(),
+            cwd: None,
+            stdin: None,
+        });
+    }
+    Some(Invocation {
+        program: "sh".to_string(),
+        args: [
+            "-c",
+            r#"grep -qaF -- "$2" "/proc/$1/cmdline" && kill -9 "$1""#,
+            "sh",
+            &process_id.to_string(),
+            session_id,
+        ]
+        .map(String::from)
+        .to_vec(),
+        cwd: None,
+        stdin: None,
+    })
+}
+
+pub fn supports_resume(profile: &AgentProfile) -> bool {
+    profile.command.contains(SESSION_FLAG)
+}
+
+pub fn resume_invocation(
+    profile: &AgentProfile,
+    action: &AgentAction,
+    prompt: &str,
+    session_id: &str,
+    mcp: Option<&McpEndpoint>,
+    mcp_config_directory: Option<&Path>,
+) -> Result<RunPlan, InvocationError> {
+    if !supports_resume(profile) {
+        return Err(InvocationError::CannotResume);
+    }
+    let resuming_profile = AgentProfile {
+        command: profile.command.replace(SESSION_FLAG, RESUME_FLAG),
+        ..profile.clone()
+    };
+    build_invocation(
+        &resuming_profile,
+        action,
+        prompt,
+        session_id,
+        mcp,
+        mcp_config_directory,
+    )
 }
 
 pub fn open_session_invocation(
@@ -532,6 +605,164 @@ mod tests {
                 "--version"
             ]
             .map(String::from)
+        );
+    }
+
+    #[test]
+    fn resume_swaps_the_session_flag_and_keeps_the_extra_args() {
+        let mut profile = AgentProfile::claude_wsl();
+        profile.environment = Environment::Wsl {
+            distro: Some("Ubuntu".to_string()),
+        };
+        let action = AgentAction::answer_this("claude");
+        let plan = resume_invocation(&profile, &action, "go on", "sid-9", None, None).unwrap();
+        let expected_args: Vec<String> = [
+            "-d",
+            "Ubuntu",
+            "-e",
+            "sh",
+            "-lc",
+            WSL_SCRIPT,
+            "sh",
+            "~",
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--resume",
+            "sid-9",
+            "--allowedTools",
+            "WebSearch,WebFetch,Read,Grep,Glob,mcp__teams",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(plan.run.args, expected_args);
+        assert_eq!(plan.run.stdin.as_deref(), Some("go on"));
+        assert_eq!(
+            plan.stop.unwrap().args,
+            ["-d", "Ubuntu", "-e", "pkill", "-f", "sid-9"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn resume_on_the_host_keeps_the_permission_mode() {
+        let action = AgentAction::build_this("claude-host");
+        let plan = resume_invocation(
+            &AgentProfile::claude_host(),
+            &action,
+            "go on",
+            "sid-8",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.run.program, "claude");
+        assert!(!plan.run.args.contains(&"--session-id".to_string()));
+        assert!(
+            plan.run
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--resume", "sid-8"])
+        );
+        assert!(
+            plan.run
+                .args
+                .ends_with(&["--permission-mode".to_string(), "auto".to_string()])
+        );
+        assert_eq!(plan.stop, None);
+    }
+
+    #[test]
+    fn copilot_resumes_with_the_prompt_in_its_args() {
+        let action = AgentAction::answer_this("copilot");
+        let plan = resume_invocation(
+            &AgentProfile::copilot_wsl(),
+            &action,
+            "go on",
+            "sid-7",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.run.stdin, None);
+        assert!(
+            plan.run
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--resume", "sid-7"])
+        );
+        assert!(plan.run.args.contains(&"go on".to_string()));
+    }
+
+    #[test]
+    fn kill_refuses_a_session_id_that_is_not_plain() {
+        assert_eq!(kill_process_invocation(1, ""), None);
+        assert_eq!(kill_process_invocation(1, "a'; rm -rf /; '"), None);
+        assert_eq!(kill_process_invocation(1, "a b"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kill_checks_the_command_line_before_taskkill() {
+        let invocation = kill_process_invocation(4242, "abc-123").unwrap();
+        assert_eq!(invocation.program, "powershell");
+        assert_eq!(
+            invocation.args[..2],
+            ["-NoProfile", "-Command"].map(String::from)
+        );
+        let script = &invocation.args[2];
+        assert!(script.contains("ProcessId=4242"));
+        assert!(script.contains("-like '*abc-123*'"));
+        assert!(script.contains("taskkill /PID 4242 /T /F"));
+    }
+
+    #[cfg(unix)]
+    mod unix_kill {
+        use super::super::*;
+
+        fn spawn_sleeper(label: &str) -> std::process::Child {
+            std::process::Command::new("sh")
+                .args(["-c", "sleep 30", label])
+                .spawn()
+                .unwrap()
+        }
+
+        fn run_kill(process_id: u32, session_id: &str) {
+            let invocation = kill_process_invocation(process_id, session_id).unwrap();
+            std::process::Command::new(invocation.program)
+                .args(invocation.args)
+                .status()
+                .unwrap();
+        }
+
+        #[test]
+        fn kills_a_process_whose_command_line_has_the_session_id() {
+            let mut child = spawn_sleeper("fake-session-1");
+            run_kill(child.id(), "fake-session-1");
+            let status = child.wait().unwrap();
+            assert!(!status.success());
+        }
+
+        #[test]
+        fn leaves_a_process_without_the_session_id_alone() {
+            let mut child = spawn_sleeper("other-session");
+            run_kill(child.id(), "fake-session-2");
+            assert!(child.try_wait().unwrap().is_none());
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_command_without_the_session_flag_cannot_resume() {
+        let mut profile = AgentProfile::claude_host();
+        profile.command = "tool -p".to_string();
+        let action = AgentAction::build_this("claude-host");
+        assert!(!supports_resume(&profile));
+        assert_eq!(
+            resume_invocation(&profile, &action, "go on", "sid", None, None),
+            Err(InvocationError::CannotResume)
         );
     }
 }

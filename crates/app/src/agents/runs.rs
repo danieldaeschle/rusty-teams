@@ -1,15 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
-use agents::{AgentSettings, RunEvent, RunOutcome, RunStatus, RunUpdate};
+use agents::{AgentAction, AgentSettings, RunEvent, RunOutcome, RunStatus, RunUpdate};
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    StartRequest, demo, mcp_bridge, mcp_config_directory, message_context, open_run_session,
-    store as run_store,
+    MCP_POLL_INTERVAL, MCP_WAIT_LIMIT, StartRequest, demo, mcp_bridge, mcp_config_directory,
+    message_context, open_run_session, store as run_store,
 };
 use crate::app_state::AppState;
 use crate::notice::truncated;
@@ -21,6 +21,9 @@ const VISIBLE_LOG_LINES: usize = 20;
 const TEXT_STEP_CHARS: usize = 80;
 const DONE_STEP_CHARS: usize = 60;
 const TICK: Duration = Duration::from_secs(1);
+const RESUME_PARALLEL_LIMIT: usize = 3;
+const RESUMED_STEP: &str = "Resumed after restart";
+const RESUME_PROMPT: &str = "The app was restarted. Continue where you stopped.";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunState {
@@ -53,6 +56,8 @@ pub struct AgentRun {
     #[serde(skip)]
     pub expanded: bool,
     pub dismissed: bool,
+    #[serde(default)]
+    pub process_id: Option<u32>,
 }
 
 impl AgentRun {
@@ -117,6 +122,23 @@ impl AgentRun {
     }
 }
 
+fn orphan_stop(run: &AgentRun, plan: &agents::RunPlan) -> Option<agents::Invocation> {
+    plan.stop.clone().or_else(|| {
+        run.process_id
+            .and_then(|process_id| agents::kill_process_invocation(process_id, &run.session_id))
+    })
+}
+
+fn can_resume(settings: &AgentSettings, run: &AgentRun) -> bool {
+    settings.resume_interrupted_runs
+        && !run.session_id.is_empty()
+        && settings
+            .agents
+            .iter()
+            .find(|agent| agent.id == run.agent_id)
+            .is_some_and(agents::supports_resume)
+}
+
 fn remove_stale_mcp_configs() {
     let Some(directory) = mcp_config_directory() else {
         return;
@@ -156,6 +178,9 @@ pub struct AgentRuns {
     settings: AgentSettings,
     runs: Vec<AgentRun>,
     stops: HashMap<u64, oneshot::Sender<()>>,
+    resume_queue: VecDeque<u64>,
+    resuming: HashSet<u64>,
+    stopping: HashSet<u64>,
     open_after_stop: HashSet<u64>,
     next_id: u64,
     ticking: bool,
@@ -166,10 +191,17 @@ impl EventEmitter<AgentRunsEvent> for AgentRuns {}
 impl AgentRuns {
     pub fn new(app: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let store = app.read(cx).store.clone();
+        let settings = run_store::load_settings(&store);
         let mut runs = run_store::load_runs(&store);
         let interrupted = runs.iter().any(AgentRun::is_running);
+        let mut resume_queue = VecDeque::new();
         for run in runs.iter_mut().filter(|run| run.is_running()) {
-            run.mark_interrupted();
+            if can_resume(&settings, run) {
+                run.push_step(RESUMED_STEP.to_owned());
+                resume_queue.push_back(run.id);
+            } else {
+                run.mark_interrupted();
+            }
         }
         if interrupted {
             run_store::save_runs(&store, &runs);
@@ -181,15 +213,133 @@ impl AgentRuns {
         let next_id = runs.iter().map(|run| run.id).max().map_or(1, |id| id + 1);
         let mut agent_runs = AgentRuns {
             app,
-            settings: run_store::load_settings(&store),
+            settings,
             runs,
             stops: HashMap::new(),
+            resume_queue,
+            resuming: HashSet::new(),
+            stopping: HashSet::new(),
             open_after_stop: HashSet::new(),
             next_id,
             ticking: false,
         };
         agent_runs.ensure_ticking(cx);
+        agent_runs.start_resumes(cx);
         agent_runs
+    }
+
+    fn start_resumes(&mut self, cx: &mut Context<Self>) {
+        if self.resume_queue.is_empty() {
+            return;
+        }
+        let needs_mcp = self.resume_queue.iter().any(|run_id| {
+            self.get(*run_id)
+                .and_then(|run| {
+                    self.settings
+                        .agents
+                        .iter()
+                        .find(|agent| agent.id == run.agent_id)
+                })
+                .is_some_and(|agent| !agent.mcp_config_flag.is_empty())
+        });
+        cx.spawn(async move |this, cx| {
+            let mut waited = Duration::ZERO;
+            while needs_mcp
+                && waited < MCP_WAIT_LIMIT
+                && !cx.update(|cx| mcp_bridge::endpoint(cx).is_some())
+            {
+                cx.background_executor().timer(MCP_POLL_INTERVAL).await;
+                waited += MCP_POLL_INTERVAL;
+            }
+            this.update(cx, |runs, cx| runs.resume_next(cx)).ok();
+        })
+        .detach();
+    }
+
+    fn resume_next(&mut self, cx: &mut Context<Self>) {
+        while self.resuming.len() < RESUME_PARALLEL_LIMIT {
+            let Some(run_id) = self.resume_queue.pop_front() else {
+                return;
+            };
+            self.begin_resume(run_id, cx);
+        }
+    }
+
+    fn resume_plan(
+        &self,
+        run: &AgentRun,
+        cx: &App,
+    ) -> Result<(agents::RunPlan, agents::OutputFormat), String> {
+        let action = self
+            .settings
+            .actions
+            .iter()
+            .find(|action| action.id == run.action_id)
+            .cloned()
+            .ok_or("the action no longer exists")?;
+        let profile = self
+            .settings
+            .agents
+            .iter()
+            .find(|profile| profile.id == run.agent_id)
+            .ok_or("the agent no longer exists")?;
+        let action = AgentAction {
+            working_dir: run.working_dir.clone(),
+            ..action
+        };
+        let plan = agents::resume_invocation(
+            profile,
+            &action,
+            RESUME_PROMPT,
+            &run.session_id,
+            mcp_bridge::endpoint(cx).as_ref(),
+            mcp_config_directory().as_deref(),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok((plan, profile.output))
+    }
+
+    fn begin_resume(&mut self, run_id: u64, cx: &mut Context<Self>) {
+        let Some(run) = self.get(run_id).filter(|run| run.is_running()).cloned() else {
+            return;
+        };
+        self.resuming.insert(run_id);
+        match self.resume_plan(&run, cx) {
+            Ok((plan, format)) => {
+                let stop = orphan_stop(&run, &plan);
+                cx.spawn(async move |this, cx| {
+                    if let Some(stop) = stop {
+                        let _ =
+                            runtime::spawn(async move { agents::run_stop_invocation(&stop).await })
+                                .await;
+                    }
+                    this.update(cx, |runs, cx| {
+                        let still_resuming = runs.resuming.contains(&run_id)
+                            && runs.get(run_id).is_some_and(AgentRun::is_running);
+                        if still_resuming {
+                            runs.spawn(run_id, plan, format, cx);
+                        } else {
+                            for path in &plan.cleanup {
+                                let _ = std::fs::remove_file(path);
+                            }
+                        }
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            Err(reason) => self.finish(
+                run_id,
+                Some(RunOutcome {
+                    status: RunStatus::Failed {
+                        message: format!("Could not resume - {reason}"),
+                        stderr_tail: Vec::new(),
+                    },
+                    exit_code: None,
+                }),
+                cx,
+            ),
+        }
     }
 
     pub fn settings(&self) -> &AgentSettings {
@@ -305,6 +455,7 @@ impl AgentRuns {
             ended_at: None,
             expanded: false,
             dismissed: false,
+            process_id: None,
         });
         if endpoint.is_none()
             && let Some(run) = self.run_mut(run_id)
@@ -359,8 +510,16 @@ impl AgentRuns {
     }
 
     fn apply_update(&mut self, run_id: u64, update: RunUpdate, cx: &mut Context<Self>) {
-        let RunUpdate::Event(event) = update else {
-            return;
+        let event = match update {
+            RunUpdate::Event(event) => event,
+            RunUpdate::Started(process_id) => {
+                if let Some(run) = self.run_mut(run_id) {
+                    run.process_id = Some(process_id);
+                    self.persist(cx);
+                }
+                return;
+            }
+            RunUpdate::Stderr(_) => return,
         };
         let Some(run) = self.run_mut(run_id) else {
             return;
@@ -377,10 +536,13 @@ impl AgentRuns {
 
     fn finish(&mut self, run_id: u64, outcome: Option<RunOutcome>, cx: &mut Context<Self>) {
         self.stops.remove(&run_id);
+        self.stopping.remove(&run_id);
+        let was_resuming = self.resuming.remove(&run_id);
         let Some(run) = self.run_mut(run_id).filter(|run| run.is_running()) else {
             return;
         };
         run.ended_at = Some(Utc::now());
+        run.process_id = None;
         match outcome.map(|outcome| outcome.status) {
             Some(RunStatus::Completed { final_text }) => {
                 let line = truncated(first_line(&final_text), DONE_STEP_CHARS);
@@ -396,6 +558,11 @@ impl AgentRuns {
                 message,
                 stderr_tail,
             }) => {
+                let message = if was_resuming && message.starts_with("cannot start") {
+                    format!("Could not resume - {message}")
+                } else {
+                    message
+                };
                 run.current_step = message.clone();
                 run.state = RunState::Failed {
                     message,
@@ -425,6 +592,9 @@ impl AgentRuns {
         }
         if self.open_after_stop.remove(&run_id) && stopped {
             open_run_session(&snapshot, cx);
+        }
+        if was_resuming {
+            self.resume_next(cx);
         }
         cx.notify();
     }
@@ -467,12 +637,46 @@ impl AgentRuns {
     }
 
     pub fn stop(&mut self, run_id: u64, cx: &mut Context<Self>) {
+        if self.stopping.contains(&run_id) {
+            return;
+        }
         if let Some(stop) = self.stops.remove(&run_id) {
+            self.stopping.insert(run_id);
             let _ = stop.send(());
             if let Some(run) = self.run_mut(run_id) {
                 run.current_step = "Stopping".to_owned();
             }
             cx.notify();
+        } else if self.resuming.contains(&run_id) || self.resume_queue.contains(&run_id) {
+            if self.resume_queue.contains(&run_id) {
+                self.stop_orphan(run_id, cx);
+            }
+            self.resume_queue.retain(|queued| *queued != run_id);
+            self.finish(
+                run_id,
+                Some(RunOutcome {
+                    status: RunStatus::Stopped,
+                    exit_code: None,
+                }),
+                cx,
+            );
+        }
+    }
+
+    fn stop_orphan(&self, run_id: u64, cx: &App) {
+        let Some(run) = self.get(run_id) else {
+            return;
+        };
+        let Ok((plan, _)) = self.resume_plan(run, cx) else {
+            return;
+        };
+        for path in &plan.cleanup {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(stop) = orphan_stop(run, &plan) {
+            drop(runtime::spawn(async move {
+                agents::run_stop_invocation(&stop).await
+            }));
         }
     }
 
@@ -550,6 +754,7 @@ pub(super) mod tests {
             ended_at: Some(Utc.with_ymd_and_hms(2026, 10, 1, 9, 1, 0).unwrap()),
             expanded: false,
             dismissed: false,
+            process_id: None,
         }
     }
 
@@ -575,6 +780,7 @@ pub(super) mod tests {
         AgentSettings {
             agents: vec![profile],
             actions: vec![action],
+            resume_interrupted_runs: true,
         }
     }
 
@@ -621,7 +827,9 @@ pub(super) mod tests {
 
     #[cfg(unix)]
     mod shell_runs {
-        use super::{RunState, TestAppContext, run_store, setup, wait_until_finished};
+        use gpui_kit::AppContext as _;
+
+        use super::{AgentRuns, RunState, TestAppContext, run_store, setup, wait_until_finished};
 
         #[gpui_kit::test]
         fn a_stream_json_run_ends_done_and_is_persisted(cx: &mut TestAppContext) {
@@ -655,6 +863,34 @@ pub(super) mod tests {
                 assert_eq!(stored[0].state, RunState::Done);
                 assert_eq!(stored[0].session_id, run.session_id);
                 assert_eq!(runs.read(cx).running_count(), 0);
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_resumed_run_continues_and_finishes_done(cx: &mut TestAppContext) {
+            let fixture = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../agents/tests/fixtures/claude-stream.jsonl"
+            );
+            let command = format!("sh -c 'cat {fixture}' --session-id {{session_id}}");
+            let (app, runs) = setup(cx, &command);
+            cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.runs.push(super::running_run(5));
+                    runs.persist(cx);
+                });
+            });
+            let reloaded = cx.update(|cx| cx.new(|cx| AgentRuns::new(app.clone(), cx)));
+            wait_until_finished(cx, &reloaded, 5);
+            cx.update(|cx| {
+                let run = reloaded.read(cx).get(5).unwrap().clone();
+                assert_eq!(run.state, RunState::Done);
+                assert_eq!(run.session_id, "session-5");
+                assert!(
+                    run.steps
+                        .iter()
+                        .any(|(_, text)| text == "Resumed after restart")
+                );
             });
         }
 
@@ -715,27 +951,163 @@ pub(super) mod tests {
         });
     }
 
-    #[gpui_kit::test]
-    fn runs_loaded_as_running_become_interrupted(cx: &mut TestAppContext) {
-        let (app, runs) = setup(cx, "true");
+    const RESUMABLE_COMMAND: &str = "sh -c 'sleep 30' --session-id {session_id}";
+    const INTERRUPTED: &str = "Interrupted - the app was closed during the run";
+
+    fn running_run(id: u64) -> AgentRun {
+        let mut running = finished_run(id);
+        running.action_id = "ask".to_owned();
+        running.agent_id = "fake".to_owned();
+        running.state = RunState::Running;
+        running.ended_at = None;
+        running
+    }
+
+    fn reload_with(
+        cx: &mut TestAppContext,
+        command: &str,
+        run: AgentRun,
+        change_settings: impl FnOnce(&mut AgentSettings),
+    ) -> AgentRun {
+        let (app, runs) = setup(cx, command);
         cx.update(|cx| {
-            let mut running = finished_run(5);
-            running.state = RunState::Running;
-            running.ended_at = None;
+            let mut settings = fake_settings(command);
+            change_settings(&mut settings);
+            run_store::save_settings(&app.read(cx).store, &settings);
+            let run_id = run.id;
             runs.update(cx, |runs, cx| {
-                runs.runs.push(running);
+                runs.runs.push(run);
                 runs.persist(cx);
             });
             let reloaded = cx.new(|cx| AgentRuns::new(app.clone(), cx));
-            let run = reloaded.read(cx).get(5).unwrap().clone();
-            assert!(matches!(
-                run.state,
-                RunState::Failed { ref message, .. } if message == "Interrupted - the app was closed during the run"
-            ));
-            assert!(run.ended_at.is_some());
-            assert_eq!(run.session_id, "session-5");
-            assert_eq!(reloaded.read(cx).running_count(), 0);
+            reloaded.read(cx).get(run_id).unwrap().clone()
+        })
+    }
+
+    fn assert_interrupted(run: &AgentRun) {
+        assert!(matches!(
+            run.state,
+            RunState::Failed { ref message, .. } if message == INTERRUPTED
+        ));
+        assert!(run.ended_at.is_some());
+    }
+
+    #[gpui_kit::test]
+    fn runs_loaded_as_running_become_interrupted(cx: &mut TestAppContext) {
+        let run = reload_with(cx, "true", running_run(5), |_| {});
+        assert_interrupted(&run);
+        assert_eq!(run.session_id, "session-5");
+    }
+
+    #[gpui_kit::test]
+    fn a_running_run_with_a_session_is_resumed(cx: &mut TestAppContext) {
+        let original = running_run(5);
+        let run = reload_with(cx, RESUMABLE_COMMAND, original.clone(), |_| {});
+        assert_eq!(run.state, RunState::Running);
+        assert_eq!(run.ended_at, None);
+        assert_eq!(run.started_at, original.started_at);
+        assert_eq!(run.current_step, "Resumed after restart");
+        assert_eq!(run.steps.len(), 2);
+        assert_eq!(run.steps[0], original.steps[0]);
+        assert_eq!(run.steps[1].1, "Resumed after restart");
+    }
+
+    fn reload_many(cx: &mut TestAppContext, run_count: u64) -> (Entity<AgentRuns>, Vec<u64>) {
+        let (app, runs) = setup(cx, RESUMABLE_COMMAND);
+        let ids: Vec<u64> = (1..=run_count).collect();
+        let reloaded = cx.update(|cx| {
+            runs.update(cx, |runs, cx| {
+                runs.runs.extend(ids.iter().map(|id| running_run(*id)));
+                runs.persist(cx);
+            });
+            cx.new(|cx| AgentRuns::new(app.clone(), cx))
         });
+        (reloaded, ids)
+    }
+
+    fn state_of(cx: &mut TestAppContext, runs: &Entity<AgentRuns>, run_id: u64) -> RunState {
+        cx.update(|cx| runs.read(cx).get(run_id).unwrap().state.clone())
+    }
+
+    #[gpui_kit::test]
+    fn at_most_three_resumes_run_and_the_fourth_starts_when_one_finishes(cx: &mut TestAppContext) {
+        let (runs, _) = reload_many(cx, 4);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let runs = runs.read(cx);
+            assert_eq!(runs.stops.len(), 3);
+            assert_eq!(runs.resume_queue, [4]);
+        });
+        cx.update(|cx| runs.update(cx, |runs, cx| runs.stop(1, cx)));
+        wait_until_finished(cx, &runs, 1);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let runs_ref = runs.read(cx);
+            assert!(runs_ref.resume_queue.is_empty());
+            assert!(runs_ref.stops.contains_key(&4));
+            runs.update(cx, |runs, cx| {
+                for run_id in [2, 3, 4] {
+                    runs.stop(run_id, cx);
+                }
+            });
+        });
+        wait_until_finished(cx, &runs, 4);
+    }
+
+    #[gpui_kit::test]
+    fn stopping_a_queued_resume_ends_it_without_spawning(cx: &mut TestAppContext) {
+        let (runs, _) = reload_many(cx, 4);
+        cx.update(|cx| runs.update(cx, |runs, cx| runs.stop(4, cx)));
+        cx.run_until_parked();
+        assert_eq!(state_of(cx, &runs, 4), RunState::Stopped);
+        cx.update(|cx| {
+            let runs_ref = runs.read(cx);
+            assert!(!runs_ref.stops.contains_key(&4));
+            assert_eq!(runs_ref.stops.len(), 3);
+            runs.update(cx, |runs, cx| {
+                for run_id in [1, 2, 3] {
+                    runs.stop(run_id, cx);
+                }
+            });
+        });
+        wait_until_finished(cx, &runs, 3);
+    }
+
+    #[gpui_kit::test]
+    fn stopping_during_the_stop_wait_ends_the_run_without_spawning(cx: &mut TestAppContext) {
+        let (runs, _) = reload_many(cx, 1);
+        cx.update(|cx| {
+            runs.update(cx, |runs, cx| {
+                runs.resume_queue.clear();
+                runs.begin_resume(1, cx);
+                runs.stop(1, cx);
+            })
+        });
+        cx.run_until_parked();
+        assert_eq!(state_of(cx, &runs, 1), RunState::Stopped);
+        cx.update(|cx| assert!(runs.read(cx).stops.is_empty()));
+    }
+
+    #[gpui_kit::test]
+    fn a_running_run_without_a_session_is_interrupted(cx: &mut TestAppContext) {
+        let mut original = running_run(5);
+        original.session_id = String::new();
+        let run = reload_with(cx, RESUMABLE_COMMAND, original, |_| {});
+        assert_interrupted(&run);
+    }
+
+    #[gpui_kit::test]
+    fn a_profile_that_cannot_resume_is_interrupted(cx: &mut TestAppContext) {
+        let run = reload_with(cx, "sh -c 'sleep 30'", running_run(5), |_| {});
+        assert_interrupted(&run);
+    }
+
+    #[gpui_kit::test]
+    fn switching_resume_off_interrupts_the_run(cx: &mut TestAppContext) {
+        let run = reload_with(cx, RESUMABLE_COMMAND, running_run(5), |settings| {
+            settings.resume_interrupted_runs = false
+        });
+        assert_interrupted(&run);
     }
 
     #[test]

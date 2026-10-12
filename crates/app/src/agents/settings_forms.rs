@@ -415,6 +415,37 @@ impl AgentsSettings {
     }
 }
 
+pub(super) fn resume_toggle(resume: bool, settings: Entity<AgentsSettings>) -> Stateful<Div> {
+    h_flex()
+        .id("resume-interrupted-runs")
+        .w_full()
+        .px(px(PAGE_PADDING))
+        .pt(px(16.))
+        .gap(px(12.))
+        .items_center()
+        .cursor_pointer()
+        .child(
+            v_flex()
+                .flex_1()
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Resume interrupted runs"),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme::text_muted())
+                        .child("Continue running agents after the app restarts"),
+                ),
+        )
+        .child(switch(resume))
+        .on_click(move |_, _, cx| {
+            settings.update(cx, |this, cx| this.set_resume_interrupted_runs(!resume, cx))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use agents::Environment;

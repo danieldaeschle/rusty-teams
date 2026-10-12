@@ -71,10 +71,8 @@ async fn failing_command_reports_stderr() {
         }
         other => panic!("unexpected status {other:?}"),
     }
-    assert_eq!(
-        receiver.try_recv().ok(),
-        Some(RunUpdate::Stderr("boom".to_string()))
-    );
+    let updates: Vec<RunUpdate> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
+    assert!(updates.contains(&RunUpdate::Stderr("boom".to_string())));
 }
 
 #[tokio::test]

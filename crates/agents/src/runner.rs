@@ -17,6 +17,7 @@ const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 pub enum RunUpdate {
     Event(RunEvent),
     Stderr(String),
+    Started(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,7 +60,7 @@ fn failed(message: String, stderr_tail: Vec<String>, exit_code: Option<i32>) -> 
     }
 }
 
-async fn run_stop_invocation(invocation: &Invocation) {
+pub async fn run_stop_invocation(invocation: &Invocation) {
     let mut command = command_for(invocation);
     command
         .stdin(Stdio::null())
@@ -111,6 +112,9 @@ async fn run_plan(
             );
         }
     };
+    if let Some(process_id) = child.id() {
+        let _ = events.send(RunUpdate::Started(process_id));
+    }
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
