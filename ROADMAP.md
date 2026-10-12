@@ -128,6 +128,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Mentions-only mode, preview off | Done |  |
 | Stack of 3, queue, Hide all, fade-out | Done |  |
 | Muted chats stay quiet | Done | Toast, sound and taskbar badge only for @mentions |
+| Mute notifications during calls and meetings | Done | Settings > Notifications switch, default off; message toasts and sounds stay away while a call is active, call rings still show |
 | Notifications on Linux | Missing |  |
 
 ## Search and navigation
@@ -174,6 +175,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Video calls (1:1 and incoming) | Partial | Camera button in 1:1 calls renegotiates a video line on the same peer connection (modalities Audio and Video), incoming video ring toast with Decline / Audio / Video, accept with video answers the video line sending, accept with audio receive-only. Offer and answer built from the Teams code and unit tested at SDP level; needs a second person |
 | Recording | Partial | Organizer "..." > Start recording / Stop recording (confirm) through the recorder bot, red dot and "Recording" in the header for everyone from the meeting state, consent notice that keeps mic and camera off until OK. Bodies unit tested; start and stop run live through `meet_now --record`, consent needs a tenant with the policy on and a second person |
 | Hold, resume, transfer | Partial | 1:1 "..." > Hold renegotiates every line inactive, "On hold" view with Resume, "You're on hold" when the other side holds, Transfer... person picker with Transfer now (blind) and Consult first (second call, first held, Transfer now). Needs a second person; redirect and park not built |
+| Noise suppression, music mode | Partial | Mic menu and Settings > Devices: Auto (device track with WebRTC echo cancellation, AGC, NS) or Off, Music mode keeps echo cancellation only. No Low/High, the APM has on/off flags only. Off and Music mode run a cpal mic through our own APM; checked with synthetic sources only, not with a real mic in a call |
+| Push to talk | Partial | Hold Ctrl+Space while muted to talk, release to mute; main window focused, not inside text fields; hint chip on the stage. Unit tested, not tried on the Windows build |
 | Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
 | Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |

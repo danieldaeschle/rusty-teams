@@ -471,7 +471,7 @@ async fn speak_until_hangup(
                     camera_on = on;
                     control.send(CallUpdate::Camera(on));
                 }
-                Some(CallCommand::SelectCamera(_)) => {}
+                Some(CallCommand::SelectCamera(_) | CallCommand::SetMicSettings(_)) => {}
                 Some(CallCommand::StartShare(source)) => {
                     control.send(CallUpdate::LocalShare(Some(source.label())));
                     if share_sound {

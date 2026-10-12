@@ -27,6 +27,7 @@ fn serialize(settings: &Settings) -> String {
         ("taskbar_flash", settings.flash.to_string()),
         ("close_to_tray", settings.close_to_tray.to_string()),
         ("do_not_disturb", settings.do_not_disturb.to_string()),
+        ("mute_in_calls", settings.mute_in_calls.to_string()),
         ("ringtone", settings.ringtone.key().to_owned()),
     ]
     .iter()
@@ -50,6 +51,7 @@ fn parse(text: &str) -> Settings {
             "taskbar_flash" => settings.flash = flag,
             "close_to_tray" => settings.close_to_tray = flag,
             "do_not_disturb" => settings.do_not_disturb = flag,
+            "mute_in_calls" => settings.mute_in_calls = flag,
             "ringtone" => settings.ringtone = Ringtone::from_key(value).unwrap_or_default(),
             _ => {}
         }
@@ -71,6 +73,7 @@ mod tests {
             flash: false,
             close_to_tray: false,
             do_not_disturb: true,
+            mute_in_calls: true,
             ringtone: Ringtone::Chime,
         };
         assert_eq!(parse(&serialize(&settings)), settings);

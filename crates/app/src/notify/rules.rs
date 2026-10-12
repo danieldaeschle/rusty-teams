@@ -75,6 +75,7 @@ pub struct Settings {
     pub flash: bool,
     pub close_to_tray: bool,
     pub do_not_disturb: bool,
+    pub mute_in_calls: bool,
     pub ringtone: Ringtone,
 }
 
@@ -88,6 +89,7 @@ impl Default for Settings {
             flash: true,
             close_to_tray: true,
             do_not_disturb: false,
+            mute_in_calls: false,
             ringtone: Ringtone::Default,
         }
     }
@@ -201,6 +203,7 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
         || environment.system_quiet
         || environment.own_do_not_disturb
         || settings.do_not_disturb
+        || (settings.mute_in_calls && environment.in_call)
         || (incoming.muted && !incoming.mentions_me)
         || (settings.mentions_only && !incoming.mentions_me && !incoming.is_direct());
     if suppressed {
@@ -390,6 +393,20 @@ mod tests {
                 sound: false
             }
         );
+    }
+
+    #[test]
+    fn mute_in_calls_drops_the_toast_only_while_in_a_call() {
+        let settings = Settings {
+            mute_in_calls: true,
+            ..Default::default()
+        };
+        let in_call = Environment {
+            in_call: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&settings, &group(), in_call), SILENT);
+        assert!(decide(&settings, &group(), Environment::default()).toast);
     }
 
     #[test]

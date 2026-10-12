@@ -9,6 +9,7 @@ use crate::captions::{CaptionEntry, CaptionState};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::hold::HoldState;
+use crate::mic_processing::MicSettings;
 use crate::mute::MuteCommand;
 use crate::reaction::Reaction;
 use crate::roster::RosterEntry;
@@ -24,6 +25,7 @@ pub enum CallCommand {
     Mute(MuteCommand),
     SelectInput(DeviceChoice),
     SelectOutput(DeviceChoice),
+    SetMicSettings(MicSettings),
     RefreshDevices,
     SetCamera(bool),
     SelectCamera(DeviceChoice),
