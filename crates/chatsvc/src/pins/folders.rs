@@ -3,7 +3,7 @@ use session::{Method, Request};
 
 use super::Pins;
 use super::chats::{FOLDER_QUERY, NO_OP_CODES, api_error, ensure_success, with_answer_context};
-use super::state::error_code;
+use super::state::{error_code, hierarchy_version};
 use super::transport::CsaTransport;
 use crate::error::{Error, Result};
 use crate::messages::encode;
@@ -61,10 +61,7 @@ impl Folders {
 }
 
 pub fn parse_folders(body: &Value) -> Result<Folders> {
-    let hierarchy_version = body
-        .get("folderHierarchyVersion")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| Error::UnexpectedAnswer("folderHierarchyVersion missing".into()))?;
+    let hierarchy_version = hierarchy_version(body)?;
     let raw = body
         .get("conversationFolders")
         .and_then(Value::as_array)

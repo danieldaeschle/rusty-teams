@@ -15,11 +15,45 @@ pub struct PinnedChannels {
     pub channel_ids: Vec<String>,
 }
 
-pub fn parse_pinned_chats(body: &Value) -> Result<PinnedChats> {
-    let hierarchy_version = body
+pub(super) fn hierarchy_version(body: &Value) -> Result<i64> {
+    let value = body
         .get("folderHierarchyVersion")
-        .and_then(Value::as_i64)
         .ok_or_else(|| Error::UnexpectedAnswer("folderHierarchyVersion missing".into()))?;
+    let parsed = match value {
+        Value::Number(number) => number.as_i64().or_else(|| {
+            number
+                .as_f64()
+                .filter(|float| float.is_finite() && float.fract() == 0.0)
+                .filter(|float| {
+                    *float >= -9.223_372_036_854_775_808e18 && *float < 9.223_372_036_854_775_808e18
+                })
+                .map(|float| float as i64)
+        }),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    };
+    parsed.ok_or_else(|| {
+        Error::UnexpectedAnswer(format!(
+            "folderHierarchyVersion is not an integer ({})",
+            json_type_name(value)
+        ))
+    })
+}
+
+fn json_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(number) if number.is_f64() => "float",
+        Value::Number(_) => "integer",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+pub fn parse_pinned_chats(body: &Value) -> Result<PinnedChats> {
+    let hierarchy_version = hierarchy_version(body)?;
     let folders = body
         .get("conversationFolders")
         .and_then(Value::as_array)
@@ -135,6 +169,50 @@ mod tests {
             parse_pinned_chats(&json!({"conversationFolders": []})),
             Err(Error::UnexpectedAnswer(_))
         ));
+    }
+
+    fn version_error(body: &Value) -> String {
+        match hierarchy_version(body) {
+            Err(Error::UnexpectedAnswer(message)) => message,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hierarchy_version_accepts_integer_string_and_integral_float() {
+        let expected = 1791368146075i64;
+        for value in [
+            json!(expected),
+            json!("1791368146075"),
+            json!(" 1791368146075 "),
+            json!(1791368146075.0),
+        ] {
+            assert_eq!(
+                hierarchy_version(&json!({"folderHierarchyVersion": value})).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchy_version_rejects_fractional_float() {
+        assert_eq!(
+            version_error(&json!({"folderHierarchyVersion": 1.5})),
+            "folderHierarchyVersion is not an integer (float)"
+        );
+    }
+
+    #[test]
+    fn hierarchy_version_names_missing_key_and_wrong_type() {
+        assert_eq!(version_error(&json!({})), "folderHierarchyVersion missing");
+        assert_eq!(
+            version_error(&json!({"folderHierarchyVersion": "abc"})),
+            "folderHierarchyVersion is not an integer (string)"
+        );
+        assert_eq!(
+            version_error(&json!({"folderHierarchyVersion": {}})),
+            "folderHierarchyVersion is not an integer (object)"
+        );
     }
 
     #[test]
