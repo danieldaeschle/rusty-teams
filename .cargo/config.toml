@@ -1,3 +1,7 @@
 # libwebrtc's prebuilt Windows lib is built with /MT; a /MD Rust build fails to link (RuntimeLibrary mismatch).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

@@ -218,6 +218,7 @@ pub struct McpView {
     tab: McpTab,
     picker: Option<Scope>,
     port_input: Entity<InputState>,
+    port_invalid: bool,
     search_input: Entity<InputState>,
     copied: Option<Copied>,
     install_states: Option<Vec<InstallState>>,
@@ -251,6 +252,7 @@ impl McpView {
             tab: McpTab::Server,
             picker: None,
             port_input,
+            port_invalid: false,
             search_input,
             copied: None,
             install_states: None,
@@ -267,24 +269,28 @@ impl McpView {
         &mut self,
         input: &Entity<InputState>,
         event: &InputEvent,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
             return;
         }
         let current = agent_api::policy(cx).port;
-        let typed = input.read(cx).value().trim().parse::<u16>().ok();
-        match typed.filter(|port| *port != 0) {
-            Some(port) if port != current => {
-                agent_api::update_policy(cx, |policy| policy.port = port)
-            }
-            Some(_) => {}
-            None => input.update(cx, |input, cx| {
-                input.set_value(current.to_string(), window, cx)
-            }),
+        let typed = input
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0);
+        self.port_invalid = typed.is_none();
+        if let Some(port) = typed
+            && port != current
+        {
+            agent_api::update_policy(cx, |policy| policy.port = port);
         }
         self.refresh_wsl(cx);
+        cx.notify();
     }
 
     fn refresh_wsl(&mut self, cx: &mut Context<Self>) {
@@ -683,6 +689,16 @@ impl McpView {
                     .flex_none()
                     .child(Input::new(&self.port_input)),
             ))
+            .when(self.port_invalid, |tab| {
+                tab.child(
+                    div()
+                        .px(px(20.))
+                        .pb(px(4.))
+                        .text_size(px(12.))
+                        .text_color(theme::red_soft())
+                        .child("Enter a port from 1 to 65535. Nothing was saved."),
+                )
+            })
             .when(running && self.wsl_unreachable, |tab| {
                 tab.child(wsl_warning())
             })

@@ -67,7 +67,7 @@
 - Organizer controls: lobby banner with Admit and Deny, tile menu (pin, spotlight, mute, remove), Mute all, live captions overlay, camera background blur
 
 **Agents (MCP)**
-- Local MCP server at `http://127.0.0.1:47615/mcp`, off by default: Settings > MCP
+- Local MCP server at `http://127.0.0.1:40615/mcp`, off by default: Settings > MCP
 - Agents read allowed chats, channels, meetings and transcripts, and propose replies
 - A proposal shows as a card above the composer: Send, Edit or Discard. Agents never send
 - One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
@@ -97,6 +97,7 @@ cargo run -p app -- --demo
 
 | Task | Command |
 |---|---|
+| Linux build needs clang + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache` |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
 | Tests | `cargo test` |
