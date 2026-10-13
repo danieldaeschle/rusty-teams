@@ -19,9 +19,13 @@ use super::media::CallMedia;
 use super::mic::save_mic;
 use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
 use super::prejoin::{DemoMeeting, MeetingJoin};
+use super::report::{
+    CallRecorder, OwnIdentity, SETTING_META_KEY, SharedRecorder, report_directory, save_report, shared,
+};
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title};
+use crate::notice::NoticeAction;
 use crate::notify::selection_for;
 
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
@@ -41,6 +45,7 @@ pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
 const CAMERA_META_KEY: &str = "call_camera";
 const EFFECTS_META_KEY: &str = "call_camera_effects";
 const DEFAULT_CAMERA_META: &str = "default";
+const REPORT_SAVED_NOTICE: &str = "Test report saved";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
     store.meta(SHARE_SOUND_META_KEY).ok().flatten().as_deref() == Some("1")
@@ -250,8 +255,58 @@ impl AppState {
         self.send_call_command(CallCommand::SetCameraEffects(self.call_effects));
         self.refresh_call_backgrounds(cx);
         self.new_chat = false;
-        self.follow_call(call_id, updates, cx);
+        let report = self.start_call_report();
+        if let Some(call) = self.call.as_mut() {
+            call.report.clone_from(&report);
+        }
+        self.follow_call(call_id, updates, report, cx);
         cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    fn start_call_report(&self) -> Option<SharedRecorder> {
+        let call = self.call.as_ref().filter(|_| self.call_report_enabled)?;
+        let me = self.directory.me.as_ref();
+        let own = OwnIdentity {
+            mri: me.map_or_else(String::new, |me| format!("{ORGID_PREFIX}{}", me.user_id)),
+            display_name: me.map_or_else(String::new, |me| me.display_name.clone()),
+            email: self.own_email.clone(),
+        };
+        let mut people: Vec<(String, String)> = call
+            .model
+            .tiles
+            .iter()
+            .map(|tile| (tile.mri.clone(), tile.name.clone()))
+            .collect();
+        if people.is_empty() {
+            people.push((String::new(), call.model.peer_name.clone()));
+        }
+        let recorder = CallRecorder::begin(
+            call.model.kind,
+            call.model.incoming,
+            self.mode.demo,
+            own,
+            people,
+        );
+        Some(shared(recorder))
+    }
+
+    pub(super) fn note_call_feature(&self, feature: &'static str, detail: String) {
+        if let Some(report) = self.call.as_ref().and_then(|call| call.report.as_ref()) {
+            report.borrow_mut().local_feature(feature, detail);
+        }
+    }
+
+    fn report_saved(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        let action = NoticeAction::new("Open folder", move |_, _| {
+            crate::downloads::reveal_in_file_manager(&path)
+        });
+        self.raise_notice(REPORT_SAVED_NOTICE.to_owned(), Some(action), cx);
+    }
+
+    pub fn set_call_report_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.call_report_enabled = on;
+        let _ = self.store.set_meta(SETTING_META_KEY, if on { "1" } else { "0" });
         cx.notify();
     }
 
@@ -259,10 +314,14 @@ impl AppState {
         &mut self,
         call_id: u64,
         mut updates: tokio::sync::mpsc::UnboundedReceiver<CallUpdate>,
+        report: Option<SharedRecorder>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
             while let Some(update) = updates.recv().await {
+                if let Some(report) = &report {
+                    report.borrow_mut().observe(&update);
+                }
                 let alive =
                     this.update(cx, |state, cx| state.apply_call_update(call_id, update, cx));
                 if alive.is_err() {
@@ -270,6 +329,22 @@ impl AppState {
                 }
             }
             let _ = this.update(cx, |state, cx| state.end_orphaned_call(call_id, cx));
+            let Some(report) = report else {
+                return;
+            };
+            let reason = EndReason::Failed("The call stopped unexpectedly".to_owned());
+            report.borrow_mut().observe(&CallUpdate::State(CallState::Ended { reason }));
+            let recorder = report.borrow().clone();
+            let saved = cx
+                .background_executor()
+                .spawn(async move { save_report(&report_directory(), &recorder.document()) })
+                .await;
+            match saved {
+                Ok(saved) => {
+                    let _ = this.update(cx, |state, cx| state.report_saved(saved.json, cx));
+                }
+                Err(error) => log::warn!("call test report not saved: {error}"),
+            }
         })
         .detach();
         cx.spawn(async move |this, cx| {
@@ -412,6 +487,9 @@ impl AppState {
 
     pub(super) fn send_call_command(&self, command: CallCommand) {
         if let Some(call) = &self.call {
+            if let Some(report) = &call.report {
+                report.borrow_mut().command(&command);
+            }
             let _ = call.commands.send(command);
         }
     }
@@ -540,11 +618,13 @@ impl AppState {
             return;
         };
         call.chat_open = !call.chat_open;
+        let chat_state = if call.chat_open { "open" } else { "close" };
         if call.chat_open {
             call.transcript_open = false;
             self.transcript_panel = None;
             call.people_open = false;
         }
+        self.note_call_feature("chat", chat_state.to_owned());
         cx.emit(AppEvent::Call);
         cx.notify();
     }

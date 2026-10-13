@@ -21,6 +21,7 @@ use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::options_dialog::OptionsDialog;
 use super::push_to_talk::PushToTalk;
+use super::report::SharedRecorder;
 use super::share_view::ShareStage;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
@@ -59,6 +60,7 @@ pub struct ActiveCall {
     pub pending_move: Option<PendingMove>,
     pub consult: Option<ConsultCall>,
     pub push_to_talk: PushToTalk,
+    pub report: Option<SharedRecorder>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,6 +129,7 @@ impl ActiveCall {
             pending_move: None,
             consult: None,
             push_to_talk: PushToTalk::default(),
+            report: None,
         }
     }
 
@@ -493,6 +496,8 @@ impl CallModel {
             CallUpdate::Capability(capability) => self.capability = capability,
             CallUpdate::BreakoutRoom { main } => self.main_meeting = Some(main),
             CallUpdate::BlurTiming(_)
+            | CallUpdate::Sample(_)
+            | CallUpdate::Diagnostics(_)
             | CallUpdate::Organizer { .. }
             | CallUpdate::MeetingOptions(_)
             | CallUpdate::MeetingOptionsSaved(_)

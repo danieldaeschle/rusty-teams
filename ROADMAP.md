@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 80 %** (83 done, 28 partial, 10 missing of 121). Partial counts half.
+**Parity: 80 %** (84 done, 28 partial, 10 missing of 122). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 49 % | 5 | 27 | 6 |
+| [Calls and meetings](#calls-and-meetings) | 50 % | 6 | 27 | 6 |
 
 ## Next
 
@@ -164,6 +164,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Feature | State | Note |
 |---|---|---|
 | Test call (Echo bot) | Done | Native libwebrtc audio, call view, mini window, mute, devices |
+| Call test report | Done | After every call a pseudonymized JSON and Markdown report lands in the app data folder `call-reports` (newest 30): timeline, SDP summary, stats every 2 s as min / max / last, features used with result, notices, end reason. People, e-mails, phone numbers, ids, URL queries, IPs, ICE credentials, fingerprints and chat text never reach the file. Toast "Test report saved" with Open folder; Settings > Devices switch, default on. Demo calls write one too |
 | Incoming call: ring, accept, decline | Partial | Ring toast, ring tone, missed call in Activity, registrar endpoint, attach + accept. Built from the Teams code, not yet rung by a second person |
 | 1:1 and group calls | Partial | Phone button, Calling and Ringing tiles, end notices, direct to mixer renegotiation. Not yet tried with a second person |
 | Join a meeting from a chat | Partial | Join button from the live meeting state, joins muted, roster tiles, lobby, Leave and End meeting. Audio only. Verified with a meeting of one; not yet with other participants |
