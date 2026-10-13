@@ -40,6 +40,7 @@ struct Arguments {
     mute_all: bool,
     blur: bool,
     record: bool,
+    audio_only: bool,
     record_for: Duration,
     unmute: bool,
     whiteboard_state: bool,
@@ -61,6 +62,7 @@ fn arguments() -> Arguments {
         mute_all: false,
         blur: false,
         record: false,
+        audio_only: false,
         record_for: RECORD_HOLD,
         unmute: false,
         whiteboard_state: false,
@@ -84,6 +86,7 @@ fn arguments() -> Arguments {
                 parsed.camera = true;
             }
             "--record" => parsed.record = true,
+            "--audio-only" => parsed.audio_only = true,
             "--record-for" => parsed.record_for = input.next().and_then(|value| value.parse().ok()).map_or(RECORD_HOLD, Duration::from_secs),
             "--unmute" => parsed.unmute = true,
             "--whiteboard-state" => parsed.whiteboard_state = true,
@@ -432,7 +435,7 @@ async fn run() {
                         let _ = handle.commands.send(CallCommand::SetBackground(BackgroundChoice::Blur));
                     }
                     if arguments.record {
-                        let _ = handle.commands.send(CallCommand::StartRecording { kind: RecordingKind::Video, title: SUBJECT.to_owned() });
+                        let _ = handle.commands.send(CallCommand::StartRecording { kind: if arguments.audio_only { RecordingKind::AudioOnly } else { RecordingKind::Video }, title: SUBJECT.to_owned() });
                     }
                     if arguments.whiteboard_state {
                         features.whiteboard_wait_until = Some(Instant::now() + WHITEBOARD_WAIT);

@@ -33,6 +33,7 @@ pub fn occurrences(conversation_id: &str, now: DateTime<Utc>) -> Vec<Occurrence>
             )),
             duration_seconds: Some(920 + days_ago as u64 * 65),
             organizer_id: Some(ORGANIZER_ID.to_owned()),
+            audio_only: false,
         })
         .collect()
 }
@@ -42,6 +43,7 @@ pub fn details(occurrence: &Occurrence, now: DateTime<Utc>) -> RecordingDetails 
     RecordingDetails {
         item_url: occurrence.recording_url.clone(),
         audio_only: occurrence.message_id.ends_with('2'),
+        transcript_only: false,
         duration_seconds: occurrence.duration_seconds,
         expires_at: Some(
             now + Duration::days(if latest {

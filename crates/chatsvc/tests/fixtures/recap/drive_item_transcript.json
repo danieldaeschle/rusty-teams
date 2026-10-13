@@ -1,0 +1,7 @@
+{
+  "id": "item-2",
+  "parentReference": {"driveId": "drive-1"},
+  "video": {"duration": 61000, "width": 1920, "height": 1080},
+  "file": {"mimeType": "video/mp4"},
+  "media": {"mediaSource": {"contentCategory": "Meeting", "contentType": "Transcript"}}
+}

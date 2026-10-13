@@ -1,4 +1,4 @@
-use chatsvc::{Occurrence, TranscriptTurn};
+use chatsvc::{Occurrence, RecordingDetails, TranscriptTurn};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
 use crate::format;
@@ -26,6 +26,10 @@ impl<T> Load<T> {
             _ => None,
         }
     }
+}
+
+pub fn shows_recording(details: &Load<RecordingDetails>) -> bool {
+    !details.ready().is_some_and(|details| details.transcript_only)
 }
 
 pub fn expiry_label(days: i64) -> String {
@@ -179,7 +183,23 @@ mod tests {
             recording_name: name.map(str::to_owned),
             duration_seconds: None,
             organizer_id: None,
+            audio_only: false,
         }
+    }
+
+    #[test]
+    fn transcript_only_sessions_show_no_recording_card() {
+        let details = |transcript_only| RecordingDetails {
+            item_url: String::new(),
+            audio_only: false,
+            transcript_only,
+            duration_seconds: None,
+            expires_at: None,
+            transcript_id: None,
+        };
+        assert!(!shows_recording(&Load::Ready(details(true))));
+        assert!(shows_recording(&Load::Ready(details(false))));
+        assert!(shows_recording(&Load::Loading));
     }
 
     #[test]
