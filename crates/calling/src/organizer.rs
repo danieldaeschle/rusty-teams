@@ -7,10 +7,10 @@ use crate::trouter_events::{CallbackLinks, find_key};
 const SPOTLIGHT: &str = "spotlight";
 const AUDIO: &str = "audio";
 const SPECIFIED: &str = "specified";
-const EVERYONE: &str = "all";
 const PRESENTER: &str = "presenter";
 const DISABLE_AUDIO: &str = "DisableAudio";
 const DISABLE_VIDEO: &str = "DisableVideo";
+const DISABLE_AUDIO_AND_VIDEO: &str = "DisableAv";
 const UNRESTRICTED: &str = "UnRestricted";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,8 +30,9 @@ impl MeetingCapability {
             self.locked = locked;
         }
         if let Some(restrictions) = capability["attendeeRestrictions"].as_str() {
-            self.attendee_mic_off = restrictions.contains(DISABLE_AUDIO);
-            self.attendee_camera_off = restrictions.contains(DISABLE_VIDEO);
+            let both = restrictions.contains(DISABLE_AUDIO_AND_VIDEO);
+            self.attendee_mic_off = both || restrictions.contains(DISABLE_AUDIO);
+            self.attendee_camera_off = both || restrictions.contains(DISABLE_VIDEO);
         }
         *self != before
     }
@@ -148,15 +149,6 @@ pub fn admit_body(from: Value, target: Target<'_>, callbacks: &CallbackLinks, ca
     })
 }
 
-pub fn admit_all_body(from: Value, callbacks: &CallbackLinks, operation_id: &str) -> Value {
-    json!({
-        "participants": {"from": from},
-        "links": {"admitAllStatus": callbacks.conversation("admitAllStatus")},
-        "operationId": operation_id,
-        "debugContent": {"causeId": operation_id},
-    })
-}
-
 pub fn remove_participant_body(from: Value, target: Target<'_>, callbacks: &CallbackLinks) -> Value {
     json!({
         "participants": {"from": from, "to": [target.wire()]},
@@ -171,8 +163,9 @@ pub fn mute_participants_body(from: Value, mris: &[String]) -> Value {
     mute_body(from, SPECIFIED, mris)
 }
 
+/// Scope `all` answers 202 but mutes nobody live; `specified` with everyone listed works.
 pub fn mute_everyone_body(from: Value, others: &[String]) -> Value {
-    mute_body(from, EVERYONE, others)
+    mute_body(from, SPECIFIED, others)
 }
 
 fn mute_body(from: Value, scope: &str, mris: &[String]) -> Value {
@@ -307,14 +300,6 @@ mod tests {
     }
 
     #[test]
-    fn admitting_everyone_has_no_recipients() {
-        let body = admit_all_body(from(), &callbacks(), "op-1");
-        assert!(body["participants"].get("to").is_none());
-        assert_eq!(body["operationId"], "op-1");
-        assert!(body["links"]["admitAllStatus"].as_str().unwrap().contains("/conversation/admitAllStatus/"));
-    }
-
-    #[test]
     fn denying_and_removing_use_the_remove_body() {
         let body = remove_participant_body(from(), ana(), &callbacks());
         assert_eq!(body["participants"]["to"][0]["id"], "8:orgid:ana");
@@ -323,13 +308,13 @@ mod tests {
     }
 
     #[test]
-    fn muting_one_or_all_only_changes_the_scope() {
+    fn muting_one_or_all_names_everyone_as_specified() {
         let one = mute_participants_body(from(), &["8:orgid:ana".to_owned()]);
         assert_eq!(one["scope"], "specified");
         assert_eq!(one["muteParticipants"], json!([{"id": "8:orgid:ana"}]));
         assert_eq!(one["mediaTypes"], json!(["audio"]));
         let everyone = mute_everyone_body(from(), &["8:orgid:ana".to_owned(), "8:orgid:bo".to_owned()]);
-        assert_eq!(everyone["scope"], "all");
+        assert_eq!(everyone["scope"], "specified");
         assert_eq!(everyone["muteParticipants"].as_array().unwrap().len(), 2);
     }
 
@@ -429,6 +414,13 @@ mod tests {
         assert!(!state.apply(&json!({"other": 1})));
         assert!(state.apply(&json!({"meetingCapability": {"lockMeeting": false, "attendeeRestrictions": "UnRestricted"}})));
         assert_eq!(state, MeetingCapability::default());
+    }
+
+    #[test]
+    fn the_live_service_reports_mic_and_camera_off_as_one_value() {
+        let mut state = MeetingCapability::default();
+        assert!(state.apply(&json!({"meetingCapability": {"attendeeRestrictions": "DisableAv"}})));
+        assert!(state.attendee_mic_off && state.attendee_camera_off);
     }
 
     #[test]

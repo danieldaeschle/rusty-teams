@@ -1445,7 +1445,13 @@ async fn drive(
                     report_organizer_result(result, "admit", "Could not admit that person", control, timeline);
                 }
                 Some(CallCommand::AdmitAll) => {
-                    let result = remote.signaling.admit_all(&remote.conversation, &remote.participant, &links).await;
+                    let mut result = Ok(202);
+                    for mri in roster.lobby_mris() {
+                        result = remote.signaling.admit(&remote.conversation, &remote.participant, target_of(&roster, &mri), &links).await;
+                        if result.is_err() {
+                            break;
+                        }
+                    }
                     report_organizer_result(result, "admit all", "Could not admit everyone", control, timeline);
                 }
                 Some(CallCommand::Deny { mri }) => {
@@ -2142,6 +2148,14 @@ fn target_of<'a>(roster: &'a Roster, mri: &'a str) -> Target<'a> {
     Target { mri, display_name }
 }
 
+const RECORDING_STOP_RETRIES: usize = 6;
+const RECORDING_STOP_RETRY_WAIT: Duration = Duration::from_secs(5);
+
+/// The recorder answers 409 to a stop sent while its start is still settling.
+fn recorder_busy(error: &Error) -> bool {
+    matches!(error, Error::Signaling(reason) if reason.contains("HTTP 409"))
+}
+
 fn report_organizer_result(result: Result<u16>, label: &str, notice: &str, control: &CallControl, timeline: &Timeline) {
     if let Err(error) = &result {
         timeline.record(format!("{label} failed"), error.to_string());
@@ -2246,8 +2260,23 @@ async fn run_bot_steps(
                         }
                     }
                     BotJob::Recording => {
-                        let stopped = remote.signaling.recording_command(&url, plan.stop(), &remote.participant, &plan.title).await;
-                        report_organizer_result(stopped, "recording stop", "The recording could not be stopped", control, timeline);
+                        let remote = remote.clone();
+                        let updates = control.updates();
+                        let (command, title) = (plan.stop(), plan.title.clone());
+                        tokio::spawn(async move {
+                            let mut stopped = remote.signaling.recording_command(&url, command, &remote.participant, &title).await;
+                            for _ in 0..RECORDING_STOP_RETRIES {
+                                if !stopped.as_ref().is_err_and(recorder_busy) {
+                                    break;
+                                }
+                                tokio::time::sleep(RECORDING_STOP_RETRY_WAIT).await;
+                                stopped = remote.signaling.recording_command(&url, command, &remote.participant, &title).await;
+                            }
+                            if stopped.is_err() {
+                                let _ = updates.send(CallUpdate::Notice("The recording could not be stopped".into()));
+                            }
+                            let _ = updates.send(CallUpdate::Organizer { action: "recording stop".into(), outcome: stopped.map_err(|error| error.to_string()) });
+                        });
                     }
                 }
             }
@@ -2631,6 +2660,13 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_conflict_answer_retries_a_recording_stop() {
+        assert!(recorder_busy(&Error::Signaling("recording command answered HTTP 409 no answer".into())));
+        assert!(!recorder_busy(&Error::Signaling("recording command answered HTTP 500 no answer".into())));
+        assert!(!recorder_busy(&Error::Cancelled));
+    }
 
     #[test]
     fn video_is_possible_once_connected_and_not_waiting_on_a_mixer_escalation() {

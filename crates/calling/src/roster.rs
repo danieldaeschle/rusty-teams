@@ -184,6 +184,11 @@ impl Roster {
         self.members.iter().any(|member| member.mri == mri && member.organizer)
     }
 
+    /// Teams web admits everyone by listing them: the server's `admitAll` leaves anonymous guests waiting.
+    pub fn lobby_mris(&self) -> Vec<String> {
+        self.members.iter().filter(|member| member.in_lobby).map(|member| member.mri.clone()).collect()
+    }
+
     pub fn is_in_lobby(&self, mri: &str) -> Option<bool> {
         self.members.iter().find(|member| member.mri == mri).map(|member| member.in_lobby)
     }
@@ -409,6 +414,20 @@ mod tests {
         roster.apply(&delta(json!({"8:orgid:me": participant("Me", 2, "active", true, 201)})));
         assert_eq!(roster.is_in_lobby("8:orgid:me"), Some(false));
         assert_eq!(roster.is_in_lobby("8:orgid:nobody"), None);
+    }
+
+    #[test]
+    fn lobby_mris_lists_only_people_waiting() {
+        let mut roster = Roster::default();
+        let waiting = |name: &str| json!({"version": 1, "state": "active", "details": {"displayName": name}, "endpoints": {"ep": {"lobby": {"mediaStreams": []}}}});
+        roster.apply(&delta(json!({
+            "8:teamsvisitor:one": waiting("One"),
+            "8:orgid:me": participant("Me", 1, "active", true, 201),
+            "8:teamsvisitor:two": waiting("Two"),
+        })));
+        let mut waiting_mris = roster.lobby_mris();
+        waiting_mris.sort();
+        assert_eq!(waiting_mris, vec!["8:teamsvisitor:one".to_owned(), "8:teamsvisitor:two".to_owned()]);
     }
 
     #[test]

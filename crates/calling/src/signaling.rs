@@ -425,11 +425,6 @@ impl Signaling {
         self.send("POST admit", Method::Post, conversation.link("admit")?, Some(body)).await.map(|response| response.status)
     }
 
-    pub async fn admit_all(&self, conversation: &Conversation, from: &Participant, callbacks: &CallbackLinks) -> Result<u16> {
-        let body = organizer::admit_all_body(from.wire(), callbacks, &uuid::Uuid::new_v4().to_string());
-        self.send("POST admitAll", Method::Post, conversation.link("admitAll")?, Some(body)).await.map(|response| response.status)
-    }
-
     pub async fn remove_participant(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
         let body = organizer::remove_participant_body(from.wire(), target, callbacks);
         self.send("POST removeParticipant", Method::Post, conversation.link("removeParticipant")?, Some(body)).await.map(|response| response.status)
