@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 89 %** (81 done, 14 partial, 4 missing of 99). Partial counts half.
+**Parity: 87 %** (81 done, 18 partial, 4 missing of 103). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 62 % | 4 | 13 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 60 % | 4 | 17 | 0 |
 
 ## Next
 
@@ -138,7 +138,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
 | Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
-| Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share screen, M mute; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
+| Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share screen, M mute, J join from a meeting reminder; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
 
 ## Presence and people
 
@@ -179,6 +179,10 @@ Feature parity with the Microsoft Teams desktop client.
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
 | Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |
 | In a call shown in presence | Done | "In a call", "In a meeting", "Presenting" from Teams activity on profile cards and chat headers; no notification sounds during a native call |
+| Schedule a meeting | Partial | Calls tab "New meeting": title, people chips, date, start, end (next half hour, 30 min), Repeat (does not repeat, daily, weekdays, weekly), details, Teams meeting always on. Graph `POST /me/events` with `isOnlineMeeting` and `teamsForBusiness`, times in UTC. Body building unit tested; never run against a real calendar |
+| Answer meeting invitations | Partial | Upcoming rows of invited meetings show Accepted / Tentative / Declined / Respond as a menu with "Send a response" (default on); own meetings say Organizer. Graph `accept`, `tentativelyAccept`, `decline`, falls back to the iCalUId lookup when the Teams id is not a Graph id. Not run against a real invitation |
+| Meeting start reminder | Partial | Toast 5 min before and at the start of an Upcoming meeting: title, time, Join, Dismiss; Ctrl+Shift+J joins from the latest. Quiet during Do not disturb and while in a call. Driven by the polled calendar; push event 128 not wired (the realtime layer does not receive it) |
+| Pre-join screen | Partial | Join from Upcoming, chat, Join with ID, link or reminder opens a screen in the chat pane: camera preview, camera and mic switches, background menu, camera, microphone and speaker selects, "Computer audio" or "Don't use audio" (audio off in both directions), Join now, Cancel. Camera, mic and devices remembered. 1:1 calls and Meet now skip it. Checked in the demo only |
 
 ## Agents
 

@@ -68,6 +68,7 @@ pub enum AppEvent {
     Ring,
     LiveMeeting,
     MissedCall(MissedCall),
+    MeetingReminder,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -127,6 +128,12 @@ pub struct AppState {
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
     pub meet_now_pending: bool,
+    pub prejoin: Option<crate::call::PendingJoin>,
+    pub prejoin_count: u64,
+    pub join_options: crate::call::JoinOptions,
+    pub rsvp_send_response: bool,
+    pub meeting_toasts: crate::call::MeetingToasts,
+    pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub call_backgrounds: crate::call::BackgroundLibrary,
     pub transfer_picker: Option<Entity<crate::views::transfer_picker::TransferPicker>>,
     pub rings: Rings,
@@ -224,6 +231,12 @@ impl AppState {
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
             meet_now_pending: false,
+            prejoin: None,
+            prejoin_count: 0,
+            join_options: crate::call::JoinOptions::default(),
+            rsvp_send_response: true,
+            meeting_toasts: crate::call::MeetingToasts::default(),
+            demo_meetings: Vec::new(),
             call_backgrounds: if mode.demo {
                 crate::call::demo_library()
             } else {
@@ -241,6 +254,7 @@ impl AppState {
         state.call_share_sound = crate::call::load_share_sound(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
+        state.join_options = crate::call::load_join_options(&state.store);
         state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);
         state.load_cached_translation_settings();
         if !mode.demo {
@@ -656,6 +670,7 @@ impl AppState {
 
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
         self.show_call(false, cx);
+        self.cancel_prejoin(cx);
         let was_drafting = std::mem::take(&mut self.new_chat);
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
             return;

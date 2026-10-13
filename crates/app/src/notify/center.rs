@@ -7,7 +7,8 @@ use store::Sidebar;
 
 use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
-use super::layout::{self, Slot, ring_height};
+use super::layout::{self, MEETING_HEIGHT, Slot, ring_height};
+use super::meeting_view::MeetingToastView;
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::ring_view::RingView;
 use super::rules::{
@@ -38,6 +39,12 @@ const DEMO_CALL_ENV: &str = "TEAMS_DEMO_CALL";
 const DEMO_SCENE_DELAY: Duration = Duration::from_millis(1500);
 const AGENT_BODY_LINES: usize = 2;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CallToast {
+    Ring(u64),
+    Meeting(u64),
+}
+
 struct OpenWindow {
     handle: AnyWindowHandle,
     native: Option<NativeHandle>,
@@ -64,8 +71,8 @@ pub struct NotificationCenter {
     throttle: SoundThrottle,
     windows: HashMap<u64, OpenWindow>,
     opening: HashSet<u64>,
-    ring_windows: HashMap<u64, OpenWindow>,
-    ring_opening: HashSet<u64>,
+    call_windows: HashMap<CallToast, OpenWindow>,
+    call_opening: HashSet<CallToast>,
     ring_tone: Option<platform::RingTone>,
     ringback: Option<platform::RingTone>,
     demo_mode: bool,
@@ -111,8 +118,8 @@ impl NotificationCenter {
             throttle: SoundThrottle::default(),
             windows: HashMap::new(),
             opening: HashSet::new(),
-            ring_windows: HashMap::new(),
-            ring_opening: HashSet::new(),
+            call_windows: HashMap::new(),
+            call_opening: HashSet::new(),
             ring_tone: None,
             ringback: None,
             demo_mode: app.read(cx).mode.demo,
@@ -239,6 +246,7 @@ impl NotificationCenter {
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.refresh_badge(cx),
             AppEvent::Ring => self.on_rings_changed(cx),
+            AppEvent::MeetingReminder => self.on_meeting_reminder(cx),
             AppEvent::Call => self.sync_ringback(cx),
             _ => {}
         }
@@ -279,9 +287,7 @@ impl NotificationCenter {
             .selection
             .as_ref()
             .is_some_and(|selection| selection.conversation_id() == conversation_id);
-        let own_do_not_disturb = state.directory.me.as_ref().is_some_and(|me| {
-            state.directory.presence_of(&me.user_id).kind() == PresenceKind::DoNotDisturb
-        });
+        let own_do_not_disturb = own_do_not_disturb(state);
         let server_in_call = match (state.engine.as_ref(), state.directory.me.as_ref()) {
             (Some(engine), Some(me)) => data::in_call(engine, &me.user_id),
             _ => false,
@@ -411,14 +417,19 @@ impl NotificationCenter {
         }
     }
 
-    fn ringing_ids(&self, cx: &App) -> Vec<(u64, bool)> {
+    fn call_toasts(&self, cx: &App) -> Vec<(CallToast, f32)> {
         let state = self.app.read(cx);
         let in_call = state.call.is_some();
-        state
+        let rings = state
             .rings
             .ringing()
-            .map(|entry| (entry.ring.ring_id, in_call))
-            .collect()
+            .map(|entry| (CallToast::Ring(entry.ring.ring_id), ring_height(in_call)));
+        let meetings = state
+            .meeting_toasts
+            .entries()
+            .iter()
+            .map(|toast| (CallToast::Meeting(toast.id), MEETING_HEIGHT));
+        rings.chain(meetings).collect()
     }
 
     fn sync_windows(&mut self, cx: &mut Context<Self>) {
@@ -432,15 +443,15 @@ impl NotificationCenter {
         for id in stale {
             self.close_window(id, cx);
         }
-        let rings = self.ringing_ids(cx);
-        let stale_rings: Vec<u64> = self
-            .ring_windows
+        let call_toasts = self.call_toasts(cx);
+        let stale_call_toasts: Vec<CallToast> = self
+            .call_windows
             .keys()
-            .filter(|id| !rings.iter().any(|(ring_id, _)| ring_id == *id))
+            .filter(|key| !call_toasts.iter().any(|(toast, _)| toast == *key))
             .copied()
             .collect();
-        for id in stale_rings {
-            self.close_ring_window(id, cx);
+        for key in stale_call_toasts {
+            self.close_call_window(key, cx);
         }
         let area = self.work_area(cx);
         let mut heights: Vec<f32> = self
@@ -455,21 +466,30 @@ impl NotificationCenter {
                 layout::toast_height(toast, lines)
             })
             .collect();
-        heights.extend(rings.iter().map(|(_, in_call)| ring_height(*in_call)));
+        heights.extend(call_toasts.iter().map(|(_, height)| *height));
         let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
         let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
         for (id, slot) in visible.iter().zip(slots.toasts.iter()) {
             self.place_toast(*id, *slot, area, cx);
         }
-        for ((ring_id, _), slot) in rings.iter().zip(slots.toasts.iter().skip(visible.len())) {
-            self.place_ring(*ring_id, *slot, area, cx);
+        for ((key, _), slot) in call_toasts
+            .iter()
+            .zip(slots.toasts.iter().skip(visible.len()))
+        {
+            self.place_call_toast(*key, *slot, area, cx);
         }
         self.sync_pill(slots.pill, area, cx);
     }
 
-    fn place_ring(&mut self, ring_id: u64, slot: Slot, area: WorkArea, cx: &mut Context<Self>) {
-        let Some(window) = self.ring_windows.get(&ring_id) else {
-            self.open_ring_window(ring_id, slot, area, cx);
+    fn place_call_toast(
+        &mut self,
+        key: CallToast,
+        slot: Slot,
+        area: WorkArea,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(window) = self.call_windows.get(&key) else {
+            self.open_call_window(key, slot, area, cx);
             return;
         };
         if let Some(native) = window.native {
@@ -478,39 +498,69 @@ impl NotificationCenter {
         }
     }
 
-    fn open_ring_window(
+    fn open_call_window(
         &mut self,
-        ring_id: u64,
+        key: CallToast,
         slot: Slot,
         area: WorkArea,
         cx: &mut Context<Self>,
     ) {
-        if !self.ring_opening.insert(ring_id) {
+        if !self.call_opening.insert(key) {
             return;
         }
         open_popup(
             popup_options(slot, area),
             cx,
-            move |center, _, cx| cx.new(|cx| RingView::new(center, ring_id, cx)),
+            move |center, _, cx| match key {
+                CallToast::Ring(ring_id) => {
+                    AnyView::from(cx.new(|cx| RingView::new(center, ring_id, cx)))
+                }
+                CallToast::Meeting(toast_id) => {
+                    AnyView::from(cx.new(|cx| MeetingToastView::new(center, toast_id, cx)))
+                }
+            },
             move |this, window| {
-                this.ring_opening.remove(&ring_id);
+                this.call_opening.remove(&key);
                 if let Some(window) = window {
-                    this.ring_windows.insert(ring_id, window);
+                    this.call_windows.insert(key, window);
                 }
             },
         );
     }
 
-    fn close_ring_window(&mut self, ring_id: u64, cx: &mut Context<Self>) {
-        let closed = self.ring_windows.get(&ring_id).is_some_and(|window| {
+    fn close_call_window(&mut self, key: CallToast, cx: &mut Context<Self>) {
+        let closed = self.call_windows.get(&key).is_some_and(|window| {
             window
                 .handle
                 .update(cx, |_, window, _| window.remove_window())
                 .is_ok()
         });
         if closed {
-            self.ring_windows.remove(&ring_id);
+            self.call_windows.remove(&key);
         }
+    }
+
+    fn on_meeting_reminder(&mut self, cx: &mut Context<Self>) {
+        if !self.app.read(cx).meeting_toasts.is_empty()
+            && !self.main_window_active(cx)
+            && let Some(native) = self.main_native
+        {
+            platform::flash(native);
+        }
+        self.sync_windows(cx);
+        cx.notify();
+    }
+
+    pub fn join_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.raise_main_window(cx);
+        self.app
+            .update(cx, |state, cx| state.join_meeting_toast(id, cx));
+    }
+
+    fn reminders_quiet(&self, cx: &App) -> bool {
+        self.settings.do_not_disturb
+            || platform::system_quiet()
+            || own_do_not_disturb(self.app.read(cx))
     }
 
     fn on_rings_changed(&mut self, cx: &mut Context<Self>) {
@@ -686,10 +736,20 @@ impl NotificationCenter {
         if !self.app.read(cx).rings.is_empty() {
             self.app.update(cx, |state, cx| state.tick_rings(cx));
         }
+        if self
+            .app
+            .read(cx)
+            .meeting_toasts
+            .is_due_for_check(Utc::now())
+        {
+            let show = !self.reminders_quiet(cx);
+            self.app
+                .update(cx, |state, cx| state.tick_meeting_reminders(show, cx));
+        }
         if !self.stack.is_empty()
             || !self.windows.is_empty()
             || self.pill.is_some()
-            || !self.ring_windows.is_empty()
+            || !self.call_windows.is_empty()
         {
             self.sync_windows(cx);
             cx.notify();
@@ -999,10 +1059,10 @@ impl NotificationCenter {
 
 /// Opens a window outside the current update: `open_window` draws right away, and every
 /// notification view reads the center while rendering.
-fn open_popup<V: Render>(
+fn open_popup<V: Into<AnyView>>(
     options: WindowOptions,
     cx: &mut Context<NotificationCenter>,
-    build: impl FnOnce(Entity<NotificationCenter>, &mut Window, &mut App) -> Entity<V> + 'static,
+    build: impl FnOnce(Entity<NotificationCenter>, &mut Window, &mut App) -> V + 'static,
     opened: impl FnOnce(&mut NotificationCenter, Option<OpenWindow>) + 'static,
 ) {
     let center = cx.entity();
@@ -1030,6 +1090,12 @@ fn open_popup<V: Render>(
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
+}
+
+fn own_do_not_disturb(state: &AppState) -> bool {
+    state.directory.me.as_ref().is_some_and(|me| {
+        state.directory.presence_of(&me.user_id).kind() == PresenceKind::DoNotDisturb
+    })
 }
 
 fn demo_scene() -> Option<DemoScene> {

@@ -26,6 +26,8 @@ const RESULT_LIMIT: usize = 8;
 const POPUP_WIDTH: f32 = 300.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
 const CHIP_NAME_MAX_WIDTH: f32 = 180.;
+const FIELD_MIN_HEIGHT: f32 = 36.;
+const FIELD_PADDING: f32 = 8.;
 const DEFAULT_PLACEHOLDER: &str = "Type a message";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +184,7 @@ pub struct NewChatDraft {
     query: Entity<InputState>,
     name: Entity<InputState>,
     chips: Vec<Pick>,
+    form_field: bool,
     remote: Vec<Pick>,
     highlighted: usize,
     popup_open: bool,
@@ -207,6 +210,7 @@ impl NewChatDraft {
             query,
             name,
             chips: Vec::new(),
+            form_field: false,
             remote: Vec::new(),
             highlighted: 0,
             popup_open: true,
@@ -216,6 +220,12 @@ impl NewChatDraft {
             search: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    pub fn compact(mut self) -> Self {
+        self.form_field = true;
+        self.popup_open = false;
+        self
     }
 
     pub fn chips(&self) -> &[Pick] {
@@ -407,7 +417,7 @@ impl NewChatDraft {
         );
         match (action, highlighted) {
             (EnterAction::Add, Some(pick)) => self.add(pick, window, cx),
-            (EnterAction::Advance, _) if self.chips.len() >= 2 => {
+            (EnterAction::Advance, _) if self.chips.len() >= 2 && !self.form_field => {
                 self.popup_open = false;
                 self.name.update(cx, |input, cx| input.focus(window, cx));
                 cx.notify();
@@ -538,46 +548,50 @@ impl NewChatDraft {
                 .child(text)
         };
         let results_empty = self.results(cx).is_empty();
+        let panel = v_flex()
+            .id("new-chat-popup")
+            .mt(px(4.))
+            .p(px(6.))
+            .rounded(px(10.))
+            .bg(theme::popup())
+            .occlude()
+            .when(!results_empty, |popup| {
+                popup.child(
+                    div()
+                        .px(px(6.))
+                        .pb(px(4.))
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_muted())
+                        .child(label),
+                )
+            })
+            .children(rows)
+            .when(self.search_failed, |popup| {
+                popup.child(note("Search failed".to_owned(), theme::red_soft()))
+            })
+            .when(self.searching && results_empty, |popup| {
+                popup.child(note("Searching ...".to_owned(), theme::text_muted()))
+            })
+            .when(
+                !self.searching && !self.search_failed && results_empty,
+                |popup| {
+                    popup.child(note(
+                        format!("No people found for \"{query}\""),
+                        theme::text_muted(),
+                    ))
+                },
+            );
+        if self.form_field {
+            return Some(panel.w_full().into_any_element());
+        }
         Some(
             deferred(
-                v_flex()
-                    .id("new-chat-popup")
+                panel
                     .absolute()
                     .top(relative(1.))
                     .left(px(20.))
-                    .mt(px(4.))
-                    .w(px(POPUP_WIDTH))
-                    .p(px(6.))
-                    .rounded(px(10.))
-                    .bg(theme::popup())
-                    .occlude()
-                    .when(!results_empty, |popup| {
-                        popup.child(
-                            div()
-                                .px(px(6.))
-                                .pb(px(4.))
-                                .text_size(px(11.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme::text_muted())
-                                .child(label),
-                        )
-                    })
-                    .children(rows)
-                    .when(self.search_failed, |popup| {
-                        popup.child(note("Search failed".to_owned(), theme::red_soft()))
-                    })
-                    .when(self.searching && results_empty, |popup| {
-                        popup.child(note("Searching ...".to_owned(), theme::text_muted()))
-                    })
-                    .when(
-                        !self.searching && !self.search_failed && results_empty,
-                        |popup| {
-                            popup.child(note(
-                                format!("No people found for \"{query}\""),
-                                theme::text_muted(),
-                            ))
-                        },
-                    ),
+                    .w(px(POPUP_WIDTH)),
             )
             .with_priority(1)
             .into_any_element(),
@@ -594,10 +608,14 @@ impl NewChatDraft {
         h_flex()
             .relative()
             .w_full()
-            .min_h(px(60.))
+            .min_h(px(if self.form_field {
+                FIELD_MIN_HEIGHT
+            } else {
+                60.
+            }))
             .flex_none()
-            .px(px(20.))
-            .py(px(8.))
+            .px(px(if self.form_field { FIELD_PADDING } else { 20. }))
+            .py(px(if self.form_field { 4. } else { 8. }))
             .gap(px(8.))
             .flex_wrap()
             .items_center()
@@ -614,11 +632,15 @@ impl NewChatDraft {
                     .min_w(px(160.))
                     .child(Input::new(&self.query).appearance(false).bordered(false)),
             )
-            .children(self.render_popup(cx))
+            .children(if self.form_field {
+                None
+            } else {
+                self.render_popup(cx)
+            })
     }
 
     fn render_name_row(&self, window: &Window, cx: &App) -> Option<impl IntoElement> {
-        if self.chips.len() < 2 {
+        if self.chips.len() < 2 || self.form_field {
             return None;
         }
         let focused = self.name.focus_handle(cx).is_focused(window);
@@ -755,6 +777,11 @@ impl Render for NewChatDraft {
                 }
             }))
             .child(self.render_bar(cx))
+            .children(if self.form_field {
+                self.render_popup(cx)
+            } else {
+                None
+            })
             .children(self.render_name_row(window, cx))
     }
 }

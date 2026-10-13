@@ -22,6 +22,7 @@ use crate::whiteboard::ContentShare;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallCommand {
     Mute(MuteCommand),
+    DisableAudio,
     SelectInput(DeviceChoice),
     SelectOutput(DeviceChoice),
     RefreshDevices,

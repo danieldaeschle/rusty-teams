@@ -11,6 +11,8 @@ pub struct AgendaRow {
     pub time_label: String,
     pub subject: String,
     pub detail: String,
+    pub response: ResponseType,
+    pub can_respond: bool,
     pub all_day: bool,
     pub join_url: Option<String>,
     pub thread_id: Option<String>,
@@ -43,12 +45,13 @@ pub fn join_available(
     now >= row_start - Duration::minutes(JOIN_LEAD_MINUTES) && now < row_end
 }
 
-pub fn rsvp_label(response: ResponseType) -> Option<&'static str> {
+pub fn response_label(response: ResponseType) -> &'static str {
     match response {
-        ResponseType::Organizer | ResponseType::Accepted => None,
-        ResponseType::Tentative => Some("tentative"),
-        ResponseType::Declined => Some("declined"),
-        ResponseType::NotResponded => Some("not answered"),
+        ResponseType::Organizer => "Organizer",
+        ResponseType::Accepted => "Accepted",
+        ResponseType::Tentative => "Tentative",
+        ResponseType::Declined => "Declined",
+        ResponseType::NotResponded => "Respond",
     }
 }
 
@@ -63,13 +66,10 @@ pub fn day_heading(day: NaiveDate, today: NaiveDate) -> String {
 }
 
 fn detail_label(event: &CalendarEvent) -> String {
-    let rsvp = rsvp_label(event.response);
-    match (event.organizer_name.as_deref(), rsvp) {
-        (Some(organizer), Some(rsvp)) => format!("{organizer} \u{b7} {rsvp}"),
-        (Some(organizer), None) => organizer.to_owned(),
-        (None, Some(rsvp)) => rsvp.to_owned(),
-        (None, None) => String::new(),
+    if event.response == ResponseType::Organizer {
+        return response_label(event.response).to_owned();
     }
+    event.organizer_name.clone().unwrap_or_default()
 }
 
 fn time_label(event: &CalendarEvent, offset: FixedOffset) -> String {
@@ -102,6 +102,8 @@ fn agenda_row(event: &CalendarEvent, offset: FixedOffset) -> AgendaRow {
             event.subject.clone()
         },
         detail: detail_label(event),
+        response: event.response,
+        can_respond: event.response != ResponseType::Organizer && event.organizer_name.is_some(),
         all_day: event.all_day,
         join_url: event.join_url.clone().filter(|_| event.online),
         thread_id: event.thread_id.clone(),
@@ -140,6 +142,12 @@ pub fn group_by_day(
     days
 }
 
+pub fn demo_join_url(id: &str) -> String {
+    format!(
+        "https://teams.microsoft.com/l/meetup-join/19%3ameeting_{id}%40thread.v2/0?context=%7b%22Tid%22%3a%22demo-tenant%22%2c%22Oid%22%3a%22demo-organizer%22%7d"
+    )
+}
+
 pub fn demo_events(now: DateTime<Utc>) -> Vec<CalendarEvent> {
     let event = |id: &str,
                  subject: &str,
@@ -154,12 +162,11 @@ pub fn demo_events(now: DateTime<Utc>) -> Vec<CalendarEvent> {
         all_day: false,
         cancelled: false,
         online: true,
-        join_url: Some(format!(
-            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_{id}%40thread.v2/0"
-        )),
+        join_url: Some(demo_join_url(id)),
         thread_id: None,
         organizer_name: Some(organizer.to_owned()),
         organizer_address: None,
+        ical_uid: None,
         response,
     };
     vec![
@@ -195,6 +202,14 @@ pub fn demo_events(now: DateTime<Utc>) -> Vec<CalendarEvent> {
             "Mara Lindqvist",
             ResponseType::Accepted,
         ),
+        event(
+            "demo-event-5",
+            "Roadmap sync",
+            420,
+            45,
+            "You",
+            ResponseType::Organizer,
+        ),
     ]
 }
 
@@ -226,6 +241,7 @@ mod tests {
             thread_id: None,
             organizer_name: Some("Mara".into()),
             organizer_address: None,
+            ical_uid: None,
             response: ResponseType::Accepted,
         }
     }
@@ -241,12 +257,12 @@ mod tests {
     }
 
     #[test]
-    fn rsvp_labels_only_show_when_not_accepted() {
-        assert_eq!(rsvp_label(ResponseType::Accepted), None);
-        assert_eq!(rsvp_label(ResponseType::Organizer), None);
-        assert_eq!(rsvp_label(ResponseType::NotResponded), Some("not answered"));
-        assert_eq!(rsvp_label(ResponseType::Tentative), Some("tentative"));
-        assert_eq!(rsvp_label(ResponseType::Declined), Some("declined"));
+    fn response_labels_name_the_current_answer() {
+        assert_eq!(response_label(ResponseType::Accepted), "Accepted");
+        assert_eq!(response_label(ResponseType::Organizer), "Organizer");
+        assert_eq!(response_label(ResponseType::NotResponded), "Respond");
+        assert_eq!(response_label(ResponseType::Tentative), "Tentative");
+        assert_eq!(response_label(ResponseType::Declined), "Declined");
     }
 
     #[test]
@@ -321,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_carry_organizer_and_rsvp_and_only_online_join_urls() {
+    fn rows_carry_organizer_response_and_only_online_join_urls() {
         let now = utc(12, 8, 0);
         let open = CalendarEvent {
             response: ResponseType::NotResponded,
@@ -332,9 +348,28 @@ mod tests {
             ..event("offline", utc(12, 10, 0), 30)
         };
         let days = group_by_day(&[open, offline], now, zero());
-        assert_eq!(days[0].rows[0].detail, "Mara \u{b7} not answered");
+        assert_eq!(days[0].rows[0].detail, "Mara");
+        assert_eq!(days[0].rows[0].response, ResponseType::NotResponded);
+        assert!(days[0].rows[0].can_respond);
         assert!(days[0].rows[0].join_url.is_some());
         assert_eq!(days[0].rows[1].join_url, None);
+    }
+
+    #[test]
+    fn own_meetings_say_organizer_and_cannot_be_answered() {
+        let own = CalendarEvent {
+            response: ResponseType::Organizer,
+            ..event("own", utc(12, 9, 0), 30)
+        };
+        let personal = CalendarEvent {
+            organizer_name: None,
+            response: ResponseType::NotResponded,
+            ..event("personal", utc(12, 10, 0), 30)
+        };
+        let days = group_by_day(&[own, personal], utc(12, 8, 0), zero());
+        assert_eq!(days[0].rows[0].detail, "Organizer");
+        assert!(!days[0].rows[0].can_respond);
+        assert!(!days[0].rows[1].can_respond);
     }
 
     #[test]

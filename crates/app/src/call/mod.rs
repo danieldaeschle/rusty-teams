@@ -14,12 +14,15 @@ mod model;
 mod overlay;
 mod overlay_layout;
 mod pictures;
+mod prejoin;
 mod preview;
+mod reminder;
 mod ring;
+mod schedule;
 mod target;
 
 pub use actions::{load_camera, load_share_sound};
-pub use agenda::{AgendaRow, fetch_window, join_available};
+pub use agenda::{AgendaRow, fetch_window, join_available, response_label};
 pub use background::{
     BackgroundLibrary, BackgroundPick, default_cache_directory, demo_library, load_background,
     load_custom_backgrounds,
@@ -38,6 +41,9 @@ pub use model::{
     REACTION_SHOWN, Tile, TileSize, TileState, grid_layout, tile_size,
 };
 pub use overlay::CallWindows;
+pub use prejoin::{AudioChoice, JoinOptions, PendingJoin, load_join_options};
 pub use preview::{CameraPreview, preview_backgrounds};
+pub use reminder::{MeetingToasts, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};
+pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use target::plan_for_chat;

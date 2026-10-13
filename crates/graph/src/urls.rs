@@ -31,6 +31,13 @@ pub fn user_profile(user_id: &str) -> String {
     )
 }
 
+pub fn user_mail(user_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/users/{}?$select=mail,userPrincipalName",
+        segment(user_id)
+    )
+}
+
 pub fn user_manager(user_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/users/{}/manager?$select=id,displayName,jobTitle",

@@ -21,7 +21,10 @@ pub mod settings;
 pub mod transcripts;
 pub mod translate;
 
-pub use calendar::{Calendar, CalendarEvent, ResponseType, meet_now_join_url, parse_calendar_events};
+pub use calendar::{
+    Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Repeat, Reply, ResponseType,
+    meet_now_join_url, new_event_body, parse_calendar_events, parse_created_event,
+};
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,

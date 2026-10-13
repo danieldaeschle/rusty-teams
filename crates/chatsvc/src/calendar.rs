@@ -5,6 +5,12 @@ use session::{ApiResponse, Method, Request, Session};
 use crate::cards::{CardTransport, DEFAULT_MT_REGION, SessionCardTransport, spaces_scope};
 use crate::error::{Error, Result};
 
+mod schedule;
+
+pub use schedule::{
+    Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, parse_created_event,
+};
+
 const QUERY_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
 const NAIVE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
 
@@ -31,6 +37,7 @@ pub struct CalendarEvent {
     pub thread_id: Option<String>,
     pub organizer_name: Option<String>,
     pub organizer_address: Option<String>,
+    pub ical_uid: Option<String>,
     pub response: ResponseType,
 }
 
@@ -100,7 +107,10 @@ impl<T: CardTransport> Calendar<T> {
         });
         let answer = self
             .transport
-            .send(Request::with_body(Method::Post, &self.create_url, body), spaces_scope())
+            .send(
+                Request::with_body(Method::Post, &self.create_url, body),
+                spaces_scope(),
+            )
             .await?;
         if !answer.is_success() {
             return Err(Error::Session(session::Error::api(
@@ -110,7 +120,11 @@ impl<T: CardTransport> Calendar<T> {
             )));
         }
         meet_now_join_url(&answer.body).ok_or_else(|| {
-            Error::Session(session::Error::api(answer.status, &self.create_url, answer.body))
+            Error::Session(session::Error::api(
+                answer.status,
+                &self.create_url,
+                answer.body,
+            ))
         })
     }
 }
@@ -166,6 +180,9 @@ fn thread_id(entry: &Value) -> Option<String> {
 }
 
 fn response_type(entry: &Value) -> ResponseType {
+    if flag(entry, "isOrganizer") {
+        return ResponseType::Organizer;
+    }
     let label = text(entry, "myResponseType").or_else(|| {
         let status = entry.get("responseStatus")?;
         status
@@ -196,6 +213,7 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         thread_id: thread_id(entry),
         organizer_name: text(entry, "organizerName"),
         organizer_address: text(entry, "organizerAddress"),
+        ical_uid: text(entry, "iCalUid").or_else(|| text(entry, "iCalUId")),
         response: response_type(entry),
     })
 }
@@ -285,6 +303,21 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 10, 12, 13, 0, 0).unwrap()
         );
         assert!(events[3].cancelled);
+    }
+
+    #[test]
+    fn the_organizer_flag_and_calendar_uid_are_read() {
+        let body = serde_json::json!({"value": [{
+            "objectId": "a",
+            "startTime": "2026-10-12T08:30:00Z",
+            "endTime": "2026-10-12T09:00:00Z",
+            "isOrganizer": true,
+            "myResponseType": "Accepted",
+            "iCalUid": "uid-a"
+        }]});
+        let events = parse_calendar_events(&body);
+        assert_eq!(events[0].response, ResponseType::Organizer);
+        assert_eq!(events[0].ical_uid.as_deref(), Some("uid-a"));
     }
 
     #[test]

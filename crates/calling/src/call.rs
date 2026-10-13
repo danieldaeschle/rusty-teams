@@ -1248,6 +1248,16 @@ async fn drive(
                         muted = apply_mute(mute, muted, live.audio.as_ref().expect("audio set above"), share_audio.as_ref(), &remote, control);
                     }
                 }
+                Some(CallCommand::DisableAudio) => {
+                    let audio = live.audio.as_ref().expect("audio set above");
+                    if audio.uses_devices() {
+                        use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+                        factory.set_adm_recording_enabled(false);
+                        factory.set_adm_playout_enabled(false);
+                    }
+                    muted = apply_mute(MuteCommand::Mute, muted, audio, share_audio.as_ref(), &remote, control);
+                    control.send(CallUpdate::ListenOnly(true));
+                }
                 Some(CallCommand::SelectInput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
                         timeline.record("input device", format!("{choice:?} applied={}", devices::select_input(&factory, &choice)));
