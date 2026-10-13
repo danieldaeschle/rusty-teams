@@ -11,7 +11,6 @@ use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full
 use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
 
 pub const SOFT_FOCUS_DEFAULT: u8 = 50;
-const MASK_INPUT_WIDTH: u32 = 512;
 const RGBA_BYTES: usize = 4;
 const AVERAGE_WEIGHT: f64 = 0.1;
 const FIRST_FRAME_GAP: Duration = Duration::from_millis(33);
@@ -107,7 +106,7 @@ impl EffectsStage {
             self.adjust_brightness(&mut buffer, width, height, elapsed);
         }
         if (blur || standout || effects.needs_mask()) && self.load_masks() {
-            let fresh = self.refresh_mask(&mut buffer, effects.auto_framing);
+            let fresh = self.refresh_mask(&buffer, effects.auto_framing);
             if effects.soft_focus {
                 self.soften(&mut buffer, width, height, effects.soft_focus_strength);
             }
@@ -143,9 +142,9 @@ impl EffectsStage {
         !self.unavailable
     }
 
-    fn refresh_mask(&mut self, buffer: &mut I420Buffer, track_subject: bool) -> bool {
+    fn refresh_mask(&mut self, buffer: &I420Buffer, track_subject: bool) -> bool {
         let Some(masks) = self.masks.as_mut() else { return false };
-        let fresh = masks.refresh(|| mask_input(buffer));
+        let fresh = masks.refresh(|| copy_frame(buffer));
         if track_subject && fresh {
             self.subject = find_subject(masks.mask(), MASK_WIDTH, MASK_HEIGHT);
         }
@@ -195,17 +194,14 @@ impl EffectsStage {
     }
 }
 
-fn mask_input(buffer: &mut I420Buffer) -> (Vec<u8>, usize, usize) {
-    let (width, height) = (buffer.width(), buffer.height());
-    let small_width = width.min(MASK_INPUT_WIDTH) & !1;
-    let small_height = (u64::from(height) * u64::from(small_width) / u64::from(width)) as u32 & !1;
-    let small = if (small_width, small_height) == (width, height) { None } else { Some(buffer.scale(small_width as i32, small_height as i32)) };
-    let source = small.as_ref().unwrap_or(buffer);
-    let (stride_y, stride_u, stride_v) = source.strides();
-    let (plane_y, plane_u, plane_v) = source.data();
-    let mut rgba = vec![0u8; small_width as usize * small_height as usize * RGBA_BYTES];
-    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, small_width * RGBA_BYTES as u32, small_width as i32, small_height as i32);
-    (rgba, small_width as usize, small_height as usize)
+fn copy_frame(buffer: &I420Buffer) -> I420Buffer {
+    let mut copy = I420Buffer::new(buffer.width(), buffer.height());
+    let (source_y, source_u, source_v) = buffer.data();
+    let (target_y, target_u, target_v) = copy.data_mut();
+    target_y.copy_from_slice(source_y);
+    target_u.copy_from_slice(source_u);
+    target_v.copy_from_slice(source_v);
+    copy
 }
 
 #[cfg(test)]
@@ -287,7 +283,7 @@ mod tests {
                 let mut copy = I420Buffer::new(1280, 720);
                 soften_luma(copy.data_mut().0, 1280, 1280, 720, &mask, 100);
             }),
-            timed("mask input", || mask_input(&mut buffer)),
+            timed("frame copy", || copy_frame(&buffer)),
             timed("subject", || find_subject(&mask, MASK_WIDTH, MASK_HEIGHT)),
             timed("crop and scale", || crop_and_scale(&buffer, &crop)),
         ]

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use tract_onnx::prelude::*;
 
+use libwebrtc::native::yuv_helper::i420_to_abgr;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
 use crate::background::BackgroundPicture;
@@ -27,6 +28,7 @@ const MASK_SMOOTHING: f32 = 0.35;
 const SLOW_INFERENCE: Duration = Duration::from_millis(22);
 const VERY_SLOW_INFERENCE: Duration = Duration::from_millis(45);
 const MAX_BANDS: usize = 4;
+const MASK_INPUT_WIDTH: u32 = 512;
 
 type Plan = std::sync::Arc<TypedRunnableModel>;
 
@@ -449,16 +451,30 @@ impl BlurStage {
 }
 
 pub trait MaskInference: Send + 'static {
-    fn infer(&self, rgba: &[u8], width: usize, height: usize) -> Result<Vec<f32>>;
+    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>>;
 }
 
 impl MaskInference for Segmenter {
-    fn infer(&self, rgba: &[u8], width: usize, height: usize) -> Result<Vec<f32>> {
-        self.mask(rgba, width, height)
+    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
+        let (rgba, width, height) = mask_input(frame);
+        self.mask(&rgba, width, height)
     }
 }
 
-type Frame = (Vec<u8>, usize, usize);
+fn mask_input(mut buffer: I420Buffer) -> (Vec<u8>, usize, usize) {
+    let (width, height) = (buffer.width(), buffer.height());
+    let small_width = width.min(MASK_INPUT_WIDTH) & !1;
+    let small_height = (u64::from(height) * u64::from(small_width) / u64::from(width)) as u32 & !1;
+    let small = if (small_width, small_height) == (width, height) { None } else { Some(buffer.scale(small_width as i32, small_height as i32)) };
+    let source = small.as_ref().unwrap_or(&buffer);
+    let (stride_y, stride_u, stride_v) = source.strides();
+    let (plane_y, plane_u, plane_v) = source.data();
+    let mut rgba = vec![0u8; small_width as usize * small_height as usize * CHANNELS];
+    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, small_width * CHANNELS as u32, small_width as i32, small_height as i32);
+    (rgba, small_width as usize, small_height as usize)
+}
+
+type Frame = I420Buffer;
 
 #[derive(Default)]
 struct Inbox {
@@ -502,7 +518,7 @@ fn smooth_into(current: &mut Vec<f32>, fresh: Vec<f32>) {
 fn run_worker(shared: &WorkerShared, inference: &dyn MaskInference) {
     let mut smoothed = Vec::new();
     loop {
-        let (rgba, width, height) = {
+        let frame = {
             let mut inbox = shared.inbox.lock().expect("inbox lock");
             loop {
                 if inbox.closed {
@@ -515,7 +531,7 @@ fn run_worker(shared: &WorkerShared, inference: &dyn MaskInference) {
             }
         };
         let started = Instant::now();
-        let Ok(fresh) = inference.infer(&rgba, width, height) else { continue };
+        let Ok(fresh) = inference.infer(frame) else { continue };
         shared.stride.store(stride_for(started.elapsed()), Ordering::Relaxed);
         smooth_into(&mut smoothed, fresh);
         let mut outbox = shared.outbox.lock().expect("outbox lock");
@@ -556,12 +572,12 @@ impl MaskSource {
         &self.mask
     }
 
-    /// Call once per frame; `rgba` is only read when `due`. Answers whether a newer mask arrived.
-    pub fn refresh(&mut self, rgba: impl FnOnce() -> Frame) -> bool {
+    /// Call once per frame; `frame` is only read when `due`. Answers whether a newer mask arrived.
+    pub fn refresh(&mut self, frame: impl FnOnce() -> Frame) -> bool {
         let due = self.due();
         self.frames += 1;
         if due {
-            self.shared.inbox.lock().expect("inbox lock").newest = Some(rgba());
+            self.shared.inbox.lock().expect("inbox lock").newest = Some(frame());
             self.shared.wake.notify_one();
         }
         let outbox = self.shared.outbox.lock().expect("outbox lock");
@@ -587,6 +603,7 @@ impl Drop for MaskSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera::i420_from_rgba;
 
     const WIDTH: usize = 160;
     const HEIGHT: usize = 90;
@@ -775,7 +792,7 @@ mod tests {
     #[test]
     fn the_mask_source_segments_when_due_and_keeps_one_mask() {
         let mut source = MaskSource::new().expect("model loads");
-        assert!(wait_for_mask(&mut source, || (checkerboard(), WIDTH, HEIGHT)));
+        assert!(wait_for_mask(&mut source, || i420_from_rgba(&checkerboard(), WIDTH as u32, HEIGHT as u32)));
         assert_eq!(source.mask().len(), MASK_WIDTH * MASK_HEIGHT);
         source.shared.stride.store(3, Ordering::Relaxed);
         source.frames = 1;
@@ -789,15 +806,18 @@ mod tests {
     }
 
     impl MaskInference for SlowSegmenter {
-        fn infer(&self, rgba: &[u8], _width: usize, _height: usize) -> Result<Vec<f32>> {
-            self.seen.lock().unwrap().push(rgba[0]);
+        fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
+            let marker = frame.data().0[0];
+            self.seen.lock().unwrap().push(marker);
             std::thread::sleep(self.delay);
-            Ok(vec![f32::from(rgba[0]) / 255.; MASK_WIDTH * MASK_HEIGHT])
+            Ok(vec![f32::from(marker) / 255.; MASK_WIDTH * MASK_HEIGHT])
         }
     }
 
     fn marked_frame(marker: u8) -> Frame {
-        (vec![marker; 16], 2, 2)
+        let mut buffer = I420Buffer::new(2, 2);
+        buffer.data_mut().0.fill(marker);
+        buffer
     }
 
     #[test]

@@ -48,7 +48,7 @@ fn camera_index(choice: &DeviceChoice) -> CameraIndex {
     }
 }
 
-pub(crate) fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
+pub fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
