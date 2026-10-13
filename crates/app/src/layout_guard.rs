@@ -131,7 +131,7 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::recap_tab::RECAP_REGION;
-    use crate::views::shell::{AppShell, SIDEBAR_HIDDEN_BELOW, Startup, bind_keys, install_globals};
+    use crate::views::shell::{AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call};
     use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
 
     const GUARDED: &[&str] = &[
@@ -528,7 +528,8 @@ mod frames {
                 let mut expected = GUARDED.to_vec();
                 if is_call {
                     expected.extend(CALL_GUARDED);
-                    if width < SIDEBAR_HIDDEN_BELOW {
+                    let panel_open = matches!(screen_name, "call-people" | "call-transcript");
+                    if sidebar_hidden_in_call(width, panel_open) {
                         expected.retain(|path| *path != "shell/islands/sidebar");
                     }
                 }

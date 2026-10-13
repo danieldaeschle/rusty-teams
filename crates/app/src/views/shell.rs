@@ -6,7 +6,7 @@ use gpui_kit::*;
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::call_mini::render_call_mini;
 use super::call_stage::{render_call_overlay, render_stage_overlay};
-use super::call_view::render_call_view;
+use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
 use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
@@ -71,6 +71,12 @@ pub struct Startup {
 
 pub const ISLAND_GAP: f32 = 6.;
 pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
+
+pub fn sidebar_hidden_in_call(window_width: f32, panel_open: bool) -> bool {
+    let panel_width = if panel_open { CHAT_PANEL_WIDTH + ISLAND_GAP } else { 0. };
+    window_width < SIDEBAR_HIDDEN_BELOW
+        || window_width - RAIL_WIDTH - SIDEBAR_WIDTH - 2. * ISLAND_GAP - panel_width < CALL_COLUMN_MIN
+}
 
 pub struct UserInputHandle(pub Arc<UserInput>);
 
@@ -744,9 +750,13 @@ impl Render for AppShell {
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);
+        let panel_open = state
+            .call
+            .as_ref()
+            .is_some_and(|call| call.chat_open || call.people_open || call.transcript_open);
         let show_sidebar = !(state.viewing_call()
             && !call_fullscreen
-            && window_width < SIDEBAR_HIDDEN_BELOW);
+            && sidebar_hidden_in_call(window_width, panel_open));
         let island_width = window_width
             - RAIL_WIDTH
             - if show_sidebar { SIDEBAR_WIDTH } else { 0. }
