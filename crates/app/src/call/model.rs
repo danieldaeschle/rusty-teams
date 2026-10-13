@@ -16,6 +16,7 @@ use super::bubbles::ChatBubble;
 use super::fullscreen::FullscreenState;
 use super::pictures::CallPictures;
 use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, split_overflow};
+use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::push_to_talk::PushToTalk;
 
@@ -46,6 +47,7 @@ pub struct ActiveCall {
     pub share_menu_open: bool,
     pub lobby_list_open: bool,
     pub chat_open: bool,
+    pub transcript_open: bool,
     pub meeting_target: Option<MeetingTarget>,
     pub pending_move: Option<PendingMove>,
     pub consult: Option<ConsultCall>,
@@ -109,6 +111,7 @@ impl ActiveCall {
             share_menu_open: false,
             lobby_list_open: false,
             chat_open: false,
+            transcript_open: false,
             meeting_target: None,
             pending_move: None,
             consult: None,
@@ -265,8 +268,13 @@ pub struct CallModel {
     pub pinned: Option<String>,
     pub captions: CaptionState,
     pub caption_lines: Vec<CaptionLine>,
+    pub transcript: Transcript,
+    pub caption_language: Option<String>,
+    language_pending: bool,
     pub background: BackgroundPick,
     pub recording: bool,
+    pub recording_audio_only: bool,
+    pub transcribing: bool,
     pub consent_required: bool,
     pub hold: HoldState,
     pub health: HealthState,
@@ -320,8 +328,13 @@ impl CallModel {
             pinned: None,
             captions: CaptionState::Off,
             caption_lines: Vec::new(),
+            transcript: Transcript::default(),
+            caption_language: None,
+            language_pending: false,
             background: BackgroundPick::None,
             recording: false,
+            recording_audio_only: false,
+            transcribing: false,
             consent_required: false,
             hold: HoldState::Active,
             health: HealthState::default(),
@@ -451,6 +464,8 @@ impl CallModel {
             }
             CallUpdate::Caption(entry) => self.note_caption(entry, Instant::now()),
             CallUpdate::Recording(on) => self.recording = on,
+            CallUpdate::RecordingAudioOnly(audio_only) => self.recording_audio_only = audio_only,
+            CallUpdate::Transcribing(on) => self.transcribing = on,
             CallUpdate::ConsentRequired(required) => self.consent_required = required,
             CallUpdate::Hold(hold) => self.hold = hold,
             CallUpdate::Health(health) => self.health.apply(health),
@@ -474,6 +489,15 @@ impl CallModel {
         } else {
             entry.display_name
         };
+        let offset = self
+            .connected_since
+            .map_or(Duration::ZERO, |since| at.saturating_duration_since(since));
+        self.transcript.note(TranscriptEntry {
+            id: entry.id.clone(),
+            speaker: speaker.clone(),
+            text: entry.text.clone(),
+            offset,
+        });
         let line = CaptionLine {
             id: entry.id,
             speaker,
@@ -493,6 +517,19 @@ impl CallModel {
             .iter()
             .filter(|line| now.saturating_duration_since(line.at) < CAPTION_SHOWN)
             .collect()
+    }
+
+    pub fn choose_caption_language(&mut self, tag: &str) {
+        self.caption_language = Some(tag.to_owned());
+        self.language_pending = true;
+    }
+
+    pub fn take_ready_caption_language(&mut self) -> Option<String> {
+        if self.language_pending && self.captions == CaptionState::On {
+            self.language_pending = false;
+            return self.caption_language.clone();
+        }
+        None
     }
 
     pub fn captions_on(&self) -> bool {
@@ -1946,6 +1983,48 @@ mod tests {
             )
             .can_hold()
         );
+    }
+
+    #[test]
+    fn the_transcript_keeps_every_caption_with_its_offset_while_the_overlay_keeps_two() {
+        let mut model = meeting_with_me();
+        let start = Instant::now();
+        model.apply(CallUpdate::State(CallState::Connected { since: start }));
+        model.apply(CallUpdate::Captions(CaptionState::On));
+        model.note_caption(caption("1", "Ana Example", "One", true), start + Duration::from_secs(5));
+        model.note_caption(caption("2", "Bo Sample", "Two", true), start + Duration::from_secs(65));
+        model.note_caption(caption("3", "Ana Example", "Three", true), start + Duration::from_secs(70));
+        assert_eq!(model.caption_lines.len(), 2);
+        assert_eq!(model.transcript.filtered("").len(), 3);
+        assert_eq!(model.transcript.filtered("")[1].offset, Duration::from_secs(65));
+        model.apply(CallUpdate::Captions(CaptionState::Off));
+        model.note_caption(caption("4", "Bo Sample", "Ignored", true), start + Duration::from_secs(80));
+        assert!(model.caption_lines.is_empty());
+        assert_eq!(model.transcript.filtered("").len(), 3);
+    }
+
+    #[test]
+    fn a_chosen_spoken_language_is_handed_out_once_the_captions_are_on() {
+        let mut model = meeting_with_me();
+        model.choose_caption_language("de-DE");
+        model.apply(CallUpdate::Captions(CaptionState::Starting));
+        assert_eq!(model.take_ready_caption_language(), None);
+        model.apply(CallUpdate::Captions(CaptionState::On));
+        assert_eq!(model.take_ready_caption_language().as_deref(), Some("de-DE"));
+        assert_eq!(model.take_ready_caption_language(), None);
+        assert_eq!(model.caption_language.as_deref(), Some("de-DE"));
+    }
+
+    #[test]
+    fn audio_only_and_transcription_follow_their_own_updates() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Transcribing(true));
+        assert!(model.transcribing && !model.recording);
+        model.apply(CallUpdate::Recording(true));
+        model.apply(CallUpdate::RecordingAudioOnly(true));
+        assert!(model.recording && model.recording_audio_only);
+        model.apply(CallUpdate::Transcribing(false));
+        assert!(!model.transcribing && model.recording);
     }
 
     #[test]

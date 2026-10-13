@@ -1180,6 +1180,7 @@ pub fn render_call_view(
             .gap(px(ISLAND_GAP))
             .child(column)
             .children(chat.map(|chat| chat_panel(app, chat)))
+            .children(call.transcript_open.then(|| state.transcript_panel.clone()).flatten())
             .into_any_element(),
     )
 }
@@ -1198,11 +1199,29 @@ fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> 
 
 fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElement {
     let app = app.clone();
+    side_panel(
+        "call-chat-panel",
+        "Chat",
+        "Close the chat",
+        move |cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)),
+        chat,
+    )
+    .into_any_element()
+}
+
+pub fn side_panel(
+    panel_id: &'static str,
+    title: &'static str,
+    close_tooltip: &'static str,
+    on_close: impl Fn(&mut App) + 'static,
+    body: impl IntoElement,
+) -> Stateful<Div> {
     v_flex()
-        .id("call-chat-panel")
+        .id(panel_id)
         .w(px(CHAT_PANEL_WIDTH))
         .h_full()
-        .flex_none()
+        .flex_shrink(1.)
+        .min_w_0()
         .rounded(px(10.))
         .overflow_hidden()
         .bg(theme::surface())
@@ -1219,11 +1238,11 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
                     div()
                         .text_size(px(15.))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("Chat"),
+                        .child(title),
                 )
                 .child(
                     div()
-                        .id("call-chat-close")
+                        .id(ElementId::Name(format!("{panel_id}-close").into()))
                         .size(px(28.))
                         .flex()
                         .items_center()
@@ -1231,13 +1250,10 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
                         .rounded(px(7.))
                         .cursor_pointer()
                         .hover(|button| button.bg(theme::row_hover()))
-                        .tooltip(|window, cx| Tooltip::new("Close the chat").build(window, cx))
+                        .tooltip(move |window, cx| Tooltip::new(close_tooltip).build(window, cx))
                         .child(icon(IconName::Close, 14., theme::text_muted()))
-                        .on_click(move |_, _, cx| {
-                            app.update(cx, |state, cx| state.toggle_call_chat(cx))
-                        }),
+                        .on_click(move |_, _, cx| on_close(cx)),
                 ),
         )
-        .child(chat)
-        .into_any_element()
+        .child(body)
 }

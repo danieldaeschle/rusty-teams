@@ -122,13 +122,14 @@ mod frames {
 
     use std::time::Instant;
 
-    use calling::{CallState, CallUpdate, RosterEntry, call_channel};
+    use calling::{CallState, CallUpdate, CaptionEntry, CaptionState, RosterEntry, call_channel};
     use gpui_kit::Entity;
 
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
     use crate::call::{ActiveCall, CallModel};
     use crate::demo;
     use crate::user_activity::UserInput;
+    use crate::views::call_transcript::TranscriptPanel;
     use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals};
     use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
@@ -164,6 +165,7 @@ mod frames {
         "shell/islands/main/prejoin/actions",
     ];
     const PREJOIN_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_guard%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%2c%22Oid%22%3a%22o%22%7d";
+    const CALL_TRANSCRIPT: &str = "shell/islands/main/call-transcript";
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
@@ -179,6 +181,7 @@ mod frames {
         StatusMenu,
         Call,
         Prejoin,
+        CallTranscript,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -296,7 +299,7 @@ mod frames {
             .chain(CALL_GUARDED)
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
-            .chain([&MENU, &RECAP_TAB, &RECAP_REGION])
+            .chain([&CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -413,6 +416,7 @@ mod frames {
                 Screen::Prejoin,
                 Screen::StatusMenu,
                 Screen::Call,
+                Screen::CallTranscript,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -438,6 +442,32 @@ mod frames {
                         });
                         ("prejoin", false)
                     }
+                    Screen::CallTranscript => {
+                        visual.update(|window, cx| {
+                            app.update(cx, |state, cx| {
+                                let mut call = gallery_call();
+                                call.model.apply(CallUpdate::Captions(CaptionState::On));
+                                for index in 0..40 {
+                                    call.model.note_caption(
+                                        CaptionEntry {
+                                            id: format!("guard-{index}"),
+                                            user_id: "8:orgid:guard-0".into(),
+                                            display_name: "Guest 0".into(),
+                                            text: "A long guarded sentence that has to wrap inside the panel".into(),
+                                            is_final: true,
+                                        },
+                                        Instant::now(),
+                                    );
+                                }
+                                call.transcript_open = true;
+                                state.call = Some(call);
+                                let app_entity = cx.entity();
+                                state.transcript_panel = Some(cx.new(|cx| TranscriptPanel::new(app_entity, window, cx)));
+                                cx.notify();
+                            })
+                        });
+                        ("call-transcript", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -451,8 +481,11 @@ mod frames {
                 };
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
-                if screen_name == "call" {
+                if screen_name == "call" || screen_name == "call-transcript" {
                     expected.extend(CALL_GUARDED);
+                }
+                if screen_name == "call-transcript" {
+                    expected.push(CALL_TRANSCRIPT);
                 }
                 if status_menu {
                     expected.push(MENU);
@@ -487,7 +520,7 @@ mod frames {
                     visual.simulate_keystrokes("escape");
                     visual.run_until_parked();
                 }
-                if screen_name == "call" {
+                if screen_name == "call" || screen_name == "call-transcript" {
                     visual.update(|_, cx| {
                         app.update(cx, |state, cx| {
                             state.call = None;

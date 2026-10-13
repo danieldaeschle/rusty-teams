@@ -15,7 +15,7 @@ use super::call_view::{BANNER_HEIGHT, MENU_WIDTH};
 use super::transfer_picker::TransferPicker;
 use super::widgets::icon;
 use crate::app_state::AppState;
-use crate::call::{BackgroundPick, CallModel};
+use crate::call::{BackgroundPick, CallModel, RecordAction, RecordingChip};
 use crate::theme;
 
 const STAGE_RADIUS: f32 = 12.;
@@ -31,7 +31,12 @@ fn dark_text() -> Hsla {
 }
 
 pub fn recording_chip(model: &CallModel) -> Option<AnyElement> {
-    model.recording.then(|| {
+    let chip = crate::call::recording_chip(model.recording, model.recording_audio_only, model.transcribing)?;
+    let color = match chip {
+        RecordingChip::Transcribing => theme::accent_text(),
+        RecordingChip::Recording | RecordingChip::RecordingAudio => theme::red(),
+    };
+    Some(
         h_flex()
             .id("call-recording")
             .flex_none()
@@ -39,11 +44,11 @@ pub fn recording_chip(model: &CallModel) -> Option<AnyElement> {
             .items_center()
             .text_size(px(13.))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::red())
-            .child(div().size(px(9.)).rounded_full().bg(theme::red()))
-            .child("Recording")
-            .into_any_element()
-    })
+            .text_color(color)
+            .child(div().size(px(9.)).rounded_full().bg(color))
+            .child(chip.label())
+            .into_any_element(),
+    )
 }
 
 pub fn return_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
@@ -264,18 +269,22 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
     )
 }
 
-pub fn confirm_stop_recording(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
+pub fn confirm_record_action(app: &Entity<AppState>, action: RecordAction, window: &mut Window, cx: &mut App) {
+    let Some(title) = action.confirm_title() else {
+        app.update(cx, |state, cx| state.run_call_record_action(action, cx));
+        return;
+    };
     let app = app.clone();
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
         let cancel = Button::new("recording-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx));
         let stop = Button::new("recording-stop").label("Stop").danger().on_click(move |_, window, cx| {
-            app.update(cx, |state, cx| state.set_call_recording(false, cx));
+            app.update(cx, |state, cx| state.run_call_record_action(action, cx));
             window.close_dialog(cx);
         });
         alert
-            .title("Stop recording and transcription?")
-            .description("The recording is saved to the organizer's OneDrive and the link arrives in the meeting chat.")
+            .title(title)
+            .description("The file is saved to the organizer's OneDrive and the link arrives in the meeting chat.")
             .footer(DialogFooter::new().child(cancel).child(stop))
             .on_ok(|_, _, _| false)
     });

@@ -25,6 +25,7 @@ pub struct CaptionBot {
     pub command_url: Option<String>,
     pub active: bool,
     pub recording: bool,
+    pub audio_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,7 +225,8 @@ fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
     let known = command_url.is_some() || metadata.iter().any(|metadata| metadata["processingModes"].is_object());
     let active = metadata.iter().any(|metadata| metadata["processingModes"]["closedCaptions"]["state"].as_str() == Some("Active"));
     let recording = metadata.iter().any(|metadata| metadata["processingModes"]["recording"]["state"].as_str() == Some("Active"));
-    known.then(|| CaptionBot { mri: mri.to_owned(), command_url, active, recording })
+    let audio_only = metadata.iter().any(|metadata| metadata["processingModes"]["recording"]["properties"]["recordVideo"].as_str() == Some("False"));
+    known.then(|| CaptionBot { mri: mri.to_owned(), command_url, active, recording, audio_only })
 }
 
 fn published_state(participant: &Value, endpoints: &[&Value], state_type: &str) -> Option<PublishedState> {
@@ -541,6 +543,18 @@ mod tests {
         assert!(roster.caption_bot().unwrap().active);
         roster.apply(&delta(json!({"28:bot": {"version": 3, "state": "inactive"}})));
         assert_eq!(roster.caption_bot(), None);
+    }
+
+    #[test]
+    fn an_audio_only_recording_shows_in_the_bot_properties() {
+        let mut bot = recorder_bot(1, false);
+        bot["endpoints"]["ep"]["endpointMetadata"]["processingModes"]["recording"] = json!({"state": "Active", "properties": {"recordVideo": "False", "exportFormatType": "Mp4"}});
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({"28:bot": bot})));
+        let found = roster.caption_bot().unwrap();
+        assert!(found.recording && found.audio_only);
+        roster.apply(&delta(json!({"28:bot": recorder_bot(2, false)})));
+        assert!(!roster.caption_bot().unwrap().audio_only);
     }
 
     #[test]

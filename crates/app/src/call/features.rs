@@ -6,10 +6,12 @@ use gpui_kit::*;
 use super::background::BackgroundPick;
 use super::demo::{DemoCall, start_demo_call};
 use super::health::HealthBanner;
-use super::model::{ActiveCall, BreakoutState, CallModel, ConsultCall, PendingMove};
+use super::model::{ActiveCall, BreakoutState, CallKind, CallModel, ConsultCall, PendingMove};
+use super::recording_menu::RecordAction;
 use super::target::plan_for_chat;
-use crate::app_state::AppState;
+use crate::app_state::{AppEvent, AppState};
 use crate::data::is_one_on_one;
+use crate::views::call_transcript::TranscriptPanel;
 
 const DEMO_ROOM_GUESTS: usize = 3;
 
@@ -38,12 +40,81 @@ fn return_move(room: &BreakoutState) -> PendingMove {
 }
 
 impl AppState {
-    pub fn set_call_recording(&mut self, on: bool, _cx: &mut Context<Self>) {
+    pub fn run_call_record_action(&mut self, action: RecordAction, _cx: &mut Context<Self>) {
         let Some(call) = self.call.as_ref().filter(|call| call.model.can_record()) else {
             return;
         };
-        let title = call.model.title.clone();
-        self.send_call_command(CallCommand::SetRecording { on, title });
+        let command = match action {
+            RecordAction::Start(kind) => CallCommand::StartRecording {
+                kind,
+                title: call.model.title.clone(),
+            },
+            RecordAction::Stop(scope) => CallCommand::StopRecording { scope },
+        };
+        self.send_call_command(command);
+    }
+
+    pub fn open_call_transcript(
+        &mut self,
+        panel: Entity<TranscriptPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        self.transcript_panel = Some(panel);
+        self.show_call_transcript(cx);
+    }
+
+    pub(super) fn show_call_transcript(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.model.kind == CallKind::Meeting)
+        else {
+            return;
+        };
+        call.chat_open = false;
+        call.transcript_open = true;
+        let captions_off = !call.model.captions_on();
+        if captions_off {
+            self.send_call_command(CallCommand::SetCaptions(true));
+        }
+        cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    pub fn close_call_transcript(&mut self, cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.transcript_open = false;
+        }
+        self.transcript_panel = None;
+        cx.emit(AppEvent::Call);
+        cx.notify();
+    }
+
+    pub fn choose_call_caption_language(&mut self, tag: &str, cx: &mut Context<Self>) {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.model.is_active() && call.model.kind == CallKind::Meeting)
+        else {
+            return;
+        };
+        call.model.choose_caption_language(tag);
+        let captions_off = !call.model.captions_on();
+        if captions_off {
+            self.send_call_command(CallCommand::SetCaptions(true));
+        }
+        self.send_ready_caption_language();
+        cx.notify();
+    }
+
+    fn send_ready_caption_language(&mut self) {
+        let language = self
+            .call
+            .as_mut()
+            .and_then(|call| call.model.take_ready_caption_language());
+        if let Some(language) = language {
+            self.send_call_command(CallCommand::SetCaptionLanguage(language));
+        }
     }
 
     pub fn accept_recording_notice(&mut self, _cx: &mut Context<Self>) {

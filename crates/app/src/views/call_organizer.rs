@@ -13,12 +13,13 @@ use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::call_extras::{
-    CameraMenu, background_items, confirm_stop_recording, effect_items, open_transfer_picker,
+    CameraMenu, background_items, effect_items, open_transfer_picker,
 };
+use super::call_record::{record_submenu, transcript_and_settings_items};
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::icon;
 use crate::app_state::AppState;
-use crate::call::{CAPTION_SHOWN, CallModel, Focus};
+use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus};
 use crate::notice::truncated;
 use crate::theme;
 
@@ -28,6 +29,7 @@ const LOBBY_LIST_WIDTH: f32 = 340.;
 const LOBBY_NAME_LIMIT: usize = 28;
 const CAPTION_WIDTH: f32 = 720.;
 const CAPTION_BOTTOM: f32 = 2. * 16. + CONTROL_SIZE + 16.;
+const CAPTION_TOP: f32 = 72.;
 const CAPTION_FADE_SECONDS: f32 = 1.;
 const CAPTION_BACKGROUND: f32 = 0.72;
 const FOCUS_RADIUS: f32 = 12.;
@@ -387,19 +389,25 @@ pub fn more_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
                 theme::surface_raised(),
                 theme::text(),
             ))
-            .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| {
-                more_menu(popup, &app, &model)
+            .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, window, cx| {
+                more_menu(popup, window, cx, &app, &model)
             })
             .into_any_element(),
     )
 }
 
-fn more_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+fn more_menu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+    model: &CallModel,
+) -> PopupMenu {
     let popup = popup.min_w(px(MENU_WIDTH));
     let popup = if model.is_one_to_one() {
         one_to_one_items(popup, app, model)
     } else {
-        meeting_items(popup, app, model)
+        meeting_items(popup, window, cx, app, model)
     };
     incoming_video_item(popup, app, model)
 }
@@ -436,9 +444,14 @@ fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallMo
     )
 }
 
-fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
-    let (mute_app, captions_app, record_app, board_app) =
-        (app.clone(), app.clone(), app.clone(), app.clone());
+fn meeting_items(
+    mut popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+    model: &CallModel,
+) -> PopupMenu {
+    let (mute_app, captions_app, board_app) = (app.clone(), app.clone(), app.clone());
     let captions_on = model.captions_on();
     if model.organizes_meeting() {
         popup = popup.item(
@@ -448,22 +461,7 @@ fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel
         );
     }
     if model.can_record() {
-        let recording = model.recording;
-        popup = popup.item(
-            PopupMenuItem::new(if recording {
-                "Stop recording"
-            } else {
-                "Start recording"
-            })
-            .icon(IconName::Video)
-            .on_click(move |_, window, cx| {
-                if recording {
-                    confirm_stop_recording(&record_app, window, cx);
-                } else {
-                    record_app.update(cx, |state, cx| state.set_call_recording(true, cx));
-                }
-            }),
-        );
+        popup = record_submenu(popup, window, cx, app, model);
     }
     if model.can_open_whiteboard() {
         popup = popup.item(
@@ -474,7 +472,7 @@ fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel
                 }),
         );
     }
-    popup.item(
+    let popup = popup.item(
         PopupMenuItem::new(if captions_on {
             "Turn off live captions"
         } else {
@@ -488,7 +486,8 @@ fn meeting_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel
         .on_click(move |_, _, cx| {
             captions_app.update(cx, |state, cx| state.toggle_call_captions(cx))
         }),
-    )
+    );
+    transcript_and_settings_items(popup, app)
 }
 
 pub fn chevron_button(button_id: &'static str, face_id: &'static str) -> Button {
@@ -568,7 +567,10 @@ pub fn captions_overlay(model: &CallModel, now: Instant) -> Option<AnyElement> {
             .absolute()
             .left_0()
             .right_0()
-            .bottom(px(CAPTION_BOTTOM))
+            .map(|overlay| match model.view.caption_position {
+                CaptionPosition::Bottom => overlay.bottom(px(CAPTION_BOTTOM)),
+                CaptionPosition::Top => overlay.top(px(CAPTION_TOP)),
+            })
             .flex()
             .justify_center()
             .px(px(24.))
@@ -582,7 +584,7 @@ pub fn captions_overlay(model: &CallModel, now: Instant) -> Option<AnyElement> {
                     .rounded(px(10.))
                     .bg(hsla(0., 0., 0., CAPTION_BACKGROUND))
                     .text_color(theme::white())
-                    .text_size(px(16.))
+                    .text_size(px(model.view.caption_size.text_size()))
                     .children(lines.into_iter().map(|line| {
                         let age = now.saturating_duration_since(line.at).as_secs_f32();
                         let fade = ((shown - age) / CAPTION_FADE_SECONDS).clamp(0., 1.);

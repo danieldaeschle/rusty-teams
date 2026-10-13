@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 use session::{ApiResponse, App, GRAPH, Method, Request, SPACES, Scope, Session};
 
 use crate::captions::{self, BotAction};
-use crate::recording::{self, Consent, StartDetails};
+use crate::recording::{self, Consent, RecordingCommand, StartDetails};
 use crate::transfer::{self, TransferTarget};
 use crate::error::{Error, Result};
 use crate::organizer::{self, Target};
@@ -469,6 +469,13 @@ impl Signaling {
         self.bot_command(command_url, body, "caption command").await.map(|_| ())
     }
 
+    pub async fn caption_language_command(&self, command_url: &str, from: &Participant, language_tag: &str) -> Result<()> {
+        ensure_teams_url(command_url)?;
+        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let body = captions::language_body(&from.mri, &from.participant_id, &timestamp, language_tag);
+        self.bot_command(command_url, body, "caption language command").await.map(|_| ())
+    }
+
     async fn bot_command(&self, command_url: &str, body: Value, label: &str) -> Result<u16> {
         let arguments = json!({
             "url": command_url,
@@ -488,7 +495,7 @@ impl Signaling {
         Err(Error::Signaling(format!("{label} answered HTTP {status} {reason}")))
     }
 
-    pub async fn recording_command(&self, command_url: &str, action: BotAction, from: &Participant, title: &str) -> Result<u16> {
+    pub async fn recording_command(&self, command_url: &str, command: RecordingCommand, from: &Participant, title: &str) -> Result<u16> {
         ensure_teams_url(command_url)?;
         let now = chrono::Utc::now();
         let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -503,7 +510,7 @@ impl Signaling {
             organizer_name: &from.display_name,
             correlation_id: &correlation_id,
         };
-        self.bot_command(command_url, recording::command_body(action, details), "recording command").await
+        self.bot_command(command_url, recording::command_body(command, details), "recording command").await
     }
 
     pub async fn consent_to_recording(&self, conversation: &Conversation, from: &Participant, consent: Consent) -> Result<u16> {

@@ -8,7 +8,7 @@ use calling::{
     CallState, CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice,
     DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
     MeetingTarget, NetworkLevel, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
-    ShareKind, ShareSource, TransportDetails, VideoKey, call_channel,
+    RecordingKind, ShareKind, ShareSource, StopScope, TransportDetails, VideoKey, call_channel,
 };
 
 use super::demo_scene::self_view;
@@ -384,7 +384,11 @@ fn publish_demo_video(
 
 fn start_scene(control: &CallControl, scene: DemoScene) {
     match scene {
-        DemoScene::Recording => control.send(CallUpdate::Recording(true)),
+        DemoScene::Recording => {
+            control.send(CallUpdate::Recording(true));
+            control.send(CallUpdate::Transcribing(true));
+            control.send(CallUpdate::Captions(CaptionState::On));
+        }
         DemoScene::Consent => {
             control.send(CallUpdate::Recording(true));
             control.send(CallUpdate::ConsentRequired(true));
@@ -465,7 +469,9 @@ async fn speak_until_hangup(
     let mut camera_on = false;
     let mut incoming_video = true;
     let mut blur = false;
-    let mut captions_on = false;
+    let mut captions_on = scene == DemoScene::Recording;
+    let mut recording_on = matches!(scene, DemoScene::Recording | DemoScene::Consent);
+    let mut transcribing_on = scene == DemoScene::Recording;
     let mut caption_ticks = 0usize;
     let mut video_tick = interval(VIDEO_PERIOD);
     let mut muted = false;
@@ -601,7 +607,20 @@ async fn speak_until_hangup(
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
                 Some(CallCommand::SetCameraEffects(_)) => {}
-                Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
+                Some(CallCommand::StartRecording { kind, .. }) => {
+                    recording_on = kind != RecordingKind::TranscriptOnly;
+                    transcribing_on = true;
+                    control.send(CallUpdate::Recording(recording_on));
+                    control.send(CallUpdate::RecordingAudioOnly(kind == RecordingKind::AudioOnly));
+                    control.send(CallUpdate::Transcribing(true));
+                }
+                Some(CallCommand::StopRecording { scope }) => {
+                    recording_on = recording_on && scope == StopScope::TranscriptionOnly;
+                    transcribing_on = transcribing_on && scope == StopScope::RecordingOnly;
+                    control.send(CallUpdate::Recording(recording_on));
+                    control.send(CallUpdate::Transcribing(transcribing_on));
+                }
+                Some(CallCommand::SetCaptionLanguage(_)) => {}
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),
                 Some(CallCommand::Transfer { .. }) => {

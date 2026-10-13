@@ -139,6 +139,7 @@ pub struct AppState {
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub call_backgrounds: crate::call::BackgroundLibrary,
     pub transfer_picker: Option<Entity<crate::views::transfer_picker::TransferPicker>>,
+    pub transcript_panel: Option<Entity<crate::views::call_transcript::TranscriptPanel>>,
     pub rings: Rings,
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
@@ -249,6 +250,7 @@ impl AppState {
                 crate::call::BackgroundLibrary::new(crate::call::default_cache_directory())
             },
             transfer_picker: None,
+            transcript_panel: None,
             rings: Rings::default(),
             live_meetings: HashMap::new(),
             live_refreshing: HashSet::new(),
