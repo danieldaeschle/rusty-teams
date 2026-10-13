@@ -1,0 +1,6 @@
+{
+  "id": "item-1",
+  "parentReference": {"driveId": "drive-1"},
+  "video": {"duration": 53120, "width": 1920, "height": 1080},
+  "file": {"mimeType": "video/mp4"}
+}

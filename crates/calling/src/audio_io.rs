@@ -8,13 +8,14 @@ use libwebrtc::prelude::*;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
+use crate::audio::{ClipGenerator, FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
 use crate::devices::{self, DeviceChoice};
 
 const TONE_AMPLITUDE: f32 = 0.3;
 const SOURCE_QUEUE_MS: u32 = 100;
 const FRAME_PERIOD: Duration = Duration::from_millis(10);
 pub const AUDIO_MODE_ENV: &str = "CALLING_AUDIO";
+pub const AUDIO_FILE_ENV: &str = "CALLING_AUDIO_FILE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioMode {
@@ -22,6 +23,7 @@ pub enum AudioMode {
     Platform,
     Tone,
     Silence,
+    File,
 }
 
 impl AudioMode {
@@ -33,6 +35,7 @@ impl AudioMode {
         match value.map(str::to_ascii_lowercase).as_deref() {
             Some("tone") => AudioMode::Tone,
             Some("silence") => AudioMode::Silence,
+            Some("file") => AudioMode::File,
             _ => AudioMode::Platform,
         }
     }
@@ -93,11 +96,18 @@ impl AudioSetup {
                 feeder: None,
             };
         }
-        let amplitude = if mode == AudioMode::Tone { TONE_AMPLITUDE } else { 0.0 };
+        let generator = match mode {
+            AudioMode::File => std::env::var_os(AUDIO_FILE_ENV)
+                .and_then(|path| std::fs::read(path).ok())
+                .and_then(|bytes| ClipGenerator::from_wav(&bytes))
+                .map_or(FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0)), FrameGenerator::Clip),
+            AudioMode::Tone => FrameGenerator::Sine(SineGenerator::new(tone_hz, TONE_AMPLITUDE)),
+            AudioMode::Platform | AudioMode::Silence => FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0)),
+        };
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, SOURCE_QUEUE_MS);
         let track = factory.create_audio_track("microphone", source.clone());
         let running = Arc::new(AtomicBool::new(true));
-        let task = tokio::spawn(feed_frames(source, SineGenerator::new(tone_hz, amplitude), running.clone()));
+        let task = tokio::spawn(feed_frames(source, generator, running.clone()));
         AudioSetup {
             factory: factory.clone(),
             track,
@@ -125,7 +135,21 @@ impl AudioSetup {
     }
 }
 
-async fn feed_frames(source: NativeAudioSource, mut generator: SineGenerator, running: Arc<AtomicBool>) {
+enum FrameGenerator {
+    Sine(SineGenerator),
+    Clip(ClipGenerator),
+}
+
+impl FrameGenerator {
+    fn next_frame(&mut self) -> Vec<i16> {
+        match self {
+            FrameGenerator::Sine(generator) => generator.next_frame(),
+            FrameGenerator::Clip(generator) => generator.next_frame(),
+        }
+    }
+}
+
+async fn feed_frames(source: NativeAudioSource, mut generator: FrameGenerator, running: Arc<AtomicBool>) {
     let mut tick = interval(FRAME_PERIOD);
     while running.load(Ordering::SeqCst) {
         tick.tick().await;
@@ -150,6 +174,7 @@ mod tests {
         assert_eq!(AudioMode::parse(None), AudioMode::Platform);
         assert_eq!(AudioMode::parse(Some("tone")), AudioMode::Tone);
         assert_eq!(AudioMode::parse(Some("SILENCE")), AudioMode::Silence);
+        assert_eq!(AudioMode::parse(Some("file")), AudioMode::File);
         assert_eq!(AudioMode::parse(Some("whatever")), AudioMode::Platform);
     }
 }
