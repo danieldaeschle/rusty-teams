@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 87 %** (81 done, 18 partial, 4 missing of 103). Partial counts half.
+**Parity: 80 %** (83 done, 28 partial, 10 missing of 121). Partial counts half.
 
 ## By area
 
@@ -14,11 +14,11 @@ Feature parity with the Microsoft Teams desktop client.
 | [Writing](#writing) | 100 % | 14 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
-| [Notifications](#notifications) | 88 % | 7 | 0 | 1 |
+| [Notifications](#notifications) | 89 % | 8 | 0 | 1 |
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 60 % | 4 | 17 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 49 % | 5 | 27 | 6 |
 
 ## Next
 
@@ -177,23 +177,30 @@ Feature parity with the Microsoft Teams desktop client.
 | Camera effects | Partial | Camera menu "Effects" and Settings > Devices: Mirror my video (self view and camera test only, default on), Auto framing, Adjust brightness, Soft focus (Low / Medium / High in Settings). Framing, brightness and soft focus run on the send path, so others see them; one segmentation mask per frame is shared with the background. Crop planner, gamma and blend are unit tested; not yet checked on a real camera |
 | Video calls (1:1 and incoming) | Partial | Camera button in 1:1 calls renegotiates a video line on the same peer connection (modalities Audio and Video), incoming video ring toast with Decline / Audio / Video, accept with video answers the video line sending, accept with audio receive-only. Offer and answer built from the Teams code and unit tested at SDP level; needs a second person |
 | Recording | Partial | Organizer "..." > Record and transcribe: Start recording, Record audio only, Start transcription only; Stop recording / Stop transcription / Stop both (confirm) through the recorder bot; header chip red "Recording" / "Recording audio" or blue "Transcribing" for everyone from the meeting state, consent notice that keeps mic and camera off until OK. Bodies unit tested; video start and stop run live through `meet_now --record` (audio only, transcription only and the stop variants are from capture, not run live), consent needs a tenant with the policy on and a second person |
-| Meeting recap tab | Partial Recap in meeting chats with a recording: occurrence picker, recording card (duration, Audio only, expiry amber under 7 days), Play in the browser, Download with save dialog and percent, organizer Delete with confirm, searchable read-only transcript with .vtt and .docx download, attendance (muted note when the tenant has reports off), files shared in the chat. Parsing and expiry unit tested, demo checked; the Graph and SharePoint calls are not yet run against a real recording |
+| Meeting recap tab | Partial | Recap in meeting chats with a recording: occurrence picker, recording card (duration, Audio only, expiry amber under 7 days), Play in the browser, Download with save dialog and percent, organizer Delete with confirm, searchable read-only transcript with .vtt and .docx download, attendance (muted note when the tenant has reports off), files shared in the chat. Parsing and expiry unit tested, demo checked; the Graph and SharePoint calls are not yet run against a real recording |
 | Hold, resume, transfer | Partial | 1:1 "..." > Hold renegotiates every line inactive, "On hold" view with Resume, "You're on hold" when the other side holds, Transfer... person picker with Transfer now (blind) and Consult first (second call, first held, Transfer now). Needs a second person; redirect and park not built |
 | Noise suppression, music mode | Partial | Mic menu and Settings > Devices: Auto (device track with WebRTC echo cancellation, AGC, NS) or Off, Music mode keeps echo cancellation only. No Low/High, the APM has on/off flags only. Off and Music mode run a cpal mic through our own APM; checked with synthetic sources only, not with a real mic in a call |
 | Push to talk | Partial | Hold Ctrl+Space while muted to talk, release to mute; main window focused, not inside text fields; hint chip on the stage. Unit tested, not tried on the Windows build |
 | Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
 | Call health and encryption | Partial | Header shows signal bars and a shield; click opens "Call health" with loss, round trip, jitter, bitrate, "Secured by Teams encryption", DTLS-SRTP cipher and media path (direct or via Microsoft media server). Unstable network banner with "Turn off incoming video", overloaded computer banner with "Turn off effects". Thresholds unit tested; not yet seen on a bad live network |
 | View and layout | Partial | "View" button between share and "...": Gallery (up to 3x3 of 16:9 tiles, "+N" tile with a pin list; visible tiles only swap after 2 s of speech, one swap per 5 s), Speaker (stage plus filmstrip of up to 6), Focus on content (only while someone shares), Hide people without video with a count chip, Hide me / Show me, Chat bubbles, Full screen (F11, controls hide after 3 s). Choice, Hide people without video and Chat bubbles are remembered. Checked with the demo gallery scene only; not yet in a large live meeting |
-| Gallery video slots | Partial | Meetings offer 9 receive lines (mids 2-10, share on 11), so a 3x3 gallery shows up to 9 live videos. Only visible tiles get a slot: "+N" people and people hidden by "Hide people without video" are not requested. Speaker stage asks for 3600 macroblocks (max-fs), filmstrip, strip and big-gallery tiles for 920. 1:1 calls unchanged. Slot plan and offer layout unit tested; not yet seen with nine people on a live mixer |
+| Gallery video slots | Partial | Meetings offer 9 receive lines (mids 2-10, share on 11), so a 3x3 gallery shows up to 9 live videos. The mixer accepts the offer (self-only Meet now, live). Only visible tiles get a slot: "+N" people and people hidden by "Hide people without video" are not requested. Speaker stage asks for 3600 macroblocks (max-fs), filmstrip, strip and big-gallery tiles for 920. 1:1 calls unchanged. Slot plan and offer layout unit tested; not yet seen with nine people on a live mixer |
 | Sharing tools | Partial | Received share: Ctrl+wheel zoom 1x-4x around the pointer, drag to pan, Alt+Shift+Plus / Minus / 0, "250%" chip resets; draggable divider (strip 160-400 px, remembered); "Pop out" opens the content in its own window, closing it returns it. Share menu: "Optimize for motion" (maintain framerate, 30 fps; off = maintain resolution, 15 fps) and "Show me over my content" (camera cut-out bottom right, 22 % wide, rounded; skipped without a mask). Linux: red border windows ignore the mouse on X11. Checked in the demo and unit tests; not yet live with a second person |
 | Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
 | Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |
 | In a call shown in presence | Done | "In a call", "In a meeting", "Presenting" from Teams activity on profile cards and chat headers; no notification sounds during a native call |
-| Schedule a meeting | Partial | Calls tab "New meeting": title, people chips, date, start, end (next half hour, 30 min), Repeat (does not repeat, daily, weekdays, weekly), details, Teams meeting always on. Graph `POST /me/events` with `isOnlineMeeting` and `teamsForBusiness`, times in UTC. Body building unit tested; never run against a real calendar |
+| Schedule a meeting | Partial | Calls tab "New meeting": title, people chips, date, start, end (next half hour, 30 min), Repeat (does not repeat, daily, weekdays, weekly), details, Teams meeting always on. Graph `POST /me/events` with `isOnlineMeeting` and `teamsForBusiness`, local wall time in the own mailbox time zone (series keep their time across DST, weekday from the local date). Body building unit tested; never run against a real calendar |
 | Answer meeting invitations | Partial | Upcoming rows of invited meetings show Accepted / Tentative / Declined / Respond as a menu with "Send a response" (default on); own meetings say Organizer. Graph `accept`, `tentativelyAccept`, `decline`, falls back to the iCalUId lookup when the Teams id is not a Graph id. Not run against a real invitation |
 | Meeting start reminder | Partial | Toast 5 min before and at the start of an Upcoming meeting: title, time, Join, Dismiss; Ctrl+Shift+J joins from the latest. Quiet during Do not disturb and while in a call. Driven by the polled calendar; push event 128 not wired (the realtime layer does not receive it) |
 | Pre-join screen | Partial | Join from Upcoming, chat, Join with ID, link or reminder opens a screen in the chat pane: camera preview, camera and mic switches, background menu, camera, microphone and speaker selects, "Computer audio" or "Don't use audio" (audio off in both directions), Join now, Cancel. Camera, mic and devices remembered. 1:1 calls and Meet now skip it. Checked in the demo only |
+| Narrow windows in a call | Done | Controls that do not fit move into "..." (View, Reactions, Raise hand, People, Chat; mic, camera, share, "..." and Leave always stay). Below 960 px, or when a side panel would leave the call under 720 px, the chat list hides; still too narrow, the panel overlays the call. Layout guard checks 640x480, 1280x800, 1920x1080 |
+| Give and take control | Missing | Protocol known (main-channel data channel, action codes 0-11); needs a second person and a security review |
+| Breakout rooms (organizer) | Missing | Create, assign, open, close rooms; needs a second person |
+| Merge calls | Missing | Needs two live callers |
+| Dial-in numbers in meeting info | Missing | Numbers from the invite, Copy join info |
+| Hide my name in captions | Missing | Setting not found in the captures |
+| End-to-end encrypted 1:1 calls | Missing | Key exchange lives in the native desktop media stack, not in the web bundle; tenant policy is Disabled, so not testable here. The call health popover shows the transport encryption instead |
 
 ## Agents
 
@@ -203,9 +210,11 @@ After parity. Not counted in the parity score.
 |---|---|---|
 | Delegate a message to an agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar | Done | Robot button in the hover toolbar, actions and agents in Settings > Agents |
 | Run status: chip under the message, Agents rail entry, toast, Open session | Done | Live step and time on the chip, Agents rail popover with running and done runs, toast on finish or failure, Open session resumes the agent session in a terminal |
-| Local API in the app | Partial | MCP only, no CLI. Tokens and chat access stay in the app |
-| CLI `rt`: watch, read, search, claim, propose, release | Missing | First. `rt watch --once` blocks until the next event, so any agent can wait on it |
-| MCP server on the same API | Done | Read tools (messages with images, reactions, files, quotes, cards, links; `get_image`; `recent_messages`) and `propose_message` only, Settings > MCP |
+| Local API in the app | Done | MCP only, no CLI by design. Tokens and chat access stay in the app |
+| MCP server on the same API | Done | Read tools (messages with images, reactions, files, quotes, cards, links; `get_image`; `recent_messages`; `search_messages`; `list_meetings` and `get_transcript` when allowed), `wait_for_event` to follow new messages and proposals, and `propose_message` only. Settings > MCP, default port 40615 |
+| One-click MCP install | Done | Settings > MCP installs the server into Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, on Windows and in WSL (needs `networkingMode=mirrored`) |
+| Start dialog per run | Done | Pick the action, the agent session (new or resume) and the working directory for each delegated message |
+| Runs survive a restart | Done | Interrupted runs resume after the app restarts; WSL "Open session" starts the agent through a login shell |
 | Agent permissions in Settings: chats/channels All/Selected/None, propose, calendar, transcripts | Done | Other chats are invisible to agents, search included |
 | Proposals: card above the composer, send, edit, discard | Done | Agents never send. A proposal is stale once you answered first |
 
@@ -215,3 +224,9 @@ After parity. Not counted in the parity score.
 |---|---|
 | Personal apps in the app bar | Outside chat and channels |
 | Server-side search | The local index answers faster |
+| Copilot, intelligent recap, AI notes, Facilitator, Interpreter | Needs a Microsoft 365 Copilot licence; left out on purpose |
+| Teams Premium features (translated captions, watermark, E2EE meetings, templates, branding) | Needs a Teams Premium licence |
+| Phone system: dial pad, park, forwarding, voicemail, delegation, queues | Needs a Teams Phone licence; none on the test account |
+| PowerPoint Live, annotation, polls, Q&A, Whiteboard editing, Live Share, meeting apps | Microsoft-hosted web apps; Whiteboard opens in the browser |
+| Together mode, speaker coach, avatars | Retired by Microsoft or needs speech analysis |
+| Webinars, town halls | Event hosting, not chat or meetings |
