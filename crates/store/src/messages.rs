@@ -271,6 +271,54 @@ impl Store {
         Ok(found)
     }
 
+    /// Newest first: (message_id, reactions_json) of the sender's undeleted messages.
+    pub fn reaction_state_of_sender(
+        &self,
+        conversation_id: &str,
+        sender_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String)>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "SELECT message_id, reactions_json FROM messages
+             WHERE conversation_id = ?1 AND sender_id = ?2 AND deleted = 0
+             ORDER BY created_at DESC, message_id DESC LIMIT ?3",
+        )?;
+        let rows = statement
+            .query_map(params![conversation_id, sender_id, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows)
+    }
+
+    /// (user_id, display name) of the senders and mentioned people in the newest `scan` messages.
+    pub fn conversation_people(
+        &self,
+        conversation_id: &str,
+        scan: usize,
+    ) -> Result<Vec<(String, String)>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "WITH recent AS (
+                SELECT sender_id, sender_name, mentions_json FROM messages
+                WHERE conversation_id = ?1 ORDER BY created_at DESC, message_id DESC LIMIT ?2)
+             SELECT DISTINCT sender_id, sender_name FROM recent
+             WHERE sender_id IS NOT NULL AND sender_name IS NOT NULL
+             UNION
+             SELECT DISTINCT json_extract(mention.value, '$.user_id'), json_extract(mention.value, '$.name')
+             FROM recent, json_each(CASE WHEN json_valid(mentions_json) THEN mentions_json ELSE '[]' END) AS mention
+             WHERE json_extract(mention.value, '$.user_id') IS NOT NULL
+               AND json_extract(mention.value, '$.name') IS NOT NULL",
+        )?;
+        let people = statement
+            .query_map(params![conversation_id, scan as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(people)
+    }
+
     pub fn display_names(&self, user_ids: &[String]) -> Result<HashMap<String, String>> {
         if user_ids.is_empty() {
             return Ok(HashMap::new());

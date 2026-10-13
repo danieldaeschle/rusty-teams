@@ -12,6 +12,7 @@ use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
+use super::reaction_proposal_pill::{ReactionPill, reaction_pill};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
 use super::toolbar_placement::{TimelineBounds, placed_toolbar};
 use super::translation_line::{TranslationActions, translation_line};
@@ -62,6 +63,7 @@ pub struct RowActions {
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
     pub agent_run: Option<AgentRun>,
+    pub reaction_proposal: Option<ReactionPill>,
 }
 
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
@@ -274,6 +276,7 @@ struct BubbleExtras {
     translation: Option<TranslationActions>,
     timeline: TimelineBounds,
     agent_run: Option<AgentRun>,
+    reaction_proposal: Option<ReactionPill>,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
@@ -490,6 +493,7 @@ fn others_row(
 ) -> Div {
     let translation = extras.translation.take();
     let agent_run = extras.agent_run.take();
+    let reaction_proposal = extras.reaction_proposal.take();
     let first = !row.series.has_prev;
     let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
     let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
@@ -513,6 +517,7 @@ fn others_row(
     }
     column = column.child(bubble(row, index, false, directory, extras, cx));
     column = column.children(agent_chip(agent_run));
+    column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -555,6 +560,7 @@ fn own_row(
 ) -> Div {
     let translation = extras.translation.take();
     let agent_run = extras.agent_run.take();
+    let reaction_proposal = extras.reaction_proposal.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
         div()
@@ -562,6 +568,7 @@ fn own_row(
             .child(bubble(row, index, true, directory, extras, cx)),
     );
     column = column.children(agent_chip(agent_run));
+    column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -592,6 +599,7 @@ pub fn render_message_row(
         translation,
         timeline,
         agent_run,
+        reaction_proposal,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -605,6 +613,7 @@ pub fn render_message_row(
         translation,
         timeline,
         agent_run,
+        reaction_proposal,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

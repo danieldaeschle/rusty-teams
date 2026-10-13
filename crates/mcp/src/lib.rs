@@ -7,7 +7,10 @@ mod settings;
 mod source;
 mod tools;
 
-pub use hub::{AgentHub, CaptionLine, Event, EventKind, Outcome, Proposal, UiEvent};
+pub use hub::{
+    AgentHub, CaptionLine, Event, EventKind, NewProposal, NewReactionProposal, Outcome, Proposal,
+    ProposalImage, ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
+};
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
 pub use server::{ServerError, ServerHandle, start};
 pub use settings::{

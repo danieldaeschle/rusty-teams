@@ -51,6 +51,7 @@ pub mod proposal_card;
 pub mod rail;
 pub mod reaction_picker;
 pub mod reaction_pills;
+pub mod reaction_proposal_pill;
 pub mod recap_tab;
 pub mod saved_panel;
 pub mod scheduled_toolbar;

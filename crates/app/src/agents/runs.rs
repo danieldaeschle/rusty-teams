@@ -551,24 +551,6 @@ impl AgentRuns {
         self.persist(cx);
     }
 
-    pub fn start(
-        &mut self,
-        action_id: &str,
-        conversation_id: &str,
-        message_id: &str,
-        extra: &str,
-        cx: &mut Context<Self>,
-    ) -> Result<u64, String> {
-        self.start_with(
-            action_id,
-            conversation_id,
-            message_id,
-            extra,
-            StartOptions::default(),
-            cx,
-        )
-    }
-
     pub fn start_with(
         &mut self,
         action_id: &str,
@@ -1305,7 +1287,9 @@ pub(super) mod tests {
         ) -> (u64, u64, u64, String) {
             cx.update(|cx| {
                 runs.update(cx, |runs, cx| {
-                    let first = runs.start("ask", "19:chat", "m1", "", cx).unwrap();
+                    let first = runs
+                        .start_with("ask", "19:chat", "m1", "", StartOptions::default(), cx)
+                        .unwrap();
                     let session_id = runs.get(first).unwrap().session_id.clone();
                     let second = runs
                         .start_with(
@@ -1793,8 +1777,10 @@ pub(super) mod tests {
             );
             let (app, runs) = setup(cx, &format!("sh -c 'cat {fixture}'"));
             let run_id = cx.update(|cx| {
-                runs.update(cx, |runs, cx| runs.start("ask", "19:chat", "m1", "", cx))
-                    .unwrap()
+                runs.update(cx, |runs, cx| {
+                    runs.start_with("ask", "19:chat", "m1", "", StartOptions::default(), cx)
+                })
+                .unwrap()
             });
             wait_until_finished(cx, &runs, run_id);
             cx.update(|cx| {
@@ -1852,8 +1838,10 @@ pub(super) mod tests {
         fn a_failing_command_ends_failed_with_its_stderr(cx: &mut TestAppContext) {
             let (app, runs) = setup(cx, "sh -c 'echo boom >&2; exit 3'");
             let run_id = cx.update(|cx| {
-                runs.update(cx, |runs, cx| runs.start("ask", "19:chat", "m1", "", cx))
-                    .unwrap()
+                runs.update(cx, |runs, cx| {
+                    runs.start_with("ask", "19:chat", "m1", "", StartOptions::default(), cx)
+                })
+                .unwrap()
             });
             wait_until_finished(cx, &runs, run_id);
             cx.update(|cx| {
@@ -1877,11 +1865,15 @@ pub(super) mod tests {
         let (_, runs) = setup(cx, "true");
         cx.update(|cx| {
             let error = runs
-                .update(cx, |runs, cx| runs.start("ghost", "19:chat", "m1", "", cx))
+                .update(cx, |runs, cx| {
+                    runs.start_with("ghost", "19:chat", "m1", "", StartOptions::default(), cx)
+                })
                 .unwrap_err();
             assert_eq!(error, "This action no longer exists");
             let error = runs
-                .update(cx, |runs, cx| runs.start("ask", "19:chat", "gone", "", cx))
+                .update(cx, |runs, cx| {
+                    runs.start_with("ask", "19:chat", "gone", "", StartOptions::default(), cx)
+                })
                 .unwrap_err();
             assert_eq!(error, "The message is no longer available");
             assert_eq!(runs.read(cx).running_count(), 0);

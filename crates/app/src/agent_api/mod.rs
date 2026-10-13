@@ -9,7 +9,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Local};
 use gpui_kit::*;
 use mcp::install::{Homes, Location};
-use mcp::{Access, AgentHub, AgentPolicy, McpEndpoint, Outcome, Proposal, ServerHandle};
+use mcp::{
+    Access, AgentHub, AgentPolicy, McpEndpoint, Outcome, Proposal, ReactionOutcome,
+    ReactionProposal, ServerHandle,
+};
 use store::Store;
 
 use crate::backend::Engine;
@@ -24,8 +27,24 @@ pub enum ProposalStatus {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Thumbnail {
+    pub image: Arc<Image>,
+    pub dimensions: (u32, u32),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProposalPicture {
+    pub name: String,
+    pub bytes: Arc<Vec<u8>>,
+    pub thumbnail: Option<Thumbnail>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProposalEntry {
     pub proposal: Proposal,
+    pub body: Arc<Vec<crate::render::Block>>,
+    pub mention_labels: Vec<String>,
+    pub images: Vec<ProposalPicture>,
     pub status: ProposalStatus,
 }
 
@@ -44,6 +63,7 @@ pub struct AgentApi {
     store: Arc<Store>,
     token: String,
     proposals: HashMap<String, ProposalEntry>,
+    reactions: HashMap<(String, String), ReactionProposal>,
     server: Option<ServerHandle>,
     status: ServerStatus,
     generation: u64,
@@ -114,6 +134,7 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
         store,
         token,
         proposals: HashMap::new(),
+        reactions: HashMap::new(),
         server: None,
         status: ServerStatus::Off,
         generation: 0,
@@ -214,6 +235,32 @@ pub fn update_policy(cx: &mut App, change: impl FnOnce(&mut AgentPolicy)) {
 
 pub fn proposal(conversation_id: &str, cx: &App) -> Option<ProposalEntry> {
     handle(cx)?.read(cx).proposals.get(conversation_id).cloned()
+}
+
+pub fn reaction_proposals(conversation_id: &str, cx: &App) -> HashMap<String, ReactionProposal> {
+    let Some(api) = handle(cx) else {
+        return HashMap::new();
+    };
+    api.read(cx)
+        .reactions
+        .values()
+        .filter(|reaction| reaction.conversation_id == conversation_id)
+        .map(|reaction| (reaction.message_id.clone(), reaction.clone()))
+        .collect()
+}
+
+pub fn resolve_reaction_proposal(
+    conversation_id: &str,
+    message_id: &str,
+    proposal_id: &str,
+    outcome: ReactionOutcome,
+    cx: &mut App,
+) {
+    if let Some(api) = handle(cx) {
+        api.update(cx, |api, cx| {
+            api.resolve_reaction(conversation_id, message_id, proposal_id, outcome, cx)
+        });
+    }
 }
 
 pub fn pending_agents(cx: &App) -> HashMap<String, &'static str> {
@@ -341,8 +388,19 @@ impl AgentApi {
         cx.notify();
     }
 
-    fn apply_ui_event(&mut self, event: mcp::UiEvent, cx: &mut Context<Self>) {
-        bridge::apply(&mut self.proposals, event);
+    fn apply_ui_event(
+        &mut self,
+        event: mcp::UiEvent,
+        pictures: Vec<ProposalPicture>,
+        cx: &mut Context<Self>,
+    ) {
+        bridge::apply(
+            &mut self.proposals,
+            &mut self.reactions,
+            event,
+            pictures,
+            &self.store,
+        );
         cx.notify();
     }
 
@@ -354,6 +412,28 @@ impl AgentApi {
             self.hub.resolve(&entry.proposal.id, outcome);
         }
         cx.notify();
+    }
+
+    fn resolve_reaction(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        proposal_id: &str,
+        outcome: ReactionOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (conversation_id.to_owned(), message_id.to_owned());
+        if self
+            .reactions
+            .get(&key)
+            .is_none_or(|reaction| reaction.id != proposal_id)
+        {
+            return;
+        }
+        if let Some(reaction) = self.reactions.remove(&key) {
+            self.hub.resolve_reaction(&reaction.id, outcome);
+            cx.notify();
+        }
     }
 
     fn reconcile(&mut self, cx: &mut Context<Self>) {

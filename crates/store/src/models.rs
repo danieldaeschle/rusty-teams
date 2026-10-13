@@ -324,11 +324,32 @@ pub struct DraftRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentProposalMention {
+    pub user_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProposalRecord {
     pub id: String,
     pub conversation_id: String,
     pub reply_to_message_id: Option<String>,
     pub text: String,
+    pub mentions: Vec<AgentProposalMention>,
+    pub images: Vec<AttachmentImage>,
+    pub agent: Option<String>,
+    pub session_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub state: String,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentReactionRecord {
+    pub id: String,
+    pub conversation_id: String,
+    pub message_id: String,
+    pub emoji: String,
     pub agent: Option<String>,
     pub session_id: Option<String>,
     pub created_at: DateTime<Utc>,

@@ -7,9 +7,11 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::*;
+use mcp::ReactionProposal;
 use teams_core::{ImageRef, LinkPreview};
 
 use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
+use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
@@ -20,6 +22,7 @@ use crate::views::attachments::ImageOpen;
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
+use crate::views::reaction_proposal_pill::ReactionPill;
 use crate::views::toolbar_placement::TimelineBounds;
 use crate::views::translation_line::{LineAction, TranslationActions};
 
@@ -31,6 +34,7 @@ pub(super) struct RenderEnv {
     pub reply_editor: Option<(String, Entity<Composer>)>,
     pub timeline: TimelineBounds,
     pub agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
+    pub reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -71,6 +75,35 @@ impl RenderEnv {
                 app.update(cx, |state, cx| state.request_images(missing_images, cx));
             });
         }
+    }
+
+    fn reaction_pill(&self, message: &MessageRow) -> Option<ReactionPill> {
+        let proposal = self
+            .reaction_proposals
+            .borrow()
+            .get(&message.key)
+            .cloned()?;
+        let (accept_view, discard_view) = (self.view.clone(), self.view.clone());
+        let (accept_key, discard_key) = (message.key.clone(), message.key.clone());
+        let (emoji, discard_id, accept_id) = (
+            proposal.emoji.clone(),
+            proposal.id.clone(),
+            proposal.id.clone(),
+        );
+        Some(ReactionPill {
+            agent: agent_label(proposal.agent.as_deref()),
+            emoji: proposal.emoji,
+            accept: Rc::new(move |cx| {
+                accept_view
+                    .update(cx, |this, cx| this.accept_reaction(&accept_key, &accept_id, &emoji, cx))
+                    .ok();
+            }),
+            discard: Rc::new(move |cx| {
+                discard_view
+                    .update(cx, |this, cx| this.discard_reaction(&discard_key, &discard_id, cx))
+                    .ok();
+            }),
+        })
     }
 
     fn bot_identity(
@@ -211,6 +244,9 @@ impl RenderEnv {
         let actionable_run = (is_real && !message.deleted)
             .then(|| self.agent_runs.borrow().get(&message.key).cloned())
             .flatten();
+        let reaction_proposal = (is_real && !message.deleted)
+            .then(|| self.reaction_pill(message))
+            .flatten();
         let translation = (is_real && !message.deleted)
             .then(|| self.translation_actions(message))
             .flatten();
@@ -248,6 +284,7 @@ impl RenderEnv {
             translation,
             timeline: self.timeline.clone(),
             agent_run: actionable_run,
+            reaction_proposal,
         }
     }
 

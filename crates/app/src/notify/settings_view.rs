@@ -410,6 +410,7 @@ pub(super) fn titled_with(
 ) -> Div {
     v_flex()
         .flex_1()
+        .min_w(px(0.))
         .child(
             div()
                 .text_size(px(14.))

@@ -11,6 +11,7 @@ use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
 use super::profile_card::opens_profile;
 use super::reaction_pills::reaction_pills;
+use super::reaction_proposal_pill::reaction_pill;
 use super::scheduled_toolbar::scheduled_toolbar;
 use super::toolbar_placement::placed_toolbar;
 use super::translation_line::translation_line;
@@ -210,6 +211,7 @@ fn message_block(
         translation: translation_actions,
         timeline,
         agent_run,
+        reaction_proposal,
         ..
     } = actions;
     let note = delivery_note(row, delivery, index);
@@ -234,7 +236,8 @@ fn message_block(
         .child(content)
         .children(translation)
         .children(note)
-        .children(agent_run.map(|run| run_chip(&run, theme::surface_raised())));
+        .children(agent_run.map(|run| run_chip(&run, theme::surface_raised())))
+        .children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
     div()
         .id(ElementId::Name(format!("post-message-{index}").into()))
         .relative()
