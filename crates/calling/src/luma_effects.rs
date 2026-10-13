@@ -100,16 +100,16 @@ struct Cells {
 
 fn cell_means(plane: &[u8], stride: usize, cell_width: usize, cell_height: usize) -> Vec<f32> {
     let mut means = vec![0f32; cell_width * cell_height];
-    let mut sums = vec![0u32; cell_width];
+    let mut column_sums = vec![0u16; cell_width * CELL];
     for (row, mean) in means.chunks_exact_mut(cell_width).enumerate() {
-        sums.fill(0);
+        column_sums.fill(0);
         for line in 0..CELL {
             let pixels = &plane[(row * CELL + line) * stride..][..cell_width * CELL];
-            for (sum, group) in sums.iter_mut().zip(pixels.as_chunks::<CELL>().0) {
-                *sum += group.iter().map(|&value| u32::from(value)).sum::<u32>();
-            }
+            column_sums.iter_mut().zip(pixels).for_each(|(sum, &value)| *sum += u16::from(value));
         }
-        mean.iter_mut().zip(&sums).for_each(|(slot, sum)| *slot = *sum as f32 / (CELL * CELL) as f32);
+        for (slot, group) in mean.iter_mut().zip(column_sums.as_chunks::<CELL>().0) {
+            *slot = group.iter().map(|&sum| u32::from(sum)).sum::<u32>() as f32 / (CELL * CELL) as f32;
+        }
     }
     means
 }
@@ -147,8 +147,17 @@ fn neighbor(index: usize, step: usize, last: usize) -> usize {
     if step < CELL / 2 { index.saturating_sub(1) } else { (index + 1).min(last) }
 }
 
+fn active_columns(cells: &Cells, near_start: usize, far_start: usize, active: &mut [bool]) {
+    let alpha_at = |column: usize| cells.alpha[near_start + column] > 0. || cells.alpha[far_start + column] > 0.;
+    for (column, slot) in active.iter_mut().enumerate() {
+        *slot = alpha_at(column) || alpha_at(column.saturating_sub(1)) || alpha_at((column + 1).min(cells.width - 1));
+    }
+}
+
 fn blend_rows(plane: &mut [u8], stride: usize, first_row: usize, cells: &Cells) {
     let (mut gain_row, mut bias_row) = (vec![0f32; cells.width], vec![0f32; cells.width]);
+    let mut active = vec![false; cells.width];
+    let last = cells.width - 1;
     for (offset, line) in plane.chunks_mut(stride).enumerate() {
         let row = first_row + offset;
         if row >= cells.height * CELL {
@@ -157,7 +166,8 @@ fn blend_rows(plane: &mut [u8], stride: usize, first_row: usize, cells: &Cells) 
         let (near, step) = (row / CELL, row % CELL);
         let far = neighbor(near, step, cells.height - 1);
         let (near_start, far_start) = (near * cells.width, far * cells.width);
-        if cells.alpha[near_start..][..cells.width].iter().chain(&cells.alpha[far_start..][..cells.width]).all(|alpha| *alpha <= 0.) {
+        active_columns(cells, near_start, far_start, &mut active);
+        if !active.contains(&true) {
             continue;
         }
         let (near_weight, far_weight) = (NEAR_WEIGHTS[step], 1. - NEAR_WEIGHTS[step]);
@@ -166,11 +176,15 @@ fn blend_rows(plane: &mut [u8], stride: usize, first_row: usize, cells: &Cells) 
             bias_row[column] = cells.bias[near_start + column] * near_weight + cells.bias[far_start + column] * far_weight;
         }
         for (column, group) in line[..cells.width * CELL].as_chunks_mut::<CELL>().0.iter_mut().enumerate() {
-            for (step, value) in group.iter_mut().enumerate() {
-                let far = neighbor(column, step, cells.width - 1);
-                let (near_weight, far_weight) = (NEAR_WEIGHTS[step], 1. - NEAR_WEIGHTS[step]);
-                let gain = gain_row[column] * near_weight + gain_row[far] * far_weight;
-                let bias = bias_row[column] * near_weight + bias_row[far] * far_weight;
+            if !active[column] {
+                continue;
+            }
+            let (before, after) = (column.saturating_sub(1), (column + 1).min(last));
+            let (gain, bias) = (gain_row[column], bias_row[column]);
+            let (gain_before, bias_before, gain_after, bias_after) = (gain_row[before], bias_row[before], gain_row[after], bias_row[after]);
+            let gains = [gain * NEAR_WEIGHTS[0] + gain_before * (1. - NEAR_WEIGHTS[0]), gain * NEAR_WEIGHTS[1] + gain_before * (1. - NEAR_WEIGHTS[1]), gain * NEAR_WEIGHTS[2] + gain_after * (1. - NEAR_WEIGHTS[2]), gain * NEAR_WEIGHTS[3] + gain_after * (1. - NEAR_WEIGHTS[3])];
+            let biases = [bias * NEAR_WEIGHTS[0] + bias_before * (1. - NEAR_WEIGHTS[0]), bias * NEAR_WEIGHTS[1] + bias_before * (1. - NEAR_WEIGHTS[1]), bias * NEAR_WEIGHTS[2] + bias_after * (1. - NEAR_WEIGHTS[2]), bias * NEAR_WEIGHTS[3] + bias_after * (1. - NEAR_WEIGHTS[3])];
+            for (value, (gain, bias)) in group.iter_mut().zip(gains.into_iter().zip(biases)) {
                 *value = apply_coefficients(*value, gain, bias);
             }
         }

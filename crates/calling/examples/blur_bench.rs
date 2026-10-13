@@ -1,6 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use calling::camera::i420_from_rgba;
 use calling::blur::{BlurSettings, MaskSource, Segmenter, compose};
 use calling::effects::{CameraEffects, EffectsStage};
 use calling::framing::{Crop, crop_and_scale};
@@ -13,6 +14,8 @@ const SEND_WIDTH: u32 = 1280;
 const SEND_HEIGHT: u32 = 720;
 const FRAMES: usize = 200;
 const WARMUP: usize = 10;
+const PACED_WARMUP: usize = 60;
+const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
 fn synthetic() -> Vec<u8> {
     (0..WIDTH * HEIGHT * 4).map(|index| if index % 4 == 3 { 255 } else { ((index / 4 % WIDTH + index / 4 / WIDTH) * 255 / (WIDTH + HEIGHT)) as u8 }).collect()
@@ -49,14 +52,18 @@ fn stage_cost(label: &str, blur: bool, effects: CameraEffects) {
         target_v.copy_from_slice(source_v);
         stage.apply_i420(frame)
     };
-    for _ in 0..WARMUP {
+    for _ in 0..PACED_WARMUP {
         run(&mut stage);
+        std::thread::sleep(FRAME_INTERVAL);
     }
-    let started = Instant::now();
+    let mut busy = Duration::ZERO;
     for _ in 0..FRAMES {
+        let started = Instant::now();
         run(&mut stage);
+        busy += started.elapsed();
+        std::thread::sleep(FRAME_INTERVAL);
     }
-    println!("{label} {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));
+    println!("{label} {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", busy.as_secs_f64() * 1000. / FRAMES as f64);
 }
 
 fn main() {
@@ -68,7 +75,7 @@ fn main() {
     let mut masks = MaskSource::new().expect("model");
     let segmenter = Segmenter::new().expect("model");
     for _ in 0..WARMUP {
-        masks.refresh(|| (frame.clone(), WIDTH, HEIGHT));
+        masks.refresh(|| i420_from_rgba(&frame, WIDTH as u32, HEIGHT as u32));
     }
     let started = Instant::now();
     for _ in 0..FRAMES {
@@ -79,7 +86,7 @@ fn main() {
     let mut result = frame.clone();
     for _ in 0..FRAMES {
         result.copy_from_slice(&frame);
-        masks.refresh(|| (frame.clone(), WIDTH, HEIGHT));
+        masks.refresh(|| i420_from_rgba(&frame, WIDTH as u32, HEIGHT as u32));
         compose(&mut result, WIDTH, HEIGHT, masks.mask());
     }
     println!("segment + blur + compose {WIDTH}x{HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));

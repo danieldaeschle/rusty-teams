@@ -1,9 +1,13 @@
 use std::io::Cursor;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use tract_onnx::prelude::*;
+
+use libwebrtc::native::yuv_helper::i420_to_abgr;
+use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
 use crate::background::BackgroundPicture;
 use crate::effects::CameraEffects;
@@ -24,6 +28,7 @@ const MASK_SMOOTHING: f32 = 0.35;
 const SLOW_INFERENCE: Duration = Duration::from_millis(22);
 const VERY_SLOW_INFERENCE: Duration = Duration::from_millis(45);
 const MAX_BANDS: usize = 4;
+const MASK_INPUT_WIDTH: u32 = 512;
 
 type Plan = std::sync::Arc<TypedRunnableModel>;
 
@@ -124,11 +129,11 @@ fn downscaled(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usize, usiz
     (small, small_width, small_height)
 }
 
-fn blur_pass(input: &[u8], output: &mut [u8], lines: usize, length: usize, line_stride: usize, step: usize) {
+fn blur_pass(input: &[u8], output: &mut [u8], lines: usize, length: usize, line_stride: usize, step: usize, channels: usize) {
     let radius = BLUR_RADIUS as isize;
     let window = (BLUR_RADIUS * 2 + 1) as u32;
     for line in 0..lines {
-        for channel in 0..3 {
+        for channel in 0..channels {
             let base = line * line_stride + channel;
             let read = |index: isize| u32::from(input[base + index.clamp(0, length as isize - 1) as usize * step]);
             let mut sum: u32 = (-radius..=radius).map(read).sum();
@@ -140,18 +145,25 @@ fn blur_pass(input: &[u8], output: &mut [u8], lines: usize, length: usize, line_
     }
 }
 
-fn box_blur(image: &mut [u8], width: usize, height: usize, scratch: &mut [u8]) {
-    blur_pass(image, scratch, height, width, width * 3, 3);
-    blur_pass(scratch, image, width, height, 3, width * 3);
+fn box_blur(image: &mut [u8], width: usize, height: usize, scratch: &mut [u8], channels: usize) {
+    blur_pass(image, scratch, height, width, width * channels, channels, channels);
+    blur_pass(scratch, image, width, height, channels, width * channels, channels);
 }
 
 fn blurred_background(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usize, usize) {
     let (mut small, small_width, small_height) = downscaled(rgba, width, height);
     let mut scratch = vec![0u8; small.len()];
     for _ in 0..BLUR_PASSES {
-        box_blur(&mut small, small_width, small_height, &mut scratch);
+        box_blur(&mut small, small_width, small_height, &mut scratch, 3);
     }
     (small, small_width, small_height)
+}
+
+fn sample_mask(mask: &[f32], mask_x: &Axis, column: usize, (top_row, bottom_row, fraction): (usize, usize, f32)) -> f32 {
+    let (left, right, across) = (mask_x.first[column], mask_x.second[column], mask_x.weight[column]);
+    let top = mask[top_row + left] * (1. - across) + mask[top_row + right] * across;
+    let bottom = mask[bottom_row + left] * (1. - across) + mask[bottom_row + right] * across;
+    top * (1. - fraction) + bottom * fraction
 }
 
 struct Composer<'a> {
@@ -176,10 +188,7 @@ impl Composer<'_> {
         let (mask_top, mask_bottom, mask_fraction) = (self.mask_y.first[row] * MASK_WIDTH, self.mask_y.second[row] * MASK_WIDTH, self.mask_y.weight[row]);
         let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
         for (column, pixel) in line.as_chunks_mut::<CHANNELS>().0.iter_mut().enumerate() {
-            let (left, right, across) = (self.mask_x.first[column], self.mask_x.second[column], self.mask_x.weight[column]);
-            let top = self.mask[mask_top + left] * (1. - across) + self.mask[mask_top + right] * across;
-            let bottom = self.mask[mask_bottom + left] * (1. - across) + self.mask[mask_bottom + right] * across;
-            let person = smoothstep(top * (1. - mask_fraction) + bottom * mask_fraction);
+            let person = smoothstep(sample_mask(self.mask, &self.mask_x, column, (mask_top, mask_bottom, mask_fraction)));
             if person >= OPAQUE {
                 continue;
             }
@@ -212,6 +221,109 @@ fn compose_over(rgba: &mut [u8], width: usize, height: usize, mask: &[f32], back
         for (index, band) in rgba.chunks_mut(rows_per_band * width * CHANNELS).enumerate() {
             let composer = &composer;
             scope.spawn(move || composer.rows(band, index * rows_per_band));
+        }
+    });
+}
+
+fn downscaled_plane(plane: &[u8], stride: usize, width: usize, height: usize, factor: usize) -> (Vec<u8>, usize, usize) {
+    let small_width = width.div_ceil(factor);
+    let small_height = height.div_ceil(factor);
+    let mut small = vec![0u8; small_width * small_height];
+    for (row, line) in small.chunks_exact_mut(small_width).enumerate() {
+        let rows = row * factor..((row + 1) * factor).min(height);
+        let mut sums = vec![0u32; small_width];
+        for source_row in rows.clone() {
+            for (sum, group) in sums.iter_mut().zip(plane[source_row * stride..][..width].chunks(factor)) {
+                *sum += group.iter().map(|&value| u32::from(value)).sum::<u32>();
+            }
+        }
+        for (column, (slot, sum)) in line.iter_mut().zip(&sums).enumerate() {
+            let columns = factor.min(width - column * factor);
+            *slot = (sum / (rows.len() * columns) as u32) as u8;
+        }
+    }
+    (small, small_width, small_height)
+}
+
+fn blurred_plane(plane: &[u8], stride: usize, width: usize, height: usize, factor: usize) -> (Vec<u8>, usize, usize) {
+    let (mut small, small_width, small_height) = downscaled_plane(plane, stride, width, height, factor);
+    let mut scratch = vec![0u8; small.len()];
+    for _ in 0..BLUR_PASSES {
+        box_blur(&mut small, small_width, small_height, &mut scratch, 1);
+    }
+    (small, small_width, small_height)
+}
+
+struct PlaneComposer<'a> {
+    background: &'a [u8],
+    mask: &'a [f32],
+    width: usize,
+    mask_x: Axis,
+    mask_y: Axis,
+    small_x: Axis,
+    small_y: Axis,
+    small_width: usize,
+}
+
+impl PlaneComposer<'_> {
+    fn new<'a>(background: &'a [u8], small_width: usize, small_height: usize, mask: &'a [f32], width: usize, height: usize) -> PlaneComposer<'a> {
+        PlaneComposer {
+            background,
+            mask,
+            width,
+            mask_x: axis(width, MASK_WIDTH),
+            mask_y: axis(height, MASK_HEIGHT),
+            small_x: axis(width, small_width),
+            small_y: axis(height, small_height),
+            small_width,
+        }
+    }
+
+    fn rows(&self, plane: &mut [u8], stride: usize, first_row: usize) {
+        for (offset, line) in plane.chunks_mut(stride).enumerate() {
+            let length = self.width.min(line.len());
+            self.row(&mut line[..length], first_row + offset);
+        }
+    }
+
+    fn row(&self, line: &mut [u8], row: usize) {
+        let mask_rows = (self.mask_y.first[row] * MASK_WIDTH, self.mask_y.second[row] * MASK_WIDTH, self.mask_y.weight[row]);
+        let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
+        for (column, value) in line.iter_mut().enumerate() {
+            let person = smoothstep(sample_mask(self.mask, &self.mask_x, column, mask_rows));
+            if person >= OPAQUE {
+                continue;
+            }
+            let (left, right, across) = (self.small_x.first[column], self.small_x.second[column], self.small_x.weight[column]);
+            let sample = |line: usize, index: usize| f32::from(self.background[line + index]);
+            let upper = sample(small_top, left) * (1. - across) + sample(small_top, right) * across;
+            let lower = sample(small_bottom, left) * (1. - across) + sample(small_bottom, right) * across;
+            let blurred = upper * (1. - small_fraction) + lower * small_fraction;
+            *value = (f32::from(*value) * person + blurred * (1. - person) + 0.5) as u8;
+        }
+    }
+}
+
+/// `compose` on I420 planes: luma blurs at `BACKGROUND_SCALE`, chroma at the same grid, with no RGBA round trip.
+pub fn compose_i420(buffer: &mut I420Buffer, mask: &[f32]) {
+    let (width, height) = (buffer.width() as usize, buffer.height() as usize);
+    let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
+    let (stride_y, stride_u, stride_v) = buffer.strides();
+    let (stride_y, stride_u, stride_v) = (stride_y as usize, stride_u as usize, stride_v as usize);
+    let (plane_y, plane_u, plane_v) = buffer.data_mut();
+    let (background_y, small_width, small_height) = blurred_plane(plane_y, stride_y, width, height, BACKGROUND_SCALE);
+    let (background_u, ..) = blurred_plane(plane_u, stride_u, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
+    let (background_v, ..) = blurred_plane(plane_v, stride_v, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
+    let luma = PlaneComposer::new(&background_y, small_width, small_height, mask, width, height);
+    let blue = PlaneComposer::new(&background_u, small_width, small_height, mask, chroma_width, chroma_height);
+    let red = PlaneComposer::new(&background_v, small_width, small_height, mask, chroma_width, chroma_height);
+    let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
+    std::thread::scope(|scope| {
+        for (composer, plane, stride, rows) in [(&luma, plane_y, stride_y, height), (&blue, plane_u, stride_u, chroma_height), (&red, plane_v, stride_v, chroma_height)] {
+            let rows_per_band = rows.div_ceil(bands);
+            for (index, band) in plane.chunks_mut(rows_per_band * stride).enumerate() {
+                scope.spawn(move || composer.rows(band, stride, index * rows_per_band));
+            }
         }
     });
 }
@@ -324,6 +436,11 @@ impl BlurStage {
         }
     }
 
+    pub fn covers(&mut self, width: usize, height: usize) -> bool {
+        self.refresh_covered(width, height);
+        self.covered.is_some()
+    }
+
     pub fn compose(&mut self, rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
         self.refresh_covered(width, height);
         match &self.covered {
@@ -333,61 +450,160 @@ impl BlurStage {
     }
 }
 
-/// One segmentation mask for every effect: segments every `stride` frames and slows down when inference is slow.
-pub struct MaskSource {
-    segmenter: Segmenter,
+pub trait MaskInference: Send + 'static {
+    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>>;
+}
+
+impl MaskInference for Segmenter {
+    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
+        let (rgba, width, height) = mask_input(frame);
+        self.mask(&rgba, width, height)
+    }
+}
+
+fn mask_input(mut buffer: I420Buffer) -> (Vec<u8>, usize, usize) {
+    let (width, height) = (buffer.width(), buffer.height());
+    let small_width = width.min(MASK_INPUT_WIDTH) & !1;
+    let small_height = (u64::from(height) * u64::from(small_width) / u64::from(width)) as u32 & !1;
+    let small = if (small_width, small_height) == (width, height) { None } else { Some(buffer.scale(small_width as i32, small_height as i32)) };
+    let source = small.as_ref().unwrap_or(&buffer);
+    let (stride_y, stride_u, stride_v) = source.strides();
+    let (plane_y, plane_u, plane_v) = source.data();
+    let mut rgba = vec![0u8; small_width as usize * small_height as usize * CHANNELS];
+    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, small_width * CHANNELS as u32, small_width as i32, small_height as i32);
+    (rgba, small_width as usize, small_height as usize)
+}
+
+type Frame = I420Buffer;
+
+#[derive(Default)]
+struct Inbox {
+    newest: Option<Frame>,
+    closed: bool,
+}
+
+#[derive(Default)]
+struct Outbox {
     mask: Vec<f32>,
+    version: u64,
+}
+
+struct WorkerShared {
+    inbox: Mutex<Inbox>,
+    wake: Condvar,
+    outbox: Mutex<Outbox>,
+    stride: AtomicU64,
+}
+
+fn stride_for(inference: Duration) -> u64 {
+    if inference > VERY_SLOW_INFERENCE {
+        3
+    } else if inference > SLOW_INFERENCE {
+        2
+    } else {
+        1
+    }
+}
+
+fn smooth_into(current: &mut Vec<f32>, fresh: Vec<f32>) {
+    if current.is_empty() {
+        *current = fresh;
+        return;
+    }
+    for (value, new) in current.iter_mut().zip(fresh) {
+        *value += (new - *value) * (1. - MASK_SMOOTHING);
+    }
+}
+
+fn run_worker(shared: &WorkerShared, inference: &dyn MaskInference) {
+    let mut smoothed = Vec::new();
+    loop {
+        let frame = {
+            let mut inbox = shared.inbox.lock().expect("inbox lock");
+            loop {
+                if inbox.closed {
+                    return;
+                }
+                if let Some(frame) = inbox.newest.take() {
+                    break frame;
+                }
+                inbox = shared.wake.wait(inbox).expect("inbox lock");
+            }
+        };
+        let started = Instant::now();
+        let Ok(fresh) = inference.infer(frame) else { continue };
+        shared.stride.store(stride_for(started.elapsed()), Ordering::Relaxed);
+        smooth_into(&mut smoothed, fresh);
+        let mut outbox = shared.outbox.lock().expect("outbox lock");
+        outbox.mask.clone_from(&smoothed);
+        outbox.version += 1;
+    }
+}
+
+/// One segmentation mask for every effect: a worker thread segments the newest frame, the caller never waits on it.
+pub struct MaskSource {
+    shared: Arc<WorkerShared>,
+    worker: Option<JoinHandle<()>>,
+    mask: Vec<f32>,
+    seen_version: u64,
     frames: u64,
-    stride: u64,
 }
 
 impl MaskSource {
     pub fn new() -> Result<Self> {
-        Ok(MaskSource { segmenter: Segmenter::new()?, mask: Vec::new(), frames: 0, stride: 1 })
+        Ok(Self::with_inference(Segmenter::new()?))
+    }
+
+    pub fn with_inference(inference: impl MaskInference) -> Self {
+        let shared = Arc::new(WorkerShared { inbox: Mutex::default(), wake: Condvar::new(), outbox: Mutex::default(), stride: AtomicU64::new(1) });
+        let worker_shared = shared.clone();
+        let worker = std::thread::Builder::new()
+            .name("segmentation".to_owned())
+            .spawn(move || run_worker(&worker_shared, &inference))
+            .expect("segmentation thread");
+        MaskSource { shared, worker: Some(worker), mask: Vec::new(), seen_version: 0, frames: 0 }
     }
 
     pub fn due(&self) -> bool {
-        self.frames.is_multiple_of(self.stride) || self.mask.is_empty()
+        self.frames.is_multiple_of(self.shared.stride.load(Ordering::Relaxed)) || self.mask.is_empty()
     }
 
     pub fn mask(&self) -> &[f32] {
         &self.mask
     }
 
-    /// Call once per frame; `rgba` is only read when `due`. Answers whether the mask changed.
-    pub fn refresh(&mut self, rgba: impl FnOnce() -> (Vec<u8>, usize, usize)) -> bool {
+    /// Call once per frame; `frame` is only read when `due`. Answers whether a newer mask arrived.
+    pub fn refresh(&mut self, frame: impl FnOnce() -> Frame) -> bool {
         let due = self.due();
         self.frames += 1;
-        if !due {
+        if due {
+            self.shared.inbox.lock().expect("inbox lock").newest = Some(frame());
+            self.shared.wake.notify_one();
+        }
+        let outbox = self.shared.outbox.lock().expect("outbox lock");
+        if outbox.version == self.seen_version {
             return false;
         }
-        let (rgba, width, height) = rgba();
-        let started = Instant::now();
-        let Ok(fresh) = self.segmenter.mask(&rgba, width, height) else {
-            return false;
-        };
-        let inference = started.elapsed();
-        self.stride = if inference > VERY_SLOW_INFERENCE {
-            3
-        } else if inference > SLOW_INFERENCE {
-            2
-        } else {
-            1
-        };
-        if self.mask.is_empty() {
-            self.mask = fresh;
-            return true;
-        }
-        for (current, new) in self.mask.iter_mut().zip(fresh) {
-            *current += (new - *current) * (1. - MASK_SMOOTHING);
-        }
+        self.seen_version = outbox.version;
+        self.mask.clone_from(&outbox.mask);
         true
+    }
+}
+
+impl Drop for MaskSource {
+    fn drop(&mut self) {
+        self.shared.inbox.lock().expect("inbox lock").closed = true;
+        self.shared.wake.notify_one();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera::i420_from_rgba;
 
     const WIDTH: usize = 160;
     const HEIGHT: usize = 90;
@@ -430,6 +646,68 @@ mod tests {
         assert_eq!(roughness(&blurred, center_x - 4, center_y), roughness(&original, center_x - 4, center_y));
         assert!(roughness(&blurred, 2, 2) * 4 < roughness(&original, 2, 2));
         assert!(roughness(&blurred, WIDTH - 12, HEIGHT - 3) * 4 < roughness(&original, WIDTH - 12, HEIGHT - 3));
+    }
+
+    fn checkerboard_i420() -> I420Buffer {
+        let mut buffer = I420Buffer::new(WIDTH as u32, HEIGHT as u32);
+        let (stride_y, stride_u, _) = buffer.strides();
+        let (plane_y, plane_u, plane_v) = buffer.data_mut();
+        for row in 0..HEIGHT {
+            for column in 0..WIDTH {
+                plane_y[row * stride_y as usize + column] = if (row / 3 + column / 3) % 2 == 0 { 20 } else { 235 };
+            }
+        }
+        for row in 0..HEIGHT / 2 {
+            for column in 0..WIDTH / 2 {
+                plane_u[row * stride_u as usize + column] = if (row / 3 + column / 3) % 2 == 0 { 60 } else { 200 };
+            }
+        }
+        plane_v.fill(128);
+        buffer
+    }
+
+    fn luma_roughness(buffer: &mut I420Buffer, x: usize, y: usize) -> i32 {
+        let stride = buffer.strides().0 as usize;
+        let plane = buffer.data_mut().0;
+        (0..8).map(|step| (i32::from(plane[y * stride + x + step + 1]) - i32::from(plane[y * stride + x + step])).abs()).sum()
+    }
+
+    #[test]
+    fn the_planar_blur_keeps_the_person_and_smooths_luma_and_chroma_outside() {
+        let mut original = checkerboard_i420();
+        let mut blurred = checkerboard_i420();
+        compose_i420(&mut blurred, &oval_mask());
+        let (center_x, center_y) = (WIDTH / 2, HEIGHT / 2);
+        assert_eq!(luma_roughness(&mut blurred, center_x - 4, center_y), luma_roughness(&mut original, center_x - 4, center_y));
+        assert!(luma_roughness(&mut blurred, 2, 2) * 4 < luma_roughness(&mut original, 2, 2));
+        let chroma = |buffer: &mut I420Buffer, x: usize, y: usize| {
+            let stride = buffer.strides().1 as usize;
+            i32::from(buffer.data_mut().1[y * stride + x])
+        };
+        assert_eq!(chroma(&mut blurred, center_x / 2, center_y / 2), chroma(&mut original, center_x / 2, center_y / 2));
+        let spread = |buffer: &mut I420Buffer| (2..10).map(|x| (chroma(buffer, x + 1, 2) - chroma(buffer, x, 2)).abs()).sum::<i32>();
+        assert!(spread(&mut blurred) * 4 < spread(&mut original));
+    }
+
+    #[test]
+    fn the_planar_blur_matches_the_rgba_blur_on_gray_frames() {
+        let mut planar = checkerboard_i420();
+        planar.data_mut().1.fill(128);
+        compose_i420(&mut planar, &oval_mask());
+        let mut rgba = checkerboard();
+        compose(&mut rgba, WIDTH, HEIGHT, &oval_mask());
+        let stride = planar.strides().0 as usize;
+        let plane = planar.data().0;
+        let worst = (0..HEIGHT).flat_map(|y| (0..WIDTH).map(move |x| (x, y))).map(|(x, y)| (i32::from(plane[y * stride + x]) - i32::from(pixel(&rgba, x, y))).abs()).max().unwrap();
+        assert!(worst <= 24, "worst luma difference {worst}");
+    }
+
+    #[test]
+    fn a_full_person_mask_leaves_the_planes_untouched() {
+        let mut untouched = checkerboard_i420();
+        compose_i420(&mut untouched, &vec![1.; MASK_WIDTH * MASK_HEIGHT]);
+        let reference = checkerboard_i420();
+        assert_eq!(untouched.data(), reference.data());
     }
 
     #[test]
@@ -500,14 +778,74 @@ mod tests {
         assert!(mask.iter().all(|value| (0. ..=1.).contains(value)));
     }
 
+    fn wait_for_mask(source: &mut MaskSource, frame: impl Fn() -> Frame) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if source.refresh(&frame) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
+
     #[test]
     fn the_mask_source_segments_when_due_and_keeps_one_mask() {
         let mut source = MaskSource::new().expect("model loads");
-        let frame = || (checkerboard(), WIDTH, HEIGHT);
-        assert!(source.refresh(frame));
+        assert!(wait_for_mask(&mut source, || i420_from_rgba(&checkerboard(), WIDTH as u32, HEIGHT as u32)));
         assert_eq!(source.mask().len(), MASK_WIDTH * MASK_HEIGHT);
-        source.stride = 3;
+        source.shared.stride.store(3, Ordering::Relaxed);
+        source.frames = 1;
         assert!(!source.due());
         assert!(!source.refresh(|| unreachable!("a skipped frame is not read")));
+    }
+
+    struct SlowSegmenter {
+        delay: Duration,
+        seen: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl MaskInference for SlowSegmenter {
+        fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
+            let marker = frame.data().0[0];
+            self.seen.lock().unwrap().push(marker);
+            std::thread::sleep(self.delay);
+            Ok(vec![f32::from(marker) / 255.; MASK_WIDTH * MASK_HEIGHT])
+        }
+    }
+
+    fn marked_frame(marker: u8) -> Frame {
+        let mut buffer = I420Buffer::new(2, 2);
+        buffer.data_mut().0.fill(marker);
+        buffer
+    }
+
+    #[test]
+    fn a_slow_segmenter_never_blocks_the_sender() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut source = MaskSource::with_inference(SlowSegmenter { delay: Duration::from_millis(300), seen });
+        let started = Instant::now();
+        for _ in 0..30 {
+            source.refresh(|| marked_frame(1));
+        }
+        assert!(started.elapsed() < Duration::from_millis(150));
+    }
+
+    #[test]
+    fn the_worker_hands_over_the_newest_frame_and_drops_stale_ones() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut source = MaskSource::with_inference(SlowSegmenter { delay: Duration::from_millis(100), seen: seen.clone() });
+        for marker in [10, 20, 30, 40] {
+            source.refresh(|| marked_frame(marker));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while seen.lock().unwrap().last() != Some(&40) && Instant::now() < deadline {
+            source.refresh(|| marked_frame(40));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let processed = seen.lock().unwrap().clone();
+        assert_eq!(processed.last(), Some(&40));
+        assert!(!processed.contains(&20) || !processed.contains(&30), "stale frames pile up: {processed:?}");
     }
 }
