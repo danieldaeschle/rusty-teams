@@ -1,3 +1,5 @@
+use std::collections::{BTreeSet, HashSet};
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
@@ -97,7 +99,47 @@ impl<'a> Recap<'a> {
                 None => break,
             }
         }
-        Ok(sorted_occurrences(found))
+        let occurrences = sorted_occurrences(found);
+        let deleted = self.deleted_recordings(&occurrences).await;
+        Ok(without_deleted(occurrences, &deleted))
+    }
+
+    async fn deleted_recordings(&self, occurrences: &[Occurrence]) -> HashSet<String> {
+        let mut deleted = HashSet::new();
+        let sites: BTreeSet<String> = occurrences
+            .iter()
+            .map(|occurrence| site_origin(&occurrence.recording_url))
+            .collect();
+        for site in sites {
+            let urls: Vec<&str> = occurrences
+                .iter()
+                .map(|occurrence| occurrence.recording_url.as_str())
+                .filter(|url| site_origin(url) == site)
+                .collect();
+            let requests: Vec<Request> = urls
+                .iter()
+                .map(|url| {
+                    Request::get(format!(
+                        "{site}/_api/v2.1/shares/{}/driveItem?$select=id",
+                        share_id(url)
+                    ))
+                })
+                .collect();
+            let Ok(answers) = self
+                .session
+                .batch(&requests, &Scope::new(site.clone(), SITE_SCOPE))
+                .await
+            else {
+                continue;
+            };
+            deleted.extend(
+                urls.iter()
+                    .zip(answers)
+                    .filter(|(_, answer)| answer.status == 404)
+                    .map(|(url, _)| (*url).to_owned()),
+            );
+        }
+        deleted
     }
 
     pub async fn details(
@@ -364,6 +406,13 @@ pub fn sorted_occurrences(mut occurrences: Vec<Occurrence>) -> Vec<Occurrence> {
     occurrences
 }
 
+pub fn without_deleted(occurrences: Vec<Occurrence>, deleted: &HashSet<String>) -> Vec<Occurrence> {
+    occurrences
+        .into_iter()
+        .filter(|occurrence| !deleted.contains(&occurrence.recording_url))
+        .collect()
+}
+
 pub fn parse_iso_duration(text: &str) -> Option<u64> {
     let time = text.strip_prefix("PT")?;
     let mut total = 0.0;
@@ -481,6 +530,15 @@ mod tests {
     }
 
     #[test]
+    fn deleted_recordings_drop_out_of_the_occurrences() {
+        let occurrences = sorted_occurrences(parse_occurrences(&fixture("messages.json")));
+        let deleted: HashSet<String> = [occurrences[0].recording_url.clone()].into();
+        let remaining = without_deleted(occurrences, &deleted);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].message_id, "2001");
+    }
+
+    #[test]
     fn iso_durations_parse_to_seconds() {
         assert_eq!(parse_iso_duration("PT1H2M3S"), Some(3723));
         assert_eq!(parse_iso_duration("PT45M"), Some(2700));
@@ -517,6 +575,17 @@ mod tests {
             item_duration_seconds(&serde_json::json!({"video": {"duration": 90000}})),
             Some(90)
         );
+    }
+
+    #[test]
+    fn recording_item_gives_url_duration_and_video() {
+        let item = fixture("drive_item.json");
+        assert_eq!(
+            item_url("https://contoso-my.sharepoint.com", &item).as_deref(),
+            Some("https://contoso-my.sharepoint.com/_api/v2.1/drives/drive-1/items/item-1")
+        );
+        assert!(!is_audio_only(&item));
+        assert_eq!(item_duration_seconds(&item), Some(53));
     }
 
     #[test]

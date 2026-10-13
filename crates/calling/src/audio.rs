@@ -32,6 +32,53 @@ impl SineGenerator {
     }
 }
 
+pub struct ClipGenerator {
+    samples: Vec<i16>,
+    position: usize,
+}
+
+impl ClipGenerator {
+    pub fn from_wav(bytes: &[u8]) -> Option<Self> {
+        let mut format = None;
+        let mut offset = 12;
+        if bytes.get(0..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
+            return None;
+        }
+        while offset + 8 <= bytes.len() {
+            let chunk_id = &bytes[offset..offset + 4];
+            let chunk_size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
+            let body = bytes.get(offset + 8..(offset + 8 + chunk_size).min(bytes.len()))?;
+            match chunk_id {
+                b"fmt " => format = Some(body.get(0..16)?.to_vec()),
+                b"data" => {
+                    let format = format?;
+                    let channels = u16::from_le_bytes([format[2], format[3]]);
+                    let rate = u32::from_le_bytes(format[4..8].try_into().ok()?);
+                    let bits = u16::from_le_bytes([format[14], format[15]]);
+                    if u16::from_le_bytes([format[0], format[1]]) != 1 || channels != 1 || rate != SAMPLE_RATE || bits != 16 {
+                        return None;
+                    }
+                    let samples: Vec<i16> = body.as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes(*pair)).collect();
+                    return (!samples.is_empty()).then_some(ClipGenerator { samples, position: 0 });
+                }
+                _ => {}
+            }
+            offset += 8 + chunk_size + chunk_size % 2;
+        }
+        None
+    }
+
+    pub fn next_frame(&mut self) -> Vec<i16> {
+        (0..FRAME_SAMPLES)
+            .map(|_| {
+                let sample = self.samples[self.position];
+                self.position = (self.position + 1) % self.samples.len();
+                sample
+            })
+            .collect()
+    }
+}
+
 pub fn rms(samples: &[i16]) -> f32 {
     if samples.is_empty() {
         return 0.0;
@@ -95,5 +142,17 @@ mod tests {
         assert!(tone_ratio(&samples, 1000.0) < 0.05);
         assert!((rms(&samples) - 0.3 / 2f32.sqrt()).abs() < 0.01);
         assert_eq!(tone_ratio(&vec![0; 4800], 440.0), 0.0);
+    }
+
+    #[test]
+    fn clip_generator_loops_a_mono_wav() {
+        let path = std::env::temp_dir().join(format!("clip-generator-{}.wav", std::process::id()));
+        write_wav(&path, &[1, 2, 3]).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let frame = ClipGenerator::from_wav(&bytes).unwrap().next_frame();
+        assert_eq!(frame.len(), FRAME_SAMPLES);
+        assert_eq!(&frame[..5], &[1, 2, 3, 1, 2]);
+        assert!(ClipGenerator::from_wav(b"RIFF\0\0\0\0WAVE").is_none());
     }
 }
