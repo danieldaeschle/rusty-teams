@@ -277,7 +277,7 @@ impl PrejoinView {
         let face = match (&image, self.options.camera_on) {
             (Some(image), _) => img(ImageSource::Render(image.clone()))
                 .size_full()
-                .object_fit(ObjectFit::Cover)
+                .object_fit(ObjectFit::Contain)
                 .into_any_element(),
             (None, true) => centered_note(&self.preview_status()),
             (None, false) => v_flex()
