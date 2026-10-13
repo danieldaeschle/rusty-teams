@@ -1,11 +1,13 @@
 use std::time::{Duration, Instant};
 
+use calling::CallCommand;
 use gpui_kit::*;
 
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
 use crate::app_state::{AppEvent, AppState};
+use crate::views::call_layouts::{measured_stage, video_wants};
 
 const CHROME_TOUCH_THROTTLE: Duration = Duration::from_millis(250);
 const DEMO_BUBBLE_START: Duration = Duration::from_secs(8);
@@ -60,8 +62,20 @@ impl AppState {
             .call
             .as_mut()
             .is_some_and(|call| call.model.refresh_layout(Instant::now()));
+        self.sync_video_wants();
         if changed {
             cx.notify();
+        }
+    }
+
+    fn sync_video_wants(&mut self) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        let wants = video_wants(&call.model, measured_stage(call));
+        if wants != call.sent_wants {
+            let _ = call.commands.send(CallCommand::SetVideoWants(wants.clone()));
+            call.sent_wants = wants;
         }
     }
 

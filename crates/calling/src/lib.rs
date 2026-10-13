@@ -76,6 +76,7 @@ pub use error::{Error, Result};
 pub use level::SpeakingDetector;
 pub use mic_processing::{ApmConfig, MicSettings, NoiseSuppression};
 pub use mute::MuteCommand;
+pub use video_layout::{TileDetail, VideoWant};
 pub use state::{CallSignal, CallState, EndReason};
 pub use camera::{CameraDevice, camera_entries};
 pub use screen::{ShareKind, ShareSource};

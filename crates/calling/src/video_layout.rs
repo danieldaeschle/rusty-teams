@@ -12,9 +12,9 @@ use crate::error::{Error, Result};
 use crate::sdp::{LineRole, OfferPlan, StreamLine};
 use crate::video_frame::VideoKey;
 
-pub const RECEIVE_SLOTS: usize = 4;
+pub const RECEIVE_SLOTS: usize = 9;
 pub const CAMERA_MID: &str = "1";
-pub const SHARE_MID: &str = "6";
+pub const SHARE_MID: &str = "11";
 pub const ONE_TO_ONE_SHARE_MID: &str = "2";
 const CAMERA_LINE_LABEL: &str = "main-video";
 const SHARE_LINE_LABEL: &str = "applicationsharing-video";
@@ -23,9 +23,32 @@ const SCREEN_STREAM: &str = "screen";
 const H264: &str = "video/h264";
 const RTX: &str = "video/rtx";
 const NO_SOURCE: i64 = -1;
-const PERSON_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 3600, max_fps: 3000, max_mbps: 108_000 };
+const STAGE_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 3600, max_fps: 3000, max_mbps: 108_000 };
+const SMALL_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 920, max_fps: 3000, max_mbps: 27_600 };
 const SCREEN_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 8160, max_fps: 1500, max_mbps: 135_000 };
 const SUBSCRIBE_PROFILE: &str = "64001f";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TileDetail {
+    #[default]
+    Stage,
+    Small,
+}
+
+impl TileDetail {
+    fn limits(self) -> ReceiveLimits {
+        match self {
+            TileDetail::Stage => STAGE_REQUEST,
+            TileDetail::Small => SMALL_REQUEST,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoWant {
+    pub mri: String,
+    pub detail: TileDetail,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReceiveLimits {
@@ -48,7 +71,7 @@ pub fn one_to_one_plan() -> OfferPlan {
     }
 }
 
-/// Offered after the audio line: camera, `RECEIVE_SLOTS` receive-only slots, screen share (mids 1, 2-5, 6).
+/// Offered after the audio line: camera, `RECEIVE_SLOTS` receive-only slots, screen share (mids 1, 2-10, 11).
 #[derive(Clone)]
 pub struct VideoLines {
     pub camera: RtpTransceiver,
@@ -178,16 +201,26 @@ impl SlotTable {
 pub struct Assignment {
     pub mri: String,
     pub source: u32,
+    pub detail: TileDetail,
+}
+
+impl Assignment {
+    fn same_source(&self, other: &Assignment) -> bool {
+        self.mri == other.mri && self.source == other.source
+    }
 }
 
 pub fn plan_receive(current: &[Option<Assignment>], candidates: &[Assignment]) -> Vec<Option<Assignment>> {
     let wanted: Vec<&Assignment> = candidates.iter().take(current.len()).collect();
     let mut next: Vec<Option<Assignment>> = current
         .iter()
-        .map(|slot| slot.clone().filter(|held| wanted.contains(&held)))
+        .map(|slot| {
+            let held = slot.as_ref()?;
+            wanted.iter().find(|assignment| assignment.same_source(held)).map(|assignment| (*assignment).clone())
+        })
         .collect();
     for assignment in wanted {
-        if next.iter().flatten().any(|held| held == assignment) {
+        if next.iter().flatten().any(|held| held.same_source(assignment)) {
             continue;
         }
         if let Some(free) = next.iter_mut().find(|slot| slot.is_none()) {
@@ -197,11 +230,20 @@ pub fn plan_receive(current: &[Option<Assignment>], candidates: &[Assignment]) -
     next
 }
 
-pub fn prioritize(candidates: Vec<(String, u32)>, speaker_history: &[String]) -> Vec<Assignment> {
+pub fn prioritize(candidates: Vec<(String, u32)>, speaker_history: &[String], wants: Option<&[VideoWant]>) -> Vec<Assignment> {
+    if let Some(wants) = wants {
+        return wants
+            .iter()
+            .filter_map(|want| {
+                let (mri, source) = candidates.iter().find(|(mri, _)| *mri == want.mri)?;
+                Some(Assignment { mri: mri.clone(), source: *source, detail: want.detail })
+            })
+            .collect();
+    }
     let rank = |mri: &str| speaker_history.iter().position(|speaker| speaker == mri).unwrap_or(usize::MAX);
     let mut ordered: Vec<Assignment> = candidates
         .into_iter()
-        .map(|(mri, source)| Assignment { mri, source })
+        .map(|(mri, source)| Assignment { mri, source, detail: TileDetail::Stage })
         .collect();
     ordered.sort_by_key(|assignment| rank(&assignment.mri));
     ordered
@@ -213,6 +255,7 @@ pub struct SourceRequest {
     pub stream_id: u32,
     pub source: Option<u32>,
     pub screen: bool,
+    pub detail: TileDetail,
 }
 
 pub fn requests_for(
@@ -229,6 +272,7 @@ pub fn requests_for(
             stream_id: slot.stream_id,
             source: after.as_ref().map(|assignment| assignment.source),
             screen: false,
+            detail: after.as_ref().map(|assignment| assignment.detail).unwrap_or_default(),
         })
         .collect()
 }
@@ -236,7 +280,7 @@ pub fn requests_for(
 impl SourceRequest {
     /// Body of the `applyChannelParameters` link, the signaling twin of the data-channel `sr` message.
     pub fn body(&self, sequence_number: u64) -> Value {
-        let limits = if self.screen { SCREEN_REQUEST } else { PERSON_REQUEST };
+        let limits = if self.screen { SCREEN_REQUEST } else { self.detail.limits() };
         let control = json!({
             "controlVideoStreaming": {
                 "sequenceNumber": sequence_number,
@@ -287,7 +331,7 @@ mod tests {
     use super::*;
 
     fn assignment(name: &str, source: u32) -> Assignment {
-        Assignment { mri: format!("8:orgid:{name}"), source }
+        Assignment { mri: format!("8:orgid:{name}"), source, detail: TileDetail::Stage }
     }
 
     fn stream(mid: &str, role: LineRole, id: Option<u32>) -> StreamLine {
@@ -303,12 +347,12 @@ mod tests {
             stream("3", LineRole::MainVideo, Some(204)),
             stream("4", LineRole::MainVideo, None),
             stream("5", LineRole::MainVideo, Some(206)),
-            stream("6", LineRole::ScreenShare, Some(207)),
+            stream("11", LineRole::ScreenShare, Some(207)),
         ];
         let table = SlotTable::from_streams(&streams);
         let mids: Vec<&str> = table.people.iter().map(|slot| slot.mid.as_str()).collect();
         assert_eq!(mids, vec!["2", "3", "5"]);
-        assert_eq!(table.screen, Some(ReceiveSlot { mid: "6".into(), stream_id: 207 }));
+        assert_eq!(table.screen, Some(ReceiveSlot { mid: "11".into(), stream_id: 207 }));
     }
 
     #[test]
@@ -327,7 +371,7 @@ mod tests {
         let held: Vec<Option<Assignment>> = (1..=4).map(|index| Some(assignment(&format!("p{index}"), index))).collect();
         let history = vec!["8:orgid:p5".to_owned(), "8:orgid:p1".to_owned(), "8:orgid:p2".to_owned(), "8:orgid:p3".to_owned()];
         let roster = (1..=5).map(|index| (format!("8:orgid:p{index}"), index)).collect();
-        let next = plan_receive(&held, &prioritize(roster, &history));
+        let next = plan_receive(&held, &prioritize(roster, &history, None));
         let names: Vec<&str> = next.iter().flatten().map(|held| held.mri.as_str()).collect();
         assert_eq!(names, vec!["8:orgid:p1", "8:orgid:p2", "8:orgid:p3", "8:orgid:p5"]);
     }
@@ -342,12 +386,12 @@ mod tests {
             ReceiveSlot { mid: "3".into(), stream_id: 204 },
         ];
         let requests = requests_for(&held, &next, &slots);
-        assert_eq!(requests, vec![SourceRequest { mid: "2".into(), stream_id: 203, source: None, screen: false }]);
+        assert_eq!(requests, vec![SourceRequest { mid: "2".into(), stream_id: 203, source: None, screen: false, detail: TileDetail::Stage }]);
     }
 
     #[test]
     fn a_source_request_wraps_the_control_message_like_the_web_client() {
-        let request = SourceRequest { mid: "3".into(), stream_id: 204, source: Some(302), screen: false };
+        let request = SourceRequest { mid: "3".into(), stream_id: 204, source: Some(302), screen: false, detail: TileDetail::Stage };
         let body = request.body(7);
         let channel = &body["applyChannelParameters"]["multiChannelParameter"];
         assert_eq!(channel["mids"], json!(["3"]));
@@ -369,6 +413,67 @@ mod tests {
         assert_eq!(parameter["controlVideoStreaming"]["controlInfo"]["fmtParams"][0]["max-fs"], 8160);
     }
 
+    fn want(name: &str, detail: TileDetail) -> VideoWant {
+        VideoWant { mri: format!("8:orgid:{name}"), detail }
+    }
+
+    fn roster_of(count: u32) -> Vec<(String, u32)> {
+        (1..=count).map(|index| (format!("8:orgid:p{index}"), index)).collect()
+    }
+
+    #[test]
+    fn nine_slots_hold_nine_visible_people_and_the_tenth_waits() {
+        let wants: Vec<VideoWant> = (1..=10).map(|index| want(&format!("p{index}"), TileDetail::Small)).collect();
+        let candidates = prioritize(roster_of(10), &[], Some(&wants));
+        let next = plan_receive(&vec![None; RECEIVE_SLOTS], &candidates);
+        assert_eq!(next.iter().flatten().count(), 9);
+        assert!(next.iter().flatten().all(|held| held.mri != "8:orgid:p10"));
+    }
+
+    #[test]
+    fn people_outside_the_visible_tiles_get_no_slot() {
+        let wants = vec![want("p2", TileDetail::Small), want("p4", TileDetail::Small)];
+        let candidates = prioritize(roster_of(5), &["8:orgid:p5".to_owned()], Some(&wants));
+        let mris: Vec<&str> = candidates.iter().map(|assignment| assignment.mri.as_str()).collect();
+        assert_eq!(mris, vec!["8:orgid:p2", "8:orgid:p4"]);
+        let held = vec![Some(assignment("p5", 5)), None, None];
+        let next = plan_receive(&held, &candidates);
+        assert_eq!(next.iter().flatten().map(|held| held.mri.as_str()).collect::<Vec<_>>(), vec!["8:orgid:p2", "8:orgid:p4"]);
+    }
+
+    #[test]
+    fn nobody_visible_means_no_subscription() {
+        assert!(prioritize(roster_of(3), &[], Some(&[])).is_empty());
+    }
+
+    #[test]
+    fn a_person_who_moves_to_the_stage_keeps_the_slot_and_gets_the_large_request() {
+        let small = Assignment { detail: TileDetail::Small, ..assignment("a", 1) };
+        let held = vec![None, Some(small), None];
+        let wants = vec![want("a", TileDetail::Stage)];
+        let next = plan_receive(&held, &prioritize(vec![("8:orgid:a".to_owned(), 1)], &[], Some(&wants)));
+        assert_eq!(next, vec![None, Some(assignment("a", 1)), None]);
+        let slots: Vec<ReceiveSlot> = (0..3).map(|index| ReceiveSlot { mid: format!("{}", index + 2), stream_id: 203 + index }).collect();
+        let requests = requests_for(&held, &next, &slots);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].mid, "3");
+        assert_eq!(requests[0].detail, TileDetail::Stage);
+    }
+
+    #[test]
+    fn stage_and_small_tiles_ask_for_different_resolutions() {
+        let fmt_for = |detail| {
+            let request = SourceRequest { mid: "2".into(), stream_id: 203, source: Some(1), screen: false, detail };
+            let body = request.body(1);
+            let parameter: Value =
+                serde_json::from_str(body["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"].as_str().unwrap()).unwrap();
+            parameter["controlVideoStreaming"]["controlInfo"]["fmtParams"][0].clone()
+        };
+        assert_eq!(fmt_for(TileDetail::Stage)["max-fs"], 3600);
+        assert_eq!(fmt_for(TileDetail::Small)["max-fs"], 920);
+        assert_eq!(fmt_for(TileDetail::Small)["max-mbps"], 27_600);
+    }
+
     #[test]
     fn media_descriptions_tell_the_mixer_what_a_line_does() {
         assert_eq!(
@@ -378,7 +483,7 @@ mod tests {
         assert_eq!(MediaDescription::camera(false).wire(), json!({"mid": "1", "direction": "recvonly"}));
         assert_eq!(
             MediaDescription::share(true).wire(),
-            json!({"mid": "6", "direction": "sendrecv", "label": "applicationsharing-video"})
+            json!({"mid": "11", "direction": "sendrecv", "label": "applicationsharing-video"})
         );
     }
 

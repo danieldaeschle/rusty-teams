@@ -51,6 +51,6 @@ pub use model::{
 pub use overlay::CallWindows;
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
-pub use stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, filmstrip, gallery_grid, split_overflow};
+pub use stage_layout::{FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, filmstrip, gallery_grid, split_overflow};
 pub use target::plan_for_chat;
 pub use view_settings::{CallLayout, ViewSettings};

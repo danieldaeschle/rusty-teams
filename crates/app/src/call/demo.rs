@@ -596,7 +596,7 @@ async fn speak_until_hangup(
                     people.iter().for_each(|(mri, _)| control.video.forget(&VideoKey::Person(mri.clone())));
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
-                Some(CallCommand::SetCameraEffects(_)) => {}
+                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoWants(_)) => {}
                 Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),

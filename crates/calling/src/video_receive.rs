@@ -14,7 +14,7 @@ use crate::signaling::Signaling;
 use crate::timeline::Timeline;
 use crate::video_frame::{FrameGate, VideoHub, VideoKey, picture_from_frame};
 use crate::video_layout::{
-    Assignment, SlotTable, SourceRequest, VideoRouter, plan_receive, prioritize, requests_for,
+    Assignment, SlotTable, SourceRequest, TileDetail, VideoRouter, VideoWant, plan_receive, prioritize, requests_for,
 };
 
 const HISTORY_LIMIT: usize = 16;
@@ -76,7 +76,7 @@ impl SourceRequester {
                     ),
                     Err(error) => timeline.record("video source failed", error.to_string()),
                 }
-                if let Some(key) = &queued.route_after {
+                if let Some(key) = queued.route_after.as_ref().filter(|key| router.key_for(&queued.request.mid).as_ref() != Some(key)) {
                     hub.forget(key);
                 }
                 router.set(&queued.request.mid, queued.route_after);
@@ -109,6 +109,7 @@ pub struct VideoReceive {
     held: Vec<Option<Assignment>>,
     screen_held: Option<Assignment>,
     history: Vec<String>,
+    wants: Option<Vec<VideoWant>>,
     requester: Option<SourceRequester>,
     incoming_enabled: bool,
 }
@@ -122,6 +123,7 @@ impl VideoReceive {
             held: Vec::new(),
             screen_held: None,
             history: Vec::new(),
+            wants: None,
             requester: None,
             incoming_enabled: true,
         }
@@ -129,6 +131,12 @@ impl VideoReceive {
 
     pub fn set_incoming_enabled(&mut self, enabled: bool) {
         self.incoming_enabled = enabled;
+    }
+
+    pub fn set_wants(&mut self, wants: Vec<VideoWant>) -> bool {
+        let changed = self.wants.as_ref() != Some(&wants);
+        self.wants = Some(wants);
+        changed
     }
 
     pub fn router(&self) -> &VideoRouter {
@@ -163,7 +171,7 @@ impl VideoReceive {
         let mut change = ReceiveChange::default();
         let Some(requester) = &self.requester else { return change };
         let candidates = if self.incoming_enabled {
-            prioritize(roster.video_candidates(&self.own_mri), &self.history)
+            prioritize(roster.video_candidates(&self.own_mri), &self.history, self.wants.as_deref())
         } else {
             Vec::new()
         };
@@ -173,14 +181,19 @@ impl VideoReceive {
             let route_after = slot
                 .and_then(|index| next[index].as_ref())
                 .map(|assignment| VideoKey::Person(assignment.mri.clone()));
-            self.router.set(&request.mid, None);
+            let same_person = slot.is_some_and(|index| {
+                self.held[index].as_ref().zip(next[index].as_ref()).is_some_and(|(before, after)| before.mri == after.mri)
+            });
+            if !same_person {
+                self.router.set(&request.mid, None);
+            }
             requester.send(request, route_after);
         }
         self.held = next;
         if let Some(slot) = &self.table.screen {
             let wanted = roster
                 .screen_share(&self.own_mri)
-                .map(|(mri, source)| Assignment { mri, source });
+                .map(|(mri, source)| Assignment { mri, source, detail: TileDetail::Stage });
             if wanted != self.screen_held {
                 let route_after = wanted.as_ref().map(|_| VideoKey::Screen);
                 self.router.set(&slot.mid, None);
@@ -190,6 +203,7 @@ impl VideoReceive {
                         stream_id: slot.stream_id,
                         source: wanted.as_ref().map(|assignment| assignment.source),
                         screen: true,
+                        detail: TileDetail::Stage,
                     },
                     route_after,
                 );

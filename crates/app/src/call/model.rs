@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use calling::{
     CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
     DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingTarget, Progress, Reaction,
-    RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub, VideoWant,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -42,6 +42,7 @@ pub struct ActiveCall {
     pub stage_fullscreen: bool,
     pub fullscreen: Option<FullscreenState>,
     pub stage_size: Rc<Cell<(f32, f32)>>,
+    pub sent_wants: Vec<VideoWant>,
     pub bubbles: Vec<ChatBubble>,
     pub share_menu_open: bool,
     pub lobby_list_open: bool,
@@ -105,6 +106,7 @@ impl ActiveCall {
             stage_fullscreen: false,
             fullscreen: None,
             stage_size: Rc::default(),
+            sent_wants: Vec::new(),
             bubbles: Vec::new(),
             share_menu_open: false,
             lobby_list_open: false,
