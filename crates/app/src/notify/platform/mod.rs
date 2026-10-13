@@ -3,6 +3,8 @@ mod windows_impl;
 #[cfg(windows)]
 pub use windows_impl::*;
 
+#[cfg(target_os = "linux")]
+mod x11_input;
 #[cfg(not(windows))]
 mod stub;
 #[cfg(not(windows))]

@@ -12,6 +12,7 @@ use super::overlay_layout::{
 use crate::app_state::AppState;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
 use crate::views::call_mini_window::MiniWindowView;
+use crate::views::call_pop_out::{POP_OUT_SIZE, POP_OUT_TITLE, SharePopOutView};
 use crate::views::share_bar::{ShareBarView, ShareBorderView};
 
 const TICK: Duration = Duration::from_millis(100);
@@ -61,6 +62,8 @@ pub struct CallWindows {
     windows: HashMap<Role, Placed>,
     opening: HashSet<Role>,
     share: Option<ShareSession>,
+    pop_out: Option<AnyWindowHandle>,
+    pop_out_opening: bool,
     pinned: bool,
     bar_idle_since: Instant,
     bar_collapsed: bool,
@@ -126,6 +129,8 @@ impl CallWindows {
             windows: HashMap::new(),
             opening: HashSet::new(),
             share: None,
+            pop_out: None,
+            pop_out_opening: false,
             pinned: false,
             bar_idle_since: Instant::now(),
             bar_collapsed: false,
@@ -213,6 +218,7 @@ impl CallWindows {
         let slow = self.ticks % SLOW_TICK_EVERY == 0;
         self.refresh_main_window();
         self.sync_share(slow, cx);
+        self.sync_pop_out(cx);
         self.sync_mini(cx);
         if slow {
             self.track_mini_position(cx);
@@ -316,6 +322,60 @@ impl CallWindows {
         }
     }
 
+    fn sync_pop_out(&mut self, cx: &mut Context<Self>) {
+        let wanted = self
+            .app
+            .read(cx)
+            .call
+            .as_ref()
+            .is_some_and(|call| call.share_stage.popped && call.model.screen_sharer.is_some());
+        match (wanted, self.pop_out) {
+            (true, None) => self.open_pop_out(cx),
+            (false, Some(handle)) => {
+                self.pop_out = None;
+                handle.update(cx, |_, window, _| window.remove_window()).ok();
+            }
+            (true, Some(handle)) => {
+                if handle.update(cx, |_, _, _| ()).is_err() {
+                    self.pop_out = None;
+                    self.app.update(cx, |state, cx| state.return_stage_from_pop_out(cx));
+                }
+            }
+            (false, None) => {}
+        }
+    }
+
+    fn open_pop_out(&mut self, cx: &mut Context<Self>) {
+        if self.pop_out_opening {
+            return;
+        }
+        self.pop_out_opening = true;
+        let controller = cx.entity();
+        let app = self.app.clone();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                None,
+                size(px(POP_OUT_SIZE.0), px(POP_OUT_SIZE.1)),
+                cx,
+            ))),
+            titlebar: Some(TitlebarOptions {
+                title: Some(POP_OUT_TITLE.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // open_window draws right away, and the view reads the app entity while rendering.
+        cx.defer(move |cx| {
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| SharePopOutView::new(app, window, cx))
+            });
+            controller.update(cx, |this, _| {
+                this.pop_out_opening = false;
+                this.pop_out = opened.ok().map(|(handle, _)| handle);
+            });
+        });
+    }
+
     fn sync_mini(&mut self, cx: &mut Context<Self>) {
         let in_call = self.app.read(cx).call.is_some();
         let work = self.work_area.or_else(|| display_work_area(cx));
@@ -406,9 +466,11 @@ impl CallWindows {
                 if let Some(native) = native {
                     platform::prepare_toast_window(native);
                     platform::exclude_from_capture(native);
-                    if matches!(role, Role::Border(_)) {
-                        platform::make_click_through(native);
-                    }
+                }
+                if matches!(role, Role::Border(_)) {
+                    handle
+                        .update(cx, |_, window, _| platform::make_window_click_through(window))
+                        .ok();
                 }
                 Placed {
                     handle,

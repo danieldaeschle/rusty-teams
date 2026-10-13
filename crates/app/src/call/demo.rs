@@ -92,6 +92,7 @@ pub enum DemoScene {
     Whiteboard,
     Network,
     Gallery,
+    Sharing,
 }
 
 impl DemoScene {
@@ -106,6 +107,7 @@ impl DemoScene {
             "whiteboard" => DemoScene::Whiteboard,
             "network" => DemoScene::Network,
             "gallery" => DemoScene::Gallery,
+            "sharing" => DemoScene::Sharing,
             _ => return None,
         })
     }
@@ -115,7 +117,11 @@ impl DemoScene {
     }
 
     pub fn guests(self) -> Option<usize> {
-        (self == DemoScene::Gallery).then_some(DEMO_GALLERY_GUESTS)
+        match self {
+            DemoScene::Gallery => Some(DEMO_GALLERY_GUESTS),
+            DemoScene::Sharing => Some(DEMO_SHARING_GUESTS),
+            _ => None,
+        }
     }
 
     fn cameras(self) -> usize {
@@ -134,6 +140,7 @@ impl DemoScene {
 }
 
 pub const DEMO_GALLERY_GUESTS: usize = 12;
+const DEMO_SHARING_GUESTS: usize = 6;
 const BREAKOUT_AT_TICKS: u32 = 20;
 const WHITEBOARD_AT_TICKS: u32 = 5;
 const DEMO_BOARD_URL: &str = "https://app.whiteboard.microsoft.com/me/whiteboards/demo";
@@ -396,6 +403,7 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         | DemoScene::Breakout
         | DemoScene::Whiteboard
         | DemoScene::Gallery
+        | DemoScene::Sharing
         | DemoScene::Plain => {}
     }
 }
@@ -478,7 +486,7 @@ async fn speak_until_hangup(
         tokio::select! {
             _ = video_tick.tick(), if video || camera_on => {
                 let elapsed = started.elapsed();
-                let share_now = sharer.is_some() && (SHARE_START..SHARE_END).contains(&elapsed);
+                let share_now = sharer.is_some() && (scene == DemoScene::Sharing || (SHARE_START..SHARE_END).contains(&elapsed));
                 if share_now != sharing {
                     sharing = share_now;
                     control.send(CallUpdate::ScreenShare(sharer.clone().filter(|_| sharing)));
@@ -596,7 +604,7 @@ async fn speak_until_hangup(
                     people.iter().for_each(|(mri, _)| control.video.forget(&VideoKey::Person(mri.clone())));
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
-                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoWants(_)) => {}
+                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoWants(_) | CallCommand::SetShareMotion(_) | CallCommand::SetShareStandout(_)) => {}
                 Some(CallCommand::SetRecording { on, .. }) => control.send(CallUpdate::Recording(on)),
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),

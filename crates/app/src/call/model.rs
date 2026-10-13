@@ -18,6 +18,7 @@ use super::pictures::CallPictures;
 use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, split_overflow};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::push_to_talk::PushToTalk;
+use super::share_view::ShareStage;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
@@ -43,6 +44,7 @@ pub struct ActiveCall {
     pub fullscreen: Option<FullscreenState>,
     pub stage_size: Rc<Cell<(f32, f32)>>,
     pub sent_wants: Vec<VideoWant>,
+    pub share_stage: ShareStage,
     pub bubbles: Vec<ChatBubble>,
     pub share_menu_open: bool,
     pub lobby_list_open: bool,
@@ -107,6 +109,7 @@ impl ActiveCall {
             fullscreen: None,
             stage_size: Rc::default(),
             sent_wants: Vec::new(),
+            share_stage: ShareStage::default(),
             bubbles: Vec::new(),
             share_menu_open: false,
             lobby_list_open: false,

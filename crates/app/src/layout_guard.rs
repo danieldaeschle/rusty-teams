@@ -150,6 +150,12 @@ mod frames {
         "shell/islands/main/call-stage",
         "shell/islands/main/call-controls",
     ];
+    const SHARE_GUARDED: &[&str] = &[
+        "shell/islands/main/call-stage/share-content",
+        "shell/islands/main/call-stage/share-content/zoom-chip",
+        "shell/islands/main/call-stage/share-divider",
+        "shell/islands/main/call-stage/share-strip",
+    ];
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
@@ -164,6 +170,7 @@ mod frames {
         Tab(&'static str, Option<fn(&mut VisualTestContext)>),
         StatusMenu,
         Call,
+        CallShare,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -279,9 +286,17 @@ mod frames {
         GUARDED
             .iter()
             .chain(CALL_GUARDED)
+            .chain(SHARE_GUARDED)
             .chain([&MENU, &RECAP_TAB, &RECAP_REGION])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
+    }
+
+    fn sharing_call() -> ActiveCall {
+        let mut call = gallery_call();
+        call.model.apply(CallUpdate::ScreenShare(Some("8:orgid:guard-1".to_owned())));
+        call.share_stage.view.step_in((800., 450.));
+        call
     }
 
     fn gallery_call() -> ActiveCall {
@@ -395,6 +410,7 @@ mod frames {
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
                 Screen::StatusMenu,
                 Screen::Call,
+                Screen::CallShare,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -413,6 +429,15 @@ mod frames {
                         });
                         ("call", false)
                     }
+                    Screen::CallShare => {
+                        visual.update(|_, cx| {
+                            app.update(cx, |state, cx| {
+                                state.call = Some(sharing_call());
+                                cx.notify();
+                            })
+                        });
+                        ("call-share", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -426,8 +451,11 @@ mod frames {
                 };
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
-                if screen_name == "call" {
+                if matches!(screen_name, "call" | "call-share") {
                     expected.extend(CALL_GUARDED);
+                }
+                if screen_name == "call-share" {
+                    expected.extend(SHARE_GUARDED);
                 }
                 if status_menu {
                     expected.push(MENU);
@@ -457,7 +485,7 @@ mod frames {
                     visual.simulate_keystrokes("escape");
                     visual.run_until_parked();
                 }
-                if screen_name == "call" {
+                if matches!(screen_name, "call" | "call-share") {
                     visual.update(|_, cx| {
                         app.update(cx, |state, cx| {
                             state.call = None;

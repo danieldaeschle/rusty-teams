@@ -1540,6 +1540,8 @@ async fn drive(
                         send_receive_change(control, video.reselect(&roster));
                     }
                 }
+                Some(CallCommand::SetShareMotion(on)) => local_video.set_motion(on),
+                Some(CallCommand::SetShareStandout(on)) => local_video.set_standout(on),
                 Some(CallCommand::SetCameraEffects(effects)) => local_video.set_effects(effects),
                 Some(CallCommand::SendReaction(reaction)) => {
                     if let Err(error) = remote.signaling.send_reaction(&remote.conversation, &remote.participant, reaction).await {

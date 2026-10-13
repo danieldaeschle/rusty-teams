@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 89 %** (81 done, 15 partial, 4 missing of 100). Partial counts half.
+**Parity: 88 %** (81 done, 17 partial, 4 missing of 102). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 61 % | 4 | 14 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 60 % | 4 | 16 | 0 |
 
 ## Next
 
@@ -182,6 +182,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Breakout rooms (participant) | Partial | Move message from the participant update or the replacement invite: notice "Moving you to <room>", leave and join the room, "Return to main meeting" in the header, a closed room goes back to the main meeting. Parsing unit tested; needs an organizer who moves people |
 | Call health and encryption | Partial | Header shows signal bars and a shield; click opens "Call health" with loss, round trip, jitter, bitrate, "Secured by Teams encryption", DTLS-SRTP cipher and media path (direct or via Microsoft media server). Unstable network banner with "Turn off incoming video", overloaded computer banner with "Turn off effects". Thresholds unit tested; not yet seen on a bad live network |
 | View and layout | Partial | "View" button between share and "...": Gallery (up to 3x3 of 16:9 tiles, "+N" tile with a pin list; visible tiles only swap after 2 s of speech, one swap per 5 s), Speaker (stage plus filmstrip of up to 6), Focus on content (only while someone shares), Hide people without video with a count chip, Hide me / Show me, Chat bubbles, Full screen (F11, controls hide after 3 s). Choice, Hide people without video and Chat bubbles are remembered. Checked with the demo gallery scene only; not yet in a large live meeting |
+| Gallery video slots | Partial | Meetings offer 9 receive lines (mids 2-10, share on 11), so a 3x3 gallery shows up to 9 live videos. Only visible tiles get a slot: "+N" people and people hidden by "Hide people without video" are not requested. Speaker stage asks for 3600 macroblocks (max-fs), filmstrip, strip and big-gallery tiles for 920. 1:1 calls unchanged. Slot plan and offer layout unit tested; not yet seen with nine people on a live mixer |
+| Sharing tools | Partial | Received share: Ctrl+wheel zoom 1x-4x around the pointer, drag to pan, Alt+Shift+Plus / Minus / 0, "250%" chip resets; draggable divider (strip 160-400 px, remembered); "Pop out" opens the content in its own window, closing it returns it. Share menu: "Optimize for motion" (maintain framerate, 30 fps; off = maintain resolution, 15 fps) and "Show me over my content" (camera cut-out bottom right, 22 % wide, rounded; skipped without a mask). Linux: red border windows ignore the mouse on X11. Checked in the demo and unit tests; not yet live with a second person |
 | Whiteboard | Partial | Stage shows "<name> is sharing a whiteboard" with Open in browser, "..." > Whiteboard opens the meeting's board. State parsing unit tested; the share callback link is registered on join but not yet seen live |
 | Call history | Done | Calls tab (Ctrl+5) from the Teams call log: avatar, name, Missed call in red, Outgoing / Incoming / Meeting with duration, time like the chat list. Click calls back or opens the meeting chat; right-click Call back and Open chat. Refreshes on tab open and after a call ends. Read live (counts and shapes); no realtime update |
 | Join by link or meeting ID | Done | "Join with ID" dialog, "Paste a meeting link", Join chip next to Teams meeting links in the composer and messages. IDs and /meet/ links resolve through a roster-only conversation like Teams web; verified live with a self-created scheduled meeting (same meeting chat found) |

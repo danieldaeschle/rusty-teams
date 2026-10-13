@@ -20,6 +20,8 @@ mod overlay_layout;
 mod pictures;
 mod preview;
 mod push_to_talk;
+mod share_actions;
+mod share_view;
 mod ring;
 mod stage_layout;
 mod target;
@@ -49,6 +51,8 @@ pub use model::{
     TileState,
 };
 pub use overlay::CallWindows;
+pub use share_actions::ZoomStep;
+pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, ShareStage, load_flag, load_strip_width};
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use stage_layout::{FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, filmstrip, gallery_grid, split_overflow};

@@ -227,6 +227,12 @@ impl AppState {
         if self.call_share_sound {
             self.send_call_command(CallCommand::SetShareSound(true));
         }
+        if self.call_share_motion {
+            self.send_call_command(CallCommand::SetShareMotion(true));
+        }
+        if self.call_share_standout {
+            self.send_call_command(CallCommand::SetShareStandout(true));
+        }
         if self.call_mic != MicSettings::default() {
             self.send_call_command(CallCommand::SetMicSettings(self.call_mic));
         }
@@ -352,6 +358,7 @@ impl AppState {
         call.model.apply(update);
         if call.model.screen_sharer.is_none() {
             call.stage_fullscreen = false;
+            call.share_stage.end();
             call.pictures.forget(&VideoKey::Screen, cx);
         }
         if !call.model.camera_on {

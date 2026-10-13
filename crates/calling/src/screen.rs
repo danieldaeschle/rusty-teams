@@ -1,4 +1,5 @@
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use libwebrtc::desktop_capturer::{CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions};
@@ -7,7 +8,6 @@ use libwebrtc::video_frame::I420Buffer;
 
 use crate::capture::Capture;
 use crate::error::{Error, Result};
-use crate::video_pattern::PatternKind;
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,10 +83,10 @@ fn i420_from_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> I420Buf
 
 pub fn start_screen_capture(
     wanted: ShareSource,
+    fps: Arc<AtomicU32>,
     mut deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
-    let period = Duration::from_secs(1) / PatternKind::Screen.fps();
     Capture::spawn_thread("screen-capture", move |stop| {
         let Some(source) = sources_of(wanted.kind).into_iter().find(|(source, _)| source.id == wanted.id).map(|(_, raw)| raw) else {
             return failed("the shared source is gone".to_owned());
@@ -103,7 +103,7 @@ pub fn start_screen_capture(
         });
         while !stop.load(Ordering::SeqCst) {
             capturer.capture_frame();
-            std::thread::sleep(period);
+            std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
         }
     })
     .map_err(|error| Error::Webrtc(format!("screen thread: {error}")))

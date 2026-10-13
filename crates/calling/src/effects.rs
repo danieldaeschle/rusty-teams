@@ -6,6 +6,7 @@ use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
 use crate::blur::{BlurSettings, BlurStage, MASK_HEIGHT, MASK_WIDTH, MaskSource};
 use crate::camera::i420_from_rgba;
+use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
 use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
 
@@ -94,7 +95,8 @@ impl EffectsStage {
     pub fn apply_i420(&mut self, mut buffer: I420Buffer) -> I420Buffer {
         let effects = self.settings.effects();
         let blur = self.settings.enabled();
-        if !blur && !effects.alters_frame() {
+        let standout = self.settings.standout();
+        if !blur && !standout && !effects.alters_frame() {
             self.previous_frame = None;
             return buffer;
         }
@@ -104,10 +106,13 @@ impl EffectsStage {
         if effects.adjust_brightness {
             self.adjust_brightness(&mut buffer, width, height, elapsed);
         }
-        if (blur || effects.needs_mask()) && self.load_masks() {
-            self.refresh_mask(&mut buffer, effects.auto_framing);
+        if (blur || standout || effects.needs_mask()) && self.load_masks() {
+            let fresh = self.refresh_mask(&mut buffer, effects.auto_framing);
             if effects.soft_focus {
                 self.soften(&mut buffer, width, height, effects.soft_focus_strength);
+            }
+            if standout && fresh {
+                self.publish_cutout(&mut buffer);
             }
             if blur {
                 buffer = self.compose_background(buffer, width, height);
@@ -138,12 +143,18 @@ impl EffectsStage {
         !self.unavailable
     }
 
-    fn refresh_mask(&mut self, buffer: &mut I420Buffer, track_subject: bool) {
-        let Some(masks) = self.masks.as_mut() else { return };
+    fn refresh_mask(&mut self, buffer: &mut I420Buffer, track_subject: bool) -> bool {
+        let Some(masks) = self.masks.as_mut() else { return false };
         let fresh = masks.refresh(|| mask_input(buffer));
         if track_subject && fresh {
             self.subject = find_subject(masks.mask(), MASK_WIDTH, MASK_HEIGHT);
         }
+        fresh
+    }
+
+    fn publish_cutout(&self, buffer: &mut I420Buffer) {
+        let Some(masks) = self.masks.as_ref() else { return };
+        self.settings.set_cutout(Cutout::from_camera(buffer, masks.mask()).map(Arc::new));
     }
 
     fn soften(&self, buffer: &mut I420Buffer, width: usize, height: usize, strength: u8) {

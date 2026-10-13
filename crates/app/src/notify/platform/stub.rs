@@ -26,7 +26,13 @@ pub fn place(_handle: NativeHandle, _x: i32, _y: i32, _width: i32, _height: i32)
 
 pub fn exclude_from_capture(_handle: NativeHandle) {}
 
-pub fn make_click_through(_handle: NativeHandle) {}
+#[cfg(target_os = "linux")]
+pub fn make_window_click_through(window: &Window) {
+    super::x11_input::make_input_transparent(window);
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn make_window_click_through(_window: &Window) {}
 
 pub fn window_minimized(_handle: NativeHandle) -> bool {
     false

@@ -35,6 +35,8 @@ pub enum CallCommand {
     StartShare(ShareSource),
     StopShare,
     SetShareSound(bool),
+    SetShareMotion(bool),
+    SetShareStandout(bool),
     RefreshShareSources,
     SetHand(bool),
     LowerHand { mri: String },

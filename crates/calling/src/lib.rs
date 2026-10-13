@@ -41,6 +41,7 @@ pub mod sdp;
 pub mod signaling;
 pub mod software_audio;
 pub mod sound_capture;
+pub mod standout;
 pub mod state;
 pub mod timeline;
 pub mod transfer;

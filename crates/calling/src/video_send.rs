@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection_factory::PeerConnectionFactory;
+use libwebrtc::rtp_parameters::DegradationPreference;
 use libwebrtc::rtp_sender::RtpSender;
 use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
@@ -20,6 +22,7 @@ use crate::control::CallUpdate;
 use crate::devices::DeviceChoice;
 use crate::error::{Error, Result};
 use crate::screen::{ShareSource, start_screen_capture};
+use crate::standout::StandoutOverlay;
 use crate::video_frame::{FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420};
 use crate::video_layout::VideoLines;
 use crate::video_pattern::{PatternKind, spawn_pattern};
@@ -27,6 +30,8 @@ use crate::video_pattern::{PatternKind, spawn_pattern};
 pub const VIDEO_MODE_ENV: &str = "CALLING_VIDEO";
 const CAMERA_LABEL: &str = "camera";
 const SCREEN_LABEL: &str = "screen";
+pub const SCREEN_SHARE_FPS: u32 = 15;
+pub const MOTION_SHARE_FPS: u32 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VideoMode {
@@ -55,6 +60,7 @@ pub struct LocalSink {
     source: NativeVideoSource,
     self_view: Option<(Arc<VideoHub>, VideoKey, FrameGate)>,
     mirror: Option<Arc<BlurSettings>>,
+    standout: Option<StandoutOverlay>,
 }
 
 impl LocalSink {
@@ -63,7 +69,7 @@ impl LocalSink {
             let fps = if matches!(key, VideoKey::LocalScreen) { SCREEN_FPS } else { PERSON_FPS };
             (hub, key, FrameGate::new(fps))
         });
-        LocalSink { source, self_view, mirror: None }
+        LocalSink { source, self_view, mirror: None, standout: None }
     }
 
     pub fn mirrored_by(mut self, settings: Arc<BlurSettings>) -> Self {
@@ -71,7 +77,16 @@ impl LocalSink {
         self
     }
 
+    pub fn with_standout(mut self, settings: Arc<BlurSettings>) -> Self {
+        self.standout = Some(StandoutOverlay::new(settings));
+        self
+    }
+
     pub fn push(&mut self, buffer: I420Buffer) {
+        let buffer = match &mut self.standout {
+            Some(overlay) => overlay.apply(buffer),
+            None => buffer,
+        };
         let mut frame = VideoFrame::new(VideoRotation::VideoRotation0, buffer);
         frame.timestamp_us = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_micros() as i64);
         self.source.capture_frame(&frame);
@@ -111,6 +126,8 @@ pub struct LocalVideo {
     screen: Outgoing,
     lines: Option<VideoLines>,
     blur: Arc<BlurSettings>,
+    motion: bool,
+    share_fps: Arc<AtomicU32>,
 }
 
 impl LocalVideo {
@@ -123,7 +140,35 @@ impl LocalVideo {
             screen: Outgoing::new(factory, SCREEN_LABEL, PatternKind::Screen, true),
             lines: None,
             blur: Arc::new(BlurSettings::default()),
+            motion: false,
+            share_fps: Arc::new(AtomicU32::new(SCREEN_SHARE_FPS)),
         }
+    }
+
+    pub fn set_motion(&mut self, motion: bool) {
+        self.motion = motion;
+        self.share_fps.store(if motion { MOTION_SHARE_FPS } else { SCREEN_SHARE_FPS }, Ordering::Relaxed);
+        if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()).filter(|_| self.sharing()) {
+            let _ = self.tune_share(&share.sender());
+        }
+    }
+
+    pub fn set_standout(&self, standout: bool) {
+        self.blur.set_standout(standout);
+    }
+
+    fn tune_share(&self, sender: &RtpSender) -> Result<()> {
+        let mut parameters = sender.parameters();
+        parameters.set_degradation_preference(if self.motion {
+            DegradationPreference::MaintainFramerate
+        } else {
+            DegradationPreference::MaintainResolution
+        });
+        let fps = f64::from(self.share_fps.load(Ordering::Relaxed));
+        for encoding in &mut parameters.encodings {
+            encoding.max_framerate = Some(fps);
+        }
+        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     pub fn set_background(&self, enabled: bool, picture: Option<Arc<BackgroundPicture>>) {
@@ -216,6 +261,7 @@ impl LocalVideo {
 
     pub fn stop_camera(&mut self) {
         self.camera.capture = None;
+        self.blur.set_cutout(None);
         if let Some(lines) = &self.lines {
             let _ = Self::set_active(&lines.camera.sender(), false);
         }
@@ -229,12 +275,13 @@ impl LocalVideo {
             return Err(Error::Webrtc("video is switched off".into()));
         }
         self.screen.capture = None;
-        let mut sink = LocalSink::new(self.screen.source.clone(), None);
+        let mut sink = LocalSink::new(self.screen.source.clone(), None).with_standout(self.blur.clone());
         let capture = match self.mode {
             VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
-            _ => start_screen_capture(source.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
+            _ => start_screen_capture(source.clone(), self.share_fps.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
         };
         Self::begin_sending(&share.sender(), &self.screen.track)?;
+        let _ = self.tune_share(&share.sender());
         self.screen.capture = Some(capture);
         Ok(())
     }

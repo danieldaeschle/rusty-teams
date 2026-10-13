@@ -18,8 +18,9 @@ use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenCallsTab,
     OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk, Scope,
     ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
-    ToggleCallHand, ToggleCallShare,
+    ToggleCallHand, ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
 };
+use super::call_pop_out::zoom_listener;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
 use super::status_bar::render_status_bar;
@@ -30,7 +31,7 @@ use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection};
-use crate::call::{CallMedia, CallWindows};
+use crate::call::{CallMedia, CallWindows, ZoomStep};
 use crate::notice::NoticeAction;
 use crate::notify::{NotificationCenter, selection_for};
 use crate::sidebar_model::Step;
@@ -851,6 +852,9 @@ impl Render for AppShell {
                 this.state
                     .update(cx, |state, cx| state.toggle_call_fullscreen(cx));
             }))
+            .on_action(zoom_listener::<ZoomShareIn>(&self.state, ZoomStep::In))
+            .on_action(zoom_listener::<ZoomShareOut>(&self.state, ZoomStep::Out))
+            .on_action(zoom_listener::<ZoomShareReset>(&self.state, ZoomStep::Reset))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {
