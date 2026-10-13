@@ -51,6 +51,31 @@ impl TeamsSource for AppSource {
         message_extras(message, my_user_id)
     }
 
+    fn image_dimensions(&self, bytes: &[u8]) -> Option<(u32, u32)> {
+        crate::views::attachment_tray::dimensions_of(bytes)
+    }
+
+    fn rendered_text(&self, markdown: &str) -> String {
+        teams_core::Draft::from_markdown(markdown).text().to_owned()
+    }
+
+    fn plain_mention_spans(
+        &self,
+        markdown: &str,
+        names: &[String],
+        ignore_case: bool,
+    ) -> Vec<Vec<std::ops::Range<usize>>> {
+        let draft = teams_core::Draft::from_markdown(markdown);
+        names
+            .iter()
+            .map(|name| teams_core::plain_mention_spans(&draft, name, ignore_case))
+            .collect()
+    }
+
+    fn reaction_supported(&self, emoji: &str) -> bool {
+        chatsvc::emotion_key(emoji).is_some()
+    }
+
     fn image<'a>(
         &'a self,
         message: &'a MessageRecord,
@@ -170,4 +195,55 @@ async fn wait_for_image(events: &mut tokio::sync::broadcast::Receiver<CoreEvent>
         }
     })
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mcp::TeamsSource;
+    use store::Store;
+
+    use super::AppSource;
+
+    fn source() -> AppSource {
+        AppSource::new(Arc::new(Store::open_in_memory().unwrap()))
+    }
+
+    fn spans(markdown: &str, name: &str, ignore_case: bool) -> usize {
+        source()
+            .plain_mention_spans(markdown, &[name.to_owned()], ignore_case)
+            .remove(0)
+            .len()
+    }
+
+    #[test]
+    fn mention_spans_follow_the_real_plain_text_rule() {
+        assert_eq!(spans("**hi @Ada** and `@Bo`", "Ada", false), 1);
+        assert_eq!(spans("**hi @Ada** and `@Bo`", "Bo", false), 0);
+        assert_eq!(spans("@Ada hi", "Ada", false), 1);
+        assert_eq!(spans("@ada hi", "Ada", true), 1);
+        assert_eq!(spans("@ada hi", "Ada", false), 0);
+        assert_eq!(spans("[x](https://e.com/@Ada) ops@Ada", "Ada", false), 0);
+        let both = source().plain_mention_spans(
+            "@Ada and @Bo",
+            &["Ada".to_owned(), "Bo".to_owned()],
+            false,
+        );
+        assert_eq!(both, [vec![0..4], vec![9..12]]);
+    }
+
+    #[test]
+    fn the_other_trait_methods_do_real_work() {
+        let source = source();
+        assert_eq!(source.rendered_text("**bold** @Ada"), "bold @Ada");
+        assert!(source.reaction_supported("\u{1F44D}"));
+        assert!(!source.reaction_supported("not an emoji"));
+        let mut png = Vec::new();
+        image::RgbaImage::new(3, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        assert_eq!(source.image_dimensions(&png), Some((3, 2)));
+        assert_eq!(source.image_dimensions(b"nope"), None);
+    }
 }

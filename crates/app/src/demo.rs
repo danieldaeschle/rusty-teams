@@ -788,7 +788,7 @@ pub fn seed(store: &Store) {
     seed_agent_access(store);
 }
 
-const AGENT_DEMO_PROPOSAL: &str = "I ran the regression suite on staging: 412 passed, 0 failed. The release candidate is good to ship.";
+const AGENT_DEMO_PROPOSAL: &str = "I ran the regression suite on staging: 412 passed, 0 failed. The release candidate is good to ship, @Mara Lindqvist.";
 
 fn seed_agent_access(store: &Store) {
     let selected =
@@ -810,6 +810,28 @@ fn seed_agent_access(store: &Store) {
         conversation_id: RELEASE_CHAT.to_owned(),
         reply_to_message_id: Some("m1".to_owned()),
         text: AGENT_DEMO_PROPOSAL.to_owned(),
+        mentions: vec![store::AgentProposalMention {
+            user_id: MARA_ID.to_owned(),
+            name: "Mara Lindqvist".to_owned(),
+        }],
+        images: vec![store::AttachmentImage {
+            name: "image-1.png".to_owned(),
+            format: "image/png".to_owned(),
+            bytes: encode_png(&MARA),
+            width: Some(PHOTO_SIZE as u32),
+            height: Some(PHOTO_SIZE as u32),
+        }],
+        agent: Some("claude".to_owned()),
+        session_id: None,
+        created_at: Utc::now() - Duration::minutes(1),
+        state: "pending".to_owned(),
+        resolved_at: None,
+    });
+    let _ = store.insert_agent_reaction(&store::AgentReactionRecord {
+        id: "demo-reaction".to_owned(),
+        conversation_id: "demo-chat-mara".to_owned(),
+        message_id: "ml1".to_owned(),
+        emoji: "\u{1F44D}".to_owned(),
         agent: Some("claude".to_owned()),
         session_id: None,
         created_at: Utc::now() - Duration::minutes(1),

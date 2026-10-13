@@ -105,7 +105,7 @@ pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, pu
 pub use mapping::{chat_record, message_record};
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
-pub use mentions::MentionInput;
+pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use meeting_join::{
     MeetingCode, MeetingLink, ThreadMeeting, find_meeting_link, meeting_code_from_id,
     meeting_link_in_html, parse_meeting_link,

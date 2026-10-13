@@ -983,8 +983,8 @@ impl McpView {
         ); 3] = [
             (
                 "mcp-propose",
-                "Propose messages",
-                "Card above the composer, you send",
+                "Propose messages and reactions",
+                "Card above the composer, note under a message. You decide",
                 theme::text_muted(),
                 policy.propose,
                 |policy| policy.propose = !policy.propose,

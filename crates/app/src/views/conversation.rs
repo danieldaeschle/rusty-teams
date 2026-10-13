@@ -74,6 +74,7 @@ use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
+use mcp::ReactionProposal;
 use render_env::RenderEnv;
 use shared::SharedState;
 
@@ -151,6 +152,15 @@ struct ReactionDetails {
     tab: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReactionAttempt {
+    Acted,
+    Started,
+    AlreadyThere,
+    MissingMessage,
+    Blocked,
+}
+
 pub struct ConversationView {
     app: Entity<AppState>,
     pinned: bool,
@@ -203,6 +213,7 @@ pub struct ConversationView {
     new_folder_input: Option<Entity<InputState>>,
     agent_layouts: HashMap<String, (usize, bool)>,
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
+    reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -470,6 +481,9 @@ impl ConversationView {
         if let Some(runs) = crate::agents::runs_handle(cx) {
             subscriptions.push(cx.observe(&runs, |this, _, cx| this.sync_agent_chips(cx)));
         }
+        if let Some(api) = crate::agent_api::handle(cx) {
+            subscriptions.push(cx.observe(&api, |this, _, cx| this.sync_reaction_pills(cx)));
+        }
         let mut view = ConversationView {
             app,
             pinned: pinned.is_some(),
@@ -522,6 +536,7 @@ impl ConversationView {
             new_folder_input: None,
             agent_layouts: HashMap::new(),
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
+            reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -804,6 +819,7 @@ impl ConversationView {
         self.toolbar_suppressed = None;
         self.agent_layouts.clear();
         self.agent_runs.borrow_mut().clear();
+        self.reaction_proposals.borrow_mut().clear();
         let title = selection_title(&self.app.read(cx).sidebar, &selection);
         let mode = match selection {
             Selection::Chat(_) => ViewMode::Flat,
@@ -826,6 +842,7 @@ impl ConversationView {
             window_request: None,
         });
         self.refresh_agent_runs(cx);
+        self.refresh_reaction_pills(cx);
         self.sync_generation += 1;
         self.reset_channel_tabs(cx);
         self.reset_recap(cx);
@@ -2431,15 +2448,26 @@ impl ConversationView {
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {
+        self.change_reaction(message_id, glyph, false, None, cx);
+    }
+
+    fn change_reaction(
+        &mut self,
+        message_id: &str,
+        glyph: &str,
+        only_add: bool,
+        accepted_proposal: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> ReactionAttempt {
         let Some(conversation_id) = self.conversation_id() else {
-            return;
+            return ReactionAttempt::Blocked;
         };
         let state = self.app.read(cx);
         let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
         let engine = engine.filter(|_| !mode.read_only);
         if !mode.demo && engine.is_none() {
             self.show_notice("Read-only mode: reaction not sent", cx);
-            return;
+            return ReactionAttempt::Blocked;
         }
         let my_user_id = self.row_context(cx).my_user_id;
         let Some(mut record) = store
@@ -2447,7 +2475,7 @@ impl ConversationView {
             .ok()
             .and_then(|mut found| found.remove(message_id))
         else {
-            return;
+            return ReactionAttempt::MissingMessage;
         };
         let wanted = reaction_glyph(glyph);
         let mut visible = teams_core::reactions(&record);
@@ -2458,6 +2486,9 @@ impl ConversationView {
             Utc::now(),
         );
         let added = !has_own_reaction(&visible, glyph, my_user_id.as_deref());
+        if only_add && !added {
+            return ReactionAttempt::AlreadyThere;
+        }
         let Some(engine) = engine.filter(|_| !mode.demo) else {
             let mut reactions = teams_core::reactions(&record);
             set_own_reaction(
@@ -2473,7 +2504,7 @@ impl ConversationView {
                 self.record_reaction_use(glyph, cx);
             }
             self.rebuild(false, cx);
-            return;
+            return ReactionAttempt::Acted;
         };
         let entries = self
             .pending_reactions
@@ -2505,11 +2536,20 @@ impl ConversationView {
                 Err(_) => Err("cancelled".to_owned()),
             };
             this.update(cx, |this, cx| {
-                this.finish_reaction(&conversation_id, &message_id, &glyph, added, outcome, cx)
+                this.finish_reaction(
+                    &conversation_id,
+                    &message_id,
+                    &glyph,
+                    added,
+                    accepted_proposal.as_deref(),
+                    outcome,
+                    cx,
+                )
             })
             .ok();
         })
         .detach();
+        ReactionAttempt::Started
     }
 
     fn finish_reaction(
@@ -2518,11 +2558,21 @@ impl ConversationView {
         message_id: &str,
         glyph: &str,
         added: bool,
+        accepted_proposal: Option<&str>,
         outcome: Result<(), String>,
         cx: &mut Context<Self>,
     ) {
         let wanted = reaction_glyph(glyph);
         let store = self.app.read(cx).store.clone();
+        if let Some(proposal_id) = accepted_proposal.filter(|_| outcome.is_ok()) {
+            crate::agent_api::resolve_reaction_proposal(
+                conversation_id,
+                message_id,
+                proposal_id,
+                mcp::ReactionOutcome::Accepted,
+                cx,
+            );
+        }
         if outcome.is_ok() {
             let my_user_id = self.row_context(cx).my_user_id;
             if let Some(mut record) = store
@@ -2842,24 +2892,29 @@ impl ConversationView {
     fn sync_agent_chips(&mut self, cx: &mut Context<Self>) {
         let (snapshot_changed, changed) = self.refresh_agent_runs(cx);
         let any_running = self.agent_runs.borrow().values().any(AgentRun::is_running);
-        if !changed.is_empty() {
-            let indices: Vec<usize> = self
-                .rows
-                .borrow()
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| row.messages().any(|message| changed.contains(&message.key)))
-                .map(|(index, _)| index)
-                .collect();
-            self.scroller.update(cx, |scroller, cx| {
-                for index in indices {
-                    scroller.remeasure_items(index..index + 1, cx);
-                }
-            });
-        }
+        self.remeasure_rows_of(&changed, cx);
         if snapshot_changed || any_running {
             cx.notify();
         }
+    }
+
+    fn remeasure_rows_of(&mut self, keys: &HashSet<String>, cx: &mut Context<Self>) {
+        if keys.is_empty() {
+            return;
+        }
+        let indices: Vec<usize> = self
+            .rows
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.messages().any(|message| keys.contains(&message.key)))
+            .map(|(index, _)| index)
+            .collect();
+        self.scroller.update(cx, |scroller, cx| {
+            for index in indices {
+                scroller.remeasure_items(index..index + 1, cx);
+            }
+        });
     }
 
     fn message_menu(
@@ -3308,6 +3363,7 @@ impl Render for ConversationView {
             reply_editor: self.reply_root.clone().zip(self.reply_composer.clone()),
             timeline: self.timeline_bounds.clone(),
             agent_runs: self.agent_runs.clone(),
+            reaction_proposals: self.reaction_proposals.clone(),
         };
         let scroller = MessageScroller::new(
             "messages",

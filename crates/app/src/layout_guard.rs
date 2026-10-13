@@ -130,6 +130,8 @@ mod frames {
     use crate::demo;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
+    use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
+    use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call};
     use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
@@ -184,6 +186,14 @@ mod frames {
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
     const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
+    const PROPOSAL_CHAT: &str = "demo-chat-release";
+    const REACTION_CHAT: &str = "demo-chat-mara";
+    const AGENT_TAGS: [&str; 4] = [
+        PROPOSAL_CARD,
+        PROPOSAL_THUMBNAILS,
+        PROPOSAL_BUTTONS,
+        REACTION_PILL,
+    ];
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
@@ -321,7 +331,14 @@ mod frames {
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
-            .chain([&CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
+            .chain([
+                &CALL_TRANSCRIPT,
+                &MENU,
+                &RECAP_TAB,
+                &RECAP_REGION,
+                &PEOPLE_PANEL,
+            ])
+            .chain(&AGENT_TAGS)
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -359,18 +376,29 @@ mod frames {
     }
 
     fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
+        mount_with(cx, false)
+    }
+
+    fn mount_with(
+        cx: &mut TestAppContext,
+        agent_api: bool,
+    ) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
         cx.update(gpui_kit::init);
         cx.update(|cx| {
             crate::theme::apply(cx);
             bind_keys(cx);
             let store = Store::open_in_memory().expect("in-memory store");
             demo::seed(&store);
+            let store = Arc::new(store);
+            if agent_api {
+                crate::agent_api::init(store.clone(), true, cx);
+            }
             let mode = Mode {
                 demo: true,
                 read_only: false,
                 demo_sync: None,
             };
-            let state = cx.new(|_| AppState::new(Arc::new(store), mode));
+            let state = cx.new(|_| AppState::new(store, mode));
             install_globals(&state, UserInput::new(), cx);
             demo::start_session(&state, cx);
             let shared_state = state.clone();
@@ -638,6 +666,37 @@ mod frames {
                 .map(|(key, message)| format!("recap@{width}x{height}:{key}: {message}"))
                 .collect();
             assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    #[gpui_kit::test]
+    fn agent_proposals_stay_inside_the_main_island(cx: &mut TestAppContext) {
+        let (handle, state) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            for (chat, expected_tags) in [
+                (PROPOSAL_CHAT, &AGENT_TAGS[..3]),
+                (REACTION_CHAT, &AGENT_TAGS[3..]),
+            ] {
+                visual.update(|_, cx| {
+                    state.update(cx, |state, cx| {
+                        state.select(Selection::Chat(chat.to_owned()), cx)
+                    })
+                });
+                let tags = collect(&mut visual, Some(expected_tags[0]));
+                let mut expected = GUARDED.to_vec();
+                expected.extend(expected_tags);
+                let found: Vec<String> = violations(&tags, window, &expected)
+                    .into_iter()
+                    .map(|(key, message)| format!("{chat}@{width}x{height}:{key}: {message}"))
+                    .collect();
+                assert!(found.is_empty(), "{}", found.join("\n"));
+            }
         }
     }
 }

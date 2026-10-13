@@ -68,8 +68,8 @@
 
 **Agents (MCP)**
 - Local MCP server at `http://127.0.0.1:40615/mcp`, off by default: Settings > MCP
-- Agents read allowed chats, channels, meetings and transcripts (images, reactions, files and cards included, newest messages across chats), and propose replies
-- A proposal shows as a card above the composer: Send, Edit or Discard. Agents never send
+- Agents read allowed chats, channels, meetings and transcripts (images, reactions, files and cards included, newest messages across chats), and propose replies with @mentions and images, or an emoji reaction
+- A reply shows as a card above the composer: Send, Edit or Discard. A reaction shows as a note under the message: Accept or Discard. Agents never send
 - One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
 - Delegate a message to a coding-agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar: progress chip, Agents rail entry, toast when it finishes, Open session
 

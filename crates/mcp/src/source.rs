@@ -126,16 +126,26 @@ pub trait TeamsSource: Send + Sync + 'static {
 
     fn image<'a>(
         &'a self,
-        _message: &'a MessageRecord,
-        _image_id: &'a str,
-        _max_edge: u32,
-    ) -> SourceFuture<'a, EncodedImage> {
-        Box::pin(async { Err(SourceError::Unsupported("images")) })
-    }
+        message: &'a MessageRecord,
+        image_id: &'a str,
+        max_edge: u32,
+    ) -> SourceFuture<'a, EncodedImage>;
 
-    fn refresh_recent(&self, _conversation_ids: Vec<String>) -> SourceFuture<'_, ()> {
-        Box::pin(async { Ok(()) })
-    }
+    fn reaction_supported(&self, emoji: &str) -> bool;
+
+    fn image_dimensions(&self, bytes: &[u8]) -> Option<(u32, u32)>;
+
+    fn rendered_text(&self, markdown: &str) -> String;
+
+    /// Per name: the `@name` spans (in rendered text offsets) where a mention may sit.
+    fn plain_mention_spans(
+        &self,
+        markdown: &str,
+        names: &[String],
+        ignore_case: bool,
+    ) -> Vec<Vec<std::ops::Range<usize>>>;
+
+    fn refresh_recent(&self, conversation_ids: Vec<String>) -> SourceFuture<'_, ()>;
 
     fn calendar(
         &self,

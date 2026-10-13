@@ -122,6 +122,20 @@ fn image_dimensions(format: InlineFormat, bytes: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+pub fn dimensions_of(bytes: &[u8]) -> Option<(u32, u32)> {
+    image_dimensions(sniff_inline_format(bytes)?, bytes)
+}
+
+pub fn inline_image(name: String, bytes: Vec<u8>) -> Option<InlineImage> {
+    let format = sniff_inline_format(&bytes)?;
+    let dimensions = image_dimensions(format, &bytes);
+    Some(InlineImage {
+        name,
+        image: Arc::new(Image::from_bytes(format.image_format(), bytes)),
+        dimensions,
+    })
+}
+
 pub fn limit_notice(dropped: usize) -> String {
     let files = if dropped == 1 {
         "1 file was".to_owned()

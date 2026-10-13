@@ -2068,6 +2068,33 @@ impl Composer {
         cx.notify();
     }
 
+    fn with_mention_tokens(
+        &mut self,
+        mut content: InputContent,
+        draft: &Draft,
+        mentions: &[MentionInput],
+    ) -> InputContent {
+        let text = draft.text();
+        let mut cursor = 0;
+        for mention in mentions {
+            let Some(range) = teams_core::plain_mention_spans(draft, &mention.text, false)
+                .into_iter()
+                .find(|span| span.start >= cursor)
+            else {
+                continue;
+            };
+            self.mention_counter += 1;
+            let token_id = format!("mention-{}", self.mention_counter);
+            let token = InlineToken::new(token_id.clone(), text[range.clone()].to_owned());
+            if let Ok(next) = content.clone().with_token(range.clone(), token) {
+                content = next;
+                self.mention_inputs.insert(token_id, mention.clone());
+                cursor = range.end;
+            }
+        }
+        content
+    }
+
     pub fn restore(&mut self, outgoing: &Outgoing, window: &mut Window, cx: &mut Context<Self>) {
         self.mention_inputs.clear();
         let image_ids = if outgoing.edit.is_none() {
@@ -2084,28 +2111,44 @@ impl Composer {
                 content = next;
             }
         }
-        let mut cursor = 0;
-        for mention in &outgoing.mentions {
-            let needle = format!("@{}", mention.text);
-            let Some(offset) = text[cursor..].find(&needle) else {
-                continue;
-            };
-            let range = cursor + offset..cursor + offset + needle.len();
-            self.mention_counter += 1;
-            let token_id = format!("mention-{}", self.mention_counter);
-            let token = InlineToken::new(token_id.clone(), needle);
-            if let Ok(next) = content.clone().with_token(range.clone(), token) {
-                content = next;
-                self.mention_inputs.insert(token_id, mention.clone());
-                cursor = range.end;
-            }
-        }
+        let content = self.with_mention_tokens(content, &outgoing.draft, &outgoing.mentions);
         self.load_draft(outgoing.draft.clone(), content, window, cx);
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
         self.link.restore(outgoing.link_preview.clone());
         self.close_popup();
         self.schedule_draft_save(cx);
+        cx.notify();
+    }
+
+    /// Text and mentions replace the draft; images join the tray, where oversized ones upload as files.
+    pub fn load_proposal(
+        &mut self,
+        text: &str,
+        mentions: &[MentionInput],
+        pictures: Vec<(String, Vec<u8>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let draft = Draft::from_markdown(text);
+        self.mention_inputs.clear();
+        let content =
+            self.with_mention_tokens(InputContent::new(draft.text().to_owned()), &draft, mentions);
+        self.load_draft(draft, content, window, cx);
+        self.update_emoji(cx);
+        self.update_mention(cx);
+        self.update_link_preview(cx);
+        for (name, bytes) in pictures {
+            let ids = self.add_pending(std::slice::from_ref(&name), cx);
+            let Some(&id) = ids.first() else {
+                continue;
+            };
+            let loaded = LoadedFile {
+                file_name: Some(name),
+                ..LoadedFile::new(bytes)
+            };
+            self.finish_reading(id, Ok(loaded), window, cx);
+        }
         cx.notify();
     }
 
@@ -3152,6 +3195,15 @@ mod tests {
             typist.press("ctrl-v");
         }
 
+        fn image_ids(composer: &Composer) -> usize {
+            composer
+                .tray
+                .items()
+                .iter()
+                .filter(|item| composer.tray.image(item.id).is_some())
+                .count()
+        }
+
         fn image_tokens(typist: &mut Typist<'_>) -> Vec<(std::ops::Range<usize>, bool)> {
             let composer = typist.composer.clone();
             typist.cx.update(|cx| {
@@ -3376,6 +3428,124 @@ mod tests {
             let again = typist.outgoing();
             assert_eq!(again.images, outgoing.images);
             assert_eq!(again.html(), "x<img src=\"../hostedContents/1/$value\">y");
+        }
+
+        fn load(
+            typist: &mut Typist<'_>,
+            entry: &crate::agent_api::ProposalEntry,
+        ) -> Vec<(String, Vec<u8>)> {
+            let composer = typist.composer.clone();
+            let mentions = crate::views::proposal_card::outgoing_for(entry, None).mentions;
+            let pictures = crate::views::proposal_card::picture_files(entry);
+            let loaded = pictures.clone();
+            let text = entry.proposal.text.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.load_proposal(&text, &mentions, pictures, window, cx)
+                });
+            });
+            loaded
+        }
+
+        #[gpui_kit::test]
+        fn a_loaded_proposal_keeps_its_mentions_images_and_the_reply(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::{sample_entry, sample_png};
+
+            let mut typist = typist(cx);
+            let entry = sample_entry(
+                "Thanks @Ada Example",
+                &[("u1", "Ada Example")],
+                &[sample_png(3, 0)],
+            );
+            let composer = typist.composer.clone();
+            let reply = super::super::ReplyPreview {
+                message_id: "m1".into(),
+                author: "Bo".into(),
+                excerpt: "question".into(),
+            };
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, cx| composer.set_reply(Some(reply.clone()), cx));
+            });
+            load(&mut typist, &entry);
+            let tokens = image_tokens(&mut typist);
+            assert_eq!(tokens.iter().filter(|(_, block)| *block).count(), 1);
+            assert_eq!(tokens.len(), 2);
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.images.len(), 1);
+            assert_eq!(
+                outgoing.mentions,
+                [teams_core::MentionInput::user("u1", "Ada Example")]
+            );
+            assert_eq!(outgoing.reply, Some(reply));
+            assert!(outgoing.html().starts_with("Thanks @Ada Example"));
+        }
+
+        #[gpui_kit::test]
+        fn a_mention_at_the_start_of_a_line_is_placed_on_send(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::sample_entry;
+
+            let mut typist = typist(cx);
+            let entry = sample_entry("Hi team\n\n@Ada\n\nthanks", &[], &[]);
+            load(&mut typist, &entry);
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.load_proposal(
+                        "Hi team\n\n@Ada\n\nthanks",
+                        &[teams_core::MentionInput::user("u1", "Ada")],
+                        Vec::new(),
+                        window,
+                        cx,
+                    )
+                });
+            });
+            let outgoing = typist.outgoing();
+            let (_, placed) = teams_core::apply_mentions(&outgoing.html(), &outgoing.mentions);
+            assert_eq!(placed.len(), 1, "{}", outgoing.html());
+        }
+
+        #[gpui_kit::test]
+        fn a_text_only_proposal_keeps_a_running_upload(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::sample_entry;
+
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, _| {
+                    let ids = composer.tray.add_pending(&["plan.pdf".to_owned()]);
+                    assert_eq!(ids.len(), 1);
+                });
+            });
+            load(&mut typist, &sample_entry("just text", &[], &[]));
+            let items = typist.cx.update(|cx| composer.read(cx).tray.items().len());
+            assert_eq!(items, 1);
+            assert_eq!(typist.value(), "just text");
+        }
+
+        #[gpui_kit::test]
+        fn proposal_images_join_the_tray_and_big_ones_become_uploads(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::{sample_entry, sample_png};
+
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, _| {
+                    composer.conversation_id = Some("c1".to_owned());
+                    composer.tray.add_pending(&["kept.pdf".to_owned()]);
+                });
+            });
+            let entry = sample_entry(
+                "pictures",
+                &[],
+                &[sample_png(2, 0), sample_png(2, 2 * 1024 * 1024)],
+            );
+            load(&mut typist, &entry);
+            let (items, images) = typist.cx.update(|cx| {
+                let composer = composer.read(cx);
+                (composer.tray.items().len(), image_ids(composer))
+            });
+            assert_eq!(items, 3);
+            assert_eq!(images, 1);
         }
 
         #[gpui_kit::test]
