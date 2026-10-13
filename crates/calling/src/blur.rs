@@ -8,6 +8,7 @@ use tract_onnx::prelude::*;
 use crate::background::BackgroundPicture;
 use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
+use crate::standout::Cutout;
 
 const MODEL: &[u8] = include_bytes!("../assets/selfie_segmentation_landscape.onnx");
 pub const MASK_WIDTH: usize = 256;
@@ -76,7 +77,7 @@ fn model_input(rgba: &[u8], width: usize, height: usize) -> Tensor {
     Tensor::from_shape(&[1, 3, MASK_HEIGHT, MASK_WIDTH], &data).expect("shape matches data")
 }
 
-fn smoothstep(value: f32) -> f32 {
+pub(crate) fn smoothstep(value: f32) -> f32 {
     let t = ((value - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW)).clamp(0., 1.);
     t * t * (3. - 2. * t)
 }
@@ -229,9 +230,11 @@ pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, mask: &[f32],
 #[derive(Default)]
 pub struct BlurSettings {
     enabled: AtomicBool,
+    standout: AtomicBool,
     average_micros: AtomicU32,
     picture: Mutex<Option<Arc<BackgroundPicture>>>,
     effects: Mutex<CameraEffects>,
+    cutout: Mutex<Option<Arc<Cutout>>>,
 }
 
 impl BlurSettings {
@@ -241,6 +244,25 @@ impl BlurSettings {
 
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_standout(&self, standout: bool) {
+        self.standout.store(standout, Ordering::Relaxed);
+        if !standout {
+            self.set_cutout(None);
+        }
+    }
+
+    pub fn standout(&self) -> bool {
+        self.standout.load(Ordering::Relaxed)
+    }
+
+    pub fn set_cutout(&self, cutout: Option<Arc<Cutout>>) {
+        *self.cutout.lock().expect("cutout lock") = cutout;
+    }
+
+    pub fn cutout(&self) -> Option<Arc<Cutout>> {
+        self.cutout.lock().expect("cutout lock").clone()
     }
 
     pub fn set_picture(&self, picture: Option<Arc<BackgroundPicture>>) {
@@ -260,7 +282,7 @@ impl BlurSettings {
     }
 
     pub fn active(&self) -> bool {
-        self.enabled() || self.effects().alters_frame()
+        self.enabled() || self.standout() || self.effects().alters_frame()
     }
 
     pub fn average_ms(&self) -> f32 {

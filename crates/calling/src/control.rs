@@ -22,6 +22,7 @@ use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
 use crate::signaling::{Callee, MeetingTarget};
 use crate::state::CallState;
+use crate::video_layout::VideoWant;
 use crate::video_frame::VideoHub;
 use crate::whiteboard::ContentShare;
 
@@ -38,6 +39,8 @@ pub enum CallCommand {
     StartShare(ShareSource),
     StopShare,
     SetShareSound(bool),
+    SetShareMotion(bool),
+    SetShareStandout(bool),
     RefreshShareSources,
     SetHand(bool),
     LowerHand { mri: String },
@@ -60,6 +63,7 @@ pub enum CallCommand {
     SetCaptions(bool),
     SetBackground(BackgroundChoice),
     SetIncomingVideo(bool),
+    SetVideoWants(Vec<VideoWant>),
     SetCameraEffects(CameraEffects),
     SendReaction(Reaction),
     StartRecording { kind: RecordingKind, title: String },

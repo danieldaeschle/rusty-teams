@@ -7,6 +7,7 @@ use calling::{
     AttendeeLimits, CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
     DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingCapability, MeetingRole,
     MeetingTarget, Progress, Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    VideoWant,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -20,6 +21,7 @@ use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::options_dialog::OptionsDialog;
 use super::push_to_talk::PushToTalk;
+use super::share_view::ShareStage;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
@@ -44,6 +46,8 @@ pub struct ActiveCall {
     pub stage_fullscreen: bool,
     pub fullscreen: Option<FullscreenState>,
     pub stage_size: Rc<Cell<(f32, f32)>>,
+    pub sent_wants: Vec<VideoWant>,
+    pub share_stage: ShareStage,
     pub bubbles: Vec<ChatBubble>,
     pub share_menu_open: bool,
     pub lobby_list_open: bool,
@@ -110,6 +114,8 @@ impl ActiveCall {
             stage_fullscreen: false,
             fullscreen: None,
             stage_size: Rc::default(),
+            sent_wants: Vec::new(),
+            share_stage: ShareStage::default(),
             bubbles: Vec::new(),
             share_menu_open: false,
             lobby_list_open: false,

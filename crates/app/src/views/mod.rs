@@ -11,6 +11,7 @@ pub mod call_mini;
 pub mod call_mini_window;
 pub mod call_organizer;
 pub mod call_people;
+pub mod call_pop_out;
 pub mod call_record;
 pub mod call_stage;
 pub mod call_transcript;

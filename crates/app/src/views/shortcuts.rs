@@ -10,6 +10,7 @@ use super::shell::{NewChat, OpenSwitcher, ToggleCallMute};
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";
 const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input";
+const ALTERNATE_KEYS: &[(&str, &str)] = &[("alt-shift-=", "alt-shift-+")];
 
 actions!(
     teams,
@@ -33,6 +34,9 @@ actions!(
         StartVideoCall,
         ToggleCallFullscreen,
         PushToTalk,
+        ZoomShareIn,
+        ZoomShareOut,
+        ZoomShareReset,
         ShowShortcuts
     ]
 );
@@ -128,6 +132,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Calls, GlobalOverTextFields, "Start an audio call in this chat", "alt-shift-a", None, StartAudioCall),
     shortcut!(Calls, GlobalOverTextFields, "Start a video call in this chat", "alt-shift-v", None, StartVideoCall),
     shortcut!(Calls, GlobalOverTextFields, "Full screen", "f11", None, ToggleCallFullscreen),
+    shortcut!(Calls, GlobalOverTextFields, "Zoom in on shared content", "alt-shift-=", None, ZoomShareIn),
+    shortcut!(Calls, GlobalOverTextFields, "Zoom out on shared content", "alt-shift--", None, ZoomShareOut),
+    shortcut!(Calls, GlobalOverTextFields, "Reset zoom on shared content", "alt-shift-0", None, ZoomShareReset),
     shortcut!(Calls, OutsideTextFields, "Hold to talk while muted", "ctrl-space", None, PushToTalk),
 ];
 
@@ -152,6 +159,7 @@ impl Shortcut {
             Scope::Composer => &[Some(COMPOSER_CONTEXT)],
         };
         let mut keys = vec![self.keys];
+        keys.extend(ALTERNATE_KEYS.iter().filter(|(primary, _)| *primary == self.keys).map(|(_, alternate)| *alternate));
         keys.extend(self.mac_keys.filter(|_| cfg!(target_os = "macos")));
         keys.iter()
             .flat_map(|keys| contexts.iter().map(|context| (self.bind)(keys, *context)))
@@ -167,7 +175,14 @@ pub fn keys_for_label(label: &str) -> Option<String> {
 }
 
 pub fn display_keys(keys: &str) -> String {
-    keys.split('-')
+    let (modifiers, key) = match keys.strip_suffix("--") {
+        Some(modifiers) => (modifiers, "-"),
+        None => keys.rsplit_once('-').unwrap_or(("", keys)),
+    };
+    modifiers
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .chain([key])
         .map(|part| match part {
             "ctrl" => "Ctrl".to_owned(),
             "cmd" => "Cmd".to_owned(),
@@ -177,6 +192,8 @@ pub fn display_keys(keys: &str) -> String {
             "down" => "Down".to_owned(),
             "enter" => "Enter".to_owned(),
             "space" => "Space".to_owned(),
+            "=" => "Plus".to_owned(),
+            "-" => "Minus".to_owned(),
             other => other.to_uppercase(),
         })
         .collect::<Vec<_>>()
@@ -319,5 +336,8 @@ mod tests {
         assert_eq!(display_keys("alt-up"), "Alt+Up");
         assert_eq!(display_keys("ctrl-."), "Ctrl+.");
         assert_eq!(display_keys("ctrl-space"), "Ctrl+Space");
+        assert_eq!(display_keys("alt-shift-="), "Alt+Shift+Plus");
+        assert_eq!(display_keys("alt-shift--"), "Alt+Shift+Minus");
+        assert_eq!(display_keys("alt-shift-0"), "Alt+Shift+0");
     }
 }

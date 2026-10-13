@@ -197,7 +197,13 @@ pub fn exclude_from_capture(handle: NativeHandle) {
     }
 }
 
-pub fn make_click_through(handle: NativeHandle) {
+pub fn make_window_click_through(window: &Window) {
+    if let Some(handle) = native_handle(window) {
+        make_click_through(handle);
+    }
+}
+
+fn make_click_through(handle: NativeHandle) {
     unsafe {
         let style = GetWindowLongPtrW(hwnd(handle), GWL_EXSTYLE);
         let added = (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE).0 as isize;

@@ -27,7 +27,7 @@ use super::call_organizer::{
     more_button, pin_chip, spotlight_chip, with_tile_menu,
 };
 use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, people_panel};
-use super::call_stage::render_stage;
+use super::call_stage::{StageMode, popped_placeholder, render_stage};
 use super::call_view_menu::view_button;
 use super::conversation::ConversationView;
 use super::shell::ISLAND_GAP;
@@ -51,11 +51,6 @@ const BLINK_DIMMED_OPACITY: f32 = 0.45;
 pub(super) const DISABLED_OPACITY: f32 = 0.4;
 pub(super) const TILE_GAP: f32 = 20.;
 pub(super) const GRID_PADDING: f32 = 24.;
-pub(super) const STRIP_TILE: TileSize = TileSize {
-    width: 232.,
-    height: 131.,
-    avatar: 56.,
-};
 pub(super) const STRIP_GAP: f32 = 12.;
 pub(super) const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
@@ -74,6 +69,9 @@ const REACTION_RISE: f32 = 24.;
 const REACTION_FADE_FROM: f32 = 0.75;
 const REACTION_CELL: f32 = 40.;
 const SHARE_SOUND_LABEL: &str = "Include computer sound";
+const SHARE_MOTION_LABEL: &str = "Optimize for motion";
+const SHARE_STANDOUT_LABEL: &str = "Show me over my content";
+const SHARE_STANDOUT_NEEDS_CAMERA: &str = "Turn your camera on first";
 const NOISE_SUPPRESSION_LABEL: &str = "Noise suppression";
 const MUSIC_MODE_LABEL: &str = "Music mode";
 const PUSH_TO_TALK_HINT: &str = "Unmuted - release Ctrl+Space to mute";
@@ -408,6 +406,13 @@ pub fn leave_button(
         })
 }
 
+fn share_stage_element(app: &Entity<AppState>, state: &AppState, call: &ActiveCall) -> Option<AnyElement> {
+    if call.share_stage.popped && call.model.screen_sharer.is_some() {
+        return Some(popped_placeholder(app));
+    }
+    render_stage(app, state, StageMode::Docked).or_else(|| whiteboard_stage(app, &call.model))
+}
+
 pub(super) fn camera_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
     let (glyph, background, foreground) = if model.camera_on {
         (IconName::Video, theme::accent(), theme::on_accent())
@@ -441,6 +446,50 @@ fn sound_switch_item(app: &Entity<AppState>, sound: bool) -> PopupMenuItem {
             .child(Switch::new("call-share-sound").checked(sound))
     })
     .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx)))
+}
+
+fn motion_switch_item(app: &Entity<AppState>, motion: bool) -> PopupMenuItem {
+    let app = app.clone();
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .id("call-share-motion-row")
+            .w_full()
+            .gap(px(16.))
+            .items_center()
+            .justify_between()
+            .child(SHARE_MOTION_LABEL)
+            .child(Switch::new("call-share-motion").checked(motion))
+    })
+    .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_motion(!motion, cx)))
+}
+
+fn standout_switch_item(app: &Entity<AppState>, standout: bool, camera_on: bool) -> PopupMenuItem {
+    let app = app.clone();
+    PopupMenuItem::element(move |_, _| {
+        v_flex()
+            .id("call-share-standout-row")
+            .w_full()
+            .when(!camera_on, |row| row.opacity(DISABLED_OPACITY))
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap(px(16.))
+                    .items_center()
+                    .justify_between()
+                    .child(SHARE_STANDOUT_LABEL)
+                    .child(Switch::new("call-share-standout").checked(standout && camera_on)),
+            )
+            .when(!camera_on, |row| {
+                row.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme::text_muted())
+                        .child(SHARE_STANDOUT_NEEDS_CAMERA),
+                )
+            })
+    })
+    .disabled(!camera_on)
+    .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_share_standout(!standout, cx)))
 }
 
 fn music_mode_item(app: &Entity<AppState>, mic: MicSettings) -> PopupMenuItem {
@@ -491,17 +540,36 @@ fn push_to_talk_chip(call: &ActiveCall) -> Option<AnyElement> {
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ShareOptions {
+    pub sound: bool,
+    pub motion: bool,
+    pub standout: bool,
+}
+
+impl ShareOptions {
+    pub(super) fn of(state: &AppState) -> Self {
+        ShareOptions {
+            sound: state.call_share_sound,
+            motion: state.call_share_motion,
+            standout: state.call_share_standout,
+        }
+    }
+}
+
 fn share_items(
     popup: PopupMenu,
     app: &Entity<AppState>,
     model: &CallModel,
-    sound: bool,
+    options: ShareOptions,
 ) -> PopupMenu {
     let screens = model.screens();
     let single_screen = screens.len() == 1;
     let mut popup = popup
         .min_w(px(MENU_WIDTH))
-        .item(sound_switch_item(app, sound))
+        .item(sound_switch_item(app, options.sound))
+        .item(motion_switch_item(app, options.motion))
+        .item(standout_switch_item(app, options.standout, model.camera_on))
         .separator();
     for (index, source) in screens.into_iter().enumerate() {
         let label = if single_screen {
@@ -540,7 +608,7 @@ fn share_items(
 fn share_button(
     app: &Entity<AppState>,
     model: &CallModel,
-    sound: bool,
+    options: ShareOptions,
     menu_open: bool,
 ) -> AnyElement {
     if model.local_share.is_some() {
@@ -581,7 +649,7 @@ fn share_button(
         .rounded_full()
         .child(face)
         .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
-            share_items(popup, &app, &model, sound)
+            share_items(popup, &app, &model, options)
         })
         .open(menu_open)
         .on_open_change(move |open, _, cx| {
@@ -1081,7 +1149,7 @@ pub fn render_call_view(
         .children(return_button(app, model));
 
     let hold = hold_panel(app, model);
-    let share_stage = render_stage(app, state, false).or_else(|| whiteboard_stage(app, model));
+    let share_stage = share_stage_element(app, state, call);
     let region = stage_region(app, state, call, now, hold, share_stage);
 
     let controls = h_flex()
@@ -1112,7 +1180,7 @@ pub fn render_call_view(
         .child(share_button(
             app,
             model,
-            state.call_share_sound,
+            ShareOptions::of(state),
             call.share_menu_open,
         ))
         .when(model.has_reaction_controls(), |row| {

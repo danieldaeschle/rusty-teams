@@ -167,6 +167,12 @@ mod frames {
     const PREJOIN_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_guard%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%2c%22Oid%22%3a%22o%22%7d";
     const CALL_TRANSCRIPT: &str = "shell/islands/main/call-transcript";
     const PEOPLE_PANEL: &str = "shell/islands/main/call-people";
+    const SHARE_GUARDED: &[&str] = &[
+        "shell/islands/main/call-stage/share-content",
+        "shell/islands/main/call-stage/share-content/zoom-chip",
+        "shell/islands/main/call-stage/share-divider",
+        "shell/islands/main/call-stage/share-strip",
+    ];
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
@@ -184,6 +190,7 @@ mod frames {
         Prejoin,
         CallTranscript,
         CallPeople,
+        CallShare,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -301,9 +308,17 @@ mod frames {
             .chain(CALL_GUARDED)
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
+            .chain(SHARE_GUARDED)
             .chain([&CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
+    }
+
+    fn sharing_call() -> ActiveCall {
+        let mut call = gallery_call();
+        call.model.apply(CallUpdate::ScreenShare(Some("8:orgid:guard-1".to_owned())));
+        call.share_stage.view.step_in((800., 450.));
+        call
     }
 
     fn gallery_call() -> ActiveCall {
@@ -421,6 +436,7 @@ mod frames {
                 Screen::Call,
                 Screen::CallTranscript,
                 Screen::CallPeople,
+                Screen::CallShare,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -475,6 +491,15 @@ mod frames {
                         });
                         ("call-transcript", false)
                     }
+                    Screen::CallShare => {
+                        visual.update(|_, cx| {
+                            app.update(cx, |state, cx| {
+                                state.call = Some(sharing_call());
+                                cx.notify();
+                            })
+                        });
+                        ("call-share", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -486,7 +511,7 @@ mod frames {
                         ("status-menu", true)
                     }
                 };
-                let is_call = matches!(screen_name, "call" | "call-people" | "call-transcript");
+                let is_call = matches!(screen_name, "call" | "call-people" | "call-transcript" | "call-share");
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
                 if is_call {
@@ -497,6 +522,9 @@ mod frames {
                 }
                 if screen_name == "call-people" {
                     expected.push(PEOPLE_PANEL);
+                }
+                if screen_name == "call-share" {
+                    expected.extend(SHARE_GUARDED);
                 }
                 if status_menu {
                     expected.push(MENU);

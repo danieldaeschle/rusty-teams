@@ -125,6 +125,9 @@ pub struct AppState {
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
     pub call_share_sound: bool,
+    pub call_share_motion: bool,
+    pub call_share_standout: bool,
+    pub call_strip_width: f32,
     pub call_view: crate::call::ViewSettings,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
@@ -232,6 +235,9 @@ impl AppState {
             call_launcher: None,
             call_count: 0,
             call_share_sound: false,
+            call_share_motion: false,
+            call_share_standout: false,
+            call_strip_width: crate::call::STRIP_DEFAULT_WIDTH,
             call_view: crate::call::ViewSettings::default(),
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
@@ -260,6 +266,9 @@ impl AppState {
         state.local_previews = load_local_previews(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
+        state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
+        state.call_share_standout = crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
+        state.call_strip_width = crate::call::load_strip_width(&state.store);
         state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
