@@ -7,7 +7,8 @@ use crate::captions::{self, BotAction};
 use crate::recording::{self, Consent, StartDetails};
 use crate::transfer::{self, TransferTarget};
 use crate::error::{Error, Result};
-use crate::organizer::{self, Target};
+use crate::organizer::{self, Invitee, Target};
+use crate::roster::MeetingRole;
 use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
 use crate::relay::ic3_scope;
 use crate::timeline::Timeline;
@@ -49,7 +50,7 @@ const SUBSCRIBE_LINK_NAMES: [&str; 6] = [
 ];
 const CALL_LINK_NAMES: [&str; 5] = ["progress", "mediaAnswer", "acceptance", "redirection", "end"];
 const AUDIO_MODALITIES: [&str; 1] = ["Audio"];
-const MEETING_MESSAGE_ID: &str = "0";
+pub(crate) const MEETING_MESSAGE_ID: &str = "0";
 const RAISE_HANDS: &str = "raiseHands";
 const CANCEL_CODE: i64 = 487;
 const DECLINE_CODE: i64 = 603;
@@ -447,6 +448,40 @@ impl Signaling {
     pub async fn spotlight(&self, conversation: &Conversation, from: &Participant, mri: &str) -> Result<u16> {
         let body = organizer::spotlight_body(from.wire(), self.next_state_sequence(), mri, &from.mri);
         self.send("POST publishState (spotlight)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn set_lock(&self, conversation: &Conversation, from: &Participant, locked: bool) -> Result<u16> {
+        let body = organizer::lock_body(from.wire(), locked, self.next_state_sequence());
+        self.send("PUT updateMeetingSettings", Method::Put, conversation.link("updateMeetingSettings")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn change_role(&self, conversation: &Conversation, from: &Participant, mri: &str, role: MeetingRole) -> Result<u16> {
+        let body = organizer::role_body(from.wire(), mri, role);
+        self.send("POST updateParticipantRole", Method::Post, conversation.link("updateParticipantRole")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn publish_attendee_state(&self, conversation: &Conversation, from: &Participant, state_type: &str, mri: &str) -> Result<u16> {
+        let body = organizer::attendee_state_body(from.wire(), state_type, self.next_state_sequence(), mri);
+        self.send("POST publishState (attendee)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    }
+
+    pub async fn add_participants(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        callees: &[Callee],
+        group_thread: Option<&str>,
+        meeting: Option<&MeetingTarget>,
+        callbacks: &CallbackLinks,
+    ) -> Result<u16> {
+        let invitees: Vec<Invitee> = callees
+            .iter()
+            .map(|callee| Invitee { callee: callee.clone(), participant_id: uuid::Uuid::new_v4().to_string() })
+            .collect();
+        let group_chat = group_thread.map_or(Value::Null, |thread_id| organizer::group_chat_for(thread_id, meeting.is_some()));
+        let body = organizer::add_participants_body(from.wire(), &invitees, group_chat, meeting, callbacks);
+        let url = conversation.link(organizer::add_link_name(group_thread.is_some()))?;
+        self.send("POST add (invite)", Method::Post, url, Some(body)).await.map(|response| response.status)
     }
 
     pub async fn add_caption_bot(

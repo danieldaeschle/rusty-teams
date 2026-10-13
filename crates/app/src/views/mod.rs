@@ -10,6 +10,7 @@ pub mod call_layouts;
 pub mod call_mini;
 pub mod call_mini_window;
 pub mod call_organizer;
+pub mod call_people;
 pub mod call_stage;
 pub mod call_view;
 pub mod call_view_menu;

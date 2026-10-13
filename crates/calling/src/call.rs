@@ -40,7 +40,8 @@ use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
 use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath};
-use crate::organizer::Target;
+use crate::organizer::{MeetingCapability, Modality, StateStep, Target, modality_steps};
+use crate::meeting_options::{self, OptionWrite};
 use crate::recording::{Consent, RecordingStatus};
 use crate::roster::Roster;
 use crate::sdp::{LineRole, OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
@@ -798,6 +799,7 @@ async fn drive(
     let mut next: Option<NextPeer> = None;
     let mut roster = Roster::default();
     let mut lobby = false;
+    let mut capability = MeetingCapability::default();
     let mut previous_packets = 0u64;
     let mut ticks = 0u32;
     let mut health_sampler = HealthSampler::default();
@@ -1054,6 +1056,9 @@ async fn drive(
                         {
                             control.send(CallUpdate::MeetingChat(thread.clone()));
                             meeting_chat = Some(thread);
+                        }
+                        if capability.apply(&body) {
+                            control.send(CallUpdate::Capability(capability));
                         }
                         let change = recording_status.apply(&body);
                         if let Some(on) = change.recording {
@@ -1429,6 +1434,70 @@ async fn drive(
                         .collect();
                     let result = remote.signaling.mute_everyone(&remote.conversation, &remote.participant, &others).await;
                     report_organizer_result(result, "mute all", "Could not mute everyone", control, timeline);
+                }
+                Some(CallCommand::SetLock(locked)) => {
+                    let result = remote.signaling.set_lock(&remote.conversation, &remote.participant, locked).await;
+                    if result.is_ok() {
+                        capability.locked = locked;
+                        control.send(CallUpdate::Capability(capability));
+                    }
+                    report_organizer_result(result, "lock meeting", "Could not change the meeting lock", control, timeline);
+                }
+                Some(CallCommand::SetRole { mri, role }) => {
+                    let result = remote.signaling.change_role(&remote.conversation, &remote.participant, &mri, role).await;
+                    report_organizer_result(result, "change role", "Could not change that role", control, timeline);
+                }
+                Some(CallCommand::SetAttendeeModality { mri, modality, allowed }) => {
+                    let limits = roster.entries().into_iter().find(|entry| entry.mri == mri).map(|entry| entry.limits).unwrap_or_default();
+                    let mut result = Ok(200);
+                    for step in modality_steps(modality, allowed, capability, &limits) {
+                        result = match step {
+                            StateStep::Publish(state_type) => remote.signaling.publish_attendee_state(&remote.conversation, &remote.participant, state_type, &mri).await,
+                            StateStep::Remove(state_id) => remote.signaling.lower_hands(&remote.conversation, &remote.participant, &[state_id]).await.map(|()| 200),
+                        };
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    let notice = if modality == Modality::Mic { "Could not change that microphone setting" } else { "Could not change that camera setting" };
+                    report_organizer_result(result, "attendee modality", notice, control, timeline);
+                }
+                Some(CallCommand::SetAttendeeRestrictions { mic_off, camera_off }) => {
+                    let result = match &meeting_target {
+                        Some(target) => meeting_options::write(&inner.session, target, &OptionWrite::restrictions(mic_off, camera_off)).await.map(|()| 200),
+                        None => Err(Error::Signaling("no meeting coordinates for the options".into())),
+                    };
+                    if result.is_ok() {
+                        capability.attendee_mic_off = mic_off;
+                        capability.attendee_camera_off = camera_off;
+                        control.send(CallUpdate::Capability(capability));
+                    }
+                    report_organizer_result(result, "attendee restrictions", "Could not change the attendee settings", control, timeline);
+                }
+                Some(CallCommand::Invite { callees, group_thread }) => {
+                    let thread = group_thread.or_else(|| meeting_chat.clone());
+                    let result = remote.signaling.add_participants(&remote.conversation, &remote.participant, &callees, thread.as_deref(), meeting_target.as_ref(), &links).await;
+                    report_organizer_result(result, "invite", "Could not invite that person", control, timeline);
+                }
+                Some(CallCommand::LoadMeetingOptions) => {
+                    let update = match &meeting_target {
+                        Some(target) => meeting_options::fetch(&inner.session, target).await.map_err(|error| error.to_string()),
+                        None => Err("This meeting has no options page".to_owned()),
+                    };
+                    control.send(CallUpdate::MeetingOptions(update));
+                }
+                Some(CallCommand::SaveMeetingOptions(writes)) => {
+                    let update = match &meeting_target {
+                        Some(target) => save_meeting_options(&inner.session, target, &writes).await,
+                        None => Err("This meeting has no options page".to_owned()),
+                    };
+                    if let Ok(options) = &update {
+                        let (mic_off, camera_off) = options.attendees_off();
+                        capability.attendee_mic_off = mic_off;
+                        capability.attendee_camera_off = camera_off;
+                        control.send(CallUpdate::Capability(capability));
+                    }
+                    control.send(CallUpdate::MeetingOptionsSaved(update));
                 }
                 Some(CallCommand::Spotlight { mri }) => {
                     let result = remote.signaling.spotlight(&remote.conversation, &remote.participant, &mri).await;
@@ -1986,6 +2055,13 @@ async fn apply_background(choice: BackgroundChoice, local_video: &LocalVideo, co
             Err(_) => {}
         },
     }
+}
+
+async fn save_meeting_options(session: &session::Session, target: &MeetingTarget, writes: &[OptionWrite]) -> std::result::Result<meeting_options::MeetingOptions, String> {
+    for change in writes {
+        meeting_options::write(session, target, change).await.map_err(|error| error.to_string())?;
+    }
+    meeting_options::fetch(session, target).await.map_err(|error| error.to_string())
 }
 
 fn target_of<'a>(roster: &'a Roster, mri: &'a str) -> Target<'a> {

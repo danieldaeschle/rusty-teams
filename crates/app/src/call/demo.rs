@@ -4,10 +4,10 @@ use calling::CameraDevice;
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallHealth,
+    AttendeeLimits, AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallHealth,
     CallState, CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice,
     DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
-    MeetingTarget, NetworkLevel, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
+    MeetingCapability, MeetingOptions, MeetingRole, MeetingTarget, Modality, NetworkLevel, Progress, PublishedState, RaisedHand, Reaction, RosterEntry,
     ShareKind, ShareSource, TransportDetails, VideoKey, call_channel,
 };
 
@@ -255,6 +255,8 @@ fn roster_of(people: &[Person], cameras: usize) -> Vec<RosterEntry> {
             sharing: false,
             hand: None,
             spotlight: None,
+            role: Some(demo_role(index)),
+            limits: demo_limits(index),
             organizer: false,
         })
         .collect()
@@ -473,6 +475,7 @@ async fn speak_until_hangup(
     let mut output = DeviceChoice::SystemDefault;
     let mut ticks = 0u32;
     let mut share_sound = false;
+    let mut capability = MeetingCapability::default();
     let mut tick = interval(LEVEL_PERIOD);
     loop {
         tokio::select! {
@@ -574,6 +577,38 @@ async fn speak_until_hangup(
                     roster.iter_mut().filter(|entry| entry.mri != DEMO_OWN_MRI).for_each(|entry| entry.muted = true);
                     control.send(CallUpdate::Roster(roster.clone()));
                 }
+                Some(CallCommand::SetLock(locked)) => {
+                    capability.locked = locked;
+                    control.send(CallUpdate::Capability(capability));
+                }
+                Some(CallCommand::SetRole { mri, role }) => {
+                    roster.iter_mut().filter(|entry| entry.mri == mri).for_each(|entry| entry.role = Some(role));
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::SetAttendeeModality { mri, modality, allowed }) => {
+                    if let Some(entry) = roster.iter_mut().find(|entry| entry.mri == mri) {
+                        let (blocked, released) = match modality {
+                            Modality::Mic => (&mut entry.limits.mic_blocked, &mut entry.limits.mic_released),
+                            Modality::Camera => (&mut entry.limits.camera_blocked, &mut entry.limits.camera_released),
+                        };
+                        *blocked = (!allowed).then(|| demo_state("demo-blocked", 1));
+                        *released = None;
+                    }
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::SetAttendeeRestrictions { mic_off, camera_off }) => {
+                    capability.attendee_mic_off = mic_off;
+                    capability.attendee_camera_off = camera_off;
+                    control.send(CallUpdate::Capability(capability));
+                }
+                Some(CallCommand::Invite { callees, .. }) => {
+                    for callee in callees {
+                        roster.push(RosterEntry { mri: callee.mri, display_name: callee.display_name, role: Some(MeetingRole::Attendee), ..RosterEntry::default() });
+                    }
+                    control.send(CallUpdate::Roster(roster.clone()));
+                }
+                Some(CallCommand::LoadMeetingOptions) => control.send(CallUpdate::MeetingOptions(Ok(demo_options()))),
+                Some(CallCommand::SaveMeetingOptions(_)) => control.send(CallUpdate::MeetingOptionsSaved(Ok(demo_options()))),
                 Some(CallCommand::Spotlight { mri }) => {
                     let rank = roster.iter().filter_map(|entry| entry.spotlight.as_ref().map(|state| state.rank)).max().unwrap_or(0) + 1;
                     if let Some(entry) = roster.iter_mut().find(|entry| entry.mri == mri) {
@@ -616,6 +651,38 @@ async fn speak_until_hangup(
     }
 }
 
+fn demo_role(index: usize) -> MeetingRole {
+    match index {
+        3 => MeetingRole::Organizer,
+        0 | 1 => MeetingRole::Presenter,
+        _ => MeetingRole::Attendee,
+    }
+}
+
+fn demo_limits(index: usize) -> AttendeeLimits {
+    AttendeeLimits {
+        mic_blocked: (index == 5).then(|| demo_state("demo-blocked-5", 1)),
+        ..AttendeeLimits::default()
+    }
+}
+
+fn demo_state(id: &str, rank: u64) -> PublishedState {
+    PublishedState { state_id: id.to_owned(), rank }
+}
+
+fn demo_options() -> MeetingOptions {
+    let option = |name: &str, value: serde_json::Value| serde_json::json!({"name": name, "currentValue": value});
+    MeetingOptions::from_response(&serde_json::json!({"options": [
+        option("AutoAdmittedUsers", serde_json::json!("EveryoneInCompany")),
+        option("PresenterOption", serde_json::json!("Everyone")),
+        option("AttendeeRestrictions", serde_json::json!("UnRestricted")),
+        option("AllowMeetingChat", serde_json::json!("Enabled")),
+        option("AllowTeamsMeetingReactions", serde_json::json!(true)),
+        option("AutoRecordAndTranscribeMode", serde_json::json!("Off")),
+    ]}))
+    .expect("the demo options are complete")
+}
+
 fn demo_organizer() -> RosterEntry {
     RosterEntry {
         mri: DEMO_OWN_MRI.to_owned(),
@@ -627,6 +694,8 @@ fn demo_organizer() -> RosterEntry {
         hand: None,
         spotlight: None,
         organizer: true,
+        role: Some(MeetingRole::Organizer),
+        ..Default::default()
     }
 }
 
@@ -641,6 +710,7 @@ fn demo_waiting(index: usize, name: &str) -> RosterEntry {
         hand: None,
         spotlight: None,
         organizer: false,
+        ..Default::default()
     }
 }
 
@@ -700,6 +770,7 @@ fn set_demo_hand(roster: &mut Vec<RosterEntry>, mri: &str, raised: bool) {
             hand: Some(demo_hand(next_rank)),
             spotlight: None,
             organizer: false,
+            ..Default::default()
         }),
     }
 }

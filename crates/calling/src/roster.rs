@@ -7,13 +7,51 @@ const SCREEN: &str = "applicationsharing-video";
 const SENDING_DIRECTIONS: [&str; 2] = ["sendonly", "sendrecv"];
 const RAISE_HANDS: &str = "raiseHands";
 const SPOTLIGHT: &str = "spotlight";
-const ORGANIZER_ROLES: [&str; 2] = ["organizer", "coorganizer"];
+const ROLE_KEYS: [&str; 2] = ["meetingRole", "role"];
+const MIC_BLOCKED: &str = "attendeeAudioRestricted";
+const MIC_RELEASED: &str = "attendeeModalitiesUnrestricted";
+const CAMERA_BLOCKED: &str = "attendeeVideoRestricted";
+const CAMERA_RELEASED: &str = "attendeeVideoUnrestricted";
 const BOT_PREFIX: &str = "28:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedState {
     pub state_id: String,
     pub rank: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeetingRole {
+    Organizer,
+    Presenter,
+    Attendee,
+}
+
+impl MeetingRole {
+    pub fn parse(text: &str) -> Option<MeetingRole> {
+        match text.to_ascii_lowercase().as_str() {
+            "organizer" | "coorganizer" => Some(MeetingRole::Organizer),
+            "presenter" => Some(MeetingRole::Presenter),
+            "attendee" => Some(MeetingRole::Attendee),
+            _ => None,
+        }
+    }
+
+    pub fn wire(self) -> &'static str {
+        match self {
+            MeetingRole::Organizer => "organizer",
+            MeetingRole::Presenter => "presenter",
+            MeetingRole::Attendee => "attendee",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttendeeLimits {
+    pub mic_blocked: Option<PublishedState>,
+    pub mic_released: Option<PublishedState>,
+    pub camera_blocked: Option<PublishedState>,
+    pub camera_released: Option<PublishedState>,
 }
 
 pub type RaisedHand = PublishedState;
@@ -40,11 +78,13 @@ pub struct Member {
     pub hand: Option<RaisedHand>,
     pub spotlight: Option<Spotlight>,
     pub organizer: bool,
+    pub role: Option<MeetingRole>,
+    pub limits: AttendeeLimits,
     pub captions: Option<CaptionBot>,
     version: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RosterEntry {
     pub mri: String,
     pub display_name: String,
@@ -55,6 +95,8 @@ pub struct RosterEntry {
     pub hand: Option<RaisedHand>,
     pub spotlight: Option<Spotlight>,
     pub organizer: bool,
+    pub role: Option<MeetingRole>,
+    pub limits: AttendeeLimits,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -81,6 +123,8 @@ impl Roster {
                 hand: member.hand.clone(),
                 spotlight: member.spotlight.clone(),
                 organizer: member.organizer,
+                role: member.role,
+                limits: member.limits.clone(),
             })
             .collect()
     }
@@ -194,6 +238,7 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         .flat_map(|endpoint| audio_streams(endpoint))
         .filter_map(|stream| source_id(&stream["sourceId"]))
         .collect();
+    let role = ROLE_KEYS.iter().filter_map(|key| participant[*key].as_str()).find_map(MeetingRole::parse);
     Member {
         mri: mri.to_owned(),
         display_name,
@@ -205,17 +250,17 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         streams: stream_summaries(&in_call),
         hand: published_state(participant, &endpoints, RAISE_HANDS),
         spotlight: published_state(participant, &endpoints, SPOTLIGHT),
-        organizer: is_organizer_role(participant),
+        organizer: role == Some(MeetingRole::Organizer),
+        role,
+        limits: AttendeeLimits {
+            mic_blocked: published_state(participant, &endpoints, MIC_BLOCKED),
+            mic_released: published_state(participant, &endpoints, MIC_RELEASED),
+            camera_blocked: published_state(participant, &endpoints, CAMERA_BLOCKED),
+            camera_released: published_state(participant, &endpoints, CAMERA_RELEASED),
+        },
         captions: mri.starts_with(BOT_PREFIX).then(|| caption_bot(mri, &endpoints)).flatten(),
         version,
     }
-}
-
-fn is_organizer_role(participant: &Value) -> bool {
-    ["meetingRole", "role"]
-        .iter()
-        .filter_map(|key| participant[*key].as_str())
-        .any(|role| ORGANIZER_ROLES.contains(&role.to_ascii_lowercase().as_str()))
 }
 
 fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
@@ -515,6 +560,27 @@ mod tests {
         assert!(roster.is_organizer("8:orgid:me"));
         assert!(!roster.is_organizer("8:orgid:a"));
         assert!(roster.is_organizer("8:orgid:b"));
+    }
+
+    #[test]
+    fn roles_and_attendee_limits_reach_the_entries() {
+        let mut roster = Roster::default();
+        let mut presenter = participant("Ana", 1, "active", false, 201);
+        presenter["meetingRole"] = json!("presenter");
+        let mut limited = participant("Bo", 1, "active", false, 301);
+        limited["meetingRole"] = json!("attendee");
+        limited["publishedStates"] = json!([
+            {"stateType": "attendeeAudioRestricted", "stateId": "s-1", "typeRank": 1},
+            {"stateType": "attendeeVideoUnrestricted", "stateId": "s-2", "typeRank": 2},
+        ]);
+        roster.apply(&delta(json!({"8:orgid:a": presenter, "8:orgid:b": limited})));
+        let entries = roster.entries();
+        assert_eq!(entries[0].role, Some(MeetingRole::Presenter));
+        assert_eq!(entries[1].role, Some(MeetingRole::Attendee));
+        assert_eq!(entries[1].limits.mic_blocked.as_ref().map(|state| state.state_id.as_str()), Some("s-1"));
+        assert_eq!(entries[1].limits.camera_released.as_ref().map(|state| state.state_id.as_str()), Some("s-2"));
+        assert_eq!(entries[1].limits.camera_blocked, None);
+        assert_eq!(entries[0].limits, AttendeeLimits::default());
     }
 
     fn recorder_bot(version: u64, active: bool) -> Value {

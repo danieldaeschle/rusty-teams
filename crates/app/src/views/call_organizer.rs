@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use calling::{CaptionState, HoldState, VideoKey};
+use calling::{CaptionState, HoldState, MeetingRole, Modality, VideoKey};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -15,6 +15,7 @@ use super::avatar::person_avatar;
 use super::call_extras::{
     CameraMenu, background_items, confirm_stop_recording, effect_items, open_transfer_picker,
 };
+use super::call_people::add_people_item;
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::icon;
 use crate::app_state::AppState;
@@ -274,6 +275,9 @@ pub fn tile_menu(
                 }),
         );
     }
+    if model.can_change_roles(mri) {
+        popup = restriction_items(popup, app, model, mri);
+    }
     if organizes && raised {
         let (hand_app, hand_mri) = (app.clone(), mri.to_owned());
         popup = popup.item(PopupMenuItem::new("Lower hand").on_click(move |_, _, cx| {
@@ -291,6 +295,47 @@ pub fn tile_menu(
         );
     }
     popup
+}
+
+fn modality_item(
+    app: &Entity<AppState>,
+    mri: &str,
+    modality: Modality,
+    allowed: bool,
+) -> PopupMenuItem {
+    let (app, mri) = (app.clone(), mri.to_owned());
+    let (label, glyph) = match (modality, allowed) {
+        (Modality::Mic, true) => ("Disable mic", IconName::MicOff),
+        (Modality::Mic, false) => ("Allow mic", IconName::Mic),
+        (Modality::Camera, true) => ("Disable camera", IconName::VideoOff),
+        (Modality::Camera, false) => ("Allow camera", IconName::Video),
+    };
+    PopupMenuItem::new(label).icon(glyph).on_click(move |_, _, cx| {
+        app.update(cx, |state, cx| {
+            state.set_call_attendee_modality(mri.clone(), modality, !allowed, cx)
+        })
+    })
+}
+
+fn restriction_items(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    model: &CallModel,
+    mri: &str,
+) -> PopupMenu {
+    let presenter = model.tile_role(mri) == Some(MeetingRole::Presenter);
+    let (role_app, role_mri) = (app.clone(), mri.to_owned());
+    popup
+        .item(modality_item(app, mri, Modality::Mic, model.attendee_allowed(mri, Modality::Mic)))
+        .item(modality_item(app, mri, Modality::Camera, model.attendee_allowed(mri, Modality::Camera)))
+        .item(
+            PopupMenuItem::new(if presenter { "Make attendee" } else { "Make presenter" })
+                .icon(IconName::Users)
+                .on_click(move |_, _, cx| {
+                    let role = if presenter { MeetingRole::Attendee } else { MeetingRole::Presenter };
+                    role_app.update(cx, |state, cx| state.set_call_role(role_mri.clone(), role, cx))
+                }),
+        )
 }
 
 fn more_overlay(
@@ -428,6 +473,7 @@ fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallMo
             .on_click(move |_, _, cx| hold_app.update(cx, |state, cx| state.toggle_call_hold(cx))),
     );
     let can_transfer = model.can_transfer();
+    popup = popup.item(add_people_item(app, model));
     popup.item(
         PopupMenuItem::new("Transfer...")
             .icon(IconName::Forward)

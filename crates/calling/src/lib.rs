@@ -24,6 +24,7 @@ pub mod luma_effects;
 #[cfg(windows)]
 mod loopback_windows;
 pub mod meeting;
+pub mod meeting_options;
 pub mod mic_processing;
 pub mod mixer;
 pub mod mute;
@@ -67,7 +68,9 @@ pub use push::Caller;
 pub use ring::{RING_TIMEOUT, RingEnd, RingSignal, RingState};
 pub use reaction::{Reaction, ReactionEvent};
 pub use captions::{CaptionEntry, CaptionState};
-pub use roster::{PublishedState, RaisedHand, RosterEntry, Spotlight};
+pub use meeting_options::{MeetingOptions, OptionWrite};
+pub use organizer::{MeetingCapability, Modality, modality_allowed};
+pub use roster::{AttendeeLimits, MeetingRole, PublishedState, RaisedHand, RosterEntry, Spotlight};
 pub use sound_capture::LoopbackKind;
 pub use renegotiation::MediaPath;
 pub use signaling::{Callee, MeetingTarget};

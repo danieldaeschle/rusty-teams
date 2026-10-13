@@ -150,6 +150,7 @@ mod frames {
         "shell/islands/main/call-stage",
         "shell/islands/main/call-controls",
     ];
+    const PEOPLE_PANEL: &str = "shell/islands/main/call-people";
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
@@ -164,6 +165,7 @@ mod frames {
         Tab(&'static str, Option<fn(&mut VisualTestContext)>),
         StatusMenu,
         Call,
+        CallPeople,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -279,7 +281,7 @@ mod frames {
         GUARDED
             .iter()
             .chain(CALL_GUARDED)
-            .chain([&MENU, &RECAP_TAB, &RECAP_REGION])
+            .chain([&MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -302,6 +304,7 @@ mod frames {
                     hand: None,
                     spotlight: None,
                     organizer: false,
+                    ..Default::default()
                 })
                 .collect(),
         ));
@@ -395,6 +398,7 @@ mod frames {
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
                 Screen::StatusMenu,
                 Screen::Call,
+                Screen::CallPeople,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -404,14 +408,17 @@ mod frames {
                         }
                         (name, false)
                     }
-                    Screen::Call => {
+                    Screen::Call | Screen::CallPeople => {
+                        let people_open = matches!(screen, Screen::CallPeople);
                         visual.update(|_, cx| {
                             app.update(cx, |state, cx| {
-                                state.call = Some(gallery_call());
+                                let mut call = gallery_call();
+                                call.people_open = people_open;
+                                state.call = Some(call);
                                 cx.notify();
                             })
                         });
-                        ("call", false)
+                        (if people_open { "call-people" } else { "call" }, false)
                     }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
@@ -424,10 +431,14 @@ mod frames {
                         ("status-menu", true)
                     }
                 };
+                let is_call = matches!(screen_name, "call" | "call-people");
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
-                if screen_name == "call" {
+                if is_call {
                     expected.extend(CALL_GUARDED);
+                }
+                if screen_name == "call-people" {
+                    expected.push(PEOPLE_PANEL);
                 }
                 if status_menu {
                     expected.push(MENU);
@@ -457,7 +468,7 @@ mod frames {
                     visual.simulate_keystrokes("escape");
                     visual.run_until_parked();
                 }
-                if screen_name == "call" {
+                if is_call {
                     visual.update(|_, cx| {
                         app.update(cx, |state, cx| {
                             state.call = None;

@@ -15,8 +15,11 @@ mod list;
 mod media;
 mod mic;
 mod model;
+mod options_dialog;
 mod overlay;
 mod overlay_layout;
+mod people;
+mod people_actions;
 mod pictures;
 mod preview;
 mod push_to_talk;
@@ -48,7 +51,9 @@ pub use model::{
     ActiveCall, CAPTION_SHOWN, CallKind, CallModel, Focus, REACTION_SHOWN, Tile, TileSize,
     TileState,
 };
+pub use options_dialog::OptionsDialog;
 pub use overlay::CallWindows;
+pub use people::{PeopleSections, PersonRow, people_sections};
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, filmstrip, gallery_grid, split_overflow};
