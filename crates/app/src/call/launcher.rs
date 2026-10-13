@@ -161,6 +161,9 @@ impl CallLauncher {
             subject: draft.subject,
             start: draft.start,
             end: draft.end,
+            local_start: draft.local_start,
+            local_end: draft.local_end,
+            time_zone_name: draft.time_zone_name,
             attendees,
             repeat: draft.repeat,
             details: draft.details,
@@ -169,6 +172,15 @@ impl CallLauncher {
             .create_event(&event)
             .await
             .map_err(|error| error.to_string())
+    }
+
+    pub async fn time_zone_name(&self, mail: &str) -> Option<String> {
+        let session = self.engine()?.session();
+        graph::Graph::new(session)
+            .time_zone_name(mail)
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn respond_to_event(

@@ -27,6 +27,7 @@ static SEARCHABLE_GIFS: OnceLock<Vec<Gif>> = OnceLock::new();
 pub const DEMO_USER_ID: &str = "demo-me";
 const DEMO_USER_NAME: &str = "Dana Demo";
 const DEMO_USER_EMAIL: &str = "dana.demo@example.com";
+const DEMO_TIME_ZONE: &str = "W. Europe Standard Time";
 const PHOTO_SIZE: usize = 48;
 const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
@@ -824,6 +825,7 @@ fn photo(palette: &Palette) -> Arc<Image> {
 pub fn seed_directory(state: &mut AppState) {
     state.own_status = crate::own_status::demo_status();
     state.own_email = DEMO_USER_EMAIL.to_owned();
+    state.own_time_zone = Some(DEMO_TIME_ZONE.to_owned());
     state.translation.settings = Some(language_settings());
     state.translation.languages = language_list();
     let directory = &mut state.directory;

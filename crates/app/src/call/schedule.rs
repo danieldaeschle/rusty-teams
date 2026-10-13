@@ -25,6 +25,9 @@ pub struct MeetingDraft {
     pub subject: String,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
+    pub local_start: NaiveDateTime,
+    pub local_end: NaiveDateTime,
+    pub time_zone_name: Option<String>,
     pub repeat: Repeat,
     pub details: String,
     pub people: Vec<Invitee>,
@@ -59,7 +62,11 @@ pub struct FormValues {
     pub people: Vec<Invitee>,
 }
 
-pub fn draft_from_form(values: FormValues, zone: &impl TimeZone) -> Result<MeetingDraft, String> {
+pub fn draft_from_form(
+    values: FormValues,
+    zone: &impl TimeZone,
+    time_zone_name: Option<String>,
+) -> Result<MeetingDraft, String> {
     let subject = values.subject.trim();
     if subject.is_empty() {
         return Err("Add a title.".to_owned());
@@ -76,6 +83,9 @@ pub fn draft_from_form(values: FormValues, zone: &impl TimeZone) -> Result<Meeti
         subject: subject.to_owned(),
         start,
         end,
+        local_start: date.and_time(values.start),
+        local_end: date.and_time(values.end),
+        time_zone_name,
         repeat: values.repeat,
         details: values.details.trim().to_owned(),
         people: values.people,
@@ -121,6 +131,28 @@ fn demo_event(draft: &MeetingDraft, serial: u64) -> CalendarEvent {
 }
 
 impl AppState {
+    pub fn load_own_time_zone(&mut self, cx: &mut Context<Self>) {
+        if self.own_time_zone.is_some() || self.own_time_zone_requested || self.own_email.is_empty()
+        {
+            return;
+        }
+        let Some(launcher) = self.call_launcher.clone() else {
+            return;
+        };
+        self.own_time_zone_requested = true;
+        let mail = self.own_email.clone();
+        let looked_up = runtime::spawn(async move { launcher.time_zone_name(&mail).await });
+        cx.spawn(async move |this, cx| {
+            let time_zone_name = looked_up.await.ok().flatten();
+            this.update(cx, |state, _| {
+                state.own_time_zone_requested = time_zone_name.is_some();
+                state.own_time_zone = time_zone_name;
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn create_meeting(
         &mut self,
         draft: MeetingDraft,
@@ -283,6 +315,7 @@ mod tests {
                 people: Vec::new(),
             },
             &plus_two(),
+            Some("W. Europe Standard Time".into()),
         )
         .unwrap();
         assert_eq!(draft.subject, "Planning");
@@ -296,6 +329,12 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 10, 14, 9, 30, 0).unwrap()
         );
         assert_eq!(draft.repeat, Repeat::Weekly);
+        assert_eq!(draft.local_start.to_string(), "2026-10-14 11:00:00");
+        assert_eq!(draft.local_end.to_string(), "2026-10-14 11:30:00");
+        assert_eq!(
+            draft.time_zone_name.as_deref(),
+            Some("W. Europe Standard Time")
+        );
     }
 
     #[test]
@@ -310,7 +349,7 @@ mod tests {
                 details: String::new(),
                 people: Vec::new(),
             };
-            draft_from_form(values, &plus_two())
+            draft_from_form(values, &plus_two(), None)
         };
         assert_eq!(
             build(" ", day(), time(9, 0), time(10, 0)).unwrap_err(),
