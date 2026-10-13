@@ -111,7 +111,8 @@ impl MeetingForm {
             details: self.details.read(cx).value().to_string(),
             people,
         };
-        let draft = match draft_from_form(values, &Local) {
+        let time_zone_name = self.state.read(cx).own_time_zone.clone();
+        let draft = match draft_from_form(values, &Local, time_zone_name) {
             Ok(draft) => draft,
             Err(message) => {
                 self.error = Some(message);

@@ -2515,7 +2515,9 @@ mod tests {
         let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
         let track = factory.create_audio_track("microphone", source);
-        create_offer(&peer, &factory, &track, layout).await
+        let offer = create_offer(&peer, &factory, &track, layout).await;
+        peer.close();
+        offer
     }
 
     #[tokio::test]
@@ -2536,7 +2538,9 @@ mod tests {
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
         let track = factory.create_audio_track("microphone", source);
         let offer = include_str!("../tests/fixtures/teams_p2p_offer.sdp");
-        if let Err(error) = answer_offer(&peer, Some(&track), offer, AnswerVideo::Receive).await {
+        let answered = answer_offer(&peer, Some(&track), offer, AnswerVideo::Receive).await;
+        peer.close();
+        if let Err(error) = answered {
             panic!("{error}");
         }
     }

@@ -116,6 +116,8 @@ pub struct AppState {
     pub image_viewer_request: Option<ViewerRequest>,
     pub own_status: PresenceStatus,
     pub own_email: String,
+    pub own_time_zone: Option<String>,
+    pub own_time_zone_requested: bool,
     pub status_menu_open: bool,
     pub status_message_request: bool,
     pub profiles: ProfileCache,
@@ -222,6 +224,8 @@ impl AppState {
             image_viewer_request: None,
             own_status: PresenceStatus::default(),
             own_email: String::new(),
+            own_time_zone: None,
+            own_time_zone_requested: false,
             status_menu_open: false,
             status_message_request: false,
             profiles: ProfileCache::new(),
@@ -787,6 +791,7 @@ impl AppState {
         self.calls_list.invalidate();
         if !self.mode.demo {
             self.reload_directory();
+            self.load_own_time_zone(cx);
         }
         cx.emit(AppEvent::Sidebar);
         cx.notify();
@@ -801,6 +806,7 @@ impl AppState {
             BackendEvent::Calls(launcher) => {
                 launcher.set_default_camera(self.call_camera.clone());
                 self.call_launcher = Some(launcher);
+                self.load_own_time_zone(cx);
             }
             BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
             BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, NaiveDateTime, Utc, Weekday};
 use serde_json::{Value, json};
 use session::{GRAPH, Method, Request, Scope};
 
@@ -59,6 +59,9 @@ pub struct NewEvent {
     pub subject: String,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
+    pub local_start: NaiveDateTime,
+    pub local_end: NaiveDateTime,
+    pub time_zone_name: Option<String>,
     pub attendees: Vec<Attendee>,
     pub repeat: Repeat,
     pub details: String,
@@ -99,14 +102,20 @@ fn day_name(weekday: Weekday) -> &'static str {
     }
 }
 
-fn graph_time(time: DateTime<Utc>) -> Value {
-    json!({
-        "dateTime": time.format(GRAPH_TIME_FORMAT).to_string(),
-        "timeZone": TIME_ZONE,
-    })
+fn graph_time(event: &NewEvent, local: NaiveDateTime, utc: DateTime<Utc>) -> Value {
+    match &event.time_zone_name {
+        Some(time_zone_name) => json!({
+            "dateTime": local.format(GRAPH_TIME_FORMAT).to_string(),
+            "timeZone": time_zone_name,
+        }),
+        None => json!({
+            "dateTime": utc.format(GRAPH_TIME_FORMAT).to_string(),
+            "timeZone": TIME_ZONE,
+        }),
+    }
 }
 
-fn recurrence(repeat: Repeat, start: DateTime<Utc>) -> Option<Value> {
+fn recurrence(repeat: Repeat, start: NaiveDateTime) -> Option<Value> {
     let (pattern_type, days): (&str, Vec<Weekday>) = match repeat {
         Repeat::Never => return None,
         Repeat::Daily => ("daily", Vec::new()),
@@ -130,8 +139,8 @@ fn recurrence(repeat: Repeat, start: DateTime<Utc>) -> Option<Value> {
 pub fn new_event_body(event: &NewEvent) -> Value {
     let mut body = json!({
         "subject": event.subject,
-        "start": graph_time(event.start),
-        "end": graph_time(event.end),
+        "start": graph_time(event, event.local_start, event.start),
+        "end": graph_time(event, event.local_end, event.end),
         "attendees": event.attendees.iter().map(|attendee| json!({
             "type": "required",
             "emailAddress": {"address": attendee.address, "name": attendee.name},
@@ -142,7 +151,7 @@ pub fn new_event_body(event: &NewEvent) -> Value {
     if !event.details.trim().is_empty() {
         body["body"] = json!({"contentType": "text", "content": event.details});
     }
-    if let Some(recurrence) = recurrence(event.repeat, event.start) {
+    if let Some(recurrence) = recurrence(event.repeat, event.local_start) {
         body["recurrence"] = recurrence;
     }
     body
@@ -287,11 +296,33 @@ mod tests {
         }
     }
 
+    fn local(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(hour, minute, 0)
+            .unwrap()
+    }
+
+    fn zoned(repeat: Repeat, local_start: NaiveDateTime, offset_hours: i64) -> NewEvent {
+        let utc_start = local_start.and_utc() - chrono::Duration::hours(offset_hours);
+        NewEvent {
+            start: utc_start,
+            end: utc_start + chrono::Duration::minutes(30),
+            local_start,
+            local_end: local_start + chrono::Duration::minutes(30),
+            time_zone_name: Some("W. Europe Standard Time".into()),
+            ..event(repeat)
+        }
+    }
+
     fn event(repeat: Repeat) -> NewEvent {
         NewEvent {
             subject: "Planning".into(),
             start: Utc.with_ymd_and_hms(2026, 10, 14, 9, 30, 0).unwrap(),
             end: Utc.with_ymd_and_hms(2026, 10, 14, 10, 0, 0).unwrap(),
+            local_start: local(2026, 10, 14, 11, 30),
+            local_end: local(2026, 10, 14, 12, 0),
+            time_zone_name: None,
             attendees: vec![Attendee {
                 name: "Mara Lindqvist".into(),
                 address: "mara@example.invalid".into(),
@@ -317,6 +348,49 @@ mod tests {
         );
         assert!(body.get("recurrence").is_none());
         assert!(body.get("body").is_none());
+    }
+
+    #[test]
+    fn summer_and_winter_series_keep_the_same_local_time() {
+        let summer = new_event_body(&zoned(Repeat::Weekly, local(2026, 7, 15, 9, 0), 2));
+        let winter = new_event_body(&zoned(Repeat::Weekly, local(2026, 12, 16, 9, 0), 1));
+        assert_eq!(summer["start"]["dateTime"], "2026-07-15T09:00:00");
+        assert_eq!(winter["start"]["dateTime"], "2026-12-16T09:00:00");
+        for body in [&summer, &winter] {
+            assert_eq!(body["start"]["timeZone"], "W. Europe Standard Time");
+            assert_eq!(body["end"]["dateTime"].as_str().unwrap()[11..], *"09:30:00");
+            assert_eq!(body["end"]["timeZone"], "W. Europe Standard Time");
+        }
+    }
+
+    #[test]
+    fn a_local_half_past_midnight_keeps_its_local_weekday_and_start_date() {
+        let body = new_event_body(&zoned(Repeat::Weekly, local(2026, 10, 14, 0, 30), 2));
+        assert_eq!(body["start"]["dateTime"], "2026-10-14T00:30:00");
+        assert_eq!(body["recurrence"]["range"]["startDate"], "2026-10-14");
+        assert_eq!(
+            body["recurrence"]["pattern"]["daysOfWeek"],
+            json!(["wednesday"])
+        );
+    }
+
+    #[test]
+    fn without_a_zone_name_times_stay_utc_but_the_date_is_local() {
+        let event = NewEvent {
+            start: Utc.with_ymd_and_hms(2026, 10, 13, 22, 30, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 10, 13, 23, 0, 0).unwrap(),
+            local_start: local(2026, 10, 14, 0, 30),
+            local_end: local(2026, 10, 14, 1, 0),
+            ..event(Repeat::Weekly)
+        };
+        let body = new_event_body(&event);
+        assert_eq!(body["start"]["dateTime"], "2026-10-13T22:30:00");
+        assert_eq!(body["start"]["timeZone"], "UTC");
+        assert_eq!(body["recurrence"]["range"]["startDate"], "2026-10-14");
+        assert_eq!(
+            body["recurrence"]["pattern"]["daysOfWeek"],
+            json!(["wednesday"])
+        );
     }
 
     #[test]
