@@ -5,8 +5,8 @@ use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
 use calling::{
-    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, ShareKind,
-    ShareSource,
+    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, RecordingKind, ShareKind,
+    ShareSource, StopScope,
 };
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
@@ -386,7 +386,7 @@ async fn run() {
                 }
                 if features.recording_stop_due.is_some_and(|due| Instant::now() >= due) {
                     features.recording_stop_due = None;
-                    let _ = handle.commands.send(CallCommand::SetRecording { on: false, title: SUBJECT.to_owned() });
+                    let _ = handle.commands.send(CallCommand::StopRecording { scope: StopScope::Both });
                 }
                 if hand_lower_due.is_some_and(|due| Instant::now() >= due) {
                     hand_lower_due = None;
@@ -423,7 +423,7 @@ async fn run() {
                         let _ = handle.commands.send(CallCommand::SetBackground(BackgroundChoice::Blur));
                     }
                     if arguments.record {
-                        let _ = handle.commands.send(CallCommand::SetRecording { on: true, title: SUBJECT.to_owned() });
+                        let _ = handle.commands.send(CallCommand::StartRecording { kind: RecordingKind::Video, title: SUBJECT.to_owned() });
                     }
                     if arguments.whiteboard_state {
                         features.whiteboard_wait_until = Some(Instant::now() + WHITEBOARD_WAIT);

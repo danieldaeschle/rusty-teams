@@ -7,6 +7,7 @@ use crate::background::BackgroundChoice;
 use crate::effects::CameraEffects;
 use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
+use crate::recording::{RecordingKind, StopScope};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::error::{Error, Result};
 use crate::health::CallHealth;
@@ -51,7 +52,9 @@ pub enum CallCommand {
     SetIncomingVideo(bool),
     SetCameraEffects(CameraEffects),
     SendReaction(Reaction),
-    SetRecording { on: bool, title: String },
+    StartRecording { kind: RecordingKind, title: String },
+    StopRecording { scope: StopScope },
+    SetCaptionLanguage(String),
     ConsentToRecording,
     Hold(bool),
     Transfer { target: Callee, replaces: Option<String> },
@@ -95,6 +98,8 @@ pub enum CallUpdate {
     Health(CallHealth),
     IncomingVideo(bool),
     Recording(bool),
+    RecordingAudioOnly(bool),
+    Transcribing(bool),
     ConsentRequired(bool),
     Hold(HoldState),
     Whiteboard(Option<ContentShare>),

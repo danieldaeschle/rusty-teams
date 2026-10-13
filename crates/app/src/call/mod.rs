@@ -3,6 +3,7 @@ mod agenda;
 mod background;
 mod bubbles;
 mod calendar;
+mod caption_style;
 mod demo;
 mod demo_scene;
 mod features;
@@ -20,15 +21,18 @@ mod overlay_layout;
 mod pictures;
 mod preview;
 mod push_to_talk;
+mod recording_menu;
 mod ring;
 mod stage_layout;
 mod target;
+mod transcript;
 mod view_actions;
 mod view_settings;
 
 pub use actions::{load_camera, load_camera_effects, load_share_sound};
 pub use mic::load_mic;
 pub use agenda::{AgendaRow, fetch_window, join_available};
+pub use caption_style::{CaptionPosition, CaptionSize};
 pub use background::{
     BackgroundLibrary, BackgroundPick, default_cache_directory, demo_library, load_background,
     load_custom_backgrounds,
@@ -52,5 +56,7 @@ pub use overlay::CallWindows;
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, filmstrip, gallery_grid, split_overflow};
+pub use recording_menu::{RecordAction, RecordingChip, record_actions, recording_chip};
 pub use target::plan_for_chat;
+pub use transcript::clock_label;
 pub use view_settings::{CallLayout, ViewSettings};

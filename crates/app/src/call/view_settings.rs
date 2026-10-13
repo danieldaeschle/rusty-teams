@@ -1,6 +1,10 @@
+use super::caption_style::{CaptionPosition, CaptionSize};
+
 const LAYOUT_META_KEY: &str = "call_layout";
 const HIDE_NO_VIDEO_META_KEY: &str = "call_hide_no_video";
 const CHAT_BUBBLES_META_KEY: &str = "call_chat_bubbles";
+const CAPTION_SIZE_META_KEY: &str = "call_caption_size";
+const CAPTION_POSITION_META_KEY: &str = "call_caption_position";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CallLayout {
@@ -43,6 +47,8 @@ pub struct ViewSettings {
     pub hide_no_video: bool,
     pub chat_bubbles: bool,
     pub hide_me: bool,
+    pub caption_size: CaptionSize,
+    pub caption_position: CaptionPosition,
 }
 
 impl Default for ViewSettings {
@@ -53,6 +59,8 @@ impl Default for ViewSettings {
             hide_no_video: false,
             chat_bubbles: true,
             hide_me: false,
+            caption_size: CaptionSize::Medium,
+            caption_position: CaptionPosition::Bottom,
         }
     }
 }
@@ -73,6 +81,16 @@ impl ViewSettings {
             layout,
             hide_no_video: flag(HIDE_NO_VIDEO_META_KEY, false),
             chat_bubbles: flag(CHAT_BUBBLES_META_KEY, true),
+            caption_size: store
+                .meta(CAPTION_SIZE_META_KEY)
+                .ok()
+                .flatten()
+                .map_or(CaptionSize::default(), |value| CaptionSize::from_meta(&value)),
+            caption_position: store
+                .meta(CAPTION_POSITION_META_KEY)
+                .ok()
+                .flatten()
+                .map_or(CaptionPosition::default(), |value| CaptionPosition::from_meta(&value)),
             ..ViewSettings::default()
         }
     }
@@ -87,6 +105,8 @@ impl ViewSettings {
             CHAT_BUBBLES_META_KEY,
             if self.chat_bubbles { "1" } else { "0" },
         );
+        let _ = store.set_meta(CAPTION_SIZE_META_KEY, self.caption_size.meta());
+        let _ = store.set_meta(CAPTION_POSITION_META_KEY, self.caption_position.meta());
     }
 
     pub fn choose(&mut self, layout: CallLayout) {
@@ -109,6 +129,8 @@ mod tests {
         assert!(settings.chat_bubbles);
         assert!(!settings.hide_no_video);
         assert!(!settings.hide_me);
+        assert_eq!(settings.caption_size, CaptionSize::Medium);
+        assert_eq!(settings.caption_position, CaptionPosition::Bottom);
     }
 
     #[test]
@@ -119,12 +141,16 @@ mod tests {
         settings.hide_no_video = true;
         settings.chat_bubbles = false;
         settings.hide_me = true;
+        settings.caption_size = CaptionSize::Large;
+        settings.caption_position = CaptionPosition::Top;
         settings.save(&store);
         let loaded = ViewSettings::load(&store);
         assert_eq!(loaded.layout, CallLayout::Speaker);
         assert!(loaded.hide_no_video);
         assert!(!loaded.chat_bubbles);
         assert!(!loaded.hide_me);
+        assert_eq!(loaded.caption_size, CaptionSize::Large);
+        assert_eq!(loaded.caption_position, CaptionPosition::Top);
     }
 
     #[test]

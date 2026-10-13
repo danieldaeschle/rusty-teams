@@ -350,6 +350,9 @@ impl AppState {
             crate::agent_api::note_caption(thread, &entry.id, speaker, &entry.text, cx);
         }
         call.model.apply(update);
+        if let Some(language) = call.model.take_ready_caption_language() {
+            let _ = call.commands.send(CallCommand::SetCaptionLanguage(language));
+        }
         if call.model.screen_sharer.is_none() {
             call.stage_fullscreen = false;
             call.pictures.forget(&VideoKey::Screen, cx);
@@ -374,6 +377,7 @@ impl AppState {
             crate::agent_api::clear_captions(thread, cx);
         }
         self.call = None;
+        self.transcript_panel = None;
         if let Some(consult) = consult {
             let _ = consult.commands.send(CallCommand::Hangup);
         }
@@ -516,6 +520,10 @@ impl AppState {
             return;
         };
         call.chat_open = !call.chat_open;
+        if call.chat_open {
+            call.transcript_open = false;
+            self.transcript_panel = None;
+        }
         cx.emit(AppEvent::Call);
         cx.notify();
     }
@@ -1129,7 +1137,8 @@ mod tests {
 
     use calling::{
         BackgroundChoice, CallCommand, CallControl, CallState, CallUpdate, CameraEffects,
-        DeviceChoice, EndKind, EndReason, EngineEvent, HoldState, Reaction, call_channel,
+        DeviceChoice, EndKind, EndReason, EngineEvent, HoldState, Reaction, RecordingKind,
+        StopScope, call_channel,
     };
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
@@ -1138,6 +1147,7 @@ mod tests {
     use crate::app_state::{AppEvent, AppState, Mode, Selection};
     use crate::call::TransferCandidate;
     use crate::call::background::BackgroundPick;
+    use crate::call::{CaptionPosition, CaptionSize, RecordAction, ViewSettings};
     use crate::call::demo::demo_ring;
     use crate::call::features::room_closed_move;
     use crate::call::model::{BreakoutState, ConsultCall};
@@ -1569,7 +1579,7 @@ mod tests {
         let (attendee, mut attendee_control) = app_with_commands(cx, live_meeting(false), None);
         cx.update(|cx| {
             attendee.update(cx, |state, cx| {
-                state.set_call_recording(true, cx);
+                state.run_call_record_action(RecordAction::Start(RecordingKind::Video), cx);
                 state.accept_recording_notice(cx);
             })
         });
@@ -1577,9 +1587,9 @@ mod tests {
         let (organizer, mut control) = app_with_commands(cx, live_meeting(true), None);
         cx.update(|cx| {
             organizer.update(cx, |state, cx| {
-                state.set_call_recording(true, cx);
+                state.run_call_record_action(RecordAction::Start(RecordingKind::Video), cx);
                 state.apply_call_update(7, CallUpdate::Recording(true), cx);
-                state.set_call_recording(false, cx);
+                state.run_call_record_action(RecordAction::Stop(StopScope::Both), cx);
                 state.accept_recording_notice(cx);
                 state.apply_call_update(7, CallUpdate::ConsentRequired(true), cx);
                 state.accept_recording_notice(cx);
@@ -1587,16 +1597,15 @@ mod tests {
         });
         assert_eq!(
             control.try_recv_command(),
-            Some(CallCommand::SetRecording {
-                on: true,
+            Some(CallCommand::StartRecording {
+                kind: RecordingKind::Video,
                 title: "Standup".into()
             })
         );
         assert_eq!(
             control.try_recv_command(),
-            Some(CallCommand::SetRecording {
-                on: false,
-                title: "Standup".into()
+            Some(CallCommand::StopRecording {
+                scope: StopScope::Both
             })
         );
         assert_eq!(
@@ -1604,6 +1613,95 @@ mod tests {
             Some(CallCommand::ConsentToRecording)
         );
         assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn every_record_action_becomes_its_own_command_for_the_organizer(cx: &mut TestAppContext) {
+        let (organizer, mut control) = app_with_commands(cx, live_meeting(true), None);
+        cx.update(|cx| {
+            organizer.update(cx, |state, cx| {
+                state.run_call_record_action(RecordAction::Start(RecordingKind::AudioOnly), cx);
+                state.run_call_record_action(RecordAction::Start(RecordingKind::TranscriptOnly), cx);
+                state.run_call_record_action(RecordAction::Stop(StopScope::RecordingOnly), cx);
+                state.run_call_record_action(RecordAction::Stop(StopScope::TranscriptionOnly), cx);
+            })
+        });
+        let title = "Standup".to_owned();
+        assert_eq!(control.try_recv_command(), Some(CallCommand::StartRecording { kind: RecordingKind::AudioOnly, title: title.clone() }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::StartRecording { kind: RecordingKind::TranscriptOnly, title }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::StopRecording { scope: StopScope::RecordingOnly }));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::StopRecording { scope: StopScope::TranscriptionOnly }));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn the_transcript_turns_captions_on_and_excludes_the_chat_panel(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::MeetingChat("19:meeting_x@thread.v2".into()), cx);
+                state.toggle_call_chat(cx);
+                state.show_call_transcript(cx);
+            })
+        });
+        let (chat_open, transcript_open) = cx.update(|cx| {
+            let call = app.read(cx).call.as_ref().unwrap();
+            (call.chat_open, call.transcript_open)
+        });
+        assert!(!chat_open && transcript_open);
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptions(true)));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::Captions(calling::CaptionState::On), cx);
+                state.show_call_transcript(cx);
+                state.toggle_call_chat(cx);
+            })
+        });
+        let (chat_open, transcript_open) = cx.update(|cx| {
+            let call = app.read(cx).call.as_ref().unwrap();
+            (call.chat_open, call.transcript_open)
+        });
+        assert!(chat_open && !transcript_open);
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn a_spoken_language_picked_while_captions_are_off_is_sent_once_they_are_on(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.choose_call_caption_language("de-DE", cx);
+                state.apply_call_update(7, CallUpdate::Captions(calling::CaptionState::Starting), cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptions(true)));
+        assert_eq!(control.try_recv_command(), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::Captions(calling::CaptionState::On), cx);
+                state.choose_call_caption_language("fr-FR", cx);
+            })
+        });
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptionLanguage("de-DE".into())));
+        assert_eq!(control.try_recv_command(), Some(CallCommand::SetCaptionLanguage("fr-FR".into())));
+        assert_eq!(control.try_recv_command(), None);
+    }
+
+    #[gpui_kit::test]
+    fn caption_size_and_position_are_stored_and_reach_the_call_model(cx: &mut TestAppContext) {
+        let (app, _control) = app_with_commands(cx, live_meeting(false), None);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.set_call_caption_size(CaptionSize::Large, cx);
+                state.set_call_caption_position(CaptionPosition::Top, cx);
+            })
+        });
+        let (view, stored) = cx.update(|cx| {
+            let state = app.read(cx);
+            (state.call.as_ref().unwrap().model.view, ViewSettings::load(&state.store))
+        });
+        assert_eq!((view.caption_size, view.caption_position), (CaptionSize::Large, CaptionPosition::Top));
+        assert_eq!((stored.caption_size, stored.caption_position), (CaptionSize::Large, CaptionPosition::Top));
     }
 
     fn live_one_to_one() -> CallModel {

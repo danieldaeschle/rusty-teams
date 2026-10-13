@@ -41,7 +41,7 @@ use crate::push::CallNotification;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
 use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath};
 use crate::organizer::Target;
-use crate::recording::{Consent, RecordingStatus};
+use crate::recording::{Consent, RecordingPlan, RecordingStatus};
 use crate::roster::Roster;
 use crate::sdp::{LineRole, OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
 use crate::signaling::{
@@ -821,7 +821,8 @@ async fn drive(
     let mut caption_deadline: Option<Instant> = None;
     let mut recording_flow = CaptionFlow::default();
     let mut recording_deadline: Option<Instant> = None;
-    let mut recording_title = String::new();
+    let mut recording_plan = RecordingPlan::default();
+    let mut recording_audio_only = false;
     let mut recording_status = RecordingStatus::default();
     let mut bot_pending = false;
     let mut consent_pending = false;
@@ -1020,14 +1021,19 @@ async fn drive(
                             if roster.caption_bot().is_some() {
                                 bot_pending = false;
                             }
+                            let audio_only = roster.caption_bot().is_some_and(|bot| bot.recording && bot.audio_only);
+                            if audio_only != recording_audio_only {
+                                recording_audio_only = audio_only;
+                                control.send(CallUpdate::RecordingAudioOnly(audio_only));
+                            }
                             if caption_flow.wanted() {
-                                run_bot_steps(BotJob::Captions, &mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), "", &mut bot_pending, control, timeline).await;
+                                run_bot_steps(BotJob::Captions, &mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), &RecordingPlan::default(), &mut bot_pending, control, timeline).await;
                                 if caption_flow.on() {
                                     caption_deadline = None;
                                 }
                             }
                             if recording_flow.wanted() {
-                                run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_title, &mut bot_pending, control, timeline).await;
+                                run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_plan, &mut bot_pending, control, timeline).await;
                             }
                         }
                     }
@@ -1058,6 +1064,12 @@ async fn drive(
                         let change = recording_status.apply(&body);
                         if let Some(on) = change.recording {
                             control.send(CallUpdate::Recording(on));
+                            if on {
+                                recording_deadline = None;
+                            }
+                        }
+                        if let Some(on) = change.transcription {
+                            control.send(CallUpdate::Transcribing(on));
                             if on {
                                 recording_deadline = None;
                             }
@@ -1450,17 +1462,33 @@ async fn drive(
                         caption_deadline = None;
                         control.send(CallUpdate::Captions(CaptionState::Off));
                     }
-                    run_bot_steps(BotJob::Captions, &mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), "", &mut bot_pending, control, timeline).await;
+                    run_bot_steps(BotJob::Captions, &mut caption_flow, &roster, &remote, &links, meeting_chat.as_deref(), &RecordingPlan::default(), &mut bot_pending, control, timeline).await;
                     if caption_flow.on() {
                         caption_deadline = None;
                     }
                 }
-                Some(CallCommand::SetRecording { on, title }) => {
+                Some(CallCommand::StartRecording { kind, title }) => {
                     if is_meeting {
-                        recording_title = title;
-                        recording_flow.want(on);
-                        recording_deadline = on.then(|| Instant::now() + RECORDING_START_LIMIT);
-                        run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_title, &mut bot_pending, control, timeline).await;
+                        recording_plan = RecordingPlan { title, kind, ..RecordingPlan::default() };
+                        recording_flow.want(true);
+                        recording_deadline = Some(Instant::now() + RECORDING_START_LIMIT);
+                        run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_plan, &mut bot_pending, control, timeline).await;
+                    }
+                }
+                Some(CallCommand::StopRecording { scope }) => {
+                    if is_meeting {
+                        recording_plan.scope = scope;
+                        recording_flow.stop();
+                        recording_deadline = None;
+                        run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_plan, &mut bot_pending, control, timeline).await;
+                    }
+                }
+                Some(CallCommand::SetCaptionLanguage(language)) => {
+                    if let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone())
+                        && let Err(error) = remote.signaling.caption_language_command(&url, &remote.participant, &language).await
+                    {
+                        timeline.record("caption language failed", error.to_string());
+                        control.send(CallUpdate::Notice("Could not change the spoken language".into()));
                     }
                 }
                 Some(CallCommand::ConsentToRecording) => {
@@ -2022,7 +2050,7 @@ async fn run_bot_steps(
     remote: &RemoteCall,
     links: &CallbackLinks,
     meeting_chat: Option<&str>,
-    title: &str,
+    plan: &RecordingPlan,
     bot_pending: &mut bool,
     control: &CallControl,
     timeline: &Timeline,
@@ -2076,7 +2104,7 @@ async fn run_bot_steps(
                         }
                     }
                     BotJob::Recording => {
-                        let started = remote.signaling.recording_command(&url, BotAction::Start, &remote.participant, title).await;
+                        let started = remote.signaling.recording_command(&url, plan.start(), &remote.participant, &plan.title).await;
                         let failed = started.is_err();
                         report_organizer_result(started, "recording start", start_failure, control, timeline);
                         if failed {
@@ -2097,7 +2125,7 @@ async fn run_bot_steps(
                         }
                     }
                     BotJob::Recording => {
-                        let stopped = remote.signaling.recording_command(&url, BotAction::Stop, &remote.participant, title).await;
+                        let stopped = remote.signaling.recording_command(&url, plan.stop(), &remote.participant, &plan.title).await;
                         report_organizer_result(stopped, "recording stop", "The recording could not be stopped", control, timeline);
                     }
                 }

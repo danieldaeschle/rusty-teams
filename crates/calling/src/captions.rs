@@ -130,6 +130,33 @@ pub fn command_body(action: BotAction, own_mri: &str, participant_leg_id: &str, 
     })
 }
 
+pub const SPOKEN_LANGUAGES: [(&str, &str); 12] = [
+    ("en-US", "English (US)"),
+    ("en-GB", "English (UK)"),
+    ("de-DE", "German"),
+    ("fr-FR", "French"),
+    ("es-ES", "Spanish"),
+    ("it-IT", "Italian"),
+    ("nl-NL", "Dutch"),
+    ("pt-BR", "Portuguese (Brazil)"),
+    ("ja-JP", "Japanese"),
+    ("zh-CN", "Chinese (Simplified)"),
+    ("sv-SE", "Swedish"),
+    ("pl-PL", "Polish"),
+];
+
+pub fn language_body(own_mri: &str, participant_leg_id: &str, timestamp: &str, language_tag: &str) -> Value {
+    json!({
+        "timestamp": timestamp,
+        "participantMri": own_mri,
+        "participantLegId": participant_leg_id,
+        "action": "setLanguage",
+        "mode": COMMAND_MODE,
+        "processingModes": [CLOSED_CAPTIONS],
+        "actionParameters": {"spokenLanguage": language_tag.to_ascii_lowercase(), "type": "setLanguage"},
+    })
+}
+
 pub fn endpoint_metadata(captions: bool) -> Value {
     json!({"holographicCapabilities": 3, "transcriptionPrefs": {"closedCaptions": captions}})
 }
@@ -157,6 +184,12 @@ impl CaptionFlow {
         if !wanted {
             self.reported = false;
         }
+    }
+
+    pub fn stop(&mut self) {
+        self.wanted = false;
+        self.started = true;
+        self.reported = false;
     }
 
     pub fn wanted(&self) -> bool {
@@ -201,7 +234,7 @@ mod tests {
     use super::*;
 
     fn bot(command_url: bool, active: bool) -> CaptionBot {
-        CaptionBot { mri: RECORDING_BOT_MRI.into(), command_url: command_url.then(|| "https://x/v2/oncommand/1".into()), active, recording: false }
+        CaptionBot { mri: RECORDING_BOT_MRI.into(), command_url: command_url.then(|| "https://x/v2/oncommand/1".into()), active, recording: false, audio_only: false }
     }
 
     #[test]
@@ -253,6 +286,31 @@ mod tests {
         assert_eq!(start["participantLegId"], "leg-1");
         assert!(start.get("participantSkypeToken").is_none());
         assert_eq!(start["timestamp"], stop["timestamp"]);
+    }
+
+    #[test]
+    fn the_language_command_sets_a_lower_case_spoken_language() {
+        let body = language_body("8:orgid:me", "leg-1", "2026-10-10T08:44:12.705Z", "de-DE");
+        assert_eq!(body["action"], "setLanguage");
+        assert_eq!(body["mode"], "transcription");
+        assert_eq!(body["processingModes"], json!(["closedCaptions"]));
+        assert_eq!(body["actionParameters"], json!({"spokenLanguage": "de-de", "type": "setLanguage"}));
+        assert_eq!(body["participantLegId"], "leg-1");
+        assert!(body.get("participantSkypeToken").is_none());
+    }
+
+    #[test]
+    fn every_listed_language_is_a_region_tag_with_a_label() {
+        assert!(SPOKEN_LANGUAGES.iter().all(|(tag, label)| tag.len() == 5 && tag.contains('-') && !label.is_empty()));
+        assert!(SPOKEN_LANGUAGES.iter().any(|(tag, _)| *tag == "en-US"));
+    }
+
+    #[test]
+    fn a_forced_stop_reaches_the_bot_even_when_this_session_did_not_start_it() {
+        let mut flow = CaptionFlow::default();
+        flow.stop();
+        assert_eq!(flow.next(Some(&bot(true, true))), CaptionStep::Stop);
+        assert_eq!(flow.next(Some(&bot(true, true))), CaptionStep::Wait);
     }
 
     #[test]

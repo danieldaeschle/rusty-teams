@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::*;
 
+use super::caption_style::{CaptionPosition, CaptionSize};
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
@@ -41,6 +42,14 @@ impl AppState {
 
     pub fn toggle_call_hide_no_video(&mut self, cx: &mut Context<Self>) {
         self.change_call_view(|view| view.hide_no_video = !view.hide_no_video, cx);
+    }
+
+    pub fn set_call_caption_size(&mut self, size: CaptionSize, cx: &mut Context<Self>) {
+        self.change_call_view(|view| view.caption_size = size, cx);
+    }
+
+    pub fn set_call_caption_position(&mut self, position: CaptionPosition, cx: &mut Context<Self>) {
+        self.change_call_view(|view| view.caption_position = position, cx);
     }
 
     pub fn toggle_call_chat_bubbles(&mut self, cx: &mut Context<Self>) {
