@@ -1,56 +1,48 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::base::PopoverState;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::runs::{AgentRun, AgentRuns, RunState};
 use super::spinner::spinner;
-use crate::app_state::AppState;
-use crate::notify::selection_for;
 use crate::theme;
 use crate::views::widgets::icon;
 
-const POPOVER_WIDTH: f32 = 300.;
-const DONE_LIMIT: usize = 10;
+const DONE_LIMIT: usize = 50;
 const HISTORY_WINDOW: usize = 60;
+const EMPTY_TEXT: &str = "No agent runs yet. Hover a message and click the robot button.";
 const STATUS_ICON: f32 = 12.;
 
-pub struct RunsPopover {
-    app: Entity<AppState>,
+pub enum AgentsPanelEvent {
+    Open {
+        conversation_id: String,
+        message_id: String,
+    },
+}
+
+pub struct AgentsPanel {
     runs: Entity<AgentRuns>,
-    popover: Option<WeakEntity<PopoverState>>,
+    scroll: ScrollHandle,
     _subscription: Subscription,
 }
 
-impl RunsPopover {
-    pub fn new(app: Entity<AppState>, runs: Entity<AgentRuns>, cx: &mut Context<Self>) -> Self {
+impl EventEmitter<AgentsPanelEvent> for AgentsPanel {}
+
+impl AgentsPanel {
+    pub fn new(runs: Entity<AgentRuns>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.observe(&runs, |_, _, cx| cx.notify());
-        RunsPopover {
-            app,
+        AgentsPanel {
             runs,
-            popover: None,
+            scroll: ScrollHandle::new(),
             _subscription: subscription,
         }
     }
 
-    pub fn set_popover(&mut self, popover: WeakEntity<PopoverState>) {
-        self.popover = Some(popover);
-    }
-
-    fn show(&mut self, run: &AgentRun, window: &mut Window, cx: &mut Context<Self>) {
-        let selection = selection_for(&self.app.read(cx).sidebar, &run.conversation_id);
-        if let Some(selection) = selection {
-            let message_id = run.message_id.clone();
-            self.app.update(cx, |state, cx| {
-                state.jump_to_message(selection, message_id, cx)
-            });
-        }
-        if let Some(popover) = &self.popover {
-            popover
-                .update(cx, |state, cx| state.dismiss(window, cx))
-                .ok();
-        }
+    fn show(&mut self, run: &AgentRun, cx: &mut Context<Self>) {
+        cx.emit(AgentsPanelEvent::Open {
+            conversation_id: run.conversation_id.clone(),
+            message_id: run.message_id.clone(),
+        });
     }
 
     fn row(&self, run: &AgentRun, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -87,14 +79,14 @@ impl RunsPopover {
         };
         h_flex()
             .id(("agent-run-row", run.id as usize))
-            .w_full()
+            .mx(px(6.))
             .px(px(10.))
-            .py(px(6.))
-            .gap(px(10.))
+            .py(px(8.))
+            .gap(px(12.))
             .items_start()
-            .rounded(px(6.))
+            .rounded(px(8.))
             .cursor_pointer()
-            .hover(|row| row.bg(theme::popup_hover()))
+            .hover(|row| row.bg(theme::row_hover()))
             .child(status.flex_none())
             .child(
                 v_flex()
@@ -117,14 +109,14 @@ impl RunsPopover {
                     ),
             )
             .child(trailing.flex_none())
-            .on_click(cx.listener(move |this, _, window, cx| this.show(&shown, window, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| this.show(&shown, cx)))
     }
 }
 
 fn section_header(title: &'static str) -> Div {
     div()
-        .px(px(10.))
-        .pt(px(6.))
+        .px(px(16.))
+        .pt(px(8.))
         .pb(px(4.))
         .text_size(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
@@ -138,7 +130,7 @@ pub fn split_runs(runs: Vec<&AgentRun>) -> (Vec<&AgentRun>, Vec<&AgentRun>) {
     (running, finished.into_iter().take(DONE_LIMIT).collect())
 }
 
-impl Render for RunsPopover {
+impl Render for AgentsPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runs = self.runs.read(cx);
         let (running, finished) = split_runs(runs.recent(HISTORY_WINDOW));
@@ -148,7 +140,13 @@ impl Render for RunsPopover {
         );
         let empty = running.is_empty() && finished.is_empty();
         v_flex()
-            .w(px(POPOVER_WIDTH))
+            .id("agents-list")
+            .debug_selector(|| "shell/islands/sidebar/agents".into())
+            .flex_1()
+            .min_h_0()
+            .pb(px(12.))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .when(!running.is_empty(), |list| {
                 list.child(section_header("Running"))
                     .children(running.iter().map(|run| self.row(run, cx)))
@@ -160,11 +158,14 @@ impl Render for RunsPopover {
             .when(empty, |list| {
                 list.child(
                     div()
-                        .px(px(10.))
-                        .py(px(8.))
-                        .text_size(px(12.))
-                        .text_color(theme::text_faint())
-                        .child("No agent runs yet"),
+                        .py(px(32.))
+                        .px(px(24.))
+                        .flex()
+                        .justify_center()
+                        .text_center()
+                        .text_size(px(13.))
+                        .text_color(theme::text_muted())
+                        .child(EMPTY_TEXT),
                 )
             })
     }
@@ -177,14 +178,14 @@ mod tests {
     use crate::agents::runs::tests::finished_run;
 
     #[test]
-    fn running_runs_go_first_and_done_is_capped_at_ten() {
-        let mut runs: Vec<_> = (0..14).map(finished_run).collect();
+    fn running_runs_go_first_and_done_is_capped_at_fifty() {
+        let mut runs: Vec<_> = (0..60).map(finished_run).collect();
         runs[3].state = RunState::Running;
         let newest_first: Vec<_> = runs.iter().rev().collect();
         let (running, finished) = split_runs(newest_first);
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].id, 3);
-        assert_eq!(finished.len(), 10);
-        assert_eq!(finished[0].id, 13);
+        assert_eq!(finished.len(), 50);
+        assert_eq!(finished[0].id, 59);
     }
 }

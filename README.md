@@ -71,7 +71,7 @@
 - Agents read allowed chats, channels, meetings and transcripts (images, reactions, files and cards included, newest messages across chats), and propose replies
 - A proposal shows as a card above the composer: Send, Edit or Discard. Agents never send
 - One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
-- Delegate a message to a coding-agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar: progress chip, Agents rail entry, toast when it finishes, Open session
+- Delegate a message to a coding-agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar: progress chip, Agents page, toast when it finishes, Open session
 
 **App**
 - Dark theme, opens instantly from the cache

@@ -1,6 +1,5 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::base::Selectable;
-use gpui_kit::component::{popover::Popover, tooltip::Tooltip, v_flex};
+use gpui_kit::component::{tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -9,7 +8,7 @@ use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
 use super::widgets::icon;
 use crate::activity::ActivityCenter;
-use crate::agents::{AgentRuns, RunsPopover, runs_handle};
+use crate::agents::{AgentRuns, runs_handle};
 use crate::app_state::AppState;
 use crate::format;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
@@ -30,14 +29,8 @@ enum RailBadge {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RailTarget {
-    Tab(SidebarTab),
-    Agents,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RailItem {
-    target: RailTarget,
+    tab: SidebarTab,
     label: &'static str,
     shortcut_label: &'static str,
     icon: IconName,
@@ -59,21 +52,21 @@ fn rail_items(
 ) -> Vec<RailItem> {
     let mut items = vec![
         RailItem {
-            target: RailTarget::Tab(SidebarTab::Activity),
+            tab: SidebarTab::Activity,
             label: "Activity",
             shortcut_label: "Open Activity",
             icon: IconName::Bell,
             badge: count_badge_for(activity_unread),
         },
         RailItem {
-            target: RailTarget::Tab(SidebarTab::Chats),
+            tab: SidebarTab::Chats,
             label: "Chats",
             shortcut_label: "Show Chats",
             icon: IconName::MessageSquare,
             badge: count_badge_for(unread_chats),
         },
         RailItem {
-            target: RailTarget::Tab(SidebarTab::Channels),
+            tab: SidebarTab::Channels,
             label: "Channels",
             shortcut_label: "Show Channels",
             icon: IconName::Users,
@@ -84,14 +77,14 @@ fn rail_items(
             },
         },
         RailItem {
-            target: RailTarget::Tab(SidebarTab::Calls),
+            tab: SidebarTab::Calls,
             label: "Calls",
             shortcut_label: "Show Calls",
             icon: IconName::Phone,
             badge: RailBadge::None,
         },
         RailItem {
-            target: RailTarget::Tab(SidebarTab::Saved),
+            tab: SidebarTab::Saved,
             label: "Saved",
             shortcut_label: "Open Saved",
             icon: IconName::Bookmark,
@@ -100,9 +93,9 @@ fn rail_items(
     ];
     if let Some(running) = agents_running {
         items.push(RailItem {
-            target: RailTarget::Agents,
+            tab: SidebarTab::Agents,
             label: "Agents",
-            shortcut_label: "Agents",
+            shortcut_label: "Open Agents",
             icon: IconName::Bot,
             badge: count_badge_for(running),
         });
@@ -122,7 +115,6 @@ pub struct RailView {
     activity: Entity<ActivityCenter>,
     sidebar: Entity<SidebarView>,
     runs: Option<Entity<AgentRuns>>,
-    runs_popover: Option<Entity<RunsPopover>>,
     _observations: Vec<Subscription>,
 }
 
@@ -167,29 +159,6 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
 }
 
-#[derive(IntoElement)]
-struct AgentsTrigger {
-    item: RailItem,
-    open: bool,
-}
-
-impl Selectable for AgentsTrigger {
-    fn selected(mut self, selected: bool) -> Self {
-        self.open = selected;
-        self
-    }
-
-    fn is_selected(&self) -> bool {
-        self.open
-    }
-}
-
-impl RenderOnce for AgentsTrigger {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        item_element(&self.item, self.open)
-    }
-}
-
 impl RailView {
     pub fn new(
         state: Entity<AppState>,
@@ -206,57 +175,28 @@ impl RailView {
         if let Some(runs) = &runs {
             observations.push(cx.observe(runs, |_, _, cx| cx.notify()));
         }
-        let runs_popover = runs.clone().map(|runs| {
-            let app = state.clone();
-            cx.new(|cx| RunsPopover::new(app, runs, cx))
-        });
         RailView {
             state,
             activity,
             sidebar,
             runs,
-            runs_popover,
             _observations: observations,
         }
     }
 
     fn item(&self, item: &RailItem, active: bool) -> AnyElement {
-        match item.target {
-            RailTarget::Tab(tab) => {
-                let sidebar = self.sidebar.clone();
-                item_element(item, active)
-                    .on_click(move |_, _, cx| {
-                        sidebar.update(cx, |sidebar, cx| sidebar.open_tab(tab, cx));
-                    })
-                    .into_any_element()
-            }
-            RailTarget::Agents => self.agents_item(item),
-        }
-    }
-
-    fn agents_item(&self, item: &RailItem) -> AnyElement {
-        let Some(content) = self.runs_popover.clone() else {
-            return div().into_any_element();
-        };
-        Popover::new("rail-agents-popover")
-            .anchor(Anchor::LeftCenter)
-            .offset(px(6.))
-            .p(px(4.))
-            .trigger(AgentsTrigger {
-                item: *item,
-                open: false,
-            })
-            .content(move |_, _, cx| {
-                let popover = cx.entity().downgrade();
-                content.update(cx, |content, _| content.set_popover(popover));
-                content.clone()
+        let tab = item.tab;
+        let sidebar = self.sidebar.clone();
+        item_element(item, active)
+            .on_click(move |_, _, cx| {
+                sidebar.update(cx, |sidebar, cx| sidebar.open_tab(tab, cx));
             })
             .into_any_element()
     }
 
     fn agents_running(&self, cx: &App) -> Option<usize> {
-        let runs = self.runs.as_ref()?.read(cx);
-        (!runs.settings().actions.is_empty()).then(|| runs.running_count())
+        let runs = self.runs.as_ref()?;
+        crate::agents::agents_enabled(cx).then(|| runs.read(cx).running_count())
     }
 }
 
@@ -318,30 +258,30 @@ impl Render for RailView {
             .children(
                 items
                     .iter()
-                    .map(|item| self.item(item, item.target == RailTarget::Tab(active))),
+                    .map(|item| self.item(item, item.tab == active)),
             )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RailBadge, RailTarget, count_badge_for, rail_items, tooltip_text};
+    use super::{RailBadge, count_badge_for, rail_items, tooltip_text};
     use crate::views::sidebar::SidebarTab;
 
     #[test]
     fn items_follow_the_spec_order() {
-        let targets: Vec<RailTarget> = rail_items(0, 0, false, None)
+        let tabs: Vec<SidebarTab> = rail_items(0, 0, false, None)
             .iter()
-            .map(|item| item.target)
+            .map(|item| item.tab)
             .collect();
         assert_eq!(
-            targets,
+            tabs,
             [
-                RailTarget::Tab(SidebarTab::Activity),
-                RailTarget::Tab(SidebarTab::Chats),
-                RailTarget::Tab(SidebarTab::Channels),
-                RailTarget::Tab(SidebarTab::Calls),
-                RailTarget::Tab(SidebarTab::Saved)
+                SidebarTab::Activity,
+                SidebarTab::Chats,
+                SidebarTab::Channels,
+                SidebarTab::Calls,
+                SidebarTab::Saved
             ]
         );
     }
@@ -351,7 +291,7 @@ mod tests {
         assert_eq!(rail_items(0, 0, false, None).len(), 5);
         let with_agents = rail_items(0, 0, false, Some(2));
         assert_eq!(with_agents.len(), 6);
-        assert_eq!(with_agents[5].target, RailTarget::Agents);
+        assert_eq!(with_agents[5].tab, SidebarTab::Agents);
         assert_eq!(with_agents[5].label, "Agents");
         assert_eq!(with_agents[5].badge, RailBadge::Count(2));
         assert_eq!(rail_items(0, 0, false, Some(0))[5].badge, RailBadge::None);

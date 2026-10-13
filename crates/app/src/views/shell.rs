@@ -18,7 +18,7 @@ use super::rail::{RAIL_WIDTH, RailView};
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
-    OpenCallsTab, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    OpenAgents, OpenCallsTab, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
 };
@@ -112,6 +112,7 @@ pub struct AppShell {
     _subscription: Subscription,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
+    _agents_subscription: Option<Subscription>,
     _agent_subscription: Option<Subscription>,
     _escape_observation: Subscription,
     _activation_observation: Subscription,
@@ -162,6 +163,20 @@ impl AppShell {
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
+        let agents_panel = crate::agents::runs_handle(cx)
+            .map(|runs| cx.new(|cx| crate::agents::AgentsPanel::new(runs, cx)));
+        let agents_subscription = agents_panel.as_ref().map(|panel| {
+            cx.subscribe(
+                panel,
+                |this, _, event: &crate::agents::AgentsPanelEvent, cx| {
+                    let crate::agents::AgentsPanelEvent::Open {
+                        conversation_id,
+                        message_id,
+                    } = event;
+                    this.open_message(conversation_id, message_id, cx);
+                },
+            )
+        });
         let panel_subscriptions = [
             cx.subscribe(
                 &activity_panel,
@@ -198,7 +213,7 @@ impl AppShell {
                 },
             )
         });
-        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, cx));
+        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, agents_panel, cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
         let subscription =
@@ -272,6 +287,7 @@ impl AppShell {
             _subscription: subscription,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
+            _agents_subscription: agents_subscription,
             _agent_subscription: agent_subscription,
             _escape_observation: escape_observation,
             _activation_observation: activation_observation,
@@ -826,6 +842,11 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.show_saved(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenAgents, window, cx| {
+                this.close_image_viewer(window, cx);
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_agents(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChatsTab, window, cx| {
                 this.close_image_viewer(window, cx);

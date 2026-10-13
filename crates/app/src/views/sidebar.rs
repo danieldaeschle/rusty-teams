@@ -20,6 +20,7 @@ use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, dot, icon, page_header, unread_marker};
+use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, is_pending_folder};
@@ -64,6 +65,7 @@ pub enum SidebarTab {
     Channels,
     Calls,
     Saved,
+    Agents,
 }
 
 impl SidebarTab {
@@ -74,6 +76,7 @@ impl SidebarTab {
             SidebarTab::Channels => "Channels",
             SidebarTab::Calls => "Calls",
             SidebarTab::Saved => "Saved",
+            SidebarTab::Agents => "Agents",
         }
     }
 }
@@ -472,6 +475,7 @@ pub struct SidebarView {
     tab: SidebarTab,
     activity_panel: Entity<ActivityPanel>,
     saved_panel: Entity<SavedPanel>,
+    agents_panel: Option<Entity<AgentsPanel>>,
     collapsed_teams: HashSet<String>,
     revealed_channel_teams: HashSet<String>,
     hidden_teams_open: bool,
@@ -483,6 +487,7 @@ pub struct SidebarView {
     _subscription: Subscription,
     _state_observation: Subscription,
     _agent_observation: Option<Subscription>,
+    _runs_observation: Option<Subscription>,
 }
 
 fn preview_text(preview: &Preview) -> Option<(String, bool)> {
@@ -538,6 +543,7 @@ impl SidebarView {
         state: Entity<AppState>,
         activity_panel: Entity<ActivityPanel>,
         saved_panel: Entity<SavedPanel>,
+        agents_panel: Option<Entity<AgentsPanel>>,
         cx: &mut Context<Self>,
     ) -> Self {
         let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
@@ -562,6 +568,13 @@ impl SidebarView {
         let state_observation = cx.observe(&state, |_, _, cx| cx.notify());
         let agent_observation =
             crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
+        let runs_observation = crate::agents::runs_handle(cx).map(|runs| {
+            cx.observe(&runs, |view, _, cx| {
+                if view.tab == SidebarTab::Agents && !crate::agents::agents_enabled(cx) {
+                    view.open_tab(SidebarTab::Chats, cx);
+                }
+            })
+        });
         let tab = if state.read(cx).start_on_channels {
             SidebarTab::Channels
         } else {
@@ -587,6 +600,7 @@ impl SidebarView {
             tab,
             activity_panel,
             saved_panel,
+            agents_panel,
             collapsed_teams,
             revealed_channel_teams: HashSet::new(),
             hidden_teams_open: false,
@@ -598,6 +612,7 @@ impl SidebarView {
             _subscription: subscription,
             _state_observation: state_observation,
             _agent_observation: agent_observation,
+            _runs_observation: runs_observation,
         }
     }
 
@@ -625,7 +640,14 @@ impl SidebarView {
         self.open_tab(SidebarTab::Saved, cx);
     }
 
+    pub fn show_agents(&mut self, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Agents, cx);
+    }
+
     pub fn open_tab(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
+        if tab == SidebarTab::Agents && !crate::agents::agents_enabled(cx) {
+            return;
+        }
         self.tab = tab;
         match tab {
             SidebarTab::Calls => self.state.update(cx, |state, cx| {
@@ -646,7 +668,9 @@ impl SidebarView {
                 .adjacent_chat_id(step)
                 .map(Selection::Chat),
             SidebarTab::Channels => self.adjacent_channel_id(step, cx).map(Selection::Channel),
-            SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Saved => None,
+            SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Saved | SidebarTab::Agents => {
+                None
+            }
         };
         if let Some(selection) = selection {
             self.state
@@ -1737,6 +1761,10 @@ impl Render for SidebarView {
             SidebarTab::Channels => self.channels_body(cx),
             SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, window_height, cx),
             SidebarTab::Saved => self.saved_panel.clone().into_any_element(),
+            SidebarTab::Agents => match &self.agents_panel {
+                Some(panel) => panel.clone().into_any_element(),
+                None => div().into_any_element(),
+            },
         };
         let header = match self.tab {
             SidebarTab::Chats => Some(
@@ -1744,7 +1772,9 @@ impl Render for SidebarView {
                     .child(self.chat_list_menu_button(cx))
                     .child(self.new_chat_button(cx)),
             ),
-            SidebarTab::Channels | SidebarTab::Calls => Some(page_header(self.tab.title())),
+            SidebarTab::Channels | SidebarTab::Calls | SidebarTab::Agents => {
+                Some(page_header(self.tab.title()))
+            }
             SidebarTab::Activity | SidebarTab::Saved => None,
         };
         v_flex()

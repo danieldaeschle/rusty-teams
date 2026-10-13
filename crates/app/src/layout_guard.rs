@@ -132,7 +132,7 @@ mod frames {
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call};
-    use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
+    use crate::views::shortcuts::{OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved};
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -153,6 +153,7 @@ mod frames {
         "shell/islands/main/call-controls/mic",
         "shell/islands/main/call-controls/leave",
     ];
+    const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/sidebar/calls-actions",
         "shell/islands/sidebar/calls-actions/meet-now",
@@ -321,7 +322,7 @@ mod frames {
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
-            .chain([&CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
+            .chain([&AGENTS_LIST, &CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -372,6 +373,7 @@ mod frames {
             };
             let state = cx.new(|_| AppState::new(Arc::new(store), mode));
             install_globals(&state, UserInput::new(), cx);
+            crate::agents::install(state.clone(), cx);
             demo::start_session(&state, cx);
             let shared_state = state.clone();
             let startup = Startup {
@@ -443,6 +445,7 @@ mod frames {
                 ),
                 Screen::Tab("saved", Some(|visual| visual.dispatch_action(OpenSaved))),
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
+                Screen::Tab("agents", Some(|visual| visual.dispatch_action(OpenAgents))),
                 Screen::Prejoin,
                 Screen::StatusMenu,
                 Screen::Call,
@@ -547,6 +550,7 @@ mod frames {
                 }
                 match screen_name {
                     "calls" => expected.extend(CALLS_TAGS),
+                    "agents" => expected.push(AGENTS_LIST),
                     "prejoin" => expected.extend(PREJOIN_TAGS),
                     _ => {}
                 }

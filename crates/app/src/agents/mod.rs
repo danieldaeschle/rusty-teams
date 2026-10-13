@@ -1,3 +1,4 @@
+mod agents_panel;
 mod demo;
 mod kills;
 mod lanes;
@@ -5,7 +6,6 @@ mod mcp_bridge;
 mod message_context;
 mod run_chip;
 mod runs;
-mod runs_popover;
 mod session_options;
 mod settings_controls;
 mod settings_forms;
@@ -23,9 +23,9 @@ use agents::{AgentAction, Environment};
 use directories::ProjectDirs;
 use gpui_kit::*;
 
+pub use agents_panel::{AgentsPanel, AgentsPanelEvent};
 pub use run_chip::run_chip;
 pub use runs::{AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions};
-pub use runs_popover::RunsPopover;
 pub use settings_section::AgentsSettings;
 pub use start_dialog::{StartDialog, StartDialogEvent, StartRequest};
 
@@ -48,6 +48,10 @@ fn mcp_config_directory() -> Option<PathBuf> {
 pub fn runs_handle(cx: &App) -> Option<Entity<AgentRuns>> {
     cx.try_global::<AgentRunsHandle>()
         .map(|handle| handle.0.clone())
+}
+
+pub fn agents_enabled(cx: &App) -> bool {
+    runs_handle(cx).is_some_and(|runs| !runs.read(cx).settings().actions.is_empty())
 }
 
 fn raise_notice(text: String, cx: &mut App) {
