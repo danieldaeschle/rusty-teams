@@ -3059,7 +3059,6 @@ impl ConversationView {
                     .inset(px(12.))
                     .rounded(px(12.))
                     .border_2()
-                    .border_dashed()
                     .border_color(theme::accent())
                     .flex()
                     .items_center()

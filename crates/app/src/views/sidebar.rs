@@ -796,7 +796,6 @@ impl SidebarView {
                         style
                             .bg(theme::drop_background())
                             .border_1()
-                            .border_dashed()
                             .border_color(theme::accent())
                     })
                     .on_drop(cx.listener(move |this, dragged: &DraggedChat, _, cx| {

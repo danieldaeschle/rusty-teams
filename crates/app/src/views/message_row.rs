@@ -124,7 +124,6 @@ fn bubble(
     if row.deleted {
         return element
             .border_1()
-            .border_dashed()
             .border_color(theme::border_strong())
             .py(px(6.))
             .text_size(px(13.))
@@ -146,7 +145,7 @@ fn bubble(
             bubble.border_1().border_color(theme::red())
         })
         .when(scheduled, |bubble| {
-            bubble.border_1().border_dashed().border_color(
+            bubble.border_1().border_color(
                 if row.delivery == Delivery::Scheduled(ScheduledState::DeliveryFailed) {
                     theme::red()
                 } else {

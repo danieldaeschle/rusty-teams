@@ -641,3 +641,33 @@ mod frames {
         }
     }
 }
+
+#[test]
+fn lines_are_solid() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    source_files(&root, &mut files);
+    let violations: Vec<String> = files
+        .iter()
+        .filter(|file| !file.ends_with("layout_guard.rs"))
+        .flat_map(|file| {
+            let source = fs::read_to_string(file).expect("read source file");
+            source
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| {
+                    line.contains(".border_dashed(") || line.contains(".border_dotted(")
+                })
+                .map(|(index, line)| {
+                    format!(
+                        "{}:{}: lines are always solid: {}",
+                        file.display(),
+                        index + 1,
+                        line.trim()
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
