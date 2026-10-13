@@ -172,3 +172,16 @@ async fn cleanup_files_are_removed_when_the_run_ends() {
     run(stopped_plan, OutputFormat::ClaudeStreamJson, sender, stop).await;
     assert!(!config.exists());
 }
+
+#[tokio::test]
+async fn a_hanging_stop_command_is_killed_after_the_limit() {
+    let invocation = Invocation {
+        program: "sleep".to_string(),
+        args: vec!["30".to_string()],
+        cwd: None,
+        stdin: None,
+    };
+    let started = std::time::Instant::now();
+    agents::run_stop_invocation_within(&invocation, std::time::Duration::from_millis(200)).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}

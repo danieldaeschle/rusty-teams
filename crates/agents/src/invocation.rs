@@ -5,6 +5,7 @@ use crate::profile::{AgentProfile, Environment};
 use crate::template::{UnknownPlaceholder, Values, placeholders_in, render, split_command};
 
 const WSL_PROGRAM: &str = "wsl.exe";
+const APP_STOP_SCRIPT: &str = r#"for p in $(pgrep -f -- "$1"); do c=$(tr '\0' ' ' </proc/$p/cmdline 2>/dev/null) || continue; case "$c" in *app-stop-marker*) continue;; esac; case "$c" in *" -p "*|*" --print "*) ;; *) continue;; esac; case "$c" in *--output-format*) ;; *) continue;; esac; case "$c" in *"--session-id $1 "*) kill -9 "$p";; *"--resume $1 "*) case "$c" in *--fork-session*) ;; *) kill -9 "$p";; esac;; esac; done"#;
 const SESSION_FLAG: &str = "--session-id {session_id}";
 const RESUME_FLAG: &str = "--resume {session_id}";
 const WSL_SCRIPT: &str = r#"case "$1" in "~"*) dir="$HOME${1#\~}";; *) dir="$1";; esac; cd "$dir" && shift && exec "$@""#;
@@ -40,6 +41,8 @@ pub enum InvocationError {
     McpConfig(String),
     #[error("the agent command has no \"{SESSION_FLAG}\" to resume with")]
     CannotResume,
+    #[error("the session id is not valid")]
+    InvalidSessionId,
 }
 
 fn expand_home(path: &str) -> String {
@@ -64,6 +67,25 @@ fn mcp_config_json(endpoint: &McpEndpoint) -> String {
         }
     })
     .to_string()
+}
+
+fn wsl_unc_rest(path: &str) -> Option<&str> {
+    path.strip_prefix(r"\\wsl.localhost\")
+        .or_else(|| path.strip_prefix(r"\\wsl$\"))
+}
+
+pub fn wsl_unc_distro(path: &str) -> Option<&str> {
+    wsl_unc_rest(path).map(|rest| rest.split('\\').next().unwrap_or(rest))
+}
+
+pub fn linux_path(path: &str) -> String {
+    match wsl_unc_rest(path) {
+        Some(rest) => match rest.split_once('\\') {
+            Some((_, relative)) => format!("/{}", relative.replace('\\', "/")),
+            None => "/".to_owned(),
+        },
+        None => wsl_path(path),
+    }
 }
 
 pub fn wsl_path(path: &str) -> String {
@@ -187,7 +209,6 @@ pub fn build_invocation(
         }
         Environment::Wsl { .. } => {
             let mut args = wsl_prefix(&profile.environment);
-            let mut stop_args = args.clone();
             args.extend(
                 ["-e", "sh", "-lc", WSL_SCRIPT, "sh"]
                     .into_iter()
@@ -195,7 +216,6 @@ pub fn build_invocation(
             );
             args.push(working_dir);
             args.extend(tokens);
-            stop_args.extend(["-e", "pkill", "-f", session_id].map(String::from));
             Ok(RunPlan {
                 run: Invocation {
                     program: WSL_PROGRAM.to_string(),
@@ -203,16 +223,27 @@ pub fn build_invocation(
                     cwd: None,
                     stdin,
                 },
-                stop: Some(Invocation {
-                    program: WSL_PROGRAM.to_string(),
-                    args: stop_args,
-                    cwd: None,
-                    stdin: None,
-                }),
+                stop: Some(app_stop_invocation(&profile.environment, session_id)),
                 cleanup,
             })
         }
     }
+}
+
+fn app_stop_invocation(environment: &Environment, session_id: &str) -> Invocation {
+    let mut args = wsl_prefix(environment);
+    args.extend(["-e", "sh", "-c", APP_STOP_SCRIPT, "sh", session_id].map(String::from));
+    Invocation {
+        program: WSL_PROGRAM.to_string(),
+        args,
+        cwd: None,
+        stdin: None,
+    }
+}
+
+pub fn wsl_stop_invocation(environment: &Environment, session_id: &str) -> Option<Invocation> {
+    (matches!(environment, Environment::Wsl { .. }) && is_plain_session_id(session_id))
+        .then(|| app_stop_invocation(environment, session_id))
 }
 
 fn is_plain_session_id(session_id: &str) -> bool {
@@ -267,11 +298,57 @@ pub fn resume_invocation(
     mcp: Option<&McpEndpoint>,
     mcp_config_directory: Option<&Path>,
 ) -> Result<RunPlan, InvocationError> {
+    resume_with_flag(
+        profile,
+        action,
+        prompt,
+        session_id,
+        RESUME_FLAG,
+        mcp,
+        mcp_config_directory,
+    )
+}
+
+pub fn fork_invocation(
+    profile: &AgentProfile,
+    action: &AgentAction,
+    prompt: &str,
+    original_session_id: &str,
+    fork_session_id: &str,
+    mcp: Option<&McpEndpoint>,
+    mcp_config_directory: Option<&Path>,
+) -> Result<RunPlan, InvocationError> {
+    if !is_plain_session_id(original_session_id) {
+        return Err(InvocationError::InvalidSessionId);
+    }
+    resume_with_flag(
+        profile,
+        action,
+        prompt,
+        fork_session_id,
+        &format!("--resume {original_session_id} --fork-session {SESSION_FLAG}"),
+        mcp,
+        mcp_config_directory,
+    )
+}
+
+fn resume_with_flag(
+    profile: &AgentProfile,
+    action: &AgentAction,
+    prompt: &str,
+    session_id: &str,
+    flag: &str,
+    mcp: Option<&McpEndpoint>,
+    mcp_config_directory: Option<&Path>,
+) -> Result<RunPlan, InvocationError> {
     if !supports_resume(profile) {
         return Err(InvocationError::CannotResume);
     }
+    if !is_plain_session_id(session_id) {
+        return Err(InvocationError::InvalidSessionId);
+    }
     let resuming_profile = AgentProfile {
-        command: profile.command.replace(SESSION_FLAG, RESUME_FLAG),
+        command: profile.command.replace(SESSION_FLAG, flag),
         ..profile.clone()
     };
     build_invocation(
@@ -381,7 +458,17 @@ mod tests {
         assert_eq!(stop.program, "wsl.exe");
         assert_eq!(
             stop.args,
-            ["-d", "Ubuntu", "-e", "pkill", "-f", "sid-1"].map(String::from)
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "sh",
+                "-c",
+                APP_STOP_SCRIPT,
+                "sh",
+                "sid-1"
+            ]
+            .map(String::from)
         );
     }
 
@@ -641,7 +728,17 @@ mod tests {
         assert_eq!(plan.run.stdin.as_deref(), Some("go on"));
         assert_eq!(
             plan.stop.unwrap().args,
-            ["-d", "Ubuntu", "-e", "pkill", "-f", "sid-9"].map(String::from)
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "sh",
+                "-c",
+                APP_STOP_SCRIPT,
+                "sh",
+                "sid-9"
+            ]
+            .map(String::from)
         );
     }
 
@@ -671,6 +768,80 @@ mod tests {
                 .ends_with(&["--permission-mode".to_string(), "auto".to_string()])
         );
         assert_eq!(plan.stop, None);
+    }
+
+    #[test]
+    fn fork_resumes_the_original_into_a_fresh_session_id_and_keeps_the_stop() {
+        let action = AgentAction::answer_this("claude");
+        let plan = fork_invocation(
+            &AgentProfile::claude_wsl(),
+            &action,
+            "go on",
+            "old-6",
+            "new-6",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(plan.run.args.windows(5).any(|window| window
+            == [
+                "--resume",
+                "old-6",
+                "--fork-session",
+                "--session-id",
+                "new-6"
+            ]));
+        assert_eq!(plan.run.stdin.as_deref(), Some("go on"));
+        assert_eq!(
+            plan.stop.unwrap().args,
+            ["-e", "sh", "-c", APP_STOP_SCRIPT, "sh", "new-6"].map(String::from)
+        );
+        assert!(
+            fork_invocation(
+                &AgentProfile::claude_wsl(),
+                &action,
+                "x",
+                "bad id; rm",
+                "new",
+                None,
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn resume_rejects_a_session_id_that_is_not_plain() {
+        let action = AgentAction::answer_this("claude");
+        assert!(matches!(
+            resume_invocation(
+                &AgentProfile::claude_wsl(),
+                &action,
+                "x",
+                "a b; rm",
+                None,
+                None
+            ),
+            Err(InvocationError::InvalidSessionId)
+        ));
+    }
+
+    #[test]
+    fn linux_path_maps_drives_and_wsl_unc_paths() {
+        assert_eq!(linux_path(r"C:\Users\dd\repo"), "/mnt/c/Users/dd/repo");
+        assert_eq!(
+            linux_path(r"\\wsl.localhost\Ubuntu\home\daniel\repo"),
+            "/home/daniel/repo"
+        );
+        assert_eq!(linux_path(r"\\wsl$\Ubuntu\home"), "/home");
+        assert_eq!(linux_path(r"\\wsl.localhost\Ubuntu"), "/");
+        assert_eq!(
+            wsl_unc_distro(r"\\wsl.localhost\Ubuntu\home"),
+            Some("Ubuntu")
+        );
+        assert_eq!(wsl_unc_distro(r"\\wsl$\Debian"), Some("Debian"));
+        assert_eq!(wsl_unc_distro(r"C:\Users"), None);
+        assert_eq!(linux_path("/home/daniel"), "/home/daniel");
     }
 
     #[test]
@@ -720,6 +891,81 @@ mod tests {
     #[cfg(unix)]
     mod unix_kill {
         use super::super::*;
+
+        fn spawn_agent_like(arguments: &[&str]) -> std::process::Child {
+            std::process::Command::new("sh")
+                .args(["-c", "sleep 30", "claude"])
+                .args(arguments)
+                .spawn()
+                .unwrap()
+        }
+
+        fn run_app_stop(session_id: &str) {
+            std::process::Command::new("sh")
+                .args(["-c", APP_STOP_SCRIPT, "sh", session_id])
+                .status()
+                .unwrap();
+        }
+
+        fn is_running(child: &mut std::process::Child) -> bool {
+            child.try_wait().unwrap().is_none()
+        }
+
+        #[test]
+        fn the_app_stop_matches_by_the_role_of_the_session_id() {
+            let session = uuid::Uuid::new_v4().to_string();
+            let fork_id = uuid::Uuid::new_v4().to_string();
+            let mut headless = spawn_agent_like(&[
+                "--print",
+                "--resume",
+                &session,
+                "--output-format",
+                "stream-json",
+            ]);
+            let mut fork = spawn_agent_like(&[
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--resume",
+                &session,
+                "--fork-session",
+                "--session-id",
+                &fork_id,
+            ]);
+            let mut terminal = spawn_agent_like(&["--resume", &session]);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            run_app_stop(&session);
+            assert!(headless.wait().is_ok_and(|status| !status.success()));
+            assert!(is_running(&mut fork));
+            assert!(is_running(&mut terminal));
+            run_app_stop(&fork_id);
+            assert!(fork.wait().is_ok_and(|status| !status.success()));
+            assert!(is_running(&mut terminal));
+            terminal.kill().unwrap();
+            terminal.wait().unwrap();
+        }
+
+        #[test]
+        fn a_running_stop_script_is_never_killed_by_another() {
+            let session = uuid::Uuid::new_v4().to_string();
+            let mut lookalike = std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    &format!("sleep 30 # {APP_STOP_SCRIPT}"),
+                    "sh",
+                    "-p",
+                    "--output-format",
+                    "--resume",
+                    &session,
+                ])
+                .spawn()
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            run_app_stop(&session);
+            assert!(is_running(&mut lookalike));
+            lookalike.kill().unwrap();
+            lookalike.wait().unwrap();
+        }
 
         fn spawn_sleeper(label: &str) -> std::process::Child {
             std::process::Command::new("sh")

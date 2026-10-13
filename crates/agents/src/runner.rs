@@ -12,6 +12,7 @@ use crate::profile::OutputFormat;
 
 const STDERR_TAIL_LINES: usize = 20;
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RunUpdate {
@@ -50,6 +51,18 @@ fn command_for(invocation: &Invocation) -> Command {
     command
 }
 
+#[cfg(windows)]
+fn taskkill_tree(process_id: u32) -> Invocation {
+    Invocation {
+        program: "taskkill".to_string(),
+        args: ["/PID", &process_id.to_string(), "/T", "/F"]
+            .map(String::from)
+            .to_vec(),
+        cwd: None,
+        stdin: None,
+    }
+}
+
 fn failed(message: String, stderr_tail: Vec<String>, exit_code: Option<i32>) -> RunOutcome {
     RunOutcome {
         status: RunStatus::Failed {
@@ -61,13 +74,19 @@ fn failed(message: String, stderr_tail: Vec<String>, exit_code: Option<i32>) -> 
 }
 
 pub async fn run_stop_invocation(invocation: &Invocation) {
+    run_stop_invocation_within(invocation, STOP_TIMEOUT).await;
+}
+
+pub async fn run_stop_invocation_within(invocation: &Invocation, limit: std::time::Duration) {
     let mut command = command_for(invocation);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Ok(mut child) = command.spawn() {
-        let _ = child.wait().await;
+    if let Ok(mut child) = command.spawn()
+        && tokio::time::timeout(limit, child.wait()).await.is_err()
+    {
+        let _ = child.kill().await;
     }
 }
 
@@ -173,6 +192,10 @@ async fn run_plan(
         tokio::select! {
             stop_result = &mut stop, if stop_armed => {
                 if stop_result.is_ok() {
+                    #[cfg(windows)]
+                    if let Some(process_id) = child.id() {
+                        run_stop_invocation(&taskkill_tree(process_id)).await;
+                    }
                     let _ = child.kill().await;
                     if let Some(stop_invocation) = &plan.stop {
                         run_stop_invocation(stop_invocation).await;

@@ -1,15 +1,19 @@
 mod demo;
+mod kills;
+mod lanes;
 mod mcp_bridge;
 mod message_context;
 mod run_chip;
 mod runs;
 mod runs_popover;
+mod session_options;
 mod settings_controls;
 mod settings_forms;
 mod settings_problems;
 mod settings_section;
 mod spinner;
 mod start_dialog;
+mod start_dialog_pickers;
 mod store;
 
 use std::path::PathBuf;
@@ -20,7 +24,7 @@ use directories::ProjectDirs;
 use gpui_kit::*;
 
 pub use run_chip::run_chip;
-pub use runs::{AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState};
+pub use runs::{AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions};
 pub use runs_popover::RunsPopover;
 pub use settings_section::AgentsSettings;
 pub use start_dialog::{StartDialog, StartDialogEvent, StartRequest};
@@ -61,13 +65,14 @@ pub fn start_run(
     conversation_id: &str,
     message_id: &str,
     extra: &str,
+    options: StartOptions,
     cx: &mut App,
 ) {
     let Some(runs) = runs_handle(cx) else {
         return;
     };
     let started = runs.update(cx, |runs, cx| {
-        runs.start(action_id, conversation_id, message_id, extra, cx)
+        runs.start_with(action_id, conversation_id, message_id, extra, options, cx)
     });
     if let Err(error) = started {
         raise_notice(format!("Agent could not start: {error}"), cx);
@@ -79,6 +84,7 @@ pub fn start_run_when_mcp_ready(
     conversation_id: String,
     message_id: String,
     extra: String,
+    options: StartOptions,
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
@@ -94,7 +100,14 @@ pub fn start_run_when_mcp_ready(
                     cx,
                 );
             }
-            start_run(&action_id, &conversation_id, &message_id, &extra, cx);
+            start_run(
+                &action_id,
+                &conversation_id,
+                &message_id,
+                &extra,
+                options,
+                cx,
+            );
         });
     })
     .detach();
@@ -133,6 +146,7 @@ pub fn delegate(request: StartRequest, cx: &mut App) {
             &request.conversation_id,
             &request.message_id,
             "",
+            StartOptions::default(),
             cx,
         );
     }

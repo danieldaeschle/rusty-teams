@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::action::AgentAction;
@@ -5,6 +7,7 @@ use crate::profile::AgentProfile;
 use crate::template::{is_known_placeholder, placeholders_in};
 
 pub const SETTINGS_KEY: &str = "agents.settings";
+pub const RECENT_WORKING_DIR_LIMIT: usize = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SettingsProblem {
@@ -25,6 +28,7 @@ pub struct AgentSettings {
     pub agents: Vec<AgentProfile>,
     pub actions: Vec<AgentAction>,
     pub resume_interrupted_runs: bool,
+    pub recent_working_dirs: HashMap<String, Vec<String>>,
 }
 
 impl Default for AgentSettings {
@@ -36,6 +40,7 @@ impl Default for AgentSettings {
                 AgentAction::build_this("claude"),
             ],
             resume_interrupted_runs: true,
+            recent_working_dirs: HashMap::new(),
         }
     }
 }
@@ -64,6 +69,22 @@ impl AgentSettings {
             agent.migrate_open_session_command();
         }
         Ok(settings)
+    }
+
+    pub fn recent_working_dirs_of(&self, agent_id: &str) -> &[String] {
+        self.recent_working_dirs
+            .get(agent_id)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    pub fn remember_working_dir(&mut self, agent_id: &str, working_dir: &str) {
+        let recent = self
+            .recent_working_dirs
+            .entry(agent_id.to_owned())
+            .or_default();
+        recent.retain(|existing| existing != working_dir);
+        recent.insert(0, working_dir.to_owned());
+        recent.truncate(RECENT_WORKING_DIR_LIMIT);
     }
 
     pub fn validate(&self) -> Vec<SettingsProblem> {
@@ -128,6 +149,30 @@ mod tests {
         assert_eq!(
             legacy.agents[2].open_session_command,
             "wt.exe wsl.exe -e claude --resume {session_id}"
+        );
+    }
+
+    #[test]
+    fn recent_working_dirs_are_newest_first_deduped_limited_and_per_agent() {
+        let mut settings = AgentSettings::default();
+        assert!(settings.recent_working_dirs_of("claude").is_empty());
+        for index in 0..7 {
+            settings.remember_working_dir("claude", &format!("/repo/{index}"));
+        }
+        settings.remember_working_dir("claude", "/repo/4");
+        settings.remember_working_dir("copilot", "/other");
+        assert_eq!(
+            settings.recent_working_dirs_of("claude"),
+            ["/repo/4", "/repo/6", "/repo/5", "/repo/3", "/repo/2"]
+        );
+        assert_eq!(settings.recent_working_dirs_of("copilot"), ["/other"]);
+        let loaded = AgentSettings::from_json(&settings.to_json()).unwrap();
+        assert_eq!(loaded, settings);
+        assert!(
+            AgentSettings::from_json("{}")
+                .unwrap()
+                .recent_working_dirs
+                .is_empty()
         );
     }
 

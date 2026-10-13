@@ -52,6 +52,10 @@ fn run_for(
         expanded: false,
         dismissed: false,
         process_id: None,
+        pending_prompt: None,
+        launched: true,
+        sent_to: None,
+        launch_session_id: None,
     }
 }
 
