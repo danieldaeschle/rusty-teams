@@ -11,6 +11,7 @@ pub mod capture;
 pub mod control;
 pub mod data_channel;
 pub mod devices;
+pub mod diagnostics;
 pub mod engine;
 pub mod effects;
 pub mod end;
@@ -76,6 +77,7 @@ pub use roster::{AttendeeLimits, MeetingRole, PublishedState, RaisedHand, Roster
 pub use sound_capture::LoopbackKind;
 pub use renegotiation::MediaPath;
 pub use signaling::{Callee, MeetingTarget};
+pub use diagnostics::{CallDiagnostics, SdpLine, SdpSummary, StatsSample};
 pub use devices::{AudioDevice, DeviceChoice, DeviceEntry, DeviceLists};
 pub use error::{Error, Result};
 pub use level::SpeakingDetector;

@@ -9,6 +9,7 @@ use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
 use crate::recording::{RecordingKind, StopScope};
 use crate::devices::{DeviceChoice, DeviceLists};
+use crate::diagnostics::{CallDiagnostics, StatsSample};
 use crate::error::{Error, Result};
 use crate::health::CallHealth;
 use crate::hold::HoldState;
@@ -92,6 +93,8 @@ pub enum CallUpdate {
     Selected { input: DeviceChoice, output: DeviceChoice },
     ListenOnly(bool),
     Stats { inbound_packets: u64, outbound_packets: u64 },
+    Sample(StatsSample),
+    Diagnostics(Box<CallDiagnostics>),
     Progress(Progress),
     Roster(Vec<RosterEntry>),
     Speakers(Vec<String>),

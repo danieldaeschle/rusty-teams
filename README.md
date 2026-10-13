@@ -64,6 +64,7 @@
 - Video and screen sharing: H264 tiles, shared screen on a stage (double click for full window, Esc back), camera and screen share buttons with a "You are sharing" banner. Linux needs glib at run time
 - Incoming calls: topmost ring toast with Decline and Accept, ring tone, missed calls in Activity
 - Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
+- After every call a pseudonymized test report (JSON and Markdown, newest 30) is saved to the app data folder `call-reports`; toast "Test report saved" with Open folder, Settings > Devices switch
 - Organizer controls: lobby banner with Admit and Deny, tile menu (pin, spotlight, mute, remove), Mute all, live captions overlay, camera background blur
 
 **Agents (MCP)**

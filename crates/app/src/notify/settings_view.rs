@@ -264,6 +264,12 @@ impl SettingsView {
         cx.notify();
     }
 
+    fn set_report_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        let app = self.center.read(cx).app().clone();
+        app.update(cx, |state, cx| state.set_call_report_enabled(on, cx));
+        cx.notify();
+    }
+
     fn change_effects(&mut self, change: fn(&mut CameraEffects), cx: &mut Context<Self>) {
         let app = self.center.read(cx).app().clone();
         let mut effects = app.read(cx).call_effects;
@@ -519,6 +525,8 @@ impl SettingsView {
         let mic = self.center.read(cx).app().read(cx).call_mic;
         let noise_view = view.clone();
         let music_view = view.clone();
+        let report_view = view.clone();
+        let report_on = self.center.read(cx).app().read(cx).call_report_enabled;
         let effects = self.center.read(cx).app().read(cx).call_effects;
         let image = self.preview.image(Instant::now());
         let status = if self.preview_blocked {
@@ -636,6 +644,19 @@ impl SettingsView {
                             cx,
                         )
                     })
+                }),
+            )
+            .child(
+                control_row(
+                    "Save a test report after each call",
+                    "Pseudonymized, stays on this computer",
+                    switch(report_on),
+                )
+                .id("call-report-row")
+                .cursor_pointer()
+                .hover(|row| row.bg(theme::row_hover()))
+                .on_click(move |_, _, cx| {
+                    report_view.update(cx, |view, cx| view.set_report_enabled(!report_on, cx))
                 }),
             )
             .child(

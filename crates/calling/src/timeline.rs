@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[derive(Debug, Clone)]
+use crate::diagnostics::{SdpSummary, summarize_sdp};
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TimelineEntry {
     pub elapsed_ms: u128,
     pub label: String,
@@ -12,6 +14,7 @@ pub struct TimelineEntry {
 pub struct Timeline {
     started: Instant,
     entries: Arc<Mutex<Vec<TimelineEntry>>>,
+    sdp: Arc<Mutex<Vec<SdpSummary>>>,
     echo: bool,
 }
 
@@ -20,6 +23,7 @@ impl Timeline {
         Timeline {
             started: Instant::now(),
             entries: Arc::default(),
+            sdp: Arc::default(),
             echo,
         }
     }
@@ -38,6 +42,16 @@ impl Timeline {
             println!("{:>6} ms  {:<34} {}", entry.elapsed_ms, entry.label, entry.detail);
         }
         self.entries.lock().expect("timeline lock").push(entry);
+    }
+
+    pub fn record_sdp(&self, role: &str, sdp: &str) {
+        if let Some(summary) = summarize_sdp(self.elapsed_ms(), role, sdp) {
+            self.sdp.lock().expect("timeline lock").push(summary);
+        }
+    }
+
+    pub fn sdp_summaries(&self) -> Vec<SdpSummary> {
+        self.sdp.lock().expect("timeline lock").clone()
     }
 
     pub fn entries(&self) -> Vec<TimelineEntry> {

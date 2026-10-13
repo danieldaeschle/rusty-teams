@@ -11,6 +11,9 @@ use calling::{
     PublishedState, RaisedHand, Reaction, RecordingKind, RosterEntry, ShareKind, ShareSource, StopScope,
     TransportDetails, VideoKey, call_channel,
 };
+use calling::call::VideoReport;
+use calling::timeline::TimelineEntry;
+use calling::{CallDiagnostics, SdpLine, SdpSummary, StatsSample};
 
 use super::demo_scene::self_view;
 use tokio::time::{interval, sleep};
@@ -23,6 +26,8 @@ const ANSWER_DELAY: Duration = Duration::from_millis(3200);
 const INCOMING_CONNECT_DELAY: Duration = Duration::from_millis(600);
 const LOBBY_WAIT: Duration = Duration::from_secs(6);
 const LEVEL_PERIOD: Duration = Duration::from_millis(200);
+const SAMPLE_EVERY_TICKS: u32 = 10;
+const SAMPLE_PACKETS_PER_TICK: u64 = 10;
 const CYCLE_TICKS: u32 = 40;
 const REMOTE_SPEAKS: std::ops::Range<u32> = 0..18;
 const LOCAL_SPEAKS: std::ops::Range<u32> = 24..32;
@@ -281,9 +286,7 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
         DemoCall::Incoming(caller) => (vec![caller.clone()], false),
     };
     if !ring_until_answered(&mut control, &script).await {
-        control.send(CallUpdate::State(CallState::Ended {
-            reason: EndReason::Cancelled,
-        }));
+        end(&control, EndReason::Cancelled);
         return;
     }
     control.send(CallUpdate::ListenOnly(false));
@@ -526,6 +529,9 @@ async fn speak_until_hangup(
                         control.send(CallUpdate::Caption(entry));
                     }
                     caption_ticks += 1;
+                }
+                if ticks.is_multiple_of(SAMPLE_EVERY_TICKS) {
+                    control.send(CallUpdate::Sample(demo_sample(ticks, video)));
                 }
                 scene_tick(&control, scene, ticks, &people);
                 ticks += 1;
@@ -812,6 +818,68 @@ fn set_demo_hand(roster: &mut Vec<RosterEntry>, mri: &str, raised: bool) {
 
 fn end(control: &CallControl, reason: EndReason) {
     control.send(CallUpdate::State(CallState::Ended { reason }));
+    control.send(CallUpdate::Diagnostics(Box::new(demo_diagnostics())));
+}
+
+fn demo_sample(ticks: u32, video: bool) -> StatsSample {
+    let packets = u64::from(ticks) * SAMPLE_PACKETS_PER_TICK;
+    StatsSample {
+        audio_in_packets: packets,
+        audio_out_packets: packets,
+        audio_in_level: 0.05,
+        audio_out_level: 0.04,
+        video: if video {
+            VideoReport {
+                inbound_packets: packets * 4,
+                inbound_frames_decoded: packets,
+                inbound_width: 1280,
+                inbound_height: 720,
+                outbound_packets: packets * 3,
+                outbound_frames_encoded: packets,
+                outbound_width: 640,
+                outbound_height: 360,
+                ..VideoReport::default()
+            }
+        } else {
+            VideoReport::default()
+        },
+        ..StatsSample::default()
+    }
+}
+
+fn demo_diagnostics() -> CallDiagnostics {
+    let entry = |elapsed_ms: u128, label: &str, detail: &str| TimelineEntry {
+        elapsed_ms,
+        label: label.to_owned(),
+        detail: detail.to_owned(),
+    };
+    let line = |kind: &str, mid: &str, codecs: &[&str]| SdpLine {
+        kind: kind.to_owned(),
+        mid: mid.to_owned(),
+        direction: "sendrecv".to_owned(),
+        codecs: codecs.iter().map(|codec| (*codec).to_owned()).collect(),
+        payload_count: codecs.len(),
+        ssrc_count: 1,
+        rejected: false,
+    };
+    CallDiagnostics {
+        timeline: vec![
+            entry(5, "Trouter connected", "callback socket ready"),
+            entry(40, "setLocalDescription", "2 m-line(s) signaled"),
+            entry(900, "ICE state", "Connected"),
+            entry(950, "PeerConnection state", "Connected"),
+        ],
+        sdp: vec![
+            SdpSummary { at_ms: 40, role: "local offer".to_owned(), lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])] },
+            SdpSummary { at_ms: 800, role: "remote answer".to_owned(), lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])] },
+        ],
+        ice_connected_ms: Some(900),
+        peer_connected_ms: Some(950),
+        selected_pair: Some("local Host/udp <-> remote Host/udp".to_owned()),
+        tls_version: "1.2".to_owned(),
+        dtls_cipher: "demo".to_owned(),
+        srtp_cipher: "demo".to_owned(),
+    }
 }
 
 #[cfg(test)]

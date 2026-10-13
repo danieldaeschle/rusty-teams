@@ -269,6 +269,7 @@ impl AppState {
             self.raise_notice("Not connected to Teams yet".to_owned(), None, cx);
             return;
         };
+        self.note_call_feature("consult", format!("start with {}", target.mri));
         self.send_call_command(CallCommand::Hold(true));
         self.call_count += 1;
         let consult_id = self.call_count;
@@ -337,6 +338,7 @@ impl AppState {
                     let transferring = consult.transferring;
                     call.consult = None;
                     if !transferring {
+                        self.note_call_feature("consult", "ended without a transfer".to_owned());
                         self.raise_notice("The consultation ended".to_owned(), None, cx);
                         self.send_call_command(CallCommand::Hold(false));
                     }
