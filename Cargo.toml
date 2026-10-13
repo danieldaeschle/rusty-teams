@@ -43,3 +43,4 @@ webview = { path = "crates/webview" }
 [patch.crates-io]
 gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
+webrtc-sys = { path = "vendor/webrtc-sys" }

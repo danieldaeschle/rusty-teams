@@ -42,6 +42,18 @@ async fn main() {
     let session = Session::connect(&endpoint).await.expect("browser");
     let poll_session = Session::connect(&endpoint).await.expect("browser");
     let audio = AudioMode::parse(Some(&std::env::var(AUDIO_MODE_ENV).unwrap_or_else(|_| "tone".to_owned())));
+    let rounds: usize = std::env::args().skip_while(|argument| argument != "--rounds").nth(1).and_then(|value| value.parse().ok()).unwrap_or(1);
+    for round in 1..=rounds {
+        println!("# round {round} of {rounds}");
+        let round_wav = match (&wav_path, rounds) {
+            (Some(path), 2..) => Some(path.with_extension(format!("{round}.wav"))),
+            _ => wav_path.clone(),
+        };
+        test_call(&session, &poll_session, audio, round_wav).await;
+    }
+}
+
+async fn test_call(session: &Session, poll_session: &Session, audio: AudioMode, wav_path: Option<PathBuf>) {
     let options = CallOptions {
         audio,
         hold_after_connected: Some(HOLD_AFTER_CONNECTED),
@@ -58,8 +70,8 @@ async fn main() {
     );
     let (mut handle, control) = call_channel();
     let drain = tokio::spawn(async move { while handle.updates.recv().await.is_some() {} });
-    let outcome = run_test_call(&session, &poll_session, options, control).await;
-    let _ = drain.await;
+    let outcome = run_test_call(session, poll_session, options, control).await;
+    drain.abort();
     match outcome {
         Ok(report) => {
             print_report(&report);
