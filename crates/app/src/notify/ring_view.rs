@@ -14,10 +14,10 @@ use crate::views::call_view::pulsing;
 use crate::views::widgets::icon;
 
 pub const RING_AVATAR: f32 = 56.;
-const RING_BORDER: f32 = 2.;
+pub(super) const RING_BORDER: f32 = 2.;
 const RING_WIDTH: f32 = 3.;
 const RING_GAP: f32 = 3.;
-const TOAST_RADIUS: f32 = 12.;
+pub(super) const TOAST_RADIUS: f32 = 12.;
 const BUTTON_HEIGHT: f32 = 32.;
 pub const ENDS_CURRENT_CALL: &str = "Accept ends current call";
 
@@ -39,7 +39,7 @@ impl RingView {
     }
 }
 
-fn answer_button(
+pub(super) fn answer_button(
     id: &'static str,
     label: &str,
     glyph: IconName,

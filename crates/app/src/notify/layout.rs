@@ -27,6 +27,7 @@ const CONFIRM_HEIGHT: f32 = 56.;
 const AGENT_CHROME_HEIGHT: f32 = 116.;
 pub const AGENT_BODY_WIDTH: f32 = TOAST_WIDTH - 2. * TOAST_PADDING - 2.;
 const RING_BASE_HEIGHT: f32 = 120.;
+pub const MEETING_HEIGHT: f32 = 112.;
 const RING_NOTE_HEIGHT: f32 = 18.;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

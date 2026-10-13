@@ -11,13 +11,14 @@ use super::conversation::{ConversationView, ReplyToHovered};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
+use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, DeclineCall, HangUpCall, NextConversation, OpenActivity, OpenCallsTab,
-    OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk, Scope,
-    ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
+    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
+    OpenCallsTab, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare,
 };
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
@@ -83,6 +84,7 @@ pub struct AppShell {
     sidebar: Entity<SidebarView>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
+    prejoin: Option<Entity<PrejoinView>>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
     _call_windows: Entity<CallWindows>,
@@ -122,6 +124,19 @@ impl AppShell {
                 self.call_chat = Some((wanted, view));
             }
             (None, _) => self.call_chat = None,
+        }
+    }
+
+    fn sync_prejoin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = self.state.read(cx).prejoin.clone();
+        let open = self.prejoin.as_ref().map(|view| view.read(cx).pending_id());
+        match (wanted, open) {
+            (Some(pending), Some(id)) if pending.id == id => {}
+            (Some(pending), _) => {
+                let app = self.state.clone();
+                self.prejoin = Some(cx.new(|cx| PrejoinView::new(app, &pending, window, cx)));
+            }
+            (None, _) => self.prejoin = None,
         }
     }
 
@@ -229,6 +244,7 @@ impl AppShell {
             sidebar,
             conversation,
             call_chat: None,
+            prejoin: None,
             switcher: None,
             notifications,
             _call_windows: call_windows,
@@ -672,9 +688,12 @@ impl AppShell {
                         ),
                     ),
             )
-            .child(match call_view {
-                Some(call_view) => call_view,
-                None => self
+            .child(match (call_view, self.prejoin.clone()) {
+                (Some(call_view), _) => call_view,
+                (None, Some(prejoin)) => prejoin
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                    .into_any_element(),
+                (None, None) => self
                     .conversation
                     .clone()
                     .cached(
@@ -715,6 +734,7 @@ impl Render for AppShell {
         }
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
+        self.sync_prejoin(window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
@@ -817,6 +837,10 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &DeclineCall, _, cx| {
                 this.state
                     .update(cx, |state, cx| state.decline_ringing_call(cx));
+            }))
+            .on_action(cx.listener(|this, _: &JoinMeetingFromToast, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.join_latest_meeting_toast(cx));
             }))
             .on_action(cx.listener(|this, _: &HangUpCall, _, cx| {
                 this.state.update(cx, |state, cx| state.leave_call(cx));

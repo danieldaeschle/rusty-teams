@@ -125,7 +125,7 @@ mod frames {
     use calling::{CallState, CallUpdate, RosterEntry, call_channel};
     use gpui_kit::Entity;
 
-    use crate::app_state::{AppState, Mode, Selection};
+    use crate::app_state::{AppHandle, AppState, Mode, Selection};
     use crate::call::{ActiveCall, CallModel};
     use crate::demo;
     use crate::user_activity::UserInput;
@@ -150,6 +150,20 @@ mod frames {
         "shell/islands/main/call-stage",
         "shell/islands/main/call-controls",
     ];
+    const CALLS_TAGS: &[&str] = &[
+        "shell/islands/sidebar/calls-actions",
+        "shell/islands/sidebar/calls-actions/meet-now",
+        "shell/islands/sidebar/calls-actions/new-meeting",
+    ];
+    const PREJOIN_TAGS: &[&str] = &[
+        "shell/islands/main/prejoin",
+        "shell/islands/main/prejoin/preview",
+        "shell/islands/main/prejoin/controls",
+        "shell/islands/main/prejoin/devices",
+        "shell/islands/main/prejoin/audio",
+        "shell/islands/main/prejoin/actions",
+    ];
+    const PREJOIN_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_guard%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%2c%22Oid%22%3a%22o%22%7d";
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
@@ -164,6 +178,7 @@ mod frames {
         Tab(&'static str, Option<fn(&mut VisualTestContext)>),
         StatusMenu,
         Call,
+        Prejoin,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -279,6 +294,8 @@ mod frames {
         GUARDED
             .iter()
             .chain(CALL_GUARDED)
+            .chain(CALLS_TAGS)
+            .chain(PREJOIN_TAGS)
             .chain([&MENU, &RECAP_TAB, &RECAP_REGION])
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
@@ -393,6 +410,7 @@ mod frames {
                 ),
                 Screen::Tab("saved", Some(|visual| visual.dispatch_action(OpenSaved))),
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
+                Screen::Prejoin,
                 Screen::StatusMenu,
                 Screen::Call,
             ];
@@ -413,6 +431,13 @@ mod frames {
                         });
                         ("call", false)
                     }
+                    Screen::Prejoin => {
+                        let state = visual.update(|_, cx| cx.global::<AppHandle>().0.clone());
+                        visual.update(|_, cx| {
+                            state.update(cx, |state, cx| state.join_meeting_link(PREJOIN_LINK, cx))
+                        });
+                        ("prejoin", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -431,6 +456,11 @@ mod frames {
                 }
                 if status_menu {
                     expected.push(MENU);
+                }
+                match screen_name {
+                    "calls" => expected.extend(CALLS_TAGS),
+                    "prejoin" => expected.extend(PREJOIN_TAGS),
+                    _ => {}
                 }
                 let mut found = violations(&tags, window, &expected);
                 if status_menu {
@@ -464,6 +494,10 @@ mod frames {
                             cx.notify();
                         })
                     });
+                }
+                if screen_name == "prejoin" {
+                    let state = visual.update(|_, cx| cx.global::<AppHandle>().0.clone());
+                    visual.update(|_, cx| state.update(cx, |state, cx| state.cancel_prejoin(cx)));
                 }
                 for (key, message) in found {
                     let full_key = format!("{screen_name}@{width}x{height}:{key}");

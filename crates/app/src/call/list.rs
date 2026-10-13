@@ -188,6 +188,7 @@ mod tests {
             thread_id: None,
             organizer_name: None,
             organizer_address: None,
+            ical_uid: None,
             response: ResponseType::Accepted,
         }
     }

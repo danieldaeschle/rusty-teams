@@ -7,6 +7,7 @@ use calling::blur::BlurSettings;
 use calling::camera::start_camera;
 use calling::capture::Capture;
 use calling::video_frame::picture_from_i420;
+use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{BackgroundChoice, CallUpdate, CameraEffects, DeviceChoice, VideoHub, VideoKey};
 use gpui_kit::*;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -75,6 +76,14 @@ impl CameraPreview {
             Err(error) => {
                 *self.failure.lock().expect("preview failure lock") = Some(error.to_string())
             }
+        }
+    }
+
+    pub fn publish_demo_frame(&self, tick: u32) {
+        if let Some(picture) =
+            picture_from_i420(pattern_frame(PatternKind::Camera, tick), PREVIEW_MAX_WIDTH)
+        {
+            self.hub.publish(VideoKey::LocalCamera, picture);
         }
     }
 

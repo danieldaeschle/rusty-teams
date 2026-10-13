@@ -60,6 +60,7 @@ pub(super) const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";
+const AUDIO_OFF_HINT: &str = "Audio is off for this meeting";
 pub const NO_CAMERA_HINT: &str = "No camera found";
 pub const NO_SHARE_HINT: &str = "Sharing starts once the call is connected";
 pub const NO_WINDOWS_HINT: &str = "No windows found";
@@ -350,10 +351,15 @@ pub fn mute_button(
     };
     let button = round_control(id, glyph, background, foreground).size(px(size));
     if !model.can_unmute() {
+        let hint = if model.audio_off {
+            AUDIO_OFF_HINT
+        } else {
+            NO_MICROPHONE_HINT
+        };
         return button
             .opacity(DISABLED_OPACITY)
             .cursor_default()
-            .tooltip(|window, cx| Tooltip::new(NO_MICROPHONE_HINT).build(window, cx));
+            .tooltip(move |window, cx| Tooltip::new(hint).build(window, cx));
     }
     let app = app.clone();
     button.on_click(move |_, _, cx| {
@@ -824,6 +830,9 @@ fn devices_menu(
     model: &CallModel,
     mic: MicSettings,
 ) -> PopupMenu {
+    if model.audio_off {
+        return popup.item(PopupMenuItem::new(AUDIO_OFF_HINT).disabled(true));
+    }
     let input_app = app.clone();
     let output_app = app.clone();
     let inputs = device_items(

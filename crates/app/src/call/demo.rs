@@ -517,6 +517,10 @@ async fn speak_until_hangup(
                     muted = command.target(muted);
                     control.send(CallUpdate::Muted(muted));
                 }
+                Some(CallCommand::DisableAudio) => {
+                    muted = true;
+                    control.send(CallUpdate::Muted(muted));
+                }
                 Some(CallCommand::SelectInput(choice)) => {
                     input = choice;
                     control.send(CallUpdate::Selected { input: input.clone(), output: output.clone() });

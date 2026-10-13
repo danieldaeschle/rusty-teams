@@ -1,19 +1,21 @@
+use chatsvc::{Reply, ResponseType};
 use chrono::{Local, Offset, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::join_dialog::open_join_with_id;
+use super::new_meeting_dialog::open_new_meeting;
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
     AGENDA_ROW_HEIGHT, AgendaRow, CALL_ROW_HEIGHT, CallRow, DAY_HEIGHT, EMPTY_HEIGHT, ListEntry,
-    SECTION_HEIGHT, join_available,
+    SECTION_HEIGHT, join_available, response_label,
 };
 use crate::theme;
 
@@ -172,9 +174,11 @@ fn join_button(id: &'static str, label: &'static str, primary: bool) -> Stateful
 
 fn join_buttons(state: &Entity<AppState>, meet_now_pending: bool) -> impl IntoElement {
     let meet_state = state.clone();
+    let new_state = state.clone();
     let id_state = state.clone();
     let paste_state = state.clone();
     h_flex()
+        .debug_selector(|| "shell/islands/sidebar/calls-actions".into())
         .w_full()
         .px(px(16.))
         .pb(px(8.))
@@ -182,12 +186,18 @@ fn join_buttons(state: &Entity<AppState>, meet_now_pending: bool) -> impl IntoEl
         .flex_wrap()
         .child(
             join_button("meet-now", "Meet now", true)
+                .debug_selector(|| "shell/islands/sidebar/calls-actions/meet-now".into())
                 .when(meet_now_pending, |button| button.opacity(0.5))
                 .when(!meet_now_pending, |button| {
                     button.on_click(move |_, _, cx| {
                         meet_state.update(cx, |state, cx| state.start_meet_now(cx));
                     })
                 }),
+        )
+        .child(
+            join_button("new-meeting", "New meeting", false)
+                .debug_selector(|| "shell/islands/sidebar/calls-actions/new-meeting".into())
+                .on_click(move |_, window, cx| open_new_meeting(new_state.clone(), window, cx)),
         )
         .child(
             join_button("join-with-id", "Join with ID", false)
@@ -240,7 +250,84 @@ fn empty_row(text: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-fn agenda_row(state: &Entity<AppState>, row: &AgendaRow, joinable: bool) -> AnyElement {
+fn rsvp_menu_item(
+    state: &Entity<AppState>,
+    event_key: &str,
+    label: &'static str,
+    reply: Reply,
+    chosen: bool,
+) -> PopupMenuItem {
+    let state = state.clone();
+    let event_key = event_key.to_owned();
+    PopupMenuItem::new(label)
+        .checked(chosen)
+        .on_click(move |_, _, cx| {
+            state.update(cx, |state, cx| {
+                state.respond_to_event(&event_key, reply, cx)
+            });
+        })
+}
+
+fn rsvp_control(state: &Entity<AppState>, row: &AgendaRow, send_response: bool) -> AnyElement {
+    let menu_state = state.clone();
+    let key = row.key.clone();
+    let response = row.response;
+    div()
+        .id(SharedString::from(format!("agenda-rsvp-{}", row.key)))
+        .flex_none()
+        .on_click(|_, _, cx| cx.stop_propagation())
+        .child(
+            Button::new(SharedString::from(format!(
+                "agenda-rsvp-button-{}",
+                row.key
+            )))
+            .xsmall()
+            .outline()
+            .label(response_label(response))
+            .icon(IconName::ChevronDown)
+            .dropdown_menu(move |menu, _, _| {
+                let toggle_state = menu_state.clone();
+                menu.item(rsvp_menu_item(
+                    &menu_state,
+                    &key,
+                    "Accept",
+                    Reply::Accept,
+                    response == ResponseType::Accepted,
+                ))
+                .item(rsvp_menu_item(
+                    &menu_state,
+                    &key,
+                    "Tentative",
+                    Reply::Tentative,
+                    response == ResponseType::Tentative,
+                ))
+                .item(rsvp_menu_item(
+                    &menu_state,
+                    &key,
+                    "Decline",
+                    Reply::Decline,
+                    response == ResponseType::Declined,
+                ))
+                .separator()
+                .item(
+                    PopupMenuItem::new("Send a response")
+                        .checked(send_response)
+                        .on_click(move |_, _, cx| {
+                            toggle_state
+                                .update(cx, |state, cx| state.toggle_rsvp_send_response(cx));
+                        }),
+                )
+            }),
+        )
+        .into_any_element()
+}
+
+fn agenda_row(
+    state: &Entity<AppState>,
+    row: &AgendaRow,
+    joinable: bool,
+    send_response: bool,
+) -> AnyElement {
     let click_state = state.clone();
     let click_row = row.clone();
     let join_state = state.clone();
@@ -275,13 +362,23 @@ fn agenda_row(state: &Entity<AppState>, row: &AgendaRow, joinable: bool) -> AnyE
                         .text_color(theme::text())
                         .child(row.subject.clone()),
                 )
-                .when(!row.detail.is_empty(), |column| {
+                .when(!row.detail.is_empty() || row.can_respond, |column| {
                     column.child(
-                        div()
-                            .truncate()
-                            .text_size(px(12.5))
-                            .text_color(theme::text_muted())
-                            .child(row.detail.clone()),
+                        h_flex()
+                            .gap(px(6.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.5))
+                                    .text_color(theme::text_muted())
+                                    .child(row.detail.clone()),
+                            )
+                            .when(row.can_respond, |line| {
+                                line.child(rsvp_control(state, row, send_response))
+                            }),
                     )
                 }),
         )
@@ -340,6 +437,7 @@ pub fn calls_body(
                 state,
                 row,
                 join_available(row.start, row.end, now) && row.join_url.is_some(),
+                app.rsvp_send_response,
             ),
             ListEntry::Call(row) => call_row(
                 state,

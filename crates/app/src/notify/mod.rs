@@ -4,6 +4,7 @@ mod badge;
 mod center;
 mod incoming;
 mod layout;
+mod meeting_view;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) mod platform;
 #[cfg_attr(not(windows), allow(dead_code))]

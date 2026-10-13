@@ -18,6 +18,7 @@ use super::features::room_closed_move;
 use super::media::CallMedia;
 use super::mic::save_mic;
 use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
+use super::prejoin::{DemoMeeting, MeetingJoin};
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title};
@@ -155,28 +156,26 @@ impl AppState {
             self.raise_notice(MEETING_UNAVAILABLE_NOTICE.to_owned(), None, cx);
             return;
         };
-        let guests = if conversation_id == DEMO_LOBBY_MEETING {
-            DEMO_SMALL_MEETING
-        } else {
-            DEMO_CROWD
-        };
-        let demo = DemoCall::Meeting {
-            guests: demo_guests(guests),
+        let demo = DemoMeeting {
+            guests: if conversation_id == DEMO_LOBBY_MEETING {
+                DEMO_SMALL_MEETING
+            } else {
+                DEMO_CROWD
+            },
             lobby: conversation_id == DEMO_LOBBY_MEETING,
             organizer: conversation_id != DEMO_LOBBY_MEETING,
-        };
-        let Some(handle) = self.place_call(CallSpec::Meeting(target.clone()), demo, false, cx)
-        else {
-            return;
         };
         let title = selection_for(&self.sidebar, conversation_id)
             .map(|selection| crate::app_state::selection_title(&self.sidebar, &selection))
             .unwrap_or_else(|| "Meeting".to_owned());
-        let model = CallModel::meeting(&title, is_organizer(&meeting, self.directory.me.as_ref()));
-        self.begin_call(handle, model, Some(conversation_id.to_owned()), cx);
-        if let Some(call) = self.call.as_mut() {
-            call.meeting_target = Some(target);
-        }
+        let join = MeetingJoin {
+            organizer: is_organizer(&meeting, self.directory.me.as_ref()),
+            conversation_id: Some(conversation_id.to_owned()),
+            target,
+            title,
+            demo,
+        };
+        self.stage_meeting_join(join, cx);
     }
 
     pub(super) fn place_call(

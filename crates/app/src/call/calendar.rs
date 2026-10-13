@@ -1,5 +1,7 @@
+use std::sync::OnceLock;
+
 use chatsvc::CalendarEvent;
-use chrono::{Local, Offset, Utc};
+use chrono::{DateTime, Local, Offset, Utc};
 use gpui_kit::Context;
 
 use super::agenda::{AgendaRow, demo_events};
@@ -7,6 +9,7 @@ use crate::app_state::{AppEvent, AppState, Selection};
 use crate::notify::selection_for;
 
 const NO_MEETING_CHAT_NOTICE: &str = "This meeting chat is not available";
+static DEMO_ANCHOR: OnceLock<DateTime<Utc>> = OnceLock::new();
 
 impl AppState {
     pub fn apply_calendar(&mut self, events: Vec<CalendarEvent>, cx: &mut Context<Self>) {
@@ -18,7 +21,10 @@ impl AppState {
 
     pub fn refresh_calendar(&mut self, cx: &mut Context<Self>) {
         if self.mode.demo {
-            self.apply_calendar(demo_events(Utc::now()), cx);
+            let mut events = demo_events(*DEMO_ANCHOR.get_or_init(Utc::now));
+            events.extend(self.demo_meetings.iter().cloned());
+            events.sort_by_key(|event| (event.start, event.end));
+            self.apply_calendar(events, cx);
             return;
         }
         if let Some(nudge) = &self.calendar_nudge {
@@ -43,6 +49,9 @@ impl AppState {
     pub fn join_agenda_row(&mut self, row: &AgendaRow, cx: &mut Context<Self>) {
         if let Some(url) = &row.join_url {
             self.join_meeting_link(url, cx);
+            if let Some(pending) = self.prejoin.as_mut() {
+                pending.join.title = row.subject.clone();
+            }
         }
     }
 

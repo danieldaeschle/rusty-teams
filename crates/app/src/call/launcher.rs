@@ -10,6 +10,8 @@ use calling::{
 };
 use session::{Session, SessionConfig, Transport};
 
+use super::schedule::{MeetingDraft, attendee_for};
+
 const START_RETRY_STEPS: [Duration; 3] = [
     Duration::from_secs(1),
     Duration::from_secs(2),
@@ -137,6 +139,48 @@ impl CallLauncher {
         let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
         chatsvc::Calendar::new(&session)
             .create_meet_now(subject)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn create_meeting(
+        &self,
+        draft: MeetingDraft,
+    ) -> Result<chatsvc::CreatedEvent, String> {
+        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        let graph = graph::Graph::new(session.clone());
+        let mut attendees = Vec::with_capacity(draft.people.len());
+        for invitee in &draft.people {
+            let looked_up = match invitee.mail {
+                Some(_) => None,
+                None => graph.user_mail(&invitee.user_id).await.ok().flatten(),
+            };
+            attendees.push(attendee_for(invitee, looked_up)?);
+        }
+        let event = chatsvc::NewEvent {
+            subject: draft.subject,
+            start: draft.start,
+            end: draft.end,
+            attendees,
+            repeat: draft.repeat,
+            details: draft.details,
+        };
+        chatsvc::Calendar::new(&session)
+            .create_event(&event)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn respond_to_event(
+        &self,
+        event_id: &str,
+        ical_uid: Option<&str>,
+        reply: chatsvc::Reply,
+        send_response: bool,
+    ) -> Result<(), String> {
+        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        chatsvc::Calendar::new(&session)
+            .respond(event_id, ical_uid, reply, send_response)
             .await
             .map_err(|error| error.to_string())
     }

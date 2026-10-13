@@ -239,6 +239,7 @@ pub struct CallModel {
     pub progress: Option<Progress>,
     pub muted: bool,
     pub listen_only: bool,
+    pub audio_off: bool,
     pub lobby: bool,
     pub can_end_meeting: bool,
     pub incoming: bool,
@@ -293,6 +294,7 @@ impl CallModel {
             progress: None,
             muted: false,
             listen_only: false,
+            audio_off: false,
             lobby: false,
             can_end_meeting: false,
             incoming: false,
@@ -1040,7 +1042,7 @@ impl CallModel {
     }
 
     pub fn can_unmute(&self) -> bool {
-        !self.listen_only
+        !self.listen_only && !self.audio_off
     }
 }
 
@@ -1253,6 +1255,13 @@ mod tests {
         let mut model = connected_model();
         assert!(model.can_unmute());
         model.apply(CallUpdate::ListenOnly(true));
+        assert!(!model.can_unmute());
+    }
+
+    #[test]
+    fn a_call_without_audio_blocks_unmuting() {
+        let mut model = connected_model();
+        model.audio_off = true;
         assert!(!model.can_unmute());
     }
 

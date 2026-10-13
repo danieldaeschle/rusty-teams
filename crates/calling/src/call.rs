@@ -814,6 +814,7 @@ async fn drive(
     let mut software_audio: Option<SoftwareAudio> = None;
     let mut share_sound_wanted = false;
     let mut mic_settings = MicSettings::default();
+    let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
     let mut own_hand: Option<String> = None;
     let mut depacketizer = Depacketizer::default();
@@ -1257,6 +1258,18 @@ async fn drive(
                         muted = apply_mute(mute, muted, live.audio.as_ref().expect("audio set above"), software_audio.as_ref(), &remote, control);
                     }
                 }
+                Some(CallCommand::DisableAudio) => {
+                    let audio = live.audio.as_ref().expect("audio set above");
+                    if audio.uses_devices() {
+                        use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+                        factory.set_adm_recording_enabled(false);
+                        factory.set_adm_playout_enabled(false);
+                    }
+                    muted = apply_mute(MuteCommand::Mute, muted, audio, software_audio.as_ref(), &remote, control);
+                    audio_disabled = true;
+                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, None, false, &mut software_audio, control, timeline);
+                    control.send(CallUpdate::ListenOnly(true));
+                }
                 Some(CallCommand::SelectInput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
                         timeline.record("input device", format!("{choice:?} applied={}", devices::select_input(&factory, &choice)));
@@ -1267,10 +1280,11 @@ async fn drive(
                         sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), true, &mut software_audio, control, timeline);
                     }
                 }
-                Some(CallCommand::SetMicSettings(settings)) => {
+                Some(CallCommand::SetMicSettings(settings)) if !audio_disabled => {
                     mic_settings = settings;
                     sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, control, timeline);
                 }
+                Some(CallCommand::SetMicSettings(settings)) => mic_settings = settings,
                 Some(CallCommand::SelectOutput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
                         timeline.record("output device", format!("{choice:?} applied={}", devices::select_output(&factory, &choice)));

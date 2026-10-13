@@ -60,6 +60,13 @@ impl Graph {
         parse_profile_details(&requests[0].url, profile, manager, reports)
     }
 
+    pub async fn user_mail(&self, user_id: &str) -> Result<Option<String>> {
+        let body = self
+            .get(&urls::user_mail(user_id), &Scope::graph(PROFILE_SCOPE))
+            .await?;
+        Ok(parse_mail(&body))
+    }
+
     pub async fn time_zone_name(&self, mail: &str) -> Result<Option<String>> {
         let body = schedule_body(mail, Utc::now());
         let answer = self
@@ -114,6 +121,15 @@ fn schedule_body(mail: &str, now: DateTime<Utc>) -> Value {
     })
 }
 
+fn parse_mail(body: &Value) -> Option<String> {
+    ["mail", "userPrincipalName"]
+        .iter()
+        .filter_map(|key| body.get(key)?.as_str())
+        .map(str::trim)
+        .find(|address| !address.is_empty())
+        .map(str::to_owned)
+}
+
 fn parse_time_zone_name(body: &Value) -> Option<String> {
     let name = body
         .pointer("/value/0/workingHours/timeZone/name")?
@@ -138,6 +154,21 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn the_mail_falls_back_to_the_user_principal_name() {
+        assert_eq!(
+            parse_mail(&json!({"mail": null, "userPrincipalName": "bea@example.invalid"})),
+            Some("bea@example.invalid".to_owned())
+        );
+        assert_eq!(
+            parse_mail(
+                &json!({"mail": "a@example.invalid", "userPrincipalName": "b@example.invalid"})
+            ),
+            Some("a@example.invalid".to_owned())
+        );
+        assert_eq!(parse_mail(&json!({"mail": " "})), None);
     }
 
     #[test]
