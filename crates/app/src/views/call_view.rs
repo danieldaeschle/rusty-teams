@@ -26,6 +26,7 @@ use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
     more_button, pin_chip, spotlight_chip, with_tile_menu,
 };
+use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, people_panel};
 use super::call_stage::render_stage;
 use super::call_view_menu::view_button;
 use super::conversation::ConversationView;
@@ -67,7 +68,7 @@ pub const NO_WINDOWS_HINT: &str = "No windows found";
 pub(super) const BANNER_HEIGHT: f32 = 40.;
 const MAX_WINDOW_ITEMS: usize = 12;
 pub const LOBBY_TEXT: &str = "Waiting in the lobby...";
-pub const CHAT_PANEL_WIDTH: f32 = 320.;
+pub(super) const CHAT_PANEL_WIDTH: f32 = 320.;
 const CHAT_HEADER_HEIGHT: f32 = 48.;
 const REACTION_RISE: f32 = 24.;
 const REACTION_FADE_FROM: f32 = 0.75;
@@ -1074,6 +1075,7 @@ pub fn render_call_view(
         )
         .children(health_indicator(model))
         .children(recording_chip(model))
+        .children(lock_chip(model))
         .children(room_chip(model))
         .child(div().flex_1())
         .children(return_button(app, model));
@@ -1119,6 +1121,9 @@ pub fn render_call_view(
         })
         .child(view_button(app, model, fullscreen))
         .children(more_button(app, model))
+        .when(model.kind != CallKind::Test, |row| {
+            row.child(people_button(app, call.people_open, model.raised_hands()))
+        })
         .when(call.chat_thread().is_some(), |row| {
             row.child(chat_button(app, call.chat_open, state.call_chat_unread()))
         })
@@ -1132,6 +1137,7 @@ pub fn render_call_view(
         .flex_none()
         .child(header)
         .children(lobby_banner(app, model, call.lobby_list_open))
+        .children(lock_banner(app, model))
         .children(health_banner(app, model))
         .children(sharing_banner(app, model, state.call_share_sound))
         .children(consult_banner(app, state));
@@ -1168,6 +1174,7 @@ pub fn render_call_view(
     .children(captions_hint_chip(model))
     .children(push_to_talk_chip(call))
     .children(state.transfer_picker.clone())
+    .children(options_dialog(app, call))
     .children(consent_overlay(app, model));
     Some(
         h_flex()
@@ -1181,6 +1188,7 @@ pub fn render_call_view(
             .child(column)
             .children(chat.map(|chat| chat_panel(app, chat)))
             .children(call.transcript_open.then(|| state.transcript_panel.clone()).flatten())
+            .children(people_panel(app, state, call))
             .into_any_element(),
     )
 }

@@ -338,6 +338,20 @@ impl AppState {
                 self.begin_breakout_move(moved, cx);
                 return;
             }
+            CallUpdate::MeetingOptions(result) => {
+                if let Some(dialog) = call.options_dialog.as_mut() {
+                    dialog.loaded(result);
+                }
+                cx.notify();
+                return;
+            }
+            CallUpdate::MeetingOptionsSaved(result) => {
+                if call.options_dialog.as_mut().is_some_and(|dialog| dialog.saved(result)) {
+                    call.options_dialog = None;
+                }
+                cx.notify();
+                return;
+            }
             _ => {}
         }
         if let (CallUpdate::Caption(entry), Some(thread)) = (&update, call.chat_thread()) {
@@ -522,6 +536,7 @@ impl AppState {
         if call.chat_open {
             call.transcript_open = false;
             self.transcript_panel = None;
+            call.people_open = false;
         }
         cx.emit(AppEvent::Call);
         cx.notify();
@@ -1348,6 +1363,7 @@ mod tests {
                         }),
                         spotlight: None,
                         organizer: false,
+                        ..Default::default()
                     }]),
                     cx,
                 );
@@ -1381,6 +1397,7 @@ mod tests {
                 rank: 1,
             }),
             organizer: false,
+            ..Default::default()
         }
     }
 

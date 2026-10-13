@@ -16,8 +16,11 @@ mod list;
 mod media;
 mod mic;
 mod model;
+mod options_dialog;
 mod overlay;
 mod overlay_layout;
+mod people;
+mod people_actions;
 mod pictures;
 mod prejoin;
 mod preview;
@@ -55,8 +58,10 @@ pub use model::{
     ActiveCall, CAPTION_SHOWN, CallKind, CallModel, Focus, REACTION_SHOWN, Tile, TileSize,
     TileState,
 };
+pub use options_dialog::OptionsDialog;
 pub use overlay::CallWindows;
 pub use prejoin::{AudioChoice, JoinOptions, PendingJoin, load_join_options};
+pub use people::{PeopleSections, PersonRow, people_sections};
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use reminder::{MeetingToasts, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};

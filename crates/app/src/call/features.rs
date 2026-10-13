@@ -72,6 +72,7 @@ impl AppState {
             return;
         };
         call.chat_open = false;
+        call.people_open = false;
         call.transcript_open = true;
         let captions_off = !call.model.captions_on();
         if captions_off {

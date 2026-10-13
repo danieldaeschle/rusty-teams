@@ -35,8 +35,15 @@ pub fn visible_candidates(
     fuzzy::rank(query, candidates, MAX_RESULTS)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerMode {
+    Transfer,
+    Invite,
+}
+
 pub struct TransferPicker {
     app: Entity<AppState>,
+    mode: PickerMode,
     candidates: Vec<(String, TransferCandidate)>,
     search: Entity<InputState>,
     results: Vec<TransferCandidate>,
@@ -49,6 +56,7 @@ impl TransferPicker {
     pub fn new(
         app: Entity<AppState>,
         candidates: Vec<TransferCandidate>,
+        mode: PickerMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -62,6 +70,7 @@ impl TransferPicker {
         let results = visible_candidates(&candidates, "");
         TransferPicker {
             app,
+            mode,
             candidates,
             search,
             results,
@@ -221,18 +230,15 @@ impl Render for TransferPicker {
                     .label("Cancel")
                     .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
             )
-            .child(self.action(
-                "transfer-consult",
-                "Consult first",
-                false,
-                AppState::start_consult,
-            ))
-            .child(self.action(
-                "transfer-now",
-                "Transfer now",
-                true,
-                AppState::transfer_call_blind,
-            ));
+            .children(match self.mode {
+                PickerMode::Transfer => vec![
+                    self.action("transfer-consult", "Consult first", false, AppState::start_consult),
+                    self.action("transfer-now", "Transfer now", true, AppState::transfer_call_blind),
+                ],
+                PickerMode::Invite => {
+                    vec![self.action("transfer-invite", "Invite", true, AppState::invite_call_person)]
+                }
+            });
         div()
             .id("transfer-layer")
             .absolute()
@@ -278,7 +284,10 @@ impl Render for TransferPicker {
                                     .flex_1()
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Transfer call"),
+                                    .child(match self.mode {
+                                        PickerMode::Transfer => "Transfer call",
+                                        PickerMode::Invite => "Invite people",
+                                    }),
                             )
                             .child(
                                 div()

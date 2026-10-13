@@ -41,7 +41,7 @@ pub fn content_share(body: &Value) -> Option<ContentShare> {
     })
 }
 
-fn encoded(component: &str) -> String {
+pub(crate) fn encoded(component: &str) -> String {
     component
         .bytes()
         .map(|byte| match byte {

@@ -13,9 +13,11 @@ use crate::error::{Error, Result};
 use crate::health::CallHealth;
 use crate::hold::HoldState;
 use crate::mic_processing::MicSettings;
+use crate::meeting_options::{MeetingOptions, OptionWrite};
 use crate::mute::MuteCommand;
+use crate::organizer::{MeetingCapability, Modality};
 use crate::reaction::Reaction;
-use crate::roster::RosterEntry;
+use crate::roster::{MeetingRole, RosterEntry};
 use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
 use crate::signaling::{Callee, MeetingTarget};
@@ -48,6 +50,13 @@ pub enum CallCommand {
     Spotlight { mri: String },
     StopSpotlight { mri: String },
     RemoveParticipant { mri: String },
+    SetLock(bool),
+    SetRole { mri: String, role: MeetingRole },
+    SetAttendeeModality { mri: String, modality: Modality, allowed: bool },
+    SetAttendeeRestrictions { mic_off: bool, camera_off: bool },
+    Invite { callees: Vec<Callee>, group_thread: Option<String> },
+    LoadMeetingOptions,
+    SaveMeetingOptions(Vec<OptionWrite>),
     SetCaptions(bool),
     SetBackground(BackgroundChoice),
     SetIncomingVideo(bool),
@@ -108,6 +117,9 @@ pub enum CallUpdate {
     BreakoutMove(BreakoutMove),
     BreakoutRoom { main: MeetingTarget },
     ReplacementLink(String),
+    Capability(MeetingCapability),
+    MeetingOptions(std::result::Result<MeetingOptions, String>),
+    MeetingOptionsSaved(std::result::Result<MeetingOptions, String>),
     Organizer { action: String, outcome: std::result::Result<u16, String> },
     MeetingChat(String),
     Notice(String),

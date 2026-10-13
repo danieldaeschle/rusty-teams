@@ -12,7 +12,7 @@ use gpui_kit::*;
 
 use super::call_organizer::pill;
 use super::call_view::{BANNER_HEIGHT, MENU_WIDTH};
-use super::transfer_picker::TransferPicker;
+use super::transfer_picker::{PickerMode, TransferPicker};
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{BackgroundPick, CallModel, RecordAction, RecordingChip};
@@ -293,8 +293,15 @@ pub fn confirm_record_action(app: &Entity<AppState>, action: RecordAction, windo
 pub fn open_transfer_picker(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
     let candidates = app.read(cx).transfer_candidates();
     let picker_app = app.clone();
-    let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, window, cx));
+    let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Transfer, window, cx));
     app.update(cx, |state, cx| state.open_transfer_picker(picker, cx));
+}
+
+pub fn open_invite_picker(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
+    let candidates = app.read(cx).invite_candidates();
+    let picker_app = app.clone();
+    let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Invite, window, cx));
+    app.update(cx, |state, cx| state.open_invite_picker(picker, cx));
 }
 
 #[derive(Clone)]

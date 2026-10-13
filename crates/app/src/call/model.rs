@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::{
-    CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
-    DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingTarget, Progress, Reaction,
-    RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    AttendeeLimits, CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
+    DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingCapability, MeetingRole,
+    MeetingTarget, Progress, Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -18,6 +18,7 @@ use super::pictures::CallPictures;
 use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, split_overflow};
 use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
+use super::options_dialog::OptionsDialog;
 use super::push_to_talk::PushToTalk;
 
 pub const TEST_CALL_TITLE: &str = "Test call";
@@ -48,6 +49,8 @@ pub struct ActiveCall {
     pub lobby_list_open: bool,
     pub chat_open: bool,
     pub transcript_open: bool,
+    pub people_open: bool,
+    pub options_dialog: Option<OptionsDialog>,
     pub meeting_target: Option<MeetingTarget>,
     pub pending_move: Option<PendingMove>,
     pub consult: Option<ConsultCall>,
@@ -112,6 +115,8 @@ impl ActiveCall {
             lobby_list_open: false,
             chat_open: false,
             transcript_open: false,
+            people_open: false,
+            options_dialog: None,
             meeting_target: None,
             pending_move: None,
             consult: None,
@@ -166,6 +171,8 @@ pub struct Tile {
     pub has_video: bool,
     pub hand: Option<u64>,
     pub spotlight: Option<u64>,
+    pub role: Option<MeetingRole>,
+    pub limits: AttendeeLimits,
 }
 
 impl Tile {
@@ -180,6 +187,8 @@ impl Tile {
             has_video: false,
             hand: None,
             spotlight: None,
+            role: None,
+            limits: AttendeeLimits::default(),
         }
     }
 }
@@ -265,6 +274,8 @@ pub struct CallModel {
     pub own_hand: Option<u64>,
     pub own_spotlight: Option<u64>,
     pub organizer: bool,
+    pub own_role: Option<MeetingRole>,
+    pub capability: MeetingCapability,
     pub pinned: Option<String>,
     pub captions: CaptionState,
     pub caption_lines: Vec<CaptionLine>,
@@ -325,6 +336,8 @@ impl CallModel {
             own_hand: None,
             own_spotlight: None,
             organizer: false,
+            own_role: None,
+            capability: MeetingCapability::default(),
             pinned: None,
             captions: CaptionState::Off,
             caption_lines: Vec::new(),
@@ -471,9 +484,12 @@ impl CallModel {
             CallUpdate::Health(health) => self.health.apply(health),
             CallUpdate::IncomingVideo(enabled) => self.health.incoming_video = enabled,
             CallUpdate::Whiteboard(share) => self.whiteboard = share,
+            CallUpdate::Capability(capability) => self.capability = capability,
             CallUpdate::BreakoutRoom { main } => self.main_meeting = Some(main),
             CallUpdate::BlurTiming(_)
             | CallUpdate::Organizer { .. }
+            | CallUpdate::MeetingOptions(_)
+            | CallUpdate::MeetingOptionsSaved(_)
             | CallUpdate::WhiteboardUrl(_)
             | CallUpdate::BreakoutMove(_)
             | CallUpdate::ReplacementLink(_) => {}
@@ -593,6 +609,39 @@ impl CallModel {
         self.kind == CallKind::Meeting && self.can_manage()
     }
 
+    pub fn present_others(&self) -> usize {
+        self.tiles
+            .iter()
+            .filter(|tile| tile.state == TileState::Present)
+            .count()
+    }
+
+    pub fn can_invite(&self) -> bool {
+        let open_to_everyone = matches!(self.kind, CallKind::Direct | CallKind::Group);
+        self.is_live() && !self.lobby && (open_to_everyone || self.organizes_meeting())
+    }
+
+    pub fn tile_role(&self, mri: &str) -> Option<MeetingRole> {
+        self.tiles
+            .iter()
+            .find(|tile| tile.mri == mri)
+            .and_then(|tile| tile.role)
+    }
+
+    pub fn can_change_roles(&self, mri: &str) -> bool {
+        self.organizes_meeting() && self.tile_role(mri) != Some(MeetingRole::Organizer)
+    }
+
+    pub fn attendee_allowed(&self, mri: &str, modality: calling::Modality) -> bool {
+        let limits = self
+            .tiles
+            .iter()
+            .find(|tile| tile.mri == mri)
+            .map(|tile| tile.limits.clone())
+            .unwrap_or_default();
+        calling::modality_allowed(modality, self.capability, &limits)
+    }
+
     pub fn can_lower_hands(&self) -> bool {
         self.can_manage()
     }
@@ -662,6 +711,11 @@ impl CallModel {
         })
     }
 
+    pub fn raised_hands(&self) -> usize {
+        self.tiles.iter().filter(|tile| tile.hand.is_some()).count()
+            + usize::from(self.own_hand.is_some())
+    }
+
     pub fn any_hand_raised(&self) -> bool {
         self.own_hand.is_some() || self.tiles.iter().any(|tile| tile.hand.is_some())
     }
@@ -689,6 +743,7 @@ impl CallModel {
             own_entry.and_then(|entry| entry.spotlight.as_ref().map(|spotlight| spotlight.rank));
         if let Some(entry) = own_entry {
             self.organizer = entry.organizer;
+            self.own_role = entry.role;
         }
         for entry in entries
             .iter()
@@ -706,6 +761,8 @@ impl CallModel {
                     tile.has_video = entry.has_video;
                     tile.hand = entry.hand.as_ref().map(|hand| hand.rank);
                     tile.spotlight = entry.spotlight.as_ref().map(|spotlight| spotlight.rank);
+                    tile.role = entry.role;
+                    tile.limits = entry.limits.clone();
                     if tile.name.is_empty() {
                         tile.name = entry.display_name.clone();
                     }
@@ -720,8 +777,13 @@ impl CallModel {
                     has_video: entry.has_video,
                     hand: entry.hand.as_ref().map(|hand| hand.rank),
                     spotlight: entry.spotlight.as_ref().map(|spotlight| spotlight.rank),
+                    role: entry.role,
+                    limits: entry.limits.clone(),
                 }),
             }
+        }
+        if self.kind == CallKind::Direct && self.present_others() > 1 {
+            self.kind = CallKind::Group;
         }
         let own_mri = self.own_mri.clone();
         let listed = |mri: &str| entries.iter().any(|entry| entry.mri == mri);
@@ -1133,6 +1195,8 @@ mod tests {
             hand: None,
             spotlight: None,
             organizer: false,
+            role: None,
+            limits: AttendeeLimits::default(),
         }
     }
 
