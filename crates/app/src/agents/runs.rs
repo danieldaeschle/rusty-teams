@@ -1,15 +1,19 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
-use agents::{AgentAction, AgentSettings, RunEvent, RunOutcome, RunStatus, RunUpdate};
+use agents::{
+    AgentAction, AgentProfile, AgentSettings, McpEndpoint, RunEvent, RunOutcome, RunStatus,
+    RunUpdate,
+};
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
+use super::lanes::{Admit, Lanes, RestoreInfo};
 use super::{
-    MCP_POLL_INTERVAL, MCP_WAIT_LIMIT, StartRequest, demo, mcp_bridge, mcp_config_directory,
-    message_context, open_run_session, store as run_store,
+    MCP_POLL_INTERVAL, MCP_WAIT_LIMIT, StartRequest, demo, kills, mcp_bridge, mcp_config_directory,
+    message_context, open_run_session, raise_notice, store as run_store,
 };
 use crate::app_state::AppState;
 use crate::notice::truncated;
@@ -22,6 +26,8 @@ const TEXT_STEP_CHARS: usize = 80;
 const DONE_STEP_CHARS: usize = 60;
 const TICK: Duration = Duration::from_secs(1);
 const RESUME_PARALLEL_LIMIT: usize = 3;
+const QUEUED_STEP: &str = "Queued";
+const OPENED_NOTICE: &str = "Session opened in a terminal - send cancelled";
 const RESUMED_STEP: &str = "Resumed after restart";
 const RESUME_PROMPT: &str = "The app was restarted. Continue where you stopped.";
 
@@ -58,11 +64,27 @@ pub struct AgentRun {
     pub dismissed: bool,
     #[serde(default)]
     pub process_id: Option<u32>,
+    #[serde(default)]
+    pub pending_prompt: Option<String>,
+    #[serde(default)]
+    pub sent_to: Option<SessionTarget>,
+    #[serde(default)]
+    pub launch_session_id: Option<String>,
+    #[serde(default = "launched_by_default")]
+    pub launched: bool,
+}
+
+fn launched_by_default() -> bool {
+    true
 }
 
 impl AgentRun {
     pub fn is_running(&self) -> bool {
         self.state == RunState::Running
+    }
+
+    pub fn is_queued(&self) -> bool {
+        self.pending_prompt.is_some()
     }
 
     pub fn is_finished(&self) -> bool {
@@ -122,15 +144,9 @@ impl AgentRun {
     }
 }
 
-fn orphan_stop(run: &AgentRun, plan: &agents::RunPlan) -> Option<agents::Invocation> {
-    plan.stop.clone().or_else(|| {
-        run.process_id
-            .and_then(|process_id| agents::kill_process_invocation(process_id, &run.session_id))
-    })
-}
-
 fn can_resume(settings: &AgentSettings, run: &AgentRun) -> bool {
     settings.resume_interrupted_runs
+        && run.launched
         && !run.session_id.is_empty()
         && settings
             .agents
@@ -163,6 +179,58 @@ fn first_line(text: &str) -> &str {
         .trim()
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionTarget {
+    pub session_id: String,
+    pub working_dir: String,
+    pub fork: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StartOptions {
+    pub working_dir: Option<String>,
+    pub remember_working_dir: bool,
+    pub session: Option<SessionTarget>,
+}
+
+fn plan_for(
+    profile: &AgentProfile,
+    action: &AgentAction,
+    prompt: &str,
+    session_id: &str,
+    target: Option<&SessionTarget>,
+    endpoint: Option<&McpEndpoint>,
+) -> Result<agents::RunPlan, agents::InvocationError> {
+    let directory = mcp_config_directory();
+    match target {
+        None => agents::build_invocation(
+            profile,
+            action,
+            prompt,
+            session_id,
+            endpoint,
+            directory.as_deref(),
+        ),
+        Some(target) if target.fork => agents::fork_invocation(
+            profile,
+            action,
+            prompt,
+            &target.session_id,
+            session_id,
+            endpoint,
+            directory.as_deref(),
+        ),
+        Some(_) => agents::resume_invocation(
+            profile,
+            action,
+            prompt,
+            session_id,
+            endpoint,
+            directory.as_deref(),
+        ),
+    }
+}
+
 pub struct AgentRunsHandle(pub Entity<AgentRuns>);
 
 impl Global for AgentRunsHandle {}
@@ -179,9 +247,12 @@ pub struct AgentRuns {
     runs: Vec<AgentRun>,
     stops: HashMap<u64, oneshot::Sender<()>>,
     resume_queue: VecDeque<u64>,
+    lanes: Lanes,
+    startup_kills: Vec<(String, agents::Invocation)>,
     resuming: HashSet<u64>,
     stopping: HashSet<u64>,
     open_after_stop: HashSet<u64>,
+    open_deferred: HashSet<u64>,
     next_id: u64,
     ticking: bool,
 }
@@ -194,15 +265,33 @@ impl AgentRuns {
         let settings = run_store::load_settings(&store);
         let mut runs = run_store::load_runs(&store);
         let interrupted = runs.iter().any(AgentRun::is_running);
-        let mut resume_queue = VecDeque::new();
-        for run in runs.iter_mut().filter(|run| run.is_running()) {
-            if can_resume(&settings, run) {
+        let infos: Vec<RestoreInfo> = runs
+            .iter()
+            .filter(|run| run.is_running())
+            .map(|run| RestoreInfo {
+                id: run.id,
+                session_id: run.session_id.clone(),
+                queued: run.is_queued(),
+                kill: kills::startup_kill(&settings, run),
+            })
+            .collect();
+        let restored = Lanes::restore(&infos, |run_id| {
+            runs.iter()
+                .find(|run| run.id == run_id)
+                .is_some_and(|run| can_resume(&settings, run))
+        });
+        for run in runs.iter_mut() {
+            if restored.resume_queue.contains(&run.id) {
                 run.push_step(RESUMED_STEP.to_owned());
-                resume_queue.push_back(run.id);
-            } else {
+            } else if restored.interrupted.contains(&run.id) {
                 run.mark_interrupted();
             }
         }
+        let (lanes, resume_queue, startup_kills) = (
+            restored.lanes,
+            VecDeque::from(restored.resume_queue),
+            restored.kills,
+        );
         if interrupted {
             run_store::save_runs(&store, &runs);
         }
@@ -217,9 +306,12 @@ impl AgentRuns {
             runs,
             stops: HashMap::new(),
             resume_queue,
+            lanes,
+            startup_kills,
             resuming: HashSet::new(),
             stopping: HashSet::new(),
             open_after_stop: HashSet::new(),
+            open_deferred: HashSet::new(),
             next_id,
             ticking: false,
         };
@@ -229,18 +321,18 @@ impl AgentRuns {
     }
 
     fn start_resumes(&mut self, cx: &mut Context<Self>) {
-        if self.resume_queue.is_empty() {
+        if self.lanes.is_empty() {
             return;
         }
-        let needs_mcp = self.resume_queue.iter().any(|run_id| {
-            self.get(*run_id)
-                .and_then(|run| {
-                    self.settings
-                        .agents
-                        .iter()
-                        .find(|agent| agent.id == run.agent_id)
-                })
-                .is_some_and(|agent| !agent.mcp_config_flag.is_empty())
+        let needs_mcp = self.runs.iter().any(|run| {
+            run.is_running()
+                && (self.resume_queue.contains(&run.id) || run.is_queued())
+                && self
+                    .settings
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id == run.agent_id)
+                    .is_some_and(|agent| !agent.mcp_config_flag.is_empty())
         });
         cx.spawn(async move |this, cx| {
             let mut waited = Duration::ZERO;
@@ -251,7 +343,16 @@ impl AgentRuns {
                 cx.background_executor().timer(MCP_POLL_INTERVAL).await;
                 waited += MCP_POLL_INTERVAL;
             }
-            this.update(cx, |runs, cx| runs.resume_next(cx)).ok();
+            this.update(cx, |runs, cx| {
+                runs.resume_next(cx);
+                for (session_id, kill) in std::mem::take(&mut runs.startup_kills) {
+                    runs.run_kill(&session_id, Some(kill), cx);
+                }
+                for session_id in runs.lanes.idle_sessions() {
+                    runs.release(&session_id, cx);
+                }
+            })
+            .ok();
         })
         .detach();
     }
@@ -300,22 +401,28 @@ impl AgentRuns {
     }
 
     fn begin_resume(&mut self, run_id: u64, cx: &mut Context<Self>) {
-        let Some(run) = self.get(run_id).filter(|run| run.is_running()).cloned() else {
+        let Some(run) = self.get(run_id).cloned() else {
             return;
         };
+        if !run.is_running() {
+            self.finish_kill(&run.session_id, cx);
+            return;
+        }
         self.resuming.insert(run_id);
+        let session_id = run.session_id.clone();
         match self.resume_plan(&run, cx) {
             Ok((plan, format)) => {
-                let stop = orphan_stop(&run, &plan);
+                let stop = kills::kill_for(&run, &plan, |launched| {
+                    self.resume_plan(launched, cx).ok().map(|(plan, _)| plan)
+                });
                 cx.spawn(async move |this, cx| {
                     if let Some(stop) = stop {
-                        let _ =
-                            runtime::spawn(async move { agents::run_stop_invocation(&stop).await })
-                                .await;
+                        kills::execute(stop).await;
                     }
                     this.update(cx, |runs, cx| {
                         let still_resuming = runs.resuming.contains(&run_id)
                             && runs.get(run_id).is_some_and(AgentRun::is_running);
+                        runs.finish_kill(&session_id, cx);
                         if still_resuming {
                             runs.spawn(run_id, plan, format, cx);
                         } else {
@@ -328,17 +435,21 @@ impl AgentRuns {
                 })
                 .detach();
             }
-            Err(reason) => self.finish(
-                run_id,
-                Some(RunOutcome {
-                    status: RunStatus::Failed {
-                        message: format!("Could not resume - {reason}"),
-                        stderr_tail: Vec::new(),
-                    },
-                    exit_code: None,
-                }),
-                cx,
-            ),
+            Err(reason) => {
+                let stop = kills::startup_kill(&self.settings, &run);
+                self.finish(
+                    run_id,
+                    Some(RunOutcome {
+                        status: RunStatus::Failed {
+                            message: format!("Could not resume - {reason}"),
+                            stderr_tail: Vec::new(),
+                        },
+                        exit_code: None,
+                    }),
+                    cx,
+                );
+                self.run_kill(&session_id, stop, cx);
+            }
         }
     }
 
@@ -376,6 +487,18 @@ impl AgentRuns {
             .filter(move |run| run.conversation_id == conversation_id && !run.dismissed)
     }
 
+    pub fn for_agent(&self, agent_id: &str) -> Vec<&AgentRun> {
+        self.runs
+            .iter()
+            .rev()
+            .filter(|run| run.agent_id == agent_id)
+            .collect()
+    }
+
+    pub fn session_ids(&self) -> HashSet<String> {
+        self.runs.iter().map(|run| run.session_id.clone()).collect()
+    }
+
     pub fn running_count(&self) -> usize {
         self.runs.iter().filter(|run| run.is_running()).count()
     }
@@ -405,7 +528,26 @@ impl AgentRuns {
         extra: &str,
         cx: &mut Context<Self>,
     ) -> Result<u64, String> {
-        let action = self
+        self.start_with(
+            action_id,
+            conversation_id,
+            message_id,
+            extra,
+            StartOptions::default(),
+            cx,
+        )
+    }
+
+    pub fn start_with(
+        &mut self,
+        action_id: &str,
+        conversation_id: &str,
+        message_id: &str,
+        extra: &str,
+        options: StartOptions,
+        cx: &mut Context<Self>,
+    ) -> Result<u64, String> {
+        let mut action = self
             .settings
             .actions
             .iter()
@@ -421,17 +563,33 @@ impl AgentRuns {
             .ok_or("The agent of this action no longer exists")?;
         let context = message_context::build(self.app.read(cx), conversation_id, message_id)
             .ok_or("The message is no longer available")?;
-        let session_id = agents::new_session_id();
-        let prompt = agents::build_prompt(&action, &context, extra, &session_id, &profile.id);
-        let endpoint = mcp_bridge::endpoint(cx);
-        let plan = agents::build_invocation(
-            &profile,
-            &action,
-            &prompt,
-            &session_id,
-            endpoint.as_ref(),
-            mcp_config_directory().as_deref(),
-        );
+        let chosen_working_dir = options
+            .working_dir
+            .clone()
+            .filter(|_| options.session.is_none() && options.remember_working_dir);
+        if let Some(target) = &options.session {
+            action.working_dir = target.working_dir.clone();
+        } else if let Some(working_dir) = &options.working_dir {
+            action.working_dir = working_dir.clone();
+        }
+        let (session_id, prompt) = match &options.session {
+            Some(target) => {
+                let session_id = if target.fork {
+                    agents::new_session_id()
+                } else {
+                    target.session_id.clone()
+                };
+                let prompt =
+                    agents::build_session_prompt(&context, extra, &session_id, &profile.id);
+                (session_id, prompt)
+            }
+            None => {
+                let session_id = agents::new_session_id();
+                let prompt =
+                    agents::build_prompt(&action, &context, extra, &session_id, &profile.id);
+                (session_id, prompt)
+            }
+        };
         let run_id = self.next_id;
         self.next_id += 1;
         self.runs.push(AgentRun {
@@ -456,19 +614,146 @@ impl AgentRuns {
             expanded: false,
             dismissed: false,
             process_id: None,
+            pending_prompt: Some(prompt),
+            sent_to: options.session.clone(),
+            launch_session_id: None,
+            launched: false,
         });
-        if endpoint.is_none()
+        if mcp_bridge::endpoint(cx).is_none()
             && let Some(run) = self.run_mut(run_id)
         {
             run.push_step("MCP server is off - no reply proposal possible".to_owned());
         }
-        match plan {
-            Ok(plan) => self.spawn(run_id, plan, profile.output, cx),
-            Err(error) => self.finish(
+        self.dispatch(run_id, cx);
+        if let Some(working_dir) = chosen_working_dir {
+            self.update_settings(
+                |settings| settings.remember_working_dir(&profile.id, &working_dir),
+                cx,
+            );
+        }
+        self.persist(cx);
+        self.ensure_ticking(cx);
+        cx.notify();
+        Ok(run_id)
+    }
+
+    fn dispatch(&mut self, run_id: u64, cx: &mut Context<Self>) {
+        let Some(session_id) = self.get(run_id).map(|run| run.session_id.clone()) else {
+            return;
+        };
+        match self.lanes.admit(&session_id, run_id) {
+            Admit::Launch => self.launch(run_id, cx),
+            Admit::Queued => {
+                if let Some(run) = self.run_mut(run_id) {
+                    run.push_step(QUEUED_STEP.to_owned());
+                }
+            }
+        }
+    }
+
+    fn release(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let runs = &self.runs;
+        let next = self.lanes.next(session_id, |run_id| {
+            runs.iter().any(|run| run.id == run_id && run.is_queued())
+        });
+        if let Some(next) = next {
+            self.launch(next, cx);
+        }
+    }
+
+    fn finish_kill(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let session_id = &self.lanes.resolve(session_id);
+        self.lanes.kill_done(session_id);
+        self.open_deferred_for(session_id, cx);
+        self.release(session_id, cx);
+    }
+
+    fn open_deferred_for(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        if self.lanes.has_kills_pending(session_id) {
+            return;
+        }
+        let ready: Vec<u64> = self
+            .open_deferred
+            .iter()
+            .copied()
+            .filter(|run_id| {
+                self.get(*run_id)
+                    .is_some_and(|run| run.session_id == session_id)
+            })
+            .collect();
+        for run_id in ready {
+            self.open_deferred.remove(&run_id);
+            if let Some(run) = self.get(run_id).cloned() {
+                self.open_and_cancel(&run, cx);
+            }
+        }
+    }
+
+    fn run_kill(
+        &mut self,
+        session_id: &str,
+        stop: Option<agents::Invocation>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(stop) = stop else {
+            self.finish_kill(session_id, cx);
+            return;
+        };
+        let session_id = session_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            kills::execute(stop).await;
+            this.update(cx, |runs, cx| runs.finish_kill(&session_id, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    fn open_and_cancel(&mut self, run: &AgentRun, cx: &mut Context<Self>) {
+        open_run_session(run, cx);
+        let waiting = self.lanes.drain_waiting(&run.session_id);
+        for run_id in &waiting {
+            if let Some(waiting_run) = self.run_mut(*run_id) {
+                waiting_run.pending_prompt = None;
+            }
+            self.finish(
+                *run_id,
+                Some(RunOutcome {
+                    status: RunStatus::Stopped,
+                    exit_code: None,
+                }),
+                cx,
+            );
+            if let Some(waiting_run) = self.run_mut(*run_id) {
+                waiting_run.current_step = OPENED_NOTICE.to_owned();
+            }
+        }
+        if !waiting.is_empty() {
+            self.persist(cx);
+            raise_notice(OPENED_NOTICE.to_owned(), cx);
+        }
+        self.release(&run.session_id, cx);
+    }
+
+    fn launch(&mut self, run_id: u64, cx: &mut Context<Self>) {
+        let Some(run) = self.get(run_id).cloned() else {
+            return;
+        };
+        let prompt = run.pending_prompt.clone().unwrap_or_default();
+        let planned = self.launch_plan(&run, &prompt, cx);
+        if let Some(run) = self.run_mut(run_id) {
+            run.pending_prompt = None;
+            if run.current_step == QUEUED_STEP {
+                run.started_at = Utc::now();
+                run.push_step("Starting".to_owned());
+            }
+        }
+        match planned {
+            Ok((plan, format)) => self.spawn(run_id, plan, format, cx),
+            Err(message) => self.finish(
                 run_id,
                 Some(RunOutcome {
                     status: RunStatus::Failed {
-                        message: error.to_string(),
+                        message,
                         stderr_tail: Vec::new(),
                     },
                     exit_code: None,
@@ -477,9 +762,41 @@ impl AgentRuns {
             ),
         }
         self.persist(cx);
-        self.ensure_ticking(cx);
-        cx.notify();
-        Ok(run_id)
+    }
+
+    fn launch_plan(
+        &self,
+        run: &AgentRun,
+        prompt: &str,
+        cx: &App,
+    ) -> Result<(agents::RunPlan, agents::OutputFormat), String> {
+        let action = self
+            .settings
+            .actions
+            .iter()
+            .find(|action| action.id == run.action_id)
+            .cloned()
+            .ok_or("the action no longer exists")?;
+        let profile = self
+            .settings
+            .agents
+            .iter()
+            .find(|profile| profile.id == run.agent_id)
+            .ok_or("the agent no longer exists")?;
+        let action = AgentAction {
+            working_dir: run.working_dir.clone(),
+            ..action
+        };
+        plan_for(
+            profile,
+            &action,
+            prompt,
+            &run.session_id,
+            run.sent_to.as_ref(),
+            mcp_bridge::endpoint(cx).as_ref(),
+        )
+        .map(|plan| (plan, profile.output))
+        .map_err(|error| error.to_string())
     }
 
     fn spawn(
@@ -492,6 +809,9 @@ impl AgentRuns {
         let (updates_sender, mut updates) = mpsc::unbounded_channel();
         let (stop_sender, stop_receiver) = oneshot::channel();
         self.stops.insert(run_id, stop_sender);
+        if let Some(run) = self.run_mut(run_id) {
+            run.launch_session_id = Some(run.session_id.clone());
+        }
         let outcome = runtime::spawn(agents::run(plan, format, updates_sender, stop_receiver));
         cx.spawn(async move |this, cx| {
             while let Some(update) = updates.recv().await {
@@ -515,6 +835,7 @@ impl AgentRuns {
             RunUpdate::Started(process_id) => {
                 if let Some(run) = self.run_mut(run_id) {
                     run.process_id = Some(process_id);
+                    run.launched = true;
                     self.persist(cx);
                 }
                 return;
@@ -529,9 +850,25 @@ impl AgentRuns {
             RunEvent::Text(text) => {
                 run.current_step = truncated(first_line(&text), TEXT_STEP_CHARS)
             }
+            RunEvent::SessionId(session_id) if session_id != run.session_id => {
+                let previous = std::mem::replace(&mut run.session_id, session_id.clone());
+                self.move_lane(&previous, &session_id);
+                self.persist(cx);
+            }
             _ => return,
         }
         cx.notify();
+    }
+
+    fn move_lane(&mut self, from: &str, to: &str) {
+        for run_id in self.lanes.rename(from, to) {
+            if let Some(run) = self.run_mut(run_id) {
+                run.session_id = to.to_owned();
+                if let Some(target) = run.sent_to.as_mut().filter(|target| !target.fork) {
+                    target.session_id = to.to_owned();
+                }
+            }
+        }
     }
 
     fn finish(&mut self, run_id: u64, outcome: Option<RunOutcome>, cx: &mut Context<Self>) {
@@ -590,11 +927,20 @@ impl AgentRuns {
         if failed_or_done {
             cx.emit(AgentRunsEvent::Finished(run_id));
         }
-        if self.open_after_stop.remove(&run_id) && stopped {
-            open_run_session(&snapshot, cx);
+        let session_id = snapshot.session_id.clone();
+        let was_active = self.lanes.finished(&session_id, run_id);
+        if self.open_after_stop.remove(&run_id) {
+            if self.lanes.has_kills_pending(&session_id) {
+                self.open_deferred.insert(run_id);
+            } else {
+                self.open_and_cancel(&snapshot, cx);
+            }
         }
         if was_resuming {
             self.resume_next(cx);
+        }
+        if was_active {
+            self.release(&session_id, cx);
         }
         cx.notify();
     }
@@ -647,10 +993,36 @@ impl AgentRuns {
                 run.current_step = "Stopping".to_owned();
             }
             cx.notify();
-        } else if self.resuming.contains(&run_id) || self.resume_queue.contains(&run_id) {
-            if self.resume_queue.contains(&run_id) {
-                self.stop_orphan(run_id, cx);
+        } else if self.get(run_id).is_some_and(AgentRun::is_queued) {
+            let session_id = self.get(run_id).map(|run| run.session_id.clone());
+            if let Some(session_id) = session_id {
+                self.lanes.remove_waiting(&session_id, run_id);
             }
+            if let Some(run) = self.run_mut(run_id) {
+                run.pending_prompt = None;
+            }
+            self.finish(
+                run_id,
+                Some(RunOutcome {
+                    status: RunStatus::Stopped,
+                    exit_code: None,
+                }),
+                cx,
+            );
+        } else if self.resuming.contains(&run_id) || self.resume_queue.contains(&run_id) {
+            let orphan_stop = self
+                .resume_queue
+                .contains(&run_id)
+                .then(|| {
+                    self.get(run_id).and_then(|run| {
+                        kills::orphan_kill(run, |candidate| {
+                            self.resume_plan(candidate, cx).ok().map(|(plan, _)| plan)
+                        })
+                    })
+                })
+                .flatten();
+            let was_queued_for_resume = self.resume_queue.contains(&run_id);
+            let session_id = self.get(run_id).map(|run| run.session_id.clone());
             self.resume_queue.retain(|queued| *queued != run_id);
             self.finish(
                 run_id,
@@ -660,28 +1032,27 @@ impl AgentRuns {
                 }),
                 cx,
             );
-        }
-    }
-
-    fn stop_orphan(&self, run_id: u64, cx: &App) {
-        let Some(run) = self.get(run_id) else {
-            return;
-        };
-        let Ok((plan, _)) = self.resume_plan(run, cx) else {
-            return;
-        };
-        for path in &plan.cleanup {
-            let _ = std::fs::remove_file(path);
-        }
-        if let Some(stop) = orphan_stop(run, &plan) {
-            drop(runtime::spawn(async move {
-                agents::run_stop_invocation(&stop).await
-            }));
+            if let (true, Some(session_id)) = (was_queued_for_resume, session_id) {
+                self.run_kill(&session_id, orphan_stop, cx);
+            }
         }
     }
 
     pub fn stop_and_open_session(&mut self, run_id: u64, cx: &mut Context<Self>) {
-        self.open_after_stop.insert(run_id);
+        let Some(run) = self.get(run_id).cloned() else {
+            return;
+        };
+        if run.is_finished() {
+            if self.lanes.has_kills_pending(&run.session_id) {
+                self.open_deferred.insert(run_id);
+            } else {
+                self.open_and_cancel(&run, cx);
+            }
+            return;
+        }
+        if !run.is_queued() {
+            self.open_after_stop.insert(run_id);
+        }
         self.stop(run_id, cx);
     }
 
@@ -690,11 +1061,24 @@ impl AgentRuns {
             .get(run_id)
             .cloned()
             .ok_or("This run no longer exists")?;
-        let started = self.start(
+        let options = StartOptions {
+            working_dir: run.sent_to.is_none().then(|| run.working_dir.clone()),
+            remember_working_dir: false,
+            session: run.sent_to.clone().map(|target| SessionTarget {
+                session_id: if target.fork {
+                    target.session_id
+                } else {
+                    run.session_id.clone()
+                },
+                ..target
+            }),
+        };
+        let started = self.start_with(
             &run.action_id,
             &run.conversation_id,
             &run.message_id,
             &run.extra,
+            options,
             cx,
         )?;
         self.dismiss(run_id, cx);
@@ -729,7 +1113,9 @@ pub(super) mod tests {
 
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
 
-    use super::{AgentRun, AgentRuns, RunState, Utc, format_elapsed, run_store};
+    use super::{
+        AgentRun, AgentRuns, RunState, SessionTarget, StartOptions, Utc, format_elapsed, run_store,
+    };
     use crate::app_state::{AppState, Mode};
 
     pub fn finished_run(id: u64) -> AgentRun {
@@ -755,6 +1141,10 @@ pub(super) mod tests {
             expanded: false,
             dismissed: false,
             process_id: None,
+            pending_prompt: None,
+            sent_to: None,
+            launch_session_id: None,
+            launched: true,
         }
     }
 
@@ -781,6 +1171,7 @@ pub(super) mod tests {
             agents: vec![profile],
             actions: vec![action],
             resume_interrupted_runs: true,
+            ..AgentSettings::default()
         }
     }
 
@@ -827,9 +1218,531 @@ pub(super) mod tests {
 
     #[cfg(unix)]
     mod shell_runs {
+        use std::time::Duration;
+
         use gpui_kit::AppContext as _;
 
-        use super::{AgentRuns, RunState, TestAppContext, run_store, setup, wait_until_finished};
+        use super::{
+            AgentRun, AgentRuns, Entity, RunState, SessionTarget, StartOptions, TestAppContext,
+            run_store, setup, wait_until_finished,
+        };
+
+        const SESSION_COMMAND: &str = "sh -c 'sleep 1' --session-id {session_id}";
+
+        fn target_of(session_id: String) -> StartOptions {
+            StartOptions {
+                working_dir: None,
+                remember_working_dir: false,
+                session: Some(SessionTarget {
+                    session_id,
+                    working_dir: std::env::temp_dir().to_string_lossy().into_owned(),
+                    fork: false,
+                }),
+            }
+        }
+
+        type LaneView = Option<(Option<u64>, Vec<u64>)>;
+
+        fn lane_of(
+            cx: &mut TestAppContext,
+            runs: &Entity<AgentRuns>,
+            session_id: &str,
+        ) -> LaneView {
+            cx.update(|cx| {
+                runs.read(cx).lanes.get(session_id).map(|lane| {
+                    (
+                        lane.active.first().copied(),
+                        lane.waiting.iter().copied().collect::<Vec<u64>>(),
+                    )
+                })
+            })
+        }
+
+        fn send_chain(
+            cx: &mut TestAppContext,
+            runs: &Entity<AgentRuns>,
+        ) -> (u64, u64, u64, String) {
+            cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    let first = runs.start("ask", "19:chat", "m1", "", cx).unwrap();
+                    let session_id = runs.get(first).unwrap().session_id.clone();
+                    let second = runs
+                        .start_with(
+                            "ask",
+                            "19:chat",
+                            "m1",
+                            "two",
+                            target_of(session_id.clone()),
+                            cx,
+                        )
+                        .unwrap();
+                    let third = runs
+                        .start_with(
+                            "ask",
+                            "19:chat",
+                            "m1",
+                            "three",
+                            target_of(session_id.clone()),
+                            cx,
+                        )
+                        .unwrap();
+                    (first, second, third, session_id)
+                })
+            })
+        }
+
+        fn started_and_ended(
+            cx: &mut TestAppContext,
+            runs: &Entity<AgentRuns>,
+            run_id: u64,
+        ) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+            cx.update(|cx| {
+                let run = runs.read(cx).get(run_id).unwrap();
+                (run.started_at, run.ended_at.unwrap())
+            })
+        }
+
+        #[gpui_kit::test]
+        fn two_sends_to_one_session_run_strictly_one_after_another(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let (first, second, third, session_id) = send_chain(cx, &runs);
+            assert_eq!(
+                lane_of(cx, &runs, &session_id),
+                Some((Some(first), vec![second, third]))
+            );
+            cx.update(|cx| {
+                let queued = runs.read(cx).get(second).unwrap();
+                assert_eq!(queued.current_step, "Queued");
+                let prompt = queued.pending_prompt.clone().unwrap();
+                assert!(prompt.contains("propose_message") && prompt.contains("m1"));
+                assert!(prompt.ends_with("\n\ntwo"));
+                assert_eq!(queued.extra, "two");
+                assert_eq!(queued.session_id, session_id);
+            });
+            wait_until_finished(cx, &runs, first);
+            assert_eq!(
+                lane_of(cx, &runs, &session_id),
+                Some((Some(second), vec![third]))
+            );
+            cx.update(|cx| {
+                assert!(!runs.read(cx).get(second).unwrap().is_queued());
+                assert!(runs.read(cx).get(third).unwrap().is_queued());
+            });
+            wait_until_finished(cx, &runs, second);
+            assert_eq!(lane_of(cx, &runs, &session_id), Some((Some(third), vec![])));
+            wait_until_finished(cx, &runs, third);
+            assert_eq!(lane_of(cx, &runs, &session_id), None);
+            let (_, first_ended) = started_and_ended(cx, &runs, first);
+            let (second_started, second_ended) = started_and_ended(cx, &runs, second);
+            let (third_started, _) = started_and_ended(cx, &runs, third);
+            assert!(second_started >= first_ended);
+            assert!(third_started >= second_ended);
+        }
+
+        #[gpui_kit::test]
+        fn a_reported_session_id_moves_the_whole_lane_and_its_waiting_runs(
+            cx: &mut TestAppContext,
+        ) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let (first, second, third, session_id) = send_chain(cx, &runs);
+            cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.apply_update(
+                        first,
+                        agents::RunUpdate::Event(agents::RunEvent::SessionId("adopted".to_owned())),
+                        cx,
+                    )
+                });
+                let runs = runs.read(cx);
+                assert_eq!(
+                    runs.get(first).unwrap().launch_session_id,
+                    Some(session_id.clone())
+                );
+                assert_eq!(runs.get(first).unwrap().session_id, "adopted");
+                for run_id in [second, third] {
+                    assert_eq!(runs.get(run_id).unwrap().session_id, "adopted");
+                }
+            });
+            assert_eq!(lane_of(cx, &runs, &session_id), None);
+            assert_eq!(
+                lane_of(cx, &runs, "adopted"),
+                Some((Some(first), vec![second, third]))
+            );
+            wait_until_finished(cx, &runs, first);
+            assert_eq!(
+                lane_of(cx, &runs, "adopted"),
+                Some((Some(second), vec![third]))
+            );
+            wait_until_finished(cx, &runs, second);
+            wait_until_finished(cx, &runs, third);
+        }
+
+        #[gpui_kit::test]
+        fn stopping_a_waiting_send_only_removes_it_from_the_lane(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let (first, second, third, session_id) = send_chain(cx, &runs);
+            cx.update(|cx| runs.update(cx, |runs, cx| runs.stop(second, cx)));
+            cx.update(|cx| {
+                let stopped = runs.read(cx).get(second).unwrap();
+                assert_eq!(stopped.state, RunState::Stopped);
+                assert!(!stopped.is_queued());
+            });
+            assert_eq!(
+                lane_of(cx, &runs, &session_id),
+                Some((Some(first), vec![third]))
+            );
+            wait_until_finished(cx, &runs, first);
+            assert_eq!(lane_of(cx, &runs, &session_id), Some((Some(third), vec![])));
+            wait_until_finished(cx, &runs, third);
+        }
+
+        #[gpui_kit::test]
+        fn stop_and_open_cancels_every_waiting_send_of_the_lane(cx: &mut TestAppContext) {
+            let (app, runs) = setup(cx, SESSION_COMMAND);
+            let (first, second, third, session_id) = send_chain(cx, &runs);
+            cx.update(|cx| runs.update(cx, |runs, cx| runs.stop_and_open_session(first, cx)));
+            wait_until_finished(cx, &runs, first);
+            cx.update(|cx| {
+                for run_id in [second, third] {
+                    let run = runs.read(cx).get(run_id).unwrap();
+                    assert_eq!(run.state, RunState::Stopped);
+                    assert_eq!(
+                        run.current_step,
+                        "Session opened in a terminal - send cancelled"
+                    );
+                    assert!(!run.is_queued());
+                }
+                assert!(runs.read(cx).open_after_stop.is_empty());
+            });
+            assert_eq!(lane_of(cx, &runs, &session_id), None);
+            cx.update(|cx| {
+                let stored = run_store::load_runs(&app.read(cx).store);
+                let notice = stored.iter().find(|run| run.id == second).unwrap();
+                assert_eq!(
+                    notice.current_step,
+                    "Session opened in a terminal - send cancelled"
+                );
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_requested_open_fires_whatever_the_outcome_of_the_run(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, "sh -c 'sleep 1; exit 3' --session-id {session_id}");
+            let (first, second, _, session_id) = send_chain(cx, &runs);
+            cx.update(|cx| runs.update(cx, |runs, _| runs.open_after_stop.insert(first)));
+            wait_until_finished(cx, &runs, first);
+            cx.update(|cx| {
+                assert!(matches!(
+                    runs.read(cx).get(first).unwrap().state,
+                    RunState::Failed { .. }
+                ));
+                assert_eq!(runs.read(cx).get(second).unwrap().state, RunState::Stopped);
+                assert!(runs.read(cx).open_after_stop.is_empty());
+            });
+            assert_eq!(lane_of(cx, &runs, &session_id), None);
+        }
+
+        #[gpui_kit::test]
+        fn a_run_that_never_launched_is_interrupted_not_resumed(cx: &mut TestAppContext) {
+            let (app, _) = setup(cx, SESSION_COMMAND);
+            let mut never_started = super::running_run(5);
+            never_started.launched = false;
+            let reloaded = reload(cx, &app, vec![never_started]);
+            cx.update(|cx| {
+                assert!(reloaded.read(cx).get(5).unwrap().is_finished());
+            });
+            assert_eq!(lane_of(cx, &reloaded, "session-5"), None);
+        }
+
+        #[gpui_kit::test]
+        fn stop_and_open_waits_for_the_orphan_kill_before_cancelling_the_lane(
+            cx: &mut TestAppContext,
+        ) {
+            let (app, _) = setup(cx, SESSION_COMMAND);
+            let mut orphan = super::running_run(5);
+            orphan.session_id = "shared".to_owned();
+            orphan.process_id = Some(1);
+            let reloaded = reload(cx, &app, vec![orphan, queued_run(7)]);
+            cx.update(|cx| {
+                reloaded.update(cx, |runs, cx| runs.stop_and_open_session(5, cx));
+                let runs = reloaded.read(cx);
+                assert!(runs.get(5).unwrap().is_finished());
+                assert!(runs.open_deferred.contains(&5));
+                assert!(runs.get(7).unwrap().is_queued());
+                assert!(runs.lanes.has_kills_pending("shared"));
+            });
+            for _ in 0..200 {
+                cx.run_until_parked();
+                if lane_of(cx, &reloaded, "shared").is_none() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            cx.update(|cx| {
+                let runs = reloaded.read(cx);
+                assert_eq!(runs.get(7).unwrap().state, RunState::Stopped);
+                assert!(runs.open_after_stop.is_empty() && runs.open_deferred.is_empty());
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_send_during_an_in_flight_kill_waits_for_the_resumed_run(cx: &mut TestAppContext) {
+            let (app, _) = setup(cx, SESSION_COMMAND);
+            let mut orphan = super::running_run(5);
+            orphan.session_id = "shared".to_owned();
+            orphan.process_id = Some(1);
+            let reloaded = reload(cx, &app, vec![orphan]);
+            let sent = cx.update(|cx| {
+                reloaded.update(cx, |runs, cx| {
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "hi",
+                        target_of("shared".to_owned()),
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            assert_eq!(
+                lane_of(cx, &reloaded, "shared"),
+                Some((Some(5), vec![sent]))
+            );
+            wait_until_finished(cx, &reloaded, 5);
+            wait_until_finished(cx, &reloaded, sent);
+            let (_, resumed_ended) = started_and_ended(cx, &reloaded, 5);
+            let (sent_started, _) = started_and_ended(cx, &reloaded, sent);
+            assert!(sent_started >= resumed_ended);
+        }
+
+        #[test]
+        fn old_saved_runs_with_a_chain_id_still_load() {
+            let mut value = serde_json::to_value(super::running_run(3)).unwrap();
+            let object = value.as_object_mut().unwrap();
+            for key in ["sent_to", "launch_session_id", "launched", "pending_prompt"] {
+                object.remove(key);
+            }
+            object.insert("after_run_id".to_owned(), serde_json::json!(2));
+            object.insert("pending_prompt".to_owned(), serde_json::json!("saved"));
+            let run: AgentRun = serde_json::from_value(value).unwrap();
+            assert!(run.is_queued());
+            assert!(run.launched);
+            assert_eq!(run.sent_to, None);
+        }
+
+        #[gpui_kit::test]
+        fn a_forked_send_gets_a_fresh_session_id_and_adopts_a_reported_one(
+            cx: &mut TestAppContext,
+        ) {
+            let (app, runs) = setup(cx, SESSION_COMMAND);
+            let forked = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    let mut options = target_of("live-session".to_owned());
+                    options.session.as_mut().unwrap().fork = true;
+                    runs.start_with("ask", "19:chat", "m1", "hi", options, cx)
+                        .unwrap()
+                })
+            });
+            cx.update(|cx| {
+                let run = runs.read(cx).get(forked).unwrap().clone();
+                assert_ne!(run.session_id, "live-session");
+                assert!(run.sent_to.as_ref().unwrap().fork);
+                assert!(!run.is_queued());
+                runs.update(cx, |runs, cx| {
+                    runs.apply_update(
+                        forked,
+                        agents::RunUpdate::Event(agents::RunEvent::SessionId(
+                            "reported".to_owned(),
+                        )),
+                        cx,
+                    )
+                });
+                assert_eq!(runs.read(cx).get(forked).unwrap().session_id, "reported");
+                let stored = run_store::load_runs(&app.read(cx).store);
+                assert_eq!(stored[0].session_id, "reported");
+            });
+            wait_until_finished(cx, &runs, forked);
+        }
+
+        #[gpui_kit::test]
+        fn retrying_a_plain_run_keeps_its_chosen_working_dir_without_recording_it(
+            cx: &mut TestAppContext,
+        ) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let started = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "",
+                        StartOptions {
+                            working_dir: Some("/srv/chosen".to_owned()),
+                            remember_working_dir: false,
+                            session: None,
+                        },
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            wait_until_finished(cx, &runs, started);
+            let retried =
+                cx.update(|cx| runs.update(cx, |runs, cx| runs.retry(started, cx)).unwrap());
+            cx.update(|cx| {
+                assert_eq!(
+                    runs.read(cx).get(retried).unwrap().working_dir,
+                    "/srv/chosen"
+                );
+                assert!(
+                    runs.read(cx)
+                        .settings()
+                        .recent_working_dirs_of("fake")
+                        .is_empty()
+                );
+            });
+            wait_until_finished(cx, &runs, retried);
+        }
+
+        #[gpui_kit::test]
+        fn retrying_a_session_send_sends_to_the_same_session_again(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let sent = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "again please",
+                        target_of("old-session".to_owned()),
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            wait_until_finished(cx, &runs, sent);
+            let retried = cx.update(|cx| runs.update(cx, |runs, cx| runs.retry(sent, cx)).unwrap());
+            cx.update(|cx| {
+                let run = runs.read(cx).get(retried).unwrap();
+                assert_eq!(run.session_id, "old-session");
+                assert_eq!(run.extra, "again please");
+                assert_eq!(run.sent_to.as_ref().unwrap().session_id, "old-session");
+            });
+            wait_until_finished(cx, &runs, retried);
+        }
+
+        fn queued_run(id: u64) -> AgentRun {
+            let mut run = super::running_run(id);
+            run.session_id = "shared".to_owned();
+            run.current_step = "Queued".to_owned();
+            run.pending_prompt = Some("saved prompt".to_owned());
+            run
+        }
+
+        fn reload(
+            cx: &mut TestAppContext,
+            app: &Entity<crate::app_state::AppState>,
+            stored: Vec<AgentRun>,
+        ) -> Entity<AgentRuns> {
+            cx.update(|cx| {
+                run_store::save_runs(&app.read(cx).store, &stored);
+                cx.new(|cx| AgentRuns::new(app.clone(), cx))
+            })
+        }
+
+        #[gpui_kit::test]
+        fn a_restart_rebuilds_the_lane_and_never_runs_two_processes_on_one_session(
+            cx: &mut TestAppContext,
+        ) {
+            let (app, _) = setup(cx, SESSION_COMMAND);
+            let mut active = super::running_run(5);
+            active.session_id = "shared".to_owned();
+            let mut duplicate = super::running_run(6);
+            duplicate.session_id = "shared".to_owned();
+            let reloaded = reload(
+                cx,
+                &app,
+                vec![active, duplicate, queued_run(7), queued_run(8)],
+            );
+            cx.update(|cx| {
+                let runs = reloaded.read(cx);
+                assert!(runs.get(6).unwrap().is_finished());
+                assert!(runs.get(7).unwrap().is_queued() && runs.get(8).unwrap().is_queued());
+            });
+            assert_eq!(
+                lane_of(cx, &reloaded, "shared"),
+                Some((Some(5), vec![7, 8]))
+            );
+            wait_until_finished(cx, &reloaded, 5);
+            assert_eq!(lane_of(cx, &reloaded, "shared"), Some((Some(7), vec![8])));
+            wait_until_finished(cx, &reloaded, 7);
+            wait_until_finished(cx, &reloaded, 8);
+            let (_, ended_5) = started_and_ended(cx, &reloaded, 5);
+            let (started_7, ended_7) = started_and_ended(cx, &reloaded, 7);
+            let (started_8, _) = started_and_ended(cx, &reloaded, 8);
+            assert!(started_7 >= ended_5 && started_8 >= ended_7);
+        }
+
+        #[gpui_kit::test]
+        fn a_waiting_send_without_a_predecessor_runs_after_a_restart(cx: &mut TestAppContext) {
+            let (app, _) = setup(cx, SESSION_COMMAND);
+            let reloaded = reload(cx, &app, vec![queued_run(7), queued_run(8)]);
+            assert_eq!(lane_of(cx, &reloaded, "shared"), Some((None, vec![7, 8])));
+            cx.run_until_parked();
+            assert_eq!(lane_of(cx, &reloaded, "shared"), Some((Some(7), vec![8])));
+            wait_until_finished(cx, &reloaded, 7);
+            wait_until_finished(cx, &reloaded, 8);
+            assert_eq!(lane_of(cx, &reloaded, "shared"), None);
+        }
+
+        #[gpui_kit::test]
+        fn a_message_to_an_idle_session_resumes_it_and_a_chosen_dir_becomes_recent(
+            cx: &mut TestAppContext,
+        ) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let (resumed, other) = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    let resumed = runs
+                        .start_with(
+                            "ask",
+                            "19:chat",
+                            "m1",
+                            "hello",
+                            target_of("old-session".to_owned()),
+                            cx,
+                        )
+                        .unwrap();
+                    let other = runs
+                        .start_with(
+                            "ask",
+                            "19:chat",
+                            "m1",
+                            "",
+                            StartOptions {
+                                working_dir: Some("/srv/other".to_owned()),
+                                remember_working_dir: true,
+                                session: None,
+                            },
+                            cx,
+                        )
+                        .unwrap();
+                    (resumed, other)
+                })
+            });
+            cx.update(|cx| {
+                let resumed = runs.read(cx).get(resumed).unwrap().clone();
+                assert_eq!(resumed.session_id, "old-session");
+                assert_ne!(resumed.current_step, "Queued");
+                let other = runs.read(cx).get(other).unwrap().clone();
+                assert_eq!(other.working_dir, "/srv/other");
+                assert_eq!(
+                    runs.read(cx).settings().recent_working_dirs_of("fake"),
+                    ["/srv/other"]
+                );
+            });
+            wait_until_finished(cx, &runs, resumed);
+        }
 
         #[gpui_kit::test]
         fn a_stream_json_run_ends_done_and_is_persisted(cx: &mut TestAppContext) {
@@ -885,7 +1798,7 @@ pub(super) mod tests {
             cx.update(|cx| {
                 let run = reloaded.read(cx).get(5).unwrap().clone();
                 assert_eq!(run.state, RunState::Done);
-                assert_eq!(run.session_id, "session-5");
+                assert_eq!(run.session_id, "3f6a2c1e-6f53-4c8e-9a51-7c2b5d0e9a11");
                 assert!(
                     run.steps
                         .iter()

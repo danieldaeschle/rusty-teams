@@ -56,6 +56,27 @@ pub fn build_prompt(
     rendered.trim().to_string()
 }
 
+pub fn build_session_prompt(
+    context: &MessageContext,
+    message: &str,
+    session_id: &str,
+    agent_id: &str,
+) -> String {
+    let quoted = context
+        .message
+        .lines()
+        .map(|line| format!("> {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Context: {sender} wrote in the Teams chat \"{chat}\" (conversation_id \"{conversation_id}\", message_id \"{message_id}\"):\n\n{quoted}\n\nThe `teams` MCP server can show images of messages (`get_image`) and list the newest messages of other chats (`recent_messages`). To propose a reply, use the `propose_message` tool of the `teams` MCP server: conversation_id \"{conversation_id}\", reply_to_message_id \"{message_id}\", session_id \"{session_id}\", agent \"{agent_id}\". Never send anything yourself.\n\n{message}",
+        sender = context.sender,
+        chat = context.chat,
+        conversation_id = context.conversation_id,
+        message_id = context.message_id,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,6 +96,17 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn a_session_prompt_carries_the_message_ids_and_the_typed_text_last() {
+        let prompt = build_session_prompt(&context(0), "and the tests?", "sid-9", "claude");
+        assert!(prompt.starts_with("Context: Ada wrote in the Teams chat \"Ops\""));
+        assert!(prompt.contains("conversation_id \"19:abc\", message_id \"42\""));
+        assert!(prompt.contains("\n> Where is the report?\n"));
+        assert!(prompt.contains("propose_message"));
+        assert!(prompt.contains("session_id \"sid-9\", agent \"claude\""));
+        assert!(prompt.ends_with("\n\nand the tests?"));
     }
 
     #[test]

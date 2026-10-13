@@ -41,6 +41,19 @@ fn earlier_records(
     earlier.split_off(skipped)
 }
 
+pub fn message_line(state: &AppState, conversation_id: &str, message_id: &str) -> Option<String> {
+    let record = state
+        .store
+        .messages_by_id(conversation_id, &[message_id.to_owned()])
+        .ok()?
+        .remove(message_id)?;
+    message_text(&record)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_owned)
+}
+
 pub fn build(state: &AppState, conversation_id: &str, message_id: &str) -> Option<MessageContext> {
     let record = state
         .store

@@ -1,14 +1,24 @@
-use agents::AgentAction;
+use std::rc::Rc;
+
+use agents::{AgentAction, Environment};
+use chrono::Utc;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, h_flex,
-    input::{Textarea, TextareaState},
+    input::{InputEvent, Textarea, TextareaState},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{mcp_bridge, message_context, start_run, start_run_when_mcp_ready};
+use super::runs::{SessionTarget, StartOptions};
+use super::session_options::{
+    SessionOption, default_wsl_distro, external_options, load_external, mark_live_runs, run_options,
+};
+use super::start_dialog_pickers::{MenuPart, MenuRow, locked_select, picker_row, select};
+use super::{
+    mcp_bridge, message_context, raise_notice, runs_handle, start_run, start_run_when_mcp_ready,
+};
 use crate::app_state::AppState;
 use crate::theme;
 use crate::views::widgets::{icon, symbol};
@@ -25,6 +35,9 @@ const QUOTE_LINES: usize = 3;
 const FIELD_MIN_ROWS: usize = 3;
 const FIELD_MAX_ROWS: usize = 6;
 const PROMPT_SIZE: f32 = 12.;
+const DISABLED_OPACITY: f32 = 0.5;
+const DEFAULT_PLACEHOLDER: &str = "e.g. only the backend, open a PR when done";
+const SESSION_PLACEHOLDER: &str = "Type the message to send";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StartRequest {
@@ -47,6 +60,16 @@ pub struct StartDialog {
     needs_allow: bool,
     input: Entity<TextareaState>,
     show_prompt: bool,
+    environment: Environment,
+    default_working_dir: String,
+    working_dir: String,
+    recent_working_dirs: Vec<String>,
+    offers_sessions: bool,
+    scans_external: bool,
+    run_sessions: Vec<SessionOption>,
+    external_sessions: Vec<SessionOption>,
+    selected_session: Option<SessionOption>,
+    external_generation: u64,
 }
 
 impl EventEmitter<StartDialogEvent> for StartDialog {}
@@ -72,24 +95,202 @@ impl StartDialog {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(FIELD_MIN_ROWS, FIELD_MAX_ROWS)
-                .placeholder("e.g. only the backend, open a PR when done")
+                .placeholder(DEFAULT_PLACEHOLDER)
         });
         input.update(cx, |input, cx| input.focus(window, cx));
-        StartDialog {
+        cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
+        .detach();
+        let runs = runs_handle(cx).map(|runs| runs.read(cx));
+        let profile = runs.and_then(|runs| {
+            runs.settings()
+                .agents
+                .iter()
+                .find(|profile| profile.id == action.agent_id)
+                .cloned()
+        });
+        let recent_working_dirs = runs
+            .map(|runs| {
+                runs.settings()
+                    .recent_working_dirs_of(&action.agent_id)
+                    .to_vec()
+            })
+            .unwrap_or_default();
+        let offers_sessions = profile.as_ref().is_some_and(agents::supports_resume);
+        let run_sessions = match runs {
+            Some(runs) if offers_sessions => {
+                run_options(&runs.for_agent(&action.agent_id), app.read(cx), Utc::now())
+            }
+            _ => Vec::new(),
+        };
+        let mut dialog = StartDialog {
             app,
-            subtitle: format!("{agent_name} - {}", action.working_dir),
+            subtitle: agent_name.to_owned(),
             needs_allow: !mcp_bridge::chat_allowed(&request.conversation_id, cx),
             request,
-            action,
             sender,
             quote,
             input,
             show_prompt: false,
+            environment: profile
+                .as_ref()
+                .map(|profile| profile.environment.clone())
+                .unwrap_or_default(),
+            default_working_dir: action.working_dir.clone(),
+            working_dir: action.working_dir.clone(),
+            recent_working_dirs,
+            offers_sessions,
+            scans_external: profile
+                .is_some_and(|profile| profile.output == agents::OutputFormat::ClaudeStreamJson)
+                && offers_sessions,
+            run_sessions,
+            external_sessions: Vec::new(),
+            selected_session: None,
+            external_generation: 0,
+            action,
+        };
+        dialog.reload_external(cx);
+        dialog
+    }
+
+    fn reload_external(&mut self, cx: &mut Context<Self>) {
+        self.external_sessions.clear();
+        if !self.scans_external {
+            return;
+        }
+        self.external_generation += 1;
+        let generation = self.external_generation;
+        let environment = self.environment.clone();
+        let working_dir = self.working_dir.clone();
+        let known_session_ids = runs_handle(cx)
+            .map(|runs| runs.read(cx).session_ids())
+            .unwrap_or_default();
+        let demo = crate::agent_api::is_demo(cx);
+        cx.spawn(async move |this, cx| {
+            let scanned_dir = working_dir.clone();
+            let loaded = cx
+                .background_executor()
+                .spawn(async move {
+                    load_external(&environment, &scanned_dir, &known_session_ids, demo)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                if this.external_generation == generation {
+                    this.external_sessions =
+                        external_options(&loaded.sessions, &working_dir, Utc::now());
+                    mark_live_runs(&mut this.run_sessions, &loaded.live_session_ids);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn choose_session(
+        &mut self,
+        session: Option<SessionOption>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let placeholder = if session.is_some() {
+            SESSION_PLACEHOLDER
+        } else {
+            DEFAULT_PLACEHOLDER
+        };
+        self.input.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+        self.selected_session = session;
+        cx.notify();
+    }
+
+    fn choose_working_dir(&mut self, working_dir: String, cx: &mut Context<Self>) {
+        if self.working_dir != working_dir {
+            self.working_dir = working_dir;
+            self.reload_external(cx);
+        }
+        cx.notify();
+    }
+
+    fn browse(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        let environment = self.environment.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let text = path.to_string_lossy().into_owned();
+            let working_dir = match &environment {
+                Environment::Host => text,
+                Environment::Wsl { distro } => {
+                    let chosen = agents::wsl_unc_distro(&text).map(str::to_owned);
+                    let wanted = match (&chosen, distro) {
+                        (_, Some(distro)) => Some(distro.clone()),
+                        (Some(_), None) => {
+                            let demo = cx.update(|cx| crate::agent_api::is_demo(cx));
+                            cx.background_executor()
+                                .spawn(async move { default_wsl_distro(demo) })
+                                .await
+                        }
+                        (None, None) => None,
+                    };
+                    if chosen.is_some() && wanted.is_some() && chosen != wanted {
+                        cx.update(|cx| {
+                            raise_notice(
+                                "That folder is in a different WSL distro than the agent"
+                                    .to_owned(),
+                                cx,
+                            )
+                        });
+                        return;
+                    }
+                    agents::linux_path(&text)
+                }
+            };
+            this.update(cx, |this, cx| this.choose_working_dir(working_dir, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    fn start_options(&self) -> StartOptions {
+        match &self.selected_session {
+            Some(session) => StartOptions {
+                working_dir: None,
+                remember_working_dir: false,
+                session: Some(SessionTarget {
+                    session_id: session.session_id.clone(),
+                    working_dir: session.working_dir.clone(),
+                    fork: session.fork,
+                }),
+            },
+            None => StartOptions {
+                working_dir: (self.working_dir != self.default_working_dir)
+                    .then(|| self.working_dir.clone()),
+                remember_working_dir: true,
+                session: None,
+            },
         }
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {
         let extra = self.input.read(cx).value().trim().to_owned();
+        if self.selected_session.is_some() && extra.is_empty() {
+            return;
+        }
+        let options = self.start_options();
         if self.needs_allow {
             mcp_bridge::allow_chat(&self.request.conversation_id, cx);
         }
@@ -99,6 +300,7 @@ impl StartDialog {
                 self.request.conversation_id.clone(),
                 self.request.message_id.clone(),
                 extra,
+                options,
                 cx,
             );
         } else {
@@ -107,6 +309,7 @@ impl StartDialog {
                 &self.request.conversation_id,
                 &self.request.message_id,
                 &extra,
+                options,
                 cx,
             );
         }
@@ -182,6 +385,133 @@ impl StartDialog {
             .child(StyledText::new(text).with_highlights([(sender_range, sender_style)]))
     }
 
+    fn session_parts(&self, dialog: &Entity<Self>) -> Vec<MenuPart> {
+        let row = |session: &SessionOption| {
+            let dialog = dialog.clone();
+            let chosen = session.clone();
+            MenuPart::Row(MenuRow {
+                label: session.label.clone(),
+                meta: Some(session.meta.clone()),
+                running: session.running,
+                selected: self
+                    .selected_session
+                    .as_ref()
+                    .is_some_and(|selected| selected.session_id == session.session_id),
+                choose: Rc::new(move |window, cx| {
+                    let chosen = chosen.clone();
+                    dialog.update(cx, |dialog, cx| {
+                        dialog.choose_session(Some(chosen), window, cx)
+                    });
+                }),
+            })
+        };
+        let new_dialog = dialog.clone();
+        let mut parts = vec![MenuPart::Row(MenuRow {
+            label: "New session".to_owned(),
+            meta: None,
+            running: false,
+            selected: self.selected_session.is_none(),
+            choose: Rc::new(move |window, cx| {
+                new_dialog.update(cx, |dialog, cx| dialog.choose_session(None, window, cx));
+            }),
+        })];
+        if !self.run_sessions.is_empty() {
+            parts.push(MenuPart::Separator);
+            parts.push(MenuPart::Header("Recent sessions".to_owned()));
+            parts.extend(self.run_sessions.iter().map(row));
+        }
+        if !self.external_sessions.is_empty() {
+            parts.push(MenuPart::Separator);
+            parts.push(MenuPart::Header(format!(
+                "Other sessions in {}",
+                self.working_dir
+            )));
+            parts.extend(self.external_sessions.iter().map(row));
+        }
+        parts
+    }
+
+    fn working_dir_parts(&self, dialog: &Entity<Self>) -> Vec<MenuPart> {
+        let row = |working_dir: &str, meta: Option<&str>| {
+            let dialog = dialog.clone();
+            let chosen = working_dir.to_owned();
+            MenuPart::Row(MenuRow {
+                label: working_dir.to_owned(),
+                meta: meta.map(str::to_owned),
+                running: false,
+                selected: self.working_dir == working_dir,
+                choose: Rc::new(move |_, cx| {
+                    let chosen = chosen.clone();
+                    dialog.update(cx, |dialog, cx| dialog.choose_working_dir(chosen, cx));
+                }),
+            })
+        };
+        let browse_dialog = dialog.clone();
+        let mut parts = vec![
+            MenuPart::Header("Recent".to_owned()),
+            row(&self.default_working_dir, Some("action default")),
+        ];
+        parts.extend(
+            self.recent_working_dirs
+                .iter()
+                .filter(|working_dir| **working_dir != self.default_working_dir)
+                .map(|working_dir| row(working_dir, None)),
+        );
+        parts.push(MenuPart::Separator);
+        parts.push(MenuPart::Row(MenuRow {
+            label: "Browse...".to_owned(),
+            meta: None,
+            running: false,
+            selected: false,
+            choose: Rc::new(move |_, cx| {
+                browse_dialog.update(cx, |dialog, cx| dialog.browse(cx));
+            }),
+        }));
+        parts
+    }
+
+    fn pickers(&self, cx: &mut Context<Self>) -> Div {
+        let dialog = cx.entity();
+        let session_row = self.offers_sessions.then(|| {
+            let (value, meta, running) = match &self.selected_session {
+                Some(session) => (
+                    session.label.clone(),
+                    Some(session.meta.clone()),
+                    session.running,
+                ),
+                None => ("New session".to_owned(), None, false),
+            };
+            picker_row(
+                "Session",
+                select(
+                    "agent-dialog-session",
+                    value,
+                    meta,
+                    running,
+                    self.session_parts(&dialog),
+                ),
+            )
+        });
+        let working_dir_control = match &self.selected_session {
+            Some(session) => {
+                locked_select(session.working_dir.clone(), "from session").into_any_element()
+            }
+            None => select(
+                "agent-dialog-working-dir",
+                self.working_dir.clone(),
+                None,
+                false,
+                self.working_dir_parts(&dialog),
+            )
+            .into_any_element(),
+        };
+        v_flex()
+            .w_full()
+            .gap(px(8.))
+            .children(session_row)
+            .child(picker_row("Working dir", working_dir_control))
+    }
+
     fn field(&self, window: &Window, cx: &App) -> Div {
         let focused = self.input.focus_handle(cx).contains_focused(window, cx);
         v_flex()
@@ -192,7 +522,11 @@ impl StartDialog {
                     .text_size(px(11.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_faint())
-                    .child("Extra instructions (optional)"),
+                    .child(if self.selected_session.is_some() {
+                        "Message to the session"
+                    } else {
+                        "Extra instructions (optional)"
+                    }),
             )
             .child(
                 div()
@@ -238,14 +572,18 @@ impl StartDialog {
 
     fn prompt_box(&self, cx: &mut Context<Self>) -> Div {
         let extra = self.input.read(cx).value().trim().to_owned();
-        let prompt = message_context::preview_prompt(
-            self.app.read(cx),
-            &self.action,
-            &self.request.conversation_id,
-            &self.request.message_id,
-            &extra,
-        )
-        .unwrap_or_default();
+        let prompt = if self.selected_session.is_some() {
+            extra
+        } else {
+            message_context::preview_prompt(
+                self.app.read(cx),
+                &self.action,
+                &self.request.conversation_id,
+                &self.request.message_id,
+                &extra,
+            )
+            .unwrap_or_default()
+        };
         div()
             .w_full()
             .max_h(px(160.))
@@ -262,7 +600,11 @@ impl StartDialog {
     }
 
     fn buttons(&self, cx: &mut Context<Self>) -> Div {
-        let start_label = if self.needs_allow {
+        let blocked =
+            self.selected_session.is_some() && self.input.read(cx).value().trim().is_empty();
+        let start_label = if self.selected_session.is_some() {
+            "Send"
+        } else if self.needs_allow {
             "Allow and start"
         } else {
             "Start"
@@ -294,14 +636,18 @@ impl StartDialog {
                     .px(px(12.))
                     .items_center()
                     .rounded(px(8.))
-                    .cursor_pointer()
                     .bg(theme::accent())
-                    .hover(|button| button.bg(theme::accent_text()))
                     .text_color(theme::on_accent())
                     .text_size(px(13.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(start_label)
-                    .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
+                    .when(blocked, |button| button.opacity(DISABLED_OPACITY))
+                    .when(!blocked, |button| {
+                        button
+                            .cursor_pointer()
+                            .hover(|button| button.bg(theme::accent_text()))
+                            .on_click(cx.listener(|this, _, _, cx| this.start(cx)))
+                    }),
             )
     }
 }
@@ -352,6 +698,7 @@ impl Render for StartDialog {
                                 .child("Agents can't see this chat yet."),
                         )
                     })
+                    .child(self.pickers(cx))
                     .child(self.field(window, cx))
                     .when(self.show_prompt, |card| card.child(self.prompt_box(cx)))
                     .child(self.buttons(cx)),
