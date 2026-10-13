@@ -2,6 +2,8 @@ mod claude;
 mod copilot;
 mod text;
 
+use std::time::Duration;
+
 use crate::profile::OutputFormat;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,6 +13,10 @@ pub enum RunEvent {
     Final(String),
     SessionId(String),
     Failed(String),
+    ApiRetry {
+        message: String,
+        retry_in: Option<Duration>,
+    },
 }
 
 #[derive(Debug)]

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -11,9 +12,11 @@ pub(super) fn parse_line(line: &str) -> Vec<RunEvent> {
         return Vec::new();
     };
     match value.get("type").and_then(Value::as_str) {
-        Some("system") if value.get("subtype").and_then(Value::as_str) == Some("init") => {
-            session_id_events(&value)
-        }
+        Some("system") => match value.get("subtype").and_then(Value::as_str) {
+            Some("init") => session_id_events(&value),
+            Some("api_error" | "api_retry") => vec![api_retry_event(&value)],
+            _ => Vec::new(),
+        },
         Some("assistant") => assistant_events(&value),
         Some("result") => result_events(&value),
         _ => Vec::new(),
@@ -26,6 +29,35 @@ fn session_id_events(value: &Value) -> Vec<RunEvent> {
         .and_then(Value::as_str)
         .map(|session_id| vec![RunEvent::SessionId(session_id.to_string())])
         .unwrap_or_default()
+}
+
+fn api_retry_event(value: &Value) -> RunEvent {
+    let error = value.get("error");
+    let message = error
+        .and_then(|error| {
+            error.as_str().or_else(|| {
+                ["formatted", "message"]
+                    .iter()
+                    .find_map(|key| error.get(*key).and_then(Value::as_str))
+            })
+        })
+        .unwrap_or("API error")
+        .to_string();
+    let retry_milliseconds = [
+        error.and_then(|error| error.pointer("/noResponse/retryWaitMs")),
+        error.and_then(|error| error.get("retryWaitMs")),
+        value.get("retry_delay_ms"),
+        value.get("retryWaitMs"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_f64);
+    RunEvent::ApiRetry {
+        message,
+        retry_in: retry_milliseconds
+            .filter(|milliseconds| *milliseconds >= 0.0)
+            .map(|milliseconds| Duration::from_millis(milliseconds as u64)),
+    }
 }
 
 fn assistant_events(value: &Value) -> Vec<RunEvent> {

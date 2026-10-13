@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agents::{
     AgentAction, AgentProfile, AgentSettings, McpEndpoint, RunEvent, RunOutcome, RunStatus,
@@ -25,6 +25,7 @@ const VISIBLE_LOG_LINES: usize = 20;
 const TEXT_STEP_CHARS: usize = 80;
 const DONE_STEP_CHARS: usize = 60;
 const TICK: Duration = Duration::from_secs(1);
+const PROGRESS_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const RESUME_PARALLEL_LIMIT: usize = 3;
 const QUEUED_STEP: &str = "Queued";
 const OPENED_NOTICE: &str = "Session opened in a terminal - send cancelled";
@@ -172,6 +173,19 @@ pub fn format_elapsed(duration: Duration) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+fn api_retry_text(message: &str, retry_in: Option<Duration>) -> String {
+    let Some(retry_in) = retry_in else {
+        return format!("API not responding - retrying ({message})");
+    };
+    let seconds = retry_in.as_secs();
+    let wait = if seconds >= 60 {
+        format!("{} min", seconds.div_ceil(60))
+    } else {
+        format!("{seconds} s")
+    };
+    format!("API not responding - retrying in {wait}")
+}
+
 fn first_line(text: &str) -> &str {
     text.lines()
         .find(|line| !line.trim().is_empty())
@@ -255,6 +269,8 @@ pub struct AgentRuns {
     open_deferred: HashSet<u64>,
     next_id: u64,
     ticking: bool,
+    progress_saved_at: Option<Instant>,
+    progress_unsaved: bool,
 }
 
 impl EventEmitter<AgentRunsEvent> for AgentRuns {}
@@ -314,6 +330,8 @@ impl AgentRuns {
             open_deferred: HashSet::new(),
             next_id,
             ticking: false,
+            progress_saved_at: None,
+            progress_unsaved: false,
         };
         agent_runs.ensure_ticking(cx);
         agent_runs.start_resumes(cx);
@@ -516,8 +534,21 @@ impl AgentRuns {
         self.runs.iter_mut().find(|run| run.id == run_id)
     }
 
-    fn persist(&self, cx: &App) {
+    fn persist(&mut self, cx: &App) {
         run_store::save_runs(&self.app.read(cx).store, &self.runs);
+        self.progress_saved_at = Some(Instant::now());
+        self.progress_unsaved = false;
+    }
+
+    fn persist_progress(&mut self, cx: &App) {
+        let due = self
+            .progress_saved_at
+            .is_none_or(|saved_at| saved_at.elapsed() >= PROGRESS_PERSIST_INTERVAL);
+        if !due {
+            self.progress_unsaved = true;
+            return;
+        }
+        self.persist(cx);
     }
 
     pub fn start(
@@ -846,9 +877,15 @@ impl AgentRuns {
             return;
         };
         match event {
-            RunEvent::Step(text) => run.push_step(text),
+            RunEvent::Step(text) => {
+                run.push_step(text);
+                self.persist_progress(cx);
+            }
             RunEvent::Text(text) => {
                 run.current_step = truncated(first_line(&text), TEXT_STEP_CHARS)
+            }
+            RunEvent::ApiRetry { message, retry_in } => {
+                run.current_step = api_retry_text(&message, retry_in)
             }
             RunEvent::SessionId(session_id) if session_id != run.session_id => {
                 let previous = std::mem::replace(&mut run.session_id, session_id.clone());
@@ -968,6 +1005,9 @@ impl AgentRuns {
                 let keep_going = this
                     .update(cx, |runs, cx| {
                         runs.ticking = runs.running_count() > 0;
+                        if runs.progress_unsaved {
+                            runs.persist_progress(cx);
+                        }
                         if runs.ticking {
                             cx.notify();
                         }
@@ -1114,7 +1154,8 @@ pub(super) mod tests {
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
 
     use super::{
-        AgentRun, AgentRuns, RunState, SessionTarget, StartOptions, Utc, format_elapsed, run_store,
+        AgentRun, AgentRuns, RunState, SessionTarget, StartOptions, Utc, api_retry_text,
+        format_elapsed, run_store,
     };
     use crate::app_state::{AppState, Mode};
 
@@ -1923,6 +1964,75 @@ pub(super) mod tests {
         assert_eq!(run.steps.len(), 2);
         assert_eq!(run.steps[0], original.steps[0]);
         assert_eq!(run.steps[1].1, "Resumed after restart");
+    }
+
+    #[gpui_kit::test]
+    fn steps_survive_a_restart_while_the_run_is_running(cx: &mut TestAppContext) {
+        let (app, runs) = setup(cx, RESUMABLE_COMMAND);
+        let reloaded_run = cx.update(|cx| {
+            let mut settings = fake_settings(RESUMABLE_COMMAND);
+            settings.resume_interrupted_runs = true;
+            run_store::save_settings(&app.read(cx).store, &settings);
+            let mut run = running_run(5);
+            run.steps.clear();
+            runs.update(cx, |runs, cx| {
+                runs.runs.push(run);
+                runs.apply_update(
+                    5,
+                    agents::RunUpdate::Event(agents::RunEvent::Step("Reading notes".to_owned())),
+                    cx,
+                );
+            });
+            let reloaded = cx.new(|cx| AgentRuns::new(app.clone(), cx));
+            reloaded.read(cx).get(5).unwrap().clone()
+        });
+        let step_texts: Vec<&str> = reloaded_run
+            .steps
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect();
+        assert_eq!(step_texts, ["Reading notes", "Resumed after restart"]);
+    }
+
+    #[gpui_kit::test]
+    fn an_api_retry_shows_as_the_current_step_and_a_text_replaces_it(cx: &mut TestAppContext) {
+        let (_, runs) = setup(cx, RESUMABLE_COMMAND);
+        cx.update(|cx| {
+            runs.update(cx, |runs, cx| {
+                runs.runs.push(running_run(5));
+                runs.apply_update(
+                    5,
+                    agents::RunUpdate::Event(agents::RunEvent::ApiRetry {
+                        message: "No response from API".to_owned(),
+                        retry_in: Some(Duration::from_secs(599)),
+                    }),
+                    cx,
+                );
+            });
+            let run = runs.read(cx).get(5).unwrap().clone();
+            assert_eq!(run.current_step, "API not responding - retrying in 10 min");
+            assert_eq!(run.state, RunState::Running);
+            runs.update(cx, |runs, cx| {
+                runs.apply_update(
+                    5,
+                    agents::RunUpdate::Event(agents::RunEvent::Text("Back again".to_owned())),
+                    cx,
+                );
+            });
+            assert_eq!(runs.read(cx).get(5).unwrap().current_step, "Back again");
+        });
+    }
+
+    #[test]
+    fn api_retry_text_formats_minutes_and_seconds() {
+        assert_eq!(
+            api_retry_text("x", Some(Duration::from_secs(45))),
+            "API not responding - retrying in 45 s"
+        );
+        assert_eq!(
+            api_retry_text("x", Some(Duration::from_secs(120))),
+            "API not responding - retrying in 2 min"
+        );
     }
 
     fn reload_many(cx: &mut TestAppContext, run_count: u64) -> (Entity<AgentRuns>, Vec<u64>) {
