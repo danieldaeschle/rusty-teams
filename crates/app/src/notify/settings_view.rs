@@ -738,7 +738,13 @@ impl Render for SettingsView {
         );
         let body = match self.section {
             Section::Notifications => self.notifications_section(cx).into_any_element(),
-            Section::Devices => self.devices_section(cx).into_any_element(),
+            Section::Devices => div()
+                .id("devices-scroll")
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .child(self.devices_section(cx))
+                .into_any_element(),
             Section::Agents => div()
                 .id("agents-scroll")
                 .flex_1()

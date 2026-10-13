@@ -301,7 +301,11 @@ impl AppState {
         let action = NoticeAction::new("Open folder", move |_, _| {
             crate::downloads::reveal_in_file_manager(&path)
         });
-        self.raise_notice(REPORT_SAVED_NOTICE.to_owned(), Some(action), cx);
+        let text = match self.notice.as_ref().filter(|notice| notice.action.is_none()) {
+            Some(ended) => format!("{}. {REPORT_SAVED_NOTICE}", ended.text.trim_end_matches('.')),
+            None => REPORT_SAVED_NOTICE.to_owned(),
+        };
+        self.raise_notice(text, Some(action), cx);
     }
 
     pub fn set_call_report_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
