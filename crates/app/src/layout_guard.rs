@@ -131,7 +131,7 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::recap_tab::RECAP_REGION;
-    use crate::views::shell::{AppShell, Startup, bind_keys, install_globals};
+    use crate::views::shell::{AppShell, SIDEBAR_HIDDEN_BELOW, Startup, bind_keys, install_globals};
     use crate::views::shortcuts::{OpenActivity, OpenCallsTab, OpenChannelsTab, OpenSaved};
 
     const GUARDED: &[&str] = &[
@@ -150,6 +150,8 @@ mod frames {
         "shell/islands/main/call-header",
         "shell/islands/main/call-stage",
         "shell/islands/main/call-controls",
+        "shell/islands/main/call-controls/mic",
+        "shell/islands/main/call-controls/leave",
     ];
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/sidebar/calls-actions",
@@ -173,11 +175,16 @@ mod frames {
         "shell/islands/main/call-stage/share-divider",
         "shell/islands/main/call-stage/share-strip",
     ];
+    const OVERLAY_PANELS: &[&str] = &[CALL_TRANSCRIPT, PEOPLE_PANEL];
+    const OVERLAY_CHROME: &[&str] = &[
+        "shell/islands/main/call-header",
+        "shell/islands/main/call-stage",
+    ];
     const MENU: &str = "popup-menu";
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
     const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
-    const SIZES: [(f32, f32); 2] = [(640., 480.), (1920., 1080.)];
+    const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
 
@@ -269,9 +276,14 @@ mod frames {
                 }
             }
             for (other, other_bounds) in tags {
+                let overlays = |first: &str, second: &str| {
+                    OVERLAY_PANELS.contains(&first) && OVERLAY_CHROME.contains(&second)
+                };
                 let siblings = path < other
                     && parent_of(path).is_some()
-                    && parent_of(path) == parent_of(other);
+                    && parent_of(path) == parent_of(other)
+                    && !overlays(path, other)
+                    && !overlays(other, path);
                 if siblings && overlaps(*bounds, *other_bounds) {
                     found.push((
                         format!("{path}:overlaps:{other}"),
@@ -516,6 +528,9 @@ mod frames {
                 let mut expected = GUARDED.to_vec();
                 if is_call {
                     expected.extend(CALL_GUARDED);
+                    if width < SIDEBAR_HIDDEN_BELOW {
+                        expected.retain(|path| *path != "shell/islands/sidebar");
+                    }
                 }
                 if screen_name == "call-transcript" {
                     expected.push(CALL_TRANSCRIPT);

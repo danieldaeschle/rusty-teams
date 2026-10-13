@@ -3,6 +3,7 @@ pub mod adaptive_card;
 pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
+pub mod call_control_fold;
 pub mod call_controls;
 pub mod call_extras;
 pub mod call_health;

@@ -16,12 +16,15 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_control_fold::{
+    CONTROL_GAP, CONTROLS_PADDING, Foldable, FoldedControls, fixed_controls_width, folded_for_width,
+};
 use super::call_extras::{
     CameraMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
     room_chip, whiteboard_stage,
 };
 use super::call_health::{health_banner, health_indicator};
-use super::call_layouts::stage_region;
+use super::call_layouts::{measured_stage, stage_region};
 use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
     more_button, pin_chip, spotlight_chip, with_tile_menu,
@@ -64,6 +67,8 @@ pub(super) const BANNER_HEIGHT: f32 = 40.;
 const MAX_WINDOW_ITEMS: usize = 12;
 pub const LOBBY_TEXT: &str = "Waiting in the lobby...";
 pub(super) const CHAT_PANEL_WIDTH: f32 = 320.;
+const OVERLAY_BELOW: f32 = 720.;
+const CONTROLS_HEIGHT: f32 = 2. * 16. + CONTROL_SIZE;
 const CHAT_HEADER_HEIGHT: f32 = 48.;
 const REACTION_RISE: f32 = 24.;
 const REACTION_FADE_FROM: f32 = 0.75;
@@ -1108,11 +1113,42 @@ fn own_tile_body(
     .into_any_element()
 }
 
+fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> FoldedControls {
+    let model = &call.model;
+    let has_more = model.kind == CallKind::Meeting || model.is_one_to_one();
+    if !has_more {
+        return FoldedControls::default();
+    }
+    let mut present = vec![Foldable::View];
+    if model.has_reaction_controls() {
+        present.extend([Foldable::Reactions, Foldable::RaiseHand]);
+    }
+    if model.kind != CallKind::Test {
+        present.push(Foldable::People);
+    }
+    if call.chat_thread().is_some() {
+        present.push(Foldable::Chat);
+    }
+    let fixed = fixed_controls_width(
+        model.can_use_camera(),
+        has_more,
+        model.kind == CallKind::Meeting,
+    );
+    FoldedControls {
+        items: folded_for_width(measured_stage(call).0, fixed, &present),
+        fullscreen,
+        people_open: call.people_open,
+        chat_open: call.chat_open,
+        chat_unread: state.call_chat_unread(),
+    }
+}
+
 pub fn render_call_view(
     app: &Entity<AppState>,
     state: &AppState,
     chat: Option<Entity<ConversationView>>,
     fullscreen: bool,
+    island_width: f32,
 ) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
     let model = &call.model;
@@ -1152,15 +1188,18 @@ pub fn render_call_view(
     let share_stage = share_stage_element(app, state, call);
     let region = stage_region(app, state, call, now, hold, share_stage);
 
+    let folded = folded_controls(state, call, fullscreen);
     let controls = h_flex()
         .w_full()
         .flex_none()
         .py(px(16.))
-        .gap(px(12.))
+        .px(px(CONTROLS_PADDING))
+        .gap(px(CONTROL_GAP))
         .items_center()
         .justify_center()
         .child(
             h_flex()
+                .debug_selector(|| "shell/islands/main/call-controls/mic".into())
                 .h(px(CONTROL_SIZE))
                 .items_center()
                 .rounded_full()
@@ -1183,19 +1222,30 @@ pub fn render_call_view(
             ShareOptions::of(state),
             call.share_menu_open,
         ))
-        .when(model.has_reaction_controls(), |row| {
-            row.child(hand_button(app, model))
-                .child(reactions_button(app, model))
+        .when(
+            model.has_reaction_controls() && !folded.folds(Foldable::RaiseHand),
+            |row| row.child(hand_button(app, model)),
+        )
+        .when(
+            model.has_reaction_controls() && !folded.folds(Foldable::Reactions),
+            |row| row.child(reactions_button(app, model)),
+        )
+        .when(!folded.folds(Foldable::View), |row| {
+            row.child(view_button(app, model, fullscreen))
         })
-        .child(view_button(app, model, fullscreen))
-        .children(more_button(app, model))
-        .when(model.kind != CallKind::Test, |row| {
-            row.child(people_button(app, call.people_open, model.raised_hands()))
-        })
-        .when(call.chat_thread().is_some(), |row| {
-            row.child(chat_button(app, call.chat_open, state.call_chat_unread()))
-        })
-        .child(leave_button(app, model, "call-leave", false))
+        .children(more_button(app, model, &folded))
+        .when(
+            model.kind != CallKind::Test && !folded.folds(Foldable::People),
+            |row| row.child(people_button(app, call.people_open, model.raised_hands())),
+        )
+        .when(
+            call.chat_thread().is_some() && !folded.folds(Foldable::Chat),
+            |row| row.child(chat_button(app, call.chat_open, state.call_chat_unread())),
+        )
+        .child(
+            leave_button(app, model, "call-leave", false)
+                .debug_selector(|| "shell/islands/main/call-controls/leave".into()),
+        )
         .when(model.kind == CallKind::Meeting, |row| {
             row.child(leave_menu(app, model))
         });
@@ -1244,8 +1294,20 @@ pub fn render_call_view(
     .children(state.transfer_picker.clone())
     .children(options_dialog(app, call))
     .children(consent_overlay(app, model));
+    let panels: Vec<AnyElement> = chat
+        .map(|chat| chat_panel(app, chat))
+        .into_iter()
+        .chain(
+            call.transcript_open
+                .then(|| state.transcript_panel.clone())
+                .flatten()
+                .map(IntoElement::into_any_element),
+        )
+        .chain(people_panel(app, state, call))
+        .collect();
     Some(
         h_flex()
+            .relative()
             .when(!fullscreen, |row| {
                 row.debug_selector(|| "shell/islands/main".into())
             })
@@ -1254,11 +1316,30 @@ pub fn render_call_view(
             .h_full()
             .gap(px(ISLAND_GAP))
             .child(column)
-            .children(chat.map(|chat| chat_panel(app, chat)))
-            .children(call.transcript_open.then(|| state.transcript_panel.clone()).flatten())
-            .children(people_panel(app, state, call))
+            .children(side_panels(panels, island_width))
             .into_any_element(),
     )
+}
+
+fn side_panels(panels: Vec<AnyElement>, island_width: f32) -> Vec<AnyElement> {
+    if panels.is_empty() {
+        return panels;
+    }
+    let panels_width = (CHAT_PANEL_WIDTH + ISLAND_GAP) * panels.len() as f32;
+    if island_width - panels_width >= OVERLAY_BELOW {
+        return panels;
+    }
+    vec![
+        h_flex()
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom(px(CONTROLS_HEIGHT))
+            .gap(px(ISLAND_GAP))
+            .w(px(panels_width.min(island_width)))
+            .children(panels)
+            .into_any_element(),
+    ]
 }
 
 fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> Stateful<Div> {

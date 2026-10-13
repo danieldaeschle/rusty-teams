@@ -13,7 +13,8 @@ use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
 use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
-use super::rail::RailView;
+use gpui_kit::prelude::FluentBuilder as _;
+use super::rail::{RAIL_WIDTH, RailView};
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
@@ -69,6 +70,7 @@ pub struct Startup {
 }
 
 pub const ISLAND_GAP: f32 = 6.;
+pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
 
 pub struct UserInputHandle(pub Arc<UserInput>);
 
@@ -666,7 +668,7 @@ impl AppShell {
 }
 
 impl AppShell {
-    fn islands(&self, call_view: Option<AnyElement>) -> impl IntoElement {
+    fn islands(&self, call_view: Option<AnyElement>, show_sidebar: bool) -> impl IntoElement {
         h_flex()
             .debug_selector(|| "shell/islands".into())
             .flex_1()
@@ -680,14 +682,16 @@ impl AppShell {
                     .h_full()
                     .flex_none()
                     .child(self.rail.clone())
-                    .child(
-                        self.sidebar.clone().cached(
-                            StyleRefinement::default()
-                                .w(px(SIDEBAR_WIDTH))
-                                .h_full()
-                                .flex_none(),
-                        ),
-                    ),
+                    .when(show_sidebar, |group| {
+                        group.child(
+                            self.sidebar.clone().cached(
+                                StyleRefinement::default()
+                                    .w(px(SIDEBAR_WIDTH))
+                                    .h_full()
+                                    .flex_none(),
+                            ),
+                        )
+                    }),
             )
             .child(match (call_view, self.prejoin.clone()) {
                 (Some(call_view), _) => call_view,
@@ -739,7 +743,15 @@ impl Render for AppShell {
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
-        let call_view = render_call_view(&self.state, state, chat_panel, call_fullscreen)
+        let window_width = f32::from(window.viewport_size().width);
+        let show_sidebar = !(state.viewing_call()
+            && !call_fullscreen
+            && window_width < SIDEBAR_HIDDEN_BELOW);
+        let island_width = window_width
+            - RAIL_WIDTH
+            - if show_sidebar { SIDEBAR_WIDTH } else { 0. }
+            - 2. * ISLAND_GAP;
+        let call_view = render_call_view(&self.state, state, chat_panel, call_fullscreen, island_width)
             .filter(|_| state.viewing_call());
         let (call_view, call_overlay) = match call_view {
             Some(view) if call_fullscreen => (None, Some(render_call_overlay(view))),
@@ -897,7 +909,7 @@ impl Render for AppShell {
                     .debug_selector(|| "shell".into())
                     .size_full()
                     .child(title_bar)
-                    .child(self.islands(call_view))
+                    .child(self.islands(call_view, show_sidebar))
                     .child(status),
             )
             .children(call_mini)

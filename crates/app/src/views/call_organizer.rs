@@ -12,13 +12,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_control_fold::{Foldable, FoldedControls, folded_items};
 use super::call_extras::{
     CameraMenu, background_items, effect_items, open_transfer_picker,
 };
 use super::call_record::{record_submenu, transcript_and_settings_items};
 use super::call_people::add_people_item;
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
-use super::widgets::icon;
+use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus};
 use crate::notice::truncated;
@@ -37,7 +38,7 @@ const FOCUS_RADIUS: f32 = 12.;
 const FOCUS_AVATAR: f32 = 140.;
 const CHIP_HEIGHT: f32 = 24.;
 const MORE_SIZE: f32 = 28.;
-const CAMERA_MENU_WIDTH: f32 = 28.;
+pub(super) const CAMERA_MENU_WIDTH: f32 = 28.;
 const NAME_LIMIT: usize = 32;
 
 fn dark_text() -> Hsla {
@@ -415,27 +416,40 @@ pub fn with_tile_menu(
     attach_tile_menu(wrapper, app, model, mri, name, own)
 }
 
-pub fn more_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElement> {
+pub fn more_button(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    folded: &FoldedControls,
+) -> Option<AnyElement> {
     let in_meeting = model.kind == crate::call::CallKind::Meeting;
     if !in_meeting && !model.is_one_to_one() {
         return None;
     }
     let app = app.clone();
     let model = model.clone();
+    let folded = folded.clone();
+    let unread = folded.chat_unread;
+    let chat_folded = folded.folds(Foldable::Chat);
     Some(
         Button::new("call-more")
             .ghost()
             .p_0()
             .size(px(CONTROL_SIZE))
             .rounded_full()
-            .child(round_control(
-                "call-more-face",
-                IconName::Ellipsis,
-                theme::surface_raised(),
-                theme::text(),
-            ))
+            .child(
+                round_control(
+                    "call-more-face",
+                    IconName::Ellipsis,
+                    theme::surface_raised(),
+                    theme::text(),
+                )
+                .relative()
+                .when(chat_folded && unread > 0, |face| {
+                    face.child(corner_badge(Corner::TopRight, 4.).child(count_badge(unread, false)))
+                }),
+            )
             .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, window, cx| {
-                more_menu(popup, window, cx, &app, &model)
+                more_menu(popup, window, cx, &app, &model, &folded)
             })
             .into_any_element(),
     )
@@ -447,8 +461,9 @@ fn more_menu(
     cx: &mut Context<PopupMenu>,
     app: &Entity<AppState>,
     model: &CallModel,
+    folded: &FoldedControls,
 ) -> PopupMenu {
-    let popup = popup.min_w(px(MENU_WIDTH));
+    let popup = folded_items(popup.min_w(px(MENU_WIDTH)), window, cx, app, model, folded);
     let popup = if model.is_one_to_one() {
         one_to_one_items(popup, app, model)
     } else {

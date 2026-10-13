@@ -66,7 +66,7 @@ fn switch_item(
     .on_click(move |_, _, cx| app.update(cx, |state, cx| toggle(state, cx)))
 }
 
-fn view_items(
+pub(super) fn view_items(
     popup: PopupMenu,
     app: &Entity<AppState>,
     model: &CallModel,

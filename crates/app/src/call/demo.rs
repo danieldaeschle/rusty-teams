@@ -754,7 +754,10 @@ fn demo_spotlight(rank: u64) -> PublishedState {
 }
 
 fn demo_caption(people: &[Person], tick: usize) -> Option<CaptionEntry> {
-    let line = tick / (CAPTION_HOLD_TICKS * 2) % DEMO_CAPTIONS.len();
+    let line = tick / (CAPTION_HOLD_TICKS * 2);
+    if line >= DEMO_CAPTIONS.len() {
+        return None;
+    }
     let within = tick % (CAPTION_HOLD_TICKS * 2);
     let (speaker, text) = DEMO_CAPTIONS[line];
     let words: Vec<&str> = text.split(' ').collect();
@@ -837,6 +840,14 @@ mod tests {
         assert_eq!(ranks, vec![1, 2]);
         set_demo_hand(&mut roster, DEMO_OWN_MRI, false);
         assert!(roster.iter().all(|entry| entry.mri != DEMO_OWN_MRI));
+    }
+
+    #[test]
+    fn demo_captions_stop_after_the_last_line() {
+        let people = demo_guests(3);
+        let ticks_per_line = CAPTION_HOLD_TICKS * 2;
+        assert!(demo_caption(&people, ticks_per_line * DEMO_CAPTIONS.len() - 1).is_some());
+        assert!(demo_caption(&people, ticks_per_line * DEMO_CAPTIONS.len()).is_none());
     }
 
     #[test]
