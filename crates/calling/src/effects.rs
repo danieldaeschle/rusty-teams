@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use libwebrtc::native::yuv_helper::i420_to_abgr;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
-use crate::blur::{BlurSettings, BlurStage, MASK_HEIGHT, MASK_WIDTH, MaskSource};
+use crate::blur::{BlurSettings, BlurStage, compose_i420, MASK_HEIGHT, MASK_WIDTH, MaskSource};
 use crate::camera::i420_from_rgba;
 use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
@@ -163,8 +163,12 @@ impl EffectsStage {
         soften_luma(buffer.data_mut().0, stride, width, height, masks.mask(), strength);
     }
 
-    fn compose_background(&mut self, buffer: I420Buffer, width: usize, height: usize) -> I420Buffer {
+    fn compose_background(&mut self, mut buffer: I420Buffer, width: usize, height: usize) -> I420Buffer {
         let Some(masks) = self.masks.as_ref().filter(|masks| !masks.mask().is_empty()) else { return buffer };
+        if !self.blur.covers(width, height) {
+            compose_i420(&mut buffer, masks.mask());
+            return buffer;
+        }
         let (stride_y, stride_u, stride_v) = buffer.strides();
         let (plane_y, plane_u, plane_v) = buffer.data();
         let mut rgba = vec![0u8; width * height * RGBA_BYTES];
