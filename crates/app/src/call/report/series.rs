@@ -65,14 +65,16 @@ impl StatsSeries {
         }
     }
 
-    pub fn observe_sample(&mut self, sample: &StatsSample) {
+    pub fn observe_sample(&mut self, sample: &StatsSample, others_unmuted: bool, own_unmuted: bool) {
         let video = &sample.video;
         if let Some(before) = self.values.get("audio_in_packets")
+            && others_unmuted
             && sample.audio_in_packets <= before.last as u64
         {
             self.stalled_audio_in += 1;
         }
         if let Some(before) = self.values.get("audio_out_packets")
+            && own_unmuted
             && sample.audio_out_packets <= before.last as u64
         {
             self.stalled_audio_out += 1;
@@ -152,12 +154,25 @@ mod tests {
     fn samples_keep_min_max_last_and_count_stalls() {
         let mut series = StatsSeries::default();
         for packets in [10, 20, 20, 35] {
-            series.observe_sample(&sample(packets));
+            series.observe_sample(&sample(packets), true, true);
         }
         let audio_in = series.values()["audio_in_packets"];
         assert_eq!((audio_in.min, audio_in.max, audio_in.last, audio_in.samples), (10., 35., 35., 4));
         assert_eq!(series.stalled_audio_in, 1);
         assert_eq!(series.values()["video_in_width"].last, 1280.);
+    }
+
+    #[test]
+    fn stalls_only_count_while_the_sender_could_be_heard() {
+        let mut series = StatsSeries::default();
+        for packets in [10, 10, 10] {
+            series.observe_sample(&sample(packets), false, false);
+        }
+        assert_eq!((series.stalled_audio_in, series.stalled_audio_out), (0, 0));
+        series.observe_sample(&sample(10), true, false);
+        assert_eq!((series.stalled_audio_in, series.stalled_audio_out), (1, 0));
+        series.observe_sample(&sample(10), false, true);
+        assert_eq!((series.stalled_audio_in, series.stalled_audio_out), (1, 1));
     }
 
     #[test]

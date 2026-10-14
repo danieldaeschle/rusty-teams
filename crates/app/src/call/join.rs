@@ -6,6 +6,7 @@ use teams_core::{
 };
 
 use super::actions::{MEETING_UNAVAILABLE_NOTICE, NOT_CONNECTED_NOTICE};
+use super::launcher::NOT_READY;
 use super::prejoin::{DemoMeeting, MeetingJoin};
 use crate::app_state::{AppState, selection_title};
 use crate::notify::selection_for;
@@ -93,10 +94,11 @@ impl AppState {
         };
         let receiver = runtime::spawn(async move { launcher.resolve_meeting(&meeting_data).await });
         cx.spawn(async move |this, cx| {
-            let resolved = receiver.await.ok().and_then(Result::ok);
+            let resolved = receiver.await.ok().unwrap_or_else(|| Err(String::new()));
             this.update(cx, |state, cx| match resolved {
-                Some(target) => state.join_resolved_meeting(target, mode, cx),
-                None => state.raise_notice(NOT_FOUND_NOTICE.to_owned(), None, cx),
+                Ok(target) => state.join_resolved_meeting(target, mode, cx),
+                Err(message) if message == NOT_READY => state.raise_notice(message, None, cx),
+                Err(_) => state.raise_notice(NOT_FOUND_NOTICE.to_owned(), None, cx),
             })
             .ok();
         })

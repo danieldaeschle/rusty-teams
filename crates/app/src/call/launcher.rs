@@ -1,10 +1,12 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+
+use tokio::sync::watch;
 use std::time::Duration;
 
 use calling::meeting::{LiveMeeting, fetch_live_meeting};
 use calling::{
-    AcceptMode, BackgroundCache, CallEngine, CallHandle, CallSpec, CallState, CallUpdate,
+    AcceptMode, BackgroundCache, CallControl, CallEngine, CallHandle, CallSpec, CallState, CallUpdate,
     DefaultBackground, DeviceChoice, EndReason, EngineConfig, EngineEvent, MeetingTarget,
     call_channel,
 };
@@ -18,11 +20,13 @@ const START_RETRY_STEPS: [Duration; 3] = [
     Duration::from_secs(5),
 ];
 const START_RETRY_STEADY: Duration = Duration::from_secs(10);
-const NOT_READY: &str = "Calls are not ready yet";
+pub(super) const NOT_READY: &str =
+    "Could not reach the Teams calling service. Check your connection and try again.";
+const READY_WAIT: Duration = Duration::from_secs(30);
 const CALL_DUMPS_DIR: &str = "call-dumps";
 
 pub struct CallLauncher {
-    engine: Mutex<Option<CallEngine>>,
+    engine: watch::Sender<Option<CallEngine>>,
     default_camera: Mutex<DeviceChoice>,
 }
 
@@ -33,7 +37,7 @@ impl CallLauncher {
         on_event: impl Fn(EngineEvent) + Send + 'static,
     ) -> Arc<CallLauncher> {
         let launcher = Arc::new(CallLauncher {
-            engine: Mutex::new(None),
+            engine: watch::channel(None).0,
             default_camera: Mutex::new(DeviceChoice::SystemDefault),
         });
         let running = launcher.clone();
@@ -46,7 +50,7 @@ impl CallLauncher {
             .await;
             crate::diagnostics::record("calls: engine ready, registered with the registrar");
             engine.set_default_camera(running.default_camera.lock().expect("camera lock").clone());
-            *running.engine.lock().expect("engine lock") = Some(engine);
+            running.engine.send_replace(Some(engine));
             while let Some(event) = events.recv().await {
                 on_event(event);
             }
@@ -55,7 +59,18 @@ impl CallLauncher {
     }
 
     fn engine(&self) -> Option<CallEngine> {
-        self.engine.lock().expect("engine lock").clone()
+        self.engine.borrow().clone()
+    }
+
+    async fn ready_engine(&self) -> Option<CallEngine> {
+        wait_until_ready(self.engine.subscribe(), READY_WAIT).await
+    }
+
+    fn start_when_ready(&self, spec: CallSpec, kind: OutgoingKind) -> CallHandle {
+        let (handle, control) = call_channel();
+        let ready = self.engine.subscribe();
+        crate::runtime::handle().spawn(queue_outgoing(ready, READY_WAIT, spec, kind, control));
+        handle
     }
 
     pub fn set_default_camera(&self, camera: DeviceChoice) {
@@ -68,26 +83,26 @@ impl CallLauncher {
     pub fn start_call(&self, spec: CallSpec) -> CallHandle {
         match self.engine() {
             Some(engine) => engine.start_call(spec),
-            None => failed_handle(NOT_READY),
+            None => self.start_when_ready(spec, OutgoingKind::Audio),
         }
     }
 
     pub fn start_video_call(&self, spec: CallSpec) -> CallHandle {
         match self.engine() {
             Some(engine) => engine.start_video_call(spec),
-            None => failed_handle(NOT_READY),
+            None => self.start_when_ready(spec, OutgoingKind::Video),
         }
     }
 
     pub fn start_consult(&self, spec: CallSpec) -> CallHandle {
         match self.engine() {
             Some(engine) => engine.start_consult(spec),
-            None => failed_handle(NOT_READY),
+            None => self.start_when_ready(spec, OutgoingKind::Consult),
         }
     }
 
     pub async fn accept_ring(&self, ring_id: u64, mode: AcceptMode) -> Option<CallHandle> {
-        self.engine()?.accept_ring(ring_id, mode).await
+        self.ready_engine().await?.accept_ring(ring_id, mode).await
     }
 
     pub fn decline_ring(&self, ring_id: u64) {
@@ -128,7 +143,8 @@ impl CallLauncher {
         &self,
         meeting_data: &serde_json::Value,
     ) -> Result<MeetingTarget, String> {
-        self.engine()
+        self.ready_engine()
+            .await
             .ok_or_else(|| NOT_READY.to_owned())?
             .resolve_meeting(meeting_data)
             .await
@@ -136,7 +152,11 @@ impl CallLauncher {
     }
 
     pub async fn create_meet_now(&self, subject: &str) -> Result<String, String> {
-        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
         chatsvc::Calendar::new(&session)
             .create_meet_now(subject)
             .await
@@ -147,7 +167,11 @@ impl CallLauncher {
         &self,
         draft: MeetingDraft,
     ) -> Result<chatsvc::CreatedEvent, String> {
-        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
         let graph = graph::Graph::new(session.clone());
         let mut attendees = Vec::with_capacity(draft.people.len());
         for invitee in &draft.people {
@@ -190,7 +214,11 @@ impl CallLauncher {
         reply: chatsvc::Reply,
         send_response: bool,
     ) -> Result<(), String> {
-        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
         chatsvc::Calendar::new(&session)
             .respond(event_id, ical_uid, reply, send_response)
             .await
@@ -248,17 +276,51 @@ async fn start_engine(
     CallEngine::start(session, poll_session, config).await
 }
 
-fn failed_handle(message: &str) -> CallHandle {
-    let (handle, control) = call_channel();
-    control.send(CallUpdate::State(CallState::Ended {
-        reason: EndReason::Failed(message.to_owned()),
-    }));
-    handle
+#[derive(Clone, Copy)]
+enum OutgoingKind {
+    Audio,
+    Video,
+    Consult,
+}
+
+async fn wait_until_ready<T: Clone>(
+    mut receiver: watch::Receiver<Option<T>>,
+    timeout: Duration,
+) -> Option<T> {
+    let ready = tokio::time::timeout(timeout, receiver.wait_for(Option::is_some))
+        .await
+        .ok()?
+        .ok()?;
+    ready.clone()
+}
+
+async fn queue_outgoing(
+    ready: watch::Receiver<Option<CallEngine>>,
+    timeout: Duration,
+    spec: CallSpec,
+    kind: OutgoingKind,
+    mut control: CallControl,
+) {
+    let ended = |reason| CallUpdate::State(CallState::Ended { reason });
+    match control.until_hangup(wait_until_ready(ready, timeout)).await {
+        Err(_) => control.send(ended(EndReason::Cancelled)),
+        Ok(None) => control.send(ended(EndReason::Failed(NOT_READY.to_owned()))),
+        Ok(Some(engine)) => {
+            let (concurrent, start_camera) = match kind {
+                OutgoingKind::Audio => (false, false),
+                OutgoingKind::Video => (false, true),
+                OutgoingKind::Consult => (true, false),
+            };
+            engine.start_call_on(spec, concurrent, start_camera, control);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    use calling::CallCommand;
 
     use super::*;
 
@@ -286,5 +348,55 @@ mod tests {
         ));
         assert_eq!(started, 2);
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn waiting_resolves_once_value_arrives() {
+        let (sender, receiver) = watch::channel(None);
+        let waiter = tokio::spawn(wait_until_ready(receiver, Duration::from_secs(5)));
+        sender.send_replace(Some(7u32));
+        assert_eq!(waiter.await.unwrap(), Some(7));
+    }
+
+    #[tokio::test]
+    async fn waiting_returns_immediately_when_already_ready() {
+        let (_sender, receiver) = watch::channel(Some(3u32));
+        assert_eq!(wait_until_ready(receiver, Duration::ZERO).await, Some(3));
+    }
+
+    #[tokio::test]
+    async fn waiting_gives_up_after_the_timeout() {
+        let (_sender, receiver) = watch::channel(None::<u32>);
+        assert_eq!(wait_until_ready(receiver, Duration::from_millis(20)).await, None);
+    }
+
+    #[tokio::test]
+    async fn waiting_gives_up_when_the_launcher_is_gone() {
+        let (sender, receiver) = watch::channel(None::<u32>);
+        drop(sender);
+        assert_eq!(wait_until_ready(receiver, Duration::from_secs(5)).await, None);
+    }
+
+    #[tokio::test]
+    async fn queued_call_fails_with_notice_after_the_timeout() {
+        let (_sender, receiver) = watch::channel(None);
+        let (mut handle, control) = call_channel();
+        queue_outgoing(receiver, Duration::from_millis(20), CallSpec::Echo, OutgoingKind::Audio, control).await;
+        assert_eq!(
+            handle.updates.recv().await,
+            Some(CallUpdate::State(CallState::Ended { reason: EndReason::Failed(NOT_READY.to_owned()) }))
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_call_is_cancelled_by_hangup() {
+        let (_sender, receiver) = watch::channel(None);
+        let (mut handle, control) = call_channel();
+        handle.commands.send(CallCommand::Hangup).unwrap();
+        queue_outgoing(receiver, Duration::from_secs(30), CallSpec::Echo, OutgoingKind::Video, control).await;
+        assert_eq!(
+            handle.updates.recv().await,
+            Some(CallUpdate::State(CallState::Ended { reason: EndReason::Cancelled }))
+        );
     }
 }

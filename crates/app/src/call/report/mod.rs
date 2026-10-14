@@ -60,6 +60,8 @@ pub struct CallRecorder {
     notices: Vec<(u128, String)>,
     captions: u32,
     series: StatsSeries,
+    others_unmuted: bool,
+    own_unmuted: bool,
     paths: Vec<(u128, MediaPath)>,
     diagnostics: Option<CallDiagnostics>,
 }
@@ -94,6 +96,8 @@ impl CallRecorder {
             notices: Vec::new(),
             captions: 0,
             series: StatsSeries::default(),
+            others_unmuted: true,
+            own_unmuted: true,
             paths: Vec::new(),
             diagnostics: None,
         }
@@ -146,7 +150,10 @@ impl CallRecorder {
         match update {
             CallUpdate::State(state) => self.note_state(state, at_ms),
             CallUpdate::OwnIdentity { mri } => self.me.mri.clone_from(mri),
-            CallUpdate::Muted(_) => self.confirm("mute"),
+            CallUpdate::Muted(muted) => {
+                self.own_unmuted = !muted;
+                self.confirm("mute");
+            }
             CallUpdate::Camera(_) => self.confirm("camera"),
             CallUpdate::LocalShare(_) | CallUpdate::ShareSound(_) => self.confirm("share"),
             CallUpdate::Hold(state) => {
@@ -169,6 +176,9 @@ impl CallRecorder {
                 for entry in entries {
                     self.remember_person(&entry.mri, &entry.display_name);
                 }
+                self.others_unmuted = entries
+                    .iter()
+                    .any(|entry| !entry.in_lobby && !entry.muted && entry.mri != self.me.mri);
                 let present = entries.iter().filter(|entry| !entry.in_lobby).count();
                 self.peak_participants = self.peak_participants.max(present);
             }
@@ -179,7 +189,9 @@ impl CallRecorder {
                     self.paths.push((at_ms, health.path));
                 }
             }
-            CallUpdate::Sample(sample) => self.series.observe_sample(sample),
+            CallUpdate::Sample(sample) => {
+                self.series.observe_sample(sample, self.others_unmuted, self.own_unmuted);
+            }
             CallUpdate::Diagnostics(diagnostics) => self.diagnostics = Some((**diagnostics).clone()),
             _ => {}
         }
@@ -382,6 +394,22 @@ mod tests {
         assert!(document.markdown.contains("## Findings"));
         assert!(document.markdown.contains("Inbound audio stalled in 1 of 4 samples."));
         assert!(document.stem.ends_with("-1to1"));
+    }
+
+    #[test]
+    fn a_call_where_everyone_else_is_muted_reports_no_inbound_stall() {
+        let mut recorder = recorder();
+        recorder.observe(&CallUpdate::Roster(vec![RosterEntry {
+            mri: PEER_MRI.to_owned(),
+            display_name: "Mara Lindqvist".to_owned(),
+            muted: true,
+            ..RosterEntry::default()
+        }]));
+        for packets in [100, 100, 100, 100] {
+            recorder.observe(&sample(packets));
+        }
+        let json: serde_json::Value = serde_json::from_str(&recorder.document().json).expect("valid json");
+        assert_eq!(json["stats"]["audio_in_stalled_samples"], 0);
     }
 
     #[test]

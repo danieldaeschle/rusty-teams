@@ -11,7 +11,7 @@ use tokio::time::timeout;
 
 use crate::call::{AcceptMode, CallOptions, CallSpec, IncomingCall, Plan};
 use crate::devices::DeviceChoice;
-use crate::control::{CallHandle, call_channel};
+use crate::control::{CallControl, CallHandle, call_channel};
 use crate::end::EndKind;
 use crate::error::{Error, Result};
 use crate::push::{CallNotification, Caller, PushEvent, decode_push};
@@ -287,12 +287,16 @@ impl CallEngine {
 
     fn start_call_with(&self, spec: CallSpec, concurrent: bool, start_camera: bool) -> CallHandle {
         let (handle, control) = call_channel();
+        self.start_call_on(spec, concurrent, start_camera, control);
+        handle
+    }
+
+    pub fn start_call_on(&self, spec: CallSpec, concurrent: bool, start_camera: bool, control: CallControl) {
         let engine = self.clone();
         self.inner.runtime.spawn(async move {
             let options = CallOptions { concurrent, start_camera, ..engine.inner.call_options() };
             let _ = engine.run(Plan::Outgoing(spec), options, control).await;
         });
-        handle
     }
 
     pub async fn accept_ring(&self, ring_id: u64, mode: AcceptMode) -> Option<CallHandle> {
