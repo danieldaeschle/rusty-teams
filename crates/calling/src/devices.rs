@@ -80,11 +80,52 @@ pub fn shared_factory() -> PeerConnectionFactory {
     FACTORY.get_or_init(PeerConnectionFactory::default).clone()
 }
 
-pub fn resolve_index(devices: &[AudioDevice], choice: &DeviceChoice) -> Option<u16> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    Capture,
+    Render,
+}
+
+/// Endpoint id of the Windows default device (console role), which the ADM reports as the device guid.
+#[cfg(windows)]
+pub fn system_default_id(flow: Flow) -> Option<String> {
+    use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
+    let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+    let id = default_endpoint_id(flow);
+    if initialized {
+        unsafe { CoUninitialize() };
+    }
+    id
+}
+
+#[cfg(windows)]
+fn default_endpoint_id(flow: Flow) -> Option<String> {
+    use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eConsole, eRender};
+    use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
+    let data_flow = match flow {
+        Flow::Capture => eCapture,
+        Flow::Render => eRender,
+    };
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        let device = enumerator.GetDefaultAudioEndpoint(data_flow, eConsole).ok()?;
+        let id = device.GetId().ok()?;
+        let text = id.to_string().ok();
+        CoTaskMemFree(Some(id.0 as *const _));
+        text
+    }
+}
+
+#[cfg(not(windows))]
+pub fn system_default_id(_flow: Flow) -> Option<String> {
+    None
+}
+
+pub fn resolve_index(devices: &[AudioDevice], choice: &DeviceChoice, system_default: Option<&str>) -> Option<u16> {
     match choice {
-        DeviceChoice::SystemDefault => devices
-            .iter()
-            .find(|device| device.is_system_alias())
+        DeviceChoice::SystemDefault => system_default
+            .and_then(|id| devices.iter().find(|device| device.guid.eq_ignore_ascii_case(id)))
+            .or_else(|| devices.iter().find(|device| device.is_system_alias()))
             .or(devices.first())
             .map(|device| device.index),
         DeviceChoice::Device(key) => devices
@@ -121,8 +162,12 @@ pub fn list_devices(factory: &PeerConnectionFactory) -> DeviceLists {
     lists
 }
 
+fn default_for(choice: &DeviceChoice, flow: Flow) -> Option<String> {
+    (*choice == DeviceChoice::SystemDefault).then(|| system_default_id(flow)).flatten()
+}
+
 pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
-    let Some(index) = resolve_index(&enumerate(factory).inputs, choice) else {
+    let Some(index) = resolve_index(&enumerate(factory).inputs, choice, default_for(choice, Flow::Capture).as_deref()) else {
         return false;
     };
     factory.stop_recording();
@@ -133,7 +178,7 @@ pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> b
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
-    let Some(index) = resolve_index(&enumerate(factory).outputs, choice) else {
+    let Some(index) = resolve_index(&enumerate(factory).outputs, choice, default_for(choice, Flow::Render).as_deref()) else {
         return false;
     };
     factory.stop_playout();
@@ -189,17 +234,29 @@ mod tests {
         let devices = [device(0, "default: Speakers", ""), device(1, "Speakers", ""), device(2, "Headset", "")];
         let entries = menu_entries(&devices);
         assert_eq!(entries[1].choice, DeviceChoice::Device("Speakers".into()));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Headset".into())), Some(2));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Gone".into())), None);
+        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Headset".into()), None), Some(2));
+        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Gone".into()), None), None);
     }
 
     #[test]
     fn the_system_default_resolves_to_the_alias_or_the_first_device() {
         let with_alias = [device(0, "USB", "u"), device(1, "default: USB", "")];
-        assert_eq!(resolve_index(&with_alias, &DeviceChoice::SystemDefault), Some(1));
+        assert_eq!(resolve_index(&with_alias, &DeviceChoice::SystemDefault, None), Some(1));
         let without_alias = [device(0, "Speakers", "s"), device(1, "Headset", "h")];
-        assert_eq!(resolve_index(&without_alias, &DeviceChoice::SystemDefault), Some(0));
-        assert_eq!(resolve_index(&[], &DeviceChoice::SystemDefault), None);
+        assert_eq!(resolve_index(&without_alias, &DeviceChoice::SystemDefault, None), Some(0));
+        assert_eq!(resolve_index(&[], &DeviceChoice::SystemDefault, None), None);
+    }
+
+    #[test]
+    fn the_system_default_follows_the_platform_default_endpoint() {
+        let devices = [
+            device(0, "Speakers (Realtek)", "{0.0.0.00000000}.{aaaa}"),
+            device(1, "Headset Earphone", "{0.0.0.00000000}.{BBBB}"),
+        ];
+        let headset = Some("{0.0.0.00000000}.{bbbb}");
+        assert_eq!(resolve_index(&devices, &DeviceChoice::SystemDefault, headset), Some(1));
+        assert_eq!(resolve_index(&devices, &DeviceChoice::SystemDefault, Some("{0.0.0.00000000}.{gone}")), Some(0));
+        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("{0.0.0.00000000}.{aaaa}".into()), headset), Some(0));
     }
 
     #[test]

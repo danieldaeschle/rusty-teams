@@ -201,6 +201,10 @@ impl Roster {
             .unwrap_or_default()
     }
 
+    pub fn screen_source_of(&self, mri: &str) -> Option<u32> {
+        self.members.iter().find(|member| member.mri == mri)?.screen_source
+    }
+
     pub fn video_candidates(&self, own_mri: &str) -> Vec<(String, u32)> {
         self.members
             .iter()

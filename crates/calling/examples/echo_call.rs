@@ -2,11 +2,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use calling::audio_io::AUDIO_MODE_ENV;
-use calling::{AudioMode, CallOptions, CallReport, call_channel, run_test_call};
+use calling::{AudioMode, CallCommand, CallOptions, CallReport, CallState, CallUpdate, call_channel, run_test_call};
 use session::{DEFAULT_ENDPOINT, Session};
 
 const HOLD_AFTER_CONNECTED: Duration = Duration::from_secs(12);
 const HARD_LIMIT: Duration = Duration::from_secs(20);
+const HOLD_START: Duration = Duration::from_secs(4);
+const HOLD_LENGTH: Duration = Duration::from_secs(10);
+const AFTER_RESUME: Duration = Duration::from_secs(20);
 
 fn print_report(report: &CallReport) {
     println!("# ice connected at {:?} ms, peer connected at {:?} ms", report.ice_connected_ms, report.peer_connected_ms);
@@ -42,6 +45,7 @@ async fn main() {
     let session = Session::connect(&endpoint).await.expect("browser");
     let poll_session = Session::connect(&endpoint).await.expect("browser");
     let audio = AudioMode::parse(Some(&std::env::var(AUDIO_MODE_ENV).unwrap_or_else(|_| "tone".to_owned())));
+    let hold = std::env::args().any(|argument| argument == "--hold");
     let rounds: usize = std::env::args().skip_while(|argument| argument != "--rounds").nth(1).and_then(|value| value.parse().ok()).unwrap_or(1);
     for round in 1..=rounds {
         println!("# round {round} of {rounds}");
@@ -49,15 +53,16 @@ async fn main() {
             (Some(path), 2..) => Some(path.with_extension(format!("{round}.wav"))),
             _ => wav_path.clone(),
         };
-        test_call(&session, &poll_session, audio, round_wav).await;
+        test_call(&session, &poll_session, audio, round_wav, hold).await;
     }
 }
 
-async fn test_call(session: &Session, poll_session: &Session, audio: AudioMode, wav_path: Option<PathBuf>) {
+async fn test_call(session: &Session, poll_session: &Session, audio: AudioMode, wav_path: Option<PathBuf>, hold: bool) {
+    let connected_for = if hold { HOLD_START + HOLD_LENGTH + AFTER_RESUME } else { HOLD_AFTER_CONNECTED };
     let options = CallOptions {
         audio,
-        hold_after_connected: Some(HOLD_AFTER_CONNECTED),
-        hard_limit: Some(HARD_LIMIT),
+        hold_after_connected: Some(connected_for),
+        hard_limit: Some(connected_for + HARD_LIMIT - HOLD_AFTER_CONNECTED),
         record_remote: true,
         wav_path: wav_path.clone(),
         sdp_dump_dir: std::env::var("CALLING_SDP_DUMP").ok().map(PathBuf::from),
@@ -66,10 +71,32 @@ async fn test_call(session: &Session, poll_session: &Session, audio: AudioMode, 
     };
     println!(
         "# Test call, audio {:?}, hang up after {:?} connected (hard limit {:?})",
-        options.audio, HOLD_AFTER_CONNECTED, HARD_LIMIT
+        options.audio, options.hold_after_connected, options.hard_limit
     );
     let (mut handle, control) = call_channel();
-    let drain = tokio::spawn(async move { while handle.updates.recv().await.is_some() {} });
+    let commands = handle.commands.clone();
+    let drain = tokio::spawn(async move {
+        let mut hold_scheduled = !hold;
+        while let Some(update) = handle.updates.recv().await {
+            match update {
+                CallUpdate::State(CallState::Connected { .. }) if !hold_scheduled => {
+                    hold_scheduled = true;
+                    let commands = commands.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(HOLD_START).await;
+                        println!("# hold");
+                        let _ = commands.send(CallCommand::Hold(true));
+                        tokio::time::sleep(HOLD_LENGTH).await;
+                        println!("# resume");
+                        let _ = commands.send(CallCommand::Hold(false));
+                    });
+                }
+                CallUpdate::Hold(state) => println!("# hold state {state:?}"),
+                CallUpdate::Notice(text) => println!("# notice {text}"),
+                _ => {}
+            }
+        }
+    });
     let outcome = run_test_call(session, poll_session, options, control).await;
     drain.abort();
     match outcome {

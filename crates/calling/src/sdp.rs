@@ -436,7 +436,7 @@ fn signal_rtp_line(
     for attribute in &source.attributes {
         let value = attribute.value.as_deref().unwrap_or_default();
         match attribute.name.as_str() {
-            "ssrc" | "ssrc-group" | "rid" | "simulcast" | "rtcp-xr" | "rtcp-fb" => {}
+            "ssrc" | "ssrc-group" | "rid" | "simulcast" | "rtcp-xr" | "rtcp-fb" | "candidate" | "end-of-candidates" => {}
             "rtpmap" => attributes.push(Attribute::new("rtpmap", signal_rtpmap(value))),
             "fmtp" => {
                 let payload = value.split(' ').next().unwrap_or_default();
@@ -1068,6 +1068,17 @@ mod tests {
         assert!(text.contains("m=audio 1234 RTP/SAVP 111 63 9 0 8 13 110 126\nc=IN IP4 10.10.10.10\n"));
         assert!(text.ends_with("a=label:main-audio\n"));
         assert_eq!(offer.lines, vec![SignaledLine { browser_mids: vec!["0".into()], role: LineRole::MainAudio }]);
+    }
+
+    #[test]
+    fn a_renegotiation_signals_only_the_placeholder_candidate() {
+        let gathered = AUDIO_ONLY_OFFER.replace(
+            "a=mid:0\r\n",
+            "a=mid:0\r\na=candidate:1 1 udp 2121998079 192.0.2.1 45325 typ host generation 0 network-id 1\r\na=candidate:2 1 tcp 1518018303 2001:db8::1 47585 typ host tcptype passive generation 0 network-id 2\r\na=end-of-candidates\r\n",
+        );
+        let text = to_teams_offer(&gathered, &OfferPlan::default(), &mut counter()).unwrap().sdp;
+        let candidates: Vec<&str> = text.lines().filter(|line| line.starts_with("a=candidate:") || line.starts_with("a=end-of-candidates")).collect();
+        assert_eq!(candidates, vec!["a=candidate:1755259772 1 UDP 2122197247 10.10.10.10 1234 typ host"]);
     }
 
     #[test]
