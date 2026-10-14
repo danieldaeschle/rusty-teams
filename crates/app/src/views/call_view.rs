@@ -820,8 +820,12 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
         .into_any_element()
 }
 
+fn has_leave_menu(model: &CallModel) -> bool {
+    model.kind == CallKind::Meeting
+        && (model.can_end_meeting || (model.can_lower_hands() && model.any_hand_raised()))
+}
+
 fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
-    let leave_app = app.clone();
     let end_app = app.clone();
     let can_end = model.can_end_meeting;
     let lower_app = app.clone();
@@ -838,16 +842,9 @@ fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
             theme::text(),
         ))
         .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| {
-            let leave_app = leave_app.clone();
             let end_app = end_app.clone();
             let lower_app = lower_app.clone();
-            let popup = popup.min_w(px(MENU_WIDTH)).item(
-                PopupMenuItem::new("Leave")
-                    .icon(IconName::PhoneOff)
-                    .on_click(move |_, _, cx| {
-                        leave_app.update(cx, |state, cx| state.leave_call(cx))
-                    }),
-            );
+            let popup = popup.min_w(px(MENU_WIDTH));
             let popup = if can_lower_all {
                 popup.item(
                     PopupMenuItem::new("Lower all hands").on_click(move |_, _, cx| {
@@ -1122,7 +1119,7 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
     let fixed = fixed_controls_width(
         model.can_use_camera(),
         has_more,
-        model.kind == CallKind::Meeting,
+        has_leave_menu(model),
     );
     FoldedControls {
         items: folded_for_width(measured_stage(call).0, fixed, &present),
@@ -1236,9 +1233,7 @@ pub fn render_call_view(
             leave_button(app, model, "call-leave", false)
                 .debug_selector(|| "shell/islands/main/call-controls/leave".into()),
         )
-        .when(model.kind == CallKind::Meeting, |row| {
-            row.child(leave_menu(app, model))
-        });
+        .when(has_leave_menu(model), |row| row.child(leave_menu(app, model)));
 
     let top = v_flex()
         .w_full()
