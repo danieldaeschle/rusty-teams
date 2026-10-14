@@ -437,6 +437,10 @@ impl ConversationView {
         Self::build(app, None, window, cx)
     }
 
+    pub fn timeline_bounds(&self) -> TimelineBounds {
+        self.timeline_bounds.clone()
+    }
+
     pub fn pinned_to(
         app: Entity<AppState>,
         selection: Selection,

@@ -4,7 +4,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
-use super::call_mini::render_call_mini;
+use super::call_mini::CallMiniView;
 use super::call_stage::{render_call_overlay, render_stage_overlay};
 use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
 use super::conversation::{ConversationView, ReplyToHovered};
@@ -110,6 +110,7 @@ pub struct AppShell {
     update: UpdateStatus,
     user_input: Arc<UserInput>,
     _subscription: Subscription,
+    call_mini: Entity<CallMiniView>,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
     _agent_subscription: Option<Subscription>,
@@ -158,7 +159,11 @@ impl AppShell {
     ) -> Self {
         let call_media = cx.new(|_| CallMedia);
         state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
-        let call_media_observation = cx.observe(&call_media, |_, _, cx| cx.notify());
+        let call_media_observation = cx.observe(&call_media, |this, _, cx| {
+            if this.state.read(cx).viewing_call() {
+                cx.notify();
+            }
+        });
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
@@ -201,6 +206,8 @@ impl AppShell {
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
+        let timeline = conversation.read(cx).timeline_bounds();
+        let call_mini = cx.new(|cx| CallMiniView::new(state.clone(), timeline, cx));
         let subscription =
             cx.subscribe_in(&state, window, |this, _, event: &AppEvent, window, cx| {
                 if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
@@ -270,6 +277,7 @@ impl AppShell {
             update: UpdateStatus::UpToDate,
             user_input,
             _subscription: subscription,
+            call_mini,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
             _agent_subscription: agent_subscription,
@@ -768,7 +776,11 @@ impl Render for AppShell {
             view => (view, None),
         };
         self.sync_window_fullscreen(call_fullscreen, window);
-        let call_mini = render_call_mini(&self.state, state);
+        let call_mini = state
+            .call
+            .as_ref()
+            .is_some_and(|call| !call.viewing)
+            .then(|| self.call_mini.clone());
         let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(
             state,

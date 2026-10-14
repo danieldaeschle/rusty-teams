@@ -12,9 +12,9 @@ use crate::app_state::AppState;
 use crate::call::{CallModel, CallWindows, Tile, TileState};
 use crate::theme;
 
-const CONTROLS_HEIGHT: f32 = 44.;
-const CONTROL_SIZE: f32 = 30.;
-const WINDOW_RADIUS: f32 = 10.;
+pub(super) const CONTROLS_HEIGHT: f32 = 44.;
+pub(super) const CONTROL_SIZE: f32 = 30.;
+pub(super) const WINDOW_RADIUS: f32 = 10.;
 const SELF_VIEW_WIDTH: f32 = 80.;
 const SELF_VIEW_HEIGHT: f32 = 45.;
 const SPEAKER_AVATAR: f32 = 56.;
@@ -66,14 +66,18 @@ pub fn speaker_tile(model: &CallModel) -> Option<&Tile> {
         .or_else(|| present.first().copied())
 }
 
-fn chip(text: String) -> Div {
+pub(super) fn chip(text: String) -> Div {
+    tinted_chip(text, hsla(0., 0., 0., CHIP_BACKGROUND))
+}
+
+pub(super) fn tinted_chip(text: String, background: Hsla) -> Div {
     div()
         .max_w(px(180.))
         .truncate()
         .px(px(8.))
         .py(px(3.))
         .rounded(px(6.))
-        .bg(hsla(0., 0., 0., CHIP_BACKGROUND))
+        .bg(background)
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::white())
@@ -86,10 +90,32 @@ fn cover(image: std::sync::Arc<RenderImage>) -> Img {
         .object_fit(ObjectFit::Cover)
 }
 
-fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElement {
-    let Some(call) = state.call.as_ref() else {
+fn speaker_video(
+    state: &AppState,
+    model: &CallModel,
+    tile: &Tile,
+    now: Instant,
+) -> Option<std::sync::Arc<RenderImage>> {
+    let call = state.call.as_ref()?;
+    (tile.has_video || model.is_one_to_one())
+        .then(|| call.pictures.live(&VideoKey::Person(tile.mri.clone()), now))
+        .flatten()
+}
+
+pub(super) fn speaker_name_chip(
+    state: &AppState,
+    model: &CallModel,
+    now: Instant,
+) -> Option<Div> {
+    let tile = speaker_tile(model)?;
+    speaker_video(state, model, tile, now)?;
+    Some(chip(tile.name.clone()))
+}
+
+pub(super) fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElement {
+    if state.call.is_none() {
         return div().into_any_element();
-    };
+    }
     let Some(tile) = speaker_tile(model) else {
         return v_flex()
             .size_full()
@@ -106,10 +132,7 @@ fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElemen
             )
             .into_any_element();
     };
-    let video = (tile.has_video || model.is_one_to_one())
-        .then(|| call.pictures.live(&VideoKey::Person(tile.mri.clone()), now))
-        .flatten();
-    match video {
+    match speaker_video(state, model, tile, now) {
         Some(image) => cover(image).into_any_element(),
         None => v_flex()
             .size_full()
@@ -134,7 +157,7 @@ fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -> AnyElemen
     }
 }
 
-fn self_view(state: &AppState, model: &CallModel, now: Instant) -> Option<AnyElement> {
+pub(super) fn self_view(state: &AppState, model: &CallModel, now: Instant) -> Option<AnyElement> {
     let image = state
         .call
         .as_ref()
@@ -156,6 +179,51 @@ fn self_view(state: &AppState, model: &CallModel, now: Instant) -> Option<AnyEle
     )
 }
 
+pub(super) fn speaker_speaking(model: &CallModel) -> bool {
+    speaker_tile(model).is_some_and(|tile| model.tile_speaking(tile))
+}
+
+pub(super) struct ControlIds {
+    pub mute: &'static str,
+    pub back: &'static str,
+    pub leave: &'static str,
+}
+
+pub(super) fn controls_row(
+    app: &Entity<AppState>,
+    model: &CallModel,
+    ids: ControlIds,
+    group: &'static str,
+    on_back: impl Fn(&mut App) + 'static,
+) -> Div {
+    h_flex()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(px(CONTROLS_HEIGHT))
+        .gap(px(10.))
+        .items_center()
+        .justify_center()
+        .bg(hsla(0., 0., 0., SHADE_BACKGROUND))
+        .opacity(0.)
+        .group_hover(group, |controls| controls.opacity(1.))
+        .child(mute_button(app, model, ids.mute, CONTROL_SIZE))
+        .child(camera_button(app, model).size(px(CONTROL_SIZE)))
+        .child(
+            round_control(
+                ids.back,
+                IconName::Maximize2,
+                theme::surface_raised(),
+                theme::text(),
+            )
+            .size(px(CONTROL_SIZE))
+            .tooltip(|window, cx| Tooltip::new("Back to call").build(window, cx))
+            .on_click(move |_, _, cx| on_back(cx)),
+        )
+        .child(leave_button(app, model, ids.leave, true))
+}
+
 impl Render for MiniWindowView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.app.read(cx);
@@ -166,8 +234,8 @@ impl Render for MiniWindowView {
         let now = Instant::now();
         let (status, _) = status_line(model, now);
         let windows = self.windows.clone();
-        let speaking = speaker_tile(model).is_some_and(|tile| model.tile_speaking(tile));
-        let speaker_name = speaker_tile(model).map(|tile| tile.name.clone());
+        let speaking = speaker_speaking(model);
+        let speaker_name = speaker_name_chip(state, model, now);
         div()
             .id("call-mini-window")
             .group("call-mini-window")
@@ -202,54 +270,21 @@ impl Render for MiniWindowView {
                             .child(chip(status)),
                     )
                     .children(speaker_name.map(|name| {
-                        div()
-                            .absolute()
-                            .bottom(px(6.))
-                            .left(px(8.))
-                            .child(chip(name))
+                        div().absolute().bottom(px(6.)).left(px(8.)).child(name)
                     }))
                     .children(self_view(state, model, now)),
             )
-            .child(
-                h_flex()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(px(CONTROLS_HEIGHT))
-                    .gap(px(10.))
-                    .items_center()
-                    .justify_center()
-                    .bg(hsla(0., 0., 0., SHADE_BACKGROUND))
-                    .opacity(0.)
-                    .group_hover("call-mini-window", |controls| controls.opacity(1.))
-                    .child(mute_button(
-                        &self.app,
-                        model,
-                        "call-mini-window-mute",
-                        CONTROL_SIZE,
-                    ))
-                    .child(camera_button(&self.app, model).size(px(CONTROL_SIZE)))
-                    .child(
-                        round_control(
-                            "call-mini-window-back",
-                            IconName::Maximize2,
-                            theme::surface_raised(),
-                            theme::text(),
-                        )
-                        .size(px(CONTROL_SIZE))
-                        .tooltip(|window, cx| Tooltip::new("Back to call").build(window, cx))
-                        .on_click(move |_, _, cx| {
-                            windows.update(cx, |windows, cx| windows.return_to_call(cx))
-                        }),
-                    )
-                    .child(leave_button(
-                        &self.app,
-                        model,
-                        "call-mini-window-leave",
-                        true,
-                    )),
-            )
+            .child(controls_row(
+                &self.app,
+                model,
+                ControlIds {
+                    mute: "call-mini-window-mute",
+                    back: "call-mini-window-back",
+                    leave: "call-mini-window-leave",
+                },
+                "call-mini-window",
+                move |cx| windows.update(cx, |windows, cx| windows.return_to_call(cx)),
+            ))
             .into_any_element()
     }
 }

@@ -100,6 +100,9 @@ pub enum DemoScene {
     Network,
     Gallery,
     Sharing,
+    Mini,
+    MiniOff,
+    MiniShare,
 }
 
 impl DemoScene {
@@ -116,6 +119,9 @@ impl DemoScene {
             "network" => DemoScene::Network,
             "gallery" => DemoScene::Gallery,
             "sharing" => DemoScene::Sharing,
+            "mini" => DemoScene::Mini,
+            "mini-off" => DemoScene::MiniOff,
+            "mini-share" => DemoScene::MiniShare,
             _ => return None,
         })
     }
@@ -123,8 +129,19 @@ impl DemoScene {
     pub fn is_one_to_one(self) -> bool {
         matches!(
             self,
-            DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Consult | DemoScene::Network
+            DemoScene::Call
+                | DemoScene::Hold
+                | DemoScene::Held
+                | DemoScene::Consult
+                | DemoScene::Network
+                | DemoScene::Mini
+                | DemoScene::MiniOff
+                | DemoScene::MiniShare
         )
+    }
+
+    pub fn minimized(self) -> bool {
+        matches!(self, DemoScene::Mini | DemoScene::MiniOff | DemoScene::MiniShare)
     }
 
     pub fn guests(self) -> Option<usize> {
@@ -138,6 +155,7 @@ impl DemoScene {
     fn cameras(self) -> usize {
         match self {
             DemoScene::Gallery => GALLERY_CAMERAS,
+            DemoScene::MiniOff => 0,
             _ => DEMO_CAMERAS,
         }
     }
@@ -417,7 +435,12 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         DemoScene::Hold => control.send(CallUpdate::Hold(HoldState::Local)),
         DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
         DemoScene::Network => control.send(CallUpdate::Health(poor_network_health())),
+        DemoScene::MiniShare => {
+            control.send(CallUpdate::LocalShare(Some("Entire screen".to_owned())))
+        }
         DemoScene::Call
+        | DemoScene::Mini
+        | DemoScene::MiniOff
         | DemoScene::Consult
         | DemoScene::Breakout
         | DemoScene::Whiteboard

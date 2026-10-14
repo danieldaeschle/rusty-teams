@@ -1088,6 +1088,9 @@ impl AppState {
                 meeting_data: None,
             });
         }
+        if scene.minimized() {
+            self.show_call(false, cx);
+        }
         if scene == DemoScene::Gallery {
             self.queue_demo_bubbles(conversation_id, cx);
         }
