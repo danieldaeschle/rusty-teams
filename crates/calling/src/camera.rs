@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use libwebrtc::native::yuv_helper::{abgr_to_i420, nv12_to_i420};
-use libwebrtc::video_frame::I420Buffer;
+use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::utils::{ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
 use nokhwa::{Camera, query};
@@ -19,6 +19,9 @@ const BYTES_PER_PIXEL: u32 = 4;
 const CAPTURE_WIDTH: u32 = 1280;
 const CAPTURE_HEIGHT: u32 = 720;
 const CAPTURE_FPS: u32 = 30;
+const LARGEST_DOWNSCALED_HEIGHT: u32 = 1080;
+const ASPECT_WIDTH: u32 = 16;
+const ASPECT_HEIGHT: u32 = 9;
 const DIRECT_FORMATS: [FrameFormat; 2] = [FrameFormat::NV12, FrameFormat::YUYV];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,13 +77,80 @@ fn format_rank(frame_format: FrameFormat) -> u8 {
     }
 }
 
+fn is_widescreen(width: u32, height: u32) -> bool {
+    width * ASPECT_HEIGHT == height * ASPECT_WIDTH
+}
+
+fn widescreen_tier(format: &CameraFormat) -> u8 {
+    match (is_widescreen(format.width(), format.height()), format.height()) {
+        (true, CAPTURE_HEIGHT) => 3,
+        (true, height) if height > CAPTURE_HEIGHT => 2,
+        (true, _) => 1,
+        (false, _) => 0,
+    }
+}
+
 fn pick_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
     formats
         .iter()
         .copied()
         .filter(|format| DIRECT_FORMATS.contains(&format.format()))
-        .filter(|format| format.frame_rate() >= CAPTURE_FPS && format.height() <= CAPTURE_HEIGHT)
-        .max_by_key(|format| (format.height(), format_rank(format.format()), std::cmp::Reverse(format.frame_rate())))
+        .filter(|format| format.frame_rate() >= CAPTURE_FPS)
+        .filter(|format| {
+            format.height() <= CAPTURE_HEIGHT
+                || (is_widescreen(format.width(), format.height()) && format.height() <= LARGEST_DOWNSCALED_HEIGHT)
+        })
+        .max_by_key(|format| {
+            (
+                widescreen_tier(format),
+                std::cmp::Reverse(format.height().abs_diff(CAPTURE_HEIGHT)),
+                format_rank(format.format()),
+                std::cmp::Reverse(format.frame_rate()),
+            )
+        })
+}
+
+fn even(value: u32) -> u32 {
+    value & !1
+}
+
+fn crop_i420(buffer: &I420Buffer, left: u32, top: u32, width: u32, height: u32) -> I420Buffer {
+    let mut cropped = I420Buffer::new(width, height);
+    let (source_strides, source_planes) = (buffer.strides(), buffer.data());
+    let (target_strides, target_planes) = (cropped.strides(), cropped.data_mut());
+    let planes = [
+        (source_planes.0, source_strides.0, target_planes.0, target_strides.0, 1),
+        (source_planes.1, source_strides.1, target_planes.1, target_strides.1, 2),
+        (source_planes.2, source_strides.2, target_planes.2, target_strides.2, 2),
+    ];
+    for (source, source_stride, target, target_stride, divisor) in planes {
+        let (plane_left, plane_top) = ((left / divisor) as usize, (top / divisor) as usize);
+        let (plane_width, plane_height) = (width.div_ceil(divisor) as usize, height.div_ceil(divisor) as usize);
+        for row in 0..plane_height {
+            let from = (plane_top + row) * source_stride as usize + plane_left;
+            let to = row * target_stride as usize;
+            target[to..to + plane_width].copy_from_slice(&source[from..from + plane_width]);
+        }
+    }
+    cropped
+}
+
+pub(crate) fn fit_widescreen(mut buffer: I420Buffer) -> I420Buffer {
+    let (width, height) = (buffer.width(), buffer.height());
+    let (crop_width, crop_height) = if width * ASPECT_HEIGHT > height * ASPECT_WIDTH {
+        (even(height * ASPECT_WIDTH / ASPECT_HEIGHT), height)
+    } else {
+        (width, even(width * ASPECT_HEIGHT / ASPECT_WIDTH))
+    };
+    if (crop_width, crop_height) != (width, height) && crop_width >= 2 && crop_height >= 2 {
+        buffer = crop_i420(&buffer, even((width - crop_width) / 2), even((height - crop_height) / 2), crop_width, crop_height);
+    }
+    let (width, height) = (buffer.width(), buffer.height());
+    if height > CAPTURE_HEIGHT {
+        let scaled_width = even(width * CAPTURE_HEIGHT / height);
+        return buffer.scale(scaled_width as i32, CAPTURE_HEIGHT as i32);
+    }
+    buffer
 }
 
 fn open_picked_format(index: CameraIndex) -> std::result::Result<Camera, nokhwa::NokhwaError> {
@@ -201,7 +271,7 @@ pub fn start_camera(
                     i420_from_rgba(&decoded.into_raw(), width, height)
                 }
             };
-            deliver(stage.apply_i420(buffer));
+            deliver(stage.apply_i420(fit_widescreen(buffer)));
         }
         let _ = camera.stop_stream();
     })
@@ -284,6 +354,58 @@ mod tests {
             format(1280, 720, FrameFormat::NV12, 30),
         ];
         assert_eq!(pick_format(&formats), Some(format(1280, 720, FrameFormat::NV12, 30)));
+    }
+
+    #[test]
+    fn a_widescreen_format_beats_a_4_3_one_of_the_same_height() {
+        let formats = [format(960, 720, FrameFormat::NV12, 30), format(1280, 720, FrameFormat::YUYV, 30), format(640, 480, FrameFormat::NV12, 30)];
+        assert_eq!(pick_format(&formats), Some(format(1280, 720, FrameFormat::YUYV, 30)));
+    }
+
+    #[test]
+    fn without_720p_the_order_is_1080p_then_360p_then_4_3() {
+        let full_hd = format(1920, 1080, FrameFormat::NV12, 30);
+        let small = format(640, 360, FrameFormat::NV12, 30);
+        let classic = format(960, 720, FrameFormat::NV12, 30);
+        assert_eq!(pick_format(&[classic, small, full_hd]), Some(full_hd));
+        assert_eq!(pick_format(&[classic, small]), Some(small));
+        assert_eq!(pick_format(&[classic, format(2560, 1440, FrameFormat::NV12, 30)]), Some(classic));
+    }
+
+    fn gradient(width: u32, height: u32) -> I420Buffer {
+        let mut buffer = I420Buffer::new(width, height);
+        let (stride_y, stride_u, _) = buffer.strides();
+        let (plane_y, plane_u, _) = buffer.data_mut();
+        for row in 0..height as usize {
+            plane_y[row * stride_y as usize..][..width as usize].fill(row as u8);
+        }
+        for row in 0..height.div_ceil(2) as usize {
+            plane_u[row * stride_u as usize..][..width.div_ceil(2) as usize].fill(row as u8);
+        }
+        buffer
+    }
+
+    #[test]
+    fn a_4_3_frame_is_centre_cropped_to_16_9() {
+        let cropped = fit_widescreen(gradient(960, 720));
+        assert_eq!((cropped.width(), cropped.height()), (960, 540));
+        let (stride_y, stride_u, _) = cropped.strides();
+        let (plane_y, plane_u, _) = cropped.data();
+        assert_eq!(plane_y[0], 90);
+        assert_eq!(plane_y[539 * stride_y as usize], 629_u32 as u8);
+        assert_eq!(plane_u[0], 45);
+        assert_eq!(plane_u[269 * stride_u as usize], 314_u32 as u8);
+    }
+
+    #[test]
+    fn a_widescreen_frame_passes_and_1080p_is_scaled_to_720p() {
+        assert_eq!(fit_widescreen(gradient(1280, 720)).width(), 1280);
+        let scaled = fit_widescreen(gradient(1920, 1080));
+        assert_eq!((scaled.width(), scaled.height()), (1280, 720));
+        let wide = fit_widescreen(gradient(2560, 1080));
+        assert_eq!((wide.width(), wide.height()), (1280, 720));
+        let classic = fit_widescreen(gradient(640, 480));
+        assert_eq!((classic.width(), classic.height()), (640, 360));
     }
 
     #[test]
