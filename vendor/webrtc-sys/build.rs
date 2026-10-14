@@ -54,6 +54,7 @@ fn main() {
         "src/android.rs",
         "src/prohibit_libsrtp_initialization.rs",
         "src/apm.rs",
+        "src/noise_hook.rs",
         "src/audio_mixer.rs",
         "src/packet_trailer.rs",
     ];
@@ -95,6 +96,7 @@ fn main() {
         "src/global_task_queue.cpp",
         "src/prohibit_libsrtp_initialization.cpp",
         "src/apm.cpp",
+        "src/noise_hook.cpp",
         "src/audio_mixer.cpp",
         "src/av1_bitstream.cpp",
         "src/packet_trailer.cpp",

@@ -37,6 +37,7 @@
 #include "api/audio_options.h"
 #include "livekit/adm_proxy.h"
 #include "livekit/audio_track.h"
+#include "livekit/noise_hook.h"
 #include "livekit/peer_connection.h"
 #include "livekit/rtc_error.h"
 #include "livekit/rtp_parameters.h"
@@ -192,7 +193,10 @@ PeerConnectionFactory::PeerConnectionFactory(
       std::move(std::make_unique<livekit_ffi::VideoDecoderFactory>());
   dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
   dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
-  dependencies.audio_processing_builder = std::make_unique<webrtc::BuiltinAudioProcessingBuilder>();
+  auto audio_processing_builder = std::make_unique<webrtc::BuiltinAudioProcessingBuilder>();
+  audio_processing_builder->SetCapturePostProcessing(
+      livekit_ffi::create_capture_post_processor());
+  dependencies.audio_processing_builder = std::move(audio_processing_builder);
 
   webrtc::EnableMedia(dependencies);
   peer_factory_ =

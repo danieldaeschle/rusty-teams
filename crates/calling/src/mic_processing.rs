@@ -4,15 +4,17 @@ use libwebrtc::native::apm::AudioProcessingModule;
 pub enum NoiseSuppression {
     #[default]
     Auto,
+    Low,
     Off,
 }
 
 impl NoiseSuppression {
-    pub const ALL: [NoiseSuppression; 2] = [NoiseSuppression::Auto, NoiseSuppression::Off];
+    pub const ALL: [NoiseSuppression; 3] = [NoiseSuppression::Auto, NoiseSuppression::Low, NoiseSuppression::Off];
 
     pub fn label(self) -> &'static str {
         match self {
             NoiseSuppression::Auto => "Auto",
+            NoiseSuppression::Low => "Low",
             NoiseSuppression::Off => "Off",
         }
     }
@@ -20,6 +22,7 @@ impl NoiseSuppression {
     pub fn key(self) -> &'static str {
         match self {
             NoiseSuppression::Auto => "auto",
+            NoiseSuppression::Low => "low",
             NoiseSuppression::Off => "off",
         }
     }
@@ -60,12 +63,16 @@ impl MicSettings {
         if self.music_mode {
             return ApmConfig { echo_canceller: true, gain_controller: false, high_pass_filter: false, noise_suppression: false };
         }
-        let on = self.noise_suppression == NoiseSuppression::Auto;
+        let on = self.noise_suppression != NoiseSuppression::Off;
         ApmConfig { echo_canceller: on, gain_controller: on, high_pass_filter: on, noise_suppression: on }
     }
 
     pub fn uses_device_track(self) -> bool {
-        self == MicSettings::default()
+        !self.music_mode && self.noise_suppression != NoiseSuppression::Off
+    }
+
+    pub fn ml_noise_suppression(self) -> bool {
+        !self.music_mode && self.noise_suppression == NoiseSuppression::Auto
     }
 }
 
@@ -81,6 +88,21 @@ mod tests {
             settings.apm_config(),
             ApmConfig { echo_canceller: true, gain_controller: true, high_pass_filter: true, noise_suppression: true }
         );
+    }
+
+    #[test]
+    fn low_keeps_the_device_track_with_the_apm_only() {
+        let settings = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert!(settings.uses_device_track());
+        assert!(!settings.ml_noise_suppression());
+        assert_eq!(settings.apm_config(), MicSettings::default().apm_config());
+    }
+
+    #[test]
+    fn only_auto_outside_music_mode_runs_the_ml_stage() {
+        assert!(MicSettings::default().ml_noise_suppression());
+        assert!(!MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false }.ml_noise_suppression());
+        assert!(!MicSettings { noise_suppression: NoiseSuppression::Auto, music_mode: true }.ml_noise_suppression());
     }
 
     #[test]
@@ -109,5 +131,7 @@ mod tests {
             assert_eq!(NoiseSuppression::from_key(level.key()), Some(level));
         }
         assert_eq!(NoiseSuppression::from_key("high"), None);
+        assert_eq!(NoiseSuppression::Low.key(), "low");
+        assert_eq!(NoiseSuppression::Low.label(), "Low");
     }
 }

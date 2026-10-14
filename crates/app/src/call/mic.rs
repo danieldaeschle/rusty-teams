@@ -52,6 +52,17 @@ mod tests {
     }
 
     #[test]
+    fn every_noise_level_round_trips() {
+        for noise_suppression in NoiseSuppression::ALL {
+            let settings = MicSettings {
+                noise_suppression,
+                music_mode: false,
+            };
+            assert_eq!(parse(&serialize(settings)), settings);
+        }
+    }
+
+    #[test]
     fn garbage_gives_defaults() {
         assert_eq!(parse(""), MicSettings::default());
         assert_eq!(parse("noise=loud\nmusic"), MicSettings::default());

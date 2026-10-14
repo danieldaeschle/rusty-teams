@@ -29,6 +29,7 @@ pub mod meeting;
 pub mod meeting_options;
 pub mod mic_processing;
 pub mod mixer;
+pub mod noise_stage;
 pub mod mute;
 pub mod organizer;
 pub mod pcm;
