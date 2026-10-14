@@ -27,11 +27,27 @@ use crate::theme;
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 
+pub const BUBBLE_TAGS: [&str; 12] = [
+    "message-bubble/0",
+    "message-bubble/1",
+    "message-bubble/2",
+    "message-bubble/3",
+    "message-bubble/4",
+    "message-bubble/5",
+    "message-bubble/6",
+    "message-bubble/7",
+    "message-bubble/8",
+    "message-bubble/9",
+    "message-bubble/10",
+    "message-bubble/11",
+];
 pub(super) const AVATAR_SIZE: f32 = 28.;
 pub(super) const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
+const NARROW_BUBBLE_WIDTH: f32 = 300.;
+const ROW_PADDING: f32 = 20.;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
@@ -100,6 +116,14 @@ fn new_marker() -> Div {
     )
 }
 
+fn bubble_max_width(timeline: &TimelineBounds, reserved: f32) -> Length {
+    let Some(bounds) = timeline.get() else {
+        return relative(MAX_WIDTH_RATIO).into();
+    };
+    let row_width = (f32::from(bounds.size.width) - 2. * ROW_PADDING - reserved).max(0.);
+    px((row_width * MAX_WIDTH_RATIO).max(row_width.min(NARROW_BUBBLE_WIDTH))).into()
+}
+
 fn bubble(
     row: &MessageRow,
     index: usize,
@@ -115,6 +139,10 @@ fn bubble(
             element.on_hover(move |is_hovered, _, cx| hover(*is_hovered, cx))
         })
         .relative()
+        .max_w_full()
+        .when_some(BUBBLE_TAGS.get(index).copied(), |element, tag| {
+            element.debug_selector(|| tag.into())
+        })
         .rounded_tl(px(corners.top_left))
         .rounded_tr(px(corners.top_right))
         .rounded_br(px(corners.bottom_right))
@@ -389,7 +417,7 @@ pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
     div()
         .id(ElementId::Name(format!("row-{index}").into()))
         .w_full()
-        .px(px(20.))
+        .px(px(ROW_PADDING))
         .pt(px(SERIES_START_GAP))
         .child(pulse("skeleton", line))
         .into_any_element()
@@ -499,7 +527,9 @@ fn others_row(
     let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
     let mut column = v_flex()
         .gap(px(2.))
-        .max_w(relative(MAX_WIDTH_RATIO))
+        .flex_1()
+        .min_w_0()
+        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP))
         .items_start();
     if first {
         column = column.child(
@@ -563,9 +593,15 @@ fn own_row(
     let reaction_proposal = extras.reaction_proposal.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
-        div()
-            .max_w(relative(MAX_WIDTH_RATIO))
-            .child(bubble(row, index, true, directory, extras, cx)),
+        h_flex()
+            .w_full()
+            .justify_end()
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w(bubble_max_width(&extras.timeline, 0.))
+                    .child(bubble(row, index, true, directory, extras, cx)),
+            ),
     );
     column = column.children(agent_chip(agent_run));
     column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
@@ -621,7 +657,7 @@ pub fn render_message_row(
     } else {
         px(SERIES_START_GAP)
     };
-    let mut container = v_flex().w_full().px(px(20.));
+    let mut container = v_flex().w_full().px(px(ROW_PADDING));
     if let Some(day) = &row.day_header {
         container = container.child(day_separator(day));
     }

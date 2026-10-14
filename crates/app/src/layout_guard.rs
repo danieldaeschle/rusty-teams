@@ -130,6 +130,8 @@ mod frames {
     use crate::demo;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
+    use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
@@ -640,6 +642,52 @@ mod frames {
                 .join("\n")
         );
     }
+    #[gpui_kit::test]
+    fn call_chat_bubbles_stay_inside_the_panel(cx: &mut TestAppContext) {
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            visual.update(|_, cx| {
+                app.update(cx, |state, cx| {
+                    let mut call = gallery_call();
+                    call.conversation_id = Some(RECAP_MEETING_CHAT.to_owned());
+                    call.chat_open = true;
+                    state.call = Some(call);
+                    cx.notify();
+                })
+            });
+            collect(&mut visual, Some(CHAT_PANEL_TAG));
+            let panel = visual
+                .debug_bounds(CHAT_PANEL_TAG)
+                .expect("chat panel rendered");
+            let bubbles: Vec<(usize, Bounds<Pixels>)> = BUBBLE_TAGS
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tag)| visual.debug_bounds(tag).map(|bounds| (index, bounds)))
+                .collect();
+            assert!(!bubbles.is_empty(), "no bubbles rendered in the call chat");
+            let found: Vec<String> = bubbles
+                .into_iter()
+                .filter(|(_, bounds)| !contains(panel, *bounds))
+                .map(|(index, bounds)| {
+                    format!(
+                        "call-chat@{width}x{height}: bubble {index} {} leaves the chat panel {}",
+                        describe(bounds),
+                        describe(panel)
+                    )
+                })
+                .collect();
+            visual.update(|_, cx| {
+                app.update(cx, |state, cx| {
+                    state.call = None;
+                    cx.notify();
+                })
+            });
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
     #[gpui_kit::test]
     fn recap_tab_stays_inside_the_main_island(cx: &mut TestAppContext) {
         let (handle, state) = mount(cx);

@@ -14,6 +14,7 @@ use crate::theme;
 const CARD_WIDTH: f32 = 360.;
 const THUMB_WIDTH: f32 = 112.;
 const THUMB_WIDTH_COMPACT: f32 = 72.;
+const THUMB_MAX_WIDTH_RATIO: f32 = 0.4;
 const THUMB_MIN_HEIGHT: f32 = 48.;
 const THUMB_MAX_HEIGHT: f32 = 112.;
 const THUMB_RADIUS: f32 = 6.;
@@ -59,6 +60,7 @@ fn thumbnail(
         .w(px(width))
         .h(px(height))
         .flex_none()
+        .max_w(relative(THUMB_MAX_WIDTH_RATIO))
         .rounded(px(THUMB_RADIUS))
         .overflow_hidden()
         .bg(theme::background());
@@ -116,9 +118,8 @@ pub fn link_preview_card(
         .id(ElementId::Name(id.clone().into()))
         .relative()
         .overflow_hidden()
-        .when(compact, |card| card.w_full())
-        .when(!compact, |card| card.w(px(CARD_WIDTH)))
-        .max_w(relative(1.))
+        .w_full()
+        .when(!compact, |card| card.max_w(px(CARD_WIDTH)))
         .gap(px(12.))
         .p(px(8.))
         .items_start()

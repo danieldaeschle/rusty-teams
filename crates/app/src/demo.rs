@@ -1293,6 +1293,31 @@ fn standup_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
+        with_links(
+            message(
+                "demo-chat-meeting-standup",
+                "su3",
+                None,
+                jonas,
+                at(0, 9, 50),
+                "<p><a href=\"https://example.com/checklist\">https://example.com/checklist</a></p>",
+                "[]",
+                false,
+            ),
+            link_preview("https://example.com/checklist")
+                .map(|preview| preview.links_json())
+                .unwrap_or_default(),
+        ),
+        message(
+            "demo-chat-meeting-standup",
+            "su4",
+            None,
+            priya,
+            at(0, 9, 52),
+            "<p>I will quickly fix the comments and then push the final version before the review starts.</p>",
+            "[]",
+            false,
+        ),
     ]
 }
 

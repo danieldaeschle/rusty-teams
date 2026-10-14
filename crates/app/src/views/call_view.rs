@@ -57,6 +57,7 @@ pub(super) const GRID_PADDING: f32 = 24.;
 pub(super) const STRIP_GAP: f32 = 12.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
+pub const CHAT_PANEL_TAG: &str = "shell/islands/main/call-chat-panel";
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";
 const AUDIO_OFF_HINT: &str = "Audio is off for this meeting";
 pub const NO_CAMERA_HINT: &str = "No camera found";
@@ -1347,6 +1348,7 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
         move |cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)),
         chat,
     )
+    .debug_selector(|| CHAT_PANEL_TAG.into())
     .into_any_element()
 }
 
