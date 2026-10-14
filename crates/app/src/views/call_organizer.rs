@@ -17,7 +17,6 @@ use super::call_extras::{
     CameraMenu, background_items, effect_items, open_transfer_picker,
 };
 use super::call_record::{record_submenu, transcript_and_settings_items};
-use super::call_people::add_people_item;
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
@@ -497,7 +496,6 @@ fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallMo
             .on_click(move |_, _, cx| hold_app.update(cx, |state, cx| state.toggle_call_hold(cx))),
     );
     let can_transfer = model.can_transfer();
-    popup = popup.item(add_people_item(app, model));
     popup.item(
         PopupMenuItem::new("Transfer...")
             .icon(IconName::Forward)

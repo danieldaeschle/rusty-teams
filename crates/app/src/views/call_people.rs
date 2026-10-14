@@ -18,7 +18,7 @@ use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH, round_contro
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::{
-    ActiveCall, CallKind, CallModel, OptionsDialog, PeopleSections, PersonRow, people_sections,
+    ActiveCall, CallModel, OptionsDialog, PeopleSections, PersonRow, people_sections,
 };
 use crate::notice::truncated;
 use crate::theme;
@@ -109,10 +109,7 @@ pub fn lock_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
 }
 
 fn people_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
-    let mut popup = popup.min_w(px(MENU_WIDTH));
-    if model.kind == CallKind::Direct {
-        popup = popup.item(add_people_item(app, model));
-    }
+    let popup = popup.min_w(px(MENU_WIDTH));
     if !model.organizes_meeting() {
         return popup;
     }
@@ -176,16 +173,8 @@ fn people_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> P
         )
 }
 
-pub fn add_people_item(app: &Entity<AppState>, model: &CallModel) -> PopupMenuItem {
-    let app = app.clone();
-    PopupMenuItem::new("Add people")
-        .icon(IconName::UserPlus)
-        .disabled(!model.can_invite())
-        .on_click(move |_, window, cx| open_invite_picker(&app, window, cx))
-}
-
 fn has_people_menu(model: &CallModel) -> bool {
-    model.kind == CallKind::Direct || model.organizes_meeting()
+    model.organizes_meeting()
 }
 
 fn panel_header(app: &Entity<AppState>, model: &CallModel, count: usize) -> Div {
