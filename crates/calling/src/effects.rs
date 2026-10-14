@@ -8,6 +8,7 @@ use crate::blur::{BlurSettings, BlurStage, compose_i420, MASK_HEIGHT, MASK_WIDTH
 use crate::camera::i420_from_rgba;
 use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
+use crate::matte::{Planes, refine};
 use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
 
 pub const SOFT_FOCUS_DEFAULT: u8 = 50;
@@ -168,11 +169,12 @@ impl EffectsStage {
             compose_i420(&mut buffer, masks.mask());
             return buffer;
         }
+        let matte = refine(masks.mask(), Planes::of(&buffer));
         let (stride_y, stride_u, stride_v) = buffer.strides();
         let (plane_y, plane_u, plane_v) = buffer.data();
         let mut rgba = vec![0u8; width * height * RGBA_BYTES];
         i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, (width * RGBA_BYTES) as u32, width as i32, height as i32);
-        self.blur.compose(&mut rgba, width, height, masks.mask());
+        self.blur.compose(&mut rgba, width, height, &matte);
         i420_from_rgba(&rgba, width as u32, height as u32)
     }
 

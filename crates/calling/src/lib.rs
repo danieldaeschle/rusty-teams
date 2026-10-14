@@ -22,6 +22,7 @@ pub mod hold;
 pub mod join;
 pub mod level;
 pub mod luma_effects;
+pub mod matte;
 #[cfg(windows)]
 mod loopback_windows;
 pub mod meeting;
