@@ -119,6 +119,7 @@ pub struct Conversation {
     pub controller: String,
     pub links: BTreeMap<String, String>,
     pub chat_thread: Option<String>,
+    pub roster: Option<Value>,
 }
 
 impl Conversation {
@@ -310,20 +311,12 @@ impl Signaling {
         Ok((target, conversation_from(&response.body)?))
     }
 
-    /// Joins with the offer; the answer may restate the conversation links, otherwise the subscribed ones stay.
+    /// A running meeting answers from the conversation that owns it, so its controller and links replace the subscribed ones.
     pub async fn join_meeting(&self, subscribed: &Conversation, invitation: &Invitation<'_>) -> Result<Conversation> {
         let response = self
             .send("POST join", Method::Post, &subscribed.controller, Some(epconv_body(invitation)))
             .await?;
-        let mut links = subscribed.links.clone();
-        if let Ok(joined) = conversation_from(&response.body) {
-            links.extend(joined.links);
-        }
-        Ok(Conversation {
-            controller: subscribed.controller.clone(),
-            links,
-            chat_thread: subscribed.chat_thread.clone(),
-        })
+        Ok(joined_conversation(subscribed, &response.body))
     }
 
     pub fn next_endpoint_sequence(&self) -> u32 {
@@ -884,7 +877,22 @@ fn conversation_from(body: &Value) -> Result<Conversation> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body) })
+    let roster = Some(&body["roster"]).filter(|roster| roster.is_object()).cloned();
+    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body), roster })
+}
+
+fn joined_conversation(subscribed: &Conversation, answer: &Value) -> Conversation {
+    let Ok(joined) = conversation_from(answer) else {
+        return subscribed.clone();
+    };
+    let mut links = subscribed.links.clone();
+    links.extend(joined.links);
+    Conversation {
+        controller: joined.controller,
+        links,
+        chat_thread: joined.chat_thread.or_else(|| subscribed.chat_thread.clone()),
+        roster: joined.roster.or_else(|| subscribed.roster.clone()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1225,6 +1233,23 @@ mod tests {
         assert_eq!(conversation.controller, "https://conv/c");
         assert_eq!(conversation.link("leave").unwrap(), "https://conv/leave");
         assert!(attached_from(&json!({})).is_err());
+    }
+
+    #[test]
+    fn a_running_meeting_answers_from_its_owning_conversation_with_the_roster() {
+        let subscribed = conversation_from(&json!({
+            "conversationController": "https://conv/subscribed",
+            "links": {"leave": "https://conv/subscribed/leave", "mute": "https://conv/subscribed/mute"},
+        }))
+        .unwrap();
+        assert_eq!(subscribed.roster, None);
+        let answer: Value = serde_json::from_str(include_str!("../tests/fixtures/meeting_join_answer.json")).unwrap();
+        let joined = joined_conversation(&subscribed, &answer);
+        assert_eq!(joined.controller, "https://conv.example/conv/joined");
+        assert_eq!(joined.link("leave").unwrap(), "https://conv.example/conv/joined/leave");
+        assert_eq!(joined.link("mute").unwrap(), "https://conv/subscribed/mute");
+        assert_eq!(joined.roster.unwrap()["participants"].as_object().unwrap().len(), 4);
+        assert_eq!(joined_conversation(&subscribed, &json!({})).controller, "https://conv/subscribed");
     }
 
     #[test]

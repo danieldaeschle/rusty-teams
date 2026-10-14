@@ -804,6 +804,13 @@ async fn drive(
     let mut reconnect_deadline: Option<Instant> = None;
     let mut next: Option<NextPeer> = None;
     let mut roster = Roster::default();
+    if let Some(snapshot) = &conversation.roster
+        && roster.apply_snapshot(snapshot)
+    {
+        let entries = roster.entries();
+        timeline.record("roster", format!("{} participant(s) from the conversation answer", entries.len()));
+        control.send(CallUpdate::Roster(entries));
+    }
     let mut lobby = false;
     let mut capability = MeetingCapability::default();
     let mut previous_packets = 0u64;

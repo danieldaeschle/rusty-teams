@@ -26,16 +26,18 @@ struct Arguments {
     link_out: Option<PathBuf>,
     thread_out: Option<PathBuf>,
     recap_thread: Option<String>,
+    join_thread: Option<PathBuf>,
 }
 
 fn arguments() -> Arguments {
-    let mut parsed = Arguments { link_out: None, thread_out: None, recap_thread: None };
+    let mut parsed = Arguments { link_out: None, thread_out: None, recap_thread: None, join_thread: None };
     let mut input = std::env::args().skip(1);
     while let Some(flag) = input.next() {
         match flag.as_str() {
             "--link-out" => parsed.link_out = input.next().map(PathBuf::from),
             "--thread-out" => parsed.thread_out = input.next().map(PathBuf::from),
             "--recap" => parsed.recap_thread = input.next(),
+            "--join-thread" => parsed.join_thread = input.next().map(PathBuf::from),
             _ => {}
         }
     }
@@ -364,13 +366,20 @@ async fn run() {
     let me = fetch_self(&session).await.expect("own identity");
     let started = Instant::now();
 
-    let body = json!({"meetingType": "MeetNow", "isStreamEnabled": false, "subject": SUBJECT, "unhideChatThread": true});
-    let created = session
-        .request(Method::Post, CREATE_URL, &Scope::new(SPACES, "user_impersonation"), Some(body))
-        .await
-        .expect("create meeting");
-    let thread_id = created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned();
-    emit(json!({"event": "created", "status": created.status}));
+    let late_joiner = arguments.join_thread.is_some();
+    let (thread_id, created_body) = match &arguments.join_thread {
+        Some(path) => (std::fs::read_to_string(path).expect("thread file").trim().to_owned(), Value::Null),
+        None => {
+            let body = json!({"meetingType": "MeetNow", "isStreamEnabled": false, "subject": SUBJECT, "unhideChatThread": true});
+            let created = session
+                .request(Method::Post, CREATE_URL, &Scope::new(SPACES, "user_impersonation"), Some(body))
+                .await
+                .expect("create meeting");
+            let thread_id = created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned();
+            emit(json!({"event": "created", "status": created.status}));
+            (thread_id, created.body)
+        }
+    };
     if let Some(path) = &arguments.thread_out {
         std::fs::write(path, &thread_id).expect("thread file");
     }
@@ -389,7 +398,7 @@ async fn run() {
         organizer_id: organizer_id.unwrap_or_else(|| me.object_id.clone()),
         meeting_data: None,
     };
-    let join_link = find_text(&created.body, &["joinUrl", "meetingJoinUrl", "joinWebUrl"]).map_or_else(
+    let join_link = find_text(&created_body, &["joinUrl", "meetingJoinUrl", "joinWebUrl"]).map_or_else(
         || {
             let context = json!({"Tid": target.tenant_id, "Oid": target.organizer_id}).to_string();
             format!("https://teams.microsoft.com/l/meetup-join/{}/0?context={}", encoded(&thread_id), encoded(&context))
@@ -402,10 +411,18 @@ async fn run() {
     let config = EngineConfig {
         ringable: false,
         trace: std::env::var_os("LIVE_TRACE").is_some(),
-        instance: InstanceNames {
-            global: "__liveMatrixTrouter".into(),
-            binding: "__liveMatrixRealtime".into(),
-            endpoint_storage_key: "__liveMatrixEpid".into(),
+        instance: if late_joiner {
+            InstanceNames {
+                global: "__lateJoinerTrouter".into(),
+                binding: "__lateJoinerRealtime".into(),
+                endpoint_storage_key: "__lateJoinerEpid".into(),
+            }
+        } else {
+            InstanceNames {
+                global: "__liveMatrixTrouter".into(),
+                binding: "__liveMatrixRealtime".into(),
+                endpoint_storage_key: "__liveMatrixEpid".into(),
+            }
         },
         ..EngineConfig::default()
     };
@@ -538,7 +555,7 @@ async fn run() {
     emit(json!({"event": "ended", "reason": ended}));
     let gone_started = Instant::now();
     let mut gone = false;
-    while gone_started.elapsed() < GONE_LIMIT {
+    while !late_joiner && gone_started.elapsed() < GONE_LIMIT {
         if matches!(fetch_live_meeting(&session, &thread_id).await, Ok(None)) {
             gone = true;
             break;
