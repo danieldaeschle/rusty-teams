@@ -279,17 +279,7 @@ fn tile(
     caption: Option<AnyElement>,
     extras: &TileExtras,
 ) -> Div {
-    let badge = div()
-        .absolute()
-        .top(px(8.))
-        .right(px(8.))
-        .size(px(24.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .bg(theme::red())
-        .child(icon(IconName::MicOff, 13., theme::white()));
+    let badge = mute_badge();
     v_flex()
         .relative()
         .w(px(size.width))

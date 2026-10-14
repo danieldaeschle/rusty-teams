@@ -353,8 +353,8 @@ fn more_overlay(
         (app.clone(), model.clone(), mri.to_owned(), name.to_owned());
     div()
         .absolute()
-        .top(px(6.))
-        .right(px(38.))
+        .top(px(8.))
+        .right(px(8.))
         .opacity(0.)
         .group_hover(group, |more| more.opacity(1.))
         .child(
