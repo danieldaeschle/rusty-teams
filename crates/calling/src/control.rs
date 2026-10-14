@@ -22,6 +22,7 @@ use crate::roster::{MeetingRole, RosterEntry};
 use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
 use crate::signaling::{Callee, MeetingTarget};
+use crate::transfer::Replacement;
 use crate::state::CallState;
 use crate::video_layout::VideoWant;
 use crate::video_frame::VideoHub;
@@ -72,7 +73,7 @@ pub enum CallCommand {
     SetCaptionLanguage(String),
     ConsentToRecording,
     Hold(bool),
-    Transfer { target: Callee, replaces: Option<String> },
+    Transfer { target: Callee, replaces: Option<Replacement> },
     OpenWhiteboard { title: String },
     Hangup,
     EndMeeting,
@@ -123,7 +124,8 @@ pub enum CallUpdate {
     WhiteboardUrl(String),
     BreakoutMove(BreakoutMove),
     BreakoutRoom { main: MeetingTarget },
-    ReplacementLink(String),
+    ReplacementLink(Replacement),
+    TransferResult { succeeded: bool },
     Capability(MeetingCapability),
     MeetingOptions(std::result::Result<MeetingOptions, String>),
     MeetingOptionsSaved(std::result::Result<MeetingOptions, String>),

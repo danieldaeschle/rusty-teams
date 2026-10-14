@@ -53,7 +53,7 @@ use crate::signaling::{
 use crate::software_audio::{SoftwareAudio, SoftwareAudioPlan};
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
-use crate::transfer::{TransferEvent, TransferTarget};
+use crate::transfer::{Replacement, TransferEvent, TransferTarget};
 use crate::video_frame::VideoKey;
 use crate::video_layout::{
     CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, offer_plan, one_to_one_plan,
@@ -854,6 +854,7 @@ async fn drive(
         control.send(CallUpdate::MeetingChat(thread.clone()));
     }
     let mut start_camera_pending = options.start_camera;
+    let mut sent_replacement: Option<Replacement> = None;
     loop {
         if start_camera_pending && video_possible(remote_set, layout, negotiator.path()) {
             start_camera_pending = false;
@@ -884,8 +885,12 @@ async fn drive(
                                 if layout == Layout::Conference {
                                     negotiate_video(&mut video, &signaling, control, timeline, &acceptance.sdp, media, acceptance.from_mixer, &media_links, &roster);
                                 }
-                                if let Some(link) = acceptance.links.get("replacement") {
-                                    control.send(CallUpdate::ReplacementLink(link.clone()));
+                                if let Some(link) = acceptance.links.get("replacement")
+                                    && sent_replacement.as_ref().is_none_or(|sent| sent.participant_id.is_none())
+                                {
+                                    let replacement = Replacement::of_call(link.clone());
+                                    sent_replacement = Some(replacement.clone());
+                                    control.send(CallUpdate::ReplacementLink(replacement));
                                 }
                                 if !callee_gate.is_waiting() {
                                     outgoing_deadline = None;
@@ -1035,6 +1040,12 @@ async fn drive(
                                 report.own_streams = own_streams;
                             }
                             send_receive_change(control, video.reselect(&roster));
+                            if let Some(replacement) = roster.transfer_replacement(&own_mri)
+                                && sent_replacement.as_ref() != Some(&replacement)
+                            {
+                                sent_replacement = Some(replacement.clone());
+                                control.send(CallUpdate::ReplacementLink(replacement));
+                            }
                             if let Some(in_lobby) = roster.is_in_lobby(&own_mri)
                                 && in_lobby != lobby
                             {
@@ -1143,13 +1154,19 @@ async fn drive(
                     Ok(CallEvent::Transfer(event)) => {
                         replier.reply(request_id, 200, "");
                         match event {
-                            TransferEvent::Accepted => timeline.record("transfer", "accepted by the target"),
+                            TransferEvent::Accepted => timeline.record("transfer accepted", "by the target"),
                             completed if completed.succeeded() => {
+                                timeline.record("transfer", "completed");
+                                control.send(CallUpdate::TransferResult { succeeded: true });
                                 control.send(CallUpdate::Notice("Call transferred".into()));
                                 advance(state, CallSignal::LocalLeave, control);
                                 break;
                             }
-                            _ => control.send(CallUpdate::Notice("The transfer did not go through".into())),
+                            TransferEvent::Completed { code, sub_code } => {
+                                timeline.record("transfer failed", format!("code {code} subCode {sub_code}"));
+                                control.send(CallUpdate::TransferResult { succeeded: false });
+                                control.send(CallUpdate::Notice("The transfer did not go through".into()));
+                            }
                         }
                     }
                     Ok(CallEvent::Reactions(events)) => {
@@ -1650,14 +1667,16 @@ async fn drive(
                 }
                 Some(CallCommand::Transfer { target, replaces }) => {
                     let Some(url) = media_links.get("transfer").cloned() else {
+                        control.send(CallUpdate::TransferResult { succeeded: false });
                         control.send(CallUpdate::Notice("This call cannot be transferred".into()));
                         continue;
                     };
-                    let transfer_target = TransferTarget { mri: &target.mri, replaces: replaces.as_deref() };
+                    let transfer_target = TransferTarget { mri: &target.mri, replaces: replaces.as_ref() };
                     match remote.signaling.transfer(&url, &remote.participant, transfer_target, &links).await {
                         Ok(()) => control.send(CallUpdate::Notice(format!("Transferring to {}...", target.display_name))),
                         Err(error) => {
                             timeline.record("transfer failed", error.to_string());
+                            control.send(CallUpdate::TransferResult { succeeded: false });
                             control.send(CallUpdate::Notice("Could not transfer the call".into()));
                         }
                     }

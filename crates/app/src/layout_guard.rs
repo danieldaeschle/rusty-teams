@@ -126,7 +126,7 @@ mod frames {
     use gpui_kit::Entity;
 
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
-    use crate::call::{ActiveCall, CallModel};
+    use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
@@ -171,6 +171,11 @@ mod frames {
         "shell/islands/main/prejoin/actions",
     ];
     const PREJOIN_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_guard%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%2c%22Oid%22%3a%22o%22%7d";
+    const CONSULT_GUARDED: &[&str] = &[
+        "shell/islands/main/call-header/call-consult",
+        "shell/islands/main/call-header/call-consult/transfer",
+        "shell/islands/main/call-header/call-consult/resume",
+    ];
     const CALL_TRANSCRIPT: &str = "shell/islands/main/call-transcript";
     const PEOPLE_PANEL: &str = "shell/islands/main/call-people";
     const SHARE_GUARDED: &[&str] = &[
@@ -210,6 +215,7 @@ mod frames {
         CallTranscript,
         CallPeople,
         CallShare,
+        CallConsult,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -333,6 +339,7 @@ mod frames {
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
+            .chain(CONSULT_GUARDED)
             .chain([
                 &CALL_TRANSCRIPT,
                 &MENU,
@@ -375,6 +382,24 @@ mod frames {
                 .collect(),
         ));
         ActiveCall::new(1, model, handle.commands, None, handle.video)
+    }
+
+    fn consult_calls() -> (ActiveCall, ActiveCall) {
+        let connected = |id: u64, name: &str, mri: &str| {
+            let (handle, _control) = call_channel();
+            let mut model = CallModel::people(name, &[(mri.to_owned(), name.to_owned())]);
+            model.apply(CallUpdate::State(CallState::Connected {
+                since: Instant::now(),
+            }));
+            ActiveCall::new(id, model, handle.commands, None, handle.video)
+        };
+        let held = connected(1, "Christopher Montgomery-Lindqvist", "8:orgid:guard-held");
+        let mut consult = connected(2, "Jonas Ortega", "8:orgid:guard-consult");
+        consult.consult = Some(ConsultCall::new(
+            ("8:orgid:guard-consult".to_owned(), "Jonas Ortega".to_owned()),
+            held.model.peer_name.clone(),
+        ));
+        (consult, held)
     }
 
     fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
@@ -479,6 +504,7 @@ mod frames {
                 Screen::CallTranscript,
                 Screen::CallPeople,
                 Screen::CallShare,
+                Screen::CallConsult,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -542,6 +568,17 @@ mod frames {
                         });
                         ("call-share", false)
                     }
+                    Screen::CallConsult => {
+                        visual.update(|_, cx| {
+                            app.update(cx, |state, cx| {
+                                let (consult, held) = consult_calls();
+                                state.call = Some(consult);
+                                state.held_call = Some(held);
+                                cx.notify();
+                            })
+                        });
+                        ("call-consult", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -553,7 +590,10 @@ mod frames {
                         ("status-menu", true)
                     }
                 };
-                let is_call = matches!(screen_name, "call" | "call-people" | "call-transcript" | "call-share");
+                let is_call = matches!(
+                    screen_name,
+                    "call" | "call-people" | "call-transcript" | "call-share" | "call-consult"
+                );
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
                 if is_call {
@@ -571,6 +611,9 @@ mod frames {
                 }
                 if screen_name == "call-share" {
                     expected.extend(SHARE_GUARDED);
+                }
+                if screen_name == "call-consult" {
+                    expected.extend(CONSULT_GUARDED);
                 }
                 if status_menu {
                     expected.push(MENU);
@@ -609,6 +652,7 @@ mod frames {
                     visual.update(|_, cx| {
                         app.update(cx, |state, cx| {
                             state.call = None;
+                            state.held_call = None;
                             cx.notify();
                         })
                     });

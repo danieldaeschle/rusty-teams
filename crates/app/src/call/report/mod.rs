@@ -385,6 +385,36 @@ mod tests {
     }
 
     #[test]
+    fn each_transfer_answer_settles_the_transfer_it_belongs_to() {
+        let mut recorder = recorder();
+        let transfer = CallCommand::Transfer {
+            target: Callee { mri: PEER_MRI.to_owned(), display_name: "Mara Lindqvist".to_owned() },
+            replaces: None,
+        };
+        recorder.command(&transfer);
+        recorder.command(&transfer);
+        let entry = |elapsed_ms, label: &str, detail: &str| TimelineEntry { elapsed_ms, label: label.to_owned(), detail: detail.to_owned() };
+        recorder.observe(&CallUpdate::Diagnostics(Box::new(CallDiagnostics {
+            timeline: vec![
+                entry(10, "transfer accepted", "by the target"),
+                entry(20, "transfer failed", "code 487 subCode 0"),
+                entry(30, "transfer accepted", "by the target"),
+                entry(40, "transfer", "completed"),
+            ],
+            ..CallDiagnostics::default()
+        })));
+        let json: serde_json::Value = serde_json::from_str(&recorder.document().json).expect("valid json");
+        let transfers: Vec<(&str, &serde_json::Value)> = json["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|feature| feature["feature"] == "transfer")
+            .map(|feature| (feature["result"].as_str().unwrap(), &feature["confirmed_at_ms"]))
+            .collect();
+        assert_eq!(transfers, [("failed", &serde_json::Value::Null), ("ok", &serde_json::json!(40))]);
+    }
+
+    #[test]
     fn neither_file_holds_anything_personal() {
         let document = finished_call().document();
         for text in [&document.json, &document.markdown] {

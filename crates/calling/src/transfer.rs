@@ -3,10 +3,29 @@ use serde_json::{Value, json};
 use crate::signaling::Participant;
 use crate::trouter_events::CallbackLinks;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replacement {
+    pub link: String,
+    pub participant_id: Option<String>,
+}
+
+impl Replacement {
+    pub fn of_call(link: impl Into<String>) -> Self {
+        Replacement { link: link.into(), participant_id: None }
+    }
+
+    fn details(&self) -> Value {
+        match &self.participant_id {
+            Some(participant_id) => json!({"replaces": self.link, "replacementTargetParticipantId": participant_id}),
+            None => json!({"replaces": self.link}),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TransferTarget<'a> {
     pub mri: &'a str,
-    pub replaces: Option<&'a str>,
+    pub replaces: Option<&'a Replacement>,
 }
 
 fn transferor(from: &Participant) -> Value {
@@ -22,7 +41,7 @@ fn transferor(from: &Participant) -> Value {
 }
 
 pub fn transfer_body(from: &Participant, target: TransferTarget<'_>, callbacks: &CallbackLinks) -> Value {
-    let replacement = target.replaces.map(|replaces| json!({"replaces": replaces}));
+    let replacement = target.replaces.map(Replacement::details);
     json!({
         "callTransfer": {
             "target": {"id": target.mri},
@@ -90,8 +109,15 @@ mod tests {
     }
 
     #[test]
-    fn a_consulted_transfer_replaces_the_consult_call() {
-        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: Some("https://cc.skype.com/replacement") }, &callbacks());
+    fn a_consulted_transfer_replaces_the_consulted_persons_leg() {
+        let leg = Replacement { link: "https://cc.skype.com/leg/replacement".into(), participant_id: Some("leg-7".into()) };
+        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: Some(&leg) }, &callbacks());
+        assert_eq!(
+            body["callTransfer"]["replacementDetails"],
+            json!({"replaces": "https://cc.skype.com/leg/replacement", "replacementTargetParticipantId": "leg-7"})
+        );
+        let whole_call = Replacement::of_call("https://cc.skype.com/replacement");
+        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: Some(&whole_call) }, &callbacks());
         assert_eq!(body["callTransfer"]["replacementDetails"], json!({"replaces": "https://cc.skype.com/replacement"}));
     }
 

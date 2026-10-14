@@ -8,7 +8,7 @@ use calling::{
     CallState, CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice,
     DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
     MeetingCapability, MeetingOptions, MeetingRole, MeetingTarget, Modality, NetworkLevel, Progress,
-    PublishedState, RaisedHand, Reaction, RecordingKind, RosterEntry, ShareKind, ShareSource, StopScope,
+    PublishedState, RaisedHand, Reaction, RecordingKind, Replacement, RosterEntry, ShareKind, ShareSource, StopScope,
     TransportDetails, VideoKey, call_channel,
 };
 use calling::call::VideoReport;
@@ -94,6 +94,7 @@ pub enum DemoScene {
     Consent,
     Hold,
     Held,
+    Consult,
     Breakout,
     Whiteboard,
     Network,
@@ -109,6 +110,7 @@ impl DemoScene {
             "consent" => DemoScene::Consent,
             "hold" => DemoScene::Hold,
             "held" => DemoScene::Held,
+            "consult" => DemoScene::Consult,
             "breakout" => DemoScene::Breakout,
             "whiteboard" => DemoScene::Whiteboard,
             "network" => DemoScene::Network,
@@ -119,7 +121,10 @@ impl DemoScene {
     }
 
     pub fn is_one_to_one(self) -> bool {
-        matches!(self, DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Network)
+        matches!(
+            self,
+            DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Consult | DemoScene::Network
+        )
     }
 
     pub fn guests(self) -> Option<usize> {
@@ -313,9 +318,9 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
         roster.push(RosterEntry { mri: calling::captions::RECORDING_BOT_MRI.to_owned(), ..RosterEntry::default() });
     }
     if matches!(script, DemoCall::People(_)) {
-        control.send(CallUpdate::ReplacementLink(
-            DEMO_REPLACEMENT_LINK.to_owned(),
-        ));
+        control.send(CallUpdate::ReplacementLink(Replacement::of_call(
+            DEMO_REPLACEMENT_LINK,
+        )));
     }
     if matches!(
         script,
@@ -413,6 +418,7 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
         DemoScene::Network => control.send(CallUpdate::Health(poor_network_health())),
         DemoScene::Call
+        | DemoScene::Consult
         | DemoScene::Breakout
         | DemoScene::Whiteboard
         | DemoScene::Gallery
@@ -677,6 +683,7 @@ async fn speak_until_hangup(
                 Some(CallCommand::ConsentToRecording) => control.send(CallUpdate::ConsentRequired(false)),
                 Some(CallCommand::Hold(hold)) => control.send(CallUpdate::Hold(if hold { HoldState::Local } else { HoldState::Active })),
                 Some(CallCommand::Transfer { .. }) => {
+                    control.send(CallUpdate::TransferResult { succeeded: true });
                     control.send(CallUpdate::Notice("Call transferred".to_owned()));
                     end(&control, EndReason::LocalHangup);
                     return;
