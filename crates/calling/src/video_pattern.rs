@@ -12,6 +12,7 @@ pub const CAMERA_HEIGHT: u32 = 360;
 pub const SCREEN_WIDTH: u32 = 1280;
 pub const SCREEN_HEIGHT: u32 = 720;
 const SQUARE: u32 = 64;
+const BORDER: u32 = 2;
 const BLOCK_ROWS: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +64,12 @@ fn paint_camera(
         for column in 0..width {
             let inside = column >= square_x && column < square_x + SQUARE && row >= square_y && row < square_y + SQUARE;
             let shade = ((column + tick * 3) * 255 / width) as u8;
-            y_plane[(row * stride_y + column) as usize] = if inside { 235 } else { shade / 2 + 24 };
+            let on_border = column < BORDER || row < BORDER || column >= width - BORDER || row >= height - BORDER;
+            let delta_x = column as i64 - width as i64 / 2;
+            let delta_y = row as i64 - height as i64 / 2;
+            let radius = height as i64 / 2 - 8;
+            let on_circle = (delta_x * delta_x + delta_y * delta_y - radius * radius).abs() < radius * 6;
+            y_plane[(row * stride_y + column) as usize] = if on_border || on_circle || inside { 235 } else { shade / 2 + 24 };
         }
     }
     for row in 0..height / 2 {

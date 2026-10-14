@@ -20,7 +20,7 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
     ActiveCall, CallLayout, CallModel, FILMSTRIP_MAX, Filmstrip, Focus, GALLERY_MAX, Overflow, Tile, TileSize,
-    filmstrip, gallery_grid, shown_bubbles, split_overflow,
+    filmstrip, focus_stage_size, gallery_grid, shown_bubbles, split_overflow,
 };
 use calling::{TileDetail, VideoWant};
 use crate::theme;
@@ -444,10 +444,12 @@ fn speaker_body(
     stage: (f32, f32),
 ) -> AnyElement {
     let SpeakerSplit { focus, others, own_cells, plan } = speaker_split(model, stage);
+    let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
+    let has_filmstrip = plan.overflow.shown + own_cells + usize::from(plan.overflow.hidden > 0) > 0;
+    let focus_size = focus_stage_size(stage, GRID_PADDING, TILE_GAP, has_filmstrip.then_some(size.height));
     let main = focus
         .as_ref()
-        .and_then(|focus| render_focus_stage(app, state, focus, now));
-    let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
+        .and_then(|focus| render_focus_stage(app, state, focus, focus_size, now));
     let shown = &others[..plan.overflow.shown];
     let mut tiles: Vec<AnyElement> = shown
         .iter()
@@ -478,6 +480,7 @@ fn speaker_body(
                 .min_h_0()
                 .w_full()
                 .items_center()
+                .justify_center()
                 .children(main),
         )
         .when(!tiles.is_empty(), |column| {

@@ -21,7 +21,7 @@ use super::call_people::add_people_item;
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
-use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus};
+use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus, contain_size};
 use crate::notice::truncated;
 use crate::theme;
 
@@ -35,6 +35,7 @@ const CAPTION_TOP: f32 = 72.;
 const CAPTION_FADE_SECONDS: f32 = 1.;
 const CAPTION_BACKGROUND: f32 = 0.72;
 const FOCUS_RADIUS: f32 = 12.;
+const FOCUS_BORDER: f32 = 2.;
 const FOCUS_AVATAR: f32 = 140.;
 const CHIP_HEIGHT: f32 = 24.;
 const MORE_SIZE: f32 = 28.;
@@ -698,6 +699,7 @@ pub fn render_focus_stage(
     app: &Entity<AppState>,
     state: &AppState,
     focus: &Focus,
+    size: (f32, f32),
     now: Instant,
 ) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
@@ -723,10 +725,27 @@ pub fn render_focus_stage(
     };
     let image: Option<Arc<RenderImage>> = call.pictures.live(&key, now);
     let picture = match image {
-        Some(image) => img(ImageSource::Render(image))
-            .size_full()
-            .object_fit(ObjectFit::Contain)
-            .into_any_element(),
+        Some(image) => {
+            let picture_size = image.size(0);
+            let (width, height) = contain_size(
+                (size.0 - 2. * FOCUS_BORDER, size.1 - 2. * FOCUS_BORDER),
+                (picture_size.width.0 as f32, picture_size.height.0 as f32),
+            );
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    img(ImageSource::Render(image))
+                        .w(px(width))
+                        .h(px(height))
+                        .flex_none()
+                        .object_fit(ObjectFit::Fill)
+                        .rounded(px(FOCUS_RADIUS)),
+                )
+                .into_any_element()
+        }
         None => div()
             .size_full()
             .flex()
@@ -743,13 +762,13 @@ pub fn render_focus_stage(
     let stage = div()
         .id("call-focus-stage")
         .relative()
-        .flex_1()
-        .min_w_0()
-        .h_full()
+        .w(px(size.0))
+        .h(px(size.1))
+        .flex_none()
         .overflow_hidden()
         .rounded(px(FOCUS_RADIUS))
         .bg(hsla(0., 0., 0.04, 1.))
-        .border_2()
+        .border(px(FOCUS_BORDER))
         .border_color(if speaking {
             theme::green()
         } else {

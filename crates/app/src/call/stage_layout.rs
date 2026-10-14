@@ -68,6 +68,22 @@ pub struct Filmstrip {
     pub overflow: Overflow,
 }
 
+pub fn focus_stage_size(stage: (f32, f32), padding: f32, gap: f32, filmstrip_height: Option<f32>) -> (f32, f32) {
+    let strip = filmstrip_height.map_or(0., |height| height + gap);
+    (
+        (stage.0 - 2. * padding).max(0.),
+        (stage.1 - 2. * padding - strip).max(0.),
+    )
+}
+
+pub fn contain_size(container: (f32, f32), picture: (f32, f32)) -> (f32, f32) {
+    if picture.0 <= 0. || picture.1 <= 0. {
+        return (0., 0.);
+    }
+    let scale = (container.0 / picture.0).min(container.1 / picture.1).max(0.);
+    (picture.0 * scale, picture.1 * scale)
+}
+
 pub fn filmstrip(
     others: usize,
     own_cells: usize,
@@ -218,6 +234,23 @@ impl VisibleRotation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contain_letterboxes_wide_and_tall_containers() {
+        let (wide_width, wide_height) = contain_size((1000., 400.), (640., 360.));
+        assert!((wide_width - 711.111).abs() < 0.01);
+        assert!((wide_height - 400.).abs() < 0.01);
+        assert_eq!(contain_size((400., 1000.), (640., 360.)), (400., 225.));
+        assert_eq!(contain_size((640., 360.), (640., 360.)), (640., 360.));
+        assert_eq!(contain_size((100., 100.), (0., 0.)), (0., 0.));
+    }
+
+    #[test]
+    fn focus_stage_takes_the_stage_minus_padding_and_filmstrip() {
+        assert_eq!(focus_stage_size((1000., 600.), 24., 20., Some(100.)), (952., 432.));
+        assert_eq!(focus_stage_size((1000., 600.), 24., 20., None), (952., 552.));
+        assert_eq!(focus_stage_size((10., 10.), 24., 20., Some(100.)), (0., 0.));
+    }
 
     fn names(count: usize) -> Vec<String> {
         (0..count).map(|index| format!("p{index}")).collect()
