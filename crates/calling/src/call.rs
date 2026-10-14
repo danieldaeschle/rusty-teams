@@ -58,7 +58,8 @@ use crate::video_frame::VideoKey;
 use crate::video_layout::{
     CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, is_share_mid, offer_plan, one_to_one_plan,
 };
-use crate::video_send::{LocalVideo, VideoMode};
+use crate::send_control::{RequestFilter, parse_request};
+use crate::video_send::{LocalVideo, SendSource, VideoMode};
 use crate::screen::{ShareKind, ShareSource, list_share_sources};
 use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
@@ -839,6 +840,7 @@ async fn drive(
     let mut local_hold = false;
     let mut remote_hold = false;
     let mut same_peer: Option<SamePeerOffer> = None;
+    let mut send_requests = RequestFilter::default();
     let mut same_peer_deadline: Option<Instant> = None;
     let mut meeting_chat = conversation.chat_thread.clone();
     if let Some(thread) = &meeting_chat {
@@ -1153,6 +1155,18 @@ async fn drive(
                         replier.reply(request_id, 200, "");
                         if status == ProgressStatus::Ringing {
                             control.send(CallUpdate::Progress(Progress::Ringing));
+                        }
+                    }
+                    Ok(CallEvent::ControlVideoStreaming(body)) => {
+                        replier.reply(request_id, 200, "");
+                        let Some(request) = parse_request(&body) else { continue };
+                        let Some(limit) = send_requests.admit(&request) else { continue };
+                        let own_screen = roster.screen_source_of(&own_mri).map(i64::from);
+                        let source = if request.source_id.is_some() && request.source_id == own_screen { SendSource::Screen } else { SendSource::Camera };
+                        match local_video.apply_send_limit(source, &limit) {
+                            Ok(Some(applied)) => timeline.record("send limits", format!("{source:?} {applied:?} keyframe {}", limit.keyframe)),
+                            Ok(None) => {}
+                            Err(error) => timeline.record("send limits failed", error.to_string()),
                         }
                     }
                     Ok(CallEvent::Speakers(sources)) => {
@@ -2473,6 +2487,7 @@ fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<Ca
         CallEvent::Acceptance(acceptance) => format!("answer sdp {} bytes, fromMixer={}", acceptance.sdp.len(), acceptance.from_mixer),
         CallEvent::End(end) => format!("code={} subCode={} phrase={}", end.code, end.sub_code, end.phrase),
         CallEvent::Progress(status) => format!("{status:?}"),
+        CallEvent::ControlVideoStreaming(body) => parse_request(body).map_or_else(|| "body not understood".to_owned(), |request| request.shape),
         _ => String::new(),
     };
     timeline.record(format!("Trouter {}", event.name()), detail);

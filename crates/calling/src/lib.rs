@@ -40,6 +40,7 @@ pub mod ring;
 pub mod roster;
 pub mod screen;
 pub mod sdp;
+pub mod send_control;
 pub mod signaling;
 pub mod software_audio;
 pub mod sound_capture;

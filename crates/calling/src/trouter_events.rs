@@ -132,6 +132,7 @@ pub enum CallEvent {
     MediaAnswer(MediaAnswer),
     MediaRenegotiation(Renegotiation),
     Speakers(Vec<u32>),
+    ControlVideoStreaming(Value),
     AddParticipantSuccess(Value),
     AddParticipantFailure(Value),
     Reactions(Vec<ReactionEvent>),
@@ -154,6 +155,7 @@ impl CallEvent {
             CallEvent::MediaAnswer(_) => "call/mediaAnswer".into(),
             CallEvent::MediaRenegotiation(_) => "call/mediaRenegotiation".into(),
             CallEvent::Speakers(_) => "call/speakers".into(),
+            CallEvent::ControlVideoStreaming(_) => "call/controlVideoStreaming".into(),
             CallEvent::AddParticipantSuccess(_) => "conversation/addParticipantSuccess".into(),
             CallEvent::AddParticipantFailure(_) => "conversation/addParticipantFailure".into(),
             CallEvent::Reactions(_) => "conversation/receiveMessage".into(),
@@ -188,6 +190,7 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("call", "mediaAnswer") => CallEvent::MediaAnswer(media_answer(&body)?),
         ("call", "mediaRenegotiation") => CallEvent::MediaRenegotiation(renegotiation(&body)?),
         ("call", "csrcInfo" | "dominantSpeakerInfo") => CallEvent::Speakers(speaker_sources(&body)),
+        ("call", "controlVideoStreaming") => CallEvent::ControlVideoStreaming(body),
         ("call", "end") => CallEvent::End(call_end(&body)),
         (scope, event) => CallEvent::Other {
             scope: scope.to_owned(),
@@ -451,6 +454,8 @@ mod tests {
         assert!(matches!(share, CallEvent::ContentShareUpdate(_)));
         let (_, ended) = classify("callAgent/abc/1/conversation/contentSharingEnd/", Value::Null).unwrap();
         assert!(matches!(ended, CallEvent::ContentShareEnd(_)));
+        let (_, control) = classify("callAgent/abc/1/call/controlVideoStreaming/", json!({"controlVideoStreaming": {}})).unwrap();
+        assert_eq!(control.name(), "call/controlVideoStreaming");
         let (_, accepted) = classify("callAgent/abc/1/call/transferAcceptance/", Value::Null).unwrap();
         assert_eq!(accepted, CallEvent::Transfer(TransferEvent::Accepted));
         let (_, completed) = classify("callAgent/abc/1/call/transferCompletion/", json!({"transferCompletion": {"code": 0}})).unwrap();
