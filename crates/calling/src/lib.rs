@@ -10,6 +10,7 @@ pub mod captions;
 pub mod capture;
 pub mod control;
 pub mod data_channel;
+pub mod device_watch;
 pub mod devices;
 pub mod diagnostics;
 pub mod engine;

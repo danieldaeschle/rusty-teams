@@ -30,7 +30,8 @@ use crate::captions::{
 use crate::control::{CallCommand, CallControl, CallUpdate, Progress};
 use crate::diagnostics::{CallDiagnostics, StatsSample};
 use crate::data_channel::Depacketizer;
-use crate::devices::{self, DeviceChoice};
+use crate::device_watch::{self, Debounce};
+use crate::devices::{self, AppliedDevice, AudioDevice, DeviceChoice, Flow, Reselect};
 use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
@@ -616,12 +617,17 @@ async fn drive(
     let mut output = options.output.clone();
     let audio = AudioSetup::start(&factory, options.audio, options.tone_hz, &input, &output);
     control.send(CallUpdate::ListenOnly(audio.listen_only));
-    let device_lists = devices::list_devices(&factory);
+    let mut device_lists = devices::list_devices(&factory);
+    let mut applied_input = devices::applied_device(&device_lists.inputs, &input, devices::system_default_id(Flow::Capture).as_deref());
+    let mut applied_output = devices::applied_device(&device_lists.outputs, &output, devices::system_default_id(Flow::Render).as_deref());
+    let (_device_watcher, mut device_changes) = device_watch::watch();
+    let mut device_debounce = Debounce::default();
     timeline.record(
         "audio setup",
         format!("listen only {}, {} input(s), {} output(s); {}", audio.listen_only, device_lists.inputs.len(), device_lists.outputs.len(), audio.adm_state),
     );
-    control.send(CallUpdate::Devices(device_lists));
+    record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
+    control.send(CallUpdate::Devices(device_lists.clone()));
     control.send(CallUpdate::Selected {
         input: input.clone(),
         output: output.clone(),
@@ -1341,6 +1347,8 @@ async fn drive(
                 Some(CallCommand::SelectInput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
                         timeline.record("input device", format!("{choice:?} applied={}", devices::select_input(&factory, &choice)));
+                        applied_input = devices::applied_device(&device_lists.inputs, &choice, devices::system_default_id(Flow::Capture).as_deref());
+                        record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
                     }
                     input = choice;
                     control.send(CallUpdate::Selected { input: input.clone(), output: output.clone() });
@@ -1360,12 +1368,15 @@ async fn drive(
                 Some(CallCommand::SelectOutput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
                         timeline.record("output device", format!("{choice:?} applied={}", devices::select_output(&factory, &choice)));
+                        applied_output = devices::applied_device(&device_lists.outputs, &choice, devices::system_default_id(Flow::Render).as_deref());
+                        record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
                     }
                     output = choice;
                     control.send(CallUpdate::Selected { input: input.clone(), output: output.clone() });
                 }
                 Some(CallCommand::RefreshDevices) => {
-                    control.send(CallUpdate::Devices(devices::list_devices(&factory)));
+                    device_lists = devices::list_devices(&factory);
+                    control.send(CallUpdate::Devices(device_lists.clone()));
                 }
                 Some(CallCommand::SetCamera(on)) => {
                     let direct = layout == Layout::OneToOne && negotiator.path() != MediaPath::Mixer;
@@ -1837,6 +1848,25 @@ async fn drive(
                             snapshot.share_receive.as_ref().filter(|_| snapshot.share_inbound_packets > 0).map(ShareReceive::summary).unwrap_or_default()
                         ),
                     );
+                }
+            }
+            Some(()) = device_changes.recv() => {
+                device_debounce.signal(Instant::now());
+            }
+            _ = sleep_until(device_debounce.deadline().unwrap_or_else(far_future)), if device_debounce.deadline().is_some() => {
+                if device_debounce.take_due(Instant::now()) {
+                    let previous = std::mem::replace(&mut device_lists, devices::list_devices(&factory));
+                    control.send(CallUpdate::Devices(device_lists.clone()));
+                    if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
+                        let input_changed = follow_device_change(Flow::Capture, (&previous.inputs, &device_lists.inputs), &input, &mut applied_input, |index| devices::select_input_index(&factory, index), timeline, control);
+                        let output_changed = follow_device_change(Flow::Render, (&previous.outputs, &device_lists.outputs), &output, &mut applied_output, |index| devices::select_output_index(&factory, index), timeline, control);
+                        if input_changed || output_changed {
+                            record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
+                        }
+                        if input_changed && software_audio.is_some() {
+                            sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), true, &mut software_audio, control, timeline);
+                        }
+                    }
                 }
             }
             _ = sleep_until(reconnect_deadline.unwrap_or_else(far_future)), if reconnect_deadline.is_some() => {
@@ -2344,6 +2374,46 @@ fn send_receive_change(control: &CallControl, change: ReceiveChange) {
     if let Some(sharer) = change.screen_sharer {
         control.send(CallUpdate::ScreenShare(sharer));
     }
+}
+
+fn record_audio_devices(timeline: &Timeline, lists: &devices::DeviceLists, input: Option<&AppliedDevice>, output: Option<&AppliedDevice>) {
+    let name = |devices: &[AudioDevice], applied: Option<&AppliedDevice>| {
+        applied
+            .and_then(|applied| devices.iter().find(|device| device.index == applied.index))
+            .map_or("none", |device| device.name.as_str())
+            .to_owned()
+    };
+    timeline.record(
+        "audio devices",
+        format!("input={} output={}", name(&lists.inputs, input), name(&lists.outputs, output)),
+    );
+}
+
+fn follow_device_change(
+    flow: Flow,
+    (previous, current): (&[AudioDevice], &[AudioDevice]),
+    choice: &DeviceChoice,
+    applied: &mut Option<AppliedDevice>,
+    select: impl Fn(u16) -> bool,
+    timeline: &Timeline,
+    control: &CallControl,
+) -> bool {
+    let system_default = devices::system_default_id(flow);
+    let (index, fell_back) = match devices::reselect(applied.as_ref(), current, choice, system_default.as_deref()) {
+        Reselect::Keep => return false,
+        Reselect::Select(index) => (index, false),
+        Reselect::FallBack(index) => (index, true),
+    };
+    let selected = select(index);
+    timeline.record("device change", format!("{flow:?} {choice:?} -> index {index} fallback={fell_back} applied={selected}"));
+    if selected {
+        *applied = current.iter().find(|device| device.index == index).map(|device| AppliedDevice { index, key: device.key() });
+    }
+    if fell_back {
+        let fallback = current.iter().find(|device| device.index == index);
+        control.send(CallUpdate::Notice(devices::disconnect_notice(previous, choice, fallback)));
+    }
+    selected
 }
 
 fn far_future() -> Instant {
