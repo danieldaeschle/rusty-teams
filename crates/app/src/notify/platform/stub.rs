@@ -24,6 +24,20 @@ pub fn work_area_at(_x: i32, _y: i32) -> Option<WorkArea> {
 
 pub fn place(_handle: NativeHandle, _x: i32, _y: i32, _width: i32, _height: i32) {}
 
+pub fn place_above(
+    _handle: NativeHandle,
+    _shared: NativeHandle,
+    _x: i32,
+    _y: i32,
+    _width: i32,
+    _height: i32,
+) {
+}
+
+pub fn stack_above(_handle: NativeHandle, _shared: NativeHandle) {}
+
+pub fn show_window_inactive(_handle: NativeHandle) {}
+
 pub fn exclude_from_capture(_handle: NativeHandle) {}
 
 #[cfg(target_os = "linux")]

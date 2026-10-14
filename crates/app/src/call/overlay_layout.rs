@@ -77,6 +77,21 @@ pub fn border_rects(target: ScreenRect, thickness: i32) -> [ScreenRect; 4] {
     ]
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderVisibility {
+    Show,
+    Hide,
+    Close,
+}
+
+pub fn border_visibility(window_share: bool, geometry_found: bool) -> BorderVisibility {
+    match (geometry_found, window_share) {
+        (true, _) => BorderVisibility::Show,
+        (false, true) => BorderVisibility::Hide,
+        (false, false) => BorderVisibility::Close,
+    }
+}
+
 pub fn mini_rect(work: WorkArea, saved: Option<(i32, i32)>) -> ScreenRect {
     let width = scaled(MINI_WIDTH, work.scale);
     let height = scaled(MINI_HEIGHT, work.scale);
@@ -207,6 +222,14 @@ mod tests {
         assert_eq!(top.bottom, 3);
         assert_eq!(left.right, 3);
         assert_eq!(right.left, 3);
+    }
+
+    #[test]
+    fn border_hides_for_a_window_without_frame_and_closes_for_a_screen() {
+        assert_eq!(border_visibility(true, true), BorderVisibility::Show);
+        assert_eq!(border_visibility(false, true), BorderVisibility::Show);
+        assert_eq!(border_visibility(true, false), BorderVisibility::Hide);
+        assert_eq!(border_visibility(false, false), BorderVisibility::Close);
     }
 
     #[test]

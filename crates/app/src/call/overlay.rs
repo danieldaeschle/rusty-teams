@@ -6,8 +6,8 @@ use gpui_kit::*;
 
 use super::model::format_elapsed;
 use super::overlay_layout::{
-    MINI_POSITION_KEY, bar_collapsed, bar_rect, border_rects, border_thickness, format_position,
-    mini_rect, mini_wanted, mini_work_area, parse_position,
+    BorderVisibility, MINI_POSITION_KEY, bar_collapsed, bar_rect, border_rects, border_thickness,
+    border_visibility, format_position, mini_rect, mini_wanted, mini_work_area, parse_position,
 };
 use crate::app_state::AppState;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
@@ -31,6 +31,8 @@ struct Placed {
     handle: AnyWindowHandle,
     native: Option<NativeHandle>,
     rect: Option<ScreenRect>,
+    anchor: Option<NativeHandle>,
+    visible: bool,
 }
 
 impl Placed {
@@ -39,11 +41,42 @@ impl Placed {
         let Some(native) = self.native else {
             return;
         };
-        platform::place(native, rect.left, rect.top, rect.width(), rect.height());
+        match self.anchor {
+            Some(anchor) => platform::place_above(
+                native,
+                anchor,
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+            ),
+            None => platform::place(native, rect.left, rect.top, rect.width(), rect.height()),
+        }
         // WM_SIZE arrives while the app is borrowed, so GPUI drops its own resize report.
         self.handle
             .update(cx, |_, window, cx| window.bounds_changed(cx))
             .ok();
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        let Some(native) = self.native else {
+            return;
+        };
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        if visible {
+            platform::show_window_inactive(native);
+        } else {
+            platform::hide_window(native);
+        }
+    }
+
+    fn restack(&self) {
+        if let (Some(native), Some(anchor)) = (self.native, self.anchor) {
+            platform::stack_above(native, anchor);
+        }
     }
 }
 
@@ -267,7 +300,12 @@ impl CallWindows {
             return;
         };
         session.source = source;
-        if refresh_geometry {
+        let shared_window = session
+            .source
+            .as_ref()
+            .filter(|source| source.kind == ShareKind::Window)
+            .map(|source| source.id as NativeHandle);
+        if refresh_geometry || shared_window.is_some() {
             session.geometry = session
                 .source
                 .as_ref()
@@ -293,17 +331,29 @@ impl CallWindows {
             cx.notify();
         }
         self.ensure_window(Role::Bar, bar_rect(work, collapsed), work.scale, true, cx);
-        match geometry {
-            Some(geometry) => {
-                let thickness = border_thickness(geometry.work.scale);
-                for (side, rect) in border_rects(geometry.target, thickness)
-                    .into_iter()
-                    .enumerate()
-                {
-                    self.ensure_window(Role::Border(side), rect, geometry.work.scale, true, cx);
+        match border_visibility(shared_window.is_some(), geometry.is_some()) {
+            BorderVisibility::Show => {
+                let thickness = border_thickness(work.scale);
+                let rects = geometry.map(|geometry| border_rects(geometry.target, thickness));
+                for (side, rect) in rects.into_iter().flatten().enumerate() {
+                    if let Some(placed) = self.windows.get_mut(&Role::Border(side)) {
+                        placed.anchor = shared_window;
+                        placed.set_visible(true);
+                    }
+                    self.ensure_window(Role::Border(side), rect, work.scale, true, cx);
+                    if let Some(placed) = self.windows.get(&Role::Border(side)) {
+                        placed.restack();
+                    }
                 }
             }
-            None => self.close_borders(cx),
+            BorderVisibility::Hide => {
+                for side in 0..BORDER_SIDES {
+                    if let Some(placed) = self.windows.get_mut(&Role::Border(side)) {
+                        placed.set_visible(false);
+                    }
+                }
+            }
+            BorderVisibility::Close => self.close_borders(cx),
         }
     }
 
@@ -333,12 +383,15 @@ impl CallWindows {
             (true, None) => self.open_pop_out(cx),
             (false, Some(handle)) => {
                 self.pop_out = None;
-                handle.update(cx, |_, window, _| window.remove_window()).ok();
+                handle
+                    .update(cx, |_, window, _| window.remove_window())
+                    .ok();
             }
             (true, Some(handle)) => {
                 if handle.update(cx, |_, _, _| ()).is_err() {
                     self.pop_out = None;
-                    self.app.update(cx, |state, cx| state.return_stage_from_pop_out(cx));
+                    self.app
+                        .update(cx, |state, cx| state.return_stage_from_pop_out(cx));
                 }
             }
             (false, None) => {}
@@ -469,13 +522,17 @@ impl CallWindows {
                 }
                 if matches!(role, Role::Border(_)) {
                     handle
-                        .update(cx, |_, window, _| platform::make_window_click_through(window))
+                        .update(cx, |_, window, _| {
+                            platform::make_window_click_through(window)
+                        })
                         .ok();
                 }
                 Placed {
                     handle,
                     native,
                     rect: None,
+                    anchor: None,
+                    visible: true,
                 }
             });
             controller.update(cx, |this, _| {

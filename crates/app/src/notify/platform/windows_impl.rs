@@ -12,7 +12,7 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
+    DWMWA_BORDER_COLOR, DWMWA_CLOAKED, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmGetWindowAttribute,
     DwmSetWindowAttribute,
 };
@@ -29,13 +29,14 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO,
-    FlashWindowEx, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, GetWindowRect, HICON, HWND_TOPMOST,
-    ICONINFO, IsIconic, LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
+    FlashWindowEx, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IsIconic, IsWindowVisible,
+    LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetLayeredWindowAttributes,
     SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-    WDA_EXCLUDEFROMCAPTURE, WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
-    WS_POPUP, WS_THICKFRAME,
+    WDA_EXCLUDEFROMCAPTURE, WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
+    WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -191,6 +192,68 @@ pub fn place(handle: NativeHandle, x: i32, y: i32, width: i32, height: i32) {
     }
 }
 
+fn is_topmost(window: HWND) -> bool {
+    unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize != 0 }
+}
+
+fn insert_after_above(handle: HWND, shared: HWND) -> Option<HWND> {
+    let shared_topmost = is_topmost(shared);
+    let band = if shared_topmost {
+        HWND_TOPMOST
+    } else {
+        HWND_NOTOPMOST
+    };
+    unsafe {
+        match GetWindow(shared, GW_HWNDPREV) {
+            Ok(previous) if previous == handle => None,
+            Ok(previous) if shared_topmost || !is_topmost(previous) => Some(previous),
+            _ => Some(band),
+        }
+    }
+}
+
+pub fn place_above(
+    handle: NativeHandle,
+    shared: NativeHandle,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let insert_after = insert_after_above(hwnd(handle), hwnd(shared));
+    let flags = if insert_after.is_some() {
+        SWP_NOACTIVATE | SWP_NOOWNERZORDER
+    } else {
+        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
+    };
+    unsafe {
+        let _ = SetWindowPos(hwnd(handle), insert_after, x, y, width, height, flags);
+    }
+}
+
+pub fn stack_above(handle: NativeHandle, shared: NativeHandle) {
+    let Some(insert_after) = insert_after_above(hwnd(handle), hwnd(shared)) else {
+        return;
+    };
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd(handle),
+            Some(insert_after),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE,
+        );
+    }
+}
+
+pub fn show_window_inactive(handle: NativeHandle) {
+    unsafe {
+        let _ = ShowWindow(hwnd(handle), SW_SHOWNOACTIVATE);
+    }
+}
+
 pub fn exclude_from_capture(handle: NativeHandle) {
     unsafe {
         let _ = SetWindowDisplayAffinity(hwnd(handle), WDA_EXCLUDEFROMCAPTURE);
@@ -235,7 +298,17 @@ pub fn window_rect(handle: NativeHandle) -> Option<ScreenRect> {
 fn visible_frame(window: HWND) -> Option<ScreenRect> {
     let mut rect = RECT::default();
     unsafe {
-        if IsIconic(window).as_bool() {
+        if IsIconic(window).as_bool() || !IsWindowVisible(window).as_bool() {
+            return None;
+        }
+        let mut cloaked = 0u32;
+        let queried = DwmGetWindowAttribute(
+            window,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut _ as *mut c_void,
+            size_of::<u32>() as u32,
+        );
+        if queried.is_ok() && cloaked != 0 {
             return None;
         }
         // Excludes the invisible resize margin that GetWindowRect includes.
