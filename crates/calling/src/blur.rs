@@ -12,6 +12,7 @@ use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use crate::background::BackgroundPicture;
 use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
+use crate::matte::{Matte, Planes, refine, refine_rgba};
 use crate::standout::Cutout;
 
 const MODEL: &[u8] = include_bytes!("../assets/selfie_segmentation_landscape.onnx");
@@ -21,10 +22,8 @@ const CHANNELS: usize = 4;
 const BACKGROUND_SCALE: usize = 4;
 const BLUR_RADIUS: usize = 3;
 const BLUR_PASSES: usize = 2;
-const EDGE_LOW: f32 = 0.3;
-const EDGE_HIGH: f32 = 0.7;
-const OPAQUE: f32 = 0.985;
 const MASK_SMOOTHING: f32 = 0.35;
+const MOTION_GAIN: f32 = 2.;
 const SLOW_INFERENCE: Duration = Duration::from_millis(22);
 const VERY_SLOW_INFERENCE: Duration = Duration::from_millis(45);
 const MAX_BANDS: usize = 4;
@@ -80,11 +79,6 @@ fn model_input(rgba: &[u8], width: usize, height: usize) -> Tensor {
         }
     }
     Tensor::from_shape(&[1, 3, MASK_HEIGHT, MASK_WIDTH], &data).expect("shape matches data")
-}
-
-pub(crate) fn smoothstep(value: f32) -> f32 {
-    let t = ((value - EDGE_LOW) / (EDGE_HIGH - EDGE_LOW)).clamp(0., 1.);
-    t * t * (3. - 2. * t)
 }
 
 pub(crate) struct Axis {
@@ -159,19 +153,10 @@ fn blurred_background(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usi
     (small, small_width, small_height)
 }
 
-fn sample_mask(mask: &[f32], mask_x: &Axis, column: usize, (top_row, bottom_row, fraction): (usize, usize, f32)) -> f32 {
-    let (left, right, across) = (mask_x.first[column], mask_x.second[column], mask_x.weight[column]);
-    let top = mask[top_row + left] * (1. - across) + mask[top_row + right] * across;
-    let bottom = mask[bottom_row + left] * (1. - across) + mask[bottom_row + right] * across;
-    top * (1. - fraction) + bottom * fraction
-}
-
 struct Composer<'a> {
     background: &'a [u8],
-    mask: &'a [f32],
+    matte: &'a Matte,
     width: usize,
-    mask_x: Axis,
-    mask_y: Axis,
     small_x: Axis,
     small_y: Axis,
     small_width: usize,
@@ -185,13 +170,13 @@ impl Composer<'_> {
     }
 
     fn row(&self, line: &mut [u8], row: usize) {
-        let (mask_top, mask_bottom, mask_fraction) = (self.mask_y.first[row] * MASK_WIDTH, self.mask_y.second[row] * MASK_WIDTH, self.mask_y.weight[row]);
         let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
-        for (column, pixel) in line.as_chunks_mut::<CHANNELS>().0.iter_mut().enumerate() {
-            let person = smoothstep(sample_mask(self.mask, &self.mask_x, column, (mask_top, mask_bottom, mask_fraction)));
-            if person >= OPAQUE {
+        let alphas = &self.matte.alpha[row * self.matte.width..][..self.matte.width];
+        for (column, (pixel, &alpha)) in line.as_chunks_mut::<CHANNELS>().0.iter_mut().zip(alphas).enumerate() {
+            if alpha == u8::MAX {
                 continue;
             }
+            let person = f32::from(alpha) / 255.;
             let (left, right, across) = (self.small_x.first[column], self.small_x.second[column], self.small_x.weight[column]);
             for (channel, value) in pixel.iter_mut().take(3).enumerate() {
                 let sample = |line: usize, index: usize| f32::from(self.background[(line + index) * 3 + channel]);
@@ -204,13 +189,11 @@ impl Composer<'_> {
     }
 }
 
-fn compose_over(rgba: &mut [u8], width: usize, height: usize, mask: &[f32], background: &[u8], background_width: usize, background_height: usize) {
+fn compose_over(rgba: &mut [u8], width: usize, height: usize, matte: &Matte, background: &[u8], background_width: usize, background_height: usize) {
     let composer = Composer {
         background,
-        mask,
+        matte,
         width,
-        mask_x: axis(width, MASK_WIDTH),
-        mask_y: axis(height, MASK_HEIGHT),
         small_x: axis(width, background_width),
         small_y: axis(height, background_height),
         small_width: background_width,
@@ -256,23 +239,20 @@ fn blurred_plane(plane: &[u8], stride: usize, width: usize, height: usize, facto
 
 struct PlaneComposer<'a> {
     background: &'a [u8],
-    mask: &'a [f32],
+    matte: &'a Matte,
     width: usize,
-    mask_x: Axis,
-    mask_y: Axis,
     small_x: Axis,
     small_y: Axis,
     small_width: usize,
 }
 
 impl PlaneComposer<'_> {
-    fn new<'a>(background: &'a [u8], small_width: usize, small_height: usize, mask: &'a [f32], width: usize, height: usize) -> PlaneComposer<'a> {
+    fn new<'a>(background: &'a [u8], small_width: usize, small_height: usize, matte: &'a Matte) -> PlaneComposer<'a> {
+        let (width, height) = (matte.width, matte.height);
         PlaneComposer {
             background,
-            mask,
+            matte,
             width,
-            mask_x: axis(width, MASK_WIDTH),
-            mask_y: axis(height, MASK_HEIGHT),
             small_x: axis(width, small_width),
             small_y: axis(height, small_height),
             small_width,
@@ -287,13 +267,13 @@ impl PlaneComposer<'_> {
     }
 
     fn row(&self, line: &mut [u8], row: usize) {
-        let mask_rows = (self.mask_y.first[row] * MASK_WIDTH, self.mask_y.second[row] * MASK_WIDTH, self.mask_y.weight[row]);
         let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
-        for (column, value) in line.iter_mut().enumerate() {
-            let person = smoothstep(sample_mask(self.mask, &self.mask_x, column, mask_rows));
-            if person >= OPAQUE {
+        let alphas = &self.matte.alpha[row * self.width..][..self.width];
+        for (column, (value, &alpha)) in line.iter_mut().zip(alphas).enumerate() {
+            if alpha == u8::MAX {
                 continue;
             }
+            let person = f32::from(alpha) / 255.;
             let (left, right, across) = (self.small_x.first[column], self.small_x.second[column], self.small_x.weight[column]);
             let sample = |line: usize, index: usize| f32::from(self.background[line + index]);
             let upper = sample(small_top, left) * (1. - across) + sample(small_top, right) * across;
@@ -310,13 +290,15 @@ pub fn compose_i420(buffer: &mut I420Buffer, mask: &[f32]) {
     let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (stride_y, stride_u, stride_v) = (stride_y as usize, stride_u as usize, stride_v as usize);
+    let luma_matte = refine(mask, Planes::of(buffer));
+    let chroma_matte = luma_matte.halved();
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
     let (background_y, small_width, small_height) = blurred_plane(plane_y, stride_y, width, height, BACKGROUND_SCALE);
     let (background_u, ..) = blurred_plane(plane_u, stride_u, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
     let (background_v, ..) = blurred_plane(plane_v, stride_v, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
-    let luma = PlaneComposer::new(&background_y, small_width, small_height, mask, width, height);
-    let blue = PlaneComposer::new(&background_u, small_width, small_height, mask, chroma_width, chroma_height);
-    let red = PlaneComposer::new(&background_v, small_width, small_height, mask, chroma_width, chroma_height);
+    let luma = PlaneComposer::new(&background_y, small_width, small_height, &luma_matte);
+    let blue = PlaneComposer::new(&background_u, small_width, small_height, &chroma_matte);
+    let red = PlaneComposer::new(&background_v, small_width, small_height, &chroma_matte);
     let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
     std::thread::scope(|scope| {
         for (composer, plane, stride, rows) in [(&luma, plane_y, stride_y, height), (&blue, plane_u, stride_u, chroma_height), (&red, plane_v, stride_v, chroma_height)] {
@@ -330,12 +312,17 @@ pub fn compose_i420(buffer: &mut I420Buffer, mask: &[f32]) {
 
 /// Keeps the person (mask near 1) sharp and replaces the rest with a blurred copy; `mask` is `MASK_WIDTH` x `MASK_HEIGHT`.
 pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
-    let (background, small_width, small_height) = blurred_background(rgba, width, height);
-    compose_over(rgba, width, height, mask, &background, small_width, small_height);
+    let matte = refine_rgba(mask, rgba, width, height);
+    compose_blurred(rgba, width, height, &matte);
 }
 
-pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, mask: &[f32], covered: &[u8]) {
-    compose_over(rgba, width, height, mask, covered, width, height);
+fn compose_blurred(rgba: &mut [u8], width: usize, height: usize, matte: &Matte) {
+    let (background, small_width, small_height) = blurred_background(rgba, width, height);
+    compose_over(rgba, width, height, matte, &background, small_width, small_height);
+}
+
+pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, matte: &Matte, covered: &[u8]) {
+    compose_over(rgba, width, height, matte, covered, width, height);
 }
 
 /// Shared between the UI command and the camera thread.
@@ -441,11 +428,11 @@ impl BlurStage {
         self.covered.is_some()
     }
 
-    pub fn compose(&mut self, rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
+    pub fn compose(&mut self, rgba: &mut [u8], width: usize, height: usize, matte: &Matte) {
         self.refresh_covered(width, height);
         match &self.covered {
-            Some(covered) => compose_image(rgba, width, height, mask, &covered.rgb),
-            None => compose(rgba, width, height, mask),
+            Some(covered) => compose_image(rgba, width, height, matte, &covered.rgb),
+            None => compose_blurred(rgba, width, height, matte),
         }
     }
 }
@@ -511,7 +498,9 @@ fn smooth_into(current: &mut Vec<f32>, fresh: Vec<f32>) {
         return;
     }
     for (value, new) in current.iter_mut().zip(fresh) {
-        *value += (new - *value) * (1. - MASK_SMOOTHING);
+        let change = new - *value;
+        let smoothing = MASK_SMOOTHING * (1. - change.abs() * MOTION_GAIN).max(0.);
+        *value += change * (1. - smoothing);
     }
 }
 
@@ -744,7 +733,7 @@ mod tests {
     fn the_person_stays_and_the_picture_replaces_everything_else() {
         let original = checkerboard();
         let mut replaced = original.clone();
-        compose_image(&mut replaced, WIDTH, HEIGHT, &oval_mask(), &cover_of([10, 120, 200]));
+        compose_image(&mut replaced, WIDTH, HEIGHT, &refine_rgba(&oval_mask(), &original, WIDTH, HEIGHT), &cover_of([10, 120, 200]));
         let (center_x, center_y) = (WIDTH / 2, HEIGHT / 2);
         assert_eq!(pixel(&replaced, center_x, center_y), pixel(&original, center_x, center_y));
         for (x, y) in [(2, 2), (WIDTH - 3, HEIGHT - 3), (2, HEIGHT - 3)] {
@@ -756,17 +745,18 @@ mod tests {
     fn the_picture_edge_is_feathered_like_the_blur_edge() {
         let original = checkerboard();
         let mut replaced = original.clone();
-        compose_image(&mut replaced, WIDTH, HEIGHT, &oval_mask(), &cover_of([0, 0, 0]));
+        compose_image(&mut replaced, WIDTH, HEIGHT, &refine_rgba(&oval_mask(), &original, WIDTH, HEIGHT), &cover_of([0, 0, 0]));
         let edge_row = HEIGHT / 2;
         let switches = (0..WIDTH - 1)
             .filter(|&x| pixel(&replaced, x, edge_row) != pixel(&original, x, edge_row) && pixel(&replaced, x + 1, edge_row) == pixel(&original, x + 1, edge_row))
             .count();
         assert!(switches <= 2);
         let mut everyone = original.clone();
-        compose_image(&mut everyone, WIDTH, HEIGHT, &vec![1.; MASK_WIDTH * MASK_HEIGHT], &cover_of([0, 0, 0]));
+        compose_image(&mut everyone, WIDTH, HEIGHT, &refine_rgba(&vec![1.; MASK_WIDTH * MASK_HEIGHT], &original, WIDTH, HEIGHT), &cover_of([0, 0, 0]));
         assert_eq!(everyone, original);
+        let empty = refine_rgba(&vec![0.; MASK_WIDTH * MASK_HEIGHT], &original, WIDTH, HEIGHT);
         let mut nobody = original;
-        compose_image(&mut nobody, WIDTH, HEIGHT, &vec![0.; MASK_WIDTH * MASK_HEIGHT], &cover_of([0, 0, 0]));
+        compose_image(&mut nobody, WIDTH, HEIGHT, &empty, &cover_of([0, 0, 0]));
         assert!(nobody.chunks(CHANNELS).all(|pixel| pixel[..3] == [0, 0, 0] && pixel[3] == 255));
     }
 
