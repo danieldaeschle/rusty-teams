@@ -70,7 +70,7 @@ pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAU
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use reminder::{MeetingToasts, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};
-pub use stage_layout::{FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, contain_size, filmstrip, focus_stage_size, gallery_grid, split_overflow};
+pub use stage_layout::{FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, contain_size, filmstrip, focus_stage_size, gallery_grid, share_strip, split_overflow};
 pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use recording_menu::{RecordAction, RecordingChip, record_actions, recording_chip};
 pub use report::load_enabled as load_report_enabled;

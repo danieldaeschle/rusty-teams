@@ -56,7 +56,7 @@ use crate::timeline::{Timeline, TimelineEntry};
 use crate::transfer::{TransferEvent, TransferTarget};
 use crate::video_frame::VideoKey;
 use crate::video_layout::{
-    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, is_share_mid, offer_plan, one_to_one_plan,
+    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, offer_plan, one_to_one_plan,
 };
 use crate::send_control::{RequestFilter, parse_request};
 use crate::video_send::{LocalVideo, SendSource, VideoMode};
@@ -1721,7 +1721,7 @@ async fn drive(
                 }
             },
             _ = stats_tick.tick(), if remote_set => {
-                let snapshot = collect_stats(&current.peer).await;
+                let snapshot = collect_stats(&current.peer, &layout_plan.screen_share_mids).await;
                 ticks += 1;
                 if caption_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     caption_deadline = None;
@@ -1805,11 +1805,12 @@ async fn drive(
                     timeline.record(
                         "stats",
                         format!(
-                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms)",
+                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms){}",
                             snapshot.inbound_packets, snapshot.inbound_bytes, snapshot.audio_level, snapshot.outbound_packets, snapshot.local_level, snapshot.echo_return_loss_enhancement, snapshot.dtls_state,
                             snapshot.video.inbound_packets, snapshot.video.inbound_frames_decoded, snapshot.video.inbound_width, snapshot.video.inbound_height,
                             snapshot.video.outbound_packets, snapshot.video.outbound_frames_encoded, snapshot.video.outbound_width, snapshot.video.outbound_height,
-                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms
+                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms,
+                            snapshot.share_receive.as_ref().filter(|_| snapshot.share_inbound_packets > 0).map(ShareReceive::summary).unwrap_or_default()
                         ),
                     );
                 }
@@ -2609,6 +2610,7 @@ struct StatsSnapshot {
     video: VideoReport,
     share_inbound_packets: u64,
     share_outbound_packets: u64,
+    share_receive: Option<ShareReceive>,
     dtls_state: String,
     tls_version: String,
     dtls_cipher: String,
@@ -2618,7 +2620,28 @@ struct StatsSnapshot {
     transport: TransportDetails,
 }
 
-async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
+#[derive(Debug, Default)]
+struct ShareReceive {
+    frames_decoded: u32,
+    key_frames_decoded: u32,
+    width: u32,
+    height: u32,
+    frames_per_second: f64,
+    pli_count: u32,
+    fir_count: u32,
+    freeze_count: u32,
+}
+
+impl ShareReceive {
+    fn summary(&self) -> String {
+        format!(
+            " share in decoded={} keyframes={} {}x{} fps={:.0} pli={} fir={} freezes={}",
+            self.frames_decoded, self.key_frames_decoded, self.width, self.height, self.frames_per_second, self.pli_count, self.fir_count, self.freeze_count
+        )
+    }
+}
+
+async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSnapshot {
     let Ok(stats) = peer.get_stats().await else {
         return StatsSnapshot::default();
     };
@@ -2641,8 +2664,18 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
             }
             RtcStats::InboundRtp(inbound) if inbound.stream.kind == "video" => {
                 snapshot.video.inbound_packets += inbound.received.packets_received;
-                if is_share_mid(&inbound.inbound.mid) {
+                if share_mids.contains(&inbound.inbound.mid) {
                     snapshot.share_inbound_packets += inbound.received.packets_received;
+                    snapshot.share_receive = Some(ShareReceive {
+                        frames_decoded: inbound.inbound.frames_decoded,
+                        key_frames_decoded: inbound.inbound.key_frames_decoded,
+                        width: inbound.inbound.frame_width,
+                        height: inbound.inbound.frame_height,
+                        frames_per_second: inbound.inbound.frames_per_second,
+                        pli_count: inbound.inbound.pli_count,
+                        fir_count: inbound.inbound.fir_count,
+                        freeze_count: inbound.inbound.freeze_count,
+                    });
                 }
                 snapshot.video.inbound_frames_decoded += u64::from(inbound.inbound.frames_decoded);
                 snapshot.video.inbound_width = snapshot.video.inbound_width.max(inbound.inbound.frame_width);
@@ -2654,7 +2687,7 @@ async fn collect_stats(peer: &PeerConnection) -> StatsSnapshot {
             }
             RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "video" => {
                 snapshot.video.outbound_packets += outbound.sent.packets_sent;
-                if is_share_mid(&outbound.outbound.mid) {
+                if share_mids.contains(&outbound.outbound.mid) {
                     snapshot.share_outbound_packets += outbound.sent.packets_sent;
                 }
                 snapshot.video.outbound_frames_encoded += u64::from(outbound.outbound.frames_encoded);

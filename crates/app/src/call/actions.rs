@@ -386,12 +386,35 @@ impl AppState {
         }
     }
 
+    fn with_known_names(&self, update: CallUpdate) -> CallUpdate {
+        let mut entries = match update {
+            CallUpdate::Roster(entries) => entries,
+            other => return other,
+        };
+        let user_id = |entry: &calling::RosterEntry| entry.mri.strip_prefix(ORGID_PREFIX).map(str::to_owned);
+        let missing: Vec<String> = entries
+            .iter()
+            .filter(|entry| entry.display_name.is_empty())
+            .filter_map(user_id)
+            .collect();
+        if !missing.is_empty() {
+            let names = crate::people::resolve_names(self, &missing);
+            for entry in entries.iter_mut().filter(|entry| entry.display_name.is_empty()) {
+                if let Some(name) = user_id(entry).and_then(|id| names.get(&id)) {
+                    entry.display_name = name.clone();
+                }
+            }
+        }
+        CallUpdate::Roster(entries)
+    }
+
     pub(super) fn apply_call_update(
         &mut self,
         call_id: u64,
         update: CallUpdate,
         cx: &mut Context<Self>,
     ) {
+        let update = self.with_known_names(update);
         let media = self.call_media.clone();
         let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
             return;
@@ -447,7 +470,11 @@ impl AppState {
             };
             crate::agent_api::note_caption(thread, &entry.id, speaker, &entry.text, cx);
         }
+        let sharer_before = call.model.screen_sharer.clone();
         call.model.apply(update);
+        if call.model.screen_sharer != sharer_before {
+            call.pictures.forget(&VideoKey::Screen, cx);
+        }
         if let Some(language) = call.model.take_ready_caption_language() {
             let _ = call.commands.send(CallCommand::SetCaptionLanguage(language));
         }

@@ -10,6 +10,8 @@ pub const SPEAKER_HOLD: Duration = Duration::from_millis(1500);
 pub const SPEAKER_SWITCH_AFTER: Duration = Duration::from_millis(800);
 pub const RECENT_SPEAKER: Duration = Duration::from_secs(3);
 const TILE_ASPECT: f32 = 16. / 9.;
+pub const STRIP_MIN_TILE_HEIGHT: f32 = 90.;
+const FIT_TOLERANCE: f32 = 0.001;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GalleryGrid {
@@ -101,6 +103,19 @@ pub fn filmstrip(
         tile_width,
         tile_height: tile_width / TILE_ASPECT,
         overflow,
+    }
+}
+
+pub fn share_strip(others: usize, own_cells: usize, strip: (f32, f32), gap: f32) -> Filmstrip {
+    let full_height = strip.0 / TILE_ASPECT;
+    let cells = (others + own_cells).max(1);
+    let height_for_all = (strip.1 - gap * (cells - 1) as f32) / cells as f32;
+    let tile_height = height_for_all.clamp(STRIP_MIN_TILE_HEIGHT.min(full_height), full_height).max(0.);
+    let capacity = (((strip.1 + gap) / (tile_height + gap) + FIT_TOLERANCE) as usize).max(1);
+    Filmstrip {
+        tile_width: tile_height * TILE_ASPECT,
+        tile_height,
+        overflow: split_overflow(others, own_cells, capacity),
     }
 }
 
@@ -336,6 +351,29 @@ mod tests {
                 hidden: 4
             }
         );
+    }
+
+    #[test]
+    fn a_tall_share_strip_shows_everyone_at_full_width() {
+        let plan = share_strip(3, 1, (232., 800.), 12.);
+        assert_eq!(plan.overflow, Overflow { shown: 3, hidden: 0 });
+        assert!((plan.tile_width - 232.).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_share_strip_shrinks_tiles_so_nine_people_and_me_fit() {
+        let plan = share_strip(9, 1, (232., 1100.), 12.);
+        assert_eq!(plan.overflow, Overflow { shown: 9, hidden: 0 });
+        assert!(plan.tile_height >= STRIP_MIN_TILE_HEIGHT);
+        assert!(10. * plan.tile_height + 9. * 12. <= 1100.01);
+    }
+
+    #[test]
+    fn a_short_share_strip_stops_at_the_minimum_height_and_adds_a_plus_tile() {
+        let plan = share_strip(9, 1, (232., 600.), 12.);
+        assert!((plan.tile_height - STRIP_MIN_TILE_HEIGHT).abs() < 0.01);
+        let capacity = ((600. + 12.) / (STRIP_MIN_TILE_HEIGHT + 12.)) as usize;
+        assert_eq!(plan.overflow, Overflow { shown: capacity - 2, hidden: 9 - (capacity - 2) });
     }
 
     #[test]

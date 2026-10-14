@@ -146,7 +146,7 @@ impl DemoScene {
 }
 
 pub const DEMO_GALLERY_GUESTS: usize = 12;
-const DEMO_SHARING_GUESTS: usize = 6;
+const DEMO_SHARING_GUESTS: usize = 9;
 const BREAKOUT_AT_TICKS: u32 = 20;
 const WHITEBOARD_AT_TICKS: u32 = 5;
 const DEMO_BOARD_URL: &str = "https://app.whiteboard.microsoft.com/me/whiteboards/demo";
@@ -309,6 +309,9 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
         control.send(CallUpdate::Lobby(false));
     }
     let mut roster = roster_of(&people, scene.cameras());
+    if scene == DemoScene::Sharing {
+        roster.push(RosterEntry { mri: calling::captions::RECORDING_BOT_MRI.to_owned(), ..RosterEntry::default() });
+    }
     if matches!(script, DemoCall::People(_)) {
         control.send(CallUpdate::ReplacementLink(
             DEMO_REPLACEMENT_LINK.to_owned(),

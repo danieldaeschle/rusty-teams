@@ -55,7 +55,6 @@ pub(super) const DISABLED_OPACITY: f32 = 0.4;
 pub(super) const TILE_GAP: f32 = 20.;
 pub(super) const GRID_PADDING: f32 = 24.;
 pub(super) const STRIP_GAP: f32 = 12.;
-pub(super) const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";

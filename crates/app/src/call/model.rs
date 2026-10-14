@@ -28,6 +28,7 @@ pub const TEST_CALL_TITLE: &str = "Test call";
 pub const ECHO_NAME: &str = "Teams echo";
 pub const ECHO_MRI: &str = calling::signaling::ECHO_BOT_MRI;
 const ORGID_PREFIX: &str = "8:orgid:";
+const BOT_PREFIX: &str = "28:";
 const AVATAR_SHARE: f32 = 0.42;
 const MIN_AVATAR: f32 = 32.;
 const MAX_AVATAR: f32 = 96.;
@@ -778,6 +779,7 @@ impl CallModel {
                         tile.name = entry.display_name.clone();
                     }
                 }
+                None if entry.mri.starts_with(BOT_PREFIX) => {}
                 None => self.tiles.push(Tile {
                     mri: entry.mri.clone(),
                     user_id: entry.mri.strip_prefix(ORGID_PREFIX).map(str::to_owned),
@@ -1432,6 +1434,23 @@ mod tests {
         ]));
         assert_eq!(model.tiles.len(), 1);
         assert_eq!(model.tiles[0].name, "Bo");
+    }
+
+    #[test]
+    fn meeting_bots_get_no_tile_but_the_called_echo_bot_keeps_its_own() {
+        let mut model = meeting_with_me();
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:me", "Me", false, false),
+            entry("8:orgid:a", "Ana", false, false),
+            entry("28:bdd75849-e0a6-4cce-8fc1-d7c0d4da43e5", "", false, false),
+        ]));
+        let names: Vec<&str> = model.strip_tiles().iter().map(|tile| tile.name.as_str()).collect();
+        assert_eq!(names, vec!["Ana"]);
+        assert_eq!(model.present_others(), 1);
+        let mut echo = CallModel::people(ECHO_NAME, &[(ECHO_MRI.into(), ECHO_NAME.into())]);
+        echo.apply(CallUpdate::Roster(vec![entry(ECHO_MRI, "", false, false)]));
+        assert_eq!(echo.tiles.len(), 1);
+        assert_eq!(echo.tiles[0].state, TileState::Present);
     }
 
     #[test]

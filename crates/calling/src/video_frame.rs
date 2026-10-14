@@ -11,7 +11,7 @@ use crate::control::CallUpdate;
 pub const PERSON_FPS: u32 = 30;
 pub const SCREEN_FPS: u32 = 15;
 pub const PERSON_MAX_WIDTH: u32 = 640;
-pub const SCREEN_MAX_WIDTH: u32 = 1600;
+pub const SCREEN_MAX_WIDTH: u32 = 2560;
 const BYTES_PER_PIXEL: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

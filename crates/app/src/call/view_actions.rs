@@ -78,10 +78,11 @@ impl AppState {
     }
 
     fn sync_video_wants(&mut self) {
+        let strip_width = self.call_strip_width;
         let Some(call) = self.call.as_mut() else {
             return;
         };
-        let wants = video_wants(&call.model, measured_stage(call));
+        let wants = video_wants(&call.model, measured_stage(call), strip_width);
         if wants != call.sent_wants {
             let _ = call.commands.send(CallCommand::SetVideoWants(wants.clone()));
             call.sent_wants = wants;

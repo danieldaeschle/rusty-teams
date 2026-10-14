@@ -46,7 +46,7 @@ impl CallPictures {
     pub fn live(&self, key: &VideoKey, now: Instant) -> Option<Arc<RenderImage>> {
         self.shown
             .get(key)
-            .filter(|shown| now.saturating_duration_since(shown.updated) < STALE_AFTER)
+            .filter(|shown| *key == VideoKey::Screen || now.saturating_duration_since(shown.updated) < STALE_AFTER)
             .map(|shown| shown.image.clone())
     }
 

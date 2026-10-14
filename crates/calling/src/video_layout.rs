@@ -17,9 +17,6 @@ pub const CAMERA_MID: &str = "1";
 pub const SHARE_MID: &str = "11";
 pub const ONE_TO_ONE_SHARE_MID: &str = "2";
 
-pub fn is_share_mid(mid: &str) -> bool {
-    mid == SHARE_MID || mid == ONE_TO_ONE_SHARE_MID
-}
 const CAMERA_LINE_LABEL: &str = "main-video";
 const SHARE_LINE_LABEL: &str = "applicationsharing-video";
 const CAMERA_STREAM: &str = "camera";

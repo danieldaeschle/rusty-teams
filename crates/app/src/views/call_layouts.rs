@@ -14,13 +14,13 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::call_organizer::render_focus_stage;
 use super::call_view::{
-    GRID_PADDING, STRIP_GAP, STRIP_VISIBLE, TILE_GAP, own_tile, person_tile,
+    GRID_PADDING, STRIP_GAP, TILE_GAP, own_tile, person_tile,
 };
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
     ActiveCall, CallLayout, CallModel, FILMSTRIP_MAX, Filmstrip, Focus, GALLERY_MAX, Overflow, Tile, TileSize,
-    filmstrip, focus_stage_size, gallery_grid, shown_bubbles, split_overflow,
+    filmstrip, focus_stage_size, gallery_grid, share_strip, shown_bubbles, split_overflow,
 };
 use calling::{TileDetail, VideoWant};
 use crate::theme;
@@ -497,33 +497,52 @@ fn speaker_body(
         .into_any_element()
 }
 
+struct StripSplit<'a> {
+    width: f32,
+    others: Vec<&'a Tile>,
+    plan: Filmstrip,
+}
+
+fn strip_split(model: &CallModel, strip_width: f32, stage: (f32, f32)) -> StripSplit<'_> {
+    let available = (stage.0 - 2. * GRID_PADDING, (stage.1 - 2. * GRID_PADDING).max(0.));
+    let width = strip_width.min(((available.0 - TILE_GAP) / 2.).max(0.));
+    let others: Vec<&Tile> = model
+        .strip_tiles()
+        .into_iter()
+        .filter(|tile| !model.hidden_for_no_video(tile))
+        .collect();
+    let plan = share_strip(others.len(), model.own_cells(), (width, available.1), STRIP_GAP);
+    StripSplit { width, others, plan }
+}
+
 fn people_strip(
     app: &Entity<AppState>,
     state: &AppState,
     model: &CallModel,
     now: Instant,
-    available: (f32, f32),
+    stage: (f32, f32),
 ) -> Stateful<Div> {
-    let strip_width = state.call_strip_width.min(((available.0 - TILE_GAP) / 2.).max(0.));
-    let tile = TileSize::sixteen_by_nine(strip_width);
-    let mut cells: Vec<AnyElement> = model
-        .strip_tiles()
-        .into_iter()
-        .filter(|tile_model| !model.hidden_for_no_video(tile_model))
-        .map(|remote| person_tile(app, state, model, remote, tile, now))
+    let StripSplit { width, others, plan } = strip_split(model, state.call_strip_width, stage);
+    let size = TileSize::sixteen_by_nine(plan.tile_width);
+    let shown = &others[..plan.overflow.shown];
+    let mut cells: Vec<AnyElement> = shown
+        .iter()
+        .map(|remote| person_tile(app, state, model, remote, size, now))
         .collect();
     if model.own_cells() > 0 {
         let own_index = model.own_cell_index(cells.len());
-        cells.insert(own_index, own_tile(app, state, model, tile, now));
+        cells.insert(own_index, own_tile(app, state, model, size, now));
+    }
+    if plan.overflow.hidden > 0 {
+        cells.push(overflow_tile(app, state, size, &others[plan.overflow.shown..]));
     }
     v_flex()
         .id("call-strip")
         .debug_selector(|| "shell/islands/main/call-stage/share-strip".into())
         .flex_none()
-        .w(px(tile.width))
-        .max_h(px((STRIP_VISIBLE * (tile.height + STRIP_GAP) - STRIP_GAP).min(available.1)))
+        .w(px(width))
+        .items_center()
         .gap(px(STRIP_GAP))
-        .overflow_y_scroll()
         .children(cells)
 }
 
@@ -582,13 +601,7 @@ fn share_body(
         })
         .child(share)
         .when(layout != CallLayout::Content, |row| {
-            row.child(strip_divider(app, dragging)).child(people_strip(
-                app,
-                state,
-                model,
-                now,
-                (stage.0 - 2. * GRID_PADDING, stage.1 - 2. * GRID_PADDING),
-            ))
+            row.child(strip_divider(app, dragging)).child(people_strip(app, state, model, now, stage))
         })
         .into_any_element()
 }
@@ -599,15 +612,14 @@ fn want(tile: &Tile, detail: TileDetail) -> VideoWant {
     VideoWant { mri: tile.mri.clone(), detail }
 }
 
-pub fn video_wants(model: &CallModel, stage: (f32, f32)) -> Vec<VideoWant> {
+pub fn video_wants(model: &CallModel, stage: (f32, f32), strip_width: f32) -> Vec<VideoWant> {
     if model.has_content() {
         if model.effective_layout() == CallLayout::Content {
             return Vec::new();
         }
-        return model
-            .strip_tiles()
-            .into_iter()
-            .filter(|tile| !model.hidden_for_no_video(tile))
+        let split = strip_split(model, strip_width, stage);
+        return split.others[..split.plan.overflow.shown]
+            .iter()
             .map(|tile| want(tile, TileDetail::Small))
             .collect();
     }
@@ -675,6 +687,7 @@ mod tests {
         CallLayout, CallModel, FILMSTRIP_TILE_MAX, GALLERY_MAX, GRID_PADDING, TILE_GAP, filmstrip, split_overflow,
         video_wants,
     };
+    use crate::call::STRIP_DEFAULT_WIDTH;
 
     const STAGE: (f32, f32) = (1400., 800.);
 
@@ -711,7 +724,7 @@ mod tests {
 
     #[test]
     fn a_small_gallery_asks_for_large_pictures() {
-        let wants = video_wants(&crowd(3), STAGE);
+        let wants = video_wants(&crowd(3), STAGE, STRIP_DEFAULT_WIDTH);
         assert_eq!(wants.len(), 3);
         assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Stage));
     }
@@ -719,7 +732,7 @@ mod tests {
     #[test]
     fn a_big_gallery_asks_for_small_pictures_and_skips_the_plus_n_people() {
         let model = crowd(14);
-        let wants = video_wants(&model, STAGE);
+        let wants = video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH);
         assert_eq!(wants.len(), split_overflow(14, 1, GALLERY_MAX).shown);
         assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
         let hidden: Vec<&str> = model.layout_tiles()[wants.len()..].iter().map(|tile| tile.mri.as_str()).collect();
@@ -730,7 +743,7 @@ mod tests {
     fn people_hidden_for_having_no_video_get_no_picture_request() {
         let mut model = meeting(vec![person(0, true), person(1, false), person(2, false)]);
         model.view.hide_no_video = true;
-        let wants = video_wants(&model, STAGE);
+        let wants = video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH);
         assert_eq!(wants.iter().map(|want| want.mri.as_str()).collect::<Vec<_>>(), vec!["8:orgid:p0"]);
     }
 
@@ -740,7 +753,7 @@ mod tests {
         model.view.choose(CallLayout::Speaker);
         model.refresh_layout(Instant::now());
         let focus = model.speaker_focus().expect("a stage person").mri;
-        let wants = video_wants(&model, STAGE);
+        let wants = video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH);
         assert_eq!(wants[0], VideoWant { mri: focus.clone(), detail: TileDetail::Stage });
         assert_eq!(wants.len(), 5);
         assert!(wants[1..].iter().all(|want| want.detail == TileDetail::Small && want.mri != focus));
@@ -751,7 +764,7 @@ mod tests {
         let mut model = crowd(12);
         model.view.choose(CallLayout::Speaker);
         model.refresh_layout(Instant::now());
-        let wants = video_wants(&model, (500., 800.));
+        let wants = video_wants(&model, (500., 800.), STRIP_DEFAULT_WIDTH);
         let fitting = filmstrip(11, 1, 500. - 2. * GRID_PADDING, TILE_GAP, FILMSTRIP_TILE_MAX).overflow.shown;
         assert!(fitting < 11);
         assert_eq!(wants.len(), 1 + fitting);
@@ -761,10 +774,19 @@ mod tests {
     fn next_to_shared_content_everybody_in_the_strip_is_small_and_content_focus_wants_nobody() {
         let mut model = crowd(3);
         model.apply(CallUpdate::ScreenShare(Some("8:orgid:p1".into())));
-        let wants = video_wants(&model, STAGE);
+        let wants = video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH);
         assert_eq!(wants.len(), 3);
         assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
         model.view.choose(CallLayout::Content);
-        assert!(video_wants(&model, STAGE).is_empty());
+        assert!(video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH).is_empty());
+    }
+
+    #[test]
+    fn a_full_share_strip_wants_video_for_every_shown_tile_and_none_behind_the_plus_tile() {
+        let mut model = crowd(9);
+        model.apply(CallUpdate::ScreenShare(Some("8:orgid:p1".into())));
+        assert_eq!(video_wants(&model, (1400., 1100.), STRIP_DEFAULT_WIDTH).len(), 9);
+        let short = video_wants(&model, (1400., 600.), STRIP_DEFAULT_WIDTH);
+        assert!(short.len() >= 3 && short.len() < 9, "{} wants", short.len());
     }
 }
