@@ -30,6 +30,7 @@ const SMALL_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 920, max_fps: 3000,
 const SCREEN_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 8160, max_fps: 1500, max_mbps: 135_000 };
 const SUBSCRIBE_PROFILE: &str = "64001f";
 const SIMULCAST_RIDS: [&str; 3] = ["1", "2", "3"];
+const SIMULCAST_START_SCALES: [f64; 3] = [4.0, 2.0, 1.0];
 const SIMULCAST_SCALABILITY: &str = "L1T1";
 const THREE_LAYER_MIN_FS: u32 = 2040;
 const SEND_CAPABILITY_FPS: u32 = 30;
@@ -118,9 +119,10 @@ fn add_line(
 fn simulcast_encodings() -> Vec<RtpEncodingParameters> {
     SIMULCAST_RIDS
         .iter()
-        .map(|rid| RtpEncodingParameters {
+        .zip(SIMULCAST_START_SCALES)
+        .map(|(rid, scale)| RtpEncodingParameters {
             rid: (*rid).to_owned(),
-            scale_resolution_down_by: Some(1.0),
+            scale_resolution_down_by: Some(scale),
             scalability_mode: Some(SIMULCAST_SCALABILITY.to_owned()),
             ..RtpEncodingParameters::default()
         })
