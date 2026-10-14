@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::transfer::Replacement;
+
 const ACTIVE: &str = "active";
 const AUDIO: &str = "audio";
 const VIDEO: &str = "video";
@@ -82,6 +84,7 @@ pub struct Member {
     pub role: Option<MeetingRole>,
     pub limits: AttendeeLimits,
     pub captions: Option<CaptionBot>,
+    pub replacement: Option<Replacement>,
     version: u64,
 }
 
@@ -167,6 +170,13 @@ impl Roster {
             self.members.retain(|member| listed.contains_key(&member.mri) || member.version > sequence);
         }
         *self != before
+    }
+
+    pub fn transfer_replacement(&self, own_mri: &str) -> Option<Replacement> {
+        self.members
+            .iter()
+            .filter(|member| member.mri != own_mri && !member.mri.starts_with(BOT_PREFIX) && !member.in_lobby)
+            .find_map(|member| member.replacement.clone())
     }
 
     pub fn hand_of(&self, mri: &str) -> Option<&RaisedHand> {
@@ -279,8 +289,17 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
             camera_released: published_state(participant, &endpoints, CAMERA_RELEASED),
         },
         captions: mri.starts_with(BOT_PREFIX).then(|| caption_bot(mri, &endpoints)).flatten(),
+        replacement: in_call.iter().copied().chain(&endpoints).find_map(|endpoint| leg_replacement(endpoint)),
         version,
     }
+}
+
+fn leg_replacement(endpoint: &Value) -> Option<Replacement> {
+    let link = endpoint["callLinks"]["replacement"].as_str().filter(|link| !link.is_empty())?;
+    Some(Replacement {
+        link: link.to_owned(),
+        participant_id: endpoint["participantId"].as_str().map(str::to_owned),
+    })
 }
 
 fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
@@ -693,5 +712,28 @@ mod tests {
         assert_eq!(roster.name_of("8:orgid:abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("zzz"), None);
+    }
+
+    #[test]
+    fn the_transfer_replacement_is_the_other_persons_call_leg() {
+        let mut roster = Roster::default();
+        let leg = |participant_id: &str, link: &str| json!({
+            "version": 1,
+            "state": "active",
+            "endpoints": {"ep": {"participantId": participant_id, "callLinks": {"replacement": link}, "call": {}}},
+        });
+        roster.apply(&delta(json!({
+            "8:orgid:me": leg("leg-me", "https://cc/me/replacement"),
+            "28:bot": leg("leg-bot", "https://cc/bot/replacement"),
+            "8:orgid:ana": leg("leg-ana", "https://cc/ana/replacement"),
+        })));
+        assert_eq!(
+            roster.transfer_replacement("8:orgid:me"),
+            Some(Replacement { link: "https://cc/ana/replacement".into(), participant_id: Some("leg-ana".into()) })
+        );
+        assert_eq!(roster.transfer_replacement("8:orgid:ana").map(|replacement| replacement.participant_id), Some(Some("leg-me".into())));
+        let mut without_links = Roster::default();
+        without_links.apply(&delta(json!({"8:orgid:ana": participant("Ana", 1, "active", false, 10)})));
+        assert_eq!(without_links.transfer_replacement("8:orgid:me"), None);
     }
 }

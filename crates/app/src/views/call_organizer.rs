@@ -46,7 +46,7 @@ fn dark_text() -> Hsla {
     hsla(0., 0., 0.08, 1.)
 }
 
-pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) -> Stateful<Div> {
+pub(super) fn pill(id: impl Into<ElementId>, label: impl Into<SharedString>, filled: bool) -> Stateful<Div> {
     let (background, foreground) = if filled {
         (dark_text(), theme::white())
     } else {
@@ -66,7 +66,7 @@ pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) 
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
-        .child(label)
+        .child(label.into())
 }
 
 pub fn lobby_text(waiting: usize) -> String {

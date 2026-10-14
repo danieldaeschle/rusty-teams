@@ -14,10 +14,10 @@ use super::demo::{
     DemoCall, DemoScene, demo_caller, demo_guests, demo_ring, demo_video_ring, start_demo_call,
     start_demo_scene_call,
 };
-use super::features::room_closed_move;
+use super::features::{TransferCandidate, room_closed_move};
 use super::media::CallMedia;
 use super::mic::save_mic;
-use super::model::{ActiveCall, CallKind, CallModel, ended_notice};
+use super::model::{ActiveCall, CallKind, CallModel, ConsultTransfer, ended_notice};
 use super::prejoin::{DemoMeeting, MeetingJoin};
 use super::report::{
     CallRecorder, OwnIdentity, SETTING_META_KEY, SharedRecorder, report_directory, save_report, shared,
@@ -35,6 +35,8 @@ const READ_ONLY_NOTICE: &str = "Calls are off in read-only mode";
 const NOT_CALLABLE_NOTICE: &str = "This chat cannot be called";
 pub(super) const MEETING_UNAVAILABLE_NOTICE: &str = "This meeting cannot be joined";
 const ANSWER_FAILED_NOTICE: &str = "Could not answer the call";
+const CONSULT_ENDED_NOTICE: &str = "The consultation ended";
+const DEMO_CONSULT_TARGET: (&str, &str) = ("8:orgid:demo-guest-1", "Jonas Ortega");
 const MEETING_KIND: &str = "meeting";
 const DEMO_LOBBY_MEETING: &str = "demo-chat-meeting-retro";
 const DEMO_CROWD: usize = 11;
@@ -72,6 +74,15 @@ fn camera_meta(choice: &DeviceChoice) -> &str {
     match choice {
         DeviceChoice::SystemDefault => DEFAULT_CAMERA_META,
         DeviceChoice::Device(key) => key,
+    }
+}
+
+fn demo_consult_target() -> TransferCandidate {
+    TransferCandidate {
+        mri: DEMO_CONSULT_TARGET.0.to_owned(),
+        name: DEMO_CONSULT_TARGET.1.to_owned(),
+        user_id: None,
+        chat_id: "demo-chat-jonas".to_owned(),
     }
 }
 
@@ -357,15 +368,15 @@ impl AppState {
                 cx.background_executor().timer(TIMER_REFRESH).await;
                 ticks += 1;
                 let running = this.update(cx, |state, cx| {
-                    let running = state.call.as_ref().is_some_and(|call| call.id == call_id);
-                    if running {
+                    let visible = state.call.as_ref().is_some_and(|call| call.id == call_id);
+                    if visible {
                         if ticks.is_multiple_of(SHARE_SOURCES_EVERY_TICKS) {
                             state.refresh_share_sources();
                         }
                         state.tick_call_layout(cx);
                         CallMedia::changed(&state.call_media, cx);
                     }
-                    running
+                    visible || state.is_held_call(call_id)
                 });
                 if !running.unwrap_or(false) {
                     return;
@@ -378,8 +389,9 @@ impl AppState {
     fn end_orphaned_call(&mut self, call_id: u64, cx: &mut Context<Self>) {
         let still_open = self
             .call
-            .as_ref()
-            .is_some_and(|call| call.id == call_id && call.model.is_active());
+            .iter()
+            .chain(&self.held_call)
+            .any(|call| call.id == call_id && call.model.is_active());
         if still_open {
             let reason = EndReason::Failed("The call stopped unexpectedly".to_owned());
             self.apply_call_update(call_id, CallUpdate::State(CallState::Ended { reason }), cx);
@@ -415,6 +427,10 @@ impl AppState {
         cx: &mut Context<Self>,
     ) {
         let update = self.with_known_names(update);
+        if self.is_held_call(call_id) {
+            self.apply_held_call_update(update, cx);
+            return;
+        }
         let media = self.call_media.clone();
         let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
             return;
@@ -451,6 +467,13 @@ impl AppState {
                     dialog.loaded(result);
                 }
                 cx.notify();
+                return;
+            }
+            CallUpdate::ReplacementLink(replacement) => {
+                if let Some(consult) = call.consult.as_mut() {
+                    consult.replacement = Some(replacement);
+                    cx.notify();
+                }
                 return;
             }
             CallUpdate::MeetingOptionsSaved(result) => {
@@ -492,20 +515,29 @@ impl AppState {
             return;
         };
         let elapsed = call.model.elapsed(Instant::now());
-        let notice = ended_notice(&reason, elapsed, &call.model.peer_name);
+        let consult = call.consult.take();
+        let notice = match &consult {
+            Some(consult) if consult.transfer == ConsultTransfer::Done => {
+                format!("Call transferred to {}", consult.target.1)
+            }
+            Some(_) if self.held_call.is_some() => CONSULT_ENDED_NOTICE.to_owned(),
+            _ => ended_notice(&reason, elapsed, &call.model.peer_name),
+        };
+        let back_to_held = consult
+            .as_ref()
+            .is_some_and(|consult| consult.transfer != ConsultTransfer::Done);
         let next_move = call
             .pending_move
             .take()
             .or_else(|| room_closed_move(call, &reason));
-        let consult = call.consult.take();
         call.pictures.clear(cx);
         if let Some(thread) = call.chat_thread() {
             crate::agent_api::clear_captions(thread, cx);
         }
         self.call = None;
         self.transcript_panel = None;
-        if let Some(consult) = consult {
-            let _ = consult.commands.send(CallCommand::Hangup);
+        if back_to_held {
+            self.call = self.held_call.take();
         }
         match next_move {
             Some(next_move) => self.join_moved_call(next_move, cx),
@@ -1059,6 +1091,14 @@ impl AppState {
         if scene == DemoScene::Gallery {
             self.queue_demo_bubbles(conversation_id, cx);
         }
+        if scene == DemoScene::Consult {
+            if let Some(call) = self.call.as_mut() {
+                call.model.apply(CallUpdate::State(CallState::Connected {
+                    since: Instant::now(),
+                }));
+            }
+            self.start_consult(demo_consult_target(), cx);
+        }
     }
 
     fn signal_ring(&mut self, ring_id: u64, signal: RingSignal, cx: &mut Context<Self>) {
@@ -1282,7 +1322,7 @@ mod tests {
     use crate::call::{CaptionPosition, CaptionSize, RecordAction, ViewSettings};
     use crate::call::demo::demo_ring;
     use crate::call::features::room_closed_move;
-    use crate::call::model::{BreakoutState, ConsultCall};
+    use crate::call::model::BreakoutState;
     use crate::data::Person;
 
     fn app_with_call(cx: &mut TestAppContext) -> Entity<AppState> {
@@ -1876,7 +1916,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_blind_transfer_names_the_target_and_a_consulted_one_carries_the_replacement_link(
+    fn a_blind_transfer_names_the_target(
         cx: &mut TestAppContext,
     ) {
         let (app, mut control) = app_with_commands(cx, live_one_to_one(), None);
@@ -1895,37 +1935,6 @@ mod tests {
                 replaces: None
             })
         );
-        let (consulting, mut consult_control) = app_with_commands(cx, live_one_to_one(), None);
-        let (consult_handle, _consult_updates) = call_channel();
-        cx.update(|cx| {
-            consulting.update(cx, |state, cx| {
-                state.call.as_mut().unwrap().consult = Some(ConsultCall {
-                    id: 8,
-                    target: ("8:orgid:ana".into(), "Ana".into()),
-                    commands: consult_handle.commands,
-                    state: CallState::Connecting,
-                    replacement: Some("https://cc.skype.com/replacement".into()),
-                    transferring: false,
-                });
-                state.transfer_consulted(cx);
-                state.call.as_mut().unwrap().consult.as_mut().unwrap().state =
-                    CallState::Connected {
-                        since: Instant::now(),
-                    };
-                state.transfer_consulted(cx);
-            })
-        });
-        assert_eq!(
-            consult_control.try_recv_command(),
-            Some(CallCommand::Transfer {
-                target: calling::Callee {
-                    mri: "8:orgid:ana".into(),
-                    display_name: "Ana".into()
-                },
-                replaces: Some("https://cc.skype.com/replacement".into()),
-            })
-        );
-        assert_eq!(consult_control.try_recv_command(), None);
     }
 
     #[gpui_kit::test]

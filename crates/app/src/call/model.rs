@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use calling::{
     AttendeeLimits, CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
     DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingCapability, MeetingRole,
-    MeetingTarget, Progress, Reaction, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
     VideoWant,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -72,28 +72,40 @@ pub struct PendingMove {
 }
 
 pub struct ConsultCall {
-    pub id: u64,
     pub target: (String, String),
-    pub commands: UnboundedSender<CallCommand>,
-    pub state: CallState,
-    pub replacement: Option<String>,
-    pub transferring: bool,
+    pub held_name: String,
+    pub replacement: Option<Replacement>,
+    pub transfer: ConsultTransfer,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ConsultTransfer {
+    #[default]
+    Idle,
+    Pending,
+    Done,
 }
 
 impl ConsultCall {
-    pub fn connected(&self) -> bool {
-        matches!(self.state, CallState::Connected { .. })
+    pub fn new(target: (String, String), held_name: String) -> Self {
+        ConsultCall {
+            target,
+            held_name,
+            replacement: None,
+            transfer: ConsultTransfer::Idle,
+        }
     }
 
-    pub fn ready_to_transfer(&self) -> bool {
-        self.connected() && self.replacement.is_some()
+    pub fn ready_to_transfer(&self, model: &CallModel) -> bool {
+        model.is_live() && self.replacement.is_some() && self.transfer == ConsultTransfer::Idle
     }
 
-    pub fn status_text(&self) -> String {
-        let name = &self.target.1;
-        match &self.state {
-            CallState::Connected { .. } => format!("Consulting {name}"),
-            _ => format!("Calling {name}..."),
+    pub fn banner_text(&self) -> String {
+        match self.transfer {
+            ConsultTransfer::Idle => format!("{} is on hold", self.held_name),
+            ConsultTransfer::Pending | ConsultTransfer::Done => {
+                format!("Transferring {} to {}...", self.held_name, self.target.1)
+            }
         }
     }
 }
@@ -504,7 +516,8 @@ impl CallModel {
             | CallUpdate::MeetingOptionsSaved(_)
             | CallUpdate::WhiteboardUrl(_)
             | CallUpdate::BreakoutMove(_)
-            | CallUpdate::ReplacementLink(_) => {}
+            | CallUpdate::ReplacementLink(_)
+            | CallUpdate::TransferResult { .. } => {}
         }
     }
 
@@ -2183,23 +2196,17 @@ mod tests {
 
     #[test]
     fn a_consultation_can_transfer_once_connected_with_a_replacement_link() {
-        let (handle, _control) = calling::call_channel();
-        let mut consult = ConsultCall {
-            id: 3,
-            target: ("8:orgid:ana".into(), "Ana".into()),
-            commands: handle.commands,
-            state: CallState::Connecting,
-            replacement: None,
-            transferring: false,
-        };
-        assert_eq!(consult.status_text(), "Calling Ana...");
-        assert!(!consult.ready_to_transfer());
-        consult.state = CallState::Connected {
+        let mut model = CallModel::people("Ana", &[("8:orgid:ana".into(), "Ana".into())]);
+        let mut consult = ConsultCall::new(("8:orgid:ana".into(), "Ana".into()), "Chris".into());
+        assert_eq!(consult.banner_text(), "Chris is on hold");
+        consult.replacement = Some(Replacement::of_call("https://cc/replacement"));
+        assert!(!consult.ready_to_transfer(&model));
+        model.apply(CallUpdate::State(CallState::Connected {
             since: Instant::now(),
-        };
-        assert_eq!(consult.status_text(), "Consulting Ana");
-        assert!(!consult.ready_to_transfer());
-        consult.replacement = Some("https://cc/replacement".into());
-        assert!(consult.ready_to_transfer());
+        }));
+        assert!(consult.ready_to_transfer(&model));
+        consult.transfer = ConsultTransfer::Pending;
+        assert!(!consult.ready_to_transfer(&model));
+        assert_eq!(consult.banner_text(), "Transferring Chris to Ana...");
     }
 }

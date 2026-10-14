@@ -4,6 +4,7 @@ mod background;
 mod bubbles;
 mod calendar;
 mod caption_style;
+mod consult;
 mod demo;
 mod demo_scene;
 mod features;
@@ -61,6 +62,8 @@ pub use model::{
     ActiveCall, CAPTION_SHOWN, CallKind, CallModel, Focus, REACTION_SHOWN, Tile, TileSize,
     TileState,
 };
+#[cfg(test)]
+pub use model::ConsultCall;
 pub use options_dialog::OptionsDialog;
 pub use overlay::CallWindows;
 pub use prejoin::{AudioChoice, JoinOptions, PendingJoin, load_join_options};

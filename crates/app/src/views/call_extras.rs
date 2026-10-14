@@ -164,11 +164,19 @@ pub fn whiteboard_stage(app: &Entity<AppState>, model: &CallModel) -> Option<Any
 }
 
 pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyElement> {
-    let consult = state.call.as_ref()?.consult.as_ref()?;
-    let text = consult.status_text();
-    let ready = consult.ready_to_transfer();
-    let (transfer_app, cancel_app) = (app.clone(), app.clone());
-    let transfer = pill("call-consult-transfer", "Transfer now", true);
+    let call = state.call.as_ref()?;
+    let consult = call.consult.as_ref()?;
+    state.held_call.as_ref()?;
+    let ready = consult.ready_to_transfer(&call.model);
+    let first_name = consult
+        .held_name
+        .split_whitespace()
+        .next()
+        .unwrap_or("call")
+        .to_owned();
+    let (transfer_app, resume_app) = (app.clone(), app.clone());
+    let transfer = pill("call-consult-transfer", "Transfer", true)
+        .debug_selector(|| "shell/islands/main/call-header/call-consult/transfer".into());
     let transfer = if ready {
         transfer.on_click(move |_, _, cx| {
             transfer_app.update(cx, |state, cx| state.transfer_consulted(cx))
@@ -176,9 +184,13 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
     } else {
         transfer.opacity(0.5).cursor_default()
     };
+    let resume = pill("call-consult-resume", format!("Resume {first_name}"), false)
+        .debug_selector(|| "shell/islands/main/call-header/call-consult/resume".into())
+        .on_click(move |_, _, cx| resume_app.update(cx, |state, cx| state.resume_held_call(cx)));
     Some(
         h_flex()
             .id("call-consult-banner")
+            .debug_selector(|| "shell/islands/main/call-header/call-consult".into())
             .w_full()
             .h(px(BANNER_HEIGHT))
             .flex_none()
@@ -190,13 +202,9 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
             .text_color(dark_text())
             .text_size(px(13.))
             .font_weight(FontWeight::SEMIBOLD)
-            .child(text)
+            .child(div().min_w_0().truncate().child(consult.banner_text()))
             .child(transfer)
-            .child(
-                pill("call-consult-cancel", "Cancel", false).on_click(move |_, _, cx| {
-                    cancel_app.update(cx, |state, cx| state.cancel_consult(cx))
-                }),
-            )
+            .child(resume)
             .into_any_element(),
     )
 }

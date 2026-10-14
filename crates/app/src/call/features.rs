@@ -1,12 +1,12 @@
 use calling::{
-    CallCommand, CallHandle, CallSpec, CallState, Callee, EndKind, EndReason, HoldState,
+    CallCommand, CallSpec, Callee, EndKind, EndReason, HoldState,
 };
 use gpui_kit::*;
 
 use super::background::BackgroundPick;
-use super::demo::{DemoCall, start_demo_call};
+use super::demo::DemoCall;
 use super::health::HealthBanner;
-use super::model::{ActiveCall, BreakoutState, CallKind, CallModel, ConsultCall, PendingMove};
+use super::model::{ActiveCall, BreakoutState, CallKind, CallModel, PendingMove};
 use super::recording_menu::RecordAction;
 use super::target::plan_for_chat;
 use crate::app_state::{AppEvent, AppState};
@@ -206,6 +206,7 @@ impl AppState {
         self.call
             .as_ref()
             .is_some_and(|call| call.model.can_transfer() && call.consult.is_none())
+            && self.held_call.is_none()
     }
 
     pub fn open_transfer_picker(
@@ -238,142 +239,6 @@ impl AppState {
             target: callee,
             replaces: None,
         });
-    }
-
-    pub fn start_consult(&mut self, target: TransferCandidate, cx: &mut Context<Self>) {
-        self.close_transfer_picker(cx);
-        if !self.can_transfer_call() {
-            return;
-        }
-        let spec = CallSpec::People {
-            callees: vec![Callee {
-                mri: target.mri.clone(),
-                display_name: target.name.clone(),
-            }],
-            thread_id: target.chat_id.clone(),
-        };
-        let handle = if self.mode.demo {
-            Some(start_demo_call(DemoCall::People(vec![(
-                target.mri.clone(),
-                target.name.clone(),
-            )])))
-        } else {
-            self.call_launcher
-                .clone()
-                .map(|launcher| launcher.start_consult(spec))
-        };
-        let Some(CallHandle {
-            commands, updates, ..
-        }) = handle
-        else {
-            self.raise_notice("Not connected to Teams yet".to_owned(), None, cx);
-            return;
-        };
-        self.note_call_feature("consult", format!("start with {}", target.mri));
-        self.send_call_command(CallCommand::Hold(true));
-        self.call_count += 1;
-        let consult_id = self.call_count;
-        let Some(call) = self.call.as_mut() else {
-            return;
-        };
-        let call_id = call.id;
-        call.consult = Some(ConsultCall {
-            id: consult_id,
-            target: (target.mri, target.name),
-            commands,
-            state: CallState::Connecting,
-            replacement: None,
-            transferring: false,
-        });
-        self.follow_consult(call_id, consult_id, updates, cx);
-        cx.notify();
-    }
-
-    fn follow_consult(
-        &mut self,
-        call_id: u64,
-        consult_id: u64,
-        mut updates: tokio::sync::mpsc::UnboundedReceiver<calling::CallUpdate>,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            while let Some(update) = updates.recv().await {
-                if this
-                    .update(cx, |state, cx| {
-                        state.apply_consult_update(call_id, consult_id, update, cx)
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn apply_consult_update(
-        &mut self,
-        call_id: u64,
-        consult_id: u64,
-        update: calling::CallUpdate,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(call) = self.call.as_mut().filter(|call| call.id == call_id) else {
-            return;
-        };
-        let Some(consult) = call
-            .consult
-            .as_mut()
-            .filter(|consult| consult.id == consult_id)
-        else {
-            return;
-        };
-        match update {
-            calling::CallUpdate::ReplacementLink(link) => consult.replacement = Some(link),
-            calling::CallUpdate::Notice(text) => self.raise_notice(text, None, cx),
-            calling::CallUpdate::State(state) => {
-                let ended = matches!(state, CallState::Ended { .. });
-                consult.state = state;
-                if ended {
-                    let transferring = consult.transferring;
-                    call.consult = None;
-                    if !transferring {
-                        self.note_call_feature("consult", "ended without a transfer".to_owned());
-                        self.raise_notice("The consultation ended".to_owned(), None, cx);
-                        self.send_call_command(CallCommand::Hold(false));
-                    }
-                }
-            }
-            _ => {}
-        }
-        cx.notify();
-    }
-
-    pub fn transfer_consulted(&mut self, _cx: &mut Context<Self>) {
-        let Some(consult) = self
-            .call
-            .as_mut()
-            .and_then(|call| call.consult.as_mut())
-            .filter(|consult| consult.ready_to_transfer())
-        else {
-            return;
-        };
-        consult.transferring = true;
-        let (mri, name) = consult.target.clone();
-        let replaces = consult.replacement.clone();
-        self.send_call_command(CallCommand::Transfer {
-            target: Callee {
-                mri,
-                display_name: name,
-            },
-            replaces,
-        });
-    }
-
-    pub fn cancel_consult(&mut self, _cx: &mut Context<Self>) {
-        if let Some(consult) = self.call.as_ref().and_then(|call| call.consult.as_ref()) {
-            let _ = consult.commands.send(CallCommand::Hangup);
-        }
     }
 
     pub(super) fn begin_breakout_move(

@@ -78,6 +78,7 @@ pub use roster::{AttendeeLimits, MeetingRole, PublishedState, RaisedHand, Roster
 pub use sound_capture::LoopbackKind;
 pub use renegotiation::MediaPath;
 pub use signaling::{Callee, MeetingTarget};
+pub use transfer::Replacement;
 pub use diagnostics::{CallDiagnostics, SdpLine, SdpSummary, StatsSample};
 pub use devices::{AudioDevice, DeviceChoice, DeviceEntry, DeviceLists};
 pub use error::{Error, Result};

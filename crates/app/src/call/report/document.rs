@@ -345,14 +345,14 @@ impl CallRecorder {
         let mut records: Vec<FeatureRecord> = self.features.clone();
         for entry in timeline {
             if entry.label == TRANSFER_LABEL
-                && let Some(record) = records.iter_mut().rev().find(|record| record.feature == "transfer" && record.outcome == Outcome::Requested)
+                && let Some(record) = oldest_pending(&mut records, TRANSFER_LABEL)
             {
                 record.outcome = Outcome::Confirmed(entry.elapsed_ms);
             }
             let Some((_, feature)) = FEATURE_FAILURE_LABELS.iter().find(|(label, _)| entry.label == *label) else {
                 continue;
             };
-            if let Some(record) = records.iter_mut().rev().find(|record| record.feature == *feature && record.outcome == Outcome::Requested) {
+            if let Some(record) = oldest_pending(&mut records, feature) {
                 record.outcome = Outcome::Failed(entry.detail.clone());
             }
         }
@@ -375,6 +375,10 @@ impl CallRecorder {
             })
             .collect()
     }
+}
+
+fn oldest_pending<'a>(records: &'a mut [FeatureRecord], feature: &str) -> Option<&'a mut FeatureRecord> {
+    records.iter_mut().find(|record| record.feature == feature && record.outcome == Outcome::Requested)
 }
 
 fn placeholders(scrubber: &mut Scrubber, people: &[(String, String)]) -> Vec<String> {
