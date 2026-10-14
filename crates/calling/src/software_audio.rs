@@ -16,6 +16,7 @@ use crate::devices::DeviceChoice;
 use crate::error::{Error, Result};
 use crate::mic_processing::{ApmConfig, MicSettings};
 use crate::mixer::mix_frames;
+use crate::noise_stage::NoiseStage;
 use crate::pcm::SampleQueue;
 use crate::sound_capture::{LoopbackKind, start_loopback, start_microphone};
 
@@ -44,11 +45,13 @@ impl FrameSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SoftwareAudioPlan {
     pub processing: ApmConfig,
+    pub ml_noise: bool,
     pub computer_sound: bool,
 }
 
 struct Feeder {
     processing: ApmConfig,
+    ml_noise: Option<NoiseStage>,
     source: NativeAudioSource,
     microphone: FrameSource,
     computer: FrameSource,
@@ -79,6 +82,9 @@ impl Feeder {
             if !muted && let Some(processing) = processing.as_mut() {
                 let _ = processing.process_stream(&mut microphone, SAMPLE_RATE as i32, 1);
             }
+            if !muted && let Some(noise_stage) = self.ml_noise.as_mut() {
+                noise_stage.process_pcm(0, &mut microphone);
+            }
             let computer = self.computer.next_frame();
             let frame = AudioFrame {
                 data: mix_frames(&microphone, &computer, muted).into(),
@@ -99,6 +105,7 @@ pub struct SoftwareAudio {
     pub plan: SoftwareAudioPlan,
     pub loopback: Option<LoopbackKind>,
     pub warning: Option<String>,
+    pub microphone_source: Option<String>,
     microphone_muted: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     feeder: Option<std::thread::JoinHandle<()>>,
@@ -108,8 +115,13 @@ pub struct SoftwareAudio {
 
 impl SoftwareAudioPlan {
     pub fn wanted(mic: MicSettings, sharing_sound: bool, uses_devices: bool) -> Option<Self> {
-        (sharing_sound || (uses_devices && !mic.uses_device_track())).then(|| SoftwareAudioPlan {
+        Self::wanted_on(cfg!(windows), mic, sharing_sound, uses_devices)
+    }
+
+    pub fn wanted_on(windows: bool, mic: MicSettings, sharing_sound: bool, uses_devices: bool) -> Option<Self> {
+        (sharing_sound || (uses_devices && !mic.uses_device_track_on(windows))).then(|| SoftwareAudioPlan {
             processing: mic.apm_config(),
+            ml_noise: mic.ml_noise_suppression(),
             computer_sound: sharing_sound,
         })
     }
@@ -127,6 +139,7 @@ impl SoftwareAudio {
     ) -> Result<Self> {
         let mut captures = Vec::new();
         let mut warning = None;
+        let mut microphone_source = None;
         let (microphone, computer, loopback) = if mode == AudioMode::Platform {
             let computer_queue = SampleQueue::default();
             let (computer, loopback) = if plan.computer_sound {
@@ -139,11 +152,15 @@ impl SoftwareAudio {
             };
             let microphone_queue = SampleQueue::default();
             let microphone = match start_microphone(input, microphone_queue.clone()) {
-                Ok(capture) => {
-                    captures.push(capture);
+                Ok(started) => {
+                    microphone_source = Some(started.source);
+                    captures.push(started.capture);
                     FrameSource::Captured(microphone_queue)
                 }
                 Err(error) => {
+                    if !plan.computer_sound {
+                        return Err(error);
+                    }
                     warning.get_or_insert(format!("microphone not captured while sharing sound: {error}"));
                     FrameSource::Silence
                 }
@@ -170,6 +187,7 @@ impl SoftwareAudio {
         let running = Arc::new(AtomicBool::new(true));
         let feeder = Feeder {
             processing: plan.processing,
+            ml_noise: plan.ml_noise.then(NoiseStage::new),
             source,
             microphone,
             computer,
@@ -187,6 +205,7 @@ impl SoftwareAudio {
             plan,
             loopback,
             warning,
+            microphone_source,
             microphone_muted,
             running,
             feeder: Some(thread),
@@ -227,7 +246,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn synthetic_sources_start_and_stop_cleanly() {
-        let plan = SoftwareAudioPlan { processing: MicSettings::default().apm_config(), computer_sound: true };
+        let plan = SoftwareAudioPlan { processing: MicSettings::default().apm_config(), ml_noise: true, computer_sound: true };
         let audio = SoftwareAudio::start(&shared_factory(), AudioMode::Tone, 440.0, &DeviceChoice::SystemDefault, plan, true, None).unwrap();
         assert_eq!(audio.loopback, Some(LoopbackKind::Synthetic));
         assert!(audio.warning.is_none());
@@ -240,17 +259,40 @@ mod tests {
     fn the_plan_follows_sharing_and_the_mic_choice() {
         let auto = MicSettings::default();
         let off = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
-        assert_eq!(SoftwareAudioPlan::wanted(auto, false, true), None);
-        assert_eq!(SoftwareAudioPlan::wanted(off, false, false), None);
-        let mic_only = SoftwareAudioPlan::wanted(off, false, true).unwrap();
+        assert_eq!(SoftwareAudioPlan::wanted_on(false, auto, false, true), None);
+        assert_eq!(SoftwareAudioPlan::wanted_on(false, off, false, false), None);
+        let mic_only = SoftwareAudioPlan::wanted_on(false, off, false, true).unwrap();
         assert!(!mic_only.computer_sound && mic_only.processing.is_passthrough());
-        let sharing = SoftwareAudioPlan::wanted(auto, true, false).unwrap();
+        let sharing = SoftwareAudioPlan::wanted_on(false, auto, true, false).unwrap();
         assert!(sharing.computer_sound && sharing.processing.echo_canceller);
+    }
+
+    #[test]
+    fn windows_runs_the_software_path_for_every_mic_setting() {
+        for noise_suppression in NoiseSuppression::ALL {
+            for music_mode in [false, true] {
+                let mic = MicSettings { noise_suppression, music_mode };
+                assert!(SoftwareAudioPlan::wanted_on(true, mic, false, true).is_some());
+                assert!(SoftwareAudioPlan::wanted_on(true, mic, false, false).is_none());
+                assert_eq!(SoftwareAudioPlan::wanted_on(false, mic, false, true).is_some(), !mic.uses_device_track_on(false));
+            }
+        }
+    }
+
+    #[test]
+    fn rnnoise_runs_in_the_software_path_only_for_auto() {
+        let ml_noise = |noise_suppression, music_mode| {
+            SoftwareAudioPlan::wanted_on(true, MicSettings { noise_suppression, music_mode }, false, true).unwrap().ml_noise
+        };
+        assert!(ml_noise(NoiseSuppression::Auto, false));
+        assert!(!ml_noise(NoiseSuppression::Low, false));
+        assert!(!ml_noise(NoiseSuppression::Off, false));
+        assert!(!ml_noise(NoiseSuppression::Auto, true));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_microphone_only_plan_has_no_computer_sound() {
-        let plan = SoftwareAudioPlan { processing: MicSettings::default().apm_config(), computer_sound: false };
+        let plan = SoftwareAudioPlan { processing: MicSettings::default().apm_config(), ml_noise: true, computer_sound: false };
         let audio = SoftwareAudio::start(&shared_factory(), AudioMode::Silence, 440.0, &DeviceChoice::SystemDefault, plan, false, None).unwrap();
         assert_eq!(audio.loopback, None);
         tokio::time::sleep(Duration::from_millis(60)).await;

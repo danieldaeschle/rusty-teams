@@ -1336,14 +1336,14 @@ async fn drive(
                 }
                 Some(CallCommand::DisableAudio) => {
                     let audio = live.audio.as_ref().expect("audio set above");
+                    muted = apply_mute(MuteCommand::Mute, muted, audio, software_audio.as_ref(), &remote, control);
+                    audio_disabled = true;
+                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, None, false, &mut software_audio, control, timeline);
                     if audio.uses_devices() {
                         use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
                         factory.set_adm_recording_enabled(false);
                         factory.set_adm_playout_enabled(false);
                     }
-                    muted = apply_mute(MuteCommand::Mute, muted, audio, software_audio.as_ref(), &remote, control);
-                    audio_disabled = true;
-                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, None, false, &mut software_audio, control, timeline);
                     control.send(CallUpdate::ListenOnly(true));
                 }
                 Some(CallCommand::SelectInput(choice)) => {
@@ -2491,6 +2491,17 @@ fn software_wanted(
     SoftwareAudioPlan::wanted(mic_settings, sharing_sound, audio.is_some_and(AudioSetup::uses_devices))
 }
 
+fn restore_device_track(factory: &PeerConnectionFactory, input: &DeviceChoice, peer: &PeerConnection, device_track: &RtcAudioTrack, timeline: &Timeline) {
+    use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+    if cfg!(windows) && !factory.adm_recording_enabled() {
+        factory.set_adm_recording_enabled(true);
+        devices::select_input(factory, input);
+    }
+    if let Err(error) = swap_audio_track(peer, device_track) {
+        timeline.record("microphone track not restored", error.to_string());
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn sync_software_audio(
     factory: &PeerConnectionFactory,
@@ -2513,9 +2524,7 @@ fn sync_software_audio(
     *software_audio = None;
     let was_sharing_sound = running.is_some_and(|plan| plan.computer_sound);
     let Some(plan) = wanted else {
-        if let Err(error) = swap_audio_track(peer, device_track) {
-            timeline.record("microphone track not restored", error.to_string());
-        }
+        restore_device_track(factory, input, peer, device_track, timeline);
         control.send(CallUpdate::ShareSound(false));
         return;
     };
@@ -2524,6 +2533,13 @@ fn sync_software_audio(
     match started {
         Ok(audio) => {
             timeline.record("software audio", format!("{:?}, computer sound {:?}", plan.processing, audio.loopback));
+            if let Some(source) = &audio.microphone_source {
+                timeline.record("mic capture", source.clone());
+            }
+            if cfg!(windows) && audio.microphone_source.is_some() {
+                use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+                factory.set_adm_recording_enabled(false);
+            }
             if let Some(warning) = &audio.warning {
                 timeline.record("computer sound warning", warning.clone());
             }
@@ -2532,9 +2548,7 @@ fn sync_software_audio(
         }
         Err(error) => {
             timeline.record("software audio failed", error.to_string());
-            if let Err(error) = swap_audio_track(peer, device_track) {
-                timeline.record("microphone track not restored", error.to_string());
-            }
+            restore_device_track(factory, input, peer, device_track, timeline);
             if was_sharing_sound || plan.computer_sound {
                 control.send(CallUpdate::ShareSound(false));
             }

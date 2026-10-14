@@ -27,6 +27,14 @@ impl NoiseStage {
         let input: [f32; FRAME_SIZE] = std::array::from_fn(|index| samples[index]);
         self.channels[channel_index].process_frame(samples, &input);
     }
+
+    pub fn process_pcm(&mut self, channel_index: usize, samples: &mut [i16]) {
+        let mut floats: Vec<f32> = samples.iter().map(|sample| f32::from(*sample)).collect();
+        self.process(channel_index, &mut floats);
+        for (sample, processed) in samples.iter_mut().zip(floats) {
+            *sample = processed.clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+        }
+    }
 }
 
 impl Default for NoiseStage {

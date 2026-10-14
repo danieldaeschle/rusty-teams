@@ -68,7 +68,11 @@ impl MicSettings {
     }
 
     pub fn uses_device_track(self) -> bool {
-        !self.music_mode && self.noise_suppression != NoiseSuppression::Off
+        self.uses_device_track_on(cfg!(windows))
+    }
+
+    pub fn uses_device_track_on(self, windows: bool) -> bool {
+        !windows && !self.music_mode && self.noise_suppression != NoiseSuppression::Off
     }
 
     pub fn ml_noise_suppression(self) -> bool {
@@ -103,6 +107,17 @@ mod tests {
         assert!(MicSettings::default().ml_noise_suppression());
         assert!(!MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false }.ml_noise_suppression());
         assert!(!MicSettings { noise_suppression: NoiseSuppression::Auto, music_mode: true }.ml_noise_suppression());
+    }
+
+    #[test]
+    fn windows_never_uses_the_device_track() {
+        for noise_suppression in NoiseSuppression::ALL {
+            for music_mode in [false, true] {
+                let settings = MicSettings { noise_suppression, music_mode };
+                assert!(!settings.uses_device_track_on(true));
+                assert_eq!(settings.uses_device_track_on(false), !music_mode && noise_suppression != NoiseSuppression::Off);
+            }
+        }
     }
 
     #[test]

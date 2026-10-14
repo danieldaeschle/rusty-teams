@@ -26,6 +26,8 @@ pub mod luma_effects;
 pub mod matte;
 #[cfg(windows)]
 mod loopback_windows;
+#[cfg(windows)]
+mod mic_windows;
 pub mod meeting;
 pub mod meeting_options;
 pub mod mic_processing;
