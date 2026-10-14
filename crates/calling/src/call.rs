@@ -57,7 +57,7 @@ use crate::timeline::{Timeline, TimelineEntry};
 use crate::transfer::{Replacement, TransferEvent, TransferTarget};
 use crate::video_frame::VideoKey;
 use crate::video_layout::{
-    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, offer_plan, one_to_one_plan,
+    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SendCapabilityReporter, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_video_lines, offer_plan, one_to_one_plan,
 };
 use crate::send_control::{RequestFilter, parse_request};
 use crate::video_send::{LocalVideo, SendSource, VideoMode};
@@ -81,6 +81,7 @@ const MIC_STREAM: &str = "microphone";
 const DATA_CHANNEL_LABEL: &str = "main-channel";
 pub const DATA_CHANNEL_ENV: &str = "CALLING_DATA_CHANNEL";
 const CAPTION_START_LIMIT: Duration = Duration::from_secs(40);
+const SEND_CAPABILITIES_LABEL: &str = "POST applyChannelParameters";
 const BLUR_TIMING_EVERY_TICKS: u32 = TICKS_PER_SECOND * 2;
 const HEALTH_EVERY_TICKS: u32 = TICKS_PER_SECOND * 2;
 const BOT_PREFIX: &str = "28:";
@@ -855,6 +856,7 @@ async fn drive(
     let mut remote_hold = false;
     let mut same_peer: Option<SamePeerOffer> = None;
     let mut send_requests = RequestFilter::default();
+    let mut send_capabilities = SendCapabilityReporter::default();
     let mut same_peer_deadline: Option<Instant> = None;
     let mut meeting_chat = conversation.chat_thread.clone();
     if let Some(thread) = &meeting_chat {
@@ -1191,11 +1193,11 @@ async fn drive(
                     Ok(CallEvent::ControlVideoStreaming(body)) => {
                         replier.reply(request_id, 200, "");
                         let Some(request) = parse_request(&body) else { continue };
-                        let Some(limit) = send_requests.admit(&request) else { continue };
+                        let Some(limits) = send_requests.admit(&request) else { continue };
                         let own_screen = roster.screen_source_of(&own_mri).map(i64::from);
                         let source = if request.source_id.is_some() && request.source_id == own_screen { SendSource::Screen } else { SendSource::Camera };
-                        match local_video.apply_send_limit(source, &limit) {
-                            Ok(Some(applied)) => timeline.record("send limits", format!("{source:?} {applied:?} keyframe {}", limit.keyframe)),
+                        match local_video.apply_send_limit(source, &limits) {
+                            Ok(Some(plans)) => timeline.record("send limits", format!("{source:?} {plans:?}")),
                             Ok(None) => {}
                             Err(error) => timeline.record("send limits failed", error.to_string()),
                         }
@@ -1769,6 +1771,20 @@ async fn drive(
                     recording_flow.failed();
                     timeline.record("recording", "did not start in time");
                     control.send(CallUpdate::Notice("The recording did not start".into()));
+                }
+                if layout == Layout::Conference
+                    && let Some(size) = local_video.camera_size()
+                    && let Some(url) = media_links.get("applyChannelParameters").cloned()
+                    && let Some(body) = send_capabilities.body_for(size)
+                {
+                    let signaling = signaling.clone();
+                    let timeline = timeline.clone();
+                    tokio::spawn(async move {
+                        match signaling.post_json(SEND_CAPABILITIES_LABEL, &url, body).await {
+                            Ok(()) => timeline.record("send capabilities", format!("{}x{} accepted", size.0, size.1)),
+                            Err(error) => timeline.record("send capabilities failed", error.to_string()),
+                        }
+                    });
                 }
                 if ticks.is_multiple_of(BLUR_TIMING_EVERY_TICKS)
                     && let Some(average_ms) = local_video.blur_average_ms()

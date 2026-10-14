@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use libwebrtc::peer_connection::PeerConnection;
 use libwebrtc::peer_connection_factory::PeerConnectionFactory;
-use libwebrtc::rtp_parameters::RtpCodecCapability;
+use libwebrtc::rtp_parameters::{RtpCodecCapability, RtpEncodingParameters};
 use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::MediaType;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
+use crate::send_control::capture_macroblocks;
 use crate::sdp::{LineRole, OfferPlan, StreamLine};
 use crate::video_frame::VideoKey;
 
@@ -28,6 +29,10 @@ const STAGE_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 3600, max_fps: 3000
 const SMALL_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 920, max_fps: 3000, max_mbps: 27_600 };
 const SCREEN_REQUEST: ReceiveLimits = ReceiveLimits { max_fs: 8160, max_fps: 1500, max_mbps: 135_000 };
 const SUBSCRIBE_PROFILE: &str = "64001f";
+const SIMULCAST_RIDS: [&str; 3] = ["1", "2", "3"];
+const SIMULCAST_SCALABILITY: &str = "L1T1";
+const THREE_LAYER_MIN_FS: u32 = 2040;
+const SEND_CAPABILITY_FPS: u32 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TileDetail {
@@ -94,11 +99,12 @@ fn add_line(
     direction: RtpTransceiverDirection,
     stream: Option<&str>,
     codecs: Vec<RtpCodecCapability>,
+    send_encodings: Vec<RtpEncodingParameters>,
 ) -> Result<RtpTransceiver> {
     let init = RtpTransceiverInit {
         direction,
         stream_ids: stream.map(str::to_owned).into_iter().collect(),
-        send_encodings: Vec::new(),
+        send_encodings,
     };
     let transceiver = peer
         .add_transceiver_for_media(MediaType::Video, init)
@@ -109,22 +115,34 @@ fn add_line(
     Ok(transceiver)
 }
 
+fn simulcast_encodings() -> Vec<RtpEncodingParameters> {
+    SIMULCAST_RIDS
+        .iter()
+        .map(|rid| RtpEncodingParameters {
+            rid: (*rid).to_owned(),
+            scale_resolution_down_by: Some(1.0),
+            scalability_mode: Some(SIMULCAST_SCALABILITY.to_owned()),
+            ..RtpEncodingParameters::default()
+        })
+        .collect()
+}
+
 pub fn add_video_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<VideoLines> {
     let sending = h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs);
     let receiving = h264_only(factory.get_rtp_receiver_capabilities(MediaType::Video).codecs);
-    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending.clone())?;
+    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending.clone(), simulcast_encodings())?;
     for _ in 0..RECEIVE_SLOTS {
-        add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving.clone())?;
+        add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving.clone(), Vec::new())?;
     }
-    let share = add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending)?;
+    let share = add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending, Vec::new())?;
     Ok(VideoLines { camera, share: Some(share) })
 }
 
 pub fn add_one_to_one_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<VideoLines> {
     let sending = h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs);
     let receiving = h264_only(factory.get_rtp_receiver_capabilities(MediaType::Video).codecs);
-    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending)?;
-    add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving)?;
+    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending, Vec::new())?;
+    add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving, Vec::new())?;
     Ok(VideoLines { camera, share: None })
 }
 
@@ -305,6 +323,47 @@ impl SourceRequest {
                 },
             },
         })
+    }
+}
+
+pub fn send_capabilities_body(width: u32, height: u32, sequence_number: u64) -> Value {
+    let largest_side = width.max(height);
+    let layers = if capture_macroblocks(width, height) < THREE_LAYER_MIN_FS { 2 } else { SIMULCAST_RIDS.len() };
+    let capabilities = json!({
+        "maxVideoSendCapabilities": {
+            "max-width": largest_side,
+            "max-height": largest_side,
+            "max-fps": SEND_CAPABILITY_FPS,
+            "max-streams": SIMULCAST_RIDS.len(),
+            "max-layers": layers,
+            "sequence-number": sequence_number,
+        },
+    });
+    json!({
+        "applyChannelParameters": {
+            "multiChannelParameter": {
+                "mids": [CAMERA_MID],
+                "mediaParameter": capabilities.to_string(),
+            },
+        },
+    })
+}
+
+/// Builds a send-capability body only when the camera size differs from the last one reported.
+#[derive(Debug, Default)]
+pub struct SendCapabilityReporter {
+    last_size: Option<(u32, u32)>,
+    sequence_number: u64,
+}
+
+impl SendCapabilityReporter {
+    pub fn body_for(&mut self, size: (u32, u32)) -> Option<Value> {
+        if self.last_size == Some(size) {
+            return None;
+        }
+        self.last_size = Some(size);
+        self.sequence_number += 1;
+        Some(send_capabilities_body(size.0, size.1, self.sequence_number))
     }
 }
 
@@ -496,5 +555,34 @@ mod tests {
         assert_eq!(router.key_for("2"), Some(VideoKey::Person("8:orgid:a".into())));
         router.set("2", None);
         assert_eq!(router.key_for("2"), None);
+    }
+
+    #[test]
+    fn send_capabilities_name_the_camera_mid_and_the_largest_side() {
+        let body = send_capabilities_body(1280, 720, 4);
+        let channel = &body["applyChannelParameters"]["multiChannelParameter"];
+        assert_eq!(channel["mids"], json!(["1"]));
+        let parameter: Value = serde_json::from_str(channel["mediaParameter"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            parameter,
+            json!({"maxVideoSendCapabilities": {
+                "max-width": 1280, "max-height": 1280, "max-fps": 30, "max-streams": 3, "max-layers": 3, "sequence-number": 4
+            }})
+        );
+        let small: Value =
+            serde_json::from_str(send_capabilities_body(480, 270, 1)["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(small["maxVideoSendCapabilities"]["max-layers"], 2);
+    }
+
+    #[test]
+    fn the_reporter_skips_a_repeated_size_and_counts_sequences() {
+        let mut reporter = SendCapabilityReporter::default();
+        assert!(reporter.body_for((1280, 720)).is_some());
+        assert!(reporter.body_for((1280, 720)).is_none());
+        let body = reporter.body_for((640, 480)).unwrap();
+        let parameter: Value =
+            serde_json::from_str(body["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"].as_str().unwrap()).unwrap();
+        assert_eq!(parameter["maxVideoSendCapabilities"]["sequence-number"], 2);
     }
 }

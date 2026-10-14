@@ -22,7 +22,7 @@ use crate::control::CallUpdate;
 use crate::devices::DeviceChoice;
 use crate::error::{Error, Result};
 use crate::screen::{ShareSource, start_screen_capture};
-use crate::send_control::{EncoderLimits, KEYFRAME_NUDGE, SendLimit, encoder_limits};
+use crate::send_control::{EncoderLimits, KEYFRAME_NUDGE, LayerPlan, SendLimit, encoder_limits, plan_layers};
 use crate::standout::StandoutOverlay;
 use crate::video_frame::{FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420};
 use crate::video_layout::VideoLines;
@@ -206,7 +206,7 @@ impl LocalVideo {
         }
     }
 
-    pub fn apply_send_limit(&mut self, source: SendSource, limit: &SendLimit) -> Result<Option<EncoderLimits>> {
+    pub fn apply_send_limit(&mut self, source: SendSource, limits: &[SendLimit]) -> Result<Option<Vec<LayerPlan>>> {
         let sending = match source {
             SendSource::Camera => self.camera_on(),
             SendSource::Screen => self.sharing(),
@@ -216,13 +216,40 @@ impl LocalVideo {
             SendSource::Camera => &mut self.camera,
             SendSource::Screen => &mut self.screen,
         };
-        let limits = encoder_limits(limit, unpack_size(outgoing.frame_size.load(Ordering::Relaxed)));
-        outgoing.limits = Some(limits);
-        if limit.keyframe {
-            Self::set_limits(&sender, &limits, KEYFRAME_NUDGE)?;
+        let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
+        let rids: Vec<String> = sender.parameters().encodings.into_iter().map(|encoding| encoding.rid).collect();
+        if rids.len() > 1 {
+            let plans = plan_layers(limits, frame, &rids);
+            if plans.iter().any(|plan| plan.keyframe) {
+                Self::set_layers(&sender, &plans, KEYFRAME_NUDGE)?;
+            }
+            Self::set_layers(&sender, &plans, 1.0)?;
+            return Ok(Some(plans));
         }
-        Self::set_limits(&sender, &limits, 1.0)?;
-        Ok(Some(limits))
+        let Some(limit) = limits.first() else { return Ok(None) };
+        let encoder = encoder_limits(limit, frame);
+        outgoing.limits = Some(encoder);
+        if limit.keyframe {
+            Self::set_limits(&sender, &encoder, KEYFRAME_NUDGE)?;
+        }
+        Self::set_limits(&sender, &encoder, 1.0)?;
+        Ok(Some(vec![LayerPlan { rid: rids.into_iter().next().unwrap_or_default(), active: true, limits: Some(encoder), keyframe: limit.keyframe }]))
+    }
+
+    fn set_layers(sender: &RtpSender, plans: &[LayerPlan], nudge: f64) -> Result<()> {
+        let mut parameters = sender.parameters();
+        for encoding in &mut parameters.encodings {
+            let Some(plan) = plans.iter().find(|plan| plan.rid == encoding.rid) else { continue };
+            let nudged = nudge != 1.0 && plan.keyframe;
+            encoding.active = plan.active;
+            let Some(limits) = &plan.limits else { continue };
+            encoding.scale_resolution_down_by = Some(limits.scale_down_by * if nudged { nudge } else { 1.0 });
+            if let Some(framerate) = limits.max_framerate {
+                encoding.max_framerate = Some(framerate);
+            }
+            encoding.max_bitrate = limits.max_bitrate;
+        }
+        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     fn set_limits(sender: &RtpSender, limits: &EncoderLimits, nudge: f64) -> Result<()> {
@@ -235,6 +262,10 @@ impl LocalVideo {
             encoding.max_bitrate = limits.max_bitrate;
         }
         sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
+    }
+
+    pub fn camera_size(&self) -> Option<(u32, u32)> {
+        unpack_size(self.camera.frame_size.load(Ordering::Relaxed)).filter(|_| self.camera_on())
     }
 
     pub fn set_background(&self, enabled: bool, picture: Option<Arc<BackgroundPicture>>) {

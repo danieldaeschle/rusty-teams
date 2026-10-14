@@ -19,6 +19,8 @@ pub struct SendLimit {
     pub max_fps: Option<f64>,
     pub max_bitrate: Option<u64>,
     pub keyframe: bool,
+    pub rid: Option<String>,
+    pub ssrc: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -65,6 +67,8 @@ fn limit_from(parameters: &BTreeMap<String, String>) -> SendLimit {
         max_fps: number("max-fps").map(|value| value / FPS_UNIT),
         max_bitrate: number("max-br").map(|value| value as u64 * BITRATE_UNIT),
         keyframe: number("KeyFrame").is_some_and(|value| value != 0.0),
+        rid: parameters.get("rid").cloned(),
+        ssrc: parameters.get("ssrc").and_then(|value| value.parse().ok()),
     }
 }
 
@@ -112,12 +116,14 @@ pub fn parse_request(body: &Value) -> Option<SendRequest> {
 #[derive(Debug, Default)]
 pub struct RequestFilter {
     last_sequence: HashMap<Option<i64>, i64>,
-    last_limit: HashMap<Option<i64>, SendLimit>,
+    last_limits: HashMap<Option<i64>, Vec<SendLimit>>,
 }
 
 impl RequestFilter {
-    pub fn admit(&mut self, request: &SendRequest) -> Option<SendLimit> {
-        let limit = request.limits.first()?.clone();
+    pub fn admit(&mut self, request: &SendRequest) -> Option<Vec<SendLimit>> {
+        if request.limits.is_empty() {
+            return None;
+        }
         if let Some(sequence) = request.sequence {
             let last = self.last_sequence.entry(request.source_id).or_insert(i64::MIN);
             if sequence < *last {
@@ -125,9 +131,10 @@ impl RequestFilter {
             }
             *last = sequence;
         }
-        let unchanged = self.last_limit.get(&request.source_id) == Some(&limit);
-        self.last_limit.insert(request.source_id, limit.clone());
-        (!unchanged || limit.keyframe).then_some(limit)
+        let unchanged = self.last_limits.get(&request.source_id) == Some(&request.limits);
+        self.last_limits.insert(request.source_id, request.limits.clone());
+        let keyframe = request.limits.iter().any(|limit| limit.keyframe);
+        (!unchanged || keyframe).then(|| request.limits.clone())
     }
 }
 
@@ -168,6 +175,36 @@ pub fn encoder_limits(limit: &SendLimit, frame: Option<(u32, u32)>) -> EncoderLi
     EncoderLimits { scale_down_by, max_framerate, max_bitrate: limit.max_bitrate.filter(|bitrate| *bitrate > 0) }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerPlan {
+    pub rid: String,
+    pub active: bool,
+    pub limits: Option<EncoderLimits>,
+    pub keyframe: bool,
+}
+
+pub fn plan_layers(limits: &[SendLimit], frame: Option<(u32, u32)>, rids: &[String]) -> Vec<LayerPlan> {
+    let encoding_of = |limit: &SendLimit| {
+        limit.rid.as_ref().and_then(|rid| rids.iter().position(|candidate| candidate == rid)).unwrap_or(0)
+    };
+    rids.iter()
+        .enumerate()
+        .map(|(index, rid)| {
+            let requested = limits.iter().find(|limit| encoding_of(limit) == index);
+            LayerPlan {
+                rid: rid.clone(),
+                active: requested.is_some(),
+                limits: requested.map(|limit| encoder_limits(limit, frame)),
+                keyframe: requested.is_some_and(|limit| limit.keyframe),
+            }
+        })
+        .collect()
+}
+
+pub fn capture_macroblocks(width: u32, height: u32) -> u32 {
+    macroblocks(f64::from(width), f64::from(height))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -182,7 +219,7 @@ mod tests {
         let request = parse_request(&body).unwrap();
         assert_eq!(request.source_id, Some(405));
         assert_eq!(request.sequence, Some(12));
-        assert_eq!(request.limits, vec![SendLimit { max_fs: Some(920), max_mbps: Some(27600), max_fps: Some(30.0), max_bitrate: None, keyframe: true }]);
+        assert_eq!(request.limits, vec![SendLimit { max_fs: Some(920), max_mbps: Some(27600), max_fps: Some(30.0), max_bitrate: None, keyframe: true, rid: None, ssrc: None }]);
         assert_eq!(
             request.shape,
             "seq 12 source 405 control start fields [control,fmtParams,sourceId,streamMsid] layers [KeyFrame=1;max-fps=3000;max-fs=920;max-mbps=27600;x-secret]"
@@ -215,7 +252,7 @@ mod tests {
         assert!(filter.admit(&request(6, "max-fs=920")).is_none());
         assert!(filter.admit(&request(4, "max-fs=3600")).is_none());
         assert!(filter.admit(&request(7, "max-fs=920;KeyFrame=1")).is_some());
-        assert_eq!(filter.admit(&request(8, "max-fs=3600")).unwrap().max_fs, Some(3600));
+        assert_eq!(filter.admit(&request(8, "max-fs=3600")).unwrap()[0].max_fs, Some(3600));
     }
 
     #[test]
@@ -231,7 +268,7 @@ mod tests {
 
     #[test]
     fn frame_rate_follows_max_fps_and_max_mbps() {
-        let limit = SendLimit { max_fs: Some(920), max_mbps: Some(13_800), max_fps: Some(30.0), max_bitrate: Some(600_000), keyframe: false };
+        let limit = SendLimit { max_fs: Some(920), max_mbps: Some(13_800), max_fps: Some(30.0), max_bitrate: Some(600_000), keyframe: false, ..SendLimit::default() };
         let limits = encoder_limits(&limit, Some((1280, 720)));
         assert!(limits.scale_down_by > 1.0);
         assert!(limits.max_framerate.unwrap() <= 30.0 && limits.max_framerate.unwrap() >= 14.0);
@@ -239,5 +276,69 @@ mod tests {
         let unknown_frame = encoder_limits(&limit, None);
         assert_eq!(unknown_frame.scale_down_by, 1.0);
         assert_eq!(unknown_frame.max_framerate, Some(30.0));
+    }
+
+    fn simulcast_request(sequence: i64, fmtp: [&str; 3]) -> SendRequest {
+        parse_request(&json!({"sequenceNumber": sequence, "controlInfo": [{"sourceId": 405, "fmtParamsList": fmtp}]})).unwrap()
+    }
+
+    const THREE_LAYERS: [&str; 3] = [
+        "max-fs=405;max-fps=3000;max-br=250;rid=1;ssrc=1111",
+        "max-fs=920;max-fps=3000;max-br=500;rid=2;ssrc=1112",
+        "max-fs=3600;max-fps=3000;max-br=1500;rid=3;ssrc=1113;KeyFrame=0",
+    ];
+
+    fn rids() -> Vec<String> {
+        ["1", "2", "3"].map(String::from).to_vec()
+    }
+
+    #[test]
+    fn three_layers_keep_their_rid_ssrc_and_limits() {
+        let request = simulcast_request(1, THREE_LAYERS);
+        let seen: Vec<(Option<&str>, Option<u32>, Option<u32>)> =
+            request.limits.iter().map(|limit| (limit.rid.as_deref(), limit.ssrc, limit.max_fs)).collect();
+        assert_eq!(seen, vec![(Some("1"), Some(1111), Some(405)), (Some("2"), Some(1112), Some(920)), (Some("3"), Some(1113), Some(3600))]);
+        assert_eq!(request.limits[2].max_bitrate, Some(1_800_000));
+    }
+
+    #[test]
+    fn a_missing_rid_switches_that_layer_off() {
+        let request = simulcast_request(1, THREE_LAYERS);
+        let limits: Vec<SendLimit> = request.limits.into_iter().filter(|limit| limit.rid.as_deref() != Some("2")).collect();
+        let plans = plan_layers(&limits, Some((1280, 720)), &rids());
+        assert_eq!(plans.iter().map(|plan| plan.active).collect::<Vec<_>>(), vec![true, false, true]);
+        assert!(plans[1].limits.is_none());
+        assert!(plans[0].limits.unwrap().scale_down_by > plans[2].limits.unwrap().scale_down_by);
+        assert_eq!(plans[2].limits.unwrap().scale_down_by, 1.0);
+    }
+
+    #[test]
+    fn an_entry_without_rid_drives_the_first_encoding() {
+        let limits = [SendLimit { max_fs: Some(920), ..SendLimit::default() }];
+        let plans = plan_layers(&limits, Some((1280, 720)), &rids());
+        assert_eq!(plans.iter().map(|plan| plan.active).collect::<Vec<_>>(), vec![true, false, false]);
+        assert!(plans[0].limits.unwrap().scale_down_by > 1.0);
+    }
+
+    #[test]
+    fn the_keyframe_flag_stays_on_its_rid() {
+        let mut limits = simulcast_request(1, THREE_LAYERS).limits;
+        limits[1].keyframe = true;
+        let plans = plan_layers(&limits, Some((1280, 720)), &rids());
+        assert_eq!(plans.iter().map(|plan| plan.keyframe).collect::<Vec<_>>(), vec![false, true, false]);
+    }
+
+    #[test]
+    fn the_filter_compares_the_whole_layer_set() {
+        let mut filter = RequestFilter::default();
+        assert_eq!(filter.admit(&simulcast_request(1, THREE_LAYERS)).unwrap().len(), 3);
+        assert!(filter.admit(&simulcast_request(2, THREE_LAYERS)).is_none());
+        let mut changed = THREE_LAYERS;
+        changed[1] = "max-fs=405;max-fps=3000;max-br=250;rid=2;ssrc=1112";
+        assert!(filter.admit(&simulcast_request(3, changed)).is_some());
+        assert!(filter.admit(&simulcast_request(4, changed)).is_none());
+        let mut keyframe = changed;
+        keyframe[2] = "max-fs=3600;max-fps=3000;max-br=1500;rid=3;ssrc=1113;KeyFrame=1";
+        assert!(filter.admit(&simulcast_request(5, keyframe)).is_some());
     }
 }

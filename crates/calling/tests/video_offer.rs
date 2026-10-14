@@ -1,6 +1,6 @@
 use calling::devices::shared_factory;
 use calling::sdp::{LineRole, parse, stream_lines, to_teams_offer};
-use calling::video_layout::{SlotTable, add_video_lines, offer_plan};
+use calling::video_layout::{SlotTable, add_one_to_one_lines, add_video_lines, offer_plan};
 use libwebrtc::audio_source::native::NativeAudioSource;
 use libwebrtc::data_channel::DataChannelInit;
 use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
@@ -20,6 +20,10 @@ async fn browser_offer() -> String {
 }
 
 async fn offer_with(data_channel: bool) -> String {
+    layout_offer(data_channel, false).await
+}
+
+async fn layout_offer(data_channel: bool, one_to_one: bool) -> String {
     let factory = shared_factory();
     let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
     let _channel = data_channel.then(|| peer.create_data_channel("main-channel", DataChannelInit::default()).unwrap());
@@ -34,7 +38,11 @@ async fn offer_with(data_channel: bool) -> String {
         },
     )
     .unwrap();
-    add_video_lines(&peer, &factory).unwrap();
+    if one_to_one {
+        add_one_to_one_lines(&peer, &factory).unwrap();
+    } else {
+        add_video_lines(&peer, &factory).unwrap();
+    }
     peer.create_offer(OfferOptions {
         offer_to_receive_audio: true,
         offer_to_receive_video: true,
@@ -118,4 +126,40 @@ async fn the_slots_come_from_the_source_stream_ids_of_an_answer() {
     let expected: Vec<(String, u32)> = (2..=10).map(|mid| (mid.to_string(), 201 + mid)).collect();
     assert_eq!(slots, expected);
     assert_eq!(table.screen.map(|slot| (slot.mid, slot.stream_id)), Some(("11".to_owned(), 212)));
+}
+
+fn camera_section(sdp: &str) -> Vec<&str> {
+    let start = sdp.find("a=mid:1").expect("camera line");
+    let begin = sdp[..start].rfind("m=video").unwrap();
+    let end = sdp[start..].find("\nm=").map_or(sdp.len(), |offset| start + offset);
+    sdp[begin..end].lines().map(str::trim_end).collect()
+}
+
+#[tokio::test]
+async fn the_meeting_camera_offers_three_simulcast_layers() {
+    let browser = browser_offer().await;
+    let camera = camera_section(&browser);
+    for rid in ["1", "2", "3"] {
+        assert!(camera.contains(&format!("a=rid:{rid} send").as_str()), "{camera:?}");
+    }
+    assert!(camera.iter().any(|line| line.starts_with("a=simulcast:send") && line.contains('1') && line.contains('3')), "{camera:?}");
+    assert!(!camera.iter().any(|line| line.starts_with("a=ssrc:")), "{camera:?}");
+    let offer = to_teams_offer(&browser, &offer_plan(), &mut counter()).unwrap();
+    let parsed = parse(&offer.sdp).unwrap();
+    let signaled = &parsed.media[1];
+    let range = signaled.value("x-ssrc-range").unwrap();
+    let (first, last) = range.split_once('-').unwrap();
+    assert_eq!(last.parse::<u32>().unwrap() - first.parse::<u32>().unwrap(), 99);
+    assert!(signaled.value("ssrc").is_some_and(|value| value.contains("fake_attribute")), "{:?}", signaled.value("ssrc"));
+    assert!(signaled.value("rid").is_none());
+    assert!(signaled.value("simulcast").is_none());
+}
+
+#[tokio::test]
+async fn a_one_to_one_camera_and_the_share_line_stay_single_layer() {
+    let one_to_one = layout_offer(false, true).await;
+    assert!(!one_to_one.contains("a=rid:"), "{one_to_one}");
+    assert!(!one_to_one.contains("a=simulcast"));
+    let meeting = browser_offer().await;
+    assert_eq!(meeting.matches("a=rid:").count(), 3);
 }
