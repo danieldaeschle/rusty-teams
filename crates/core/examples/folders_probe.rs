@@ -15,6 +15,9 @@ async fn main() {
         .with_folder_source(Arc::new(ChatsvcFolderSource::new(&session)));
     match engine.refresh_folders().await {
         Ok(()) => println!("# refresh folders ok"),
-        Err(error) => println!("# refresh folders failed: {}", error.to_string().chars().take(200).collect::<String>()),
+        Err(error) => println!(
+            "# refresh folders failed: {}",
+            error.to_string().chars().take(200).collect::<String>()
+        ),
     }
 }

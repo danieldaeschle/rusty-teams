@@ -33,7 +33,7 @@ impl<R: Remote> SyncEngine<R> {
             .await?;
         let refreshed = [result.thread_id.as_str(), target_conversation_id]
             .into_iter()
-            .find(|conversation_id| self.resolve(conversation_id).is_ok());
+            .find(|conversation_id| self.resolve_stored(conversation_id).is_ok());
         if let Some(conversation_id) = refreshed
             && let Err(error) = self.fetch_newer(conversation_id).await
         {
@@ -95,7 +95,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn message_link(&self, conversation_id: &str, message_id: &str) -> Result<String> {
-        let Conversation::Channel { team_id } = self.resolve(conversation_id)? else {
+        let Conversation::Channel { team_id } = self.resolve(conversation_id).await? else {
             let notes_oid = if conversation_id == NOTES_CHAT_ID {
                 Some(self.my_user_id().await?)
             } else {
@@ -154,7 +154,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn ensure_chat(&self, conversation_id: &str) -> Result<()> {
-        match self.resolve(conversation_id)? {
+        match self.resolve_stored(conversation_id)? {
             Conversation::Chat => Ok(()),
             Conversation::Channel { .. } => Err(Error::Unsupported("pinned messages in a channel")),
         }

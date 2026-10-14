@@ -6,7 +6,7 @@ use crate::remote::Remote;
 
 impl<R: Remote> SyncEngine<R> {
     pub async fn channel_library_root(&self, channel_id: &str) -> Result<DriveEntry> {
-        let Conversation::Channel { team_id } = self.resolve(channel_id)? else {
+        let Conversation::Channel { team_id } = self.resolve(channel_id).await? else {
             return Err(Error::Unsupported("a library for a chat"));
         };
         self.remote.channel_files_root(&team_id, channel_id).await
@@ -17,7 +17,7 @@ impl<R: Remote> SyncEngine<R> {
         channel_id: &str,
         tab_id: &str,
     ) -> Result<Option<String>> {
-        let Conversation::Channel { team_id } = self.resolve(channel_id)? else {
+        let Conversation::Channel { team_id } = self.resolve(channel_id).await? else {
             return Err(Error::Unsupported("a tab link for a chat"));
         };
         self.remote

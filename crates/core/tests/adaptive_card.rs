@@ -48,7 +48,10 @@ fn digest_card_keeps_layout_text_and_actions() {
         panic!("first item is a column set");
     };
     assert_eq!(columns[0].width, ColumnWidth::Auto);
-    assert_eq!(columns[0].layout.vertical_alignment, VerticalAlignment::Center);
+    assert_eq!(
+        columns[0].layout.vertical_alignment,
+        VerticalAlignment::Center
+    );
     let CardElement::Image(image) = &columns[0].items[0].element else {
         panic!("avatar column holds an image");
     };

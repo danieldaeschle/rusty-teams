@@ -74,7 +74,7 @@ impl<R: Remote> SyncEngine<R> {
         conversation_id: &str,
         records: &mut [&mut MessageRecord],
     ) -> bool {
-        let Ok(conversation) = self.resolve(conversation_id) else {
+        let Ok(conversation) = self.resolve_stored(conversation_id) else {
             return false;
         };
         let targets = link_conversations(conversation_id, &conversation, records);

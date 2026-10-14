@@ -51,7 +51,7 @@ impl<R: Remote> SyncEngine<R> {
         if conversation_id == NOTES_CHAT_ID {
             return Err(Error::Unsupported("schedule send in the notes chat"));
         }
-        let conversation = match (self.resolve(conversation_id)?, thread_root_id) {
+        let conversation = match (self.resolve_stored(conversation_id)?, thread_root_id) {
             (Conversation::Chat, None) => ConversationRef::chat(conversation_id),
             (Conversation::Channel { .. }, None) => ConversationRef::channel_root(conversation_id),
             (Conversation::Channel { .. }, Some(root_id)) => {

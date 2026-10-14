@@ -180,7 +180,10 @@ impl<R: Remote> SyncEngine<R> {
 
     /// Call when a chat opens. Channels are skipped.
     pub async fn refresh_receipts(&self, conversation_id: &str) -> Result<()> {
-        if matches!(self.resolve(conversation_id)?, Conversation::Channel { .. }) {
+        if matches!(
+            self.resolve(conversation_id).await?,
+            Conversation::Channel { .. }
+        ) {
             return Ok(());
         }
         let my_user_id = self.my_user_id().await?;

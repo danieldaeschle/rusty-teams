@@ -192,11 +192,7 @@ impl<R: Remote> SyncEngine<R> {
         Ok((my_user_id, page))
     }
 
-    fn apply_older_chats(
-        &self,
-        fetched: Result<(String, ChatsPage)>,
-        epoch: u64,
-    ) -> Result<usize> {
+    fn apply_older_chats(&self, fetched: Result<(String, ChatsPage)>, epoch: u64) -> Result<usize> {
         let mut paging = self.chat_paging.lock().unwrap();
         let (my_user_id, page) = match fetched {
             Ok(fetched) => fetched,
