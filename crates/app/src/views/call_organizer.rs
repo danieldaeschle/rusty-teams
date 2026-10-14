@@ -724,50 +724,43 @@ pub fn render_focus_stage(
         )
     };
     let image: Option<Arc<RenderImage>> = call.pictures.live(&key, now);
-    let picture = match image {
+    let avatar_only = image.is_none();
+    let (picture_size, picture) = match image {
         Some(image) => {
-            let picture_size = image.size(0);
-            let (width, height) = contain_size(
-                (size.0 - 2. * FOCUS_BORDER, size.1 - 2. * FOCUS_BORDER),
-                (picture_size.width.0 as f32, picture_size.height.0 as f32),
-            );
+            let pixels = image.size(0);
+            let (width, height) = contain_size(size, (pixels.width.0 as f32, pixels.height.0 as f32));
+            let picture = img(ImageSource::Render(image))
+                .size_full()
+                .object_fit(ObjectFit::Fill)
+                .rounded(px(FOCUS_RADIUS))
+                .into_any_element();
+            ((width, height), picture)
+        }
+        None => (
+            contain_size(size, (16., 9.)),
             div()
                 .size_full()
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(
-                    img(ImageSource::Render(image))
-                        .w(px(width))
-                        .h(px(height))
-                        .flex_none()
-                        .object_fit(ObjectFit::Fill)
-                        .rounded(px(FOCUS_RADIUS)),
-                )
-                .into_any_element()
-        }
-        None => div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(person_avatar(
-                &state.directory,
-                user_id.as_deref(),
-                &name,
-                FOCUS_AVATAR,
-            ))
-            .into_any_element(),
+                .child(person_avatar(
+                    &state.directory,
+                    user_id.as_deref(),
+                    &name,
+                    FOCUS_AVATAR,
+                ))
+                .into_any_element(),
+        ),
     };
     let stage = div()
         .id("call-focus-stage")
         .relative()
-        .w(px(size.0))
-        .h(px(size.1))
+        .w(px(picture_size.0))
+        .h(px(picture_size.1))
         .flex_none()
         .overflow_hidden()
         .rounded(px(FOCUS_RADIUS))
-        .bg(hsla(0., 0., 0.04, 1.))
+        .when(avatar_only, |stage| stage.bg(hsla(0., 0., 0.04, 1.)))
         .border(px(FOCUS_BORDER))
         .border_color(if speaking {
             theme::green()
@@ -787,8 +780,8 @@ pub fn render_focus_stage(
         .child(
             h_flex()
                 .absolute()
-                .left(px(12.))
-                .bottom(px(12.))
+                .left(px(8.))
+                .bottom(px(8.))
                 .gap(px(8.))
                 .px(px(8.))
                 .py(px(4.))
@@ -802,9 +795,18 @@ pub fn render_focus_stage(
                     plate.child(icon(IconName::MicOff, 14., theme::red()))
                 }),
         );
-    Some(attach_tile_menu(
-        stage, app, model, &focus.mri, &name, focus.own,
-    ))
+    let stage = attach_tile_menu(stage, app, model, &focus.mri, &name, focus.own);
+    Some(
+        div()
+            .w(px(size.0))
+            .h(px(size.1))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(stage)
+            .into_any_element(),
+    )
 }
 
 pub fn captions_state_hint(model: &CallModel) -> Option<&'static str> {
