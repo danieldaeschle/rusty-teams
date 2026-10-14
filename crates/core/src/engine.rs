@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::folders::FolderSource;
 use crate::links::{LinkPreview, has_stored_links};
-use crate::mapping::{flatten_thread, message_record};
+use crate::mapping::{chat_record, flatten_thread, message_record};
 use crate::people::DirectoryCache;
 use crate::presence::Presence;
 use crate::preview::OwnedPreview;
@@ -192,7 +192,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn fetch_newer(&self, conversation_id: &str) -> Result<Delta> {
-        let mut delta = match self.resolve(conversation_id)? {
+        let mut delta = match self.resolve(conversation_id).await? {
             Conversation::Chat => self.fetch_newer_chat(conversation_id).await?,
             Conversation::Channel { team_id } => {
                 self.fetch_newer_channel(&team_id, conversation_id).await?
@@ -205,7 +205,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn refresh_thread(&self, conversation_id: &str, root_id: &str) -> Result<Delta> {
-        let Conversation::Channel { team_id } = self.resolve(conversation_id)? else {
+        let Conversation::Channel { team_id } = self.resolve(conversation_id).await? else {
             return Err(Error::Unsupported("refreshing a thread of a chat"));
         };
         let delta = self
@@ -216,7 +216,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn load_older(&self, conversation_id: &str) -> Result<Vec<MessageRecord>> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         if self.store.sync_state(conversation_id)?.is_none() {
             self.fetch_newer(conversation_id).await?;
         }
@@ -310,7 +310,32 @@ impl<R: Remote> SyncEngine<R> {
         Ok(tenant.clone())
     }
 
-    pub(crate) fn resolve(&self, conversation_id: &str) -> Result<Conversation> {
+    pub(crate) async fn resolve(&self, conversation_id: &str) -> Result<Conversation> {
+        match self.resolve_stored(conversation_id) {
+            Err(Error::UnknownConversation(_)) => self.fetch_unknown_chat(conversation_id).await,
+            resolved => resolved,
+        }
+    }
+
+    async fn fetch_unknown_chat(&self, conversation_id: &str) -> Result<Conversation> {
+        let chat = match self.remote.chat(conversation_id).await {
+            Ok(chat) => chat,
+            Err(Error::Graph(graph::Error::Session(session::Error::Api {
+                status: 403 | 404,
+                ..
+            }))) => {
+                return Err(Error::UnknownConversation(conversation_id.to_owned()));
+            }
+            Err(error) => return Err(error),
+        };
+        let my_user_id = self.my_user_id().await?;
+        self.store
+            .upsert_chats(&[chat_record(&chat, &my_user_id)])?;
+        let _ = self.events.send(CoreEvent::SidebarChanged);
+        Ok(Conversation::Chat)
+    }
+
+    pub(crate) fn resolve_stored(&self, conversation_id: &str) -> Result<Conversation> {
         if let Some(channel) = self.store.channel(conversation_id)? {
             return Ok(Conversation::Channel {
                 team_id: channel.team_id,

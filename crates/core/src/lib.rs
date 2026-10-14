@@ -28,9 +28,9 @@ mod link_sync;
 mod links;
 mod mapping;
 mod markdown;
+mod meeting_join;
 mod mentions;
 mod message_actions;
-mod meeting_join;
 mod message_link;
 mod message_window;
 mod people;
@@ -79,10 +79,17 @@ pub use card_widgets::{
 };
 pub use card_width::{TargetWidth, WidthClass};
 pub use chatsvc::{
-    CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind, ForwardResult, Gif, PinnedMessage, PresenceStatus,
-    SavedMessage, ScheduledDraft, StatusNote, WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
+    CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
+    ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
+    WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings};
+pub use chatsvc::{
+    Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
+    TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
+    parse_language_settings, target_patch,
+};
+pub use download::LibraryFile;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
@@ -99,20 +106,19 @@ pub use graph::{
     DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
     MessageExtras, SharedFile, UploadedFile,
 };
-pub use download::LibraryFile;
 pub use images::StoredImage;
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
 pub use mapping::{chat_record, message_record};
-pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
-pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use meeting_join::{
     MeetingCode, MeetingLink, ThreadMeeting, find_meeting_link, meeting_code_from_id,
     meeting_link_in_html, parse_meeting_link,
 };
+pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
     ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
 };
+pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
 pub use presence::{Activity, Availability, Presence};
 pub use preview::preview_text;
@@ -126,12 +132,8 @@ pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
     card_texts, copy_text, files, images, linked_message_spans, mentions, message_quote,
-    message_spans, quotes, reaction_summaries, reactions, readable_text, translated_spans, user_mention_inputs,
-};
-pub use chatsvc::{
-    Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
-    TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
-    parse_language_settings, target_patch,
+    message_spans, quotes, reaction_summaries, reactions, readable_text, translated_spans,
+    user_mention_inputs,
 };
 pub use time_zone::local_time;
 pub use translation::{

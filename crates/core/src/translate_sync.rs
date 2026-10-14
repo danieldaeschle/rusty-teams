@@ -17,7 +17,7 @@ const STAMP_CACHE_MESSAGES: usize = 100;
 impl<R: Remote> SyncEngine<R> {
     pub async fn language_stamps(&self, conversation_id: &str) -> Result<Vec<MessageLanguage>> {
         let targets =
-            match self.resolve(conversation_id)? {
+            match self.resolve(conversation_id).await? {
                 Conversation::Chat => vec![ConversationRef::chat(conversation_id)],
                 Conversation::Channel { .. } => {
                     let cached =
@@ -58,7 +58,7 @@ impl<R: Remote> SyncEngine<R> {
         to_language: &str,
         trigger: &TranslationTrigger,
     ) -> Result<Vec<Translation>> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         let mut translations = Vec::new();
         match conversation {
             Conversation::Chat => {

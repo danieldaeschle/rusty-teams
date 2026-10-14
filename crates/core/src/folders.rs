@@ -3,11 +3,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use chatsvc::settings::{parse_chat_sections, parse_teams_order};
 use chatsvc::{
     ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
     ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
 };
-use chatsvc::settings::{parse_chat_sections, parse_teams_order};
 use chrono::Utc;
 use serde_json::Value;
 use session::Session;
