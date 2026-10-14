@@ -159,6 +159,16 @@ impl Roster {
         *self != before
     }
 
+    /// A conversation answer lists everyone present; deltas only ever name who changed.
+    pub fn apply_snapshot(&mut self, snapshot: &Value) -> bool {
+        let before = self.clone();
+        self.apply(snapshot);
+        if let (Some(sequence), Some(listed)) = (snapshot["sequenceNumber"].as_u64(), snapshot["participants"].as_object()) {
+            self.members.retain(|member| listed.contains_key(&member.mri) || member.version > sequence);
+        }
+        *self != before
+    }
+
     pub fn hand_of(&self, mri: &str) -> Option<&RaisedHand> {
         self.members.iter().find(|member| member.mri == mri)?.hand.as_ref()
     }
@@ -644,6 +654,36 @@ mod tests {
         assert!(found.recording && found.audio_only);
         roster.apply(&delta(json!({"28:bot": recorder_bot(2, false)})));
         assert!(!roster.caption_bot().unwrap().audio_only);
+    }
+
+    const JOIN_ANSWER: &str = include_str!("../tests/fixtures/meeting_join_answer.json");
+
+    #[test]
+    fn a_late_joiner_sees_everyone_from_the_join_answer() {
+        let answer: Value = serde_json::from_str(JOIN_ANSWER).unwrap();
+        let mut roster = Roster::default();
+        assert!(roster.apply_snapshot(&answer["roster"]));
+        let mut names: Vec<String> = roster.entries().into_iter().map(|entry| entry.display_name).collect();
+        names.sort();
+        assert_eq!(names, ["Organizer", "Test Guest 1", "Test Guest 2", "Test Guest 3"]);
+        assert_eq!(roster.video_candidates("8:orgid:00000000-0000-0000-0000-00000000000a").len(), 3);
+        let own_delta = delta(json!({"8:orgid:00000000-0000-0000-0000-00000000000a": participant("Organizer", 10, "active", true, 840)}));
+        roster.apply(&own_delta);
+        assert_eq!(roster.members().len(), 4);
+    }
+
+    #[test]
+    fn a_snapshot_drops_people_it_no_longer_lists_unless_a_newer_delta_added_them() {
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({
+            "8:orgid:gone": participant("Gone", 3, "active", false, 201),
+            "8:orgid:new": participant("New", 12, "active", false, 301),
+        })));
+        let snapshot = json!({"type": "Delta", "sequenceNumber": 9, "participants": {"8:orgid:a": participant("Ana", 4, "active", false, 401)}});
+        assert!(roster.apply_snapshot(&snapshot));
+        let mut mris: Vec<&str> = roster.members().iter().map(|member| member.mri.as_str()).collect();
+        mris.sort();
+        assert_eq!(mris, ["8:orgid:a", "8:orgid:new"]);
     }
 
     #[test]
