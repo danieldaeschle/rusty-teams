@@ -431,6 +431,13 @@ int32_t AdmProxy::RecordingDeviceName(uint16_t index,
   });
 }
 
+// WebRtcVoiceEngine::Init asks for the communications default at every call start; the app's default is the Windows default device.
+AdmProxy::WindowsDeviceType AdmProxy::SystemDefaultFor(WindowsDeviceType requested) {
+  return requested == WindowsDeviceType::kDefaultCommunicationDevice
+             ? WindowsDeviceType::kDefaultDevice
+             : requested;
+}
+
 int32_t AdmProxy::SetPlayoutDevice(uint16_t index) {
   return RunOnWorker([this, index] {
     RTC_DCHECK_RUN_ON(worker_thread_);
@@ -442,7 +449,8 @@ int32_t AdmProxy::SetPlayoutDevice(uint16_t index) {
   });
 }
 
-int32_t AdmProxy::SetPlayoutDevice(WindowsDeviceType device) {
+int32_t AdmProxy::SetPlayoutDevice(WindowsDeviceType requested) {
+  const WindowsDeviceType device = SystemDefaultFor(requested);
   return RunOnWorker([this, device] {
     RTC_DCHECK_RUN_ON(worker_thread_);
     selected_playout_device_ = DeviceSelection(device);
@@ -464,7 +472,8 @@ int32_t AdmProxy::SetRecordingDevice(uint16_t index) {
   });
 }
 
-int32_t AdmProxy::SetRecordingDevice(WindowsDeviceType device) {
+int32_t AdmProxy::SetRecordingDevice(WindowsDeviceType requested) {
+  const WindowsDeviceType device = SystemDefaultFor(requested);
   return RunOnWorker([this, device] {
     RTC_DCHECK_RUN_ON(worker_thread_);
     selected_recording_device_ = DeviceSelection(device);
