@@ -35,7 +35,7 @@ use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
 use crate::health::{CallHealth, HealthCounters, HealthSampler, QualityTracker, TransportDetails, health_from_stats};
-use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, is_hold, rewrite_directions};
+use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, is_hold, keep_media_running, rewrite_directions};
 use crate::mic_processing::MicSettings;
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
@@ -923,7 +923,10 @@ async fn drive(
                             && let Some(pending) = same_peer.take()
                         {
                             same_peer_deadline = None;
-                            let applied = apply_answer(&current.peer, &answer.sdp, &pending.signaled, &pending.browser_offer).await;
+                            let applied = match pending.change {
+                                Change::Hold(_) => apply_hold_answer(&current.peer, &answer.sdp, &pending.signaled, &pending.browser_offer).await,
+                                Change::Camera(_) => apply_answer(&current.peer, &answer.sdp, &pending.signaled, &pending.browser_offer).await,
+                            };
                             match applied {
                                 Ok(()) => {
                                     if let Some(url) = answer.links.get("mediaAcknowledgement") {
@@ -932,6 +935,7 @@ async fn drive(
                                     match pending.change {
                                         Change::Hold(hold) => {
                                             local_hold = hold;
+                                            silence_for_hold(local_hold, muted, live.audio.as_ref(), software_audio.as_ref());
                                             control.send(CallUpdate::Hold(HoldState::from_flags(local_hold, remote_hold)));
                                         }
                                         Change::Camera(on) => control.send(CallUpdate::Camera(on)),
@@ -1280,6 +1284,7 @@ async fn drive(
                         control.send(CallUpdate::Notice(CONSENT_FIRST_NOTICE.into()));
                     } else {
                         muted = apply_mute(mute, muted, live.audio.as_ref().expect("audio set above"), software_audio.as_ref(), &remote, control);
+                        silence_for_hold(local_hold, muted, live.audio.as_ref(), software_audio.as_ref());
                     }
                 }
                 Some(CallCommand::DisableAudio) => {
@@ -2070,13 +2075,13 @@ async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: 
         .create_offer(OfferOptions { offer_to_receive_audio: true, offer_to_receive_video: true, ..OfferOptions::default() })
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
-    let text = directions_for(layout, hold, camera, &offer.to_string());
+    let text = directions_for(layout, false, camera, &offer.to_string());
     let description = parse_sdp(&text, SdpType::Offer)?;
     peer.set_local_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let mut numbers = random_u32;
-    let signaled = to_teams_offer(&text, plan, &mut numbers)?;
+    let signaled = to_teams_offer(&directions_for(layout, hold, camera, &text), plan, &mut numbers)?;
     Ok((text, signaled))
 }
 
@@ -2323,6 +2328,16 @@ fn apply_mute(
     effect.muted
 }
 
+fn silence_for_hold(on_hold: bool, muted: bool, audio: Option<&AudioSetup>, software_audio: Option<&SoftwareAudio>) {
+    let silent = on_hold || muted;
+    if let Some(audio) = audio {
+        audio.track.set_enabled(MuteEffect::for_muted(silent).track_enabled);
+    }
+    if let Some(software_audio) = software_audio {
+        software_audio.set_microphone_muted(silent);
+    }
+}
+
 fn swap_audio_track(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<()> {
     let sender = peer
         .senders()
@@ -2473,7 +2488,17 @@ fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<Ca
 
 async fn apply_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
     let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
-    let description = parse_sdp(&answer, SdpType::Answer)?;
+    set_browser_answer(peer, &answer).await
+}
+
+/// libwebrtc does not restart a send stream that an inactive answer stopped, so a hold keeps the streams and only mutes.
+async fn apply_hold_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
+    let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
+    set_browser_answer(peer, &keep_media_running(&answer, browser_offer)).await
+}
+
+async fn set_browser_answer(peer: &PeerConnection, answer: &str) -> Result<()> {
+    let description = parse_sdp(answer, SdpType::Answer)?;
     peer.set_remote_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))
@@ -2742,6 +2767,15 @@ mod tests {
             assert_eq!(directions(&directions_for(layout, true, true, BROWSER_OFFER)), vec!["inactive", "inactive", "inactive"]);
         }
         assert_eq!(directions_for(Layout::Conference, false, true, BROWSER_OFFER), BROWSER_OFFER);
+    }
+
+    #[test]
+    fn a_hold_offer_body_is_inactive_on_every_teams_line_with_one_placeholder_candidate() {
+        let held = directions_for(Layout::Conference, true, false, BROWSER_OFFER);
+        let mut numbers = || 7;
+        let signaled = to_teams_offer(&held, &offer_plan(), &mut numbers).unwrap().sdp;
+        assert_eq!(directions(&signaled), vec!["inactive", "inactive", "inactive"]);
+        assert_eq!(signaled.matches("a=candidate:").count(), 1);
     }
 
     #[test]

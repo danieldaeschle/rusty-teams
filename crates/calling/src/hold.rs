@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::error::Result;
 use crate::sdp::parse;
 
@@ -66,6 +68,27 @@ pub fn rewrite_directions(sdp: &str, pick: impl Fn(MediaLine<'_>) -> Option<&'st
         }
     }
     lines.join(newline)
+}
+
+fn mirrored(direction: &str) -> &'static str {
+    match direction {
+        "sendonly" => "recvonly",
+        "recvonly" => "sendonly",
+        "inactive" => INACTIVE,
+        _ => "sendrecv",
+    }
+}
+
+pub fn keep_media_running(browser_answer: &str, browser_offer: &str) -> String {
+    let offer_lines: Vec<String> = browser_offer.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let offered: HashMap<String, &'static str> = sections(&offer_lines)
+        .into_iter()
+        .filter_map(|section| {
+            let direction = offer_lines[section.direction_line?].strip_prefix("a=")?;
+            Some((section.mid, mirrored(direction)))
+        })
+        .collect();
+    rewrite_directions(browser_answer, |line| offered.get(line.mid).copied())
 }
 
 pub fn all_inactive(sdp: &str) -> String {
@@ -146,6 +169,14 @@ mod tests {
         let held = all_inactive(&unix);
         assert!(!held.contains('\r'));
         assert_eq!(directions(&held), vec!["inactive", "inactive", "inactive"]);
+    }
+
+    #[test]
+    fn a_hold_answer_mirrors_our_offer_so_nothing_stops_locally() {
+        let answer = all_inactive(&OFFER.replace("a=setup:actpass", "a=setup:passive"));
+        let kept = keep_media_running(&answer, OFFER);
+        assert_eq!(directions(&kept), vec!["sendrecv", "sendrecv", "sendonly"]);
+        assert_eq!(kept.lines().count(), answer.lines().count());
     }
 
     #[test]
