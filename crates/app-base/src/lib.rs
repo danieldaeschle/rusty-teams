@@ -16,6 +16,7 @@ pub mod emoji;
 pub mod format;
 pub mod frame_log;
 pub mod fuzzy;
+pub mod image_clipboard;
 pub mod image_view_math;
 pub mod inline_image;
 pub mod notify;

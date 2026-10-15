@@ -5,7 +5,7 @@ use gpui_kit::*;
 use std::time::Duration;
 
 use super::adaptive_card::cards_view;
-use super::attachments::{FileActions, ImageOpen, attachments_view, message_body};
+use super::attachments::{FileActions, ImageActions, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, call_card_row};
 use super::link_preview::{link_preview_card, meeting_join_chip};
@@ -74,7 +74,7 @@ pub struct RowActions {
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
     pub files: Option<FileActions>,
-    pub open_image: Option<ImageOpen>,
+    pub open_image: Option<ImageActions>,
     pub highlighted: bool,
     pub saved: bool,
     pub translation: Option<TranslationActions>,
@@ -302,7 +302,7 @@ struct BubbleExtras {
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
-    open_image: Option<ImageOpen>,
+    open_image: Option<ImageActions>,
     saved: bool,
     translation: Option<TranslationActions>,
     timeline: TimelineBounds,

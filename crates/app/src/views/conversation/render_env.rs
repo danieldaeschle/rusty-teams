@@ -18,7 +18,7 @@ use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
-use crate::views::attachments::ImageOpen;
+use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
@@ -237,11 +237,20 @@ impl RenderEnv {
                     .file_actions(&message.key, &message.files, view.clone())
             });
         let open_image = (is_real && !message.deleted && !message.images.is_empty()).then(|| {
-            let (view, key) = (view.clone(), message.key.clone());
-            Rc::new(move |url: &str, cx: &mut App| {
-                view.update(cx, |this, cx| this.open_image_viewer(&key, url, cx))
-                    .ok();
-            }) as ImageOpen
+            let (open_view, open_key) = (view.clone(), message.key.clone());
+            let (share_view, share_key) = (view.clone(), message.key.clone());
+            ImageActions {
+                open: Rc::new(move |url: &str, cx: &mut App| {
+                    open_view
+                        .update(cx, |this, cx| this.open_image_viewer(&open_key, url, cx))
+                        .ok();
+                }),
+                share: Some(Rc::new(move |cx: &mut App| {
+                    share_view
+                        .update(cx, |this, cx| this.forward_message(&share_key, cx))
+                        .ok();
+                })),
+            }
         });
         let bot = self.bot_identity(message, cx);
         let actionable_run = (is_real && !message.deleted)

@@ -13,6 +13,7 @@ use super::avatar::person_avatar;
 use super::widgets::symbol;
 use crate::app_state::AppState;
 use crate::downloads;
+use crate::image_clipboard::ClipboardImage;
 use crate::image_view_gallery::{GalleryItem, ViewerRequest};
 use crate::image_view_math::{
     MAX_ZOOM, Pair, View, clamp_pan, clamp_scale, counter_label, display_size, fit_scale,
@@ -119,31 +120,16 @@ fn rotated_png(path: &Path, quarter_turns: u8) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn clipboard_format(bytes: &[u8]) -> Option<ImageFormat> {
-    match image::guess_format(bytes).ok()? {
-        image::ImageFormat::Png => Some(ImageFormat::Png),
-        image::ImageFormat::Jpeg => Some(ImageFormat::Jpeg),
-        image::ImageFormat::Gif => Some(ImageFormat::Gif),
-        image::ImageFormat::WebP => Some(ImageFormat::Webp),
-        image::ImageFormat::Bmp => Some(ImageFormat::Bmp),
-        _ => None,
-    }
+fn clipboard_image(path: &Path, quarter_turns: u8) -> Option<ClipboardImage> {
+    let bytes = if quarter_turns != 0 {
+        rotated_png(path, quarter_turns)?
+    } else {
+        std::fs::read(path).ok()?
+    };
+    ClipboardImage::from_bytes(&bytes)
 }
 
-fn clipboard_item(path: &Path, quarter_turns: u8) -> Option<ClipboardItem> {
-    if quarter_turns != 0 {
-        let bytes = rotated_png(path, quarter_turns)?;
-        return Some(ClipboardItem::new_image(&Image::from_bytes(
-            ImageFormat::Png,
-            bytes,
-        )));
-    }
-    let bytes = std::fs::read(path).ok()?;
-    let format = clipboard_format(&bytes)?;
-    Some(ClipboardItem::new_image(&Image::from_bytes(format, bytes)))
-}
-
-fn suggested_name(path: &Path, rotated: bool) -> String {
+pub(super) fn suggested_name(path: &Path, rotated: bool) -> String {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -165,7 +151,7 @@ fn suggested_name(path: &Path, rotated: bool) -> String {
     format!("{name}.{extension}")
 }
 
-fn write_image(source: &Path, target: &Path, quarter_turns: u8) -> std::io::Result<()> {
+pub(super) fn write_image(source: &Path, target: &Path, quarter_turns: u8) -> std::io::Result<()> {
     if quarter_turns == 0 {
         return std::fs::copy(source, target).map(|_| ());
     }
@@ -539,11 +525,11 @@ impl ImageViewer {
         cx.spawn(async move |this, cx| {
             let fallback = path.clone();
             let item = cx
-                .background_spawn(async move { clipboard_item(&path, quarter_turns) })
+                .background_spawn(async move { clipboard_image(&path, quarter_turns) })
                 .await;
             this.update(cx, |this, cx| match item {
-                Some(item) => {
-                    cx.write_to_clipboard(item);
+                Some(image) => {
+                    image.write(cx);
                     this.show_notice("Image copied", cx);
                 }
                 None => {
