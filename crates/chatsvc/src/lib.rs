@@ -16,6 +16,7 @@ pub mod presence;
 pub mod reactions;
 pub mod recap;
 pub mod realtime;
+pub mod recording_policy;
 pub mod receipts;
 pub mod saved;
 pub mod settings;
@@ -41,6 +42,7 @@ pub use language_settings::{
     LanguageSettings, LanguageSettingsClient, TranslationBehavior, authoring_patch, behavior_patch,
     parse_language_settings, target_patch,
 };
+pub use recording_policy::{RecordingPolicy, parse_recording_policy};
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
 pub use messages::{ConversationRef, Messages};

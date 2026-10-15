@@ -116,6 +116,7 @@ pub enum CallUpdate {
     Health(CallHealth),
     IncomingVideo(bool),
     Recording(bool),
+    RecordingPending(bool),
     RecordingAudioOnly(bool),
     Transcribing(bool),
     ConsentRequired(bool),
@@ -131,6 +132,7 @@ pub enum CallUpdate {
     MeetingOptionsSaved(std::result::Result<MeetingOptions, String>),
     Organizer { action: String, outcome: std::result::Result<u16, String> },
     MeetingChat(String),
+    MeetingTenant(String),
     Notice(String),
 }
 

@@ -290,6 +290,8 @@ impl AppState {
         if let Some(call) = self.call.as_mut() {
             call.report.clone_from(&report);
         }
+        let rights_conversation = self.call.as_ref().and_then(|call| call.conversation_id.clone());
+        self.apply_recording_rights(rights_conversation.as_deref(), cx);
         self.follow_call(call_id, updates, report, cx);
         cx.emit(AppEvent::Call);
         cx.notify();
@@ -1115,6 +1117,10 @@ impl AppState {
         if scene.minimized() {
             self.show_call(false, cx);
         }
+        if let Some(call) = self.call.as_mut().filter(|_| scene == DemoScene::Blocked) {
+            call.model.recording_policy.call_recording = false;
+            call.model.recording_policy.call_transcription = false;
+        }
         if scene == DemoScene::Gallery {
             self.queue_demo_bubbles(conversation_id, cx);
         }
@@ -1839,10 +1845,12 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn only_the_organizer_starts_a_recording_and_the_notice_needs_a_consent_request(
+    fn attendees_cannot_start_a_recording_and_the_notice_needs_a_consent_request(
         cx: &mut TestAppContext,
     ) {
-        let (attendee, mut attendee_control) = app_with_commands(cx, live_meeting(false), None);
+        let mut attendee_model = live_meeting(false);
+        attendee_model.own_role = Some(calling::MeetingRole::Attendee);
+        let (attendee, mut attendee_control) = app_with_commands(cx, attendee_model, None);
         cx.update(|cx| {
             attendee.update(cx, |state, cx| {
                 state.run_call_record_action(RecordAction::Start(RecordingKind::Video), cx);

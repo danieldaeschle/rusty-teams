@@ -12,12 +12,35 @@ const DISABLE_AUDIO: &str = "DisableAudio";
 const DISABLE_VIDEO: &str = "DisableVideo";
 const DISABLE_AUDIO_AND_VIDEO: &str = "DisableAv";
 const UNRESTRICTED: &str = "UnRestricted";
+const RECORDER_NONE: &str = "None";
+const RECORDER_ORGANIZERS: &str = "OrganizerAndCoOrganizersOnly";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RecorderOption {
+    #[default]
+    OrganizersAndPresenters,
+    OrganizersOnly,
+    Nobody,
+}
+
+impl RecorderOption {
+    fn parse(text: &str) -> Self {
+        match text {
+            RECORDER_NONE => RecorderOption::Nobody,
+            RECORDER_ORGANIZERS => RecorderOption::OrganizersOnly,
+            _ => RecorderOption::OrganizersAndPresenters,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MeetingCapability {
     pub locked: bool,
     pub attendee_mic_off: bool,
     pub attendee_camera_off: bool,
+    pub recorder_option: RecorderOption,
+    pub allow_cloud_recording: Option<bool>,
+    pub allow_transcription: Option<bool>,
 }
 
 impl MeetingCapability {
@@ -33,6 +56,15 @@ impl MeetingCapability {
             let both = restrictions.contains(DISABLE_AUDIO_AND_VIDEO);
             self.attendee_mic_off = both || restrictions.contains(DISABLE_AUDIO);
             self.attendee_camera_off = both || restrictions.contains(DISABLE_VIDEO);
+        }
+        if let Some(option) = capability["recorderOption"].as_str() {
+            self.recorder_option = RecorderOption::parse(option);
+        }
+        if let Some(allowed) = capability["allowCloudRecording"].as_bool() {
+            self.allow_cloud_recording = Some(allowed);
+        }
+        if let Some(allowed) = capability["allowTranscription"].as_bool() {
+            self.allow_transcription = Some(allowed);
         }
         *self != before
     }
@@ -332,7 +364,7 @@ mod tests {
     }
 
     fn capability(mic_off: bool, camera_off: bool) -> MeetingCapability {
-        MeetingCapability { locked: false, attendee_mic_off: mic_off, attendee_camera_off: camera_off }
+        MeetingCapability { attendee_mic_off: mic_off, attendee_camera_off: camera_off, ..MeetingCapability::default() }
     }
 
     fn limits_with(mic_blocked: bool, mic_released: bool) -> AttendeeLimits {
@@ -409,11 +441,27 @@ mod tests {
         let mut state = MeetingCapability::default();
         let update = json!({"meetingDetails": {"meetingCapability": {"lockMeeting": true, "attendeeRestrictions": "DisableAudio,DisableVideo"}}});
         assert!(state.apply(&update));
-        assert_eq!(state, MeetingCapability { locked: true, attendee_mic_off: true, attendee_camera_off: true });
+        assert_eq!(state, MeetingCapability { locked: true, attendee_mic_off: true, attendee_camera_off: true, ..MeetingCapability::default() });
         assert!(!state.apply(&update));
         assert!(!state.apply(&json!({"other": 1})));
         assert!(state.apply(&json!({"meetingCapability": {"lockMeeting": false, "attendeeRestrictions": "UnRestricted"}})));
         assert_eq!(state, MeetingCapability::default());
+    }
+
+    #[test]
+    fn the_capability_reads_the_recording_and_transcription_rights() {
+        let mut state = MeetingCapability::default();
+        assert_eq!(state.recorder_option, RecorderOption::OrganizersAndPresenters);
+        assert_eq!((state.allow_cloud_recording, state.allow_transcription), (None, None));
+        let update = json!({"meetingDetails": {"meetingCapability": {"recorderOption": "OrganizerAndCoOrganizersOnly", "allowCloudRecording": false, "allowTranscription": true}}});
+        assert!(state.apply(&update));
+        assert_eq!(state.recorder_option, RecorderOption::OrganizersOnly);
+        assert_eq!((state.allow_cloud_recording, state.allow_transcription), (Some(false), Some(true)));
+        assert!(state.apply(&json!({"meetingCapability": {"recorderOption": "None"}})));
+        assert_eq!(state.recorder_option, RecorderOption::Nobody);
+        assert_eq!(state.allow_cloud_recording, Some(false));
+        assert!(state.apply(&json!({"meetingCapability": {"recorderOption": "OrganizersAndPresentersOnly"}})));
+        assert_eq!(state.recorder_option, RecorderOption::OrganizersAndPresenters);
     }
 
     #[test]

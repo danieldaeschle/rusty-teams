@@ -662,6 +662,10 @@ async fn drive(
         Some(CallSpec::Meeting(target)) => Some(target.clone()),
         _ => None,
     };
+    let people_thread = match &spec {
+        Some(CallSpec::People { thread_id, .. }) if !thread_id.is_empty() => Some(thread_id.clone()),
+        _ => None,
+    };
     let mut layout = match &spec {
         Some(CallSpec::People { callees, .. }) if callees.len() == 1 => Layout::OneToOne,
         _ => Layout::Conference,
@@ -862,6 +866,12 @@ async fn drive(
     let mut meeting_chat = conversation.chat_thread.clone();
     if let Some(thread) = &meeting_chat {
         control.send(CallUpdate::MeetingChat(thread.clone()));
+    }
+    if let Some(target) = &meeting_target {
+        control.send(CallUpdate::MeetingTenant(target.tenant_id.clone()));
+    }
+    if meeting_chat.is_none() {
+        meeting_chat = people_thread;
     }
     let mut start_camera_pending = options.start_camera;
     let mut sent_replacement: Option<Replacement> = None;
@@ -1088,6 +1098,7 @@ async fn drive(
                             timeline.record("recorder bot failed", "addParticipantFailure");
                             recording_flow.failed();
                             recording_deadline = None;
+                            control.send(CallUpdate::RecordingPending(false));
                             control.send(CallUpdate::Notice("The recording service could not join".into()));
                         }
                         if caption_flow.wanted() && roster.caption_bot().is_none() {
@@ -1113,12 +1124,14 @@ async fn drive(
                             control.send(CallUpdate::Recording(on));
                             if on {
                                 recording_deadline = None;
+                                control.send(CallUpdate::RecordingPending(false));
                             }
                         }
                         if let Some(on) = change.transcription {
                             control.send(CallUpdate::Transcribing(on));
                             if on {
                                 recording_deadline = None;
+                                control.send(CallUpdate::RecordingPending(false));
                             }
                         }
                         if let Some(required) = change.consent_required {
@@ -1628,15 +1641,16 @@ async fn drive(
                     }
                 }
                 Some(CallCommand::StartRecording { kind, title }) => {
-                    if is_meeting {
+                    if !is_echo {
                         recording_plan = RecordingPlan { title, kind, ..RecordingPlan::default() };
                         recording_flow.want(true);
                         recording_deadline = Some(Instant::now() + RECORDING_START_LIMIT);
+                        control.send(CallUpdate::RecordingPending(true));
                         run_bot_steps(BotJob::Recording, &mut recording_flow, &roster, &remote, &links, meeting_chat.as_deref(), &recording_plan, &mut bot_pending, control, timeline).await;
                     }
                 }
                 Some(CallCommand::StopRecording { scope }) => {
-                    if is_meeting {
+                    if !is_echo {
                         recording_plan.scope = scope;
                         recording_flow.stop();
                         recording_deadline = None;
@@ -1771,6 +1785,7 @@ async fn drive(
                     recording_deadline = None;
                     recording_flow.failed();
                     timeline.record("recording", "did not start in time");
+                    control.send(CallUpdate::RecordingPending(false));
                     control.send(CallUpdate::Notice("The recording did not start".into()));
                 }
                 if layout == Layout::Conference
@@ -2298,6 +2313,9 @@ async fn run_bot_steps(
             BotJob::Captions => CallUpdate::Captions(CaptionState::Failed(reason.to_owned())),
             BotJob::Recording => CallUpdate::Notice(reason.to_owned()),
         });
+        if job == BotJob::Recording {
+            control.send(CallUpdate::RecordingPending(false));
+        }
     };
     let (join_failure, start_failure) = match job {
         BotJob::Captions => ("The captions service could not join", "Captions could not start"),
@@ -2311,7 +2329,7 @@ async fn run_bot_steps(
                     continue;
                 }
                 let Some(thread) = meeting_chat else {
-                    return fail(flow, "This meeting has no chat for the captions and the recording");
+                    return fail(flow, "This call has no chat for the captions and the recording");
                 };
                 *bot_pending = true;
                 let added = remote.signaling.add_caption_bot(&remote.conversation, &remote.participant, thread, links).await;

@@ -9,6 +9,7 @@ use calling::{
     MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
     VideoWant,
 };
+use teams_core::RecordingPolicy;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::background::BackgroundPick;
@@ -308,6 +309,10 @@ pub struct CallModel {
     pub recording: bool,
     pub recording_audio_only: bool,
     pub transcribing: bool,
+    pub record_pending: bool,
+    pub recording_policy: RecordingPolicy,
+    pub meeting_tenant: Option<String>,
+    pub own_tenant: Option<String>,
     pub consent_required: bool,
     pub hold: HoldState,
     pub health: HealthState,
@@ -370,6 +375,10 @@ impl CallModel {
             recording: false,
             recording_audio_only: false,
             transcribing: false,
+            record_pending: false,
+            recording_policy: RecordingPolicy::default(),
+            meeting_tenant: None,
+            own_tenant: None,
             consent_required: false,
             hold: HoldState::Active,
             health: HealthState::default(),
@@ -501,6 +510,8 @@ impl CallModel {
             CallUpdate::Recording(on) => self.recording = on,
             CallUpdate::RecordingAudioOnly(audio_only) => self.recording_audio_only = audio_only,
             CallUpdate::Transcribing(on) => self.transcribing = on,
+            CallUpdate::RecordingPending(pending) => self.record_pending = pending,
+            CallUpdate::MeetingTenant(tenant) => self.meeting_tenant = Some(tenant),
             CallUpdate::ConsentRequired(required) => self.consent_required = required,
             CallUpdate::Hold(hold) => self.hold = hold,
             CallUpdate::Health(health) => self.health.apply(health),
@@ -1062,10 +1073,6 @@ impl CallModel {
         self.is_one_to_one() && self.is_live() && self.hold == HoldState::Active
     }
 
-    pub fn can_record(&self) -> bool {
-        self.organizes_meeting() && self.is_live() && !self.lobby
-    }
-
     pub fn can_open_whiteboard(&self) -> bool {
         self.kind == CallKind::Meeting && self.is_live() && !self.lobby
     }
@@ -1145,7 +1152,7 @@ impl CallModel {
         !self.share_sources.is_empty() && self.is_live()
     }
 
-    fn is_live(&self) -> bool {
+    pub(super) fn is_live(&self) -> bool {
         matches!(
             self.state,
             CallState::Connected { .. } | CallState::Reconnecting { .. }
@@ -2135,13 +2142,12 @@ mod tests {
     }
 
     #[test]
-    fn recording_and_consent_follow_the_call_updates_and_only_organizers_may_record() {
+    fn recording_and_consent_follow_the_call_updates() {
         let mut model = meeting_with_me();
+        assert!(!model.can_record());
         model.apply(CallUpdate::State(CallState::Connected {
             since: Instant::now(),
         }));
-        assert!(!model.can_record());
-        model.apply(CallUpdate::Roster(vec![organizer_entry("8:orgid:me")]));
         assert!(model.can_record());
         model.apply(CallUpdate::Recording(true));
         model.apply(CallUpdate::ConsentRequired(true));

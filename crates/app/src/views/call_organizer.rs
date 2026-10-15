@@ -16,7 +16,7 @@ use super::call_control_fold::{Foldable, FoldedControls, folded_items};
 use super::call_extras::{
     CameraMenu, background_items, effect_items, open_transfer_picker,
 };
-use super::call_record::{record_submenu, transcript_and_settings_items};
+use super::call_record::{record_items, transcript_and_settings_items};
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
@@ -421,8 +421,10 @@ pub fn more_button(
     model: &CallModel,
     folded: &FoldedControls,
 ) -> Option<AnyElement> {
-    let in_meeting = model.kind == crate::call::CallKind::Meeting;
-    if !in_meeting && !model.is_one_to_one() {
+    if !matches!(
+        model.kind,
+        crate::call::CallKind::Meeting | crate::call::CallKind::Direct | crate::call::CallKind::Group
+    ) {
         return None;
     }
     let app = app.clone();
@@ -464,10 +466,10 @@ fn more_menu(
     folded: &FoldedControls,
 ) -> PopupMenu {
     let popup = folded_items(popup.min_w(px(MENU_WIDTH)), window, cx, app, model, folded);
-    let popup = if model.is_one_to_one() {
-        one_to_one_items(popup, app, model)
-    } else {
-        meeting_items(popup, window, cx, app, model)
+    let popup = match model.kind {
+        crate::call::CallKind::Meeting => meeting_items(popup, window, cx, app, model),
+        crate::call::CallKind::Direct => one_to_one_items(popup, window, cx, app, model),
+        _ => record_items(popup, window, cx, app, model),
     };
     incoming_video_item(popup, app, model)
 }
@@ -486,7 +488,13 @@ fn incoming_video_item(popup: PopupMenu, app: &Entity<AppState>, model: &CallMod
     )
 }
 
-fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+fn one_to_one_items(
+    mut popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+    model: &CallModel,
+) -> PopupMenu {
     let (hold_app, transfer_app) = (app.clone(), app.clone());
     let held = model.hold == HoldState::Local;
     popup = popup.item(
@@ -495,6 +503,7 @@ fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallMo
             .disabled(!held && !model.can_hold())
             .on_click(move |_, _, cx| hold_app.update(cx, |state, cx| state.toggle_call_hold(cx))),
     );
+    popup = record_items(popup, window, cx, app, model);
     let can_transfer = model.can_transfer();
     popup.item(
         PopupMenuItem::new("Transfer...")
@@ -520,9 +529,7 @@ fn meeting_items(
                 .on_click(move |_, _, cx| mute_app.update(cx, |state, cx| state.mute_all_call(cx))),
         );
     }
-    if model.can_record() {
-        popup = record_submenu(popup, window, cx, app, model);
-    }
+    popup = record_items(popup, window, cx, app, model);
     if model.can_open_whiteboard() {
         popup = popup.item(
             PopupMenuItem::new("Whiteboard")

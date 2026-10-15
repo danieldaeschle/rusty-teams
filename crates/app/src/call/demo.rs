@@ -103,6 +103,7 @@ pub enum DemoScene {
     Mini,
     MiniOff,
     MiniShare,
+    Blocked,
 }
 
 impl DemoScene {
@@ -122,6 +123,7 @@ impl DemoScene {
             "mini" => DemoScene::Mini,
             "mini-off" => DemoScene::MiniOff,
             "mini-share" => DemoScene::MiniShare,
+            "blocked" => DemoScene::Blocked,
             _ => return None,
         })
     }
@@ -137,6 +139,7 @@ impl DemoScene {
                 | DemoScene::Mini
                 | DemoScene::MiniOff
                 | DemoScene::MiniShare
+                | DemoScene::Blocked
         )
     }
 
@@ -446,6 +449,7 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         | DemoScene::Whiteboard
         | DemoScene::Gallery
         | DemoScene::Sharing
+        | DemoScene::Blocked
         | DemoScene::Plain => {}
     }
 }

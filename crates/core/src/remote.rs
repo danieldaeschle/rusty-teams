@@ -3,7 +3,7 @@ use chatsvc::{
     ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
     LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
     MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
-    Receipts, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
+    Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
     Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
@@ -399,6 +399,10 @@ pub trait Remote {
 
     async fn patch_language_settings(&self, _patch: serde_json::Value) -> Result<()> {
         Err(Error::Unsupported("translation settings"))
+    }
+
+    async fn recording_policy(&self) -> Result<RecordingPolicy> {
+        Err(Error::Unsupported("recording policy"))
     }
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
@@ -1004,6 +1008,12 @@ impl Remote for Graph {
 
     async fn language_settings(&self) -> Result<LanguageSettings> {
         Ok(LanguageSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn recording_policy(&self) -> Result<RecordingPolicy> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .read_recording_policy()
+            .await?)
     }
 
     async fn patch_language_settings(&self, patch: serde_json::Value) -> Result<()> {
