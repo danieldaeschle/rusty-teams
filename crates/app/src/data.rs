@@ -341,12 +341,21 @@ impl Directory {
     }
 
     pub fn move_targets(&self) -> Vec<(String, String)> {
-        self.folders
-            .iter()
-            .filter(|folder| {
-                folder.kind == FolderKind::UserCreated && !is_pending_folder(&folder.id)
-            })
-            .map(|folder| (folder.id.clone(), folder.name.clone()))
+        let favorites = self.favorites().map(|folder| {
+            let name = folder.name.trim();
+            let name = if name.is_empty() { crate::sidebar_model::FAVORITES_FALLBACK_NAME } else { name };
+            (folder.id.clone(), name.to_owned())
+        });
+        favorites
+            .into_iter()
+            .chain(
+                self.folders
+                    .iter()
+                    .filter(|folder| {
+                        folder.kind == FolderKind::UserCreated && !is_pending_folder(&folder.id)
+                    })
+                    .map(|folder| (folder.id.clone(), folder.name.clone())),
+            )
             .collect()
     }
 
@@ -752,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_folders_are_no_move_targets() {
+    fn favorites_come_first_and_pending_folders_are_no_move_targets() {
         let directory = Directory {
             folders: vec![
                 folder("fav", FolderKind::Favorites, &[]),
@@ -767,7 +776,10 @@ mod tests {
         };
         assert_eq!(
             directory.move_targets(),
-            [("work".to_owned(), "work".to_owned())]
+            [
+                ("fav".to_owned(), "fav".to_owned()),
+                ("work".to_owned(), "work".to_owned())
+            ]
         );
     }
 

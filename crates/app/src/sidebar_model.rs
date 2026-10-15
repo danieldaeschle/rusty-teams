@@ -11,7 +11,7 @@ use crate::data::{
 use crate::format;
 use crate::typing::{TypingState, preview_label};
 
-pub const FAVORITES_FALLBACK_NAME: &str = "Pinned";
+pub const FAVORITES_FALLBACK_NAME: &str = "Favorites";
 pub const OTHERS_NAME: &str = "Other chats";
 pub const OTHERS_ID: &str = "others";
 pub const MUTED_NAME: &str = "Muted";

@@ -106,7 +106,7 @@ impl Render for DragGhost {
 struct ChatMenuTarget {
     id: String,
     title: String,
-    pinned: bool,
+    folder_id: Option<String>,
     unread: bool,
     muted: bool,
     is_group: bool,
@@ -117,7 +117,6 @@ struct ChatMenuTarget {
 struct MenuContext {
     state: Entity<AppState>,
     folders: Vec<(String, String)>,
-    favorites_id: Option<String>,
 }
 
 fn menu_icon(name: IconName) -> gpui_kit::component::Icon {
@@ -131,33 +130,20 @@ fn chat_menu(
     context: &MenuContext,
     target: &ChatMenuTarget,
 ) -> PopupMenu {
-    let pinned = target.pinned;
-    let pin_state = context.state.clone();
-    let pin_id = target.id.clone();
-    let mut popup = popup.item(
-        PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
-            .icon(menu_icon(if pinned {
-                IconName::PinOff
-            } else {
-                IconName::Pin
-            }))
-            .on_click(move |_, _, cx| {
-                pin_state.update(cx, |state, cx| {
-                    if pinned {
-                        state.move_chat(&pin_id, None, cx);
-                    } else {
-                        state.pin_chat(&pin_id, cx);
-                    }
-                });
-            }),
-    );
-    if !context.folders.is_empty() {
-        let folders = context.folders.clone();
+    let mut popup = popup;
+    let current = target.folder_id.clone();
+    let folders: Vec<(String, String)> = context
+        .folders
+        .iter()
+        .filter(|(folder_id, _)| current.as_ref() != Some(folder_id))
+        .cloned()
+        .collect();
+    if !folders.is_empty() {
         let move_state = context.state.clone();
         let move_id = target.id.clone();
         popup = popup.submenu_with_icon(
             Some(menu_icon(IconName::Folder)),
-            "Move to folder",
+            "Move to section",
             window,
             cx,
             move |submenu, _, _| {
@@ -171,6 +157,17 @@ fn chat_menu(
                     }))
                 })
             },
+        );
+    }
+    if current.is_some() {
+        let remove_state = context.state.clone();
+        let remove_id = target.id.clone();
+        popup = popup.item(
+            PopupMenuItem::new("Remove from section")
+                .icon(menu_icon(IconName::FolderMinus))
+                .on_click(move |_, _, cx| {
+                    remove_state.update(cx, |state, cx| state.move_chat(&remove_id, None, cx));
+                }),
         );
     }
     let read_state = context.state.clone();
@@ -993,12 +990,11 @@ impl SidebarView {
             id: item.id.clone(),
             title: item.title.clone(),
         };
-        let pinned = menu.favorites_id.is_some() && item.folder_id == menu.favorites_id;
         let menu_context = menu.clone();
         let target = ChatMenuTarget {
             id: item.id.clone(),
             title: item.title.clone(),
-            pinned,
+            folder_id: item.folder_id.clone(),
             unread,
             muted: item.muted,
             is_group: item.is_group,
@@ -1050,7 +1046,6 @@ impl SidebarView {
             let menu = MenuContext {
                 state: self.state.clone(),
                 folders: state.directory.move_targets(),
-                favorites_id: state.directory.favorites().map(|folder| folder.id.clone()),
             };
             let section_menus =
                 section_menu_targets(&sections, &state.directory, state.mode.read_only);

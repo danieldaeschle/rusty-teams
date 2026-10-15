@@ -669,11 +669,6 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn pin_chat(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
-        let favorites = self.directory.favorites().map(|folder| folder.id.clone());
-        self.move_chat(conversation_id, favorites.as_deref(), cx);
-    }
-
     pub fn mark_chat_read(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
         if self.keeps_unread(conversation_id) {
             self.keep_unread = None;
