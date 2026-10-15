@@ -38,6 +38,7 @@ mod presence;
 mod preview;
 mod profile;
 mod receipts;
+mod recording_rights;
 mod remote;
 mod scheduled;
 mod search;
@@ -83,7 +84,7 @@ pub use chatsvc::{
     ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
-pub use chatsvc::{ChatSection, ChatSectionSettings};
+pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,

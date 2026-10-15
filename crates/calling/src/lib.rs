@@ -77,7 +77,7 @@ pub use ring::{RING_TIMEOUT, RingEnd, RingSignal, RingState};
 pub use reaction::{Reaction, ReactionEvent};
 pub use captions::{CaptionEntry, CaptionState, SPOKEN_LANGUAGES};
 pub use meeting_options::{MeetingOptions, OptionWrite};
-pub use organizer::{MeetingCapability, Modality, modality_allowed};
+pub use organizer::{MeetingCapability, Modality, RecorderOption, modality_allowed};
 pub use recording::{RecordingKind, StopScope};
 pub use roster::{AttendeeLimits, MeetingRole, PublishedState, RaisedHand, RosterEntry, Spotlight};
 pub use sound_capture::LoopbackKind;

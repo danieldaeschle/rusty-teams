@@ -128,6 +128,8 @@ pub struct AppState {
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
     pub call_share_sound: bool,
+    pub recording_policy: teams_core::RecordingPolicy,
+    pub own_tenant: Option<String>,
     pub call_share_motion: bool,
     pub call_share_standout: bool,
     pub call_report_enabled: bool,
@@ -242,6 +244,8 @@ impl AppState {
             call_launcher: None,
             call_count: 0,
             call_share_sound: false,
+            recording_policy: teams_core::RecordingPolicy::default(),
+            own_tenant: None,
             call_share_motion: false,
             call_share_standout: false,
             call_report_enabled: true,
@@ -836,6 +840,7 @@ impl AppState {
                 self.resend_outbox(cx);
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);
+                self.refresh_recording_policy(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
                 self.refresh_own_status(cx);

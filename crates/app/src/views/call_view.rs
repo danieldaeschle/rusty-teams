@@ -1102,7 +1102,7 @@ fn own_tile_body(
 
 fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> FoldedControls {
     let model = &call.model;
-    let has_more = model.kind == CallKind::Meeting || model.is_one_to_one();
+    let has_more = model.kind != CallKind::Test;
     if !has_more {
         return FoldedControls::default();
     }

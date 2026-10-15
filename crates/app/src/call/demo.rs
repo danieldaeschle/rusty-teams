@@ -100,6 +100,7 @@ pub enum DemoScene {
     Network,
     Gallery,
     Sharing,
+    Blocked,
 }
 
 impl DemoScene {
@@ -116,6 +117,7 @@ impl DemoScene {
             "network" => DemoScene::Network,
             "gallery" => DemoScene::Gallery,
             "sharing" => DemoScene::Sharing,
+            "blocked" => DemoScene::Blocked,
             _ => return None,
         })
     }
@@ -123,7 +125,7 @@ impl DemoScene {
     pub fn is_one_to_one(self) -> bool {
         matches!(
             self,
-            DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Consult | DemoScene::Network
+            DemoScene::Call | DemoScene::Hold | DemoScene::Held | DemoScene::Consult | DemoScene::Network | DemoScene::Blocked
         )
     }
 
@@ -423,6 +425,7 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         | DemoScene::Whiteboard
         | DemoScene::Gallery
         | DemoScene::Sharing
+        | DemoScene::Blocked
         | DemoScene::Plain => {}
     }
 }

@@ -41,7 +41,11 @@ fn return_move(room: &BreakoutState) -> PendingMove {
 
 impl AppState {
     pub fn run_call_record_action(&mut self, action: RecordAction, _cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_ref().filter(|call| call.model.can_record()) else {
+        let Some(call) = self
+            .call
+            .as_ref()
+            .filter(|call| call.model.action_allowed(action))
+        else {
             return;
         };
         let command = match action {

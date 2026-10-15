@@ -9,30 +9,65 @@ use gpui_kit::*;
 
 use super::call_extras::confirm_record_action;
 use super::call_transcript::TranscriptPanel;
+use super::widgets::icon;
 use crate::app_state::AppState;
-use crate::call::{CallModel, CaptionPosition, CaptionSize, record_actions};
+use crate::call::{
+    CallModel, CaptionPosition, CaptionSize, RecordBlock, RecordFeature, record_actions,
+};
 use crate::theme;
 
 const SETTINGS_WIDTH: f32 = 460.;
 const CHIP_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 14.;
+const RECORD_LABEL: &str = "Record and transcribe";
+const BLOCKED_WIDTH: f32 = 236.;
+const LOCK_SIZE: f32 = 13.;
+const REASON_SIZE: f32 = 11.;
 
-pub fn record_submenu(
+pub fn record_items(
     popup: PopupMenu,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
     app: &Entity<AppState>,
     model: &CallModel,
 ) -> PopupMenu {
-    let actions = record_actions(model.recording, model.transcribing);
+    if model.record_hidden() {
+        return popup;
+    }
+    match model.record_menu_block() {
+        Some((block, feature)) => popup.item(blocked_item(
+            RECORD_LABEL,
+            Some(IconName::Video),
+            block,
+            feature,
+        )),
+        None => record_submenu(popup, window, cx, app, model),
+    }
+}
+
+fn record_submenu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+    model: &CallModel,
+) -> PopupMenu {
+    let actions: Vec<_> = record_actions(model.recording, model.transcribing)
+        .into_iter()
+        .map(|(action, label)| (action, label, model.action_block(action)))
+        .collect();
     let app = app.clone();
     popup.submenu_with_icon(
         Some(Icon::new(IconName::Video)),
-        "Record and transcribe",
+        RECORD_LABEL,
         window,
         cx,
         move |mut menu, _, _| {
-            for (action, label) in actions.clone() {
+            for (action, label, blocked) in actions.clone() {
+                if let Some((block, feature)) = blocked {
+                    menu = menu.item(blocked_item(label, None, block, feature));
+                    continue;
+                }
                 let app = app.clone();
                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                     confirm_record_action(&app, action, window, cx)
@@ -41,6 +76,40 @@ pub fn record_submenu(
             menu
         },
     )
+}
+
+fn blocked_item(
+    label: &'static str,
+    icon_name: Option<IconName>,
+    block: RecordBlock,
+    feature: RecordFeature,
+) -> PopupMenuItem {
+    let reason = block.reason(feature);
+    let item = PopupMenuItem::element(move |_, _| {
+        v_flex()
+            .w(px(BLOCKED_WIDTH))
+            .gap(px(2.))
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(label)
+                    .when(block.locked(), |row| {
+                        row.child(icon(IconName::Lock, LOCK_SIZE, theme::text_muted()))
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(REASON_SIZE))
+                    .text_color(theme::text_faint())
+                    .child(reason),
+            )
+    })
+    .disabled(true);
+    match icon_name {
+        Some(icon_name) => item.icon(icon_name),
+        None => item,
+    }
 }
 
 pub fn transcript_and_settings_items(popup: PopupMenu, app: &Entity<AppState>) -> PopupMenu {
