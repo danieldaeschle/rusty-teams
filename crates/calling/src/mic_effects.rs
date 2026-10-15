@@ -20,7 +20,7 @@ impl MicEffect {
     }
 }
 
-const EFFECT_SUFFIX: u128 = 0x8211_11e2_8c70_2c27d7f001fa;
+const EFFECT_SUFFIX: u128 = 0x8211_11e2_8c70_2c27_d7f0_01fa;
 const EFFECT_NAMES: [(u32, &str); 19] = [
     (0x6f64adbe, "acoustic echo cancellation"),
     (0x6f64adbf, "noise suppression"),
