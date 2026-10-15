@@ -24,6 +24,7 @@ mod hidden_chats;
 mod image_size;
 mod images;
 mod italic;
+mod jumbo;
 mod library;
 mod link_sync;
 mod links;
@@ -112,6 +113,7 @@ pub use graph::{
     MessageExtras, SharedFile, UploadedFile,
 };
 pub use images::StoredImage;
+pub use jumbo::{JumboEmoji, MAX_JUMBO_EMOJI, jumbo_emoji};
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
 pub use mapping::{chat_record, message_record};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};

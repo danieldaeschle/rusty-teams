@@ -15,6 +15,7 @@ calling.workspace = true
 chatsvc.workspace = true
 chrono.workspace = true
 directories.workspace = true
+futures-util = { workspace = true, features = ["io"] }
 gpui-kit.workspace = true
 log = "0.4"
 mcp.workspace = true

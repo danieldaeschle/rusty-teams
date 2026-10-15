@@ -8,6 +8,7 @@ use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, ImageActions, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, call_card_row};
+use super::jumbo_emoji::jumbo_row;
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::{MessageMenu, message_toolbar};
 use super::profile_card::opens_profile;
@@ -135,6 +136,9 @@ fn bubble(
     cx: &App,
 ) -> Stateful<Div> {
     let corners = bubble_corners(own, row.series);
+    let jumbo = row.jumbo.as_deref().filter(|_| {
+        !row.deleted && matches!(row.delivery, Delivery::Delivered | Delivery::Sending)
+    });
     let mut element = div()
         .id(ElementId::Name(format!("bubble-{index}").into()))
         .when_some(extras.hover.clone(), |element, hover| {
@@ -145,12 +149,15 @@ fn bubble(
         .when_some(BUBBLE_TAGS.get(index).copied(), |element, tag| {
             element.debug_selector(|| tag.into())
         })
-        .rounded_tl(px(corners.top_left))
-        .rounded_tr(px(corners.top_right))
-        .rounded_br(px(corners.bottom_right))
-        .rounded_bl(px(corners.bottom_left))
-        .px(px(12.))
-        .py(px(8.))
+        .when(jumbo.is_none(), |element| {
+            element
+                .rounded_tl(px(corners.top_left))
+                .rounded_tr(px(corners.top_right))
+                .rounded_br(px(corners.bottom_right))
+                .rounded_bl(px(corners.bottom_left))
+                .px(px(12.))
+                .py(px(8.))
+        })
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
     if row.deleted {
@@ -166,7 +173,7 @@ fn bubble(
     let failed = matches!(row.delivery, Delivery::Failed(_));
     let scheduled = matches!(row.delivery, Delivery::Scheduled(_));
     element = element
-        .when(!scheduled, |bubble| {
+        .when(!scheduled && jumbo.is_none(), |bubble| {
             bubble.bg(if own && !failed {
                 theme::bubble_own()
             } else {
@@ -206,13 +213,15 @@ fn bubble(
         || row.meeting_link.is_some()
         || row.link_preview.is_some()
         || !cards.is_empty();
-    let padded_blocks = if has_reactions || trailing_content {
+    let padded_blocks = if has_reactions || trailing_content || jumbo.is_some() {
         None
     } else {
         with_meta_room(&row.blocks, meta_room(row, own, saved))
     };
     let meta_inline = has_text(row) && padded_blocks.is_some();
-    if has_text(row) {
+    if let Some(jumbo) = jumbo {
+        content = content.child(jumbo_row(&row.key, jumbo, own));
+    } else if has_text(row) {
         content = content.children(message_body(
             padded_blocks.as_deref().unwrap_or(&row.blocks),
             &row.images,

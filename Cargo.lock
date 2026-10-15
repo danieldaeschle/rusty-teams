@@ -312,6 +312,7 @@ dependencies = [
  "chatsvc",
  "chrono",
  "directories",
+ "futures-util",
  "gpui-kit",
  "image",
  "log",
@@ -9147,6 +9148,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "unicode-segmentation",
  "url",
 ]
 

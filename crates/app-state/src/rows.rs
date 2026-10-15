@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
+    JumboEmoji, jumbo_emoji,
     AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ImageRef, LinkPreview,
     ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration, images,
     link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
@@ -136,6 +137,7 @@ pub struct MessageRow {
     pub time: String,
     pub day_header: Option<String>,
     pub blocks: Vec<Block>,
+    pub jumbo: Option<Vec<JumboEmoji>>,
     pub edited: bool,
     pub deleted: bool,
     pub reactions: Vec<ReactionChip>,
@@ -590,6 +592,7 @@ fn call_row(record: &MessageRecord, event: &CallEvent, context: &RowContext) -> 
             context.today,
         )),
         blocks: Vec::new(),
+        jumbo: None,
         edited: false,
         deleted: false,
         reactions: Vec::new(),
@@ -677,6 +680,9 @@ fn message_row_with(
         time: clock_label(record.created_at, context.offset),
         day_header: Some(format::day_label(local.date_naive(), context.today)),
         blocks,
+        jumbo: (!record.deleted && !is_forwarded(&record.body_html))
+            .then(|| jumbo_emoji(&record.body_html))
+            .flatten(),
         edited: record.edited_at.is_some() && !record.deleted,
         deleted: record.deleted,
         reactions: reaction_chips(&visible_reactions(record, context), context),

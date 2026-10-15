@@ -13,6 +13,7 @@ pub mod demo_recap;
 pub mod diagnostics;
 pub mod downloads;
 pub mod emoji;
+pub mod emoticons;
 pub mod format;
 pub mod frame_log;
 pub mod fuzzy;
