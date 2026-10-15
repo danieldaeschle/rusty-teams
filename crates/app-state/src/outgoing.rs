@@ -86,7 +86,7 @@ impl Outgoing {
                 None => {}
             }
         }
-        html
+        teams_core::emoticon_tags(&html, crate::emoticons::send_tag)
     }
 
     pub fn has_attachments(&self) -> bool {

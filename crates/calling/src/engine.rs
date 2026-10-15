@@ -20,7 +20,7 @@ use crate::signaling::{
     AttachRequest, LeaveReason, MeetingTarget, Participant, SelfIdentity, Signaling, TenantRouting, fetch_self,
 };
 use crate::timeline::Timeline;
-use crate::trouter_events::{CallEvent, CallbackLinks, callback_call_id, classify, decode_body};
+use crate::trouter_events::{CallEvent, CallbackLinks, callback_call_id, callback_reply_body, classify, decode_body};
 
 const ENDPOINT_WAIT: Duration = Duration::from_secs(30);
 const PRESENCE_SUFFIX: &str = "unifiedPresenceService";
@@ -113,6 +113,11 @@ enum RingCommand {
     Drop,
 }
 
+struct Route {
+    sender: mpsc::UnboundedSender<TrouterCallback>,
+    links: CallbackLinks,
+}
+
 pub(crate) struct Inner {
     pub(crate) session: Session,
     pub(crate) poll_session: Session,
@@ -121,7 +126,7 @@ pub(crate) struct Inner {
     pub(crate) replier: CallbackReplier,
     pub(crate) gate: Arc<tokio::sync::Mutex<()>>,
     endpoint: Mutex<TrouterEndpoint>,
-    routes: Mutex<HashMap<String, mpsc::UnboundedSender<TrouterCallback>>>,
+    routes: Mutex<HashMap<String, Route>>,
     rings: Mutex<HashMap<u64, mpsc::UnboundedSender<RingCommand>>>,
     seen: Mutex<HashMap<(String, String), Instant>>,
     next_ring_id: AtomicU64,
@@ -137,9 +142,10 @@ impl Inner {
         self.endpoint.lock().expect("endpoint lock").clone()
     }
 
-    pub(crate) fn register_route(&self, call_id: &str) -> mpsc::UnboundedReceiver<TrouterCallback> {
+    pub(crate) fn register_route(&self, links: &CallbackLinks) -> mpsc::UnboundedReceiver<TrouterCallback> {
         let (sender, receiver) = mpsc::unbounded_channel();
-        self.routes.lock().expect("routes lock").insert(call_id.to_owned(), sender);
+        let route = Route { sender, links: links.clone() };
+        self.routes.lock().expect("routes lock").insert(links.call_id().to_owned(), route);
         receiver
     }
 
@@ -181,12 +187,16 @@ impl Inner {
             self.replier.reply(callback.request_id, 200, "");
             return;
         };
-        let sender = self.routes.lock().expect("routes lock").get(&call_id).cloned();
-        match sender {
-            Some(sender) => {
-                if let Err(rejected) = sender.send(callback) {
-                    self.replier.reply(rejected.0.request_id, 200, "");
-                }
+        let route = self
+            .routes
+            .lock()
+            .expect("routes lock")
+            .get(&call_id)
+            .map(|route| (route.sender.clone(), callback_reply_body(&callback.path, &route.links)));
+        match route {
+            Some((sender, reply)) => {
+                self.replier.reply(callback.request_id, 200, reply);
+                let _ = sender.send(callback);
             }
             None => self.replier.reply(callback.request_id, 200, ""),
         }
@@ -411,7 +421,7 @@ async fn ring_task(
     let inner = engine.inner.clone();
     let links = inner.callback_links();
     let route_id = links.call_id().to_owned();
-    let mut callbacks = inner.register_route(&route_id);
+    let mut callbacks = inner.register_route(&links);
     let timeline = Timeline::new(inner.config.trace);
     let signaling = inner.signaling(timeline.clone());
     let participant_id = if notification.participant_id.is_empty() {
@@ -462,7 +472,6 @@ async fn ring_task(
         tokio::select! {
             callback = callbacks.recv() => {
                 let Some(callback) = callback else { break };
-                inner.replier.reply(callback.request_id, 200, "");
                 let event = decode_body(&callback).and_then(|body| classify(&callback.path, body));
                 if let Ok((_, CallEvent::End(end))) = event {
                     inner.emit(EngineEvent::RingEnded {

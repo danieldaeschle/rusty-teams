@@ -1,5 +1,7 @@
 use scraper::{ElementRef, Html, Node};
 
+use crate::jumbo::without_repeated_skin_tone;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontSize {
     Small,
@@ -374,7 +376,7 @@ fn push_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .map(str::to_owned)
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| raw_text(element));
-    push_text(spans, &glyph);
+    push_text(spans, &without_repeated_skin_tone(&glyph));
 }
 
 fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
@@ -384,7 +386,7 @@ fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .is_some_and(|itemtype| itemtype.contains(EMOJI_ITEMTYPE));
     if is_emoji {
         if let Some(alt) = value.attr("alt") {
-            push_text(spans, alt);
+            push_text(spans, &without_repeated_skin_tone(alt));
         }
         return;
     }

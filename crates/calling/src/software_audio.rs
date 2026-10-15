@@ -254,17 +254,20 @@ mod tests {
     }
 
     #[test]
-    fn call_start_picks_the_path_per_platform_with_default_settings() {
+    fn default_settings_run_the_software_chain_on_both_platforms() {
         let default = MicSettings::default();
         assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_some());
-        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
+        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_some());
+        let low = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert!(SoftwareAudioPlan::wanted_on(false, low, false, true).is_none());
     }
 
     #[test]
     fn the_plan_follows_sharing_and_the_mic_choice() {
         let auto = MicSettings::default();
         let off = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
-        assert_eq!(SoftwareAudioPlan::wanted_on(false, auto, false, true), None);
+        let low = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert_eq!(SoftwareAudioPlan::wanted_on(false, low, false, true), None);
         assert_eq!(SoftwareAudioPlan::wanted_on(false, off, false, false), None);
         let mic_only = SoftwareAudioPlan::wanted_on(false, off, false, true).unwrap();
         assert!(!mic_only.computer_sound && mic_only.processing.is_passthrough());

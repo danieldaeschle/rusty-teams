@@ -48,7 +48,13 @@ pub struct MicrophoneStart {
 #[cfg(windows)]
 pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
     match crate::mic_windows::start_communications_microphone(choice, queue.clone()) {
-        Ok((capture, name)) => Ok(MicrophoneStart { capture, source: format!("wasapi communications ({name})") }),
+        Ok((capture, name, effects)) => {
+            let active: Vec<String> = effects.iter().filter(|effect| effect.enabled).map(|effect| effect.name()).collect();
+            Ok(MicrophoneStart {
+                capture,
+                source: format!("wasapi communications ({name}), windows effects: {}", active.join(", ")),
+            })
+        }
         Err(error) => {
             let capture = start_cpal_microphone(choice, queue)?;
             Ok(MicrophoneStart { capture, source: format!("cpal, wasapi communications failed: {error}") })

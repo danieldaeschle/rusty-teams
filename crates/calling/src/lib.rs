@@ -30,15 +30,21 @@ pub mod matte;
 mod loopback_windows;
 #[cfg(windows)]
 mod mic_windows;
+#[cfg(windows)]
+pub use mic_windows::probe_effects;
 pub mod meeting;
 pub mod meeting_options;
 pub mod mic_processing;
 pub mod mixer;
+pub mod gain_stage;
 pub mod mic_chain;
+pub mod mic_effects;
 pub mod noise_stage;
+pub mod voice_high_pass;
 pub mod wav_dump;
 pub mod mute;
 pub mod organizer;
+pub mod outcome;
 pub mod pcm;
 pub mod push;
 pub mod reaction;

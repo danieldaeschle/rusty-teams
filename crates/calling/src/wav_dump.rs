@@ -66,7 +66,7 @@ pub struct StageDumps {
 }
 
 impl StageDumps {
-    pub const STAGES: [&str; 4] = ["1-raw", "2-echo-highpass", "3-noise", "4-gain"];
+    pub const STAGES: [&str; 5] = ["0-far-end", "1-raw", "2-echo-highpass", "3-gain", "4-noise-gain"];
 
     pub fn from_env() -> Option<StageDumps> {
         let directory = PathBuf::from(std::env::var_os(AUDIO_DUMP_ENV)?);
@@ -113,11 +113,11 @@ mod tests {
     fn every_stage_gets_its_own_file() {
         let directory = tempfile::tempdir().unwrap();
         let mut dumps = StageDumps::create(directory.path()).unwrap();
-        dumps.write(3, &[5]);
+        dumps.write(4, &[5]);
         drop(dumps);
         let names: Vec<String> =
             std::fs::read_dir(directory.path()).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
         assert_eq!(names.len(), StageDumps::STAGES.len());
-        assert!(names.iter().any(|name| name.ends_with("4-gain.wav")));
+        assert!(names.iter().any(|name| name.ends_with("4-noise-gain.wav")));
     }
 }

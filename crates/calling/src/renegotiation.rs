@@ -104,11 +104,39 @@ impl MediaNegotiator {
     pub fn escalation_failed(&mut self) {
         self.own_offer_pending = false;
     }
+
+    pub fn on_rejection(&mut self) -> RejectedOffer {
+        if std::mem::take(&mut self.same_peer_offer_pending) {
+            return RejectedOffer::SamePeer;
+        }
+        if std::mem::take(&mut self.own_offer_pending) {
+            return RejectedOffer::NewPeer;
+        }
+        RejectedOffer::None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejectedOffer {
+    SamePeer,
+    NewPeer,
+    None,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rejection_clears_the_pending_offer() {
+        let mut negotiator = MediaNegotiator::default();
+        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::ApplyAnswerThenEscalate);
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::NewPeer);
+        assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
+        assert!(negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::SamePeer);
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::None);
+    }
 
     #[test]
     fn the_first_answer_decides_the_path() {

@@ -3,6 +3,8 @@ mod strip;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use teams_core::EmoticonTag;
+
 pub use strip::{StripImages, StripLoader, StripSource, split_strip};
 
 const CATALOG: &str = include_str!("../../../app/assets/emoticons.tsv");
@@ -11,6 +13,8 @@ const ASSET_SIZE: u32 = 100;
 const FRAMES_PER_SECOND: u64 = 24;
 const VARIATION_SELECTOR: char = '\u{fe0f}';
 const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
+const TONE_NAMES: [&str; 5] = ["light", "medium light", "medium", "medium dark", "dark"];
+const TONE_ID_MARKER: &str = "-tone";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Emoticon {
@@ -19,6 +23,7 @@ pub struct Emoticon {
     etag: &'static str,
     frames: u32,
     diverse: bool,
+    description: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +66,7 @@ fn catalog() -> &'static [Emoticon] {
                     etag: fields.next()?,
                     frames: fields.next()?.parse().ok()?,
                     diverse: fields.next()? == "1",
+                    description: fields.next()?,
                 })
             })
             .collect()
@@ -83,6 +89,7 @@ fn base_glyph(glyph: &str) -> String {
 
 pub fn resolve(id: Option<&str>, glyph: &str) -> Option<ResolvedEmoticon> {
     let base = base_glyph(glyph);
+    let id = id.map(|id| id.split_once(TONE_ID_MARKER).map_or(id, |(base, _)| base));
     let by_id = id.and_then(|id| catalog().iter().find(|emoticon| emoticon.id == id));
     let by_unicode = || {
         let mut matches = catalog().iter().filter(|emoticon| emoticon.unicode == base);
@@ -97,6 +104,35 @@ pub fn resolve(id: Option<&str>, glyph: &str) -> Option<ResolvedEmoticon> {
     Some(ResolvedEmoticon {
         emoticon: by_id.or_else(by_unicode)?,
         tone: skin_tone(glyph),
+    })
+}
+
+pub fn send_tag(glyph: &str) -> Option<EmoticonTag> {
+    let resolved = resolve(None, glyph)?;
+    let emoticon = resolved.emoticon;
+    let (id, title, suffix) = match resolved.tone.filter(|_| emoticon.diverse) {
+        Some(tone) => (
+            format!("{}{TONE_ID_MARKER}{tone}", emoticon.id),
+            format!(
+                "{} with {} skin tone",
+                emoticon.description,
+                TONE_NAMES[tone as usize - 1]
+            ),
+            format!("_s{}", tone + 1),
+        ),
+        None => (
+            emoticon.id.to_owned(),
+            emoticon.description.to_owned(),
+            String::new(),
+        ),
+    };
+    Some(EmoticonTag {
+        id,
+        title,
+        image_url: format!(
+            "{ASSET_BASE}/{}/default/{{size}}_f{suffix}.png",
+            emoticon.id
+        ),
     })
 }
 
@@ -117,6 +153,22 @@ mod tests {
         assert_eq!(resolve(Some("unknown"), "❤️").unwrap().emoticon.id, "heart");
         assert_eq!(resolve(None, "👍").unwrap().emoticon.id, "yes");
         assert!(resolve(None, "x").is_none());
+    }
+
+    #[test]
+    fn send_tags_carry_the_tone_id_and_toned_image() {
+        let heart = send_tag("❤️").unwrap();
+        assert_eq!(
+            (heart.id.as_str(), heart.title.as_str()),
+            ("heart", "Heart")
+        );
+        assert!(heart.image_url.ends_with("/heart/default/{size}_f.png"));
+        let thumb = send_tag("👍🏼").unwrap();
+        assert_eq!(thumb.id, "yes-tone2");
+        assert_eq!(thumb.title, "Yes with medium light skin tone");
+        assert!(thumb.image_url.ends_with("/yes/default/{size}_f_s3.png"));
+        assert_eq!(send_tag("👍").unwrap().id, "yes");
+        assert_eq!(resolve(Some("yes-tone2"), "👍🏼").unwrap().emoticon.id, "yes");
     }
 
     #[test]
