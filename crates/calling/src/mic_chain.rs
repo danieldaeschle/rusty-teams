@@ -3,10 +3,12 @@ use libwebrtc::native::apm::AudioProcessingModule;
 use crate::audio::SAMPLE_RATE;
 use crate::mic_processing::ApmConfig;
 use crate::noise_stage::NoiseStage;
+use crate::voice_high_pass::VoiceHighPass;
 use crate::wav_dump::StageDumps;
 
-/// High-pass and echo first, then DeepFilterNet, then AGC2 with its limiter, so the gain follows the cleaned voice.
+/// Voice high-pass and echo first, then DeepFilterNet, then AGC2 with its limiter, so the gain follows the cleaned voice.
 pub struct MicChain {
+    high_pass: Option<VoiceHighPass>,
     front: Option<AudioProcessingModule>,
     ml_noise: Option<NoiseStage>,
     gain: Option<AudioProcessingModule>,
@@ -19,6 +21,7 @@ impl MicChain {
             crate::noise_stage::prepare();
         }
         MicChain {
+            high_pass: processing.high_pass_filter.then(VoiceHighPass::new),
             front: processing.front_module(),
             ml_noise: ml_noise.then(NoiseStage::new),
             gain: processing.gain_module(),
@@ -34,6 +37,9 @@ impl MicChain {
 
     pub fn process(&mut self, frame: &mut [i16]) {
         self.dump(0, frame);
+        if let Some(high_pass) = self.high_pass.as_mut() {
+            high_pass.process(frame);
+        }
         if let Some(front) = self.front.as_mut() {
             let _ = front.process_stream(frame, SAMPLE_RATE as i32, 1);
         }

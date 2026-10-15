@@ -137,6 +137,7 @@ impl SoftwareAudio {
     ) -> Result<Self> {
         let mut captures = Vec::new();
         let mut warning = None;
+        let mut processing = plan.processing;
         let mut microphone_source = None;
         let (microphone, computer, loopback) = if mode == AudioMode::Platform {
             let computer_queue = SampleQueue::default();
@@ -152,6 +153,7 @@ impl SoftwareAudio {
             let microphone = match start_microphone(input, microphone_queue.clone()) {
                 Ok(started) => {
                     microphone_source = Some(started.source);
+                    processing.echo_canceller &= !started.os_echo_cancellation;
                     captures.push(started.capture);
                     FrameSource::Captured(microphone_queue)
                 }
@@ -184,7 +186,7 @@ impl SoftwareAudio {
         let microphone_muted = Arc::new(AtomicBool::new(microphone_muted));
         let running = Arc::new(AtomicBool::new(true));
         let feeder = Feeder {
-            processing: plan.processing,
+            processing,
             ml_noise: plan.ml_noise,
             source,
             microphone,
@@ -254,17 +256,20 @@ mod tests {
     }
 
     #[test]
-    fn call_start_picks_the_path_per_platform_with_default_settings() {
+    fn default_settings_run_the_software_chain_on_both_platforms() {
         let default = MicSettings::default();
         assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_some());
-        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
+        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_some());
+        let low = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert!(SoftwareAudioPlan::wanted_on(false, low, false, true).is_none());
     }
 
     #[test]
     fn the_plan_follows_sharing_and_the_mic_choice() {
         let auto = MicSettings::default();
         let off = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
-        assert_eq!(SoftwareAudioPlan::wanted_on(false, auto, false, true), None);
+        let low = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert_eq!(SoftwareAudioPlan::wanted_on(false, low, false, true), None);
         assert_eq!(SoftwareAudioPlan::wanted_on(false, off, false, false), None);
         let mic_only = SoftwareAudioPlan::wanted_on(false, off, false, true).unwrap();
         assert!(!mic_only.computer_sound && mic_only.processing.is_passthrough());
