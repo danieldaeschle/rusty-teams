@@ -1,45 +1,27 @@
 mod actions;
-mod agenda;
-mod background;
-mod bubbles;
 mod calendar;
-mod caption_style;
 mod consult;
-mod demo;
-mod demo_scene;
 mod features;
-mod health;
-mod fullscreen;
 mod history;
 mod join;
 mod launcher;
 mod list;
-mod media;
-mod mic;
-mod model;
-mod options_dialog;
 mod overlay;
 mod overlay_layout;
-mod people;
 mod people_actions;
-mod pictures;
 mod prejoin;
-mod preview;
-mod push_to_talk;
-mod recording_menu;
 mod record_load;
-mod record_rights;
-mod report;
 mod reminder;
 mod share_actions;
-mod share_view;
-mod ring;
 mod schedule;
-mod stage_layout;
 mod target;
-mod transcript;
 mod view_actions;
-mod view_settings;
+
+use app_call_model::{
+    agenda, background, bubbles, caption_style, demo, fullscreen, health, media, mic,
+    model, options_dialog, people, preview, record_rights,
+    recording_menu, report, ring, share_view, stage_layout, transcript, view_settings,
+};
 
 pub use actions::{load_camera, load_camera_effects, load_input, load_output, load_share_sound};
 pub use mic::load_mic;

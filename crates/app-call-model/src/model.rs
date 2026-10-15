@@ -1152,7 +1152,7 @@ impl CallModel {
         !self.share_sources.is_empty() && self.is_live()
     }
 
-    pub(super) fn is_live(&self) -> bool {
+    pub fn is_live(&self) -> bool {
         matches!(
             self.state,
             CallState::Connected { .. } | CallState::Reconnecting { .. }

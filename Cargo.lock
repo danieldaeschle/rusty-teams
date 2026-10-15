@@ -277,6 +277,7 @@ version = "0.1.0"
 dependencies = [
  "agents",
  "app-base",
+ "app-call-model",
  "calling",
  "chatsvc",
  "chrono",
@@ -325,6 +326,32 @@ dependencies = [
  "tray-icon",
  "windows 0.62.2",
  "x11rb",
+]
+
+[[package]]
+name = "app-call-model"
+version = "0.1.0"
+dependencies = [
+ "agents",
+ "app-base",
+ "calling",
+ "chatsvc",
+ "chrono",
+ "directories",
+ "gpui-kit",
+ "graph",
+ "image",
+ "log",
+ "mcp",
+ "regex",
+ "serde",
+ "serde_json",
+ "session",
+ "store",
+ "teams-core",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -277,7 +277,7 @@ pub fn start_demo_call(script: DemoCall) -> CallHandle {
 
 pub fn start_demo_scene_call(script: DemoCall, scene: DemoScene) -> CallHandle {
     let (handle, control) = call_channel();
-    crate::runtime::handle().spawn(run_demo_call(control, script, scene));
+    app_base::runtime::handle().spawn(run_demo_call(control, script, scene));
     handle
 }
 

@@ -7,7 +7,7 @@ use super::markdown;
 use super::scrub::Scrubber;
 use super::series::{level_name, limitation_name};
 use super::{CallRecorder, FeatureRecord, Outcome};
-use crate::call::model::CallKind;
+use crate::model::CallKind;
 
 const SCHEMA: u32 = 1;
 const FILE_STAMP: &str = "%Y%m%dT%H%M%SZ";
@@ -272,7 +272,7 @@ impl CallRecorder {
             schema: SCHEMA,
             app: AppInfo {
                 version: env!("CARGO_PKG_VERSION"),
-                build: env!("TEAMS_BUILD_VERSION"),
+                build: app_base::version::build_version(),
                 os: std::env::consts::OS,
                 arch: std::env::consts::ARCH,
                 demo: self.demo,
