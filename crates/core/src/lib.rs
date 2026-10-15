@@ -136,7 +136,7 @@ pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
-    card_texts, copy_text, files, images, linked_message_spans, mentions, message_quote,
+    card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with, mentions, message_quote,
     message_spans, quote_html, quotes, reaction_summaries, reactions, readable_text, translated_spans,
     user_mention_inputs,
 };

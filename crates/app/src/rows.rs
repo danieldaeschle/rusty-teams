@@ -8,8 +8,8 @@ use store::MessageRecord;
 use teams_core::{
     AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ImageRef, LinkPreview,
     ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration, images,
-    link_preview, linked_message_spans, meeting_link_in_html, message_spans, reactions,
-    translated_spans,
+    link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
+    reactions, readable_text, translated_spans,
 };
 
 use crate::card_state::CardOverride;
@@ -612,7 +612,38 @@ fn call_row(record: &MessageRecord, event: &CallEvent, context: &RowContext) -> 
     }
 }
 
+const QUOTE_LINES: usize = 5;
+
+pub fn quoted_texts(records: &[MessageRecord]) -> HashMap<String, String> {
+    let wanted: std::collections::HashSet<String> = records
+        .iter()
+        .flat_map(quotes)
+        .map(|quote| quote.message_id)
+        .collect();
+    records
+        .iter()
+        .filter(|record| !record.deleted && wanted.contains(&record.message_id))
+        .map(|record| {
+            let text = readable_text(record);
+            let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+            let mut shown = lines.iter().take(QUOTE_LINES).copied().collect::<Vec<_>>().join("\n");
+            if lines.len() > QUOTE_LINES {
+                shown.push_str(" …");
+            }
+            (record.message_id.clone(), shown)
+        })
+        .collect()
+}
+
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
+    message_row_with(record, context, &HashMap::new())
+}
+
+fn message_row_with(
+    record: &MessageRecord,
+    context: &RowContext,
+    quoted: &HashMap<String, String>,
+) -> MessageRow {
     if let Some(event) = call_event(record) {
         return call_row(record, &event, context);
     }
@@ -625,7 +656,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
     } else if let Some(html) = &translation.translated_html {
         layout_blocks(&translated_spans(record, html))
     } else {
-        layout_blocks(&linked_message_spans(record))
+        layout_blocks(&linked_message_spans_with(record, &|id| quoted.get(id).cloned()))
     };
     let blocks = if images.is_empty() {
         blocks
@@ -702,6 +733,7 @@ pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: boo
             .is_some_and(|event| is_open_start(event, &finished))
     });
     let mut previous_day: Option<NaiveDate> = None;
+    let quoted = quoted_texts(records);
     for (index, (record, event)) in records.iter().zip(&events).enumerate() {
         let mut row = match event {
             Some(event)
@@ -710,7 +742,7 @@ pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: boo
                 continue;
             }
             Some(event) => call_row(record, event, context),
-            None => message_row(record, context),
+            None => message_row_with(record, context, &quoted),
         };
         if let Some(call) = row.call.as_mut() {
             call.started &= newest_open_start == Some(index);
@@ -937,6 +969,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_quote_shows_the_lines_of_the_quoted_message_when_it_is_loaded() {
+        let mut quoted = record("q1", None, 8, 6);
+        quoted.body_html = "<p>first link</p><p>second link</p>".into();
+        let mut answer = record("a1", None, 9, 6);
+        answer.body_html = "<attachment id=\"q1\"></attachment><p>please again</p>".into();
+        answer.attachments_json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"id":"q1","quote":{"message_id":"q1","preview":"first link second link","sender_name":"Robin"}}]"#.into();
+        let rows = flat_rows(&[quoted, answer], &context(), false);
+        let reply = rows
+            .iter()
+            .find_map(|row| match row {
+                Row::Message(row) if row.key == "a1" => Some(row.blocks.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let Some(Block::Reply(children)) = reply.first() else { panic!("{reply:?}") };
+        let text = format!("{children:?}");
+        assert!(text.contains(r"first link\nsecond link"), "{text}");
+    }
+
     fn own_reaction(reaction_type: &str) -> ReactionInfo {
         ReactionInfo {
             reaction_type: reaction_type.into(),
@@ -1112,7 +1164,7 @@ mod tests {
         ));
         assert_eq!(
             row.blocks,
-            layout_blocks(&linked_message_spans(&record("a", None, 8, 6)))
+            layout_blocks(&teams_core::linked_message_spans(&record("a", None, 8, 6)))
         );
     }
 

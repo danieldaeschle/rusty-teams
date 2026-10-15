@@ -558,8 +558,17 @@ pub const PROFILE_LINK_PREFIX: &str = "teams-profile:";
 
 /// Like `message_spans`, with the id of each user mention replaced by a profile link.
 pub fn linked_message_spans(record: &MessageRecord) -> Vec<Span> {
+    linked_message_spans_with(record, &|_| None)
+}
+
+/// Like `linked_message_spans`, but a quote shows `quoted_text(message_id)` when known instead of the one-line server preview.
+pub fn linked_message_spans_with(
+    record: &MessageRecord,
+    quoted_text: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Span> {
     let infos = mentions(record);
-    let mut spans = spans_with_mentions(record, &infos);
+    let mut spans = html_to_spans(&with_inline_quotes(record, quoted_text));
+    merge_split_mentions(&mut spans, &infos);
     link_user_mentions(&mut spans, &infos);
     spans
 }
@@ -609,17 +618,20 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
 }
 
 fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
-    let mut spans = html_to_spans(&with_inline_quotes(record));
+    let mut spans = html_to_spans(&with_inline_quotes(record, &|_| None));
     merge_split_mentions(&mut spans, infos);
     spans
 }
 
-fn with_inline_quotes(record: &MessageRecord) -> String {
+fn with_inline_quotes(record: &MessageRecord, quoted_text: &dyn Fn(&str) -> Option<String>) -> String {
     let mut html = record.body_html.clone();
     for attachment in attachments(record) {
-        let Some(quote) = attachment.quote else {
+        let Some(mut quote) = attachment.quote else {
             continue;
         };
+        if let Some(text) = quoted_text(&quote.message_id).filter(|text| !text.trim().is_empty()) {
+            quote.preview = text;
+        }
         let id = attachment.id.unwrap_or_else(|| quote.message_id.clone());
         let tag = format!("<attachment id=\"{id}\"></attachment>");
         let block = quote_html(&quote);
