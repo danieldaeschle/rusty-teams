@@ -96,7 +96,7 @@ mod windows_clipboard {
             let global = Owned::new(GlobalAlloc(GMEM_MOVEABLE, data.len())?);
             let pointer = GlobalLock(*global);
             if pointer.is_null() {
-                return Err(windows::core::Error::from_win32());
+                return Err(windows::core::Error::from_thread());
             }
             std::ptr::copy_nonoverlapping(data.as_ptr(), pointer.cast(), data.len());
             GlobalUnlock(*global).ok();
