@@ -839,6 +839,7 @@ async fn drive(
     crate::noise_stage::apply(mic_settings);
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
+    sync_software_audio(&factory, options, &input, muted, None, &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, control, timeline);
     let mut own_hand: Option<String> = None;
     let mut depacketizer = Depacketizer::default();
     let mut caption_flow = CaptionFlow::default();
@@ -919,7 +920,7 @@ async fn drive(
                                 keep_alive_seconds = acceptance.keep_alive_seconds;
                                 keep_alive_at = Some(Instant::now() + keep_alive_period(keep_alive_seconds));
                                 if action == MediaAction::ApplyAnswerThenEscalate {
-                                    let pending = escalate(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
+                                    let pending = escalate(&factory, &grant, options, outgoing_track(software_audio.as_ref(), &track), &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
                                     next = pending.or(next);
                                 }
                                 let remote = remote.clone();
@@ -933,7 +934,7 @@ async fn drive(
                                 });
                             }
                             MediaAction::Escalate => {
-                                let pending = escalate(&factory, &grant, options, &track, &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
+                                let pending = escalate(&factory, &grant, options, outgoing_track(software_audio.as_ref(), &track), &remote, &links, &media_leg_id, &acceptance.links, &mut negotiator, live, timeline).await;
                                 next = pending.or(next);
                             }
                             _ => {}
@@ -998,7 +999,7 @@ async fn drive(
                         let action = negotiator.on_renegotiation(renegotiation.new_offer, renegotiation.escalation);
                         let result = match action {
                             MediaAction::AnswerOnNewPeer => {
-                                match answer_on_new_peer(&factory, &grant, options, &track, &renegotiation.sdp).await {
+                                match answer_on_new_peer(&factory, &grant, options, outgoing_track(software_audio.as_ref(), &track), &renegotiation.sdp).await {
                                     Ok((session, answered)) => {
                                         timeline.record_sdp("local answer", &answered.answer_sdp);
                                         live.peers.push(session.peer.clone());
@@ -2481,6 +2482,14 @@ fn swap_audio_track(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<()> 
         .map_err(|error| Error::Webrtc(error.to_string()))
 }
 
+fn outgoing_track<'a>(software_audio: Option<&'a SoftwareAudio>, device_track: &'a RtcAudioTrack) -> &'a RtcAudioTrack {
+    pick_track(software_audio.map(|audio| &audio.track), device_track)
+}
+
+fn pick_track<'a, T>(software: Option<&'a T>, device: &'a T) -> &'a T {
+    software.unwrap_or(device)
+}
+
 fn software_wanted(
     mic_settings: MicSettings,
     share_sound_wanted: bool,
@@ -2870,6 +2879,12 @@ mod tests {
         assert!(recorder_busy(&Error::Signaling("recording command answered HTTP 409 no answer".into())));
         assert!(!recorder_busy(&Error::Signaling("recording command answered HTTP 500 no answer".into())));
         assert!(!recorder_busy(&Error::Cancelled));
+    }
+
+    #[test]
+    fn escalation_keeps_the_software_track_when_it_runs() {
+        assert_eq!(*pick_track(Some(&1), &0), 1);
+        assert_eq!(*pick_track(None, &0), 0);
     }
 
     #[test]

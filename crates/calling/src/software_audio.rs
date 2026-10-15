@@ -256,6 +256,13 @@ mod tests {
     }
 
     #[test]
+    fn call_start_picks_the_path_per_platform_with_default_settings() {
+        let default = MicSettings::default();
+        assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_some());
+        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
+    }
+
+    #[test]
     fn the_plan_follows_sharing_and_the_mic_choice() {
         let auto = MicSettings::default();
         let off = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
