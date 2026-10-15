@@ -10,9 +10,9 @@ use store::{
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CardActionOutcome, ChatApp, Gif, Language, LanguageSettings, LinkPreview,
-    MentionCandidate, PersonCandidate, PersonSource, PinnedMessage, SavedMessage, TaskDialog,
-    TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
+    Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
+    LanguageSettings, LinkPreview, MentionCandidate, PersonCandidate, PersonSource, PinnedMessage,
+    SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -784,6 +784,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&priority_messages());
     let _ = store.upsert_messages(&meeting_link_messages());
     let _ = store.upsert_messages(&standup_messages());
+    let _ = store.upsert_messages(&call_messages());
     let _ = store.upsert_messages(&bot_messages());
     seed_agent_access(store);
 }
@@ -1029,7 +1030,87 @@ fn message(
         reactions_json: reactions_json.to_owned(),
         mentions_json: "[]".to_owned(),
         subject: None,
+        call_event_json: None,
     }
+}
+
+fn call_record(
+    conversation: &str,
+    id: &str,
+    time: DateTime<Utc>,
+    event: CallEvent,
+) -> MessageRecord {
+    MessageRecord {
+        conversation_id: conversation.to_owned(),
+        message_id: id.to_owned(),
+        created_at: time,
+        links_json: "[]".to_owned(),
+        attachments_json: "[]".to_owned(),
+        reactions_json: "[]".to_owned(),
+        mentions_json: "[]".to_owned(),
+        call_event_json: Some(event.to_json()),
+        ..MessageRecord::default()
+    }
+}
+
+fn call_event(
+    phase: CallPhase,
+    call_id: &str,
+    initiator: (&str, &str),
+    duration_seconds: Option<u64>,
+    participant_ids: &[&str],
+) -> CallEvent {
+    CallEvent {
+        phase,
+        call_type: CallType::Call,
+        call_id: call_id.to_owned(),
+        duration_seconds,
+        initiator_id: Some(initiator.0.to_owned()),
+        initiator_name: Some(initiator.1.to_owned()),
+        participant_ids: participant_ids.iter().map(|id| (*id).to_owned()).collect(),
+    }
+}
+
+fn call_messages() -> Vec<MessageRecord> {
+    let mara = (MARA_ID, "Mara Lindqvist");
+    let me = (DEMO_USER_ID, DEMO_USER_NAME);
+    let jonas = (JONAS_ID, "Jonas Ortega");
+    let both = [DEMO_USER_ID, MARA_ID];
+    vec![
+        call_record(
+            "demo-chat-mara",
+            "call-1-started",
+            at(0, 12, 4),
+            call_event(CallPhase::Started, "demo-call-1", me, None, &[]),
+        ),
+        call_record(
+            "demo-chat-mara",
+            "call-1-ended",
+            at(0, 12, 16),
+            call_event(CallPhase::Ended, "demo-call-1", me, Some(723), &both),
+        ),
+        call_record(
+            "demo-chat-mara",
+            "call-2-started",
+            at(0, 13, 9),
+            call_event(CallPhase::Started, "demo-call-2", mara, None, &[]),
+        ),
+        call_record(
+            "demo-chat-mara",
+            "call-2-ended",
+            at(0, 13, 10),
+            call_event(CallPhase::Ended, "demo-call-2", mara, Some(60), &[MARA_ID]),
+        ),
+        call_record(
+            "demo-chat-meeting-standup",
+            "call-3-started",
+            at(0, 9, 50),
+            CallEvent {
+                call_type: CallType::Meeting,
+                ..call_event(CallPhase::Started, "demo-call-3", jonas, None, &[])
+            },
+        ),
+    ]
 }
 
 fn with_subject(mut record: MessageRecord, subject: &str) -> MessageRecord {

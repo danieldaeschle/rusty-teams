@@ -88,6 +88,7 @@ pub struct MessageRecord {
     pub sender_application_id: Option<String>,
     pub links_json: String,
     pub subject: Option<String>,
+    pub call_event_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

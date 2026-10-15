@@ -113,6 +113,7 @@ pub struct Message {
     pub subject: Option<String>,
     pub from: Option<Sender>,
     pub body: Option<Body>,
+    pub event_detail: Option<serde_json::Value>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
     #[serde(default)]

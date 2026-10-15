@@ -7,6 +7,7 @@ use std::time::Duration;
 use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, ImageOpen, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
+use super::call_card::{CallActions, call_card_row};
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
 use super::profile_card::opens_profile;
@@ -79,6 +80,7 @@ pub struct RowActions {
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
     pub agent_run: Option<AgentRun>,
+    pub call: CallActions,
     pub reaction_proposal: Option<ReactionPill>,
 }
 
@@ -104,11 +106,11 @@ fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
         )
 }
 
-fn day_separator(label: &str) -> Div {
+pub(super) fn day_separator(label: &str) -> Div {
     separator_pill(label, theme::row_hover(), theme::text_muted())
 }
 
-fn new_marker() -> Div {
+pub(super) fn new_marker() -> Div {
     separator_pill(
         "New",
         theme::mention_background(false),
@@ -619,6 +621,9 @@ pub fn render_message_row(
     directory: &Directory,
     cx: &App,
 ) -> AnyElement {
+    if let Some(call) = &row.call {
+        return call_card_row(row, call, index, directory, actions.call);
+    }
     let RowActions {
         bot,
         delivery,
@@ -635,6 +640,7 @@ pub fn render_message_row(
         translation,
         timeline,
         agent_run,
+        call: _,
         reaction_proposal,
     } = actions;
     let extras = BubbleExtras {

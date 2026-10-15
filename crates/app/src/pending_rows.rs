@@ -73,5 +73,6 @@ pub fn pending_row(
         own: true,
         forwarded: false,
         translation: None,
+        call: None,
     }
 }

@@ -55,7 +55,7 @@ impl IncomingTracker {
             }
             self.watermarks
                 .insert(record.conversation_id.clone(), record.created_at);
-            if record.deleted || is_own(&record, my_user_id) {
+            if record.deleted || record.call_event_json.is_some() || is_own(&record, my_user_id) {
                 continue;
             }
             if let Some(entry) = build_incoming(&record, store, sidebar, my_user_id) {
@@ -292,6 +292,7 @@ mod tests {
             attachments_json: "[]".into(),
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
+            call_event_json: None,
         }
     }
 

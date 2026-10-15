@@ -390,6 +390,9 @@ pub fn copy_text(record: &MessageRecord) -> String {
 }
 
 pub fn readable_text(record: &MessageRecord) -> String {
+    if let Some(event) = crate::call_event::call_event(record) {
+        return event.plain_text();
+    }
     let spans: Vec<Span> = message_spans(record)
         .into_iter()
         .filter(|span| !matches!(span, Span::Quote(_)))
@@ -775,6 +778,7 @@ mod tests {
             attachments_json: attachments_json.to_owned(),
             reactions_json: "[]".to_owned(),
             mentions_json: "[]".to_owned(),
+            call_event_json: None,
         }
     }
 

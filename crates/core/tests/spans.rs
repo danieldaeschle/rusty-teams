@@ -373,6 +373,7 @@ fn record_with(body_html: &str, attachments_json: &str) -> MessageRecord {
         attachments_json: attachments_json.to_owned(),
         reactions_json: "[]".to_owned(),
         mentions_json: "[]".to_owned(),
+        call_event_json: None,
     }
 }
 

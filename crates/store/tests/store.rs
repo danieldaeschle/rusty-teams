@@ -67,6 +67,7 @@ fn message(conversation_id: &str, message_id: &str, minute: u32) -> MessageRecor
         sender_application_id: None,
         links_json: "[]".to_owned(),
         subject: None,
+        call_event_json: None,
     }
 }
 
@@ -470,11 +471,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 19);
+    assert_eq!(reopened.schema_version().unwrap(), 20);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -506,7 +507,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 19);
+    assert_eq!(store.schema_version().unwrap(), 20);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -572,7 +573,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 19);
+    assert_eq!(store.schema_version().unwrap(), 20);
 }
 
 #[test]
@@ -589,6 +590,7 @@ fn migration_to_v13_clears_channel_delta_links_only() {
                  INSERT INTO channels (id, team_id, name) VALUES ('ch', 't', 'C');
                  INSERT INTO sync_state (conversation_id, delta_link) VALUES ('ch', 'link'), ('chat', 'link');
                  ALTER TABLE messages DROP COLUMN subject;
+                 ALTER TABLE messages DROP COLUMN call_event_json;
                  ALTER TABLE folders DROP COLUMN expanded;
                  DROP TABLE channel_tabs;
                  DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals;
@@ -868,6 +870,7 @@ fn migration_indexes_rows_that_predate_search() {
                  ALTER TABLE messages DROP COLUMN sender_application_id;
                  ALTER TABLE messages DROP COLUMN links_json;
                  ALTER TABLE messages DROP COLUMN subject;
+                 ALTER TABLE messages DROP COLUMN call_event_json;
                  ALTER TABLE chats DROP COLUMN muted;
                  ALTER TABLE folders DROP COLUMN expanded;
                  PRAGMA user_version = 3;",
@@ -1282,4 +1285,62 @@ fn recent_messages_break_ties_by_conversation_across_the_cursor() {
             .unwrap()
             .is_empty()
     );
+}
+
+fn call_message(message_id: &str, minute: u32) -> MessageRecord {
+    MessageRecord {
+        sender_id: None,
+        sender_name: None,
+        body_html: String::new(),
+        call_event_json: Some(r#"{"phase":"Ended"}"#.to_owned()),
+        ..message("c", message_id, minute)
+    }
+}
+
+#[test]
+fn call_event_round_trips_and_is_not_indexed_or_unread() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_messages(&[call_message("call", 1), message("c", "text", 2)])
+        .unwrap();
+    let stored = store.messages("c", None, 10).unwrap();
+    assert_eq!(
+        stored[0].call_event_json.as_deref(),
+        Some(r#"{"phase":"Ended"}"#)
+    );
+    assert_eq!(stored[1].call_event_json, None);
+    assert_eq!(store.count_messages_after("c", None, "me").unwrap(), 1);
+    assert_eq!(
+        store
+            .first_message_after_from_others("c", None, "me")
+            .unwrap()
+            .as_deref(),
+        Some("text")
+    );
+}
+
+#[test]
+fn migration_to_v20_adds_the_call_event_column() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        store.upsert_messages(&[message("c", "old", 1)]).unwrap();
+        store.upsert_chats(&[chat("c", "Chat", Some(at(1)))]).unwrap();
+        store.set_sync_state("c", &SyncState::default()).unwrap();
+        store.set_sync_state("channel", &SyncState::default()).unwrap();
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("ALTER TABLE messages DROP COLUMN call_event_json; PRAGMA user_version = 19")
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 20);
+    let old = store.messages("c", None, 10).unwrap();
+    assert_eq!(old[0].call_event_json, None);
+    assert!(store.sync_state("c").unwrap().is_none());
+    assert!(store.sync_state("channel").unwrap().is_some());
+    store.upsert_messages(&[call_message("call", 2)]).unwrap();
+    assert!(store.messages("c", None, 10).unwrap()[1].call_event_json.is_some());
 }

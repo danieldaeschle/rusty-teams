@@ -19,6 +19,7 @@ use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::attachments::ImageOpen;
+use crate::views::call_card::CallActions;
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
@@ -160,8 +161,10 @@ impl RenderEnv {
             })
         });
         self.request_missing_media(message, cx);
-        let is_real =
-            !self.drafting && !message.key.starts_with(PENDING_KEY_PREFIX) && scheduled.is_none();
+        let is_real = !self.drafting
+            && !message.key.starts_with(PENDING_KEY_PREFIX)
+            && scheduled.is_none()
+            && message.call.is_none();
         let hovered = is_real.then(|| {
             let (view, key) = (view.clone(), message.key.clone());
             Rc::new(move |hovered: bool, cx: &mut App| {
@@ -284,8 +287,35 @@ impl RenderEnv {
             translation,
             timeline: self.timeline.clone(),
             agent_run: actionable_run,
+            call: self.call_actions(message, cx),
             reaction_proposal,
         }
+    }
+
+    fn call_actions(&self, message: &MessageRow, cx: &App) -> CallActions {
+        let Some(call) = &message.call else {
+            return CallActions {
+                call_back: None,
+                join: None,
+            };
+        };
+        let app = self.app.clone();
+        let conversation_id = message.conversation_id.clone();
+        let call_back = call.missed.then(|| {
+            let (app, conversation_id) = (app.clone(), conversation_id.clone());
+            boxed(move |cx| {
+                app.update(cx, |state, cx| state.start_chat_call(&conversation_id, cx));
+            })
+        });
+        let joinable = call.started && app.read(cx).running_meeting(&conversation_id).is_some();
+        let join = joinable.then(|| {
+            boxed(move |cx| {
+                app.update(cx, |state, cx| {
+                    state.join_meeting_call(&conversation_id, cx)
+                });
+            })
+        });
+        CallActions { call_back, join }
     }
 
     fn translation_actions(&self, message: &MessageRow) -> Option<TranslationActions> {

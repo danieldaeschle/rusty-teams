@@ -1,6 +1,7 @@
 mod actions;
 mod adaptive_card;
 mod avatars;
+mod call_event;
 mod card_actions;
 mod card_chart;
 mod card_date;
@@ -56,6 +57,9 @@ pub use adaptive_card::{
     card_content_text, split_overflow, task_value,
 };
 pub use avatars::Avatar;
+pub use call_event::{
+    CallEvent, CallPhase, CallType, call_event, format_duration, parse_duration_seconds,
+};
 pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
 pub use card_chart::{
     AxisScale, BarDisplayMode, CardChart, ChartColor, ChartGauge, ChartKind, ChartPoint,

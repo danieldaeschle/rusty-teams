@@ -263,6 +263,7 @@ mod tests {
             sender_application_id: None,
             links_json: "[]".to_owned(),
             subject: None,
+            call_event_json: None,
         }
     }
 

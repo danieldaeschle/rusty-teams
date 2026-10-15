@@ -115,6 +115,7 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
             subject: None,
+            call_event_json: None,
         }
     }
 

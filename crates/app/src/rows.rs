@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -6,9 +6,10 @@ use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
-    AdaptiveCard, Draft, FileCard, ImageRef, LinkPreview, ReactionInfo, Span, adaptive_cards,
-    card_texts, files, images, link_preview, linked_message_spans, meeting_link_in_html,
-    message_spans, reactions, translated_spans,
+    AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ImageRef, LinkPreview,
+    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration, images,
+    link_preview, linked_message_spans, meeting_link_in_html, message_spans, reactions,
+    translated_spans,
 };
 
 use crate::card_state::CardOverride;
@@ -107,6 +108,22 @@ pub struct LocalImage {
     pub size: Option<(u32, u32)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallIcon {
+    Call,
+    Missed,
+    Video,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallCard {
+    pub title: &'static str,
+    pub detail: String,
+    pub icon: CallIcon,
+    pub missed: bool,
+    pub started: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageRow {
     pub key: String,
@@ -136,6 +153,7 @@ pub struct MessageRow {
     pub receipt: Receipt,
     pub forwarded: bool,
     pub translation: Option<TranslationLine>,
+    pub call: Option<CallCard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,7 +221,9 @@ fn sender_key(row: &MessageRow) -> &str {
 }
 
 fn continues_series(previous: &MessageRow, next: &MessageRow) -> bool {
-    next.day_header.is_none()
+    previous.call.is_none()
+        && next.call.is_none()
+        && next.day_header.is_none()
         && !next.new_marker
         && sender_key(previous) == sender_key(next)
         && next.created_at - previous.created_at < Duration::minutes(SERIES_GAP_MINUTES)
@@ -520,7 +540,82 @@ fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<Reacti
     visible
 }
 
+pub fn call_card(event: &CallEvent, time: &str, my_user_id: Option<&str>) -> CallCard {
+    let missed = event.missed(my_user_id);
+    let detail = match (event.phase, event.duration_seconds) {
+        (CallPhase::Ended, Some(seconds)) if !missed => {
+            format!("{} \u{b7} {time}", format_duration(seconds))
+        }
+        _ => time.to_owned(),
+    };
+    CallCard {
+        title: event.title(missed),
+        detail,
+        icon: match (missed, event.call_type) {
+            (true, _) => CallIcon::Missed,
+            (false, CallType::Meeting) => CallIcon::Video,
+            (false, CallType::Call) => CallIcon::Call,
+        },
+        missed,
+        started: event.phase == CallPhase::Started,
+    }
+}
+
+fn call_row(record: &MessageRecord, event: &CallEvent, context: &RowContext) -> MessageRow {
+    let my_user_id = context.my_user_id.as_deref();
+    let time = clock_label(record.created_at, context.offset);
+    let author = event
+        .initiator_name
+        .clone()
+        .or_else(|| {
+            event
+                .initiator_id
+                .as_ref()
+                .and_then(|user_id| context.names.get(user_id).cloned())
+        })
+        .unwrap_or_else(|| UNKNOWN_AUTHOR.to_owned());
+    MessageRow {
+        key: record.message_id.clone(),
+        conversation_id: record.conversation_id.clone(),
+        sender_id: event.initiator_id.clone(),
+        application_id: None,
+        created_at: record.created_at,
+        series: Series::default(),
+        author,
+        day_header: Some(format::day_label(
+            record
+                .created_at
+                .with_timezone(&context.offset)
+                .date_naive(),
+            context.today,
+        )),
+        blocks: Vec::new(),
+        edited: false,
+        deleted: false,
+        reactions: Vec::new(),
+        images: Vec::new(),
+        local_images: Vec::new(),
+        files: Vec::new(),
+        link_preview: None,
+        meeting_link: None,
+        adaptive_cards: Vec::new(),
+        subject: None,
+        new_marker: false,
+        reply_root: None,
+        delivery: Delivery::Delivered,
+        receipt: Receipt::Hidden,
+        own: event.initiated_by(my_user_id),
+        forwarded: false,
+        translation: None,
+        call: Some(call_card(event, &time, my_user_id)),
+        time,
+    }
+}
+
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
+    if let Some(event) = call_event(record) {
+        return call_row(record, &event, context);
+    }
     let local = record.created_at.with_timezone(&context.offset);
     let images = images(record);
     let own = context.my_user_id.is_some() && record.sender_id == context.my_user_id;
@@ -573,6 +668,7 @@ pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
         own,
         forwarded: !record.deleted && is_forwarded(&record.body_html),
         translation: translation.line,
+        call: None,
     }
 }
 
@@ -580,14 +676,45 @@ pub fn is_forwarded(body_html: &str) -> bool {
     body_html.contains(FORWARD_ITEMTYPE)
 }
 
+fn finished_call_ids(events: &[Option<CallEvent>]) -> HashSet<&str> {
+    events
+        .iter()
+        .flatten()
+        .filter(|event| event.phase == CallPhase::Ended)
+        .map(|event| event.call_id.as_str())
+        .collect()
+}
+
+fn is_open_start(event: &CallEvent, finished: &HashSet<&str>) -> bool {
+    event.phase == CallPhase::Started && !finished.contains(event.call_id.as_str())
+}
+
 pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: bool) -> Vec<Row> {
     let mut rows = Vec::with_capacity(records.len() + 1);
     if has_older {
         rows.push(Row::LoadOlder);
     }
+    let events: Vec<Option<CallEvent>> = records.iter().map(call_event).collect();
+    let finished = finished_call_ids(&events);
+    let newest_open_start = events.iter().rposition(|event| {
+        event
+            .as_ref()
+            .is_some_and(|event| is_open_start(event, &finished))
+    });
     let mut previous_day: Option<NaiveDate> = None;
-    for record in records {
-        let mut row = message_row(record, context);
+    for (index, (record, event)) in records.iter().zip(&events).enumerate() {
+        let mut row = match event {
+            Some(event)
+                if event.phase == CallPhase::Started && !is_open_start(event, &finished) =>
+            {
+                continue;
+            }
+            Some(event) => call_row(record, event, context),
+            None => message_row(record, context),
+        };
+        if let Some(call) = row.call.as_mut() {
+            call.started &= newest_open_start == Some(index);
+        }
         let day = record
             .created_at
             .with_timezone(&context.offset)
@@ -680,6 +807,7 @@ pub fn thread_list_rows(
 ) -> Vec<Row> {
     let by_id: BTreeMap<&str, &MessageRecord> = records
         .iter()
+        .filter(|record| record.call_event_json.is_none())
         .map(|record| (record.message_id.as_str(), record))
         .collect();
     let mut threads = group_threads(records);
@@ -805,6 +933,7 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
             subject: None,
+            call_event_json: None,
         }
     }
 
@@ -1455,5 +1584,200 @@ mod tests {
         edited.body_html = "<p>changed</p>".into();
         let new = flat_rows(&[record("a", None, 8, 6), edited], &context(), false);
         assert_eq!(changed_indices(&old, &new), vec![1]);
+    }
+
+    fn call_record(id: &str, hour: u32, event: CallEvent) -> MessageRecord {
+        MessageRecord {
+            sender_id: None,
+            sender_name: None,
+            body_html: String::new(),
+            call_event_json: Some(event.to_json()),
+            ..record(id, None, hour, 7)
+        }
+    }
+
+    fn call_event_of(
+        phase: CallPhase,
+        call_id: &str,
+        initiator: &str,
+        seconds: Option<u64>,
+        participants: &[&str],
+    ) -> CallEvent {
+        CallEvent {
+            phase,
+            call_type: CallType::Call,
+            call_id: call_id.into(),
+            duration_seconds: seconds,
+            initiator_id: Some(initiator.into()),
+            initiator_name: Some(format!("Name {initiator}")),
+            participant_ids: participants.iter().map(|id| (*id).to_owned()).collect(),
+        }
+    }
+
+    fn call_context() -> RowContext {
+        let mut context = context();
+        context.my_user_id = Some("me".into());
+        context
+    }
+
+    fn call_of(row: &Row) -> &CallCard {
+        let Row::Message(message) = row else {
+            panic!("not a message row")
+        };
+        message.call.as_ref().expect("call row")
+    }
+
+    #[test]
+    fn started_call_is_hidden_when_the_same_call_ended() {
+        let records = [
+            call_record(
+                "s1",
+                9,
+                call_event_of(CallPhase::Started, "one", "u", None, &[]),
+            ),
+            call_record(
+                "e1",
+                10,
+                call_event_of(CallPhase::Ended, "one", "u", Some(723), &["u", "me"]),
+            ),
+            call_record(
+                "s2",
+                11,
+                call_event_of(CallPhase::Started, "two", "u", None, &[]),
+            ),
+        ];
+        let rows = flat_rows(&records, &call_context(), false);
+        assert_eq!(keys(&rows), ["e1", "s2"]);
+        assert_eq!(call_of(&rows[0]).title, "Call ended");
+        assert_eq!(call_of(&rows[0]).detail, "12m 3s \u{b7} 10:00");
+        assert_eq!(call_of(&rows[1]).title, "Call started");
+        assert_eq!(call_of(&rows[1]).detail, "11:00");
+        assert!(call_of(&rows[1]).started);
+    }
+
+    #[test]
+    fn only_the_newest_open_start_can_be_joined() {
+        let records = [
+            call_record(
+                "old",
+                9,
+                call_event_of(CallPhase::Started, "lost", "u", None, &[]),
+            ),
+            call_record(
+                "new",
+                11,
+                call_event_of(CallPhase::Started, "live", "u", None, &[]),
+            ),
+        ];
+        let rows = flat_rows(&records, &call_context(), false);
+        assert_eq!(keys(&rows), ["old", "new"]);
+        assert!(!call_of(&rows[0]).started);
+        assert!(call_of(&rows[1]).started);
+    }
+
+    #[test]
+    fn missed_call_needs_an_incoming_call_with_fewer_than_two_participants() {
+        let rows = flat_rows(
+            &[
+                call_record(
+                    "incoming",
+                    9,
+                    call_event_of(CallPhase::Ended, "a", "u", Some(60), &["u"]),
+                ),
+                call_record(
+                    "outgoing",
+                    10,
+                    call_event_of(CallPhase::Ended, "b", "me", Some(60), &["me"]),
+                ),
+                call_record(
+                    "answered",
+                    11,
+                    call_event_of(CallPhase::Ended, "c", "u", Some(60), &["u", "me"]),
+                ),
+            ],
+            &call_context(),
+            false,
+        );
+        let missed = call_of(&rows[0]);
+        assert!(missed.missed);
+        assert_eq!(missed.title, "Missed call");
+        assert_eq!(missed.detail, "09:00");
+        assert_eq!(missed.icon, CallIcon::Missed);
+        let outgoing = call_of(&rows[1]);
+        assert!(!outgoing.missed);
+        assert_eq!(outgoing.title, "Call ended");
+        assert_eq!(outgoing.detail, "1m \u{b7} 10:00");
+        assert!(!call_of(&rows[2]).missed);
+    }
+
+    #[test]
+    fn call_side_follows_the_initiator() {
+        let rows = flat_rows(
+            &[
+                call_record(
+                    "mine",
+                    9,
+                    call_event_of(CallPhase::Ended, "a", "me", Some(5), &["me", "u"]),
+                ),
+                call_record(
+                    "theirs",
+                    10,
+                    call_event_of(CallPhase::Ended, "b", "u", Some(5), &["me", "u"]),
+                ),
+            ],
+            &call_context(),
+            false,
+        );
+        let sides: Vec<(bool, Option<&str>)> = rows
+            .iter()
+            .map(|row| match row {
+                Row::Message(message) => (message.own, message.sender_id.as_deref()),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(sides, [(true, Some("me")), (false, Some("u"))]);
+    }
+
+    #[test]
+    fn meeting_events_use_the_video_icon_and_meeting_titles() {
+        let mut event = call_event_of(CallPhase::Ended, "m", "u", Some(3723), &["u", "me", "x"]);
+        event.call_type = CallType::Meeting;
+        let rows = flat_rows(&[call_record("m", 9, event)], &call_context(), false);
+        let card = call_of(&rows[0]);
+        assert_eq!(card.title, "Meeting ended");
+        assert_eq!(card.icon, CallIcon::Video);
+        assert_eq!(card.detail, "1h 2m 3s \u{b7} 09:00");
+    }
+
+    #[test]
+    fn call_rows_never_join_a_series() {
+        let mut records = vec![
+            record_by("a", "u", 9, 0, 7),
+            call_record(
+                "c",
+                9,
+                call_event_of(CallPhase::Ended, "x", "u", Some(5), &["u", "me"]),
+            ),
+        ];
+        records.push(record_by("b", "u", 9, 1, 7));
+        let rows = flat_rows(&records, &call_context(), false);
+        let series: Vec<Series> = rows
+            .iter()
+            .map(|row| match row {
+                Row::Message(message) => message.series,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert!(series.iter().all(|series| *series == Series::default()));
+    }
+
+    #[test]
+    fn thread_lists_leave_call_events_out() {
+        let records = [call_record(
+            "c",
+            9,
+            call_event_of(CallPhase::Ended, "x", "u", Some(5), &["u", "me"]),
+        )];
+        assert!(thread_list_rows(&records, &call_context(), false).is_empty());
     }
 }
