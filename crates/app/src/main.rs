@@ -3,55 +3,14 @@
     windows_subsystem = "windows"
 )]
 
-mod activity;
-mod agent_api;
-mod agents;
-mod app_state;
-mod backend;
-mod call;
-mod card_actions;
-mod card_inputs;
-mod card_refresh;
-mod card_state;
-mod chat_actions;
-mod data;
-mod demo;
-mod demo_profiles;
-mod emoji;
-mod gifs;
-mod image_view_gallery;
+pub mod agents;
+pub mod call;
 #[cfg(test)]
 mod layout_guard;
-mod local_previews;
-mod message_actions;
-mod notice;
-mod notify;
-mod outbox;
-mod outgoing;
-mod own_status;
-mod pending_rows;
-mod people;
-mod profile_model;
-mod profile_state;
-mod reaction_model;
-mod rows;
-mod scheduled;
-mod scheduled_rows;
-mod section_actions;
-mod sidebar_model;
-mod stored_outgoing;
-mod task_dialog;
-mod translation_actions;
-mod typing;
+pub mod notify;
 mod views;
 
-pub use app_ui_kit::render;
-pub use app_base::{
-    APP_NAME, assets, avatar_image, channel_files, crash_log, demo_cards, demo_chart_cards, demo_gifs,
-    demo_input_cards, demo_library, demo_recap, diagnostics, downloads, format, frame_log, fuzzy,
-    image_view_math, inline_image, presence_link, read_state, recap, remote_image, runtime, schedule_time,
-    single_instance, stickers, theme, translation, updater, user_activity,
-};
+pub use state::*;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -62,7 +21,7 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use store::Store;
 
-use app_state::{AppState, Mode};
+use crate::app_state::{AppState, Mode};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
 const VERSION_MARKER: &str = concat!("teams-build:", env!("TEAMS_BUILD_VERSION"));
@@ -222,7 +181,7 @@ fn main() {
         application = application.with_http_client(Arc::new(http_client));
     }
 
-    application.with_assets(assets::AppAssets).run(move |cx| {
+    application.with_assets(app_base::assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         cx.on_app_quit(|_| {
             updater::exit_after_grace();

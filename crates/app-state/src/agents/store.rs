@@ -51,7 +51,7 @@ mod tests {
     use agents::AgentAction;
 
     use super::*;
-    use crate::agents::runs::tests::finished_run;
+    use crate::agents::fixtures::finished_run;
 
     #[test]
     fn settings_round_trip_and_default_when_missing() {

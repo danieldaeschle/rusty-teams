@@ -278,6 +278,7 @@ dependencies = [
  "agents",
  "app-base",
  "app-call-model",
+ "app-state",
  "app-ui-kit",
  "calling",
  "chatsvc",
@@ -353,6 +354,35 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "app-state"
+version = "0.1.0"
+dependencies = [
+ "agents",
+ "app-base",
+ "app-call-model",
+ "app-ui-kit",
+ "calling",
+ "chatsvc",
+ "chrono",
+ "directories",
+ "gpui-kit",
+ "graph",
+ "image",
+ "log",
+ "mcp",
+ "regex",
+ "serde",
+ "serde_json",
+ "session",
+ "store",
+ "teams-core",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "webview",
 ]
 
 [[package]]

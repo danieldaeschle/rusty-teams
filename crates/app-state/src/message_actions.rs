@@ -80,7 +80,7 @@ fn saved_entry(record: &MessageRecord, is_channel: bool) -> SavedMessage {
 }
 
 impl AppState {
-    pub(crate) fn message_record(
+    pub fn message_record(
         &self,
         conversation_id: &str,
         message_id: &str,

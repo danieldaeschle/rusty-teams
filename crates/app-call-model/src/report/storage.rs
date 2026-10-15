@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::Document;
 
+#[cfg(not(test))]
 const REPORT_DIRECTORY: &str = "call-reports";
 const KEEP_REPORTS: usize = 30;
 const JSON_EXTENSION: &str = "json";

@@ -1,4 +1,4 @@
-mod recent;
+pub mod recent;
 
 use app_base::emoji::typing;
 use std::ops::Range;
@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 pub use recent::Recent;
 pub use typing::{active_query, closing_code, smiley_before_space, trailing_smiley, typed_char};
 
-const INDEX: &str = include_str!("../../assets/emoji/emoji.tsv");
+const INDEX: &str = include_str!("../../../app/assets/emoji/emoji.tsv");
 
 #[derive(Debug)]
 pub struct Emoji {

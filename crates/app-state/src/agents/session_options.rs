@@ -282,11 +282,11 @@ mod tests {
             std::sync::Arc::new(store::Store::open_in_memory().unwrap()),
             crate::app_state::Mode::default(),
         );
-        let mut created = crate::agents::runs::tests::finished_run(1);
+        let mut created = crate::agents::fixtures::finished_run(1);
         created.launched = true;
-        let mut never_started = crate::agents::runs::tests::finished_run(2);
+        let mut never_started = crate::agents::fixtures::finished_run(2);
         never_started.launched = false;
-        let mut sent = crate::agents::runs::tests::finished_run(3);
+        let mut sent = crate::agents::fixtures::finished_run(3);
         sent.launched = false;
         sent.sent_to = Some(crate::agents::runs::SessionTarget {
             session_id: sent.session_id.clone(),

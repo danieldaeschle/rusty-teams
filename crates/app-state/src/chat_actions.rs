@@ -215,7 +215,7 @@ impl AppState {
     }
 
     /// `None` stops the action. `Some(None)` is demo mode, which only changes the local store.
-    pub(crate) fn chat_action_engine(
+    pub fn chat_action_engine(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<Option<std::sync::Arc<crate::backend::Engine>>> {
@@ -254,7 +254,7 @@ impl AppState {
         }
     }
 
-    pub(crate) fn reload_sidebar_after_sync(&mut self, cx: &mut Context<Self>) {
+    pub fn reload_sidebar_after_sync(&mut self, cx: &mut Context<Self>) {
         let selected = match &self.selection {
             Some(Selection::Chat(chat_id)) => Some(chat_id.clone()),
             _ => None,
@@ -309,7 +309,7 @@ impl AppState {
         build_sections(&input)
     }
 
-    pub(crate) fn run_chat_action(
+    pub fn run_chat_action(
         &mut self,
         label: &'static str,
         call: impl Future<Output = teams_core::Result<()>> + Send + 'static,

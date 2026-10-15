@@ -22,6 +22,8 @@ pub mod call_view;
 pub mod call_view_menu;
 pub mod calls_tab;
 pub mod card_carousel;
+#[cfg(test)]
+mod card_input_tests;
 pub mod card_code_block;
 pub mod card_icon;
 pub mod card_input;

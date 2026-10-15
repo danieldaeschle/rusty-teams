@@ -6,7 +6,7 @@ use crate::backend::Engine;
 use crate::card_state::CardScope;
 
 #[cfg(windows)]
-mod hosted;
+pub mod hosted;
 #[cfg(windows)]
 use app_base::task_dialog::sdk;
 

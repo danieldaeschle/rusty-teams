@@ -143,7 +143,7 @@ impl AppState {
         }
     }
 
-    pub(crate) fn reapply_section_changes(&mut self) {
+    pub fn reapply_section_changes(&mut self) {
         self.section_changes.reapply(&mut self.directory);
     }
 

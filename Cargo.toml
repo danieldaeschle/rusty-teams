@@ -30,6 +30,7 @@ uuid = { version = "1", default-features = false, features = ["v4"] }
 
 app-base = { path = "crates/app-base" }
 app-call-model = { path = "crates/app-call-model" }
+app-state = { path = "crates/app-state" }
 app-ui-kit = { path = "crates/app-ui-kit" }
 agents = { path = "crates/agents" }
 session = { path = "crates/session" }
@@ -65,4 +66,7 @@ opt-level = 1
 opt-level = 1
 
 [profile.release.package.app-ui-kit]
+opt-level = 1
+
+[profile.release.package.app-state]
 opt-level = 1

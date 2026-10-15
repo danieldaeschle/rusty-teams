@@ -1,6 +1,6 @@
-mod bridge;
+pub mod bridge;
 pub mod body;
-mod source;
+pub mod source;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;

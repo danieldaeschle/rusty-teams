@@ -1,6 +1,6 @@
-mod feed;
-mod reactions;
-mod service;
+pub mod feed;
+pub mod reactions;
+pub mod service;
 
 pub use feed::{Actor, Entry, Filter, Kind};
 pub use service::ActivityCenter;

@@ -222,12 +222,12 @@ impl AppState {
         .detach();
     }
 
-    pub(crate) fn announce_cards(&mut self, scope: &CardScope, cx: &mut Context<Self>) {
+    pub fn announce_cards(&mut self, scope: &CardScope, cx: &mut Context<Self>) {
         cx.emit(AppEvent::Cards(scope.conversation_id.clone()));
         cx.notify();
     }
 
-    pub(crate) fn replace_card(
+    pub fn replace_card(
         &mut self,
         scope: &CardScope,
         json: &str,

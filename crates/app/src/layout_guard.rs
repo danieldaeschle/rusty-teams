@@ -838,9 +838,10 @@ mod frames {
 
 #[test]
 fn lines_are_solid() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
-    source_files(&root, &mut files);
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
     let violations: Vec<String> = files
         .iter()
         .filter(|file| !file.ends_with("layout_guard.rs"))
