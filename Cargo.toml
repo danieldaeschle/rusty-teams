@@ -51,3 +51,6 @@ codegen-units = 256
 
 [profile.release.package."*"]
 codegen-units = 16
+
+[profile.release.package.app]
+opt-level = 1
