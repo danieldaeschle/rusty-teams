@@ -44,3 +44,10 @@ webview = { path = "crates/webview" }
 gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
+
+[profile.release]
+incremental = true
+codegen-units = 256
+
+[profile.release.package."*"]
+codegen-units = 16
