@@ -20,7 +20,7 @@ use crate::signaling::{
     AttachRequest, LeaveReason, MeetingTarget, Participant, SelfIdentity, Signaling, TenantRouting, fetch_self,
 };
 use crate::timeline::Timeline;
-use crate::trouter_events::{CallEvent, CallbackLinks, callback_call_id, callback_reply_body, classify, decode_body};
+use crate::trouter_events::{CallEvent, CallbackLinks, acceptance_acknowledgement, callback_call_id, classify, decode_body, is_acceptance_callback};
 
 const ENDPOINT_WAIT: Duration = Duration::from_secs(30);
 const PRESENCE_SUFFIX: &str = "unifiedPresenceService";
@@ -115,7 +115,7 @@ enum RingCommand {
 
 struct Route {
     sender: mpsc::UnboundedSender<TrouterCallback>,
-    links: CallbackLinks,
+    acceptance_reply: String,
 }
 
 pub(crate) struct Inner {
@@ -144,7 +144,10 @@ impl Inner {
 
     pub(crate) fn register_route(&self, links: &CallbackLinks) -> mpsc::UnboundedReceiver<TrouterCallback> {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let route = Route { sender, links: links.clone() };
+        let route = Route {
+            sender,
+            acceptance_reply: acceptance_acknowledgement(links).to_string(),
+        };
         self.routes.lock().expect("routes lock").insert(links.call_id().to_owned(), route);
         receiver
     }
@@ -192,7 +195,10 @@ impl Inner {
             .lock()
             .expect("routes lock")
             .get(&call_id)
-            .map(|route| (route.sender.clone(), callback_reply_body(&callback.path, &route.links)));
+            .map(|route| {
+                let reply = if is_acceptance_callback(&callback.path) { route.acceptance_reply.clone() } else { String::new() };
+                (route.sender.clone(), reply)
+            });
         match route {
             Some((sender, reply)) => {
                 self.replier.reply(callback.request_id, 200, reply);

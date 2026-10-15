@@ -72,7 +72,8 @@ pub fn recorder_features() -> Value {
     })
 }
 
-pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name: &str, callbacks: &CallbackLinks) -> Value {
+pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name: &str, callbacks: &CallbackLinks, threadless: bool) -> Value {
+    let group_chat = if threadless { Value::Null } else { json!({"threadId": thread_id, "messageId": null}) };
     json!({
         "disableUnmute": false,
         "participants": {
@@ -95,7 +96,7 @@ pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name:
         }},
         "replacementDetails": null,
         "groupContext": null,
-        "groupChat": {"threadId": thread_id, "messageId": null},
+        "groupChat": group_chat,
         "links": {
             "addParticipantSuccess": callbacks.conversation("addParticipantSuccess"),
             "addParticipantFailure": callbacks.conversation("addParticipantFailure"),
@@ -264,7 +265,10 @@ mod tests {
     #[test]
     fn the_bot_invitation_carries_the_meeting_and_a_token_placeholder() {
         let callbacks = CallbackLinks::new("https://trouter.example/v4/f/x/", "call-1");
-        let body = add_bot_body(json!({"id": "8:orgid:me"}), "19:meeting_x@thread.v2", "call-1", "Me", &callbacks);
+        let body = add_bot_body(json!({"id": "8:orgid:me"}), "19:meeting_x@thread.v2", "call-1", "Me", &callbacks, false);
+        let direct = add_bot_body(json!({"id": "8:orgid:me"}), "19:a_b@unq.gbl.spaces", "call-1", "Me", &callbacks, true);
+        assert_eq!(direct["groupChat"], Value::Null);
+        assert_eq!(direct["participantInvitationData"]["botData"]["threadId"], "19:a_b@unq.gbl.spaces");
         let bot_data = &body["participantInvitationData"]["botData"];
         assert_eq!(body["participants"]["to"][0]["id"], RECORDING_BOT_MRI);
         assert_eq!(bot_data["mode"], "RecordingAndTranscription");

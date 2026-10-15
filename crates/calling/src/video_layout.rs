@@ -142,10 +142,9 @@ pub fn add_video_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -
 
 pub fn add_one_to_one_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<VideoLines> {
     let sending = h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs);
-    let receiving = h264_only(factory.get_rtp_receiver_capabilities(MediaType::Video).codecs);
-    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending, Vec::new())?;
-    add_line(peer, RtpTransceiverDirection::RecvOnly, None, receiving, Vec::new())?;
-    Ok(VideoLines { camera, share: None })
+    let camera = add_line(peer, RtpTransceiverDirection::SendRecv, Some(CAMERA_STREAM), sending.clone(), Vec::new())?;
+    let share = add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending, Vec::new())?;
+    Ok(VideoLines { camera, share: Some(share) })
 }
 
 /// Per-line direction told to the mixer through `updateMediaDescriptions`; no SDP renegotiation.

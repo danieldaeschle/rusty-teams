@@ -584,9 +584,13 @@ pub fn to_browser_answer(teams_sdp: &str, offer: &SignaledOffer, browser_offer_s
     session.attributes.retain(|attribute| attribute.name.starts_with("x-"));
     session.attributes.push(Attribute::flag("extmap-allow-mixed"));
     session.attributes.push(Attribute::new("msid-semantic", " WMS *"));
-    let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
-    session.attributes.push(Attribute::new("group", format!("BUNDLE {}", mids.join(" "))));
+    session.attributes.push(Attribute::new("group", bundle_group(media.iter().map(|line| (line.port.as_str(), line.mid())))));
     Ok(write(&SessionDescription { session, media }))
+}
+
+fn bundle_group<'a>(lines: impl Iterator<Item = (&'a str, Option<&'a str>)>) -> String {
+    let mids: Vec<&str> = lines.filter(|(port, _)| *port != "0").filter_map(|(_, mid)| mid).collect();
+    format!("BUNDLE {}", mids.join(" "))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -943,8 +947,7 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
     session.bandwidths.clear();
     session.connection = None;
     session.attributes.retain(|attribute| matches!(attribute.name.as_str(), "extmap-allow-mixed" | "msid-semantic"));
-    let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
-    session.attributes.push(Attribute::new("group", format!("BUNDLE {}", mids.join(" "))));
+    session.attributes.push(Attribute::new("group", bundle_group(media.iter().map(|line| (line.port.as_str(), line.mid())))));
     Ok(RemoteOffer {
         browser_sdp: write(&SessionDescription { session, media }),
         lines,
@@ -1066,6 +1069,12 @@ mod tests {
             next += 1;
             next
         }
+    }
+
+    #[test]
+    fn rejected_lines_stay_out_of_the_bundle() {
+        let lines = [("9", Some("0")), ("0", Some("1")), ("9", Some("2"))];
+        assert_eq!(bundle_group(lines.into_iter()), "BUNDLE 0 2");
     }
 
     const AUDIO_ONLY_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS stream\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=ice-options:trickle\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=mid:0\r\na=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\na=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\na=sendrecv\r\na=msid:stream track\r\na=rtcp-mux\r\na=rtpmap:111 opus/48000/2\r\na=rtcp-fb:111 transport-cc\r\na=fmtp:111 minptime=10;useinbandfec=1\r\na=rtpmap:63 red/48000/2\r\na=fmtp:63 111/111\r\na=rtpmap:9 G722/8000\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:13 CN/8000\r\na=rtpmap:110 telephone-event/48000\r\na=rtpmap:126 telephone-event/8000\r\na=ssrc:42 cname:abc\r\na=ssrc:42 msid:stream track\r\n";
