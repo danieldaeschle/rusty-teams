@@ -79,6 +79,7 @@ fn image_view(
     open_image: Option<&ImageActions>,
 ) -> AnyElement {
     let (width, height) = image_size(image, directory);
+    let image_id = ElementId::Name(format!("{id}-image").into());
     let frame = div()
         .id(ElementId::Name(id.into()))
         .relative()
@@ -112,6 +113,7 @@ fn image_view(
         .cursor_pointer()
         .child(
             img(entry.path.clone())
+                .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover),
@@ -178,6 +180,7 @@ pub fn file_badge(kind: FileKind, size: f32) -> Div {
 
 fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
     let (width, height) = fit_image(image.size);
+    let image_id = ElementId::Name(format!("{id}-image").into());
     div()
         .id(ElementId::Name(id.into()))
         .w(px(width))
@@ -188,6 +191,7 @@ fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
         .overflow_hidden()
         .child(
             img(image.image.clone())
+                .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover),

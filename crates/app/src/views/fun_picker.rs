@@ -463,6 +463,7 @@ impl FunPicker {
             .hover(|tile| tile.opacity(0.85))
             .child(
                 img(image_source(&gif.preview_url))
+                    .id(("fun-picker-gif-image", index))
                     .size_full()
                     .object_fit(ObjectFit::Cover),
             )
