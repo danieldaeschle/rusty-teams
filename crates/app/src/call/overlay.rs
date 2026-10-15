@@ -37,19 +37,17 @@ struct Placed {
 
 impl Placed {
     fn place(&mut self, rect: ScreenRect, cx: &mut App) {
+        if self.rect == Some(rect) {
+            return;
+        }
         self.rect = Some(rect);
         let Some(native) = self.native else {
             return;
         };
         match self.anchor {
-            Some(anchor) => platform::place_above(
-                native,
-                anchor,
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-            ),
+            Some(_) => {
+                platform::place_rect(native, rect.left, rect.top, rect.width(), rect.height())
+            }
             None => platform::place(native, rect.left, rect.top, rect.width(), rect.height()),
         }
         // WM_SIZE arrives while the app is borrowed, so GPUI drops its own resize report.
@@ -70,12 +68,6 @@ impl Placed {
             platform::show_window_inactive(native);
         } else {
             platform::hide_window(native);
-        }
-    }
-
-    fn restack(&self) {
-        if let (Some(native), Some(anchor)) = (self.native, self.anchor) {
-            platform::stack_above(native, anchor);
         }
     }
 }
@@ -341,10 +333,8 @@ impl CallWindows {
                         placed.set_visible(true);
                     }
                     self.ensure_window(Role::Border(side), rect, work.scale, true, cx);
-                    if let Some(placed) = self.windows.get(&Role::Border(side)) {
-                        placed.restack();
-                    }
                 }
+                self.restack_borders(shared_window);
             }
             BorderVisibility::Hide => {
                 for side in 0..BORDER_SIDES {
@@ -464,6 +454,16 @@ impl CallWindows {
                 .store
                 .set_meta(MINI_POSITION_KEY, &format_position(position.0, position.1));
         }
+    }
+
+    fn restack_borders(&self, shared_window: Option<NativeHandle>) {
+        let Some(shared) = shared_window else {
+            return;
+        };
+        let group: Vec<NativeHandle> = (0..BORDER_SIDES)
+            .filter_map(|side| self.windows.get(&Role::Border(side))?.native)
+            .collect();
+        platform::stack_group_above(shared, &group);
     }
 
     fn ensure_window(

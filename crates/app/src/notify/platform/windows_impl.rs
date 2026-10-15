@@ -40,6 +40,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
+use super::stack_plan::{StackPlan, stack_plan};
 use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
 use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, ringback_cycle};
@@ -196,55 +197,61 @@ fn is_topmost(window: HWND) -> bool {
     unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize != 0 }
 }
 
-fn insert_after_above(handle: HWND, shared: HWND) -> Option<HWND> {
-    let shared_topmost = is_topmost(shared);
-    let band = if shared_topmost {
-        HWND_TOPMOST
-    } else {
-        HWND_NOTOPMOST
-    };
-    unsafe {
-        match GetWindow(shared, GW_HWNDPREV) {
-            Ok(previous) if previous == handle => None,
-            Ok(previous) if shared_topmost || !is_topmost(previous) => Some(previous),
-            _ => Some(band),
+fn band_after(shared_topmost: bool, previous: Option<HWND>) -> HWND {
+    match previous {
+        Some(previous) if shared_topmost || !is_topmost(previous) => previous,
+        _ if shared_topmost => HWND_TOPMOST,
+        _ => HWND_NOTOPMOST,
+    }
+}
+
+fn windows_above(shared: HWND, group: &[NativeHandle]) -> Vec<NativeHandle> {
+    let mut above = Vec::new();
+    let mut current = shared;
+    while let Ok(previous) = unsafe { GetWindow(current, GW_HWNDPREV) } {
+        above.push(previous.0 as NativeHandle);
+        if !group.contains(&(previous.0 as NativeHandle)) {
+            break;
         }
+        current = previous;
     }
+    above
 }
 
-pub fn place_above(
-    handle: NativeHandle,
-    shared: NativeHandle,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) {
-    let insert_after = insert_after_above(hwnd(handle), hwnd(shared));
-    let flags = if insert_after.is_some() {
-        SWP_NOACTIVATE | SWP_NOOWNERZORDER
-    } else {
-        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER
-    };
-    unsafe {
-        let _ = SetWindowPos(hwnd(handle), insert_after, x, y, width, height, flags);
-    }
-}
-
-pub fn stack_above(handle: NativeHandle, shared: NativeHandle) {
-    let Some(insert_after) = insert_after_above(hwnd(handle), hwnd(shared)) else {
-        return;
-    };
+pub fn place_rect(handle: NativeHandle, x: i32, y: i32, width: i32, height: i32) {
     unsafe {
         let _ = SetWindowPos(
             hwnd(handle),
-            Some(insert_after),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER,
         );
+    }
+}
+
+pub fn stack_group_above(shared: NativeHandle, group: &[NativeHandle]) {
+    let shared = hwnd(shared);
+    let above = windows_above(shared, group);
+    let StackPlan::Rebuild { after } = stack_plan(&above, group) else {
+        return;
+    };
+    let mut insert_after = band_after(is_topmost(shared), after.map(hwnd));
+    for handle in group {
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd(*handle),
+                Some(insert_after),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE,
+            );
+        }
+        insert_after = hwnd(*handle);
     }
 }
 

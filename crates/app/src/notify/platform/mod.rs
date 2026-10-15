@@ -12,6 +12,9 @@ pub use stub::*;
 
 pub type NativeHandle = isize;
 
+#[cfg_attr(not(windows), allow(dead_code))]
+mod stack_plan;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorkArea {
     pub left: i32,
