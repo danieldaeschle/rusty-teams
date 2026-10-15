@@ -1,4 +1,4 @@
-use calling::{CallCommand, CallSpec, DeviceChoice, MeetingTarget, MuteCommand};
+use calling::{CallCommand, CallSpec, MeetingTarget, MuteCommand};
 use gpui_kit::Context;
 
 use super::demo::{DemoCall, demo_guests};
@@ -6,7 +6,6 @@ use super::model::CallModel;
 use crate::app_state::AppState;
 
 const OPTIONS_META_KEY: &str = "prejoin_options";
-const DEFAULT_DEVICE_META: &str = "default";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioChoice {
@@ -29,8 +28,6 @@ pub struct JoinOptions {
     pub camera_on: bool,
     pub mic_on: bool,
     pub audio: AudioChoice,
-    pub input: DeviceChoice,
-    pub output: DeviceChoice,
 }
 
 impl Default for JoinOptions {
@@ -39,34 +36,16 @@ impl Default for JoinOptions {
             camera_on: false,
             mic_on: true,
             audio: AudioChoice::Computer,
-            input: DeviceChoice::SystemDefault,
-            output: DeviceChoice::SystemDefault,
         }
-    }
-}
-
-fn device_meta(choice: &DeviceChoice) -> &str {
-    match choice {
-        DeviceChoice::SystemDefault => DEFAULT_DEVICE_META,
-        DeviceChoice::Device(key) => key,
-    }
-}
-
-fn device_from_meta(value: &str) -> DeviceChoice {
-    match value {
-        "" | DEFAULT_DEVICE_META => DeviceChoice::SystemDefault,
-        key => DeviceChoice::Device(key.to_owned()),
     }
 }
 
 impl JoinOptions {
     pub fn to_meta(&self) -> String {
         format!(
-            "camera={}\nmic={}\ninput={}\noutput={}",
+            "camera={}\nmic={}",
             u8::from(self.camera_on),
-            u8::from(self.mic_on),
-            device_meta(&self.input),
-            device_meta(&self.output)
+            u8::from(self.mic_on)
         )
     }
 
@@ -76,8 +55,6 @@ impl JoinOptions {
             match key {
                 "camera" => options.camera_on = value == "1",
                 "mic" => options.mic_on = value == "1",
-                "input" => options.input = device_from_meta(value),
-                "output" => options.output = device_from_meta(value),
                 _ => {}
             }
         }
@@ -88,17 +65,11 @@ impl JoinOptions {
         if self.audio == AudioChoice::NoAudio {
             return vec![CallCommand::DisableAudio];
         }
-        let mut commands = Vec::new();
         if self.mic_on {
-            commands.push(CallCommand::Mute(MuteCommand::Unmute));
+            vec![CallCommand::Mute(MuteCommand::Unmute)]
+        } else {
+            Vec::new()
         }
-        if self.input != DeviceChoice::SystemDefault {
-            commands.push(CallCommand::SelectInput(self.input.clone()));
-        }
-        if self.output != DeviceChoice::SystemDefault {
-            commands.push(CallCommand::SelectOutput(self.output.clone()));
-        }
-        commands
     }
 }
 
@@ -210,8 +181,6 @@ mod tests {
             camera_on: true,
             mic_on: false,
             audio: AudioChoice::Computer,
-            input: DeviceChoice::Device("usb-mic".into()),
-            output: DeviceChoice::SystemDefault,
         };
         assert_eq!(JoinOptions::from_meta(&options.to_meta()), options);
     }
@@ -223,32 +192,23 @@ mod tests {
     }
 
     #[test]
-    fn computer_audio_unmutes_and_selects_chosen_devices_only() {
+    fn computer_audio_unmutes_only_when_the_mic_is_on() {
         let default = JoinOptions::default();
         assert_eq!(
             default.commands_after_join(),
             vec![CallCommand::Mute(MuteCommand::Unmute)]
         );
-        let chosen = JoinOptions {
+        let muted = JoinOptions {
             mic_on: false,
-            input: DeviceChoice::Device("mic".into()),
-            output: DeviceChoice::Device("speaker".into()),
             ..default
         };
-        assert_eq!(
-            chosen.commands_after_join(),
-            vec![
-                CallCommand::SelectInput(DeviceChoice::Device("mic".into())),
-                CallCommand::SelectOutput(DeviceChoice::Device("speaker".into())),
-            ]
-        );
+        assert_eq!(muted.commands_after_join(), Vec::<CallCommand>::new());
     }
 
     #[test]
     fn without_audio_only_the_audio_is_switched_off() {
         let options = JoinOptions {
             audio: AudioChoice::NoAudio,
-            input: DeviceChoice::Device("mic".into()),
             ..JoinOptions::default()
         };
         assert_eq!(

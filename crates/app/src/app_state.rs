@@ -135,6 +135,8 @@ pub struct AppState {
     pub call_view: crate::call::ViewSettings,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
+    pub call_input: calling::DeviceChoice,
+    pub call_output: calling::DeviceChoice,
     pub call_mic: calling::MicSettings,
     pub call_effects: calling::CameraEffects,
     pub meet_now_pending: bool,
@@ -249,6 +251,8 @@ impl AppState {
             call_view: crate::call::ViewSettings::default(),
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
+            call_input: calling::DeviceChoice::SystemDefault,
+            call_output: calling::DeviceChoice::SystemDefault,
             call_mic: calling::MicSettings::default(),
             call_effects: calling::CameraEffects::default(),
             meet_now_pending: false,
@@ -281,6 +285,8 @@ impl AppState {
         state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
+        state.call_input = crate::call::load_input(&state.store);
+        state.call_output = crate::call::load_output(&state.store);
         state.call_mic = crate::call::load_mic(&state.store);
         state.call_effects = crate::call::load_camera_effects(&state.store);
         state.join_options = crate::call::load_join_options(&state.store);

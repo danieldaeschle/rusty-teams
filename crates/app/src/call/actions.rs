@@ -45,8 +45,10 @@ const DEMO_LIVE_MINUTES: i64 = 60;
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
 const CAMERA_META_KEY: &str = "call_camera";
+const INPUT_META_KEY: &str = "call_input";
+const OUTPUT_META_KEY: &str = "call_output";
 const EFFECTS_META_KEY: &str = "call_camera_effects";
-const DEFAULT_CAMERA_META: &str = "default";
+const DEFAULT_DEVICE_META: &str = "default";
 const REPORT_SAVED_NOTICE: &str = "Test report saved";
 
 pub fn load_share_sound(store: &store::Store) -> bool {
@@ -54,8 +56,20 @@ pub fn load_share_sound(store: &store::Store) -> bool {
 }
 
 pub fn load_camera(store: &store::Store) -> DeviceChoice {
-    match store.meta(CAMERA_META_KEY).ok().flatten() {
-        Some(key) if !key.is_empty() && key != DEFAULT_CAMERA_META => DeviceChoice::Device(key),
+    load_device(store, CAMERA_META_KEY)
+}
+
+pub fn load_input(store: &store::Store) -> DeviceChoice {
+    load_device(store, INPUT_META_KEY)
+}
+
+pub fn load_output(store: &store::Store) -> DeviceChoice {
+    load_device(store, OUTPUT_META_KEY)
+}
+
+fn load_device(store: &store::Store, key: &str) -> DeviceChoice {
+    match store.meta(key).ok().flatten() {
+        Some(key) if !key.is_empty() && key != DEFAULT_DEVICE_META => DeviceChoice::Device(key),
         _ => DeviceChoice::SystemDefault,
     }
 }
@@ -70,9 +84,9 @@ pub fn load_camera_effects(store: &store::Store) -> CameraEffects {
         })
 }
 
-fn camera_meta(choice: &DeviceChoice) -> &str {
+fn device_meta(choice: &DeviceChoice) -> &str {
     match choice {
-        DeviceChoice::SystemDefault => DEFAULT_CAMERA_META,
+        DeviceChoice::SystemDefault => DEFAULT_DEVICE_META,
         DeviceChoice::Device(key) => key,
     }
 }
@@ -259,6 +273,12 @@ impl AppState {
         }
         if self.call_camera != DeviceChoice::SystemDefault {
             self.send_call_command(CallCommand::SelectCamera(self.call_camera.clone()));
+        }
+        if self.call_input != DeviceChoice::SystemDefault {
+            self.send_call_command(CallCommand::SelectInput(self.call_input.clone()));
+        }
+        if self.call_output != DeviceChoice::SystemDefault {
+            self.send_call_command(CallCommand::SelectOutput(self.call_output.clone()));
         }
         if self.call_background != BackgroundPick::None {
             self.send_background_command(cx);
@@ -609,7 +629,7 @@ impl AppState {
     }
 
     pub fn select_call_camera(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
-        let _ = self.store.set_meta(CAMERA_META_KEY, camera_meta(&choice));
+        let _ = self.store.set_meta(CAMERA_META_KEY, device_meta(&choice));
         self.call_camera = choice.clone();
         if let Some(launcher) = &self.call_launcher {
             launcher.set_default_camera(choice.clone());
@@ -653,10 +673,14 @@ impl AppState {
     }
 
     pub fn select_call_input(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
+        let _ = self.store.set_meta(INPUT_META_KEY, device_meta(&choice));
+        self.call_input = choice.clone();
         self.send_call_command(CallCommand::SelectInput(choice));
     }
 
     pub fn select_call_output(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
+        let _ = self.store.set_meta(OUTPUT_META_KEY, device_meta(&choice));
+        self.call_output = choice.clone();
         self.send_call_command(CallCommand::SelectOutput(choice));
     }
 
@@ -1315,7 +1339,7 @@ mod tests {
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use store::{ChatRecord, MemberRecord, Store};
 
-    use super::{ActiveCall, CallModel, load_camera, load_camera_effects};
+    use super::{ActiveCall, CallModel, load_camera, load_camera_effects, load_input, load_output};
     use crate::app_state::{AppEvent, AppState, Mode, Selection};
     use crate::call::TransferCandidate;
     use crate::call::background::BackgroundPick;
@@ -1436,6 +1460,71 @@ mod tests {
         cx.update(|cx| app.update(cx, |state, cx| state.set_call_share_sound(false, cx)));
         let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
         assert!(!cx.update(|cx| reopened.read(cx).call_share_sound));
+    }
+
+    #[gpui_kit::test]
+    fn in_call_device_picks_are_saved_including_system_default(cx: &mut TestAppContext) {
+        let (app, mut control) = app_with_commands(cx, live_meeting(false), None);
+        let store = cx.update(|cx| app.read(cx).store.clone());
+        assert_eq!(load_input(&store), DeviceChoice::SystemDefault);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.select_call_input(DeviceChoice::Device("headset-mic".into()), cx);
+                state.select_call_output(DeviceChoice::Device("headset".into()), cx);
+            })
+        });
+        assert_eq!(load_input(&store), DeviceChoice::Device("headset-mic".into()));
+        assert_eq!(load_output(&store), DeviceChoice::Device("headset".into()));
+        assert_eq!(
+            control.try_recv_command(),
+            Some(CallCommand::SelectInput(DeviceChoice::Device("headset-mic".into())))
+        );
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.select_call_input(DeviceChoice::SystemDefault, cx)
+            })
+        });
+        assert_eq!(load_input(&store), DeviceChoice::SystemDefault);
+        let reopened = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        assert_eq!(
+            cx.update(|cx| reopened.read(cx).call_output.clone()),
+            DeviceChoice::Device("headset".into())
+        );
+    }
+
+    #[gpui_kit::test]
+    fn every_call_starts_with_the_saved_devices_even_when_they_are_not_present(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.select_call_input(DeviceChoice::Device("unplugged-mic".into()), cx);
+                state.select_call_output(DeviceChoice::Device("headset".into()), cx);
+            })
+        });
+        let (handle, mut control) = call_channel();
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.begin_call(handle, CallModel::test(), None, cx)
+            })
+        });
+        let mut commands = Vec::new();
+        while let Some(command) = control.try_recv_command() {
+            commands.push(command);
+        }
+        assert!(commands.contains(&CallCommand::SelectInput(DeviceChoice::Device(
+            "unplugged-mic".into()
+        ))));
+        assert!(commands.contains(&CallCommand::SelectOutput(DeviceChoice::Device(
+            "headset".into()
+        ))));
+        assert_eq!(
+            load_input(&store),
+            DeviceChoice::Device("unplugged-mic".into())
+        );
     }
 
     #[gpui_kit::test]
