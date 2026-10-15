@@ -39,6 +39,9 @@ pub fn pending_row(
         time: created_at.with_timezone(&Local).format("%H:%M").to_string(),
         day_header: None,
         blocks: pending_blocks(outgoing),
+        jumbo: (outgoing.reply.is_none() && outgoing.images.is_empty() && outgoing.files.is_empty())
+            .then(|| teams_core::jumbo_emoji(&outgoing.html()))
+            .flatten(),
         edited: false,
         deleted: false,
         reactions: Vec::new(),

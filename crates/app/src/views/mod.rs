@@ -40,6 +40,7 @@ pub mod fun_picker;
 pub mod image_menu;
 pub mod image_viewer;
 pub mod join_dialog;
+pub mod jumbo_emoji;
 pub mod link_preview;
 pub mod message_actions;
 pub mod message_row;

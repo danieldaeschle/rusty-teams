@@ -1708,6 +1708,26 @@ fn release_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
+        message(
+            chat,
+            "m10",
+            None,
+            (PRIYA_ID, priya_name),
+            at(0, 13, 50),
+            "<p><emoji id=\"heart\" alt=\"\u{2764}\u{fe0f}\" title=\"Heart\"></emoji></p>",
+            &many,
+            false,
+        ),
+        message(
+            chat,
+            "m11",
+            None,
+            me,
+            at(0, 13, 51),
+            "<p>\u{1f44d}\u{1f389}</p>",
+            "[]",
+            false,
+        ),
     ]
 }
 
