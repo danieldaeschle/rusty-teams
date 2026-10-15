@@ -54,7 +54,10 @@ pub enum Span {
     Image {
         hosted_content_url: String,
     },
-    Quote(Vec<Span>),
+    Quote {
+        message_id: Option<String>,
+        children: Vec<Span>,
+    },
     BlockQuote(Vec<Span>),
 }
 
@@ -142,7 +145,10 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
             start: 1,
             items: vec![convert_children(element)],
         }),
-        "blockquote" if is_reply(element) => spans.push(Span::Quote(convert_children(element))),
+        "blockquote" if is_reply(element) => spans.push(Span::Quote {
+            message_id: element.value().attr("itemid").map(str::to_owned),
+            children: convert_children(element),
+        }),
         "blockquote" => spans.push(Span::BlockQuote(convert_children(element))),
         "emoji" => push_emoji(element, spans),
         "img" => push_image(element, spans),
@@ -416,7 +422,7 @@ fn tidy(spans: &mut Vec<Span>) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => tidy(children),
             Span::List { items, .. } => items.iter_mut().for_each(tidy),
@@ -447,7 +453,7 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
                         | Span::List { .. }
                         | Span::Table { .. }
                         | Span::Heading { .. }
-                        | Span::Quote(_)
+                        | Span::Quote { .. }
                         | Span::BlockQuote(_)
                 )
             )

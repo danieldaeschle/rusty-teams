@@ -119,7 +119,7 @@ mod tests {
             &outgoing,
             Delivery::Sending,
         );
-        assert!(matches!(row.blocks.first(), Some(Block::Reply(_))));
+        assert!(matches!(row.blocks.first(), Some(Block::Reply { .. })));
         assert_eq!(row.blocks.len(), 2);
     }
 }

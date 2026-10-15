@@ -468,7 +468,7 @@ const FORWARD_ITEMTYPE: &str = "schema.skype.com/Forward";
 pub fn message_text(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
         .into_iter()
-        .filter(|span| !matches!(span, Span::Quote(_)))
+        .filter(|span| !matches!(span, Span::Quote { .. }))
         .collect();
     strip_image_placeholders(layout_blocks(&own_spans))
         .into_iter()
@@ -481,7 +481,7 @@ pub fn message_text(record: &MessageRecord) -> String {
 pub fn message_draft(record: &MessageRecord) -> Draft {
     let own_spans: Vec<Span> = message_spans(record)
         .into_iter()
-        .filter(|span| !matches!(span, Span::Quote(_)))
+        .filter(|span| !matches!(span, Span::Quote { .. }))
         .collect();
     Draft::from_spans(&own_spans).trimmed()
 }
@@ -489,7 +489,7 @@ pub fn message_draft(record: &MessageRecord) -> Draft {
 pub fn reply_excerpt(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
         .into_iter()
-        .filter(|span| !matches!(span, Span::Quote(_)))
+        .filter(|span| !matches!(span, Span::Quote { .. }))
         .collect();
     let text = strip_image_placeholders(layout_blocks(&own_spans))
         .into_iter()
@@ -984,7 +984,7 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let Some(Block::Reply(children)) = reply.first() else { panic!("{reply:?}") };
+        let Some(Block::Reply { children, .. }) = reply.first() else { panic!("{reply:?}") };
         let text = format!("{children:?}");
         assert!(text.contains(r"first link\nsecond link"), "{text}");
     }

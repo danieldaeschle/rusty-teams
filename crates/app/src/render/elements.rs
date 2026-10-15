@@ -6,6 +6,7 @@ use super::blocks::{Block, Inline, StyleFlags};
 use super::flow_text::{FlowSegment, FlowText};
 use super::selectable::{Pill, SelectableRichText};
 use super::syntax::{self, Token};
+use crate::app_state::AppHandle;
 use crate::theme;
 use crate::views::widgets::symbol;
 
@@ -46,8 +47,21 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .child(render_inline(inline, id, own, cx))
             .into_any_element(),
         Block::Code { language, code } => render_code(language.as_deref(), code, id, own, cx),
-        Block::Reply(children) => div()
+        Block::Reply {
+            message_id,
+            children,
+        } => div()
+            .id(SharedString::from(format!("{id}-reply")))
             .w_full()
+            .when_some(message_id.clone(), |quote, message_id| {
+                quote
+                    .cursor_pointer()
+                    .hover(|quote| quote.bg(theme::row_hover()))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        jump_to_quoted(message_id.clone(), cx);
+                    })
+            })
             .px(px(8.))
             .py(px(3.))
             .border_l(px(3.))
@@ -485,4 +499,15 @@ mod tests {
     fn light_text_color_stays_as_sent() {
         assert_eq!(Rgba::from(readable(0xffd700, false)), rgb(0xffd700));
     }
+}
+
+fn jump_to_quoted(message_id: String, cx: &mut App) {
+    let Some(handle) = cx.try_global::<AppHandle>() else {
+        return;
+    };
+    handle.0.clone().update(cx, |state, cx| {
+        if let Some(selection) = state.selection.clone() {
+            state.jump_to_message(selection, message_id, cx);
+        }
+    });
 }

@@ -395,7 +395,7 @@ pub fn readable_text(record: &MessageRecord) -> String {
     }
     let spans: Vec<Span> = message_spans(record)
         .into_iter()
-        .filter(|span| !matches!(span, Span::Quote(_)))
+        .filter(|span| !matches!(span, Span::Quote { .. }))
         .collect();
     let mut text = String::new();
     push_plain(&mut text, &spans);
@@ -468,7 +468,7 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => push_plain(text, children),
             Span::Heading { children, .. } => {
@@ -592,7 +592,7 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => link_user_mentions(children, infos),
             Span::List { items, .. } => items
@@ -685,7 +685,7 @@ fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => collect_user_mentions(children, infos, inputs),
             Span::List { items, .. } => items
@@ -731,7 +731,7 @@ fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => merge_split_mentions(children, mentions),
             Span::List { items, .. } => items
@@ -1120,7 +1120,7 @@ mod tests {
             json,
         );
         let spans = message_spans(&stored);
-        let Some(Span::Quote(children)) = spans.first() else {
+        let Some(Span::Quote { children, .. }) = spans.first() else {
             panic!("expected a reply quote first, got {spans:?}");
         };
         let mut quoted = String::new();
@@ -1136,7 +1136,7 @@ mod tests {
     fn a_message_reference_without_its_tag_still_shows_the_quote() {
         let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"quote":{"message_id":"Q1","preview":"hi","sender_name":null}}]"#;
         let spans = message_spans(&record("<p>answer</p>", json));
-        assert!(matches!(spans.first(), Some(Span::Quote(_))));
+        assert!(matches!(spans.first(), Some(Span::Quote { .. })));
     }
 
     fn with_mentions(body_html: &str, mentions_json: &str) -> MessageRecord {

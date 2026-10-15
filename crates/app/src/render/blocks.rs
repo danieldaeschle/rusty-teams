@@ -174,7 +174,10 @@ pub enum Block {
         language: Option<String>,
         code: String,
     },
-    Reply(Vec<Block>),
+    Reply {
+        message_id: Option<String>,
+        children: Vec<Block>,
+    },
     Quote(Vec<Block>),
     List {
         ordered: bool,
@@ -230,7 +233,7 @@ impl Block {
                     .join("\n"),
             ),
             Block::Quote(children) => Some(join(children)),
-            Block::Reply(_) | Block::Rule | Block::Image { .. } => None,
+            Block::Reply { .. } | Block::Rule | Block::Image { .. } => None,
         }
     }
 
@@ -241,7 +244,7 @@ impl Block {
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
             Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
             Block::Quote(children) => children.iter().find_map(Block::first_line),
-            Block::Reply(_) | Block::Rule | Block::Image { .. } => None,
+            Block::Reply { .. } | Block::Rule | Block::Image { .. } => None,
         }
     }
 
@@ -254,6 +257,22 @@ impl Block {
     }
 }
 
+fn unlink(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => {
+                for segment in &mut inline.segments {
+                    segment.link = None;
+                    segment.style.link = false;
+                }
+            }
+            Block::Reply { children, .. } | Block::Quote(children) => unlink(children),
+            Block::List { items, .. } => items.iter_mut().for_each(|item| unlink(item)),
+            _ => {}
+        }
+    }
+}
+
 pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
     blocks
         .into_iter()
@@ -262,9 +281,15 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
                 let stripped = inline.without(IMAGE_PLACEHOLDER);
                 (!stripped.is_blank()).then_some(Block::Paragraph(stripped))
             }
-            Block::Reply(children) => {
+            Block::Reply {
+                message_id,
+                children,
+            } => {
                 let children = strip_image_placeholders(children);
-                (!children.is_empty()).then_some(Block::Reply(children))
+                (!children.is_empty()).then_some(Block::Reply {
+                    message_id,
+                    children,
+                })
             }
             Block::Quote(children) => {
                 let children = strip_image_placeholders(children);
@@ -307,14 +332,25 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                     code: code.trim_end_matches('\n').to_owned(),
                 });
             }
-            Span::Quote(children) | Span::BlockQuote(children) => {
+            Span::Quote {
+                message_id,
+                children,
+            } => {
+                flush(&mut current, &mut blocks, Block::Paragraph);
+                let mut inner = layout_blocks_with(children, false);
+                unlink(&mut inner);
+                if !inner.is_empty() {
+                    blocks.push(Block::Reply {
+                        message_id: message_id.clone(),
+                        children: inner,
+                    });
+                }
+            }
+            Span::BlockQuote(children) => {
                 flush(&mut current, &mut blocks, Block::Paragraph);
                 let inner = layout_blocks_with(children, false);
                 if !inner.is_empty() {
-                    blocks.push(match span {
-                        Span::Quote(_) => Block::Reply(inner),
-                        _ => Block::Quote(inner),
-                    });
+                    blocks.push(Block::Quote(inner));
                 }
             }
             Span::List {
@@ -566,7 +602,7 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 );
             }
             Span::LineBreak | Span::Rule => out.push("\n", style, link),
-            Span::Quote(children) | Span::BlockQuote(children) => {
+            Span::Quote { children, .. } | Span::BlockQuote(children) => {
                 append_inline(children, style, link, out);
                 out.push("\n", style, link);
             }
@@ -828,7 +864,7 @@ mod tests {
                     ],
                 ],
             },
-            Span::Quote(vec![text("quoted")]),
+            Span::Quote { message_id: Some("m1".into()), children: vec![text("quoted")] },
         ]);
         assert_eq!(
             blocks,
@@ -848,7 +884,10 @@ mod tests {
                         ],
                     ],
                 },
-                Block::Reply(vec![Block::Paragraph(Inline::plain("quoted"))]),
+                Block::Reply {
+                    message_id: Some("m1".into()),
+                    children: vec![Block::Paragraph(Inline::plain("quoted"))]
+                },
             ]
         );
     }
