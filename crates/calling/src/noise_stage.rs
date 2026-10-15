@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once};
 
 use df::tract::{DfParams, DfTract, ReduceMask, RuntimeParams};
@@ -14,8 +13,6 @@ const MAX_LOCAL_SNR_ERB_DB: f32 = 35.0;
 const MAX_LOCAL_SNR_DF_DB: f32 = 35.0;
 const WARM_UP_FRAMES: usize = 100;
 
-static ENABLED: AtomicBool = AtomicBool::new(false);
-static STAGE: Mutex<NoiseStage> = Mutex::new(NoiseStage::new());
 static PROTOTYPE: Mutex<Option<DfTract>> = Mutex::new(None);
 static PREPARE: Once = Once::new();
 
@@ -147,20 +144,10 @@ impl Default for NoiseStage {
     }
 }
 
-fn process_capture(channel_index: usize, samples: &mut [f32]) {
-    if !ENABLED.load(Ordering::Relaxed) {
-        return;
-    }
-    let mut stage = STAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    stage.process(channel_index, samples);
-}
-
 pub fn apply(settings: MicSettings) {
     if settings.ml_noise_suppression() {
         prepare();
     }
-    webrtc_sys::noise_hook::set_capture_hook(Some(process_capture));
-    ENABLED.store(settings.ml_noise_suppression(), Ordering::Relaxed);
 }
 
 #[cfg(test)]

@@ -43,15 +43,23 @@ fn named_input(choice: &DeviceChoice) -> Option<Device> {
 pub struct MicrophoneStart {
     pub capture: Capture,
     pub source: String,
+    pub os_echo_cancellation: bool,
 }
 
 #[cfg(windows)]
 pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
     match crate::mic_windows::start_communications_microphone(choice, queue.clone()) {
-        Ok((capture, name)) => Ok(MicrophoneStart { capture, source: format!("wasapi communications ({name})") }),
+        Ok((capture, name, effects)) => {
+            let active: Vec<String> = effects.iter().filter(|effect| effect.enabled).map(|effect| effect.name()).collect();
+            Ok(MicrophoneStart {
+                capture,
+                source: format!("wasapi communications ({name}), windows effects: {}", active.join(", ")),
+                os_echo_cancellation: effects.iter().any(|effect| effect.is_echo_cancellation() && effect.enabled),
+            })
+        }
         Err(error) => {
             let capture = start_cpal_microphone(choice, queue)?;
-            Ok(MicrophoneStart { capture, source: format!("cpal, wasapi communications failed: {error}") })
+            Ok(MicrophoneStart { capture, source: format!("cpal, wasapi communications failed: {error}"), os_echo_cancellation: false })
         }
     }
 }
@@ -59,7 +67,7 @@ pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Mic
 #[cfg(not(windows))]
 pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
     let capture = start_cpal_microphone(choice, queue)?;
-    Ok(MicrophoneStart { capture, source: "cpal".into() })
+    Ok(MicrophoneStart { capture, source: "cpal".into(), os_echo_cancellation: false })
 }
 
 fn start_cpal_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Capture> {

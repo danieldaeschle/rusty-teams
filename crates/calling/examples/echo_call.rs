@@ -58,7 +58,12 @@ async fn main() {
 }
 
 async fn test_call(session: &Session, poll_session: &Session, audio: AudioMode, wav_path: Option<PathBuf>, hold: bool) {
-    let connected_for = if hold { HOLD_START + HOLD_LENGTH + AFTER_RESUME } else { HOLD_AFTER_CONNECTED };
+    let seconds = std::env::args().skip_while(|argument| argument != "--seconds").nth(1).and_then(|value| value.parse().ok());
+    let connected_for = match (hold, seconds) {
+        (true, _) => HOLD_START + HOLD_LENGTH + AFTER_RESUME,
+        (false, Some(seconds)) => Duration::from_secs(seconds),
+        (false, None) => HOLD_AFTER_CONNECTED,
+    };
     let options = CallOptions {
         audio,
         hold_after_connected: Some(connected_for),
