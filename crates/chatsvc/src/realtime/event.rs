@@ -78,12 +78,16 @@ pub enum RealtimeEvent {
     Endpoint(TrouterEndpoint),
 }
 
+pub const OUT_OF_OFFICE_ACTIVITY: &str = "OutOfOffice";
+
 #[derive(Deserialize)]
 struct WirePresence {
     mri: String,
     availability: String,
     #[serde(default)]
     activity: Option<String>,
+    #[serde(default, rename = "outOfOffice")]
+    out_of_office: bool,
 }
 
 #[derive(Deserialize)]
@@ -173,10 +177,11 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
                     Some(PresenceUpdate {
                         user_id: bounded(user_id.to_owned()),
                         availability: bounded(entry.availability),
-                        activity: entry
-                            .activity
-                            .map(bounded)
-                            .filter(|value| !value.is_empty()),
+                        activity: if entry.out_of_office {
+                            Some(OUT_OF_OFFICE_ACTIVITY.to_owned())
+                        } else {
+                            entry.activity.map(bounded).filter(|value| !value.is_empty())
+                        },
                     })
                 })
                 .collect(),
@@ -408,6 +413,7 @@ mod tests {
         let payload = r#"{"channel":"presence","entries":[
             {"mri":"8:orgid:abc","availability":"Busy","activity":"InACall"},
             {"mri":"8:orgid:def","availability":"Away","activity":""},
+            {"mri":"8:orgid:ooo","availability":"Offline","activity":"OffWork","outOfOffice":true},
             {"mri":"4:+4912345","availability":"Offline"}]}"#;
         let RealtimeEvent::Presence(updates) = decode_payload(payload).unwrap() else {
             panic!("expected presence")
@@ -424,6 +430,11 @@ mod tests {
                     user_id: "def".into(),
                     availability: "Away".into(),
                     activity: None,
+                },
+                PresenceUpdate {
+                    user_id: "ooo".into(),
+                    availability: "Offline".into(),
+                    activity: Some("OutOfOffice".into()),
                 },
             ]
         );

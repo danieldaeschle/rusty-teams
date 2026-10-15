@@ -121,7 +121,8 @@
       const cut = (value) => (typeof value === 'string' ? value.slice(0, MAX_PRESENCE_FIELD) : null);
       const entries = ((body && Array.isArray(body.presence)) ? body.presence : []).slice(0, MAX_PRESENCE_ENTRIES)
         .map((entry) => ({mri: cut(entry && entry.mri), availability: cut(entry && entry.presence && entry.presence.availability),
-          activity: cut(entry && entry.presence && entry.presence.activity)}))
+          activity: cut(entry && entry.presence && entry.presence.activity),
+          outOfOffice: !!(entry && entry.presence && entry.presence.calendarData && entry.presence.calendarData.isOutOfOffice)}))
         .filter((entry) => entry.mri && entry.availability);
       if (entries.length) forward({channel: 'presence', entries});
       return;
