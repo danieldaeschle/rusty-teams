@@ -8,6 +8,8 @@ use crate::pins::DEFAULT_REGION;
 const SETTINGS_KEY: &str = "simpleCollabUserSettings";
 const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
 const TEAMS_ORDER_KEY: &str = "teamsOrder";
+const SKIN_TONE_KEY: &str = "preferredSkinToneIndex";
+const MAX_SKIN_TONE: u8 = 5;
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
 const MUTED_DEFAULT: bool = false;
@@ -119,6 +121,15 @@ pub fn parse_chat_sections(properties: &Value) -> ChatSectionSettings {
     }
 }
 
+pub fn parse_skin_tone(properties: &Value) -> Option<u8> {
+    let value = properties.get(SKIN_TONE_KEY)?;
+    let tone = match value {
+        Value::String(text) => text.parse().ok()?,
+        other => u8::try_from(other.as_u64()?).ok()?,
+    };
+    (tone <= MAX_SKIN_TONE).then_some(tone)
+}
+
 pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
     let entries = match properties.get(TEAMS_ORDER_KEY) {
         Some(Value::String(text)) => serde_json::from_str::<Value>(text).ok(),
@@ -184,6 +195,13 @@ mod tests {
 
     fn properties(settings: &str) -> Value {
         json!({"other": "kept", SETTINGS_KEY: settings})
+    }
+
+    #[test]
+    fn skin_tone_is_read_from_the_string_property() {
+        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})), Some(2));
+        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})), None);
+        assert_eq!(parse_skin_tone(&json!({})), None);
     }
 
     #[test]

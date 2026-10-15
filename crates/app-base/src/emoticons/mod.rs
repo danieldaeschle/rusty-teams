@@ -1,5 +1,6 @@
 mod strip;
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -78,6 +79,47 @@ fn skin_tone(glyph: &str) -> Option<u32> {
         .chars()
         .find(|character| SKIN_TONES.contains(character))
         .map(|tone| tone as u32 - *SKIN_TONES.start() as u32 + 1)
+}
+
+pub const SKIN_TONE_COUNT: u8 = 5;
+const ZERO_WIDTH_JOINER: char = '\u{200d}';
+
+fn toneable_glyphs() -> &'static HashSet<&'static str> {
+    static PARSED: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        catalog()
+            .iter()
+            .filter(|emoticon| emoticon.diverse)
+            .map(|emoticon| emoticon.unicode)
+            .collect()
+    })
+}
+
+pub fn is_toneable(glyph: &str) -> bool {
+    toneable_glyphs().contains(base_glyph(glyph).as_str())
+}
+
+pub fn without_tone(glyph: &str) -> String {
+    glyph
+        .chars()
+        .filter(|character| !SKIN_TONES.contains(character))
+        .collect()
+}
+
+/// The Teams rule: the modifier goes in once, before the first joiner, otherwise at the end;
+/// a variation selector at that spot is dropped.
+pub fn with_tone(glyph: &str, tone: u8) -> String {
+    let base = without_tone(glyph);
+    if tone == 0 || tone > SKIN_TONE_COUNT || !is_toneable(&base) {
+        return base;
+    }
+    let modifier = char::from_u32(*SKIN_TONES.start() as u32 + u32::from(tone) - 1)
+        .expect("skin tone modifier");
+    let (head, tail) = base.split_at(base.find(ZERO_WIDTH_JOINER).unwrap_or(base.len()));
+    format!(
+        "{}{modifier}{tail}",
+        head.strip_suffix(VARIATION_SELECTOR).unwrap_or(head)
+    )
 }
 
 fn base_glyph(glyph: &str) -> String {
@@ -169,6 +211,17 @@ mod tests {
         assert!(thumb.image_url.ends_with("/yes/default/{size}_f_s3.png"));
         assert_eq!(send_tag("👍").unwrap().id, "yes");
         assert_eq!(resolve(Some("yes-tone2"), "👍🏼").unwrap().emoticon.id, "yes");
+    }
+
+    #[test]
+    fn tones_follow_the_teams_insertion_rule() {
+        assert!(is_toneable("👍"));
+        assert!(!is_toneable("❤️"));
+        assert_eq!(with_tone("👍", 2), "👍🏼");
+        assert_eq!(with_tone("👍🏿", 0), "👍");
+        assert_eq!(with_tone("✌️", 3), "✌🏽");
+        assert_eq!(with_tone("🤷\u{200d}♂️", 1), "🤷🏻\u{200d}♂️");
+        assert_eq!(with_tone("❤️", 2), "❤️");
     }
 
     #[test]

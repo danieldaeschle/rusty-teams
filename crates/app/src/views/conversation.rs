@@ -53,6 +53,7 @@ use crate::data::{existing_one_on_one, is_one_on_one, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
+use crate::emoticons;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
@@ -63,7 +64,8 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
-    has_own_reaction, message_draft, message_text, place_local_rows, placeholder_rows,
+    has_own_reaction, message_draft, message_text, own_reaction_glyph, place_local_rows,
+    placeholder_rows,
     reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
@@ -2492,6 +2494,18 @@ impl ConversationView {
         if only_add && !added {
             return ReactionAttempt::AlreadyThere;
         }
+        let skin_tone = teams_core::skin_tone(&store);
+        let wanted = if added {
+            emoticons::with_tone(&wanted, skin_tone)
+        } else {
+            let own = own_reaction_glyph(&visible, glyph, my_user_id.as_deref()).unwrap_or(wanted);
+            if emoticons::without_tone(&own) == own {
+                emoticons::with_tone(&own, skin_tone)
+            } else {
+                own
+            }
+        };
+        let glyph = wanted.as_str();
         let Some(engine) = engine.filter(|_| !mode.demo) else {
             let mut reactions = teams_core::reactions(&record);
             set_own_reaction(
@@ -2513,7 +2527,9 @@ impl ConversationView {
             .pending_reactions
             .entry(message_id.to_owned())
             .or_default();
-        entries.retain(|(pending, _)| *pending != wanted);
+        entries.retain(|(pending, _)| {
+            emoticons::without_tone(pending) != emoticons::without_tone(&wanted)
+        });
         entries.push((wanted.clone(), added));
         self.rebuild(false, cx);
         let (message_id, glyph) = (message_id.to_owned(), glyph.to_owned());
@@ -2614,7 +2630,7 @@ impl ConversationView {
         let store = self.app.read(cx).store.clone();
         self.recent.update(cx, |recent, cx| {
             recent.reload(&store);
-            recent.record_use(glyph);
+            recent.record_use(&emoticons::without_tone(glyph));
             recent.save(&store);
             cx.notify();
         });

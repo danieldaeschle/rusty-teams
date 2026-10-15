@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 const EMOTIONS: &str = include_str!("../assets/emotions.tsv");
+const EMOTICONS: &str = include_str!("../../app/assets/emoticons.tsv");
+const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
+const TONE_MARKER: &str = "-tone";
 
 type Index = HashMap<&'static str, Vec<&'static str>>;
 
@@ -17,6 +20,69 @@ fn index() -> &'static Index {
             })
             .collect()
     })
+}
+
+fn diverse_ids() -> &'static std::collections::HashSet<&'static str> {
+    static PARSED: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        EMOTICONS
+            .lines()
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                (fields.get(4) == Some(&"1")).then_some(fields[0])
+            })
+            .collect()
+    })
+}
+
+fn split_tone(glyph: &str) -> (String, Option<u32>) {
+    let tone = glyph
+        .chars()
+        .find(|character| SKIN_TONES.contains(character))
+        .map(|tone| tone as u32 - *SKIN_TONES.start() as u32 + 1);
+    let base = glyph
+        .chars()
+        .filter(|character| !SKIN_TONES.contains(character))
+        .collect();
+    (base, tone)
+}
+
+/// Teams sends a toned reaction as `{diverse id}-tone{n}`, so 👍🏼 is `yes-tone2`, not `like`.
+pub fn reaction_key(glyph: &str) -> Option<String> {
+    let (base, tone) = split_tone(glyph);
+    let keys = emotion_keys(&base);
+    match tone {
+        Some(tone) => keys
+            .iter()
+            .find(|key| diverse_ids().contains(*key))
+            .map(|key| format!("{key}{TONE_MARKER}{tone}"))
+            .or_else(|| keys.first().map(|key| key.to_string())),
+        None => keys.first().map(|key| key.to_string()),
+    }
+}
+
+/// Graph reads a toned reaction back without its tone, so removing one also clears the plain keys.
+pub fn reaction_keys(glyph: &str) -> Vec<String> {
+    let (base, tone) = split_tone(glyph);
+    let plain = emotion_keys(&base).iter().map(|key| key.to_string());
+    match tone {
+        Some(_) => {
+            let toned = reaction_key(glyph);
+            toned
+                .clone()
+                .into_iter()
+                .chain(plain.filter(|key| Some(key) != toned.as_ref()))
+                .collect()
+        }
+        None => plain.collect(),
+    }
+}
+
+pub fn emotion_glyph(key: &str) -> Option<&'static str> {
+    index()
+        .iter()
+        .find(|(_, keys)| keys.contains(&key))
+        .map(|(glyph, _)| *glyph)
 }
 
 pub fn emotion_keys(glyph: &str) -> &'static [&'static str] {
@@ -58,6 +124,15 @@ mod tests {
             ["1f603_grinningfacewithbigeyes", "happyface"]
         );
         assert_eq!(emotion_keys("\u{2764}\u{FE0F}")[0], "heart");
+    }
+
+    #[test]
+    fn toned_reactions_use_the_diverse_id_with_the_tone() {
+        assert_eq!(reaction_key("👍").as_deref(), Some("like"));
+        assert_eq!(reaction_key("👍🏼").as_deref(), Some("yes-tone2"));
+        assert_eq!(reaction_keys("👍🏿"), ["yes-tone5", "like", "yes"]);
+        assert_eq!(reaction_keys("👍"), ["like", "yes"]);
+        assert_eq!(reaction_key("❤️").as_deref(), Some("heart"));
     }
 
     #[test]
