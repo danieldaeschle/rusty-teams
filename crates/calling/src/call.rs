@@ -41,7 +41,8 @@ use crate::mic_processing::MicSettings;
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
-use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath};
+use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath, RejectedOffer};
+use crate::outcome::{embedded_end, failed_participant_count, outcome_summary};
 use crate::organizer::{MeetingCapability, Modality, StateStep, Target, modality_steps};
 use crate::meeting_options::{self, OptionWrite};
 use crate::recording::{Consent, RecordingPlan, RecordingStatus};
@@ -64,7 +65,7 @@ use crate::video_send::{LocalVideo, SendSource, VideoMode};
 use crate::screen::{ShareKind, ShareSource, list_share_sources};
 use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
-    CallEnd, CallEvent, CallbackLinks, ProgressStatus, acceptance_acknowledgement, classify, decode_body,
+    CallEnd, CallEvent, CallbackLinks, ProgressStatus, classify, decode_body,
 };
 use crate::whiteboard;
 
@@ -209,6 +210,13 @@ impl CallSpec {
 
     fn is_people(&self) -> bool {
         matches!(self, CallSpec::People { .. })
+    }
+
+    fn callee_count(&self) -> usize {
+        match self {
+            CallSpec::People { callees, .. } => callees.len(),
+            CallSpec::Echo | CallSpec::Meeting(_) => 0,
+        }
     }
 }
 
@@ -594,7 +602,7 @@ async fn drive(
         None => {
             let links = inner.callback_links();
             let participant = inner.participant(&uuid::Uuid::new_v4().to_string());
-            let callbacks = inner.register_route(links.call_id());
+            let callbacks = inner.register_route(&links);
             (links, participant, callbacks, None)
         }
     };
@@ -657,7 +665,7 @@ async fn drive(
     let mut outgoing_deadline: Option<Instant> = None;
     let is_meeting = spec.as_ref().is_some_and(CallSpec::is_meeting);
     let is_echo = matches!(spec, Some(CallSpec::Echo));
-    let mut callee_gate = CalleeGate::new(spec.as_ref().is_some_and(CallSpec::is_people));
+    let mut callee_gate = CalleeGate::new(spec.as_ref().map_or(0, CallSpec::callee_count));
     let meeting_target = match &spec {
         Some(CallSpec::Meeting(target)) => Some(target.clone()),
         _ => None,
@@ -808,7 +816,6 @@ async fn drive(
         timeline.record("updateEndpointState failed", error.to_string());
     }
 
-    let replier = inner.replier.clone();
     let mut stats_tick = interval(STATS_PERIOD);
     let hard_deadline = options.hard_limit.map(|limit| call_started + limit);
     let mut leave_at = hard_deadline;
@@ -882,10 +889,8 @@ async fn drive(
         }
         tokio::select! {
             Some(callback) = callbacks.recv() => {
-                let request_id = callback.request_id;
                 match handle_callback(&callback, timeline) {
                     Ok(CallEvent::Acceptance(acceptance)) => {
-                        replier.reply(request_id, 200, acceptance_acknowledgement(&links).to_string());
                         if !acceptance.from_mixer && callee_gate.callee_joined() {
                             advance(state, CallSignal::MediaConnected, control);
                         }
@@ -951,7 +956,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::MediaAnswer(answer)) => {
-                        replier.reply(request_id, 200, "");
                         let action = negotiator.on_media_answer();
                         if action == MediaAction::ApplyOnSamePeer
                             && let Some(pending) = same_peer.take()
@@ -1005,7 +1009,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::MediaRenegotiation(renegotiation)) => {
-                        replier.reply(request_id, 200, "");
                         let action = negotiator.on_renegotiation(renegotiation.new_offer, renegotiation.escalation);
                         let result = match action {
                             MediaAction::AnswerOnNewPeer => {
@@ -1043,7 +1046,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::RosterUpdate(body)) => {
-                        replier.reply(request_id, 200, "");
                         if roster.apply(&body) {
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
@@ -1091,9 +1093,16 @@ async fn drive(
                             }
                         }
                     }
-                    Ok(CallEvent::AddParticipantFailure(_)) => {
-                        replier.reply(request_id, 200, "");
+                    Ok(CallEvent::AddParticipantFailure(body)) => {
+                        let bot_add = bot_pending;
                         bot_pending = false;
+                        if !bot_add && callee_gate.callees_failed(failed_participant_count(&body)) {
+                            let end = embedded_end(&body);
+                            let kind = end.as_ref().map_or(EndKind::Unavailable, setup_end_kind);
+                            report.end = end;
+                            advance(state, CallSignal::RemoteEnd(kind), control);
+                            break;
+                        }
                         if recording_flow.wanted() && roster.caption_bot().is_none() {
                             timeline.record("recorder bot failed", "addParticipantFailure");
                             recording_flow.failed();
@@ -1109,7 +1118,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::ConversationUpdate(body)) => {
-                        replier.reply(request_id, 200, "");
                         if let Some(thread) = chat_thread_id(&body)
                             && meeting_chat.as_ref() != Some(&thread)
                         {
@@ -1149,7 +1157,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::LocalParticipantUpdate(body)) => {
-                        replier.reply(request_id, 200, "");
                         let moved = room_watcher.apply(breakout::room_assignment(&body)).filter(|moved| !is_own_meeting(meeting_target.as_ref(), &moved.target));
                         if let Some(moved) = moved {
                             timeline.record("breakout", format!("moved to {}", moved.room_name));
@@ -1157,7 +1164,6 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::Replacement(body)) => {
-                        replier.reply(request_id, 200, "");
                         let invited = breakout::invite_move(&body).filter(|moved| !is_own_meeting(meeting_target.as_ref(), &moved.target));
                         if let Some(moved) = invited {
                             timeline.record("breakout", format!("invited to {}", moved.room_name));
@@ -1165,17 +1171,14 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::ContentShareUpdate(body)) => {
-                        replier.reply(request_id, 200, "");
                         if let Some(share) = whiteboard::content_share(&body).filter(|share| share.whiteboard) {
                             control.send(CallUpdate::Whiteboard(Some(share)));
                         }
                     }
                     Ok(CallEvent::ContentShareEnd(_)) => {
-                        replier.reply(request_id, 200, "");
                         control.send(CallUpdate::Whiteboard(None));
                     }
                     Ok(CallEvent::Transfer(event)) => {
-                        replier.reply(request_id, 200, "");
                         match event {
                             TransferEvent::Accepted => timeline.record("transfer accepted", "by the target"),
                             completed if completed.succeeded() => {
@@ -1193,19 +1196,16 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::Reactions(events)) => {
-                        replier.reply(request_id, 200, "");
                         for event in events {
                             control.send(CallUpdate::Reaction { mri: event.mri, reaction: event.reaction });
                         }
                     }
                     Ok(CallEvent::Progress(status)) => {
-                        replier.reply(request_id, 200, "");
                         if status == ProgressStatus::Ringing {
                             control.send(CallUpdate::Progress(Progress::Ringing));
                         }
                     }
                     Ok(CallEvent::ControlVideoStreaming(body)) => {
-                        replier.reply(request_id, 200, "");
                         let Some(request) = parse_request(&body) else { continue };
                         let Some(limits) = send_requests.admit(&request) else { continue };
                         let own_screen = roster.screen_source_of(&own_mri).map(i64::from);
@@ -1217,23 +1217,44 @@ async fn drive(
                         }
                     }
                     Ok(CallEvent::Speakers(sources)) => {
-                        replier.reply(request_id, 200, "");
                         let speakers = roster.mris_for_sources(&sources);
                         if video.note_speakers(&speakers) {
                             send_receive_change(control, video.reselect(&roster));
                         }
                         control.send(CallUpdate::Speakers(speakers));
                     }
+                    Ok(CallEvent::ConversationEnd(body)) if callee_gate.is_waiting() => {
+                        live.skip_leave = true;
+                        let end = embedded_end(&body);
+                        let kind = end.as_ref().map_or(EndKind::Unavailable, setup_end_kind);
+                        report.end = end;
+                        advance(state, CallSignal::RemoteEnd(kind), control);
+                        break;
+                    }
+                    Ok(CallEvent::Rejection(_)) => match negotiator.on_rejection() {
+                        RejectedOffer::SamePeer => {
+                            same_peer_deadline = None;
+                            if let Some(pending) = same_peer.take() {
+                                rollback_offer(&current.peer).await;
+                                undo_change(pending.change, &mut local_video, control);
+                            }
+                        }
+                        RejectedOffer::NewPeer => {
+                            if let Some(pending) = next.take() {
+                                pending.session.peer.close();
+                            }
+                            timeline.record("escalation failed", "offer rejected, staying on the old peer connection");
+                        }
+                        RejectedOffer::None => {}
+                    },
                     Ok(CallEvent::End(end)) => {
-                        replier.reply(request_id, 200, "");
                         let kind = end.kind();
                         report.end = Some(end);
                         advance(state, CallSignal::RemoteEnd(kind), control);
                         break;
                     }
-                    Ok(_) => replier.reply(request_id, 200, ""),
+                    Ok(_) => {}
                     Err(error) => {
-                        replier.reply(request_id, 200, "");
                         timeline.record("callback not understood", error.to_string());
                     }
                 }
@@ -2609,9 +2630,7 @@ async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &
     {
         let waited = timeout(END_CALLBACK_WAIT, async {
             while let Some(callback) = callbacks.recv().await {
-                let request_id = callback.request_id;
                 let event = handle_callback(&callback, timeline);
-                inner.replier.reply(request_id, 200, "");
                 if let Ok(CallEvent::End(end)) = event {
                     return Some(end);
                 }
@@ -2639,6 +2658,13 @@ async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &
     timeline.record("closed", "peer closed, call route removed");
 }
 
+fn setup_end_kind(end: &CallEnd) -> EndKind {
+    match end.kind() {
+        EndKind::Normal | EndKind::Other => EndKind::Unavailable,
+        kind => kind,
+    }
+}
+
 fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<CallEvent> {
     let body = decode_body(callback)?;
     let (_, event) = classify(&callback.path, body)?;
@@ -2646,6 +2672,7 @@ fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<Ca
         CallEvent::Acceptance(acceptance) => format!("answer sdp {} bytes, fromMixer={}", acceptance.sdp.len(), acceptance.from_mixer),
         CallEvent::End(end) => format!("code={} subCode={} phrase={}", end.code, end.sub_code, end.phrase),
         CallEvent::Progress(status) => format!("{status:?}"),
+        CallEvent::ConversationEnd(body) | CallEvent::Rejection(body) | CallEvent::AddParticipantFailure(body) => outcome_summary(body),
         CallEvent::ControlVideoStreaming(body) => parse_request(body).map_or_else(|| "body not understood".to_owned(), |request| request.shape),
         _ => String::new(),
     };

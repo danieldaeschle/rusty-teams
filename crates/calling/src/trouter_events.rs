@@ -135,6 +135,8 @@ pub enum CallEvent {
     ControlVideoStreaming(Value),
     AddParticipantSuccess(Value),
     AddParticipantFailure(Value),
+    ConversationEnd(Value),
+    Rejection(Value),
     Reactions(Vec<ReactionEvent>),
     LocalParticipantUpdate(Value),
     Replacement(Value),
@@ -158,6 +160,8 @@ impl CallEvent {
             CallEvent::ControlVideoStreaming(_) => "call/controlVideoStreaming".into(),
             CallEvent::AddParticipantSuccess(_) => "conversation/addParticipantSuccess".into(),
             CallEvent::AddParticipantFailure(_) => "conversation/addParticipantFailure".into(),
+            CallEvent::ConversationEnd(_) => "conversation/conversationEnd".into(),
+            CallEvent::Rejection(_) => "call/rejection".into(),
             CallEvent::Reactions(_) => "conversation/receiveMessage".into(),
             CallEvent::LocalParticipantUpdate(_) => "conversation/localParticipantUpdate".into(),
             CallEvent::Replacement(_) => "call/replacement".into(),
@@ -179,6 +183,8 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("conversation", "addParticipantSuccess") => CallEvent::AddParticipantSuccess(body),
         ("conversation", "receiveMessage") => CallEvent::Reactions(parse_reactions(&body)),
         ("conversation", "addParticipantFailure") => CallEvent::AddParticipantFailure(body),
+        ("conversation", "conversationEnd") => CallEvent::ConversationEnd(body),
+        ("call", "rejection") => CallEvent::Rejection(body),
         ("conversation", "localParticipantUpdate") => CallEvent::LocalParticipantUpdate(body),
         ("conversation", "contentSharingUpdate") => CallEvent::ContentShareUpdate(body),
         ("conversation", "contentSharingEnd") => CallEvent::ContentShareEnd(body),
@@ -202,6 +208,13 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
 
 pub fn callback_call_id(path: &str) -> Option<String> {
     split_callback_path(path).ok().map(|(call_id, _, _)| call_id)
+}
+
+pub fn callback_reply_body(path: &str, links: &CallbackLinks) -> String {
+    match split_callback_path(path) {
+        Ok((_, scope, event)) if scope == "call" && event == "acceptance" => acceptance_acknowledgement(links).to_string(),
+        _ => String::new(),
+    }
 }
 
 fn split_callback_path(path: &str) -> Result<(String, String, String)> {
@@ -555,5 +568,15 @@ mod tests {
         assert_eq!(callback_call_id("callAgent/abc/1/call/end/").as_deref(), Some("abc"));
         assert_eq!(callback_call_id("unifiedPresenceService"), None);
         assert_eq!(callback_call_id(""), None);
+    }
+
+    #[test]
+    fn only_the_acceptance_reply_carries_the_acknowledgement() {
+        let links = CallbackLinks::new("https://trouter.example/", "abc");
+        let acceptance = callback_reply_body("callAgent/abc/1/call/acceptance/", &links);
+        let parsed: Value = serde_json::from_str(&acceptance).unwrap();
+        assert!(parsed["callAcceptanceAcknowledgement"]["links"].is_object());
+        assert_eq!(callback_reply_body("callAgent/abc/1/call/mediaAnswer/", &links), "");
+        assert_eq!(callback_reply_body("callAgent/abc/1/conversation/rosterUpdate/", &links), "");
     }
 }

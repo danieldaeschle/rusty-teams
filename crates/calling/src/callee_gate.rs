@@ -1,21 +1,31 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalleeGate {
-    required: bool,
+    callees: usize,
+    failed: usize,
     joined: bool,
     media_connected: bool,
 }
 
 impl CalleeGate {
-    pub fn new(required: bool) -> Self {
+    pub fn new(callees: usize) -> Self {
         CalleeGate {
-            required,
+            callees,
+            failed: 0,
             joined: false,
             media_connected: false,
         }
     }
 
     pub fn is_waiting(&self) -> bool {
-        self.required && !self.joined
+        self.callees > 0 && !self.joined
+    }
+
+    pub fn callees_failed(&mut self, count: usize) -> bool {
+        if !self.is_waiting() {
+            return false;
+        }
+        self.failed += count;
+        self.failed >= self.callees
     }
 
     pub fn media_connected(&mut self) -> bool {
@@ -57,7 +67,7 @@ mod tests {
 
     #[test]
     fn media_waits_for_the_callee_when_required() {
-        let mut gate = CalleeGate::new(true);
+        let mut gate = CalleeGate::new(1);
         assert!(!gate.media_connected());
         assert!(gate.is_waiting());
         assert!(gate.callee_joined());
@@ -67,14 +77,25 @@ mod tests {
 
     #[test]
     fn a_callee_before_media_does_not_fire_early() {
-        let mut gate = CalleeGate::new(true);
+        let mut gate = CalleeGate::new(1);
         assert!(!gate.callee_joined());
         assert!(gate.media_connected());
     }
 
     #[test]
+    fn the_call_fails_only_when_every_callee_failed() {
+        let mut gate = CalleeGate::new(3);
+        assert!(!gate.callees_failed(1));
+        assert!(gate.callees_failed(2));
+        let mut joined = CalleeGate::new(1);
+        joined.callee_joined();
+        assert!(!joined.callees_failed(1));
+        assert!(!CalleeGate::new(0).callees_failed(1));
+    }
+
+    #[test]
     fn an_unrequired_gate_never_waits() {
-        let mut gate = CalleeGate::new(false);
+        let mut gate = CalleeGate::new(0);
         assert!(!gate.is_waiting());
         assert!(gate.media_connected());
         assert!(!gate.callee_joined());

@@ -41,6 +41,7 @@ pub mod voice_high_pass;
 pub mod wav_dump;
 pub mod mute;
 pub mod organizer;
+pub mod outcome;
 pub mod pcm;
 pub mod push;
 pub mod reaction;
