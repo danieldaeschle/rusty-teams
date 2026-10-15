@@ -54,7 +54,7 @@ pub use presence::{
     ActivityReporting, ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote, WorkLocation,
     WorkLocationKind, WorkLocationSource, error_status, is_endpoint_missing,
 };
-pub use reactions::{emotion_key, emotion_keys};
+pub use reactions::{emotion_glyph, emotion_key, emotion_keys, reaction_key, reaction_keys};
 pub use realtime::{
     CallbackReplier, EventKind, InstanceNames, MessageEvent, PresenceUpdate, Realtime,
     RealtimeConfig, RealtimeEvent, StatusEvent, StatusKind, TrouterCallback, TrouterEndpoint,

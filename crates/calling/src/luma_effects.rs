@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::blur::{MASK_HEIGHT, MASK_WIDTH, axis};
+use crate::mask::{Mask, axis};
 
 const DARK_LUMA: f32 = 0.35;
 const VERY_DARK_LUMA: f32 = 0.05;
@@ -114,7 +114,7 @@ fn cell_means(plane: &[u8], stride: usize, cell_width: usize, cell_height: usize
     means
 }
 
-fn smoothing_cells(plane: &[u8], stride: usize, width: usize, height: usize, mask: &[f32], strength_percent: u8) -> Cells {
+fn smoothing_cells(plane: &[u8], stride: usize, width: usize, height: usize, mask: &Mask, strength_percent: u8) -> Cells {
     let (cell_width, cell_height) = (width / CELL, height / CELL);
     let small = cell_means(plane, stride, cell_width, cell_height);
     let squared: Vec<f32> = small.iter().map(|value| value * value).collect();
@@ -126,10 +126,11 @@ fn smoothing_cells(plane: &[u8], stride: usize, width: usize, height: usize, mas
     }).collect();
     let offset: Vec<f32> = mean.iter().zip(&slope).map(|(mean, slope)| mean * (1. - slope)).collect();
     let (mean_slope, mean_offset) = (box_mean(&slope, cell_width, cell_height), box_mean(&offset, cell_width, cell_height));
-    let (mask_x, mask_y) = (axis(cell_width, MASK_WIDTH), axis(cell_height, MASK_HEIGHT));
+    let (mask_x, mask_y) = (axis(cell_width, mask.width), axis(cell_height, mask.height));
+    let (mask_width, mask) = (mask.width, &mask.values);
     let mut cells = Cells { gain: vec![1.; small.len()], bias: vec![0.; small.len()], alpha: vec![0.; small.len()], width: cell_width, height: cell_height };
     for row in 0..cell_height {
-        let (mask_top, mask_bottom, mask_fraction) = (mask_y.first[row] * MASK_WIDTH, mask_y.second[row] * MASK_WIDTH, mask_y.weight[row]);
+        let (mask_top, mask_bottom, mask_fraction) = (mask_y.first[row] * mask_width, mask_y.second[row] * mask_width, mask_y.weight[row]);
         for column in 0..cell_width {
             let (left, right, across) = (mask_x.first[column], mask_x.second[column], mask_x.weight[column]);
             let top = mask[mask_top + left] * (1. - across) + mask[mask_top + right] * across;
@@ -192,7 +193,7 @@ fn blend_rows(plane: &mut [u8], stride: usize, first_row: usize, cells: &Cells) 
 }
 
 /// Edge-preserving smoothing (fast guided filter, radius about 4) of the luma plane, blended in only inside the person mask.
-pub fn soften_luma(plane: &mut [u8], stride: usize, width: usize, height: usize, mask: &[f32], strength_percent: u8) {
+pub fn soften_luma(plane: &mut [u8], stride: usize, width: usize, height: usize, mask: &Mask, strength_percent: u8) {
     if strength_percent == 0 || width < CELL * 2 || height < CELL * 2 {
         return;
     }
@@ -289,10 +290,7 @@ mod tests {
     fn soft_focus_smooths_noise_inside_the_mask_keeps_edges_and_spares_the_outside() {
         let original = noisy_plane();
         let mut softened = original.clone();
-        let mut mask = vec![0f32; MASK_WIDTH * MASK_HEIGHT];
-        for row in 0..MASK_HEIGHT {
-            mask[row * MASK_WIDTH..][..MASK_WIDTH / 2 + 20].fill(1.);
-        }
+        let mask = Mask::from_fn(256, 144, |x, _| if x * 256. < 148. { 1. } else { 0. });
         soften_luma(&mut softened, WIDTH, WIDTH, HEIGHT, &mask, 100);
         assert!(roughness(&softened, 18, 2, 20) < roughness(&original, 18, 2, 20));
         assert!(i32::from(softened[18 * WIDTH + WIDTH / 2 + 2]) - i32::from(softened[18 * WIDTH + WIDTH / 2 - 3]) > 100);

@@ -1149,19 +1149,21 @@ impl Composer {
             return;
         }
         let matches = emoji::search(&query, &self.recent_emoji.glyphs(), emoji_popup::LIMIT);
-        self.emoji_popup = (!matches.is_empty()).then(|| EmojiPopup::new(range, query, matches));
+        let skin_tone = teams_core::skin_tone(&self.app.read(cx).store);
+        self.emoji_popup = (!matches.is_empty())
+            .then(|| EmojiPopup::new(range, query, matches, skin_tone));
     }
 
     fn accept_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(popup) = self.emoji_popup.take() else {
             return;
         };
-        let Some(glyph) = popup.selected().map(|found| found.glyph) else {
+        let Some(glyph) = popup.selected_glyph() else {
             return;
         };
         let cursor = popup.range.end;
-        self.replace_text(popup.range, glyph, cursor, window, cx);
-        self.remember_emoji(glyph, cx);
+        self.replace_text(popup.range, &glyph, cursor, window, cx);
+        self.remember_emoji(&crate::emoticons::without_tone(&glyph), cx);
         cx.notify();
     }
 

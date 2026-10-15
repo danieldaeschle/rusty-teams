@@ -3,7 +3,11 @@ use std::time::{Duration, Instant};
 
 use calling::camera::i420_from_rgba;
 use calling::background::BackgroundPicture;
-use calling::blur::{BlurSettings, MaskInference, MaskSource, Segmenter, compose, compose_i420, compose_image};
+use calling::composite::PicturePlanes;
+use calling::blur::{BlurSettings, MaskInference, MaskSource, compose, compose_i420, compose_image};
+use calling::segmentation::FixedSegmenter;
+use calling::segmentation::model::MEDIAPIPE;
+use calling::segmentation::runtime::Device;
 use calling::effects::{CameraEffects, EffectsStage};
 use calling::framing::{Crop, crop_and_scale};
 use calling::luma_effects::soften_luma;
@@ -94,14 +98,14 @@ fn save_png(path: &str, rgba: Vec<u8>) {
 fn shots(input: &str, prefix: &str) {
     let photo = image::open(input).expect("photo").resize_to_fill(SEND_WIDTH, SEND_HEIGHT, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
     let camera = i420_from_rgba(&photo, SEND_WIDTH, SEND_HEIGHT);
-    let mask = Segmenter::new().expect("model").infer(i420_from_rgba(&photo, SEND_WIDTH, SEND_HEIGHT)).expect("mask");
+    let mask = FixedSegmenter::new(MEDIAPIPE, Device::Cpu { threads: 1 }).expect("model").infer(i420_from_rgba(&photo, SEND_WIDTH, SEND_HEIGHT)).expect("mask");
     let matte = refine(&mask, Planes::of(&camera));
     image::GrayImage::from_raw(SEND_WIDTH, SEND_HEIGHT, matte.alpha.clone()).expect("matte size").save(format!("{prefix}-matte.png")).expect("png written");
     let mut blurred = i420_from_rgba(&photo, SEND_WIDTH, SEND_HEIGHT);
     compose_i420(&mut blurred, &mask);
     save_png(&format!("{prefix}-blur.png"), rgba_of(&blurred));
     let mut replaced = rgba_of(&camera);
-    let backdrop = picture_backdrop().covering(SEND_WIDTH as usize, SEND_HEIGHT as usize);
+    let backdrop = PicturePlanes::new(&picture_backdrop().covering(SEND_WIDTH as usize, SEND_HEIGHT as usize), SEND_WIDTH as usize, SEND_HEIGHT as usize);
     compose_image(&mut replaced, SEND_WIDTH as usize, SEND_HEIGHT as usize, &matte, &backdrop);
     save_png(&format!("{prefix}-picture.png"), replaced);
 }
@@ -117,13 +121,13 @@ fn main() {
     let frame = input.map_or_else(synthetic, |path| std::fs::read(path).expect("raw rgba 640x360 input"));
     assert_eq!(frame.len(), WIDTH * HEIGHT * 4, "input must be raw RGBA {WIDTH}x{HEIGHT}");
     let mut masks = MaskSource::new().expect("model");
-    let segmenter = Segmenter::new().expect("model");
+    let mut segmenter = FixedSegmenter::new(MEDIAPIPE, Device::Cpu { threads: 1 }).expect("model");
     for _ in 0..WARMUP {
         masks.refresh(|| i420_from_rgba(&frame, WIDTH as u32, HEIGHT as u32));
     }
     let started = Instant::now();
     for _ in 0..FRAMES {
-        segmenter.mask(&frame, WIDTH, HEIGHT).expect("mask");
+        segmenter.infer(i420_from_rgba(&frame, WIDTH as u32, HEIGHT as u32)).expect("mask");
     }
     println!("segmentation only: {:.2} ms/frame", milliseconds_per_frame(started));
     let started = Instant::now();
@@ -147,12 +151,7 @@ fn main() {
     stage_cost("stage, blur only", true, off);
     let mut frame = send_frame();
     let stride = frame.strides().0 as usize;
-    let oval: Vec<f32> = (0..calling::blur::MASK_WIDTH * calling::blur::MASK_HEIGHT)
-        .map(|index| {
-            let (x, y) = ((index % calling::blur::MASK_WIDTH) as f32 / calling::blur::MASK_WIDTH as f32 - 0.5, (index / calling::blur::MASK_WIDTH) as f32 / calling::blur::MASK_HEIGHT as f32 - 0.5);
-            if (x * x) / 0.04 + (y * y) / 0.09 <= 1. { 1. } else { 0. }
-        })
-        .collect();
+    let oval = calling::mask::Mask::from_fn(256, 144, |x, y| if ((x - 0.5) * (x - 0.5)) / 0.04 + ((y - 0.5) * (y - 0.5)) / 0.09 <= 1. { 1. } else { 0. });
     let started = Instant::now();
     for _ in 0..FRAMES {
         soften_luma(frame.data_mut().0, stride, SEND_WIDTH as usize, SEND_HEIGHT as usize, &oval, 100);
@@ -163,7 +162,7 @@ fn main() {
         std::hint::black_box(refine(&oval, Planes::of(&frame)));
     }
     println!("matte refinement {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));
-    let backdrop = picture_backdrop().covering(SEND_WIDTH as usize, SEND_HEIGHT as usize);
+    let backdrop = PicturePlanes::new(&picture_backdrop().covering(SEND_WIDTH as usize, SEND_HEIGHT as usize), SEND_WIDTH as usize, SEND_HEIGHT as usize);
     let camera = rgba_of(&frame);
     let mut replaced = camera.clone();
     let started = Instant::now();

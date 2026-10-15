@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::base::PopoverState;
@@ -10,8 +11,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::Gif;
 
+use super::skin_tone_choices::{tone_badge, tone_choices};
 use crate::app_state::AppState;
 use crate::emoji;
+use crate::emoticons;
 use crate::gifs::{self, GifError};
 use crate::remote_image::{RemoteImage, image_source};
 use crate::stickers::{self, Sticker};
@@ -106,6 +109,8 @@ pub struct FunPicker {
     query: String,
     recent: emoji::Recent,
     popover: Option<WeakEntity<PopoverState>>,
+    skin_tone: u8,
+    tone_menu: Option<(String, Point<Pixels>)>,
     emoji_rows: Vec<EmojiRow>,
     emoji_scroll: UniformListScrollHandle,
     gifs: GifState,
@@ -192,6 +197,7 @@ impl FunPicker {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(Tab::Emoji.placeholder()));
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
         let recent = emoji::Recent::load(&app.read(cx).store);
+        let skin_tone = teams_core::skin_tone(&app.read(cx).store);
         FunPicker {
             app,
             input,
@@ -200,6 +206,8 @@ impl FunPicker {
             emoji_rows: emoji_rows("", &recent.glyphs()),
             recent,
             popover: None,
+            skin_tone,
+            tone_menu: None,
             emoji_scroll: UniformListScrollHandle::new(),
             gifs: GifState::Loading,
             gif_generation: 0,
@@ -218,6 +226,8 @@ impl FunPicker {
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let store = self.app.read(cx).store.clone();
         self.recent.reload(&store);
+        self.skin_tone = teams_core::skin_tone(&store);
+        self.tone_menu = None;
         self.tab = store
             .meta(TAB_KEY)
             .ok()
@@ -322,9 +332,40 @@ impl FunPicker {
     }
 
     fn pick_emoji(&mut self, glyph: &str, cx: &mut Context<Self>) {
-        self.recent.push(glyph);
+        self.tone_menu = None;
+        self.recent.push(&emoticons::without_tone(glyph));
         self.refresh(false, cx);
         cx.emit(FunPickerEvent::Emoji(glyph.to_owned()));
+    }
+
+    fn pick_tone(&mut self, glyph: &str, tone: u8, cx: &mut Context<Self>) {
+        self.skin_tone = tone;
+        let _ = teams_core::store_picked_skin_tone(&self.app.read(cx).store, tone);
+        self.pick_emoji(&emoticons::with_tone(glyph, tone), cx);
+    }
+
+    fn render_tone_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (glyph, position) = self.tone_menu.clone()?;
+        let (pick_view, dismiss_view) = (cx.entity().downgrade(), cx.entity().downgrade());
+        Some(tone_choices(
+            "fun-picker-tones",
+            position,
+            &glyph.clone(),
+            self.skin_tone,
+            Rc::new(move |tone, _, cx| {
+                pick_view
+                    .update(cx, |this, cx| this.pick_tone(&glyph, tone, cx))
+                    .ok();
+            }),
+            Rc::new(move |_, cx| {
+                dismiss_view
+                    .update(cx, |this, cx| {
+                        this.tone_menu = None;
+                        cx.notify();
+                    })
+                    .ok();
+            }),
+        ))
     }
 
     fn pick_image(&mut self, image: RemoteImage, window: &mut Window, cx: &mut Context<Self>) {
@@ -409,9 +450,13 @@ impl FunPicker {
             EmojiRow::Cells(glyphs) => glyphs,
         };
         let cells = row.iter().enumerate().map(|(column, glyph)| {
-            let picked = glyph.clone();
+            let cell_id = index * EMOJI_COLUMNS + column;
+            let toneable = emoticons::is_toneable(glyph);
+            let shown = emoticons::with_tone(glyph, self.skin_tone);
+            let picked = shown.clone();
             div()
-                .id(("fun-picker-emoji", index * EMOJI_COLUMNS + column))
+                .id(("fun-picker-emoji", cell_id))
+                .relative()
                 .size(px(EMOJI_CELL))
                 .flex_none()
                 .flex()
@@ -421,7 +466,18 @@ impl FunPicker {
                 .text_size(px(20.))
                 .cursor_pointer()
                 .hover(|cell| cell.bg(theme::popup_hover()))
-                .child(glyph.clone())
+                .child(shown)
+                .when(toneable, |cell| {
+                    let base = glyph.clone();
+                    cell.child(tone_badge()).on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.tone_menu = Some((base.clone(), event.position));
+                            cx.notify();
+                        }),
+                    )
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.pick_emoji(&picked, cx)))
         });
         h_flex()
@@ -686,6 +742,7 @@ impl Render for FunPicker {
             .child(h_flex().flex_none().gap(px(2.)).children(tabs))
             .child(self.search_field())
             .child(div().flex_1().min_h_0().child(body))
+            .children(self.render_tone_menu(cx))
             .when(self.tab == Tab::Gif, |picker| {
                 picker.child(
                     div()

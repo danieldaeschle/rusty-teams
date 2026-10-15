@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
-use crate::blur::{MASK_HEIGHT, MASK_WIDTH, axis};
+use crate::mask::{Mask, axis};
 use crate::matte::{Planes, refine};
 use crate::blur::BlurSettings;
 
@@ -31,8 +31,8 @@ fn corner_coverage(column: usize, row: usize, width: usize, height: usize, radiu
 }
 
 impl Cutout {
-    pub fn from_camera(camera: &mut I420Buffer, mask: &[f32]) -> Option<Cutout> {
-        if mask.len() != MASK_WIDTH * MASK_HEIGHT || camera.width() < 2 || camera.height() < 2 {
+    pub fn from_camera(camera: &mut I420Buffer, mask: &Mask) -> Option<Cutout> {
+        if mask.is_empty() || camera.width() < 2 || camera.height() < 2 {
             return None;
         }
         let width = CUTOUT_WIDTH.min(camera.width()) & !1;
@@ -181,8 +181,8 @@ mod tests {
         buffer
     }
 
-    fn full_mask(value: f32) -> Vec<f32> {
-        vec![value; MASK_WIDTH * MASK_HEIGHT]
+    fn full_mask(value: f32) -> Mask {
+        Mask::filled(256, 144, value)
     }
 
     fn luma_at(buffer: &I420Buffer, x: usize, y: usize) -> u8 {
@@ -236,6 +236,6 @@ mod tests {
     #[test]
     fn a_missing_mask_gives_no_cutout() {
         let mut camera = gray_frame(640, 360, 100);
-        assert!(Cutout::from_camera(&mut camera, &[]).is_none());
+        assert!(Cutout::from_camera(&mut camera, &Mask::default()).is_none());
     }
 }

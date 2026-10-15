@@ -60,6 +60,7 @@ pub mod scheduled_toolbar;
 pub mod section_dialog;
 pub mod share_bar;
 pub mod shared_tab;
+pub mod skin_tone_choices;
 pub mod shell;
 pub mod shortcuts;
 pub mod shortcuts_dialog;

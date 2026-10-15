@@ -647,19 +647,20 @@ impl Remote for Graph {
     }
 
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
-        if let Some(key) = chatsvc::emotion_key(reaction_type) {
+        if let Some(key) = chatsvc::reaction_key(reaction_type) {
             return Ok(Messages::new(self.session())
-                .set_emotion(&conversation_ref(target), target.message_id(), key)
+                .set_emotion(&conversation_ref(target), target.message_id(), &key)
                 .await?);
         }
         Ok(Graph::set_reaction(self, target, reaction_type).await?)
     }
 
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
-        let keys = chatsvc::emotion_keys(reaction_type);
+        let keys = chatsvc::reaction_keys(reaction_type);
         if !keys.is_empty() {
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
             return Ok(Messages::new(self.session())
-                .unset_emotions(&conversation_ref(target), target.message_id(), keys)
+                .unset_emotions(&conversation_ref(target), target.message_id(), &keys)
                 .await?);
         }
         Ok(Graph::unset_reaction(self, target, reaction_type).await?)

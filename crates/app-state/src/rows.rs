@@ -353,9 +353,23 @@ pub fn reaction_label(reaction_type: &str) -> String {
 }
 
 pub fn reaction_glyph(reaction_type: &str) -> String {
+    if let Some((key, tone)) = reaction_type
+        .split_once(TONE_MARKER)
+        .and_then(|(key, tone)| Some((key, tone.parse::<u8>().ok()?)))
+    {
+        let base = match key {
+            "yes" => "\u{1F44D}".to_owned(),
+            other => chatsvc::emotion_glyph(other).map_or_else(|| reaction_label(other), str::to_owned),
+        };
+        return crate::emoticons::with_tone(&base, tone);
+    }
     reaction_label(reaction_type)
         .trim_end_matches('\u{FE0F}')
         .to_owned()
+}
+
+fn same_reaction(left: &str, right: &str) -> bool {
+    crate::emoticons::without_tone(left) == crate::emoticons::without_tone(right)
 }
 
 /// Graph rejects the legacy names ("Unicode 'like' in the payload is not supported").
@@ -375,12 +389,28 @@ pub fn reaction_type_for(glyph: &str) -> String {
         .map_or_else(|| bare.to_owned(), str::to_owned)
 }
 
+const TONE_MARKER: &str = "-tone";
+const MAX_TONE_VARIANTS: usize = 3;
+
 pub type PendingReactions = HashMap<String, Vec<(String, bool)>>;
 
 fn is_own_reaction(reaction: &ReactionInfo, wanted: &str, my_user_id: Option<&str>) -> bool {
     my_user_id.is_some()
         && reaction.user_id.as_deref() == my_user_id
-        && reaction_glyph(&reaction.reaction_type) == wanted
+        && same_reaction(&reaction_glyph(&reaction.reaction_type), wanted)
+}
+
+/// The glyph of the own reaction that matches `glyph` regardless of skin tone.
+pub fn own_reaction_glyph(
+    reactions: &[ReactionInfo],
+    glyph: &str,
+    my_user_id: Option<&str>,
+) -> Option<String> {
+    let wanted = reaction_glyph(glyph);
+    reactions
+        .iter()
+        .find(|reaction| is_own_reaction(reaction, &wanted, my_user_id))
+        .map(|reaction| reaction_glyph(&reaction.reaction_type))
 }
 
 pub fn has_own_reaction(reactions: &[ReactionInfo], glyph: &str, my_user_id: Option<&str>) -> bool {
@@ -424,21 +454,35 @@ pub fn apply_pending_reactions(
 pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<ReactionChip> {
     let my_user_id = context.my_user_id.as_deref();
     let mut chips: Vec<ReactionChip> = Vec::new();
+    let mut variants: Vec<Vec<String>> = Vec::new();
     for reaction in reactions {
         let glyph = reaction_glyph(&reaction.reaction_type);
-        let position = match chips.iter().position(|chip| chip.glyph() == glyph) {
+        let position = match chips
+            .iter()
+            .position(|chip| same_reaction(&chip.glyph(), &glyph))
+        {
             Some(position) => position,
             None => {
                 chips.push(ReactionChip {
                     reaction_type: reaction.reaction_type.clone(),
-                    label: reaction_label(&reaction.reaction_type),
+                    label: String::new(),
                     count: 0,
                     mine: false,
                     reactors: Vec::new(),
                 });
+                variants.push(Vec::new());
                 chips.len() - 1
             }
         };
+        let label = if reaction.reaction_type.contains(TONE_MARKER) {
+            glyph
+        } else {
+            reaction_label(&reaction.reaction_type)
+        };
+        let shown = &mut variants[position];
+        if shown.len() < MAX_TONE_VARIANTS && !shown.contains(&label) {
+            shown.push(label);
+        }
         let chip = &mut chips[position];
         chip.count += 1;
         chip.mine |= my_user_id.is_some() && reaction.user_id.as_deref() == my_user_id;
@@ -447,6 +491,9 @@ pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<R
             name: reactor_name(reaction, context),
             created_at: reaction.created_at,
         });
+    }
+    for (chip, shown) in chips.iter_mut().zip(variants) {
+        chip.label = shown.concat();
     }
     chips
 }
@@ -1456,6 +1503,38 @@ mod tests {
         let chips = reaction_chips(&[reaction("like"), reaction("\u{1F44D}")], &context());
         assert_eq!(chips.len(), 1);
         assert_eq!(chips[0].count, 2);
+    }
+
+    #[test]
+    fn skin_tones_share_a_chip_showing_up_to_three_variants() {
+        let reaction = |kind: &str| ReactionInfo {
+            reaction_type: kind.into(),
+            user_id: Some(kind.into()),
+            user_name: Some("Lea".into()),
+            created_at: None,
+        };
+        let kinds = ["yes-tone2", "👍🏿", "like", "👍🏻", "yes-tone2"];
+        let chips = reaction_chips(&kinds.map(reaction), &context());
+        assert_eq!(chips.len(), 1);
+        assert_eq!(chips[0].count, 5);
+        assert_eq!(chips[0].label, "👍🏼👍🏿👍");
+    }
+
+    #[test]
+    fn own_toned_reaction_matches_the_plain_glyph() {
+        let mine = ReactionInfo {
+            reaction_type: "👍🏼".into(),
+            user_id: Some("me".into()),
+            user_name: None,
+            created_at: None,
+        };
+        let reactions = vec![mine];
+        assert!(has_own_reaction(&reactions, "\u{1F44D}", Some("me")));
+        assert_eq!(
+            own_reaction_glyph(&reactions, "like", Some("me")).as_deref(),
+            Some("👍🏼")
+        );
+        assert_eq!(reaction_glyph("yes-tone5"), "👍🏿");
     }
 
     #[test]

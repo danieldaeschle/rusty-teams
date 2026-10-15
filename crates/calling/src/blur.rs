@@ -1,328 +1,47 @@
-use std::io::Cursor;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-
-use tract_onnx::prelude::*;
 
 use libwebrtc::native::yuv_helper::i420_to_abgr;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
 use crate::background::BackgroundPicture;
 use crate::effects::CameraEffects;
-use crate::error::{Error, Result};
-use crate::matte::{Matte, Planes, refine, refine_rgba};
+use crate::error::Result;
+use crate::camera::i420_from_rgba;
+use crate::composite::{Backdrop, PicturePlanes, composite};
+use crate::mask::Mask;
+use crate::segmentation::LadderSegmenter;
+use crate::matte::{Matte, Planes, refine};
 use crate::standout::Cutout;
 
-const MODEL: &[u8] = include_bytes!("../assets/selfie_segmentation_landscape.onnx");
-pub const MASK_WIDTH: usize = 256;
-pub const MASK_HEIGHT: usize = 144;
 const CHANNELS: usize = 4;
-const BACKGROUND_SCALE: usize = 4;
-const BLUR_RADIUS: usize = 3;
-const BLUR_PASSES: usize = 2;
 const MASK_SMOOTHING: f32 = 0.35;
 const MOTION_GAIN: f32 = 2.;
 const SLOW_INFERENCE: Duration = Duration::from_millis(22);
 const VERY_SLOW_INFERENCE: Duration = Duration::from_millis(45);
-const MAX_BANDS: usize = 4;
-const MASK_INPUT_WIDTH: u32 = 512;
 
-type Plan = std::sync::Arc<TypedRunnableModel>;
-
-/// MediaPipe selfie segmentation (landscape, 256x144); answers the probability of "person" per mask pixel.
-pub struct Segmenter {
-    plan: Plan,
+pub fn compose_i420(buffer: &mut I420Buffer, mask: &Mask) {
+    let matte = refine(mask, Planes::of(buffer));
+    composite(buffer, &matte, Backdrop::Blur);
 }
 
-impl Segmenter {
-    pub fn new() -> Result<Self> {
-        let plan = Self::load().map_err(|error| Error::Webrtc(format!("segmentation model: {error}")))?;
-        Ok(Segmenter { plan })
-    }
-
-    fn load() -> TractResult<Plan> {
-        let model = tract_onnx::onnx().model_for_read(&mut Cursor::new(MODEL))?;
-        let batch = model.symbols.sym("batch_size");
-        let one_image = std::collections::HashMap::from([(batch, TDim::from(1))]);
-        model.into_typed()?.set_symbols(&one_image)?.into_optimized()?.into_runnable()
-    }
-
-    pub fn mask(&self, rgba: &[u8], width: usize, height: usize) -> Result<Vec<f32>> {
-        let input = model_input(rgba, width, height);
-        let outputs = self.plan.run(tvec!(input.into())).map_err(|error| Error::Webrtc(format!("segmentation: {error}")))?;
-        let values = outputs[0].to_plain_array_view::<f32>().map_err(|error| Error::Webrtc(format!("segmentation output: {error}")))?;
-        if values.len() != MASK_WIDTH * MASK_HEIGHT {
-            return Err(Error::Webrtc(format!("segmentation output has {} values", values.len())));
-        }
-        Ok(values.iter().map(|value| value.clamp(0., 1.)).collect())
-    }
-}
-
-fn model_input(rgba: &[u8], width: usize, height: usize) -> Tensor {
-    let plane = MASK_WIDTH * MASK_HEIGHT;
-    let mut data = vec![0f32; 3 * plane];
-    for row in 0..MASK_HEIGHT {
-        let top = (row * 2 * height / (MASK_HEIGHT * 2)).min(height - 1);
-        let bottom = ((row * 2 + 1) * height / (MASK_HEIGHT * 2)).min(height - 1);
-        for column in 0..MASK_WIDTH {
-            let left = (column * 2 * width / (MASK_WIDTH * 2)).min(width - 1);
-            let right = ((column * 2 + 1) * width / (MASK_WIDTH * 2)).min(width - 1);
-            for channel in 0..3 {
-                let sum: u32 = [(top, left), (top, right), (bottom, left), (bottom, right)]
-                    .iter()
-                    .map(|&(y, x)| u32::from(rgba[(y * width + x) * CHANNELS + channel]))
-                    .sum();
-                data[channel * plane + row * MASK_WIDTH + column] = sum as f32 / (4. * 255.);
-            }
-        }
-    }
-    Tensor::from_shape(&[1, 3, MASK_HEIGHT, MASK_WIDTH], &data).expect("shape matches data")
-}
-
-pub(crate) struct Axis {
-    pub(crate) first: Vec<usize>,
-    pub(crate) second: Vec<usize>,
-    pub(crate) weight: Vec<f32>,
-}
-
-pub(crate) fn axis(output: usize, input: usize) -> Axis {
-    let mut axis = Axis { first: Vec::with_capacity(output), second: Vec::with_capacity(output), weight: Vec::with_capacity(output) };
-    for index in 0..output {
-        let position = ((index as f32 + 0.5) * input as f32 / output as f32 - 0.5).clamp(0., (input - 1) as f32);
-        let first = position.floor() as usize;
-        axis.first.push(first);
-        axis.second.push((first + 1).min(input - 1));
-        axis.weight.push(position - first as f32);
-    }
-    axis
-}
-
-fn downscaled(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usize, usize) {
-    let small_width = width.div_ceil(BACKGROUND_SCALE);
-    let small_height = height.div_ceil(BACKGROUND_SCALE);
-    let mut small = vec![0u8; small_width * small_height * 3];
-    for row in 0..small_height {
-        for column in 0..small_width {
-            let mut sums = [0u32; 3];
-            let mut count = 0u32;
-            for y in row * BACKGROUND_SCALE..((row + 1) * BACKGROUND_SCALE).min(height) {
-                for x in column * BACKGROUND_SCALE..((column + 1) * BACKGROUND_SCALE).min(width) {
-                    for (channel, sum) in sums.iter_mut().enumerate() {
-                        *sum += u32::from(rgba[(y * width + x) * CHANNELS + channel]);
-                    }
-                    count += 1;
-                }
-            }
-            for (channel, sum) in sums.iter().enumerate() {
-                small[(row * small_width + column) * 3 + channel] = (sum / count) as u8;
-            }
-        }
-    }
-    (small, small_width, small_height)
-}
-
-fn blur_pass(input: &[u8], output: &mut [u8], lines: usize, length: usize, line_stride: usize, step: usize, channels: usize) {
-    let radius = BLUR_RADIUS as isize;
-    let window = (BLUR_RADIUS * 2 + 1) as u32;
-    for line in 0..lines {
-        for channel in 0..channels {
-            let base = line * line_stride + channel;
-            let read = |index: isize| u32::from(input[base + index.clamp(0, length as isize - 1) as usize * step]);
-            let mut sum: u32 = (-radius..=radius).map(read).sum();
-            for index in 0..length {
-                output[base + index * step] = (sum / window) as u8;
-                sum = sum + read(index as isize + radius + 1) - read(index as isize - radius);
-            }
-        }
-    }
-}
-
-fn box_blur(image: &mut [u8], width: usize, height: usize, scratch: &mut [u8], channels: usize) {
-    blur_pass(image, scratch, height, width, width * channels, channels, channels);
-    blur_pass(scratch, image, width, height, channels, width * channels, channels);
-}
-
-fn blurred_background(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usize, usize) {
-    let (mut small, small_width, small_height) = downscaled(rgba, width, height);
-    let mut scratch = vec![0u8; small.len()];
-    for _ in 0..BLUR_PASSES {
-        box_blur(&mut small, small_width, small_height, &mut scratch, 3);
-    }
-    (small, small_width, small_height)
-}
-
-struct Composer<'a> {
-    background: &'a [u8],
-    matte: &'a Matte,
-    width: usize,
-    small_x: Axis,
-    small_y: Axis,
-    small_width: usize,
-}
-
-impl Composer<'_> {
-    fn rows(&self, rgba: &mut [u8], first_row: usize) {
-        for (offset, line) in rgba.chunks_exact_mut(self.width * CHANNELS).enumerate() {
-            self.row(line, first_row + offset);
-        }
-    }
-
-    fn row(&self, line: &mut [u8], row: usize) {
-        let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
-        let alphas = &self.matte.alpha[row * self.matte.width..][..self.matte.width];
-        for (column, (pixel, &alpha)) in line.as_chunks_mut::<CHANNELS>().0.iter_mut().zip(alphas).enumerate() {
-            if alpha == u8::MAX {
-                continue;
-            }
-            let person = f32::from(alpha) / 255.;
-            let (left, right, across) = (self.small_x.first[column], self.small_x.second[column], self.small_x.weight[column]);
-            for (channel, value) in pixel.iter_mut().take(3).enumerate() {
-                let sample = |line: usize, index: usize| f32::from(self.background[(line + index) * 3 + channel]);
-                let upper = sample(small_top, left) * (1. - across) + sample(small_top, right) * across;
-                let lower = sample(small_bottom, left) * (1. - across) + sample(small_bottom, right) * across;
-                let blurred = upper * (1. - small_fraction) + lower * small_fraction;
-                *value = (f32::from(*value) * person + blurred * (1. - person) + 0.5) as u8;
-            }
-        }
-    }
-}
-
-fn compose_over(rgba: &mut [u8], width: usize, height: usize, matte: &Matte, background: &[u8], background_width: usize, background_height: usize) {
-    let composer = Composer {
-        background,
-        matte,
-        width,
-        small_x: axis(width, background_width),
-        small_y: axis(height, background_height),
-        small_width: background_width,
-    };
-    let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
-    let rows_per_band = height.div_ceil(bands);
-    std::thread::scope(|scope| {
-        for (index, band) in rgba.chunks_mut(rows_per_band * width * CHANNELS).enumerate() {
-            let composer = &composer;
-            scope.spawn(move || composer.rows(band, index * rows_per_band));
-        }
-    });
-}
-
-fn downscaled_plane(plane: &[u8], stride: usize, width: usize, height: usize, factor: usize) -> (Vec<u8>, usize, usize) {
-    let small_width = width.div_ceil(factor);
-    let small_height = height.div_ceil(factor);
-    let mut small = vec![0u8; small_width * small_height];
-    for (row, line) in small.chunks_exact_mut(small_width).enumerate() {
-        let rows = row * factor..((row + 1) * factor).min(height);
-        let mut sums = vec![0u32; small_width];
-        for source_row in rows.clone() {
-            for (sum, group) in sums.iter_mut().zip(plane[source_row * stride..][..width].chunks(factor)) {
-                *sum += group.iter().map(|&value| u32::from(value)).sum::<u32>();
-            }
-        }
-        for (column, (slot, sum)) in line.iter_mut().zip(&sums).enumerate() {
-            let columns = factor.min(width - column * factor);
-            *slot = (sum / (rows.len() * columns) as u32) as u8;
-        }
-    }
-    (small, small_width, small_height)
-}
-
-fn blurred_plane(plane: &[u8], stride: usize, width: usize, height: usize, factor: usize) -> (Vec<u8>, usize, usize) {
-    let (mut small, small_width, small_height) = downscaled_plane(plane, stride, width, height, factor);
-    let mut scratch = vec![0u8; small.len()];
-    for _ in 0..BLUR_PASSES {
-        box_blur(&mut small, small_width, small_height, &mut scratch, 1);
-    }
-    (small, small_width, small_height)
-}
-
-struct PlaneComposer<'a> {
-    background: &'a [u8],
-    matte: &'a Matte,
-    width: usize,
-    small_x: Axis,
-    small_y: Axis,
-    small_width: usize,
-}
-
-impl PlaneComposer<'_> {
-    fn new<'a>(background: &'a [u8], small_width: usize, small_height: usize, matte: &'a Matte) -> PlaneComposer<'a> {
-        let (width, height) = (matte.width, matte.height);
-        PlaneComposer {
-            background,
-            matte,
-            width,
-            small_x: axis(width, small_width),
-            small_y: axis(height, small_height),
-            small_width,
-        }
-    }
-
-    fn rows(&self, plane: &mut [u8], stride: usize, first_row: usize) {
-        for (offset, line) in plane.chunks_mut(stride).enumerate() {
-            let length = self.width.min(line.len());
-            self.row(&mut line[..length], first_row + offset);
-        }
-    }
-
-    fn row(&self, line: &mut [u8], row: usize) {
-        let (small_top, small_bottom, small_fraction) = (self.small_y.first[row] * self.small_width, self.small_y.second[row] * self.small_width, self.small_y.weight[row]);
-        let alphas = &self.matte.alpha[row * self.width..][..self.width];
-        for (column, (value, &alpha)) in line.iter_mut().zip(alphas).enumerate() {
-            if alpha == u8::MAX {
-                continue;
-            }
-            let person = f32::from(alpha) / 255.;
-            let (left, right, across) = (self.small_x.first[column], self.small_x.second[column], self.small_x.weight[column]);
-            let sample = |line: usize, index: usize| f32::from(self.background[line + index]);
-            let upper = sample(small_top, left) * (1. - across) + sample(small_top, right) * across;
-            let lower = sample(small_bottom, left) * (1. - across) + sample(small_bottom, right) * across;
-            let blurred = upper * (1. - small_fraction) + lower * small_fraction;
-            *value = (f32::from(*value) * person + blurred * (1. - person) + 0.5) as u8;
-        }
-    }
-}
-
-/// `compose` on I420 planes: luma blurs at `BACKGROUND_SCALE`, chroma at the same grid, with no RGBA round trip.
-pub fn compose_i420(buffer: &mut I420Buffer, mask: &[f32]) {
-    let (width, height) = (buffer.width() as usize, buffer.height() as usize);
-    let (chroma_width, chroma_height) = (width.div_ceil(2), height.div_ceil(2));
+fn through_i420(rgba: &mut [u8], width: usize, height: usize, apply: impl FnOnce(&mut I420Buffer)) {
+    let mut buffer = i420_from_rgba(rgba, width as u32, height as u32);
+    apply(&mut buffer);
     let (stride_y, stride_u, stride_v) = buffer.strides();
-    let (stride_y, stride_u, stride_v) = (stride_y as usize, stride_u as usize, stride_v as usize);
-    let luma_matte = refine(mask, Planes::of(buffer));
-    let chroma_matte = luma_matte.halved();
-    let (plane_y, plane_u, plane_v) = buffer.data_mut();
-    let (background_y, small_width, small_height) = blurred_plane(plane_y, stride_y, width, height, BACKGROUND_SCALE);
-    let (background_u, ..) = blurred_plane(plane_u, stride_u, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
-    let (background_v, ..) = blurred_plane(plane_v, stride_v, chroma_width, chroma_height, BACKGROUND_SCALE / 2);
-    let luma = PlaneComposer::new(&background_y, small_width, small_height, &luma_matte);
-    let blue = PlaneComposer::new(&background_u, small_width, small_height, &chroma_matte);
-    let red = PlaneComposer::new(&background_v, small_width, small_height, &chroma_matte);
-    let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
-    std::thread::scope(|scope| {
-        for (composer, plane, stride, rows) in [(&luma, plane_y, stride_y, height), (&blue, plane_u, stride_u, chroma_height), (&red, plane_v, stride_v, chroma_height)] {
-            let rows_per_band = rows.div_ceil(bands);
-            for (index, band) in plane.chunks_mut(rows_per_band * stride).enumerate() {
-                scope.spawn(move || composer.rows(band, stride, index * rows_per_band));
-            }
-        }
-    });
+    let (plane_y, plane_u, plane_v) = buffer.data();
+    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, rgba, (width * CHANNELS) as u32, width as i32, height as i32);
 }
 
-/// Keeps the person (mask near 1) sharp and replaces the rest with a blurred copy; `mask` is `MASK_WIDTH` x `MASK_HEIGHT`.
-pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &[f32]) {
-    let matte = refine_rgba(mask, rgba, width, height);
-    compose_blurred(rgba, width, height, &matte);
+/// Keeps the person (mask near 1) sharp and replaces the rest with a blurred copy.
+pub fn compose(rgba: &mut [u8], width: usize, height: usize, mask: &Mask) {
+    through_i420(rgba, width, height, |buffer| compose_i420(buffer, mask));
 }
 
-fn compose_blurred(rgba: &mut [u8], width: usize, height: usize, matte: &Matte) {
-    let (background, small_width, small_height) = blurred_background(rgba, width, height);
-    compose_over(rgba, width, height, matte, &background, small_width, small_height);
-}
-
-pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, matte: &Matte, covered: &[u8]) {
-    compose_over(rgba, width, height, matte, covered, width, height);
+pub fn compose_image(rgba: &mut [u8], width: usize, height: usize, matte: &Matte, picture: &PicturePlanes) {
+    through_i420(rgba, width, height, |buffer| composite(buffer, matte, Backdrop::Picture(picture)));
 }
 
 /// Shared between the UI command and the camera thread.
@@ -401,9 +120,7 @@ pub struct BlurStage {
 
 struct CoveredPicture {
     picture: Arc<BackgroundPicture>,
-    width: usize,
-    height: usize,
-    rgb: Vec<u8>,
+    planes: PicturePlanes,
 }
 
 impl BlurStage {
@@ -416,49 +133,22 @@ impl BlurStage {
             self.covered = None;
             return;
         };
-        let fresh = self.covered.as_ref().is_some_and(|covered| Arc::ptr_eq(&covered.picture, &picture) && covered.width == width && covered.height == height);
+        let fresh = self.covered.as_ref().is_some_and(|covered| Arc::ptr_eq(&covered.picture, &picture) && covered.planes.fits(width, height));
         if !fresh {
-            let rgb = picture.covering(width, height);
-            self.covered = Some(CoveredPicture { picture, width, height, rgb });
+            let planes = PicturePlanes::new(&picture.covering(width, height), width, height);
+            self.covered = Some(CoveredPicture { picture, planes });
         }
     }
 
-    pub fn covers(&mut self, width: usize, height: usize) -> bool {
-        self.refresh_covered(width, height);
-        self.covered.is_some()
-    }
-
-    pub fn compose(&mut self, rgba: &mut [u8], width: usize, height: usize, matte: &Matte) {
-        self.refresh_covered(width, height);
-        match &self.covered {
-            Some(covered) => compose_image(rgba, width, height, matte, &covered.rgb),
-            None => compose_blurred(rgba, width, height, matte),
-        }
+    pub fn compose(&mut self, buffer: &mut I420Buffer, matte: &Matte) {
+        self.refresh_covered(buffer.width() as usize, buffer.height() as usize);
+        let backdrop = self.covered.as_ref().map_or(Backdrop::Blur, |covered| Backdrop::Picture(&covered.planes));
+        composite(buffer, matte, backdrop);
     }
 }
 
 pub trait MaskInference: Send + 'static {
-    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>>;
-}
-
-impl MaskInference for Segmenter {
-    fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
-        let (rgba, width, height) = mask_input(frame);
-        self.mask(&rgba, width, height)
-    }
-}
-
-fn mask_input(mut buffer: I420Buffer) -> (Vec<u8>, usize, usize) {
-    let (width, height) = (buffer.width(), buffer.height());
-    let small_width = width.min(MASK_INPUT_WIDTH) & !1;
-    let small_height = (u64::from(height) * u64::from(small_width) / u64::from(width)) as u32 & !1;
-    let small = if (small_width, small_height) == (width, height) { None } else { Some(buffer.scale(small_width as i32, small_height as i32)) };
-    let source = small.as_ref().unwrap_or(&buffer);
-    let (stride_y, stride_u, stride_v) = source.strides();
-    let (plane_y, plane_u, plane_v) = source.data();
-    let mut rgba = vec![0u8; small_width as usize * small_height as usize * CHANNELS];
-    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, small_width * CHANNELS as u32, small_width as i32, small_height as i32);
-    (rgba, small_width as usize, small_height as usize)
+    fn infer(&mut self, frame: I420Buffer) -> Result<Mask>;
 }
 
 type Frame = I420Buffer;
@@ -471,7 +161,7 @@ struct Inbox {
 
 #[derive(Default)]
 struct Outbox {
-    mask: Vec<f32>,
+    mask: Mask,
     version: u64,
 }
 
@@ -492,20 +182,20 @@ fn stride_for(inference: Duration) -> u64 {
     }
 }
 
-fn smooth_into(current: &mut Vec<f32>, fresh: Vec<f32>) {
-    if current.is_empty() {
+fn smooth_into(current: &mut Mask, fresh: Mask) {
+    if (current.width, current.height, current.matte) != (fresh.width, fresh.height, fresh.matte) {
         *current = fresh;
         return;
     }
-    for (value, new) in current.iter_mut().zip(fresh) {
+    for (value, new) in current.values.iter_mut().zip(fresh.values) {
         let change = new - *value;
         let smoothing = MASK_SMOOTHING * (1. - change.abs() * MOTION_GAIN).max(0.);
         *value += change * (1. - smoothing);
     }
 }
 
-fn run_worker(shared: &WorkerShared, inference: &dyn MaskInference) {
-    let mut smoothed = Vec::new();
+fn run_worker(shared: &WorkerShared, inference: &mut dyn MaskInference) {
+    let mut smoothed = Mask::default();
     loop {
         let frame = {
             let mut inbox = shared.inbox.lock().expect("inbox lock");
@@ -533,31 +223,40 @@ fn run_worker(shared: &WorkerShared, inference: &dyn MaskInference) {
 pub struct MaskSource {
     shared: Arc<WorkerShared>,
     worker: Option<JoinHandle<()>>,
-    mask: Vec<f32>,
+    mask: Mask,
     seen_version: u64,
     frames: u64,
 }
 
 impl MaskSource {
+    /// The models load on the worker, so the first frames pass unchanged instead of the camera thread waiting on them.
     pub fn new() -> Result<Self> {
-        Ok(Self::with_inference(Segmenter::new()?))
+        Ok(Self::spawn(|| LadderSegmenter::new().ok()))
     }
 
     pub fn with_inference(inference: impl MaskInference) -> Self {
+        Self::spawn(move || Some(inference))
+    }
+
+    fn spawn<Inference: MaskInference>(create: impl FnOnce() -> Option<Inference> + Send + 'static) -> Self {
         let shared = Arc::new(WorkerShared { inbox: Mutex::default(), wake: Condvar::new(), outbox: Mutex::default(), stride: AtomicU64::new(1) });
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("segmentation".to_owned())
-            .spawn(move || run_worker(&worker_shared, &inference))
+            .spawn(move || {
+                if let Some(mut inference) = create() {
+                    run_worker(&worker_shared, &mut inference);
+                }
+            })
             .expect("segmentation thread");
-        MaskSource { shared, worker: Some(worker), mask: Vec::new(), seen_version: 0, frames: 0 }
+        MaskSource { shared, worker: Some(worker), mask: Mask::default(), seen_version: 0, frames: 0 }
     }
 
     pub fn due(&self) -> bool {
         self.frames.is_multiple_of(self.shared.stride.load(Ordering::Relaxed)) || self.mask.is_empty()
     }
 
-    pub fn mask(&self) -> &[f32] {
+    pub fn mask(&self) -> &Mask {
         &self.mask
     }
 
@@ -594,6 +293,8 @@ mod tests {
     use super::*;
     use crate::camera::i420_from_rgba;
 
+    const MASK_WIDTH: usize = 256;
+    const MASK_HEIGHT: usize = 144;
     const WIDTH: usize = 160;
     const HEIGHT: usize = 90;
 
@@ -608,13 +309,8 @@ mod tests {
         rgba
     }
 
-    fn oval_mask() -> Vec<f32> {
-        (0..MASK_WIDTH * MASK_HEIGHT)
-            .map(|index| {
-                let (x, y) = ((index % MASK_WIDTH) as f32 / MASK_WIDTH as f32 - 0.5, (index / MASK_WIDTH) as f32 / MASK_HEIGHT as f32 - 0.5);
-                if (x * x) / 0.04 + (y * y) / 0.09 <= 1. { 1. } else { 0. }
-            })
-            .collect()
+    fn oval_mask() -> Mask {
+        Mask::from_fn(MASK_WIDTH, MASK_HEIGHT, |x, y| if ((x - 0.5) * (x - 0.5)) / 0.04 + ((y - 0.5) * (y - 0.5)) / 0.09 <= 1. { 1. } else { 0. })
     }
 
     fn pixel(rgba: &[u8], x: usize, y: usize) -> u8 {
@@ -694,7 +390,7 @@ mod tests {
     #[test]
     fn a_full_person_mask_leaves_the_planes_untouched() {
         let mut untouched = checkerboard_i420();
-        compose_i420(&mut untouched, &vec![1.; MASK_WIDTH * MASK_HEIGHT]);
+        compose_i420(&mut untouched, &Mask::filled(MASK_WIDTH, MASK_HEIGHT, 1.));
         let reference = checkerboard_i420();
         assert_eq!(untouched.data(), reference.data());
     }
@@ -710,7 +406,7 @@ mod tests {
             .filter(|&x| pixel(&blurred, x, edge_row) != pixel(&original, x, edge_row) && pixel(&blurred, x + 1, edge_row) == pixel(&original, x + 1, edge_row))
             .count();
         assert!(changed_steps <= 2, "a hard seam shows as one switch per side");
-        mask.fill(1.);
+        mask.values.fill(1.);
         let mut untouched = original.clone();
         compose(&mut untouched, WIDTH, HEIGHT, &mask);
         assert_eq!(untouched, original);
@@ -720,13 +416,17 @@ mod tests {
     fn an_empty_mask_blurs_the_whole_frame() {
         let original = checkerboard();
         let mut blurred = original.clone();
-        compose(&mut blurred, WIDTH, HEIGHT, &vec![0.; MASK_WIDTH * MASK_HEIGHT]);
+        compose(&mut blurred, WIDTH, HEIGHT, &Mask::filled(MASK_WIDTH, MASK_HEIGHT, 0.));
         assert!(roughness(&blurred, 70, 40) * 4 < roughness(&original, 70, 40));
         assert!(blurred.chunks(CHANNELS).all(|pixel| pixel[3] == 255));
     }
 
-    fn cover_of(color: [u8; 3]) -> Vec<u8> {
-        BackgroundPicture::from_rgb(color.repeat(4 * 4), 4, 4).unwrap().covering(WIDTH, HEIGHT)
+    fn cover_of(color: [u8; 3]) -> PicturePlanes {
+        PicturePlanes::new(&BackgroundPicture::from_rgb(color.repeat(4 * 4), 4, 4).unwrap().covering(WIDTH, HEIGHT), WIDTH, HEIGHT)
+    }
+
+    fn refine_rgba(mask: &Mask, rgba: &[u8], width: usize, height: usize) -> Matte {
+        crate::matte::refine_rgba(mask, rgba, width, height)
     }
 
     #[test]
@@ -737,7 +437,8 @@ mod tests {
         let (center_x, center_y) = (WIDTH / 2, HEIGHT / 2);
         assert_eq!(pixel(&replaced, center_x, center_y), pixel(&original, center_x, center_y));
         for (x, y) in [(2, 2), (WIDTH - 3, HEIGHT - 3), (2, HEIGHT - 3)] {
-            assert_eq!(&replaced[(y * WIDTH + x) * CHANNELS..][..4], &[10, 120, 200, 255]);
+            let shown = &replaced[(y * WIDTH + x) * CHANNELS..][..4];
+            assert!(shown.iter().zip([10, 120, 200, 255]).all(|(&shown, wanted)| shown.abs_diff(wanted) <= 3), "{shown:?}");
         }
     }
 
@@ -752,20 +453,12 @@ mod tests {
             .count();
         assert!(switches <= 2);
         let mut everyone = original.clone();
-        compose_image(&mut everyone, WIDTH, HEIGHT, &refine_rgba(&vec![1.; MASK_WIDTH * MASK_HEIGHT], &original, WIDTH, HEIGHT), &cover_of([0, 0, 0]));
+        compose_image(&mut everyone, WIDTH, HEIGHT, &refine_rgba(&Mask::filled(MASK_WIDTH, MASK_HEIGHT, 1.), &original, WIDTH, HEIGHT), &cover_of([0, 0, 0]));
         assert_eq!(everyone, original);
-        let empty = refine_rgba(&vec![0.; MASK_WIDTH * MASK_HEIGHT], &original, WIDTH, HEIGHT);
+        let empty = refine_rgba(&Mask::filled(MASK_WIDTH, MASK_HEIGHT, 0.), &original, WIDTH, HEIGHT);
         let mut nobody = original;
         compose_image(&mut nobody, WIDTH, HEIGHT, &empty, &cover_of([0, 0, 0]));
         assert!(nobody.chunks(CHANNELS).all(|pixel| pixel[..3] == [0, 0, 0] && pixel[3] == 255));
-    }
-
-    #[test]
-    fn the_model_answers_one_probability_per_mask_pixel() {
-        let segmenter = Segmenter::new().expect("model loads");
-        let mask = segmenter.mask(&checkerboard(), WIDTH, HEIGHT).expect("inference runs");
-        assert_eq!(mask.len(), MASK_WIDTH * MASK_HEIGHT);
-        assert!(mask.iter().all(|value| (0. ..=1.).contains(value)));
     }
 
     fn wait_for_mask(source: &mut MaskSource, frame: impl Fn() -> Frame) -> bool {
@@ -783,7 +476,7 @@ mod tests {
     fn the_mask_source_segments_when_due_and_keeps_one_mask() {
         let mut source = MaskSource::new().expect("model loads");
         assert!(wait_for_mask(&mut source, || i420_from_rgba(&checkerboard(), WIDTH as u32, HEIGHT as u32)));
-        assert_eq!(source.mask().len(), MASK_WIDTH * MASK_HEIGHT);
+        assert_eq!(source.mask().values.len(), MASK_WIDTH * MASK_HEIGHT);
         source.shared.stride.store(3, Ordering::Relaxed);
         source.frames = 1;
         assert!(!source.due());
@@ -796,11 +489,11 @@ mod tests {
     }
 
     impl MaskInference for SlowSegmenter {
-        fn infer(&self, frame: I420Buffer) -> Result<Vec<f32>> {
+        fn infer(&mut self, frame: I420Buffer) -> Result<Mask> {
             let marker = frame.data().0[0];
             self.seen.lock().unwrap().push(marker);
             std::thread::sleep(self.delay);
-            Ok(vec![f32::from(marker) / 255.; MASK_WIDTH * MASK_HEIGHT])
+            Ok(Mask::filled(MASK_WIDTH, MASK_HEIGHT, f32::from(marker) / 255.))
         }
     }
 
