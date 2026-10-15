@@ -191,7 +191,22 @@ fn bubble(
     if row.forwarded {
         content = content.child(forwarded_header());
     }
-    let padded_blocks = if has_reactions {
+    let attachments = attachments_view(
+        &row.blocks,
+        &row.images,
+        &row.local_images,
+        &row.files,
+        &format!("message-{index}"),
+        directory,
+        extras.files.as_ref(),
+        extras.open_image.as_ref(),
+    );
+    let cards = cards_view(&row.adaptive_cards, &row.conversation_id, &row.key, cx);
+    let trailing_content = attachments.is_some()
+        || row.meeting_link.is_some()
+        || row.link_preview.is_some()
+        || !cards.is_empty();
+    let padded_blocks = if has_reactions || trailing_content {
         None
     } else {
         with_meta_room(&row.blocks, meta_room(row, own, saved))
@@ -209,16 +224,7 @@ fn bubble(
             cx,
         ));
     }
-    content = content.children(attachments_view(
-        &row.blocks,
-        &row.images,
-        &row.local_images,
-        &row.files,
-        &format!("message-{index}"),
-        directory,
-        extras.files.as_ref(),
-        extras.open_image.as_ref(),
-    ));
+    content = content.children(attachments);
     content = content.children(
         row.meeting_link
             .clone()
@@ -233,12 +239,7 @@ fn bubble(
             None,
         )
     }));
-    content = content.children(cards_view(
-        &row.adaptive_cards,
-        &row.conversation_id,
-        &row.key,
-        cx,
-    ));
+    content = content.children(cards);
     if has_reactions {
         content = content.child(
             h_flex()

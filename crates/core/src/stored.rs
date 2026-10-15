@@ -638,11 +638,20 @@ pub fn quote_html(quote: &QuoteInfo) -> String {
         .as_deref()
         .map(|name| format!("<strong itemprop=\"mri\">{}</strong>", escape_html(name)))
         .unwrap_or_default();
+    let time = quote_time(&quote.message_id)
+        .map(|time| format!(" <span itemprop=\"time\">{time}</span>"))
+        .unwrap_or_default();
+    let preview = escape_html(quote.preview.trim()).replace('\n', "<br>");
     format!(
-        "<blockquote itemscope=\"\" itemtype=\"http://{REPLY_ITEMTYPE}\" itemid=\"{}\">{sender}<p itemprop=\"preview\">{}</p></blockquote>",
+        "<blockquote itemscope=\"\" itemtype=\"http://{REPLY_ITEMTYPE}\" itemid=\"{}\">{sender}{time}<p itemprop=\"preview\">{preview}</p></blockquote>",
         escape_html(&quote.message_id),
-        escape_html(&quote.preview),
     )
+}
+
+fn quote_time(message_id: &str) -> Option<String> {
+    let millis = message_id.parse::<i64>().ok()?;
+    let time = chrono::DateTime::from_timestamp_millis(millis)?;
+    Some(time.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string())
 }
 
 pub fn user_mention_inputs(record: &MessageRecord) -> Vec<MentionInput> {
@@ -849,6 +858,23 @@ mod tests {
         assert!(text.contains("- one\n- two\n"), "{text}");
         assert!(text.contains("let x = 1;\n"), "{text}");
         assert!(text.ends_with("last"), "{text}");
+    }
+
+    #[test]
+    fn a_quote_keeps_its_lines_and_shows_when_the_quoted_message_was_sent() {
+        let html = quote_html(&QuoteInfo {
+            message_id: "1760517360000".to_owned(),
+            preview: "first link\nsecond link".to_owned(),
+            sender_name: Some("Ada".to_owned()),
+        });
+        assert!(html.contains("first link<br>second link"), "{html}");
+        assert!(html.contains("/2025 "), "{html}");
+        let without_time = quote_html(&QuoteInfo {
+            message_id: "Q9".to_owned(),
+            preview: "text".to_owned(),
+            sender_name: None,
+        });
+        assert!(!without_time.contains("itemprop=\"time\""), "{without_time}");
     }
 
     #[test]
