@@ -3,7 +3,7 @@ use std::time::Duration;
 use gpui_kit::component::Icon;
 use gpui_kit::*;
 
-use crate::theme;
+use app_base::theme;
 
 const SPIN_PERIOD: Duration = Duration::from_millis(900);
 

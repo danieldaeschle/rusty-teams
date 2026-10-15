@@ -7,7 +7,7 @@ use gpui_kit::*;
 
 use super::blocks::CODE_PADDING;
 use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
-use crate::views::profile_card::open_profile_link;
+use super::hooks::open_profile_link;
 
 const WRAP_TOLERANCE: f32 = 0.5;
 

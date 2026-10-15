@@ -10,7 +10,7 @@ use gpui_kit::*;
 use store::ChannelTabRecord;
 use teams_core::channel_tab_link;
 
-use crate::theme;
+use app_base::theme;
 
 const BAR_HEIGHT: f32 = 36.;
 const TAB_HEIGHT: f32 = 28.;

@@ -6,10 +6,8 @@ mod run_chip;
 mod runs;
 mod runs_popover;
 mod session_options;
-mod settings_controls;
 mod settings_forms;
 mod settings_section;
-mod spinner;
 mod start_dialog;
 mod start_dialog_pickers;
 mod store;
@@ -18,6 +16,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use app_base::agents::{lanes, settings_problems};
+use app_ui_kit::{settings_controls, spinner};
 use agents::{AgentAction, Environment};
 use directories::ProjectDirs;
 use gpui_kit::*;

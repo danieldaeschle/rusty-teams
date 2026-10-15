@@ -5,7 +5,7 @@ use gpui_kit::*;
 use teams_core::{Draft, FontSize, LineKind, MarkKind, SizeStep};
 
 use crate::render::blocks::{Script, StyleFlags};
-use crate::theme;
+use app_base::theme;
 
 const CODE_PILL_RADIUS: f32 = 4.;
 const CODE_BLOCK_RADIUS: f32 = 6.;

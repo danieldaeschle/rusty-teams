@@ -4,11 +4,11 @@ use gpui_kit::*;
 
 use super::blocks::{Block, Inline, StyleFlags};
 use super::flow_text::{FlowSegment, FlowText};
+use super::hooks::jump_to_quoted;
 use super::selectable::{Pill, SelectableRichText};
 use super::syntax::{self, Token};
-use crate::app_state::AppHandle;
-use crate::theme;
-use crate::views::widgets::symbol;
+use app_base::theme;
+use crate::widgets::symbol;
 
 const LIST_GAP: f32 = 2.;
 const MARKER_WIDTH: f32 = 18.;
@@ -487,7 +487,7 @@ mod tests {
     use gpui_kit::{Rgba, rgb};
 
     use super::{MIN_CONTRAST, contrast, readable};
-    use crate::theme;
+    use app_base::theme;
 
     #[test]
     fn dark_text_color_is_lifted_to_readable_contrast() {
@@ -499,15 +499,4 @@ mod tests {
     fn light_text_color_stays_as_sent() {
         assert_eq!(Rgba::from(readable(0xffd700, false)), rgb(0xffd700));
     }
-}
-
-fn jump_to_quoted(message_id: String, cx: &mut App) {
-    let Some(handle) = cx.try_global::<AppHandle>() else {
-        return;
-    };
-    handle.0.clone().update(cx, |state, cx| {
-        if let Some(selection) = state.selection.clone() {
-            state.jump_to_message(selection, message_id, cx);
-        }
-    });
 }

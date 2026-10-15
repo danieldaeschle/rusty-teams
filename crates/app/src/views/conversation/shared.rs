@@ -20,13 +20,11 @@ use crate::views::attachment_tray::{display_name, read_attachment};
 use crate::views::channel_tabs::{
     ChannelPane, TabAction, TabBarActions, fallback_tab_link, render_tab_bar, tab_action,
 };
-use crate::views::rail::RAIL_WIDTH;
 use crate::views::shared_tab::{
     LibraryView, Listing, MessagesView, SharedCommand, SharedRun, SharedScope, render_library,
     render_messages,
 };
-use crate::views::shell::ISLAND_GAP;
-use crate::views::sidebar::SIDEBAR_WIDTH;
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 
 const LIBRARY_KEY: &str = "library";
 const NEW_FOLDER_PLACEHOLDER: &str = "Folder name";

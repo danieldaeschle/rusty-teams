@@ -33,7 +33,7 @@ use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, 
 use super::call_stage::{StageMode, popped_placeholder, render_stage};
 use super::call_view_menu::view_button;
 use super::conversation::ConversationView;
-use super::shell::ISLAND_GAP;
+use app_ui_kit::layout::ISLAND_GAP;
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::REACTION_SHOWN;

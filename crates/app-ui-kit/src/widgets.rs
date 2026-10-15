@@ -2,9 +2,22 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::*;
 
-use crate::format;
-use crate::sidebar_model::Unread;
-use crate::theme;
+use app_base::format;
+use app_base::theme;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unread {
+    None,
+    Silent,
+    Dot,
+    Count(u32),
+}
+
+impl Unread {
+    pub fn is_unread(self) -> bool {
+        self != Unread::None
+    }
+}
 
 pub fn icon(name: IconName, size: f32, color: Hsla) -> Icon {
     Icon::new(name).size(px(size)).text_color(color)

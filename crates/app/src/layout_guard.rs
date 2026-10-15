@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-const WIDGETS_FILE: &str = "views/widgets.rs";
+const WIDGETS_FILE: &str = "widgets.rs";
 const SCAN_ALLOWLIST: &[(&str, &str)] = &[
     ("views/toolbar_placement.rs", ".top(px(-SLOT_HEIGHT))"),
     ("views/conversation.rs", ".bottom(px(-1.))"),

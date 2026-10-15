@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, FixedOffset, Utc};
 use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam};
 use teams_core::ChatSection;
+use app_ui_kit::widgets::Unread;
 
 use crate::app_state::chat_title;
 use crate::data::{
@@ -31,20 +32,6 @@ pub enum Preview {
         prefix: Option<String>,
         text: String,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unread {
-    None,
-    Silent,
-    Dot,
-    Count(u32),
-}
-
-impl Unread {
-    pub fn is_unread(self) -> bool {
-        self != Unread::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

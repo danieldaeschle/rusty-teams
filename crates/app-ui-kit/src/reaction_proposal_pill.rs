@@ -3,7 +3,7 @@ use std::rc::Rc;
 use gpui_kit::component::h_flex;
 use gpui_kit::*;
 
-use crate::theme;
+use app_base::theme;
 
 const PILL_HEIGHT: f32 = 26.;
 const PILL_PADDING: f32 = 10.;

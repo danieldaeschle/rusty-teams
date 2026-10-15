@@ -10,7 +10,7 @@ use teams_core::{
     series_maximum, series_value, slice_angles, unit_fraction,
 };
 
-use crate::theme;
+use app_base::theme;
 
 const CHART_HEIGHT: f32 = 200.;
 const GAUGE_HEIGHT: f32 = 136.;

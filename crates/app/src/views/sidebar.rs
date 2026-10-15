@@ -32,9 +32,9 @@ use crate::sidebar_model::{
     visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
+use app_ui_kit::layout::SIDEBAR_WIDTH;
 
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
-pub const SIDEBAR_WIDTH: f32 = 300.;
 const ROW_HEIGHT: f32 = 54.;
 const PROPOSAL_DOT_SIZE: f32 = 8.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;

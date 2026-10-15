@@ -14,7 +14,7 @@ use super::image_viewer::{ImageViewer, ImageViewerEvent};
 use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
-use super::rail::{RAIL_WIDTH, RailView};
+use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
@@ -24,7 +24,9 @@ use super::shortcuts::{
 };
 use super::call_pop_out::zoom_listener;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
-use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
+use super::sidebar::SidebarView;
+use app_ui_kit::render::hooks::RenderHooks;
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use super::status_bar::render_status_bar;
 use super::status_menu::own_status_button;
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
@@ -69,7 +71,6 @@ pub struct Startup {
     pub reply_to_last: bool,
 }
 
-pub const ISLAND_GAP: f32 = 6.;
 pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
 
 pub fn sidebar_hidden_in_call(window_width: f32, panel_open: bool) -> bool {
@@ -85,6 +86,21 @@ impl Global for UserInputHandle {}
 pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx: &mut App) {
     cx.set_global(crate::app_state::AppHandle(state.clone()));
     cx.set_global(UserInputHandle(user_input));
+    cx.set_global(RenderHooks {
+        open_profile_link: super::profile_card::open_profile_link,
+        jump_to_quoted,
+    });
+}
+
+fn jump_to_quoted(message_id: String, cx: &mut App) {
+    let Some(handle) = cx.try_global::<crate::app_state::AppHandle>() else {
+        return;
+    };
+    handle.0.clone().update(cx, |state, cx| {
+        if let Some(selection) = state.selection.clone() {
+            state.jump_to_message(selection, message_id, cx);
+        }
+    });
 }
 
 pub struct AppShell {

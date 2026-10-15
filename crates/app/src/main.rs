@@ -33,7 +33,6 @@ mod people;
 mod profile_model;
 mod profile_state;
 mod reaction_model;
-mod render;
 mod rows;
 mod scheduled;
 mod scheduled_rows;
@@ -45,6 +44,7 @@ mod translation_actions;
 mod typing;
 mod views;
 
+pub use app_ui_kit::render;
 pub use app_base::{
     APP_NAME, assets, avatar_image, channel_files, crash_log, demo_cards, demo_chart_cards, demo_gifs,
     demo_input_cards, demo_library, demo_recap, diagnostics, downloads, format, frame_log, fuzzy,

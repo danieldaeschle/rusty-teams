@@ -12,7 +12,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::theme;
+use app_base::theme;
 
 pub const PAGE_PADDING: f32 = 20.;
 const FIELD_HEIGHT: f32 = 32.;

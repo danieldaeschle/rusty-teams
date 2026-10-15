@@ -20,6 +20,7 @@ tempfile.workspace = true
 [dependencies]
 app-base.workspace = true
 app-call-model.workspace = true
+app-ui-kit.workspace = true
 agents.workspace = true
 calling.workspace = true
 chatsvc.workspace = true

@@ -1,6 +1,7 @@
 pub mod blocks;
 pub mod elements;
 mod flow_text;
+pub mod hooks;
 mod selectable;
 mod syntax;
 
