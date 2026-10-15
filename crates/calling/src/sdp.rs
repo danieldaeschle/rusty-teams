@@ -638,6 +638,23 @@ fn transport_attributes(teams_line: &Media, session: &Session) -> Vec<Attribute>
         .collect()
 }
 
+const OPUS_SEND_QUALITY: [(&str, &str); 2] = [("maxaveragebitrate", "40000"), ("maxplaybackrate", "48000")];
+
+/// libwebrtc sizes its Opus encoder from these remote fmtp parameters; without them it picks its own bitrate.
+fn with_opus_send_quality(fmtp: &str) -> String {
+    let mut value = fmtp.to_owned();
+    for (name, setting) in OPUS_SEND_QUALITY {
+        if value.split([' ', ';']).any(|parameter| parameter.split('=').next() == Some(name)) {
+            continue;
+        }
+        if !value.ends_with(' ') {
+            value.push(if value.contains(' ') { ';' } else { ' ' });
+        }
+        value.push_str(&format!("{name}={setting}"));
+    }
+    value
+}
+
 fn browser_rtp_line(
     teams_line: &Media,
     offered: &Media,
@@ -698,16 +715,17 @@ fn browser_rtp_line(
         if !kept_set.contains(payload.as_str()) {
             continue;
         }
-        fmtp_payloads.insert(payload);
         let cleaned = value
             .split(';')
             .filter(|parameter| !parameter.starts_with("rtx-time="))
             .collect::<Vec<_>>()
             .join(";");
-        attributes.push(Attribute::new("fmtp", cleaned));
+        let is_opus = codec_payload("opus").is_some_and(|opus| *opus == payload);
+        fmtp_payloads.insert(payload);
+        attributes.push(Attribute::new("fmtp", if is_opus { with_opus_send_quality(&cleaned) } else { cleaned }));
     }
     if let Some(opus) = codec_payload("opus").filter(|payload| !fmtp_payloads.contains(*payload)) {
-        attributes.push(Attribute::new("fmtp", format!("{opus} usedtx=1")));
+        attributes.push(Attribute::new("fmtp", with_opus_send_quality(&format!("{opus} usedtx=1"))));
     }
     if let (Some(red), Some(opus)) = (codec_payload("red"), codec_payload("opus"))
         && !fmtp_payloads.contains(red)
@@ -1104,7 +1122,7 @@ mod tests {
         let browser = to_browser_answer(answer, &offer, AUDIO_ONLY_OFFER).unwrap().replace("\r\n", "\n");
         assert!(browser.contains("m=audio 3480 UDP/TLS/RTP/SAVPF 111 97 13 101\n"), "{browser}");
         assert!(browser.contains("a=rtpmap:97 RED/48000/2\n"));
-        assert!(browser.contains("a=fmtp:111 usedtx=1\n"));
+        assert!(browser.contains("a=fmtp:111 usedtx=1;maxaveragebitrate=40000;maxplaybackrate=48000\n"));
         assert!(browser.contains("a=fmtp:97 111/111\n"));
         assert!(browser.contains("a=rtcp-fb:111 transport-cc\n"));
         assert!(browser.contains("a=ssrc:1000 msid:mainAudio-1000 mainAudio-1000\n"));
@@ -1186,5 +1204,15 @@ mod tests {
     fn folded_gallery_lines_expand_below_their_carrier_mid() {
         assert_eq!(folded_mids("17", 8), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());
         assert_eq!(folded_mids("x", 2), vec!["x-0".to_owned(), "x".to_owned()]);
+    }
+
+    #[test]
+    fn opus_fmtp_gets_the_send_quality_without_overriding_teams() {
+        assert_eq!(
+            with_opus_send_quality("111 minptime=10;useinbandfec=1"),
+            "111 minptime=10;useinbandfec=1;maxaveragebitrate=40000;maxplaybackrate=48000"
+        );
+        assert_eq!(with_opus_send_quality("111 maxplaybackrate=16000"), "111 maxplaybackrate=16000;maxaveragebitrate=40000");
+        assert_eq!(with_opus_send_quality("111"), "111 maxaveragebitrate=40000;maxplaybackrate=48000");
     }
 }

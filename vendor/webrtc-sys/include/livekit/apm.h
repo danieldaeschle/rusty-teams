@@ -37,6 +37,9 @@ struct AudioProcessingConfig {
     config.echo_canceller.enabled = echo_canceller_enabled;
     config.gain_controller2.enabled = gain_controller_enabled;
     config.gain_controller2.adaptive_digital.enabled = gain_controller_enabled;
+    // Speech settles near -16 dBFS like Teams instead of AGC2's -22 dBFS; the limiter after the fixed gain keeps peaks below -1 dBFS.
+    config.gain_controller2.adaptive_digital.initial_gain_db = 0.0f;
+    config.gain_controller2.fixed_digital.gain_db = gain_controller_enabled ? 6.0f : 0.0f;
     config.high_pass_filter.enabled = high_pass_filter_enabled;
     config.noise_suppression.enabled = noise_suppression_enabled;
     return config;
