@@ -4,6 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub const MAX_JUMBO_EMOJI: usize = 3;
 
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
+const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
 const BLOCKING_ELEMENTS: [&str; 4] = ["table", "attachment", "blockquote", "pre"];
 const IGNORED_CHARACTERS: [char; 5] = ['\u{a0}', '\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}'];
 
@@ -104,12 +105,33 @@ fn visit_element(element: ElementRef<'_>, scan: &mut Scan) {
 }
 
 fn glyph(element: ElementRef<'_>) -> String {
-    element
+    let raw = element
         .value()
         .attr("alt")
         .filter(|alt| !alt.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| element.text().collect())
+        .unwrap_or_else(|| element.text().collect());
+    without_repeated_skin_tone(&raw)
+}
+
+/// Graph repeats the skin tone in emoticon alt text (`👍🏼🏼`, `🤷🏽‍♂️🏽`); the extra one renders as a colour square.
+pub(crate) fn without_repeated_skin_tone(glyph: &str) -> String {
+    let mut cleaned = String::with_capacity(glyph.len());
+    let mut previous: Option<char> = None;
+    let mut tone_seen = false;
+    for character in glyph.chars() {
+        let is_tone = SKIN_TONES.contains(&character);
+        let stray = is_tone
+            && previous.is_some_and(|previous| {
+                SKIN_TONES.contains(&previous) || (tone_seen && !is_pictographic(previous))
+            });
+        if !stray {
+            cleaned.push(character);
+        }
+        tone_seen |= is_tone;
+        previous = Some(character);
+    }
+    cleaned
 }
 
 fn unicode_emoji(text: &str) -> Option<Vec<JumboEmoji>> {
@@ -164,6 +186,17 @@ fn is_pictographic(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_skin_tones_from_graph_are_dropped() {
+        assert_eq!(without_repeated_skin_tone("👍🏼🏼"), "👍🏼");
+        assert_eq!(without_repeated_skin_tone("🤷🏽\u{200d}♂️🏽"), "🤷🏽\u{200d}♂️");
+        assert_eq!(without_repeated_skin_tone("🧑🏻\u{200d}🤝\u{200d}🧑🏿"), "🧑🏻\u{200d}🤝\u{200d}🧑🏿");
+        assert_eq!(
+            jumbo_emoji(r#"<emoji id="yes" alt="👍🏼🏼"></emoji>"#),
+            Some(vec![emoticon("yes", "👍🏼")])
+        );
+    }
 
     fn emoticon(id: &str, glyph: &str) -> JumboEmoji {
         JumboEmoji {
