@@ -34,6 +34,7 @@ pub mod meeting;
 pub mod meeting_options;
 pub mod mic_processing;
 pub mod mixer;
+pub mod gain_stage;
 pub mod mic_chain;
 pub mod mic_effects;
 pub mod noise_stage;

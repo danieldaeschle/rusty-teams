@@ -10,10 +10,6 @@ impl MicEffect {
         effect_name(self.id)
     }
 
-    pub fn is_echo_cancellation(&self) -> bool {
-        known_prefix(self.id) == Some(ECHO_CANCELLATION)
-    }
-
     /// The state to switch to, when it differs from the current one and Windows lets us change it.
     pub fn change(&self) -> Option<bool> {
         wanted_state(self.id).filter(|wanted| self.can_set && *wanted != self.enabled)
@@ -55,11 +51,12 @@ fn known_prefix(guid: u128) -> Option<u32> {
 }
 
 /// DeepFilterNet and AGC2 replace the Windows noise, gain and compression stages, stacking them muffles speech.
-/// The Windows echo canceller stays: it has the exact speaker signal, ours only a copy of the decoded stream.
+/// The Windows echo canceller stays: it has the exact speaker signal; AEC3 after it removes the rest before AGC2 lifts it.
 pub fn wanted_state(guid: u128) -> Option<bool> {
     match known_prefix(guid)? {
         NOISE_SUPPRESSION | DEEP_NOISE_SUPPRESSION | GAIN_CONTROL | RANGE_COMPRESSION => Some(false),
         BEAMFORMING => Some(true),
+        ECHO_CANCELLATION => None,
         _ => None,
     }
 }
@@ -85,7 +82,7 @@ mod tests {
         assert_eq!(wanted_state(guid(ECHO_CANCELLATION)), None);
         assert_eq!(wanted_state(0x1234), None);
         let echo = MicEffect { id: guid(ECHO_CANCELLATION), enabled: true, can_set: true };
-        assert!(echo.is_echo_cancellation() && echo.change().is_none());
+        assert!(echo.change().is_none());
         let deep_noise = MicEffect { id: guid(DEEP_NOISE_SUPPRESSION), enabled: true, can_set: true };
         assert_eq!(deep_noise.change(), Some(false));
         assert_eq!(MicEffect { can_set: false, ..deep_noise }.change(), None);

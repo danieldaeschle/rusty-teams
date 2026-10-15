@@ -137,7 +137,6 @@ impl SoftwareAudio {
     ) -> Result<Self> {
         let mut captures = Vec::new();
         let mut warning = None;
-        let mut processing = plan.processing;
         let mut microphone_source = None;
         let (microphone, computer, loopback) = if mode == AudioMode::Platform {
             let computer_queue = SampleQueue::default();
@@ -153,7 +152,6 @@ impl SoftwareAudio {
             let microphone = match start_microphone(input, microphone_queue.clone()) {
                 Ok(started) => {
                     microphone_source = Some(started.source);
-                    processing.echo_canceller &= !started.os_echo_cancellation;
                     captures.push(started.capture);
                     FrameSource::Captured(microphone_queue)
                 }
@@ -186,7 +184,7 @@ impl SoftwareAudio {
         let microphone_muted = Arc::new(AtomicBool::new(microphone_muted));
         let running = Arc::new(AtomicBool::new(true));
         let feeder = Feeder {
-            processing,
+            processing: plan.processing,
             ml_noise: plan.ml_noise,
             source,
             microphone,

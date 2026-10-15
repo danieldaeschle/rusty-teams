@@ -1197,6 +1197,7 @@ dependencies = [
  "chatsvc",
  "chrono",
  "cpal",
+ "cxx",
  "deep_filter",
  "flate2",
  "futures-util",

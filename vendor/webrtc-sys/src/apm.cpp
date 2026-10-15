@@ -25,11 +25,15 @@
 namespace livekit_ffi {
 
 AudioProcessingModule::AudioProcessingModule(
-    const AudioProcessingConfig& config) {
+    const AudioProcessingConfig& config)
+    : AudioProcessingModule(config.ToWebrtcConfig()) {}
+
+AudioProcessingModule::AudioProcessingModule(
+    const webrtc::AudioProcessing::Config& config) {
   apm_ = webrtc::BuiltinAudioProcessingBuilder()
              .Build(webrtc::CreateEnvironment());
 
-  apm_->ApplyConfig(config.ToWebrtcConfig());
+  apm_->ApplyConfig(config);
   apm_->Initialize();
 }
 
@@ -67,6 +71,20 @@ std::unique_ptr<AudioProcessingModule> create_apm(
   config.gain_controller_enabled = gain_controller_enabled;
   config.high_pass_filter_enabled = high_pass_filter_enabled;
   config.noise_suppression_enabled = noise_suppression_enabled;
+  return std::make_unique<AudioProcessingModule>(config);
+}
+
+std::unique_ptr<AudioProcessingModule> create_gain_apm(
+    float initial_gain_db,
+    float fixed_gain_db,
+    float max_gain_change_db_per_second) {
+  webrtc::AudioProcessing::Config config;
+  config.gain_controller2.enabled = true;
+  config.gain_controller2.adaptive_digital.enabled = true;
+  config.gain_controller2.adaptive_digital.initial_gain_db = initial_gain_db;
+  config.gain_controller2.adaptive_digital.max_gain_change_db_per_second =
+      max_gain_change_db_per_second;
+  config.gain_controller2.fixed_digital.gain_db = fixed_gain_db;
   return std::make_unique<AudioProcessingModule>(config);
 }
 

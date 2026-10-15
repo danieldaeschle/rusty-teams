@@ -56,9 +56,6 @@ impl ApmConfig {
             .then(|| AudioProcessingModule::new(self.echo_canceller, false, false, self.noise_suppression))
     }
 
-    pub fn gain_module(self) -> Option<AudioProcessingModule> {
-        self.gain_controller.then(|| AudioProcessingModule::new(false, true, false, false))
-    }
 }
 
 impl MicSettings {
@@ -111,16 +108,6 @@ mod tests {
     }
 
     #[test]
-    fn gain_runs_in_its_own_module_after_the_front_stages() {
-        let config = MicSettings::default().apm_config();
-        assert!(config.front_module().is_some());
-        assert!(config.gain_module().is_some());
-        let music = MicSettings { noise_suppression: NoiseSuppression::Auto, music_mode: true }.apm_config();
-        assert!(music.front_module().is_some());
-        assert!(music.gain_module().is_none());
-    }
-
-    #[test]
     fn only_auto_outside_music_mode_runs_the_ml_stage() {
         assert!(MicSettings::default().ml_noise_suppression());
         assert!(!MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false }.ml_noise_suppression());
@@ -144,7 +131,6 @@ mod tests {
         assert!(!settings.uses_device_track());
         assert!(settings.apm_config().is_passthrough());
         assert!(settings.apm_config().front_module().is_none());
-        assert!(settings.apm_config().gain_module().is_none());
     }
 
     #[test]
