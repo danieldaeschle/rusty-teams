@@ -1,5 +1,6 @@
 use calling::VideoPicture;
-use calling::blur::{MASK_HEIGHT, MASK_WIDTH, compose};
+use calling::blur::compose;
+use calling::mask::Mask;
 
 pub const SCENE_WIDTH: usize = 640;
 pub const SCENE_HEIGHT: usize = 360;
@@ -49,16 +50,8 @@ fn scene(tick: usize) -> Vec<u8> {
     rgba
 }
 
-fn person_mask() -> Vec<f32> {
-    (0..MASK_WIDTH * MASK_HEIGHT)
-        .map(|index| {
-            let (x, y) = (
-                ((index % MASK_WIDTH) as f32 + 0.5) / MASK_WIDTH as f32,
-                ((index / MASK_WIDTH) as f32 + 0.5) / MASK_HEIGHT as f32,
-            );
-            if person_at(x, y).is_some() { 1. } else { 0. }
-        })
-        .collect()
+fn person_mask() -> Mask {
+    Mask::from_fn(256, 144, |x, y| if person_at(x, y).is_some() { 1. } else { 0. })
 }
 
 /// A drawn head-and-shoulders scene; the mask comes from the drawing, not from the model.

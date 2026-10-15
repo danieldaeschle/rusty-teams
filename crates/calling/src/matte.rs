@@ -1,19 +1,35 @@
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
-use crate::blur::{Axis, MASK_HEIGHT, MASK_WIDTH, axis};
+use crate::mask::{Axis, Mask, axis};
 use crate::camera::i420_from_rgba;
 
 const GUIDE_WIDTH: usize = 160;
 const FILTER_RADIUS: usize = 3;
 const FILTER_EPSILON: f32 = 3e-3;
 const CHROMA_WEIGHT: f32 = 2.;
-const MATTE_LOW: f32 = 0.45;
+const MATTE_LOW: f32 = 0.2;
 const MATTE_HIGH: f32 = 0.8;
-const SURE_PERSON: f32 = 0.85;
-const SURE_BACKGROUND: f32 = 0.1;
+const SURE_PERSON: f32 = 0.95;
+const SURE_BACKGROUND: f32 = 0.05;
 const CERTAINTY_RAMP: f32 = 0.05;
 const MAX_BANDS: usize = 4;
 const CHANNELS: usize = 3;
+
+/// How the low-resolution mask becomes the full-resolution matte.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RefineSettings {
+    pub guide_width: usize,
+    pub edge_low: f32,
+    pub edge_high: f32,
+    pub sure_person: f32,
+    pub sure_background: f32,
+}
+
+impl Default for RefineSettings {
+    fn default() -> Self {
+        RefineSettings { guide_width: GUIDE_WIDTH, edge_low: MATTE_LOW, edge_high: MATTE_HIGH, sure_person: SURE_PERSON, sure_background: SURE_BACKGROUND }
+    }
+}
 
 /// Person alpha (0..255) per pixel of a `width` x `height` frame.
 pub struct Matte {
@@ -69,12 +85,12 @@ fn ramp(value: f32, start: f32) -> f32 {
     ((value - start) / CERTAINTY_RAMP).clamp(0., 1.)
 }
 
-fn edge_curve(value: f32) -> f32 {
-    let t = ((value - MATTE_LOW) / (MATTE_HIGH - MATTE_LOW)).clamp(0., 1.);
+fn edge_curve(value: f32, settings: &RefineSettings) -> f32 {
+    let t = ((value - settings.edge_low) / (settings.edge_high - settings.edge_low)).clamp(0., 1.);
     t * t * (3. - 2. * t)
 }
 
-fn box_filter(input: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
+pub(crate) fn box_filter(input: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
     let mut across = vec![0f32; input.len()];
     let mut prefix = vec![0f32; width + 1];
     for (line, output) in input.chunks_exact(width).zip(across.chunks_exact_mut(width)) {
@@ -133,21 +149,6 @@ fn small_guide(planes: &Planes, factor: usize) -> ([Vec<f32>; CHANNELS], usize, 
     ([luma, colour(planes.blue, planes.blue_stride), colour(planes.red, planes.red_stride)], small.0, small.1)
 }
 
-fn small_mask(mask: &[f32], width: usize, height: usize) -> Vec<f32> {
-    let (mask_x, mask_y) = (axis(width, MASK_WIDTH), axis(height, MASK_HEIGHT));
-    let mut small = Vec::with_capacity(width * height);
-    for row in 0..height {
-        let (top, bottom, down) = (mask_y.first[row] * MASK_WIDTH, mask_y.second[row] * MASK_WIDTH, mask_y.weight[row]);
-        for column in 0..width {
-            let (left, right, across) = (mask_x.first[column], mask_x.second[column], mask_x.weight[column]);
-            let upper = mask[top + left] * (1. - across) + mask[top + right] * across;
-            let lower = mask[bottom + left] * (1. - across) + mask[bottom + right] * across;
-            small.push(upper * (1. - down) + lower * down);
-        }
-    }
-    small
-}
-
 struct Coefficients {
     slope: [Vec<f32>; CHANNELS],
     offset: Vec<f32>,
@@ -188,6 +189,7 @@ fn coefficients(guide: &[Vec<f32>; CHANNELS], person: &[f32], width: usize, heig
 }
 
 struct Upsampler<'a> {
+    settings: RefineSettings,
     coefficients: &'a Coefficients,
     prior: &'a [f32],
     planes: Planes<'a>,
@@ -210,27 +212,34 @@ impl Upsampler<'_> {
                 let (left, right, horizontal) = (&lines[self.across.first[column]], &lines[self.across.second[column]], self.across.weight[column]);
                 let at = |index: usize| left[index] * (1. - horizontal) + right[index] * horizontal;
                 let prior = at(4);
-                let (floor, ceiling) = (ramp(prior, SURE_PERSON), ramp(prior, SURE_BACKGROUND - CERTAINTY_RAMP));
+                let (floor, ceiling) = (ramp(prior, self.settings.sure_person), ramp(prior, self.settings.sure_background - CERTAINTY_RAMP));
                 if floor >= 1. || ceiling <= 0. {
                     *slot = if floor >= 1. { u8::MAX } else { 0 };
                     continue;
                 }
                 let guide = self.planes.pixel(column, row);
                 let person = at(0) * guide[0] + at(1) * guide[1] + at(2) * guide[2] + at(3);
-                *slot = (edge_curve(person).max(floor).min(ceiling) * 255. + 0.5) as u8;
+                *slot = (edge_curve(person, &self.settings).max(floor).min(ceiling) * 255. + 0.5) as u8;
             }
         }
     }
 }
 
 /// Snaps the low-resolution `mask` to the colour edges of the full-resolution frame with a fast colour guided filter.
-pub fn refine(mask: &[f32], planes: Planes) -> Matte {
+pub fn refine(mask: &Mask, planes: Planes) -> Matte {
+    refine_with(mask, planes, RefineSettings::default())
+}
+
+pub fn refine_with(mask: &Mask, planes: Planes, settings: RefineSettings) -> Matte {
     let (width, height) = (planes.width, planes.height);
-    let factor = (width / GUIDE_WIDTH).max(1);
+    if mask.matte {
+        return upscaled(mask, width, height);
+    }
+    let factor = (width / settings.guide_width).max(1);
     let (guide, small_width, small_height) = small_guide(&planes, factor);
-    let prior = small_mask(mask, small_width, small_height);
+    let prior = mask.resampled(small_width, small_height);
     let coefficients = coefficients(&guide, &prior, small_width, small_height);
-    let upsampler = Upsampler { coefficients: &coefficients, prior: &prior, planes, across: axis(width, small_width), down: axis(height, small_height) };
+    let upsampler = Upsampler { settings, coefficients: &coefficients, prior: &prior, planes, across: axis(width, small_width), down: axis(height, small_height) };
     let mut alpha = vec![0u8; width * height];
     let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
     let rows_per_band = height.div_ceil(bands);
@@ -243,7 +252,33 @@ pub fn refine(mask: &[f32], planes: Planes) -> Matte {
     Matte { width, height, alpha }
 }
 
-pub fn refine_rgba(mask: &[f32], rgba: &[u8], width: usize, height: usize) -> Matte {
+/// A matting model's alpha already follows hair and edges; bilinear scaling keeps it, a guided filter only costs time.
+fn upscaled(mask: &Mask, width: usize, height: usize) -> Matte {
+    let (across, down) = (axis(width, mask.width), axis(height, mask.height));
+    let mut alpha = vec![0u8; width * height];
+    let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
+    let rows_per_band = height.div_ceil(bands);
+    std::thread::scope(|scope| {
+        for (index, band) in alpha.chunks_mut(rows_per_band * width).enumerate() {
+            let (across, down) = (&across, &down);
+            scope.spawn(move || {
+                for (offset, line) in band.chunks_exact_mut(width).enumerate() {
+                    let row = index * rows_per_band + offset;
+                    let (top, bottom, vertical) = (down.first[row] * mask.width, down.second[row] * mask.width, down.weight[row]);
+                    for (column, slot) in line.iter_mut().enumerate() {
+                        let (left, right, horizontal) = (across.first[column], across.second[column], across.weight[column]);
+                        let upper = mask.values[top + left] * (1. - horizontal) + mask.values[top + right] * horizontal;
+                        let lower = mask.values[bottom + left] * (1. - horizontal) + mask.values[bottom + right] * horizontal;
+                        *slot = ((upper * (1. - vertical) + lower * vertical) * 255. + 0.5) as u8;
+                    }
+                }
+            });
+        }
+    });
+    Matte { width, height, alpha }
+}
+
+pub fn refine_rgba(mask: &Mask, rgba: &[u8], width: usize, height: usize) -> Matte {
     refine(mask, Planes::of(&i420_from_rgba(rgba, width as u32, height as u32)))
 }
 
@@ -251,6 +286,8 @@ pub fn refine_rgba(mask: &[f32], rgba: &[u8], width: usize, height: usize) -> Ma
 mod tests {
     use super::*;
 
+    const MASK_WIDTH: usize = 256;
+    const MASK_HEIGHT: usize = 144;
     const WIDTH: usize = 1280;
     const HEIGHT: usize = 720;
     const LEFT: usize = 403;
@@ -277,8 +314,8 @@ mod tests {
         frame(WIDTH, HEIGHT, |column, row| if (LEFT..RIGHT).contains(&column) && (TOP..BOTTOM).contains(&row) { 200 } else { 50 })
     }
 
-    fn blocky_mask() -> Vec<f32> {
-        (0..MASK_WIDTH * MASK_HEIGHT)
+    fn blocky_mask() -> Mask {
+        let values = (0..MASK_WIDTH * MASK_HEIGHT)
             .map(|index| {
                 let (block_column, block_row) = ((index % MASK_WIDTH) / BLOCK * BLOCK, (index / MASK_WIDTH) / BLOCK * BLOCK);
                 let center_x = (block_column as f32 + BLOCK as f32 / 2.) * WIDTH as f32 / MASK_WIDTH as f32;
@@ -286,7 +323,8 @@ mod tests {
                 let inside = (LEFT as f32..RIGHT as f32).contains(&center_x) && (TOP as f32..BOTTOM as f32).contains(&center_y);
                 if inside { 0.9 } else { 0.1 }
             })
-            .collect()
+            .collect();
+        Mask::new(MASK_WIDTH, MASK_HEIGHT, values)
     }
 
     fn crossing(values: impl Iterator<Item = u8>) -> Vec<usize> {
@@ -335,10 +373,13 @@ mod tests {
     #[test]
     fn flat_regions_keep_the_mask_and_halving_averages() {
         let flat = frame(64, 36, |_, _| 120);
-        let everyone = refine(&vec![1.; MASK_WIDTH * MASK_HEIGHT], Planes::of(&flat));
+        let everyone = refine(&Mask::filled(MASK_WIDTH, MASK_HEIGHT, 1.), Planes::of(&flat));
         assert!(everyone.alpha.iter().all(|&alpha| alpha == 255));
-        let nobody = refine(&vec![0.; MASK_WIDTH * MASK_HEIGHT], Planes::of(&flat));
+        let nobody = refine(&Mask::filled(MASK_WIDTH, MASK_HEIGHT, 0.), Planes::of(&flat));
         assert!(nobody.alpha.iter().all(|&alpha| alpha == 0));
+        let step = Mask::new(2, 1, vec![0., 1.]).into_matte();
+        let upscaled = refine(&step, Planes::of(&frame(4, 2, |_, _| 120)));
+        assert_eq!(&upscaled.alpha[..4], &[0, 64, 191, 255]);
         let halved = Matte { width: 3, height: 2, alpha: vec![0, 255, 255, 0, 255, 255] }.halved();
         assert_eq!((halved.width, halved.height, halved.alpha), (2, 1, vec![128, 255]));
     }

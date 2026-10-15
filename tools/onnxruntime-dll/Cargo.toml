@@ -1,0 +1,15 @@
+[package]
+name = "onnxruntime-dll"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[workspace]
+
+[lib]
+name = "onnxruntime"
+crate-type = ["cdylib"]
+
+[dependencies]
+ort-sys = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "api-31", "download-binaries", "tls-native", "directml"] }

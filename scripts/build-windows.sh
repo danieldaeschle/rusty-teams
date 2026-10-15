@@ -43,6 +43,10 @@ if ! diff -rq "$stagingDir" "$patchedDir" >/dev/null 2>&1; then
 fi
 rm -rf "$(dirname "$stagingDir")"
 
+# ONNX Runtime (background effects) goes into the exe as an embedded DLL, see tools/onnxruntime-dll.
+(cd "$repoRoot/tools/onnxruntime-dll" && RUSTFLAGS="-C target-feature=-crt-static" cargo xwin build --release --target "$targetName")
+export CALLING_ONNXRUNTIME_DLL="$CARGO_TARGET_DIR/$targetName/release/onnxruntime.dll"
+
 cd "$crateDir"
 binaryArguments=()
 outputDir="$CARGO_TARGET_DIR/$targetName/release"
