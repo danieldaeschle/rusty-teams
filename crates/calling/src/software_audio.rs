@@ -16,9 +16,10 @@ use crate::devices::DeviceChoice;
 use crate::error::{Error, Result};
 use crate::mic_processing::{ApmConfig, MicSettings};
 use crate::mixer::mix_frames;
-use crate::noise_stage::NoiseStage;
+use crate::mic_chain::MicChain;
 use crate::pcm::SampleQueue;
 use crate::sound_capture::{LoopbackKind, start_loopback, start_microphone};
+use crate::wav_dump::StageDumps;
 
 const SOURCE_QUEUE_MS: u32 = 100;
 const FRAME_PERIOD: Duration = Duration::from_millis(10);
@@ -51,7 +52,7 @@ pub struct SoftwareAudioPlan {
 
 struct Feeder {
     processing: ApmConfig,
-    ml_noise: Option<NoiseStage>,
+    ml_noise: bool,
     source: NativeAudioSource,
     microphone: FrameSource,
     computer: FrameSource,
@@ -63,7 +64,7 @@ struct Feeder {
 
 impl Feeder {
     fn run(mut self) {
-        let mut processing = self.processing.module();
+        let mut chain = MicChain::new(self.processing, self.ml_noise, StageDumps::from_env());
         let mut due = Instant::now();
         while self.running.load(Ordering::SeqCst) {
             due += FRAME_PERIOD;
@@ -74,16 +75,13 @@ impl Feeder {
                 due = now;
             }
             let (mut far_end, has_far_end) = self.far_end.next_frame();
-            if has_far_end && let Some(processing) = processing.as_mut() {
-                let _ = processing.process_reverse_stream(&mut far_end, SAMPLE_RATE as i32, 1);
+            if has_far_end {
+                chain.process_far_end(&mut far_end);
             }
             let muted = self.microphone_muted.load(Ordering::SeqCst);
             let mut microphone = self.microphone.next_frame();
-            if !muted && let Some(processing) = processing.as_mut() {
-                let _ = processing.process_stream(&mut microphone, SAMPLE_RATE as i32, 1);
-            }
-            if !muted && let Some(noise_stage) = self.ml_noise.as_mut() {
-                noise_stage.process_pcm(0, &mut microphone);
+            if !muted {
+                chain.process(&mut microphone);
             }
             let computer = self.computer.next_frame();
             let frame = AudioFrame {
@@ -187,7 +185,7 @@ impl SoftwareAudio {
         let running = Arc::new(AtomicBool::new(true));
         let feeder = Feeder {
             processing: plan.processing,
-            ml_noise: plan.ml_noise.then(NoiseStage::new),
+            ml_noise: plan.ml_noise,
             source,
             microphone,
             computer,

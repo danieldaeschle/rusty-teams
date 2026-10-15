@@ -51,10 +51,13 @@ impl ApmConfig {
         self == ApmConfig { echo_canceller: false, gain_controller: false, high_pass_filter: false, noise_suppression: false }
     }
 
-    pub fn module(self) -> Option<AudioProcessingModule> {
-        (!self.is_passthrough()).then(|| {
-            AudioProcessingModule::new(self.echo_canceller, self.gain_controller, self.high_pass_filter, self.noise_suppression)
-        })
+    pub fn front_module(self) -> Option<AudioProcessingModule> {
+        (self.echo_canceller || self.high_pass_filter || self.noise_suppression)
+            .then(|| AudioProcessingModule::new(self.echo_canceller, false, self.high_pass_filter, self.noise_suppression))
+    }
+
+    pub fn gain_module(self) -> Option<AudioProcessingModule> {
+        self.gain_controller.then(|| AudioProcessingModule::new(false, true, false, false))
     }
 }
 
@@ -64,7 +67,8 @@ impl MicSettings {
             return ApmConfig { echo_canceller: true, gain_controller: false, high_pass_filter: false, noise_suppression: false };
         }
         let on = self.noise_suppression != NoiseSuppression::Off;
-        ApmConfig { echo_canceller: on, gain_controller: on, high_pass_filter: on, noise_suppression: on }
+        let apm_noise_suppression = self.noise_suppression == NoiseSuppression::Low;
+        ApmConfig { echo_canceller: on, gain_controller: on, high_pass_filter: on, noise_suppression: apm_noise_suppression }
     }
 
     pub fn uses_device_track(self) -> bool {
@@ -85,9 +89,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_keeps_the_device_track_with_everything_on() {
+    fn auto_leaves_noise_to_the_ml_stage_and_keeps_the_rest_of_the_apm() {
         let settings = MicSettings::default();
-        assert!(settings.uses_device_track());
+        assert!(settings.uses_device_track_on(false));
+        assert!(settings.ml_noise_suppression());
+        assert_eq!(
+            settings.apm_config(),
+            ApmConfig { echo_canceller: true, gain_controller: true, high_pass_filter: true, noise_suppression: false }
+        );
+    }
+
+    #[test]
+    fn low_keeps_the_device_track_with_the_apm_noise_suppression() {
+        let settings = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+        assert!(settings.uses_device_track_on(false));
+        assert!(!settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
             ApmConfig { echo_canceller: true, gain_controller: true, high_pass_filter: true, noise_suppression: true }
@@ -95,11 +111,13 @@ mod tests {
     }
 
     #[test]
-    fn low_keeps_the_device_track_with_the_apm_only() {
-        let settings = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
-        assert!(settings.uses_device_track());
-        assert!(!settings.ml_noise_suppression());
-        assert_eq!(settings.apm_config(), MicSettings::default().apm_config());
+    fn gain_runs_in_its_own_module_after_the_front_stages() {
+        let config = MicSettings::default().apm_config();
+        assert!(config.front_module().is_some());
+        assert!(config.gain_module().is_some());
+        let music = MicSettings { noise_suppression: NoiseSuppression::Auto, music_mode: true }.apm_config();
+        assert!(music.front_module().is_some());
+        assert!(music.gain_module().is_none());
     }
 
     #[test]
@@ -125,7 +143,8 @@ mod tests {
         let settings = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
         assert!(!settings.uses_device_track());
         assert!(settings.apm_config().is_passthrough());
-        assert!(settings.apm_config().module().is_none());
+        assert!(settings.apm_config().front_module().is_none());
+        assert!(settings.apm_config().gain_module().is_none());
     }
 
     #[test]
