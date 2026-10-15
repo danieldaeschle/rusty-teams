@@ -35,12 +35,9 @@ pub fn record_items(
         return popup;
     }
     match model.record_menu_block() {
-        Some((block, feature)) => popup.item(blocked_item(
-            RECORD_LABEL,
-            Some(IconName::Video),
-            block,
-            feature,
-        )),
+        Some((block, feature)) => {
+            blocked_items(popup, RECORD_LABEL, Some(IconName::Video), block, feature)
+        }
         None => record_submenu(popup, window, cx, app, model),
     }
 }
@@ -65,7 +62,7 @@ fn record_submenu(
         move |mut menu, _, _| {
             for (action, label, blocked) in actions.clone() {
                 if let Some((block, feature)) = blocked {
-                    menu = menu.item(blocked_item(label, None, block, feature));
+                    menu = blocked_items(menu, label, None, block, feature);
                     continue;
                 }
                 let app = app.clone();
@@ -78,38 +75,41 @@ fn record_submenu(
     )
 }
 
-fn blocked_item(
+fn blocked_items(
+    mut popup: PopupMenu,
     label: &'static str,
     icon_name: Option<IconName>,
     block: RecordBlock,
     feature: RecordFeature,
-) -> PopupMenuItem {
+) -> PopupMenu {
     let reason = block.reason(feature);
-    let item = PopupMenuItem::element(move |_, _| {
-        v_flex()
+    let title = PopupMenuItem::element(move |_, _| {
+        h_flex()
             .w(px(BLOCKED_WIDTH))
-            .gap(px(2.))
-            .child(
-                h_flex()
-                    .items_center()
-                    .justify_between()
-                    .child(label)
-                    .when(block.locked(), |row| {
-                        row.child(icon(IconName::Lock, LOCK_SIZE, theme::text_muted()))
-                    }),
-            )
-            .child(
-                div()
-                    .text_size(px(REASON_SIZE))
-                    .text_color(theme::text_faint())
-                    .child(reason),
-            )
+            .items_center()
+            .justify_between()
+            .child(label)
+            .when(block.locked(), |row| {
+                row.child(icon(IconName::Lock, LOCK_SIZE, theme::text_muted()))
+            })
     })
     .disabled(true);
-    match icon_name {
-        Some(icon_name) => item.icon(icon_name),
-        None => item,
-    }
+    let detail = PopupMenuItem::element(move |_, _| {
+        div()
+            .w(px(BLOCKED_WIDTH))
+            .pb(px(4.))
+            .text_size(px(REASON_SIZE))
+            .text_color(theme::text_faint())
+            .child(reason)
+    })
+    .disabled(true);
+    popup = match icon_name {
+        Some(icon_name) => popup
+            .item(title.icon(icon_name))
+            .item(detail.icon(Icon::empty())),
+        None => popup.item(title).item(detail),
+    };
+    popup
 }
 
 pub fn transcript_and_settings_items(popup: PopupMenu, app: &Entity<AppState>) -> PopupMenu {
