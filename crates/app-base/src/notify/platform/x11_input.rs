@@ -28,7 +28,9 @@ pub fn make_input_transparent(window: &Window) {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
+    use std::sync::mpsc;
     use std::time::Duration;
 
     use x11rb::connection::Connection;
@@ -37,38 +39,45 @@ mod tests {
 
     use super::*;
 
+    const SERVER_START_TIMEOUT: Duration = Duration::from_secs(5);
+
     struct Server(Child);
 
     impl Drop for Server {
         fn drop(&mut self) {
-            let _ = self.0.kill();
+            // SIGKILL leaves /tmp/.X<n>-lock behind, and the next run then cannot claim that display.
+            let _ = Command::new("kill").arg(self.0.id().to_string()).status();
+            let _ = self.0.wait();
         }
     }
 
-    fn start_server(display: &str) -> Option<Server> {
-        let child = Command::new("Xvfb")
-            .args([display, "-screen", "0", "320x200x24", "-nolisten", "tcp", "-noreset"])
-            .stdout(Stdio::null())
+    fn start_server() -> Option<(Server, String)> {
+        let mut child = Command::new("Xvfb")
+            .args(["-displayfd", "1", "-screen", "0", "320x200x24", "-nolisten", "tcp", "-noreset"])
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .ok()?;
+        let stdout = child.stdout.take()?;
         let server = Server(child);
-        for _ in 0..50 {
-            if RustConnection::connect(Some(display)).is_ok() {
-                return Some(server);
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        None
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut number = String::new();
+            let _ = BufReader::new(stdout).read_line(&mut number);
+            let _ = sender.send(number);
+        });
+        let number = receiver.recv_timeout(SERVER_START_TIMEOUT).ok()?;
+        let display = format!(":{}", number.trim());
+        RustConnection::connect(Some(&display)).ok()?;
+        Some((server, display))
     }
 
     #[test]
     fn the_border_window_gets_an_empty_input_region() {
-        let display = ":87";
-        let Some(_server) = start_server(display) else {
+        let Some((_server, display)) = start_server() else {
             return;
         };
-        let (connection, screen_number) = RustConnection::connect(Some(display)).unwrap();
+        let (connection, screen_number) = RustConnection::connect(Some(&display)).unwrap();
         let root = connection.setup().roots[screen_number].root;
         let window = connection.generate_id().unwrap();
         connection
@@ -77,7 +86,7 @@ mod tests {
         connection.flush().unwrap();
         let before = connection.shape_get_rectangles(window, SK::INPUT).unwrap().reply().unwrap();
         assert_eq!(before.rectangles.len(), 1);
-        empty_input_region(Some(display), window).unwrap();
+        empty_input_region(Some(&display), window).unwrap();
         let after = connection.shape_get_rectangles(window, SK::INPUT).unwrap().reply().unwrap();
         assert!(after.rectangles.is_empty());
     }
