@@ -152,8 +152,8 @@ pub fn place(center_x: Pixels, top: Pixels, edges: (Pixels, Pixels), width: f32)
     let width = px(width);
     let (left_edge, right_edge) = edges;
     let left = (center_x - width / 2.)
-        .min(right_edge - width)
-        .max(left_edge);
+        .max(left_edge)
+        .min(right_edge - width);
     Placement {
         left,
         bottom: top - px(GAP),
@@ -371,6 +371,13 @@ mod tests {
         let near_right = place(px(899.), px(300.), (px(100.), px(900.)), 200.);
         assert_eq!(near_right.left, px(700.));
         assert_eq!(near_right.arrow_x, px(200. - ARROW_MARGIN));
+    }
+
+    #[test]
+    fn a_bar_wider_than_the_composer_ends_at_its_right_edge() {
+        let placement = place(px(560.), px(300.), (px(500.), px(800.)), 400.);
+        assert_eq!(placement.left, px(400.));
+        assert_eq!(placement.arrow_x, px(160.));
     }
 
     #[test]

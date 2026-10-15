@@ -137,7 +137,7 @@ pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
     card_texts, copy_text, files, images, linked_message_spans, mentions, message_quote,
-    message_spans, quotes, reaction_summaries, reactions, readable_text, translated_spans,
+    message_spans, quote_html, quotes, reaction_summaries, reactions, readable_text, translated_spans,
     user_mention_inputs,
 };
 pub use time_zone::local_time;

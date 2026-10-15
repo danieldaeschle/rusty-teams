@@ -137,24 +137,11 @@ pub fn existing_one_on_one<'chats>(
     })
 }
 
-pub fn group_label(chips: &[Pick], group_name: &str) -> String {
-    let name = group_name.trim();
-    if name.is_empty() {
-        chips
-            .iter()
-            .map(|chip| chip.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        name.to_owned()
-    }
-}
-
 pub fn composer_placeholder(chips: &[Pick], group_name: &str) -> String {
     match chips {
-        [] => DEFAULT_PLACEHOLDER.to_owned(),
         [chip] => format!("Message {}", chip.name),
-        _ => format!("Message {}", group_label(chips, group_name)),
+        [_, _, ..] if !group_name.trim().is_empty() => format!("Message {}", group_name.trim()),
+        _ => DEFAULT_PLACEHOLDER.to_owned(),
     }
 }
 
@@ -792,8 +779,8 @@ mod tests {
     use store::{ChatRecord, MemberRecord};
 
     use super::{
-        EnterAction, Pick, composer_placeholder, enter_action, existing_one_on_one, group_label,
-        search_results, suggested_people,
+        EnterAction, Pick, composer_placeholder, enter_action, existing_one_on_one, search_results,
+        suggested_people,
     };
     use crate::data::Person;
 
@@ -903,9 +890,8 @@ mod tests {
         let two = [pick("ann", "Ann", None), pick("bob", "Bob", None)];
         assert_eq!(composer_placeholder(&[], ""), "Type a message");
         assert_eq!(composer_placeholder(&one, "ignored"), "Message Ann");
-        assert_eq!(composer_placeholder(&two, " "), "Message Ann, Bob");
+        assert_eq!(composer_placeholder(&two, " "), "Type a message");
         assert_eq!(composer_placeholder(&two, " Crew "), "Message Crew");
-        assert_eq!(group_label(&two, ""), "Ann, Bob");
     }
 
     #[test]

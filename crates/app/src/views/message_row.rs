@@ -1,5 +1,5 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
@@ -310,7 +310,7 @@ struct BubbleExtras {
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
-    run.map(|run| div().pt(px(2.)).child(run_chip(&run, theme::row_hover())))
+    run.map(|run| div().py(px(2.)).child(run_chip(&run, theme::row_hover())))
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -355,11 +355,19 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
             own && row.delivery == Delivery::Delivered,
             |meta| match row.receipt {
                 Receipt::Hidden => meta,
-                Receipt::Pending => meta.child(receipt_slot(tint)),
-                Receipt::Sent => meta.child(symbol("done", META_CHECK_SIZE, tint)),
-                Receipt::Read => meta.child(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                Receipt::Pending => meta.child(receipt_slot(tint).relative().top(px(1.))),
+                Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
+                Receipt::Read => meta.child(on_baseline(symbol(
+                    "done_all",
+                    META_CHECK_SIZE,
+                    theme::own_read(),
+                ))),
             },
         )
+}
+
+fn on_baseline(check: Icon) -> Div {
+    div().relative().top(px(1.)).child(check)
 }
 
 fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> AnimationElement<E> {

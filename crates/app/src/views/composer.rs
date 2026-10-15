@@ -1473,7 +1473,12 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_placeholder(&format!("Message {name}"), window, cx);
+        let placeholder = if name.is_empty() {
+            "Type a message".to_owned()
+        } else {
+            format!("Message {name}")
+        };
+        self.set_placeholder(&placeholder, window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
             self.save_draft_now(cx);
             self.draft_save = None;
@@ -2486,6 +2491,7 @@ impl Render for Composer {
         let send = div()
             .id("composer-send")
             .size(px(32.))
+            .ml(px(6.))
             .flex_none()
             .flex()
             .items_center()
@@ -2619,6 +2625,12 @@ impl Render for Composer {
                 .child(notice.to_owned())
         });
         let composer_bounds = self.composer_bounds.clone();
+        let single_line = {
+            let state = self.input.read(cx);
+            state
+                .line_height()
+                .is_none_or(|line_height| state.input_bounds().size.height < line_height * 2.)
+        };
         let (inset, top, bottom) = if self.inline {
             (0., 0., 0.)
         } else {
@@ -2821,13 +2833,25 @@ impl Render for Composer {
                             .child(
                                 h_flex()
                                     .w_full()
-                                    .items_end()
-                                    .gap(px(6.))
+                                    .map(|row| {
+                                        if single_line {
+                                            row.items_center()
+                                        } else {
+                                            row.items_end()
+                                        }
+                                    })
                                     .py(px(6.))
                                     .pl(px(if can_attach { 6. } else { 12. }))
                                     .pr(px(6.))
-                                    .children(fun)
-                                    .children(attach)
+                                    .when(can_attach, |row| {
+                                        row.child(
+                                            h_flex()
+                                                .flex_none()
+                                                .gap(px(6.))
+                                                .children(fun)
+                                                .children(attach),
+                                        )
+                                    })
                                     .child(
                                         div()
                                             .flex_1()

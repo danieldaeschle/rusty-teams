@@ -173,12 +173,22 @@ fn chip_row(run: &AgentRun, fill: Hsla) -> Stateful<Div> {
                 })
                 .child(dismiss_button(run_id))
         }
-        RunState::Stopped => row
-            .child(icon(IconName::Square, STATUS_ICON, theme::text_faint()))
-            .child(label(action_label, theme::text_soft()))
-            .child(step_text("Stopped".to_owned()))
-            .child(elapsed_text(run))
-            .child(dismiss_button(run_id)),
+        RunState::Stopped => {
+            row.child(icon(IconName::Square, STATUS_ICON, theme::text_faint()))
+                .child(label(action_label, theme::text_soft()))
+                .child(step_text("Stopped".to_owned()))
+                .child(elapsed_text(run))
+                .when(!session_id.is_empty(), |row| {
+                    row.child(
+                        chip_button(format!("agent-open-{run_id}"), "Open session", false)
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                with_runs(cx, |runs, cx| runs.stop_and_open_session(run_id, cx));
+                            }),
+                    )
+                })
+                .child(dismiss_button(run_id))
+        }
     }
 }
 
@@ -206,27 +216,12 @@ fn step_row(elapsed: String, text: String, current: bool) -> Div {
 }
 
 fn stop_row(run_id: u64) -> Div {
-    h_flex()
-        .mt(px(2.))
-        .items_center()
-        .justify_between()
-        .child(
-            chip_button(
-                format!("agent-stop-open-{run_id}"),
-                "Stop and open session",
-                false,
-            )
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                with_runs(cx, |runs, cx| runs.stop_and_open_session(run_id, cx));
-            }),
-        )
-        .child(
-            chip_button(format!("agent-stop-{run_id}"), "Stop", false).on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                with_runs(cx, |runs, cx| runs.stop(run_id, cx));
-            }),
-        )
+    h_flex().mt(px(2.)).items_center().justify_end().child(
+        chip_button(format!("agent-stop-{run_id}"), "Stop", false).on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            with_runs(cx, |runs, cx| runs.stop(run_id, cx));
+        }),
+    )
 }
 
 fn detail_panel(run: &AgentRun, fill: Hsla) -> Div {

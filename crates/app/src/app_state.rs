@@ -168,6 +168,22 @@ pub fn chat_title(chat: &ChatRecord) -> String {
     chat.display_title()
 }
 
+pub fn composer_name(sidebar: &Sidebar, selection: &Selection) -> String {
+    let unnamed_group = match selection {
+        Selection::Chat(id) => sidebar.chats.iter().any(|chat| {
+            &chat.id == id
+                && chat.title.trim().is_empty()
+                && !chat.kind.eq_ignore_ascii_case("oneOnOne")
+        }),
+        Selection::Channel(_) => false,
+    };
+    if unnamed_group {
+        String::new()
+    } else {
+        selection_title(sidebar, selection)
+    }
+}
+
 pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
     match selection {
         Selection::Chat(id) => sidebar

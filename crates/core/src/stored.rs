@@ -632,7 +632,7 @@ fn with_inline_quotes(record: &MessageRecord) -> String {
     html
 }
 
-fn quote_html(quote: &QuoteInfo) -> String {
+pub fn quote_html(quote: &QuoteInfo) -> String {
     let sender = quote
         .sender_name
         .as_deref()

@@ -45,7 +45,7 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, StartRequest};
-use crate::app_state::{AppEvent, AppState, Selection, selection_title};
+use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_title};
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
@@ -670,10 +670,11 @@ impl ConversationView {
                 } else if let Some(current) = self.current.as_mut() {
                     let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
                     if current.title != title {
-                        current.title = title.clone();
+                        current.title = title;
                         let conversation_id = current.selection.conversation_id().to_owned();
+                        let name = composer_name(&self.app.read(cx).sidebar, &current.selection);
                         self.composer.update(cx, |composer, cx| {
-                            composer.set_conversation(&conversation_id, &title, window, cx)
+                            composer.set_conversation(&conversation_id, &name, window, cx)
                         });
                         cx.notify();
                     }
@@ -868,7 +869,7 @@ impl ConversationView {
             .map(|current| {
                 (
                     current.selection.conversation_id().to_owned(),
-                    current.title.clone(),
+                    composer_name(&self.app.read(cx).sidebar, &current.selection),
                 )
             })
             .unwrap_or_default();

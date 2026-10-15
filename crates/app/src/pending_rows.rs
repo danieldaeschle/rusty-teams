@@ -1,10 +1,25 @@
 use chrono::{DateTime, Local, Utc};
-use teams_core::FileCard;
+use teams_core::{FileCard, QuoteInfo};
 
-use crate::render::layout_blocks;
+use crate::render::{Block, layout_blocks};
 use crate::rows::{Delivery, LocalImage, MessageRow, Receipt, Series};
 use crate::views::attachment_tray::OutgoingImage;
 use crate::views::composer::Outgoing;
+
+fn pending_blocks(outgoing: &Outgoing) -> Vec<Block> {
+    let quote = outgoing.reply.as_ref().map(|reply| {
+        teams_core::quote_html(&QuoteInfo {
+            message_id: reply.message_id.clone(),
+            preview: reply.excerpt.clone(),
+            sender_name: Some(reply.author.clone()),
+        })
+    });
+    if quote.is_none() && outgoing.draft.is_blank() && outgoing.images.is_empty() {
+        return Vec::new();
+    }
+    let html = quote.unwrap_or_default() + &outgoing.html();
+    layout_blocks(&teams_core::html_to_spans(&html))
+}
 
 pub fn pending_row(
     key: String,
@@ -24,11 +39,7 @@ pub fn pending_row(
         series: Series::default(),
         time: created_at.with_timezone(&Local).format("%H:%M").to_string(),
         day_header: None,
-        blocks: if outgoing.draft.is_blank() && outgoing.images.is_empty() {
-            Vec::new()
-        } else {
-            layout_blocks(&teams_core::html_to_spans(&outgoing.html()))
-        },
+        blocks: pending_blocks(outgoing),
         edited: false,
         deleted: false,
         reactions: Vec::new(),
@@ -74,5 +85,41 @@ pub fn pending_row(
         forwarded: false,
         translation: None,
         call: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use teams_core::Draft;
+
+    use super::*;
+    use crate::views::composer::ReplyPreview;
+
+    #[test]
+    fn a_pending_reply_shows_its_quote_before_the_server_echo() {
+        let outgoing = Outgoing {
+            draft: Draft::plain("agreed"),
+            subject: None,
+            mentions: Vec::new(),
+            reply: Some(ReplyPreview {
+                message_id: "message-1".to_owned(),
+                author: "Grace".to_owned(),
+                excerpt: "earlier".to_owned(),
+            }),
+            edit: None,
+            images: Vec::new(),
+            files: Vec::new(),
+            link_preview: None,
+        };
+        let row = pending_row(
+            "key".to_owned(),
+            "chat".to_owned(),
+            None,
+            Utc::now(),
+            &outgoing,
+            Delivery::Sending,
+        );
+        assert!(matches!(row.blocks.first(), Some(Block::Reply(_))));
+        assert_eq!(row.blocks.len(), 2);
     }
 }
