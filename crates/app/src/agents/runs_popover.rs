@@ -6,8 +6,7 @@ use gpui_kit::*;
 
 use super::runs::{AgentRun, AgentRuns, RunState};
 use super::spinner::spinner;
-use crate::app_state::AppState;
-use crate::notify::selection_for;
+use crate::app_state::{AppState, selection_for};
 use crate::theme;
 use crate::views::widgets::icon;
 

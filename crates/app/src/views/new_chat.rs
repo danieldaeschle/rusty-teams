@@ -124,19 +124,6 @@ pub fn search_results(
         .collect()
 }
 
-pub fn existing_one_on_one<'chats>(
-    chats: &'chats [ChatRecord],
-    me: Option<&Person>,
-    user_id: &str,
-) -> Option<&'chats ChatRecord> {
-    chats.iter().find(|chat| {
-        data::is_one_on_one(chat)
-            && data::others(chat, me)
-                .iter()
-                .any(|(member_id, _)| member_id.as_deref() == Some(user_id))
-    })
-}
-
 pub fn composer_placeholder(chips: &[Pick], group_name: &str) -> String {
     match chips {
         [chip] => format!("Message {}", chip.name),
@@ -779,10 +766,9 @@ mod tests {
     use store::{ChatRecord, MemberRecord};
 
     use super::{
-        EnterAction, Pick, composer_placeholder, enter_action, existing_one_on_one, search_results,
-        suggested_people,
+        EnterAction, Pick, composer_placeholder, enter_action, search_results, suggested_people,
     };
-    use crate::data::Person;
+    use crate::data::{Person, existing_one_on_one};
 
     fn me() -> Person {
         Person {

@@ -3,8 +3,7 @@ use teams_core::{FileCard, QuoteInfo};
 
 use crate::render::{Block, layout_blocks};
 use crate::rows::{Delivery, LocalImage, MessageRow, Receipt, Series};
-use crate::views::attachment_tray::OutgoingImage;
-use crate::views::composer::Outgoing;
+use crate::outgoing::{Outgoing, OutgoingImage};
 
 fn pending_blocks(outgoing: &Outgoing) -> Vec<Block> {
     let quote = outgoing.reply.as_ref().map(|reply| {
@@ -93,7 +92,7 @@ mod tests {
     use teams_core::Draft;
 
     use super::*;
-    use crate::views::composer::ReplyPreview;
+    use crate::outgoing::ReplyPreview;
 
     #[test]
     fn a_pending_reply_shows_its_quote_before_the_server_echo() {

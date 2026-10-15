@@ -302,14 +302,14 @@ pub fn open_transfer_picker(app: &Entity<AppState>, window: &mut Window, cx: &mu
     let candidates = app.read(cx).transfer_candidates();
     let picker_app = app.clone();
     let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Transfer, window, cx));
-    app.update(cx, |state, cx| state.open_transfer_picker(picker, cx));
+    app.update(cx, |state, cx| state.open_transfer_picker(picker.into(), cx));
 }
 
 pub fn open_invite_picker(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
     let candidates = app.read(cx).invite_candidates();
     let picker_app = app.clone();
     let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Invite, window, cx));
-    app.update(cx, |state, cx| state.open_invite_picker(picker, cx));
+    app.update(cx, |state, cx| state.open_invite_picker(picker.into(), cx));
 }
 
 #[derive(Clone)]

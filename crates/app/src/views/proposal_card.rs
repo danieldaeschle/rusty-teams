@@ -8,8 +8,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{Draft, MentionInput, OBJECT_MARK};
 
+#[cfg(test)]
+use crate::agent_api::body::body_blocks;
 use crate::agent_api::{ProposalEntry, ProposalPicture, ProposalStatus, agent_label};
-use crate::render::{Block, layout_blocks, render_blocks};
+use crate::render::render_blocks;
 use crate::theme;
 use crate::views::attachment_tray::{Classification, OutgoingImage, classify, inline_image};
 use crate::views::composer::{Outgoing, ReplyPreview};
@@ -25,7 +27,6 @@ const BUTTON_RADIUS: f32 = 7.;
 const BODY_LINE_HEIGHT: f32 = 20.;
 const BODY_MAX_LINES: f32 = 4.;
 const QUOTE_BAR_WIDTH: f32 = 2.;
-const BODY_PREVIEW_CHARACTERS: usize = 1200;
 const THUMBNAIL_HEIGHT: f32 = 48.;
 const THUMBNAIL_MAX_WIDTH: f32 = 120.;
 const THUMBNAIL_MIN_WIDTH: f32 = 16.;
@@ -49,28 +50,6 @@ fn open_session_available(session_id: &str, cx: &App) -> bool {
 
 fn open_session(session_id: &str, _window: &mut Window, cx: &mut App) {
     crate::agents::open_session(session_id, cx);
-}
-
-fn body_preview(text: &str) -> String {
-    let text = text.trim();
-    let cut: String = text.chars().take(BODY_PREVIEW_CHARACTERS).collect();
-    if cut.len() == text.len() {
-        return cut;
-    }
-    match cut.rfind('\n') {
-        Some(newline) => cut[..newline].to_owned(),
-        None => cut,
-    }
-}
-
-pub fn body_blocks(text: &str, mentions: &[mcp::ProposalMention]) -> Vec<Block> {
-    let inputs: Vec<MentionInput> = mentions
-        .iter()
-        .map(|mention| MentionInput::user(&mention.user_id, &mention.name))
-        .collect();
-    let preview = body_preview(text);
-    let (html, _) = teams_core::apply_mentions(&Draft::from_markdown(&preview).to_html(), &inputs);
-    layout_blocks(&teams_core::html_to_spans(&html))
 }
 
 fn inline_flags(pictures: &[ProposalPicture]) -> Vec<bool> {
@@ -420,10 +399,9 @@ mod tests {
     use teams_core::MentionInput;
 
     use super::{
-        age_label, body_blocks, needs_upload, outgoing_for, picture_files, sample_entry,
+        age_label, needs_upload, outgoing_for, picture_files, sample_entry,
         sample_png, thumbnail_size,
     };
-    use crate::render::Block;
     use crate::views::attachment_tray::{AttachmentTray, INLINE_IMAGE_MAX_BYTES, OutgoingImage};
 
     const TWO_MEGABYTES: usize = 2 * 1024 * 1024;
@@ -438,56 +416,6 @@ mod tests {
         assert_eq!(label(120), "2 h ago");
         assert_eq!(label(3000), "2 d ago");
         assert_eq!(age_label(now + Duration::minutes(5), now), "just now");
-    }
-
-    #[test]
-    fn the_card_body_renders_markdown_like_a_sent_message() {
-        let blocks = body_blocks("- item\n- `code`", &[]);
-        let [Block::List { items, ordered, .. }] = blocks.as_slice() else {
-            panic!("{blocks:?}");
-        };
-        assert!(!ordered);
-        assert_eq!(items.len(), 2);
-        let Block::Paragraph(inline) = &items[1][0] else {
-            panic!("{items:?}");
-        };
-        assert_eq!(inline.text, "code");
-        assert!(inline.segments.iter().any(|segment| segment.style.code));
-    }
-
-    #[test]
-    fn long_bodies_are_cut_at_the_last_line_break() {
-        let text = format!("{}\n{}", "a".repeat(1000), "b".repeat(500));
-        assert_eq!(super::body_preview(&text), "a".repeat(1000));
-        assert_eq!(super::body_preview("short"), "short");
-    }
-
-    #[test]
-    fn long_bodies_are_cut_before_layout() {
-        let long = "word ".repeat(2000);
-        let blocks = body_blocks(&long, &[]);
-        let crate::render::Block::Paragraph(inline) = &blocks[0] else {
-            panic!("{blocks:?}");
-        };
-        assert!(inline.text.chars().count() <= super::BODY_PREVIEW_CHARACTERS);
-    }
-
-    #[test]
-    fn mentions_and_links_render_as_styled_segments() {
-        let blocks = body_blocks(
-            "**Hi** @Ada Example, see https://example.com/x",
-            &[mcp::ProposalMention {
-                user_id: "u1".to_owned(),
-                name: "Ada Example".to_owned(),
-            }],
-        );
-        let Block::Paragraph(inline) = &blocks[0] else {
-            panic!("{blocks:?}");
-        };
-        assert!(inline.segments.iter().any(|segment| segment.style.bold));
-        assert!(inline.segments.iter().any(|segment| segment.style.mention));
-        assert!(inline.segments.iter().any(|segment| segment.link.is_some()));
-        assert!(!inline.text.contains("**"));
     }
 
     #[test]

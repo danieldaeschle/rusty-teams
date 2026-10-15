@@ -114,7 +114,7 @@ impl AppState {
 
     pub fn open_invite_picker(
         &mut self,
-        picker: Entity<crate::views::transfer_picker::TransferPicker>,
+        picker: AnyView,
         cx: &mut Context<Self>,
     ) {
         if self.call.as_ref().is_some_and(|call| call.model.can_invite()) {

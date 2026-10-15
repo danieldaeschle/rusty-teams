@@ -2,8 +2,7 @@ use agents::{AgentAction, MessageContext, ThreadMessage, build_prompt};
 use chrono::Local;
 use store::MessageRecord;
 
-use crate::app_state::{AppState, Selection, selection_title};
-use crate::notify::selection_for;
+use crate::app_state::{AppState, Selection, selection_for, selection_title};
 use crate::people::local_names;
 use crate::rows::message_text;
 

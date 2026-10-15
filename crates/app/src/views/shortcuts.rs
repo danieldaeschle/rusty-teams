@@ -1,11 +1,10 @@
 use gpui_kit::*;
 
-use super::composer::{
-    EditLink, KEY_CONTEXT as COMPOSER_CONTEXT, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic,
-    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+use super::actions::{
+    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, NewChat, OpenSwitcher, ReplyToHovered,
+    ScheduleSend, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike, ToggleSubscript,
+    ToggleSuperscript, ToggleUnderline, ToggleCallMute,
 };
-use super::conversation::ReplyToHovered;
-use super::shell::{NewChat, OpenSwitcher, ToggleCallMute};
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";

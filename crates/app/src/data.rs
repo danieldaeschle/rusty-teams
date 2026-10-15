@@ -442,6 +442,19 @@ pub fn others(chat: &ChatRecord, me: Option<&Person>) -> Vec<(Option<String>, St
         .collect()
 }
 
+pub fn existing_one_on_one<'chats>(
+    chats: &'chats [ChatRecord],
+    me: Option<&Person>,
+    user_id: &str,
+) -> Option<&'chats ChatRecord> {
+    chats.iter().find(|chat| {
+        is_one_on_one(chat)
+            && others(chat, me)
+                .iter()
+                .any(|(member_id, _)| member_id.as_deref() == Some(user_id))
+    })
+}
+
 pub fn face_members(chat: &ChatRecord, me: Option<&Person>) -> Vec<(Option<String>, String)> {
     others(chat, me)
         .into_iter()

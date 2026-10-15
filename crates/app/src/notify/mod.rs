@@ -13,7 +13,7 @@ mod text;
 mod toast;
 
 pub use app_base::notify::{badge, platform, ring_tone};
-pub use center::{NotificationCenter, selection_for};
+pub use center::NotificationCenter;
 pub use incoming::{IncomingTracker, preview_of};
 #[cfg(windows)]
 pub use platform::native_handle;

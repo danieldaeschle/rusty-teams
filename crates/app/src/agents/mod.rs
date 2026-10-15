@@ -22,10 +22,12 @@ use directories::ProjectDirs;
 use gpui_kit::*;
 
 pub use run_chip::run_chip;
-pub use runs::{AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions};
+pub use runs::{
+    AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions, StartRequest, needs_dialog,
+};
 pub use runs_popover::RunsPopover;
 pub use settings_section::AgentsSettings;
-pub use start_dialog::{StartDialog, StartDialogEvent, StartRequest};
+pub use start_dialog::{StartDialog, StartDialogEvent};
 
 use crate::app_state::{AppHandle, AppState};
 
@@ -136,7 +138,7 @@ pub fn delegate(request: StartRequest, cx: &mut App) {
         return;
     };
     let allowed = mcp_bridge::chat_allowed(&request.conversation_id, cx);
-    if start_dialog::needs_dialog(&action, allowed) {
+    if needs_dialog(&action, allowed) {
         runs.update(cx, |_, cx| cx.emit(AgentRunsEvent::StartRequested(request)));
     } else {
         start_run(

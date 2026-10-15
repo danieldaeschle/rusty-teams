@@ -9,11 +9,11 @@ use super::call_mini_window::{
     speaker_speaking, tinted_chip,
 };
 use super::call_view::status_line;
-use super::message_row::ROW_PADDING;
 use super::toolbar_placement::TimelineBounds;
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::theme;
+use app_ui_kit::layout::ROW_PADDING;
 
 const MINI_WIDTH: f32 = 256.;
 const MINI_HEIGHT: f32 = 144.;

@@ -27,6 +27,7 @@ mod message_actions;
 mod notice;
 mod notify;
 mod outbox;
+mod outgoing;
 mod own_status;
 mod pending_rows;
 mod people;
@@ -48,7 +49,7 @@ pub use app_ui_kit::render;
 pub use app_base::{
     APP_NAME, assets, avatar_image, channel_files, crash_log, demo_cards, demo_chart_cards, demo_gifs,
     demo_input_cards, demo_library, demo_recap, diagnostics, downloads, format, frame_log, fuzzy,
-    image_view_math, presence_link, read_state, recap, remote_image, runtime, schedule_time,
+    image_view_math, inline_image, presence_link, read_state, recap, remote_image, runtime, schedule_time,
     single_instance, stickers, theme, translation, updater, user_activity,
 };
 

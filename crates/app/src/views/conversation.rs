@@ -37,7 +37,7 @@ use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
-use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
+use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder};
 use super::post_card::render_post;
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
@@ -49,7 +49,7 @@ use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_t
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
-use crate::data::{is_one_on_one, others};
+use crate::data::{existing_one_on_one, is_one_on_one, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
@@ -97,8 +97,6 @@ const TYPING_LINE_HEIGHT: f32 = 22.;
 const TYPING_DOT_SIZE: f32 = 5.;
 const TYPING_DOT_COUNT: usize = 3;
 const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
-
-actions!(teams, [ReplyToHovered]);
 
 #[derive(Clone, Copy)]
 enum HoverSlot {

@@ -4,11 +4,11 @@ use calling::CallCommand;
 use gpui_kit::*;
 
 use super::caption_style::{CaptionPosition, CaptionSize};
+use super::{measured_stage, video_wants};
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
 use crate::app_state::{AppEvent, AppState};
-use crate::views::call_layouts::{measured_stage, video_wants};
 
 const CHROME_TOUCH_THROTTLE: Duration = Duration::from_millis(250);
 const DEMO_BUBBLE_START: Duration = Duration::from_secs(8);

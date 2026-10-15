@@ -7,7 +7,8 @@ use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::call_mini::CallMiniView;
 use super::call_stage::{render_call_overlay, render_stage_overlay};
 use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
-use super::conversation::{ConversationView, ReplyToHovered};
+use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
+use super::conversation::ConversationView;
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
@@ -34,16 +35,14 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
-use crate::app_state::{AppEvent, AppState, Selection};
+use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 use crate::call::{CallMedia, CallWindows, ZoomStep};
 use crate::notice::NoticeAction;
-use crate::notify::{NotificationCenter, selection_for};
+use crate::notify::NotificationCenter;
 use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 use crate::user_activity::{self, UserInput};
-
-actions!(teams, [OpenSwitcher, NewChat, ToggleCallMute]);
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
@@ -770,7 +769,7 @@ impl Render for AppShell {
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         self.sync_prejoin(window, cx);
-        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
+        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);

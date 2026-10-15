@@ -7,12 +7,13 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use serde::{Deserialize, Serialize};
 use teams_core::{FileKind, FileReference, UploadedFile};
 
 use super::attachments::file_badge;
 use super::widgets::icon;
 use crate::format;
+use crate::inline_image::{InlineFormat, image_dimensions, sniff_inline_format};
+pub use crate::outgoing::{InlineImage, OutgoingFile, OutgoingImage};
 use crate::remote_image::{RemoteImage, image_source};
 use crate::theme;
 
@@ -34,58 +35,6 @@ const TRAY_GAP: f32 = 8.;
 const PROGRESS_HEIGHT: f32 = 2.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InlineFormat {
-    Png,
-    Jpeg,
-    Gif,
-    Webp,
-}
-
-impl InlineFormat {
-    fn image_format(self) -> ImageFormat {
-        match self {
-            InlineFormat::Png => ImageFormat::Png,
-            InlineFormat::Jpeg => ImageFormat::Jpeg,
-            InlineFormat::Gif => ImageFormat::Gif,
-            InlineFormat::Webp => ImageFormat::Webp,
-        }
-    }
-
-    fn decoder_format(self) -> Option<image::ImageFormat> {
-        match self {
-            InlineFormat::Png => Some(image::ImageFormat::Png),
-            InlineFormat::Jpeg => Some(image::ImageFormat::Jpeg),
-            InlineFormat::Webp => Some(image::ImageFormat::WebP),
-            InlineFormat::Gif => None,
-        }
-    }
-}
-
-pub fn sniff_inline_format(bytes: &[u8]) -> Option<InlineFormat> {
-    match bytes {
-        [0x89, b'P', b'N', b'G', ..] => Some(InlineFormat::Png),
-        [0xFF, 0xD8, 0xFF, ..] => Some(InlineFormat::Jpeg),
-        [b'G', b'I', b'F', b'8', ..] => Some(InlineFormat::Gif),
-        [
-            b'R',
-            b'I',
-            b'F',
-            b'F',
-            _,
-            _,
-            _,
-            _,
-            b'W',
-            b'E',
-            b'B',
-            b'P',
-            ..,
-        ] => Some(InlineFormat::Webp),
-        _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
     Inline(InlineFormat),
     File { sent_as_file: bool },
@@ -105,25 +54,6 @@ pub fn classify(name: &str, bytes: &[u8], inline_used: u64) -> Classification {
             sent_as_file: FileKind::from_name(name) == FileKind::Image,
         },
     }
-}
-
-fn image_dimensions(format: InlineFormat, bytes: &[u8]) -> Option<(u32, u32)> {
-    match format.decoder_format() {
-        Some(decoder) => image::ImageReader::with_format(Cursor::new(bytes), decoder)
-            .into_dimensions()
-            .ok(),
-        None => {
-            let header = bytes.get(6..10)?;
-            Some((
-                u32::from(u16::from_le_bytes([header[0], header[1]])),
-                u32::from(u16::from_le_bytes([header[2], header[3]])),
-            ))
-        }
-    }
-}
-
-pub fn dimensions_of(bytes: &[u8]) -> Option<(u32, u32)> {
-    image_dimensions(sniff_inline_format(bytes)?, bytes)
 }
 
 pub fn inline_image(name: String, bytes: Vec<u8>) -> Option<InlineImage> {
@@ -240,29 +170,6 @@ impl PreviewImage {
 }
 
 pub type RemoveImage = Rc<dyn Fn(&mut Window, &mut App)>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InlineImage {
-    pub name: String,
-    pub image: Arc<Image>,
-    pub dimensions: Option<(u32, u32)>,
-}
-
-/// One object in the text: uploaded bytes or a GIF or sticker the message links to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OutgoingImage {
-    Inline(InlineImage),
-    Remote(RemoteImage),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OutgoingFile {
-    pub name: String,
-    pub size: u64,
-    pub kind: FileKind,
-    pub reference: FileReference,
-    pub uploaded: Option<UploadedFile>,
-}
 
 #[derive(Debug, Clone)]
 pub enum JobKind {

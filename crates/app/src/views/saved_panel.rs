@@ -6,9 +6,8 @@ use teams_core::SavedMessage;
 
 use super::avatar::person_avatar;
 use super::widgets::icon;
-use crate::app_state::{AppState, selection_title};
+use crate::app_state::{AppState, selection_for, selection_title};
 use crate::format;
-use crate::notify::selection_for;
 use crate::theme;
 
 const AVATAR_SIZE: f32 = 32.;

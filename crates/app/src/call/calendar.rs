@@ -5,8 +5,7 @@ use chrono::{DateTime, Local, Offset, Utc};
 use gpui_kit::Context;
 
 use super::agenda::{AgendaRow, demo_events};
-use crate::app_state::{AppEvent, AppState, Selection};
-use crate::notify::selection_for;
+use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 
 const NO_MEETING_CHAT_NOTICE: &str = "This meeting chat is not available";
 static DEMO_ANCHOR: OnceLock<DateTime<Utc>> = OnceLock::new();

@@ -20,7 +20,7 @@ mod view_actions;
 use app_call_model::{
     agenda, background, bubbles, caption_style, demo, fullscreen, health, media, mic,
     model, options_dialog, people, preview, record_rights,
-    recording_menu, report, ring, share_view, stage_layout, transcript, view_settings,
+    recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
 };
 
 pub use actions::{load_camera, load_camera_effects, load_input, load_output, load_share_sound};
@@ -57,7 +57,11 @@ pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAU
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use reminder::{MeetingToasts, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};
-pub use stage_layout::{FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, contain_size, filmstrip, focus_stage_size, gallery_grid, share_strip, split_overflow};
+pub use stage_split::{
+    GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_split,
+    measured_stage, speaker_split, strip_split, video_wants,
+};
+pub use stage_layout::{contain_size, focus_stage_size, gallery_grid};
 pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use record_rights::{RecordBlock, RecordFeature};
 pub use recording_menu::{RecordAction, RecordingChip, record_actions, recording_chip};

@@ -24,9 +24,8 @@ use super::report::{
 };
 use super::ring::{MissedCall, RingOutcome};
 use super::target::{is_organizer, plan_for_chat};
-use crate::app_state::{AppEvent, AppState, Selection, chat_title};
+use crate::app_state::{AppEvent, AppState, Selection, chat_title, selection_for};
 use crate::notice::NoticeAction;
-use crate::notify::selection_for;
 
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
 const SHARE_SOURCES_EVERY_TICKS: u32 = 10;

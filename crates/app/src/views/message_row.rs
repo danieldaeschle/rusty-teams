@@ -9,13 +9,13 @@ use super::attachments::{FileActions, ImageOpen, attachments_view, message_body}
 use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, call_card_row};
 use super::link_preview::{link_preview_card, meeting_join_chip};
-use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
+use super::message_actions::{MessageMenu, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::reaction_proposal_pill::{ReactionPill, reaction_pill};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
-use super::toolbar_placement::{TimelineBounds, placed_toolbar};
+use super::toolbar_placement::{HoverChange, TimelineBounds, placed_toolbar};
 use super::translation_line::{TranslationActions, translation_line};
 use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, run_chip};
@@ -25,6 +25,7 @@ use crate::render::Block;
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
+use app_ui_kit::layout::ROW_PADDING;
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 
@@ -48,7 +49,6 @@ const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const NARROW_BUBBLE_WIDTH: f32 = 300.;
-pub(super) const ROW_PADDING: f32 = 20.;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;

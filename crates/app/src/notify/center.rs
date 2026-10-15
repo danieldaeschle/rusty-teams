@@ -23,7 +23,7 @@ use super::stack::{
 use super::text::describe;
 use super::toast::{PillView, ToastView};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
-use crate::app_state::{AppEvent, AppState, Selection};
+use crate::app_state::{AppEvent, AppState, selection_for};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
@@ -1173,18 +1173,6 @@ fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
     }
 }
 
-pub fn selection_for(sidebar: &Sidebar, conversation_id: &str) -> Option<Selection> {
-    if sidebar.chats.iter().any(|chat| chat.id == conversation_id) {
-        return Some(Selection::Chat(conversation_id.to_owned()));
-    }
-    sidebar
-        .teams
-        .iter()
-        .flat_map(|team| team.channels.iter())
-        .any(|channel| channel.id == conversation_id)
-        .then(|| Selection::Channel(conversation_id.to_owned()))
-}
-
 pub fn unread_summary(
     sidebar: &Sidebar,
     unread_mentions: &HashSet<String>,
@@ -1284,8 +1272,7 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use super::{preview_lines, selection_for, unread_summary};
-    use crate::app_state::Selection;
+    use super::{preview_lines, unread_summary};
     use store::Sidebar;
 
     fn sidebar() -> Sidebar {
@@ -1338,19 +1325,6 @@ mod tests {
         assert!(ids.contains("a"));
         let (count, _) = unread_summary(&quiet, &HashSet::from(["a".to_owned()]));
         assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn selection_kind_follows_sidebar() {
-        assert_eq!(
-            selection_for(&sidebar(), "a"),
-            Some(Selection::Chat("a".into()))
-        );
-        assert_eq!(
-            selection_for(&sidebar(), "ch"),
-            Some(Selection::Channel("ch".into()))
-        );
-        assert_eq!(selection_for(&sidebar(), "x"), None);
     }
 
     #[gpui_kit::test]

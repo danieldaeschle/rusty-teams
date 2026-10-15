@@ -8,8 +8,7 @@ use teams_core::{
 use super::actions::{MEETING_UNAVAILABLE_NOTICE, NOT_CONNECTED_NOTICE};
 use super::launcher::NOT_READY;
 use super::prejoin::{DemoMeeting, MeetingJoin};
-use crate::app_state::{AppState, selection_title};
-use crate::notify::selection_for;
+use crate::app_state::{AppState, selection_for, selection_title};
 use crate::runtime;
 
 const NO_LINK_NOTICE: &str = "No Teams meeting link in the clipboard";

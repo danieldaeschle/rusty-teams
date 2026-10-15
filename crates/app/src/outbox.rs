@@ -11,7 +11,7 @@ use crate::backend::Engine;
 use crate::notice::short_error;
 use crate::runtime;
 use crate::stored_outgoing::{decode, encode};
-use crate::views::composer::Outgoing;
+use crate::outgoing::Outgoing;
 
 const RETRY_BACKOFF: [Duration; 3] = [
     Duration::from_secs(2),

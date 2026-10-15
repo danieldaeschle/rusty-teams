@@ -11,7 +11,6 @@ use super::recording_menu::RecordAction;
 use super::target::plan_for_chat;
 use crate::app_state::{AppEvent, AppState};
 use crate::data::is_one_on_one;
-use crate::views::call_transcript::TranscriptPanel;
 
 const DEMO_ROOM_GUESTS: usize = 3;
 
@@ -60,7 +59,7 @@ impl AppState {
 
     pub fn open_call_transcript(
         &mut self,
-        panel: Entity<TranscriptPanel>,
+        panel: AnyView,
         cx: &mut Context<Self>,
     ) {
         self.transcript_panel = Some(panel);
@@ -215,7 +214,7 @@ impl AppState {
 
     pub fn open_transfer_picker(
         &mut self,
-        picker: Entity<crate::views::transfer_picker::TransferPicker>,
+        picker: AnyView,
         cx: &mut Context<Self>,
     ) {
         if self.can_transfer_call() {

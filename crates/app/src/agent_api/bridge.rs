@@ -11,6 +11,7 @@ use store::{MessageRecord, Store};
 use teams_core::CoreEvent;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::body::body_blocks;
 use super::extras::message_extras;
 use super::image_scale::downscale;
 use super::source::AppSource;
@@ -18,7 +19,6 @@ use super::{AgentApi, ProposalEntry, ProposalPicture, ProposalStatus, Thumbnail}
 use crate::backend::Engine;
 use crate::rows::reaction_glyph;
 use crate::runtime;
-use crate::views::proposal_card::body_blocks;
 
 const PREVIEW_CHARACTERS: usize = 200;
 const NEW_MESSAGE_BATCH: usize = 50;

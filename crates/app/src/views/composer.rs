@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
@@ -23,18 +22,21 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use serde::{Deserialize, Serialize};
 use teams_core::{
-    Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, LinkPreview,
-    MarkKind, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
+    Draft, DraftLine, Edit, FileReference, FormatState, LineKind, LinkPreview, MarkKind,
+    MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
 mod drafts;
 mod schedule;
 
+use super::actions::{
+    COMPOSER_KEY_CONTEXT, EditLink, OpenSwitcher, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic,
+    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+};
 use super::attachment_tray::{
-    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, OutgoingFile, OutgoingImage,
+    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS,
     PasteAction, UploadJob, UploadResult, discard_uploaded, inline_preview, names_of, paste_action,
     pasted_image_name, prepare_pasted_image, read_attachment, render_tray,
 };
@@ -47,6 +49,7 @@ use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_jo
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
+pub use crate::outgoing::{EditPreview, Outgoing, ReplyPreview};
 use crate::remote_image::RemoteImage;
 use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
@@ -70,109 +73,10 @@ const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
 const HISTORY_LIMIT: usize = 200;
 const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
-pub(super) const KEY_CONTEXT: &str = "Composer";
 const IMAGE_TOKEN_PREFIX: &str = "image-";
-
-actions!(
-    composer,
-    [
-        ToggleBold,
-        ToggleItalic,
-        ToggleUnderline,
-        ToggleStrike,
-        ToggleSuperscript,
-        ToggleSubscript,
-        ToggleCode,
-        EditLink,
-        ScheduleSend
-    ]
-);
 
 pub fn bind_keys(cx: &mut App) {
     super::shortcuts::bind_scopes(cx, &[super::shortcuts::Scope::Composer]);
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplyPreview {
-    pub message_id: String,
-    pub author: String,
-    pub excerpt: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditPreview {
-    pub message_id: String,
-    pub excerpt: String,
-    pub scheduled: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Outgoing {
-    pub draft: Draft,
-    pub subject: Option<String>,
-    pub mentions: Vec<MentionInput>,
-    pub reply: Option<ReplyPreview>,
-    pub edit: Option<EditPreview>,
-    pub images: Vec<OutgoingImage>,
-    pub files: Vec<OutgoingFile>,
-    pub link_preview: Option<LinkPreview>,
-}
-
-impl Outgoing {
-    /// Without list and quote markers, for previews.
-    pub fn text(&self) -> String {
-        self.draft.plain_text()
-    }
-
-    /// The body before mentions become `<at>` tags.
-    pub fn html(&self) -> String {
-        let mut html = String::new();
-        let mut objects = self.images.iter();
-        let mut uploaded = 0;
-        for character in self.draft.to_html().chars() {
-            if character != OBJECT_MARK {
-                html.push(character);
-                continue;
-            }
-            match objects.next() {
-                Some(OutgoingImage::Inline(_)) => {
-                    uploaded += 1;
-                    html.push_str(&format!(
-                        "<img src=\"../hostedContents/{uploaded}/$value\">"
-                    ));
-                }
-                Some(OutgoingImage::Remote(remote)) => html.push_str(&remote.html()),
-                None => {}
-            }
-        }
-        html
-    }
-
-    pub fn has_attachments(&self) -> bool {
-        !self.images.is_empty() || !self.files.is_empty()
-    }
-
-    pub fn extras(&self) -> MessageExtras {
-        MessageExtras {
-            kept: Vec::new(),
-            images: self
-                .images
-                .iter()
-                .filter_map(|outgoing| match outgoing {
-                    OutgoingImage::Inline(inline) => Some(HostedImage {
-                        content_type: inline.image.format.mime_type().to_owned(),
-                        bytes: Arc::new(inline.image.bytes.clone()),
-                    }),
-                    OutgoingImage::Remote(_) => None,
-                })
-                .collect(),
-            files: self
-                .files
-                .iter()
-                .map(|file| file.reference.clone())
-                .collect(),
-        }
-    }
 }
 
 enum UploadEvent {
@@ -1027,7 +931,7 @@ impl Composer {
             return;
         }
         if self.draft.is_blank() && self.selection(cx).is_empty() {
-            window.dispatch_action(Box::new(super::shell::OpenSwitcher), cx);
+            window.dispatch_action(Box::new(OpenSwitcher), cx);
             return;
         }
         self.open_link_editor(window, cx);
@@ -2642,7 +2546,7 @@ impl Render for Composer {
             .px(px(inset))
             .pt(px(top))
             .pb(px(bottom))
-            .key_context(KEY_CONTEXT)
+            .key_context(COMPOSER_KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &ToggleBold, _, cx| {
                 if this.link_editor.is_none() {
                     this.toggle_mark(MarkKind::Bold, cx);
@@ -2964,7 +2868,7 @@ mod tests {
         use teams_core::FileKind;
 
         use super::super::attachment_tray::InlineImage;
-        use super::{Outgoing, OutgoingFile, OutgoingImage};
+        use crate::outgoing::{Outgoing, OutgoingFile, OutgoingImage};
 
         let outgoing = Outgoing {
             draft: teams_core::Draft::default(),
@@ -2997,20 +2901,20 @@ mod tests {
         assert!(outgoing.has_attachments());
     }
 
-    fn placed_image(width: u32) -> super::OutgoingImage {
+    fn placed_image(width: u32) -> crate::outgoing::OutgoingImage {
         use std::sync::Arc;
 
         use gpui_kit::{Image, ImageFormat};
 
-        super::OutgoingImage::Inline(super::super::attachment_tray::InlineImage {
+        crate::outgoing::OutgoingImage::Inline(super::super::attachment_tray::InlineImage {
             name: "pasted-image.png".into(),
             image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![width as u8])),
             dimensions: Some((width, width)),
         })
     }
 
-    fn remote_gif(title: &str) -> super::OutgoingImage {
-        super::OutgoingImage::Remote(super::RemoteImage {
+    fn remote_gif(title: &str) -> crate::outgoing::OutgoingImage {
+        crate::outgoing::OutgoingImage::Remote(super::RemoteImage {
             kind: crate::remote_image::RemoteKind::Gif,
             url: "https://media0.giphy.com/media/a/giphy.gif".into(),
             title: title.into(),
@@ -3019,8 +2923,8 @@ mod tests {
         })
     }
 
-    fn outgoing_with(text: &str, images: Vec<super::OutgoingImage>) -> super::Outgoing {
-        super::Outgoing {
+    fn outgoing_with(text: &str, images: Vec<crate::outgoing::OutgoingImage>) -> crate::outgoing::Outgoing {
+        crate::outgoing::Outgoing {
             draft: teams_core::Draft::plain(text),
             subject: None,
             mentions: Vec::new(),
@@ -3077,7 +2981,7 @@ mod tests {
     #[test]
     fn a_sticker_carries_the_sticker_itemtype() {
         let sticker = super::RemoteImage::sticker(crate::stickers::popular()[0]);
-        let outgoing = outgoing_with("\u{FFFC}", vec![super::OutgoingImage::Remote(sticker)]);
+        let outgoing = outgoing_with("\u{FFFC}", vec![crate::outgoing::OutgoingImage::Remote(sticker)]);
         assert!(
             outgoing
                 .html()
@@ -3176,7 +3080,7 @@ mod tests {
                 self.cx.update(|cx| composer.read(cx).draft.clone())
             }
 
-            fn outgoing(&mut self) -> super::super::Outgoing {
+            fn outgoing(&mut self) -> crate::outgoing::Outgoing {
                 let composer = self.composer.clone();
                 self.cx
                     .update(|cx| composer.read(cx).outgoing(cx))
@@ -3355,8 +3259,8 @@ mod tests {
                 .images
                 .iter()
                 .map(|image| match image {
-                    super::super::OutgoingImage::Inline(inline) => inline.dimensions,
-                    super::super::OutgoingImage::Remote(_) => None,
+                    crate::outgoing::OutgoingImage::Inline(inline) => inline.dimensions,
+                    crate::outgoing::OutgoingImage::Remote(_) => None,
                 })
                 .collect();
             assert_eq!(dimensions, [Some((4, 4)), Some((2, 2))]);

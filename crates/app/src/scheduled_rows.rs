@@ -5,7 +5,7 @@ use crate::pending_rows::pending_row;
 use crate::rows::{Delivery, MessageRow, ScheduledState};
 use crate::schedule_time::describe;
 use crate::scheduled::{conversation_of, thread_root_of};
-use crate::views::composer::Outgoing;
+use crate::outgoing::Outgoing;
 
 pub const SCHEDULED_KEY_PREFIX: &str = "scheduled-";
 

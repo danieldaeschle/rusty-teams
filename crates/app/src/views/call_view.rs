@@ -24,7 +24,8 @@ use super::call_extras::{
     room_chip, whiteboard_stage,
 };
 use super::call_health::{health_banner, health_indicator};
-use super::call_layouts::{measured_stage, stage_region};
+use super::call_layouts::stage_region;
+use crate::call::measured_stage;
 use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
     more_button, pin_chip, spotlight_chip, with_tile_menu,
@@ -32,7 +33,6 @@ use super::call_organizer::{
 use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, people_panel};
 use super::call_stage::{StageMode, popped_placeholder, render_stage};
 use super::call_view_menu::view_button;
-use super::conversation::ConversationView;
 use app_ui_kit::layout::ISLAND_GAP;
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
@@ -52,9 +52,6 @@ const PULSE_PERIOD: Duration = Duration::from_millis(1400);
 const BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const BLINK_DIMMED_OPACITY: f32 = 0.45;
 pub(super) const DISABLED_OPACITY: f32 = 0.4;
-pub(super) const TILE_GAP: f32 = 20.;
-pub(super) const GRID_PADDING: f32 = 24.;
-pub(super) const STRIP_GAP: f32 = 12.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
 pub const CHAT_PANEL_TAG: &str = "shell/islands/main/call-chat-panel";
@@ -1133,7 +1130,7 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
 pub fn render_call_view(
     app: &Entity<AppState>,
     state: &AppState,
-    chat: Option<Entity<ConversationView>>,
+    chat: Option<AnyView>,
     fullscreen: bool,
     island_width: f32,
 ) -> Option<AnyElement> {
@@ -1339,7 +1336,7 @@ fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> 
         .child(content)
 }
 
-fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElement {
+fn chat_panel(app: &Entity<AppState>, chat: AnyView) -> AnyElement {
     let app = app.clone();
     side_panel(
         "call-chat-panel",

@@ -5,11 +5,10 @@ use gpui_kit::*;
 use store::MessageRecord;
 use teams_core::{PinnedMessage, SavedMessage};
 
-use crate::app_state::{AppEvent, AppState, Selection};
+use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 use crate::format;
 use crate::image_view_gallery::ViewerRequest;
 use crate::notice::short_error;
-use crate::notify::selection_for;
 use crate::rows::{message_text, reply_excerpt};
 use crate::runtime;
 

@@ -3,8 +3,8 @@ use gpui_kit::base::GlobalState;
 use gpui_kit::component::h_flex;
 use gpui_kit::*;
 
-use super::message_actions::{Action, HoverChange, bar_button};
-use super::toolbar_placement::{TOOLBAR_HEIGHT, toolbar_slot};
+use super::message_actions::{Action, bar_button};
+use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
 use crate::theme;
 

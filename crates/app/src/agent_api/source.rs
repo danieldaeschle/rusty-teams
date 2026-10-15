@@ -52,7 +52,7 @@ impl TeamsSource for AppSource {
     }
 
     fn image_dimensions(&self, bytes: &[u8]) -> Option<(u32, u32)> {
-        crate::views::attachment_tray::dimensions_of(bytes)
+        crate::inline_image::dimensions_of(bytes)
     }
 
     fn rendered_text(&self, markdown: &str) -> String {

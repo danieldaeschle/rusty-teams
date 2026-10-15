@@ -6,10 +6,10 @@ use gpui_kit::*;
 use teams_core::PersonProfile;
 
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::data::existing_one_on_one;
 use crate::demo_profiles;
 use crate::notice::short_error;
 use crate::profile_model::is_stale;
-use crate::views::new_chat::existing_one_on_one;
 
 #[derive(Default)]
 pub struct ProfileEntry {

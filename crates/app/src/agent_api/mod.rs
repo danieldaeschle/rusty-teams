@@ -1,4 +1,5 @@
 mod bridge;
+pub mod body;
 mod source;
 
 use std::collections::{BTreeSet, HashMap};

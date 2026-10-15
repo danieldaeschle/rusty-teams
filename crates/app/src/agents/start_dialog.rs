@@ -11,7 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::runs::{SessionTarget, StartOptions};
+use super::runs::{SessionTarget, StartOptions, StartRequest};
 use super::session_options::{
     SessionOption, default_wsl_distro, external_options, load_external, mark_live_runs, run_options,
 };
@@ -38,13 +38,6 @@ const PROMPT_SIZE: f32 = 12.;
 const DISABLED_OPACITY: f32 = 0.5;
 const DEFAULT_PLACEHOLDER: &str = "e.g. only the backend, open a PR when done";
 const SESSION_PLACEHOLDER: &str = "Type the message to send";
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StartRequest {
-    pub action_id: String,
-    pub conversation_id: String,
-    pub message_id: String,
-}
 
 pub enum StartDialogEvent {
     Close,
@@ -73,10 +66,6 @@ pub struct StartDialog {
 }
 
 impl EventEmitter<StartDialogEvent> for StartDialog {}
-
-pub fn needs_dialog(action: &AgentAction, chat_allowed: bool) -> bool {
-    action.ask_extra_instructions || !chat_allowed
-}
 
 impl StartDialog {
     pub fn new(
@@ -703,21 +692,5 @@ impl Render for StartDialog {
                     .when(self.show_prompt, |card| card.child(self.prompt_box(cx)))
                     .child(self.buttons(cx)),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use agents::AgentAction;
-
-    use super::needs_dialog;
-
-    #[test]
-    fn the_dialog_shows_for_extra_instructions_or_a_chat_agents_cannot_see() {
-        let quiet = AgentAction::answer_this("claude");
-        let asking = AgentAction::build_this("claude");
-        assert!(!needs_dialog(&quiet, true));
-        assert!(needs_dialog(&quiet, false));
-        assert!(needs_dialog(&asking, true));
     }
 }

@@ -6,8 +6,7 @@ use store::AttachmentImage;
 use teams_core::{Draft, DraftLine, LinkPreview, MentionInput};
 
 use crate::remote_image::{RemoteImage, RemoteKind};
-use crate::views::attachment_tray::{InlineImage, OutgoingFile, OutgoingImage};
-use crate::views::composer::{Outgoing, ReplyPreview};
+use crate::outgoing::{InlineImage, Outgoing, OutgoingFile, OutgoingImage, ReplyPreview};
 
 const IMAGE_FORMATS: [ImageFormat; 9] = [
     ImageFormat::Png,

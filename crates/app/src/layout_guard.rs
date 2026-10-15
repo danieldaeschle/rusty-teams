@@ -596,7 +596,7 @@ mod frames {
                                 call.transcript_open = true;
                                 state.call = Some(call);
                                 let app_entity = cx.entity();
-                                state.transcript_panel = Some(cx.new(|cx| TranscriptPanel::new(app_entity, window, cx)));
+                                state.transcript_panel = Some(cx.new(|cx| TranscriptPanel::new(app_entity, window, cx)).into());
                                 cx.notify();
                             })
                         });

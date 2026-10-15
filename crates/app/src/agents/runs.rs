@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::lanes::{Admit, Lanes, RestoreInfo};
 use super::{
-    MCP_POLL_INTERVAL, MCP_WAIT_LIMIT, StartRequest, demo, kills, mcp_bridge, mcp_config_directory,
+    MCP_POLL_INTERVAL, MCP_WAIT_LIMIT, demo, kills, mcp_bridge, mcp_config_directory,
     message_context, open_run_session, raise_notice, store as run_store,
 };
 use crate::app_state::AppState;
@@ -248,6 +248,17 @@ fn plan_for(
 pub struct AgentRunsHandle(pub Entity<AgentRuns>);
 
 impl Global for AgentRunsHandle {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartRequest {
+    pub action_id: String,
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
+pub fn needs_dialog(action: &AgentAction, chat_allowed: bool) -> bool {
+    action.ask_extra_instructions || !chat_allowed
+}
 
 pub enum AgentRunsEvent {
     Finished(u64),
@@ -1137,9 +1148,18 @@ pub(super) mod tests {
 
     use super::{
         AgentRun, AgentRuns, RunState, SessionTarget, StartOptions, Utc, api_retry_text,
-        format_elapsed, run_store,
+        format_elapsed, needs_dialog, run_store,
     };
     use crate::app_state::{AppState, Mode};
+
+    #[test]
+    fn the_dialog_shows_for_extra_instructions_or_a_chat_agents_cannot_see() {
+        let quiet = AgentAction::answer_this("claude");
+        let asking = AgentAction::build_this("claude");
+        assert!(!needs_dialog(&quiet, true));
+        assert!(needs_dialog(&quiet, false));
+        assert!(needs_dialog(&asking, true));
+    }
 
     pub fn finished_run(id: u64) -> AgentRun {
         AgentRun {

@@ -149,8 +149,8 @@ pub struct AppState {
     pub meeting_toasts: crate::call::MeetingToasts,
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub call_backgrounds: crate::call::BackgroundLibrary,
-    pub transfer_picker: Option<Entity<crate::views::transfer_picker::TransferPicker>>,
-    pub transcript_panel: Option<Entity<crate::views::call_transcript::TranscriptPanel>>,
+    pub transfer_picker: Option<AnyView>,
+    pub transcript_panel: Option<AnyView>,
     pub rings: Rings,
     pub live_meetings: HashMap<String, LiveMeeting>,
     pub live_refreshing: HashSet<String>,
@@ -163,6 +163,18 @@ pub struct AppHandle(pub Entity<AppState>);
 impl Global for AppHandle {}
 
 impl EventEmitter<AppEvent> for AppState {}
+
+pub fn selection_for(sidebar: &Sidebar, conversation_id: &str) -> Option<Selection> {
+    if sidebar.chats.iter().any(|chat| chat.id == conversation_id) {
+        return Some(Selection::Chat(conversation_id.to_owned()));
+    }
+    sidebar
+        .teams
+        .iter()
+        .flat_map(|team| team.channels.iter())
+        .any(|channel| channel.id == conversation_id)
+        .then(|| Selection::Channel(conversation_id.to_owned()))
+}
 
 pub fn chat_title(chat: &ChatRecord) -> String {
     chat.display_title()
@@ -944,7 +956,7 @@ mod tests {
     };
     use teams_core::CoreEvent;
 
-    use super::{AppState, Mode, Selection, chat_title, selection_title};
+    use super::{AppState, Mode, Selection, chat_title, selection_for, selection_title};
     use crate::backend::BackendEvent;
     use crate::data::Person;
     use store::Sidebar;
@@ -960,6 +972,19 @@ mod tests {
             unread,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn selection_kind_follows_sidebar() {
+        assert_eq!(
+            selection_for(&sidebar(), "c1"),
+            Some(Selection::Chat("c1".into()))
+        );
+        assert_eq!(
+            selection_for(&sidebar(), "ch"),
+            Some(Selection::Channel("ch".into()))
+        );
+        assert_eq!(selection_for(&sidebar(), "x"), None);
     }
 
     fn sidebar() -> Sidebar {
