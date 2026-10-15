@@ -199,6 +199,16 @@ pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hs
             .justify_center()
             .child(icon(IconName::Calendar, (size * MEETING_ICON_RATIO).round(), theme::white()))
             .into_any_element(),
+        AvatarSpec::Muted => div()
+            .size(px(size))
+            .flex_none()
+            .rounded_full()
+            .bg(theme::popup_hover())
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon(IconName::BellOff, (size * MEETING_ICON_RATIO).round(), theme::text_muted()))
+            .into_any_element(),
         AvatarSpec::Pair(first, second) => {
             let small = (size * PAIR_RATIO).round();
             div()

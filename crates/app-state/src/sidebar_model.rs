@@ -45,6 +45,7 @@ pub enum AvatarSpec {
     Single(Face),
     Pair(Face, Face),
     Meeting,
+    Muted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,7 +162,7 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
     } else {
         Unread::None
     };
-    let presence_user = is_one_on_one(chat)
+    let presence_user = (is_one_on_one(chat) && !chat.muted)
         .then(|| {
             others(chat, me)
                 .into_iter()
@@ -192,7 +193,11 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
         muted: chat.muted,
         is_group: chat.kind == GROUP_KIND,
         member_count: chat.members.len(),
-        avatar: avatar_for(chat, me),
+        avatar: if chat.muted {
+            AvatarSpec::Muted
+        } else {
+            avatar_for(chat, me)
+        },
         presence_user,
         folder_id: folder_id.map(str::to_owned),
     }
@@ -446,11 +451,9 @@ fn section(
         0
     };
     items.truncate(count - hidden_count);
-    if kind == SectionKind::Muted {
-        for item in &mut items {
-            if item.unread.is_unread() {
-                item.unread = Unread::Silent;
-            }
+    for item in items.iter_mut().filter(|item| item.muted) {
+        if item.unread.is_unread() {
+            item.unread = Unread::Silent;
         }
     }
     Section {
@@ -724,7 +727,7 @@ mod tests {
         quiet.muted = true;
         let chats = [quiet, chat("b", "group", true)];
         assert_eq!(unread_chat_count(&chats), 1);
-        let directory = Directory::default();
+        let directory = sectioned_directory(true, Vec::new());
         let collapsed = HashSet::new();
         let sections = build_sections(&input(&chats, &directory, &collapsed));
         assert_eq!(sections[0].unread_chats, 1);
@@ -985,12 +988,28 @@ mod tests {
     }
 
     #[test]
-    fn muted_is_on_until_the_user_chooses_and_meeting_chats_stay_in_others() {
+    fn muted_chats_stay_in_others_until_the_user_turns_the_section_on() {
         let chats = vec![muted_chat("quiet"), meeting_chat("sync")];
         let directory = Directory::default();
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
-        assert_eq!(section_ids(&sections), vec![OTHERS_ID, MUTED_ID]);
-        assert_eq!(item_ids(&sections[0]), vec!["sync"]);
+        assert_eq!(section_ids(&sections), vec![OTHERS_ID]);
+        assert_eq!(item_ids(&sections[0]), vec!["quiet", "sync"]);
+        assert!(sections[0].items[0].muted);
+        assert_eq!(sections[0].items[0].avatar, AvatarSpec::Muted);
+        assert_eq!(sections[0].items[1].avatar, AvatarSpec::Meeting);
+    }
+
+    #[test]
+    fn a_muted_chat_in_others_stays_bold_without_a_count() {
+        let mut quiet = muted_chat("quiet");
+        quiet.unread = true;
+        let chats = vec![quiet];
+        let mut directory = Directory::default();
+        directory.unread_counts.insert("quiet".into(), 4);
+        let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
+        assert_eq!(sections[0].kind, SectionKind::Others);
+        assert_eq!(sections[0].items[0].unread, Unread::Silent);
+        assert_eq!(sections[0].unread_chats, 0);
     }
 
     #[test]
@@ -1054,7 +1073,7 @@ mod tests {
         let chats: Vec<ChatRecord> = (0..8)
             .map(|index| muted_chat(&format!("m{index}")))
             .collect();
-        let directory = Directory::default();
+        let directory = sectioned_directory(true, Vec::new());
         let collapsed = HashSet::new();
         let sections = build_sections(&input(&chats, &directory, &collapsed));
         let muted = &sections[1];
@@ -1078,7 +1097,7 @@ mod tests {
         let chats: Vec<ChatRecord> = (0..5)
             .map(|index| muted_chat(&format!("m{index}")))
             .collect();
-        let directory = Directory::default();
+        let directory = sectioned_directory(true, Vec::new());
         let collapsed = HashSet::new();
         let expanded: HashSet<String> = [MUTED_ID.to_owned()].into();
         let mut context = input(&chats, &directory, &collapsed);
@@ -1099,7 +1118,7 @@ mod tests {
                 ..meeting_chat("x")
             },
         ];
-        let mut directory = Directory::default();
+        let mut directory = sectioned_directory(true, Vec::new());
         directory.unread_counts.insert("quiet".into(), 4);
         let sections = build_sections(&input(&chats, &directory, &HashSet::new()));
         let muted = &sections[1];

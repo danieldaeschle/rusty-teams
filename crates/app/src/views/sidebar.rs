@@ -54,7 +54,6 @@ const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
 const MENU_ICON_SIZE: f32 = 15.;
-const MUTED_ICON_SIZE: f32 = 13.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -911,18 +910,9 @@ impl SidebarView {
             } else {
                 theme::text_muted()
             })
-            .when(item.muted, |time| {
-                time.child(icon(
-                    IconName::BellOff,
-                    MUTED_ICON_SIZE,
-                    theme::text_faint(),
-                ))
-            })
             .child(item.time_label.clone());
         let preview_color = if matches!(item.preview, Preview::Typing(_)) {
             theme::accent_text()
-        } else if item.muted {
-            theme::text_faint()
         } else if unread {
             theme::text_strong()
         } else {
@@ -1711,7 +1701,7 @@ fn collect_faces(spec: &AvatarSpec, faces: &mut Vec<String>) {
             faces.extend(first.user_id.clone());
             faces.extend(second.user_id.clone());
         }
-        AvatarSpec::Meeting => {}
+        AvatarSpec::Meeting | AvatarSpec::Muted => {}
     }
 }
 

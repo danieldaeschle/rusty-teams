@@ -9,4 +9,4 @@ pub use app_base::notify::{badge, platform, ring_tone};
 pub use incoming::{IncomingTracker, preview_of};
 #[cfg(windows)]
 pub use platform::native_handle;
-pub use rules::{ChatKind, Incoming, Preview, channel_alerts};
+pub use rules::{ChatKind, Incoming, Preview, alerts};

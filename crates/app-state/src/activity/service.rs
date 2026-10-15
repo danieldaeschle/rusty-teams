@@ -9,7 +9,7 @@ use super::reactions::reacted_messages;
 use crate::app_state::{AppEvent, AppState};
 use crate::call::MissedCall;
 use crate::demo;
-use crate::notify::{IncomingTracker, channel_alerts};
+use crate::notify::{IncomingTracker, alerts};
 use crate::people::resolve_names;
 
 const WATERMARK_KEY: &str = "activity_watermark";
@@ -142,6 +142,7 @@ impl ActivityCenter {
             let from_me =
                 my_user_id.is_some() && chat.last_message_sender_id.as_deref() == my_user_id;
             if at <= self.cutoff
+                || chat.muted
                 || from_me
                 || chat.last_message_deleted
                 || selected == Some(chat.id.as_str())
@@ -173,7 +174,7 @@ impl ActivityCenter {
             .unwrap_or_default();
         let _ = state.store.set_meta_time(WATERMARK_KEY, Utc::now());
         if !foreground {
-            for incoming in found.iter().filter(|incoming| channel_alerts(incoming)) {
+            for incoming in found.iter().filter(|incoming| alerts(incoming)) {
                 self.feed
                     .record_message(incoming, preview_label(&incoming.preview));
             }

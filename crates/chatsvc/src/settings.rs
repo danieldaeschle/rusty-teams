@@ -10,7 +10,7 @@ const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
 const TEAMS_ORDER_KEY: &str = "teamsOrder";
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
-const MUTED_DEFAULT: bool = true;
+const MUTED_DEFAULT: bool = false;
 const MEETING_DEFAULT: bool = false;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +190,7 @@ mod tests {
     fn unset_fields_use_the_teams_defaults() {
         let parsed = parse_chat_sections(&json!({}));
         assert_eq!(parsed, ChatSectionSettings::default());
-        assert!(parsed.enabled(ChatSection::Muted));
+        assert!(!parsed.enabled(ChatSection::Muted));
         assert!(!parsed.enabled(ChatSection::Meeting));
     }
 

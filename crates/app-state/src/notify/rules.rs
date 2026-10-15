@@ -165,7 +165,11 @@ pub struct Decision {
     pub sound: bool,
 }
 
-pub fn channel_alerts(incoming: &Incoming) -> bool {
+pub fn alerts(incoming: &Incoming) -> bool {
+    channel_alerts(incoming) && (!incoming.muted || incoming.mentions_me)
+}
+
+fn channel_alerts(incoming: &Incoming) -> bool {
     if !matches!(incoming.kind, ChatKind::Channel { .. }) || incoming.mentions_me {
         return true;
     }
@@ -197,14 +201,13 @@ const SILENT: Decision = Decision {
 };
 
 pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment) -> Decision {
-    let suppressed = !channel_alerts(incoming)
+    let suppressed = !alerts(incoming)
         || !channel_toasts(incoming)
         || environment.chat_in_foreground
         || environment.system_quiet
         || environment.own_do_not_disturb
         || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call)
-        || (incoming.muted && !incoming.mentions_me)
         || (settings.mentions_only && !incoming.mentions_me && !incoming.is_direct());
     if suppressed {
         return SILENT;
@@ -410,14 +413,16 @@ mod tests {
     }
 
     #[test]
-    fn muted_chat_only_notifies_for_mentions() {
+    fn muted_chat_only_alerts_and_notifies_for_mentions() {
         let mut muted = group();
         muted.muted = true;
+        assert!(!alerts(&muted));
         assert_eq!(
             decide(&Settings::default(), &muted, Environment::default()),
             SILENT
         );
         muted.mentions_me = true;
+        assert!(alerts(&muted));
         assert!(decide(&Settings::default(), &muted, Environment::default()).toast);
     }
 
