@@ -1,6 +1,6 @@
 mod recent;
-mod typing;
 
+use app_base::emoji::typing;
 use std::ops::Range;
 use std::sync::OnceLock;
 

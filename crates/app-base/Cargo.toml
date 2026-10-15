@@ -1,0 +1,51 @@
+[package]
+name = "app-base"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+
+[dependencies]
+agents.workspace = true
+calling.workspace = true
+chatsvc.workspace = true
+chrono.workspace = true
+directories.workspace = true
+gpui-kit.workspace = true
+log = "0.4"
+mcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+session.workspace = true
+store.workspace = true
+teams-core.workspace = true
+tokio.workspace = true
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+raw-window-handle = "0.6"
+x11rb = { version = "0.13", features = ["shape"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
+tray-icon = { version = "0.21", default-features = false }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Pipes",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

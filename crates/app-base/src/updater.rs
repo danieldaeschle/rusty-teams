@@ -7,7 +7,6 @@ use std::time::Duration;
 
 pub const POLL_INTERVAL: Duration = Duration::from_secs(15);
 
-const VERSION_MARKER: &str = concat!("teams-build:", env!("TEAMS_BUILD_VERSION"));
 const UPDATE_DIRECTORY: &str = "update";
 const EXE_NAME: &str = "teams.exe";
 const OLD_EXE_NAME: &str = "teams.old.exe";
@@ -20,7 +19,7 @@ const QUIT_GRACE: Duration = Duration::from_secs(3);
 const PREVIOUS_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn running_version() -> &'static str {
-    VERSION_MARKER.trim_start_matches("teams-build:")
+    crate::version::build_version()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -426,8 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn running_version_has_no_marker_prefix() {
-        assert!(!running_version().starts_with("teams-build:"));
+    fn running_version_is_set() {
         assert!(!running_version().is_empty());
     }
 }

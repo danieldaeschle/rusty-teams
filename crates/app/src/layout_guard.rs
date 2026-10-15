@@ -10,6 +10,22 @@ const SCAN_ALLOWLIST: &[(&str, &str)] = &[
     ("views/conversation.rs", ".bottom(px(-1.))"),
 ];
 
+fn source_roots() -> Vec<PathBuf> {
+    let crates_directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut roots: Vec<PathBuf> = fs::read_dir(&crates_directory)
+        .expect("read crates directory")
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("app"))
+        })
+        .map(|path| path.join("src"))
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort();
+    roots
+}
+
 fn source_files(directory: &Path, files: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).expect("read source directory") {
         let path = entry.expect("directory entry").path();
@@ -64,30 +80,31 @@ fn matcher_matches_allowlist_from_match_start() {
 
 #[test]
 fn negative_offsets_go_through_corner_badge() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let pattern = offset_pattern();
-    let mut files = Vec::new();
-    source_files(&root, &mut files);
     let mut matched_allowlist = HashSet::new();
     let mut violations = Vec::new();
-    for file in files {
-        let relative = file
-            .strip_prefix(&root)
-            .expect("inside src")
-            .to_string_lossy()
-            .replace('\\', "/");
-        if relative == WIDGETS_FILE || relative == "layout_guard.rs" {
-            continue;
-        }
-        let source = fs::read_to_string(&file).expect("read source file");
-        for (line_number, position, text) in negative_offsets(&pattern, &source, &relative) {
-            match position {
-                Some(position) => {
-                    matched_allowlist.insert(position);
+    for root in source_roots() {
+        let mut files = Vec::new();
+        source_files(&root, &mut files);
+        for file in files {
+            let relative = file
+                .strip_prefix(&root)
+                .expect("inside src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative == WIDGETS_FILE || relative == "layout_guard.rs" {
+                continue;
+            }
+            let source = fs::read_to_string(&file).expect("read source file");
+            for (line_number, position, text) in negative_offsets(&pattern, &source, &relative) {
+                match position {
+                    Some(position) => {
+                        matched_allowlist.insert(position);
+                    }
+                    None => violations.push(format!(
+                        "{relative}:{line_number}: negative absolute offset, use widgets::corner_badge: {text}"
+                    )),
                 }
-                None => violations.push(format!(
-                    "{relative}:{line_number}: negative absolute offset, use widgets::corner_badge: {text}"
-                )),
             }
         }
     }
@@ -105,6 +122,32 @@ fn negative_offsets_go_through_corner_badge() {
             .chain(stale)
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+#[test]
+fn hover_styles_never_toggle_display() {
+    let toggle =
+        Regex::new(r"hover\([^|]*\|\w+\|\s*\w+\s*\.\s*(hidden|flex|block|grid)\(\)").unwrap();
+    let mut files = Vec::new();
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
+    let offenders: Vec<String> = files
+        .iter()
+        .flat_map(|path| {
+            let source = fs::read_to_string(path).unwrap();
+            source
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| toggle.is_match(line))
+                .map(|(index, _)| format!("{}:{}", path.display(), index + 1))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "hover styles must toggle visible()/invisible(), not display (gpui panics \"must call prepaint before paint\"): {offenders:?}"
     );
 }
 

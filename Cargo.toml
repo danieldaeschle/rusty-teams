@@ -28,6 +28,7 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 url = "2"
 uuid = { version = "1", default-features = false, features = ["v4"] }
 
+app-base = { path = "crates/app-base" }
 agents = { path = "crates/agents" }
 session = { path = "crates/session" }
 graph = { path = "crates/graph" }
@@ -53,4 +54,7 @@ codegen-units = 256
 codegen-units = 16
 
 [profile.release.package.app]
+opt-level = 1
+
+[profile.release.package.app-base]
 opt-level = 1

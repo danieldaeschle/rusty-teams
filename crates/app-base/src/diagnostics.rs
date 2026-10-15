@@ -86,7 +86,7 @@ fn line_prefix() -> String {
     format!(
         "{} {}",
         chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
-        env!("TEAMS_BUILD_VERSION")
+        crate::version::build_version()
     )
 }
 

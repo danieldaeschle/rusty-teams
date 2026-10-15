@@ -1,6 +1,5 @@
 mod demo;
 mod kills;
-mod lanes;
 mod mcp_bridge;
 mod message_context;
 mod run_chip;
@@ -9,7 +8,6 @@ mod runs_popover;
 mod session_options;
 mod settings_controls;
 mod settings_forms;
-mod settings_problems;
 mod settings_section;
 mod spinner;
 mod start_dialog;
@@ -19,6 +17,7 @@ mod store;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use app_base::agents::{lanes, settings_problems};
 use agents::{AgentAction, Environment};
 use directories::ProjectDirs;
 use gpui_kit::*;

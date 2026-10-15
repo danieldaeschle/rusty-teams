@@ -32,7 +32,7 @@ fn entry(info: &PanicHookInfo<'_>, backtrace: &str) -> String {
     format!(
         "=== {} build {} thread {}\npanic at {location}: {}\n{backtrace}\n",
         chrono::Utc::now().to_rfc3339(),
-        env!("TEAMS_BUILD_VERSION"),
+        crate::version::build_version(),
         thread.name().unwrap_or("unnamed"),
         message(info),
     )

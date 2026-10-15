@@ -7,10 +7,10 @@ const FONT_FAMILY: &str = "Google Sans Flex";
 const MONO_FAMILIES: [&str; 2] = ["Cascadia Code", "Consolas"];
 const BASE_FONT_SIZE: f32 = 14.;
 const FONT_FILES: [&[u8]; 4] = [
-    include_bytes!("../assets/fonts/GoogleSansFlex-Regular.ttf"),
-    include_bytes!("../assets/fonts/GoogleSansFlex-SemiBold.ttf"),
-    include_bytes!("../assets/fonts/GoogleSansFlex-Bold.ttf"),
-    include_bytes!("../assets/fonts/GoogleSansFlex-Italic.ttf"),
+    include_bytes!("../../app/assets/fonts/GoogleSansFlex-Regular.ttf"),
+    include_bytes!("../../app/assets/fonts/GoogleSansFlex-SemiBold.ttf"),
+    include_bytes!("../../app/assets/fonts/GoogleSansFlex-Bold.ttf"),
+    include_bytes!("../../app/assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
 
 pub const BACKGROUND: u32 = 0x0f0f10;

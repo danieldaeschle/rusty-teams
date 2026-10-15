@@ -4,7 +4,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 
 macro_rules! symbols {
     ($($name:literal),* $(,)?) => {
-        [$((concat!("symbols/", $name, ".svg"), include_bytes!(concat!("../assets/symbols/", $name, ".svg")) as &[u8])),*]
+        [$((concat!("symbols/", $name, ".svg"), include_bytes!(concat!("../../app/assets/symbols/", $name, ".svg")) as &[u8])),*]
     };
 }
 

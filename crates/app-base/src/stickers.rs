@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-const CATALOG: &str = include_str!("../assets/stickers.tsv");
+const CATALOG: &str = include_str!("../../app/assets/stickers.tsv");
 const IMAGE_BASE: &str = "https://statics.teams.cdn.office.net/evergreen-assets/stickerassets";
 const IMAGE_VERSION: u32 = 5;
 const POPULAR_IDS: [&str; 6] = [

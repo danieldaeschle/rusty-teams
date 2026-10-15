@@ -276,6 +276,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "agents",
+ "app-base",
  "calling",
  "chatsvc",
  "chrono",
@@ -287,8 +288,32 @@ dependencies = [
  "image",
  "log",
  "mcp",
- "raw-window-handle",
  "regex",
+ "serde",
+ "serde_json",
+ "session",
+ "store",
+ "teams-core",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "webview",
+]
+
+[[package]]
+name = "app-base"
+version = "0.1.0"
+dependencies = [
+ "agents",
+ "calling",
+ "chatsvc",
+ "chrono",
+ "directories",
+ "gpui-kit",
+ "image",
+ "log",
+ "mcp",
+ "raw-window-handle",
  "rodio",
  "serde",
  "serde_json",
@@ -298,8 +323,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tray-icon",
- "uuid",
- "webview",
  "windows 0.62.2",
  "x11rb",
 ]

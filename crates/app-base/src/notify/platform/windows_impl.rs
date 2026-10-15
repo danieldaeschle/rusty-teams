@@ -45,8 +45,8 @@ use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
 use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, ringback_cycle};
 
-const SOUND_BYTES: &[u8] = include_bytes!("../../../assets/sounds/notification.mp3");
-const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/teams-fast-256.png");
+const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../../app/assets/icon/teams-fast-256.png");
 const TRAY_ICON_SIZE: u32 = 32;
 const TRAY_DOT_RADIUS: f32 = 6.;
 const BASE_DPI: f32 = 96.;

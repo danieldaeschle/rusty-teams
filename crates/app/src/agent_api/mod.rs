@@ -1,6 +1,4 @@
 mod bridge;
-mod extras;
-mod image_scale;
 mod source;
 
 use std::collections::{BTreeSet, HashMap};
@@ -14,6 +12,7 @@ use mcp::{
     ReactionProposal, ServerHandle,
 };
 use store::Store;
+use app_base::agent_api::{extras, image_scale};
 
 use crate::backend::Engine;
 use crate::runtime;

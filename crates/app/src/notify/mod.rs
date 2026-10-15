@@ -1,14 +1,8 @@
 mod agent_toast;
-#[cfg_attr(not(windows), allow(dead_code))]
-mod badge;
 mod center;
 mod incoming;
 mod layout;
 mod meeting_view;
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) mod platform;
-#[cfg_attr(not(windows), allow(dead_code))]
-mod ring_tone;
 mod ring_view;
 mod rules;
 mod settings;
@@ -18,6 +12,7 @@ mod stack;
 mod text;
 mod toast;
 
+pub use app_base::notify::{badge, platform, ring_tone};
 pub use center::{NotificationCenter, selection_for};
 pub use incoming::{IncomingTracker, preview_of};
 #[cfg(windows)]

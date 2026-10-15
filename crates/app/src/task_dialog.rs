@@ -7,8 +7,8 @@ use crate::card_state::CardScope;
 
 #[cfg(windows)]
 mod hosted;
-#[cfg_attr(not(windows), allow(dead_code))]
-mod sdk;
+#[cfg(windows)]
+use app_base::task_dialog::sdk;
 
 #[cfg(windows)]
 pub use hosted::install_host;
