@@ -50,6 +50,7 @@ pub enum PresenceKind {
     Busy,
     DoNotDisturb,
     Away,
+    OutOfOffice,
     Offline,
     Unknown,
 }
@@ -61,6 +62,7 @@ impl PresenceKind {
             PresenceKind::Busy => "Busy",
             PresenceKind::DoNotDisturb => "Do not disturb",
             PresenceKind::Away => "Away",
+            PresenceKind::OutOfOffice => "Out of office",
             PresenceKind::Offline => "Offline",
             PresenceKind::Unknown => "",
         }
@@ -72,6 +74,7 @@ impl PresenceKind {
             PresenceKind::Busy => "Busy",
             PresenceKind::DoNotDisturb => "DoNotDisturb",
             PresenceKind::Away => "Away",
+            PresenceKind::OutOfOffice => "OutOfOffice",
             PresenceKind::Offline => "Offline",
             PresenceKind::Unknown => "Unknown",
         }
@@ -83,6 +86,7 @@ impl PresenceKind {
             "Busy" => PresenceKind::Busy,
             "DoNotDisturb" => PresenceKind::DoNotDisturb,
             "Away" => PresenceKind::Away,
+            "OutOfOffice" => PresenceKind::OutOfOffice,
             "Offline" => PresenceKind::Offline,
             _ => PresenceKind::Unknown,
         }
@@ -532,6 +536,13 @@ pub fn presence_kind_of(availability: Availability) -> PresenceKind {
     }
 }
 
+pub fn shown_presence(availability: Availability, activity: Option<Activity>) -> PresenceKind {
+    match activity {
+        Some(Activity::OutOfOffice) => PresenceKind::OutOfOffice,
+        _ => presence_kind_of(availability),
+    }
+}
+
 pub fn activity_label(activity: Activity) -> &'static str {
     match activity {
         Activity::InACall => "In a call",
@@ -550,7 +561,7 @@ pub fn presence_activity(engine: &Engine, user_id: &str) -> Option<Activity> {
 pub fn presence_kind(engine: &Engine, user_id: &str) -> Option<PresenceKind> {
     engine
         .presence(user_id)
-        .map(|presence| presence_kind_of(presence.availability))
+        .map(|presence| shown_presence(presence.availability, presence.activity))
 }
 
 pub fn in_call(engine: &Engine, user_id: &str) -> bool {
@@ -613,6 +624,18 @@ pub fn remove_from_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn out_of_office_shows_over_the_availability() {
+        assert_eq!(
+            shown_presence(Availability::Offline, Some(Activity::OutOfOffice)),
+            PresenceKind::OutOfOffice
+        );
+        assert_eq!(
+            shown_presence(Availability::Available, Some(Activity::InAMeeting)),
+            PresenceKind::Available
+        );
+    }
 
     #[test]
     fn activity_wording_replaces_availability_only_for_live_presence() {

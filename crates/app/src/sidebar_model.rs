@@ -57,6 +57,7 @@ pub struct Face {
 pub enum AvatarSpec {
     Single(Face),
     Pair(Face, Face),
+    Meeting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +140,9 @@ pub fn preview_for(chat: &ChatRecord, me: Option<&Person>) -> Preview {
 }
 
 pub fn avatar_for(chat: &ChatRecord, me: Option<&Person>) -> AvatarSpec {
+    if chat.kind.eq_ignore_ascii_case("meeting") {
+        return AvatarSpec::Meeting;
+    }
     let faces = face_members(chat, me);
     let face = |(user_id, name): (Option<String>, String)| Face { user_id, name };
     if is_one_on_one(chat) || faces.len() < 2 {
@@ -906,6 +910,7 @@ mod tests {
         let group = chat_item(&chats[1], &context, None);
         assert_eq!(group.presence_user, None);
         assert!(matches!(group.avatar, AvatarSpec::Pair(..)));
+        assert_eq!(avatar_for(&meeting_chat("meeting-1"), None), AvatarSpec::Meeting);
     }
 
     #[test]

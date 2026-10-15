@@ -1716,6 +1716,7 @@ fn collect_faces(spec: &AvatarSpec, faces: &mut Vec<String>) {
             faces.extend(first.user_id.clone());
             faces.extend(second.user_id.clone());
         }
+        AvatarSpec::Meeting => {}
     }
 }
 

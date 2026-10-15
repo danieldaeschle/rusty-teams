@@ -59,6 +59,8 @@ const CLOSE_BUTTON_ICON: u32 = 0xffffff;
 const RED_SOFT: u32 = 0xf87171;
 const RED_TINT: u32 = 0xfca5a5;
 const AMBER: u32 = 0xfbbf24;
+const OUT_OF_OFFICE: u32 = 0xc239b3;
+const MEETING_AVATAR: u32 = 0x4f52b2;
 const AVATAR_PALETTE: [u32; 6] = [0x9a4a22, 0x44606e, 0x8a3434, 0x4f6a3c, 0x6a4f7a, 0x2f6b63];
 
 pub fn color(hex: u32) -> Hsla {
@@ -319,6 +321,14 @@ pub fn red_tint() -> Hsla {
 
 pub fn amber() -> Hsla {
     color(AMBER)
+}
+
+pub fn out_of_office() -> Hsla {
+    color(OUT_OF_OFFICE)
+}
+
+pub fn meeting_avatar() -> Hsla {
+    color(MEETING_AVATAR)
 }
 
 pub fn avatar_color(index: usize) -> Hsla {

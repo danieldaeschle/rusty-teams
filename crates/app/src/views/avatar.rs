@@ -22,6 +22,7 @@ const PRESENCE_SPIN_PERIOD: Duration = Duration::from_millis(1600);
 const CACHED_PRESENCE_OPACITY: f32 = 0.5;
 const INITIALS_RATIO: f32 = 0.36;
 const PAIR_INITIALS_RATIO: f32 = 0.42;
+const MEETING_ICON_RATIO: f32 = 0.5;
 
 fn initials_circle(name: &str, key: &str, size: f32, pending: bool, text_ratio: f32) -> Div {
     let (background, foreground) = if pending {
@@ -125,6 +126,7 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
         PresenceKind::Available => theme::green(),
         PresenceKind::Busy | PresenceKind::DoNotDisturb => theme::red(),
         PresenceKind::Away => theme::amber(),
+        PresenceKind::OutOfOffice => theme::out_of_office(),
         PresenceKind::Offline => ring,
         PresenceKind::Unknown => return None,
     };
@@ -140,6 +142,7 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
             center.child(div().w(px(inner - 4.)).h(px(2.)).rounded(px(1.)).bg(ring))
         }
         PresenceKind::Offline => center.border(px(1.5)).border_color(theme::text_muted()),
+        PresenceKind::OutOfOffice => center.child(icon(IconName::ArrowLeft, inner - 2., theme::white())),
         _ => center,
     };
     Some(
@@ -186,6 +189,16 @@ pub fn with_presence(avatar: AnyElement, presence: Presence, size: f32, ring: Hs
 pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hsla) -> AnyElement {
     match spec {
         AvatarSpec::Single(face) => face_circle(directory, face, size, INITIALS_RATIO),
+        AvatarSpec::Meeting => div()
+            .size(px(size))
+            .flex_none()
+            .rounded_full()
+            .bg(theme::meeting_avatar())
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon(IconName::Calendar, (size * MEETING_ICON_RATIO).round(), theme::white()))
+            .into_any_element(),
         AvatarSpec::Pair(first, second) => {
             let small = (size * PAIR_RATIO).round();
             div()
