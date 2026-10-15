@@ -60,6 +60,7 @@ impl RenderOnce for JumboEmoticon {
         } else {
             images.still.clone()
         };
+        let image_id = ElementId::Name(format!("{}-image", self.id).into());
         div()
             .id(self.id)
             .size(px(EMOTICON_SIZE))
@@ -73,7 +74,7 @@ impl RenderOnce for JumboEmoticon {
                     });
                 }
             })
-            .child(img(ImageSource::Render(image)).size_full())
+            .child(img(ImageSource::Render(image)).id(image_id).size_full())
             .into_any_element()
     }
 }
