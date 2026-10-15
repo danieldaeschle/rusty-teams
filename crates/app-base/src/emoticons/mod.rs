@@ -3,6 +3,8 @@ mod strip;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use teams_core::EmoticonTag;
+
 pub use strip::{StripImages, StripLoader, StripSource, split_strip};
 
 const CATALOG: &str = include_str!("../../../app/assets/emoticons.tsv");
@@ -19,6 +21,7 @@ pub struct Emoticon {
     etag: &'static str,
     frames: u32,
     diverse: bool,
+    description: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +64,7 @@ fn catalog() -> &'static [Emoticon] {
                     etag: fields.next()?,
                     frames: fields.next()?.parse().ok()?,
                     diverse: fields.next()? == "1",
+                    description: fields.next()?,
                 })
             })
             .collect()
@@ -100,6 +104,17 @@ pub fn resolve(id: Option<&str>, glyph: &str) -> Option<ResolvedEmoticon> {
     })
 }
 
+pub fn send_tag(glyph: &str) -> Option<EmoticonTag> {
+    if skin_tone(glyph).is_some() {
+        return None;
+    }
+    let emoticon = resolve(None, glyph)?.emoticon;
+    Some(EmoticonTag {
+        id: emoticon.id.to_owned(),
+        title: emoticon.description.to_owned(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,6 +132,16 @@ mod tests {
         assert_eq!(resolve(Some("unknown"), "❤️").unwrap().emoticon.id, "heart");
         assert_eq!(resolve(None, "👍").unwrap().emoticon.id, "yes");
         assert!(resolve(None, "x").is_none());
+    }
+
+    #[test]
+    fn send_tags_name_the_emoticon_and_skip_skin_tones() {
+        let heart = send_tag("❤️").unwrap();
+        assert_eq!(
+            (heart.id.as_str(), heart.title.as_str()),
+            ("heart", "Heart")
+        );
+        assert!(send_tag("👍🏽").is_none());
     }
 
     #[test]

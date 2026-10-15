@@ -14,6 +14,7 @@ mod channel_sync;
 mod chat_paging;
 mod download;
 mod draft;
+mod emoticon_tags;
 mod engine;
 mod error;
 mod events;
@@ -100,6 +101,7 @@ pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
+pub use emoticon_tags::{EmoticonTag, emoticon_tags};
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
 pub use error::{Error, Result};
 pub use events::CoreEvent;

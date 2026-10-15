@@ -123,7 +123,7 @@ fn unicode_emoji(text: &str) -> Option<Vec<JumboEmoji>> {
         .collect()
 }
 
-fn is_emoji_grapheme(grapheme: &str) -> bool {
+pub(crate) fn is_emoji_grapheme(grapheme: &str) -> bool {
     let mut characters = grapheme.chars();
     characters.next().is_some_and(is_pictographic)
         && characters.all(|character| {
