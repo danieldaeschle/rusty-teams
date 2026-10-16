@@ -49,6 +49,12 @@ gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 incremental = true
 codegen-units = 256
