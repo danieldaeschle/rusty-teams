@@ -332,6 +332,8 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(None);
         };
         let mut record = record;
+        self.apply_chat_emotions(conversation_id, std::slice::from_mut(&mut record))
+            .await;
         let delta = self.ingest(conversation_id, vec![record.clone()])?;
         let links_changed = self.attach_links(conversation_id, &mut [&mut record]).await;
         self.announce(conversation_id, !delta.is_empty() || links_changed);

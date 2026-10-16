@@ -95,6 +95,7 @@ mod tests {
             pending_reactions: HashMap::new(),
             card_overrides: HashMap::new(),
             translation: TranslationContext::default(),
+            skin_tone: 0,
         }
     }
 

@@ -397,6 +397,8 @@ impl<R: Remote> SyncEngine<R> {
                 delta_link: None,
             },
         };
+        let mut collected = collected;
+        self.apply_chat_emotions(conversation_id, &mut collected).await;
         let delta = self.ingest(conversation_id, collected)?;
         self.store.set_sync_state(conversation_id, &state)?;
         Ok(delta)
@@ -413,11 +415,12 @@ impl<R: Remote> SyncEngine<R> {
             .await?;
         let page_oldest = oldest_created(&page);
         let has_more = page.next_link.is_some() && page_oldest.is_some();
-        let records: Vec<_> = page
+        let mut records: Vec<_> = page
             .items
             .iter()
             .filter_map(|message| message_record(conversation_id, message))
             .collect();
+        self.apply_chat_emotions(conversation_id, &mut records).await;
         self.ingest(conversation_id, records.clone())?;
         self.store.set_sync_state(
             conversation_id,

@@ -195,7 +195,7 @@ impl ReactionPicker {
 
     fn pick_tone(&mut self, glyph: &str, tone: u8, window: &mut Window, cx: &mut Context<Self>) {
         self.skin_tone = tone;
-        let _ = teams_core::store_picked_skin_tone(&self.app.read(cx).store, tone);
+        self.app.update(cx, |state, cx| state.set_skin_tone(tone, cx));
         self.pick(&emoticons::with_tone(glyph, tone), false, window, cx);
     }
 

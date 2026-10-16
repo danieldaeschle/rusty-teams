@@ -15,6 +15,7 @@ mod chat_paging;
 mod download;
 mod draft;
 mod emoticon_tags;
+mod emotion_sync;
 mod engine;
 mod error;
 mod events;
@@ -136,7 +137,7 @@ pub use profile::{OrgPerson, PersonProfile};
 pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
 pub use scheduled::NOTES_CHAT_ID;
-pub use skin_tone::{skin_tone, store_picked_skin_tone};
+pub use skin_tone::{skin_tone, store_account_skin_tone};
 pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{

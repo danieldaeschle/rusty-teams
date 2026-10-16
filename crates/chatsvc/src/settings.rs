@@ -93,6 +93,16 @@ impl<T: MessageTransport> UserSettings<T> {
         ensure_success(&answer)
     }
 
+    pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
+        let url = format!("{}?name={SKIN_TONE_KEY}", self.base_url);
+        let body = json!({ SKIN_TONE_KEY: tone.to_string() });
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Put, url, body))
+            .await?;
+        ensure_success(&answer)
+    }
+
     pub async fn properties(&self) -> Result<Value> {
         let answer = self.transport.send(Request::get(&self.base_url)).await?;
         ensure_success(&answer)?;

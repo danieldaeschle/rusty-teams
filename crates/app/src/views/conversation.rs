@@ -1264,6 +1264,7 @@ impl ConversationView {
             pending_reactions: self.pending_reactions.clone(),
             card_overrides,
             translation,
+            skin_tone: teams_core::skin_tone(&app.store),
         }
     }
 
@@ -2496,7 +2497,7 @@ impl ConversationView {
         }
         let skin_tone = teams_core::skin_tone(&store);
         let wanted = if added {
-            emoticons::with_tone(&wanted, skin_tone)
+            wanted
         } else {
             let own = own_reaction_glyph(&visible, glyph, my_user_id.as_deref()).unwrap_or(wanted);
             if emoticons::without_tone(&own) == own {

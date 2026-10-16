@@ -114,7 +114,7 @@ fn pill(
     } else {
         (theme::border_strong(), theme::text_soft())
     };
-    let glyph = chip.label.clone();
+    let glyph = chip.click_glyph.clone();
     let tooltip_text = chip_tooltip(chip);
     let toggle = controls.map(|controls| {
         let is_open = controls

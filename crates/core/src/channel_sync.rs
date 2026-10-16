@@ -66,6 +66,8 @@ impl<R: Remote> SyncEngine<R> {
                 ..previous.clone()
             },
         };
+        let mut records = records;
+        self.apply_chat_emotions(channel_id, &mut records).await;
         let mut delta = self.ingest(channel_id, records)?;
         self.store.set_sync_state(channel_id, &state)?;
         let since = bootstrap_start(previous.newest_seen, started_at);
@@ -86,7 +88,8 @@ impl<R: Remote> SyncEngine<R> {
         start: DeltaStart,
     ) -> Result<Delta> {
         let run = self.run_delta(team_id, channel_id, start).await?;
-        let records = self.delta_records(team_id, channel_id, &run.items).await?;
+        let mut records = self.delta_records(team_id, channel_id, &run.items).await?;
+        self.apply_chat_emotions(channel_id, &mut records).await;
         let newest = records.iter().map(|record| record.created_at).max();
         let delta = self.ingest(channel_id, records)?;
         let newest_seen = match (state.newest_seen, newest) {
@@ -198,6 +201,7 @@ impl<R: Remote> SyncEngine<R> {
                     .filter_map(|reply| message_record(channel_id, reply)),
             );
         }
+        self.apply_chat_emotions(channel_id, &mut records).await;
         self.ingest(channel_id, records)
     }
 
@@ -217,7 +221,8 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(Vec::new());
         };
         let page = self.remote.channel_messages_at(cursor).await?;
-        let records = thread_records(channel_id, &page.items);
+        let mut records = thread_records(channel_id, &page.items);
+        self.apply_chat_emotions(channel_id, &mut records).await;
         self.ingest(channel_id, records.clone())?;
         let page_oldest = records.iter().map(|record| record.created_at).min();
         self.store.set_sync_state(

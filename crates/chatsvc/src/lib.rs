@@ -4,6 +4,7 @@ pub mod cards;
 pub mod channel_notifications;
 pub mod conversations;
 pub mod drafts;
+pub mod emotions;
 mod error;
 pub mod forward;
 pub mod gifs;
@@ -54,7 +55,8 @@ pub use presence::{
     ActivityReporting, ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote, WorkLocation,
     WorkLocationKind, WorkLocationSource, error_status, is_endpoint_missing,
 };
-pub use reactions::{emotion_glyph, emotion_key, emotion_keys, reaction_key, reaction_keys};
+pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, user_id_from_mri};
+pub use reactions::{emotion_glyph, insert_skin_tone, reaction_glyph_for_key, emotion_key, emotion_keys, reaction_key, reaction_keys};
 pub use realtime::{
     CallbackReplier, EventKind, InstanceNames, MessageEvent, PresenceUpdate, Realtime,
     RealtimeConfig, RealtimeEvent, StatusEvent, StatusKind, TrouterCallback, TrouterEndpoint,

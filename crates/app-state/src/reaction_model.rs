@@ -129,6 +129,7 @@ mod tests {
         ReactionChip {
             reaction_type: reaction_type.to_owned(),
             label: crate::rows::reaction_label(reaction_type),
+            click_glyph: crate::rows::reaction_glyph(reaction_type),
             count: reactors.len(),
             mine: false,
             reactors,

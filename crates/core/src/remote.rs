@@ -2,7 +2,7 @@ use chatsvc::{
     CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState, Conversations,
     ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
     LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
-    MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
+    MessageEmotions, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
     Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
     Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
@@ -349,6 +349,15 @@ pub trait Remote {
         _page_size: usize,
     ) -> Result<Vec<MessageLinks>> {
         Err(Error::Unsupported("link previews"))
+    }
+
+    async fn message_emotions(
+        &self,
+        _conversation: &ConversationRef,
+        _newest_message_id: &str,
+        _page_size: usize,
+    ) -> Result<Vec<MessageEmotions>> {
+        Err(Error::Unsupported("chat service reactions"))
     }
 
     async fn set_message_links(&self, _target: &MessageTarget, _links_json: &str) -> Result<()> {
@@ -954,6 +963,17 @@ impl Remote for Graph {
     ) -> Result<Vec<MessageLinks>> {
         Ok(Messages::new(self.session())
             .list_message_links(conversation, page_size)
+            .await?)
+    }
+
+    async fn message_emotions(
+        &self,
+        conversation: &ConversationRef,
+        newest_message_id: &str,
+        page_size: usize,
+    ) -> Result<Vec<MessageEmotions>> {
+        Ok(Messages::new(self.session())
+            .message_emotions(&conversation.conversation_id(), newest_message_id, page_size)
             .await?)
     }
 

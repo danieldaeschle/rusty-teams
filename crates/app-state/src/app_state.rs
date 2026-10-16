@@ -456,6 +456,26 @@ impl AppState {
         );
     }
 
+    pub fn set_skin_tone(&mut self, tone: u8, cx: &mut Context<Self>) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous = teams_core::skin_tone(&self.store);
+        let _ = teams_core::store_account_skin_tone(&self.store, tone);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Skin tone",
+            async move { engine.set_skin_tone(tone).await },
+            move |state, _| {
+                let _ = teams_core::store_account_skin_tone(&state.store, previous);
+            },
+            |_, _| {},
+            cx,
+        );
+    }
+
     fn apply_section_settings(&mut self, settings: ChatSectionSettings, cx: &mut Context<Self>) {
         self.directory.section_settings = settings;
         let _ = teams_core::store_section_settings(&self.store, &settings);

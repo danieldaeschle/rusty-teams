@@ -82,7 +82,6 @@ fn skin_tone(glyph: &str) -> Option<u32> {
 }
 
 pub const SKIN_TONE_COUNT: u8 = 5;
-const ZERO_WIDTH_JOINER: char = '\u{200d}';
 
 fn toneable_glyphs() -> &'static HashSet<&'static str> {
     static PARSED: OnceLock<HashSet<&'static str>> = OnceLock::new();
@@ -106,20 +105,12 @@ pub fn without_tone(glyph: &str) -> String {
         .collect()
 }
 
-/// The Teams rule: the modifier goes in once, before the first joiner, otherwise at the end;
-/// a variation selector at that spot is dropped.
 pub fn with_tone(glyph: &str, tone: u8) -> String {
     let base = without_tone(glyph);
     if tone == 0 || tone > SKIN_TONE_COUNT || !is_toneable(&base) {
         return base;
     }
-    let modifier = char::from_u32(*SKIN_TONES.start() as u32 + u32::from(tone) - 1)
-        .expect("skin tone modifier");
-    let (head, tail) = base.split_at(base.find(ZERO_WIDTH_JOINER).unwrap_or(base.len()));
-    format!(
-        "{}{modifier}{tail}",
-        head.strip_suffix(VARIATION_SELECTOR).unwrap_or(head)
-    )
+    chatsvc::insert_skin_tone(&base, tone)
 }
 
 fn base_glyph(glyph: &str) -> String {
