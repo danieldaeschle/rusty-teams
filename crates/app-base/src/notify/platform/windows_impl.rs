@@ -587,6 +587,18 @@ fn start_cycle(cycle: Vec<f32>) -> Option<RingTone> {
     Some(RingTone { stop })
 }
 
+pub fn play_mp3(bytes: Vec<u8>) {
+    std::thread::spawn(move || {
+        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+            return;
+        };
+        sink.log_on_drop(false);
+        if let Ok(player) = rodio::play(sink.mixer(), Cursor::new(bytes)) {
+            player.sleep_until_end();
+        }
+    });
+}
+
 pub fn play_sound() {
     std::thread::spawn(|| {
         let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {

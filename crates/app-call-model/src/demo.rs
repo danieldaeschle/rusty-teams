@@ -16,6 +16,7 @@ use calling::timeline::TimelineEntry;
 use calling::{CallDiagnostics, SdpLine, SdpSummary, StatsSample};
 
 use super::demo_scene::self_view;
+use super::end_screen::EndCause;
 use tokio::time::{interval, sleep};
 
 use super::model::{ECHO_MRI, ECHO_NAME};
@@ -104,6 +105,8 @@ pub enum DemoScene {
     MiniOff,
     MiniShare,
     Blocked,
+    Removed,
+    Dropped,
 }
 
 impl DemoScene {
@@ -124,6 +127,8 @@ impl DemoScene {
             "mini-off" => DemoScene::MiniOff,
             "mini-share" => DemoScene::MiniShare,
             "blocked" => DemoScene::Blocked,
+            "removed" => DemoScene::Removed,
+            "dropped" => DemoScene::Dropped,
             _ => return None,
         })
     }
@@ -141,6 +146,14 @@ impl DemoScene {
                 | DemoScene::MiniShare
                 | DemoScene::Blocked
         )
+    }
+
+    pub fn end_cause(self) -> Option<EndCause> {
+        match self {
+            DemoScene::Removed => Some(EndCause::Removed),
+            DemoScene::Dropped => Some(EndCause::Dropped),
+            _ => None,
+        }
     }
 
     pub fn minimized(self) -> bool {
@@ -450,6 +463,8 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         | DemoScene::Gallery
         | DemoScene::Sharing
         | DemoScene::Blocked
+        | DemoScene::Removed
+        | DemoScene::Dropped
         | DemoScene::Plain => {}
     }
 }

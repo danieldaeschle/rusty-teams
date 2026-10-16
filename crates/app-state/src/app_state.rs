@@ -71,6 +71,7 @@ pub enum AppEvent {
     MissedCall(MissedCall),
     MeetingReminder,
     MeetingChime,
+    CallEndTone(crate::call::end_screen::EndTone),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -127,6 +128,7 @@ pub struct AppState {
     pub profile_request: Option<ProfileRequest>,
     pub call: Option<ActiveCall>,
     pub held_call: Option<ActiveCall>,
+    pub call_end: Option<crate::call::end_screen::CallEndScreen>,
     pub call_media: Option<Entity<CallMedia>>,
     pub call_launcher: Option<Arc<CallLauncher>>,
     pub call_count: u64,
@@ -273,6 +275,7 @@ impl AppState {
             profiles: ProfileCache::new(),
             profile_request: None,
             call: None,
+            call_end: None,
             held_call: None,
             call_media: None,
             call_launcher: None,
@@ -774,6 +777,7 @@ impl AppState {
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
         self.show_call(false, cx);
         self.cancel_prejoin(cx);
+        self.call_end = None;
         let was_drafting = std::mem::take(&mut self.new_chat);
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
             return;

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod calendar;
 pub mod consult;
+pub mod end_actions;
 pub mod features;
 pub mod history;
 pub mod join;
@@ -17,7 +18,7 @@ pub mod target;
 pub mod view_actions;
 
 pub use app_call_model::{
-    agenda, background, bubbles, caption_style, demo, fullscreen, health, media, mic,
+    agenda, background, bubbles, caption_style, demo, end_screen, fullscreen, health, media, mic,
     model, options_dialog, people, preview, record_rights,
     recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
 };

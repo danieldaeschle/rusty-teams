@@ -111,6 +111,7 @@ impl AppState {
             return;
         }
         self.prejoin_count += 1;
+        self.call_end = None;
         self.prejoin = Some(PendingJoin {
             id: self.prejoin_count,
             join,

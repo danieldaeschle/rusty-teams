@@ -68,6 +68,8 @@ pub fn set_badge(_handle: NativeHandle, _badge: Option<&Badge>) {}
 
 pub fn play_sound() {}
 
+pub fn play_mp3(_bytes: Vec<u8>) {}
+
 pub struct RingTone;
 
 pub fn start_ring(_ringtone: Ringtone) -> Option<RingTone> {
