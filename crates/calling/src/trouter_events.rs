@@ -112,6 +112,7 @@ pub enum ProgressStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaAnswer {
     pub sdp: String,
+    pub from_mixer: bool,
     pub links: BTreeMap<String, String>,
 }
 
@@ -137,6 +138,7 @@ pub enum CallEvent {
     AddParticipantFailure(Value),
     ConversationEnd(Value),
     Rejection(Value),
+    RetargetCompletion(Value),
     Reactions(Vec<ReactionEvent>),
     LocalParticipantUpdate(Value),
     Replacement(Value),
@@ -162,6 +164,7 @@ impl CallEvent {
             CallEvent::AddParticipantFailure(_) => "conversation/addParticipantFailure".into(),
             CallEvent::ConversationEnd(_) => "conversation/conversationEnd".into(),
             CallEvent::Rejection(_) => "call/rejection".into(),
+            CallEvent::RetargetCompletion(_) => "call/retargetCompletion".into(),
             CallEvent::Reactions(_) => "conversation/receiveMessage".into(),
             CallEvent::LocalParticipantUpdate(_) => "conversation/localParticipantUpdate".into(),
             CallEvent::Replacement(_) => "call/replacement".into(),
@@ -185,6 +188,7 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("conversation", "addParticipantFailure") => CallEvent::AddParticipantFailure(body),
         ("conversation", "conversationEnd") => CallEvent::ConversationEnd(body),
         ("call", "rejection") => CallEvent::Rejection(body),
+        ("call", "retargetCompletion") => CallEvent::RetargetCompletion(body),
         ("conversation", "localParticipantUpdate") => CallEvent::LocalParticipantUpdate(body),
         ("conversation", "contentSharingUpdate") => CallEvent::ContentShareUpdate(body),
         ("conversation", "contentSharingEnd") => CallEvent::ContentShareEnd(body),
@@ -210,11 +214,8 @@ pub fn callback_call_id(path: &str) -> Option<String> {
     split_callback_path(path).ok().map(|(call_id, _, _)| call_id)
 }
 
-pub fn callback_reply_body(path: &str, links: &CallbackLinks) -> String {
-    match split_callback_path(path) {
-        Ok((_, scope, event)) if scope == "call" && event == "acceptance" => acceptance_acknowledgement(links).to_string(),
-        _ => String::new(),
-    }
+pub fn is_acceptance_callback(path: &str) -> bool {
+    matches!(split_callback_path(path), Ok((_, scope, event)) if scope == "call" && event == "acceptance")
 }
 
 fn split_callback_path(path: &str) -> Result<(String, String, String)> {
@@ -226,6 +227,16 @@ fn split_callback_path(path: &str) -> Result<(String, String, String)> {
         return Err(Error::Callback(format!("unexpected callback path shape ({} parts)", parts.len())));
     };
     Ok(((*call_id).to_owned(), (*scope).to_owned(), (*event).to_owned()))
+}
+
+pub fn callback_tag(path_or_url: &str) -> Option<String> {
+    let start = path_or_url.find(CALLBACK_ROOT)?;
+    split_callback_path(&path_or_url[start..]).ok()?;
+    path_or_url[start + CALLBACK_ROOT.len()..].split('/').nth(1).map(str::to_owned)
+}
+
+pub fn acknowledgement_links(body: &Value) -> BTreeMap<String, String> {
+    string_links(&body["callAcceptanceAcknowledgement"]["links"])
 }
 
 fn string_links(value: &Value) -> BTreeMap<String, String> {
@@ -272,6 +283,7 @@ fn media_answer(body: &Value) -> Result<MediaAnswer> {
         .to_owned();
     Ok(MediaAnswer {
         sdp,
+        from_mixer: answer["mediaContent"]["fromMixer"].as_bool().unwrap_or(false),
         links: string_links(&answer["links"]),
     })
 }
@@ -571,12 +583,30 @@ mod tests {
     }
 
     #[test]
-    fn only_the_acceptance_reply_carries_the_acknowledgement() {
+    fn the_tag_names_the_offer_an_answer_belongs_to() {
         let links = CallbackLinks::new("https://trouter.example/", "abc");
-        let acceptance = callback_reply_body("callAgent/abc/1/call/acceptance/", &links);
-        let parsed: Value = serde_json::from_str(&acceptance).unwrap();
-        assert!(parsed["callAcceptanceAcknowledgement"]["links"].is_object());
-        assert_eq!(callback_reply_body("callAgent/abc/1/call/mediaAnswer/", &links), "");
-        assert_eq!(callback_reply_body("callAgent/abc/1/conversation/rosterUpdate/", &links), "");
+        let url = links.call("mediaAnswer");
+        let tag = callback_tag(&url).unwrap();
+        assert_eq!(tag.len(), 8);
+        assert_eq!(callback_tag(&format!("callAgent/abc/{tag}/call/mediaAnswer/")), Some(tag));
+        assert_eq!(callback_tag("unifiedPresenceService"), None);
+    }
+
+    #[test]
+    fn a_media_answer_says_whether_the_mixer_sent_it() {
+        let body = json!({"mediaAnswer": {"mediaContent": {"blob": "v=0\r\n", "fromMixer": true}, "links": {}}});
+        let (_, event) = classify("callAgent/abc/1/call/mediaAnswer/", body).unwrap();
+        let CallEvent::MediaAnswer(answer) = event else { panic!("not a media answer") };
+        assert!(answer.from_mixer);
+        let (_, retarget) = classify("callAgent/abc/1/call/retargetCompletion/", json!({"retargetCompleted": {"code": 0}})).unwrap();
+        assert!(matches!(retarget, CallEvent::RetargetCompletion(_)));
+    }
+
+    #[test]
+    fn only_the_acceptance_callback_gets_the_acknowledgement() {
+        assert!(is_acceptance_callback("callAgent/abc/1/call/acceptance/"));
+        assert!(!is_acceptance_callback("callAgent/abc/1/call/mediaAnswer/"));
+        assert!(!is_acceptance_callback("callAgent/abc/1/conversation/rosterUpdate/"));
+        assert!(!is_acceptance_callback("unifiedPresenceService"));
     }
 }

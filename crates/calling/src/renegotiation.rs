@@ -88,9 +88,10 @@ impl MediaNegotiator {
     }
 
     pub fn on_renegotiation(&mut self, new_offer: bool, escalation: bool) -> MediaAction {
-        if self.own_offer_pending || self.same_peer_offer_pending {
+        if self.own_offer_pending || (self.same_peer_offer_pending && !escalation) {
             return MediaAction::RejectGlare;
         }
+        self.same_peer_offer_pending = false;
         if escalation {
             self.path = MediaPath::Mixer;
         }
@@ -103,6 +104,29 @@ impl MediaNegotiator {
 
     pub fn escalation_failed(&mut self) {
         self.own_offer_pending = false;
+    }
+
+    pub fn escalate_after_mixer_answer(&mut self) -> bool {
+        if self.path != MediaPath::Direct || self.own_offer_pending {
+            return false;
+        }
+        self.path = MediaPath::Mixer;
+        self.own_offer_pending = true;
+        true
+    }
+
+    pub fn note_mixer_path(&mut self) {
+        if self.path == MediaPath::Direct {
+            self.path = MediaPath::Mixer;
+        }
+    }
+
+    pub fn begin_conference_upgrade(&mut self) -> bool {
+        if self.path != MediaPath::Mixer || self.own_offer_pending || self.same_peer_offer_pending {
+            return false;
+        }
+        self.own_offer_pending = true;
+        true
     }
 
     pub fn on_rejection(&mut self) -> RejectedOffer {
@@ -126,6 +150,29 @@ pub enum RejectedOffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mixer_answer_on_a_direct_call_starts_one_escalation() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false, true);
+        assert_eq!(negotiator.path(), MediaPath::Direct);
+        assert!(negotiator.escalate_after_mixer_answer());
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        assert!(!negotiator.escalate_after_mixer_answer());
+        assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnNewPeer);
+    }
+
+    #[test]
+    fn a_server_escalation_wins_over_a_pending_same_peer_offer() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false, true);
+        assert!(negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
+        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        assert!(negotiator.begin_conference_upgrade());
+        assert!(!negotiator.begin_conference_upgrade());
+    }
 
     #[test]
     fn a_rejection_clears_the_pending_offer() {

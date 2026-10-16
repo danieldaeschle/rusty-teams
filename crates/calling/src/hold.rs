@@ -70,6 +70,24 @@ pub fn rewrite_directions(sdp: &str, pick: impl Fn(MediaLine<'_>) -> Option<&'st
     lines.join(newline)
 }
 
+pub fn stop_sending_on(sdp: &str, mid: &str) -> String {
+    let newline = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    for section in sections(&lines) {
+        let Some(direction_line) = section.direction_line else { continue };
+        if section.mid != mid {
+            continue;
+        }
+        let receive_only = match lines[direction_line].as_str() {
+            "a=sendrecv" => "recvonly",
+            "a=sendonly" => INACTIVE,
+            _ => continue,
+        };
+        lines[direction_line] = format!("a={receive_only}");
+    }
+    lines.join(newline)
+}
+
 fn mirrored(direction: &str) -> &'static str {
     match direction {
         "sendonly" => "recvonly",
@@ -129,6 +147,15 @@ pub fn accepted_modalities(video: bool) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_line_that_stops_sending_keeps_receiving() {
+        let sdp = "v=0\r\nm=audio 9 RTP 0\r\na=mid:0\r\na=sendrecv\r\nm=video 9 RTP 96\r\na=mid:1\r\na=sendrecv\r\nm=video 9 RTP 96\r\na=mid:2\r\na=sendonly\r\n";
+        let camera_off = super::stop_sending_on(sdp, "1");
+        assert!(camera_off.contains("a=mid:1\r\na=recvonly"));
+        assert!(camera_off.contains("a=mid:0\r\na=sendrecv"));
+        assert!(super::stop_sending_on(sdp, "2").contains("a=mid:2\r\na=inactive"));
+    }
+
     use super::*;
 
     const OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1 2\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:1\r\na=sendrecv\r\na=rtpmap:102 H264/90000\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:2\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\n";
