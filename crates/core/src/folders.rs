@@ -67,6 +67,9 @@ pub trait FolderSource: Send + Sync {
     fn preferred_skin_tone(&self) -> Option<u8> {
         None
     }
+    fn set_skin_tone(&self, _tone: u8) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
     fn set_section_enabled(&self, section: ChatSection, enabled: bool)
     -> BoxFuture<'_, Result<()>>;
     fn set_folder_expanded<'a>(
@@ -152,6 +155,10 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn preferred_skin_tone(&self) -> Option<u8> {
         *self.skin_tone.lock().unwrap()
+    }
+
+    fn set_skin_tone(&self, tone: u8) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { Ok(self.settings.set_skin_tone(tone).await?) })
     }
 
     fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
@@ -461,6 +468,11 @@ impl<R: Remote> SyncEngine<R> {
         self.folder_source()?
             .set_section_enabled(section, enabled)
             .await
+    }
+
+    pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
+        self.folder_source()?.set_skin_tone(tone).await?;
+        crate::skin_tone::store_account_skin_tone(&self.store, tone)
     }
 
     pub async fn set_folder_expanded(&self, folder_id: &str, expanded: bool) -> Result<()> {

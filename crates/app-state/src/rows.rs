@@ -34,6 +34,7 @@ const CORNER_SERIES: f32 = 4.;
 pub struct ReactionChip {
     pub reaction_type: String,
     pub label: String,
+    pub click_glyph: String,
     pub count: usize,
     pub mine: bool,
     pub reactors: Vec<Reactor>,
@@ -353,19 +354,13 @@ pub fn reaction_label(reaction_type: &str) -> String {
 }
 
 pub fn reaction_glyph(reaction_type: &str) -> String {
-    if let Some((key, tone)) = reaction_type
-        .split_once(TONE_MARKER)
-        .and_then(|(key, tone)| Some((key, tone.parse::<u8>().ok()?)))
-    {
-        let base = match key {
-            "yes" => "\u{1F44D}".to_owned(),
-            other => chatsvc::emotion_glyph(other).map_or_else(|| reaction_label(other), str::to_owned),
-        };
-        return crate::emoticons::with_tone(&base, tone);
-    }
-    reaction_label(reaction_type)
-        .trim_end_matches('\u{FE0F}')
-        .to_owned()
+    let label = reaction_label(reaction_type);
+    let glyph = if label == reaction_type {
+        chatsvc::reaction_glyph_for_key(reaction_type).unwrap_or(label)
+    } else {
+        label
+    };
+    glyph.trim_end_matches('\u{FE0F}').to_owned()
 }
 
 fn same_reaction(left: &str, right: &str) -> bool {
@@ -389,7 +384,6 @@ pub fn reaction_type_for(glyph: &str) -> String {
         .map_or_else(|| bare.to_owned(), str::to_owned)
 }
 
-const TONE_MARKER: &str = "-tone";
 const MAX_TONE_VARIANTS: usize = 3;
 
 pub type PendingReactions = HashMap<String, Vec<(String, bool)>>;
@@ -466,6 +460,7 @@ pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<R
                 chips.push(ReactionChip {
                     reaction_type: reaction.reaction_type.clone(),
                     label: String::new(),
+                    click_glyph: crate::emoticons::with_tone(&glyph, context.skin_tone),
                     count: 0,
                     mine: false,
                     reactors: Vec::new(),
@@ -474,11 +469,7 @@ pub fn reaction_chips(reactions: &[ReactionInfo], context: &RowContext) -> Vec<R
                 chips.len() - 1
             }
         };
-        let label = if reaction.reaction_type.contains(TONE_MARKER) {
-            glyph
-        } else {
-            reaction_label(&reaction.reaction_type)
-        };
+        let label = glyph;
         let shown = &mut variants[position];
         if shown.len() < MAX_TONE_VARIANTS && !shown.contains(&label) {
             shown.push(label);
@@ -576,6 +567,7 @@ pub struct RowContext {
     pub pending_reactions: PendingReactions,
     pub card_overrides: HashMap<String, CardOverride>,
     pub translation: TranslationContext,
+    pub skin_tone: u8,
 }
 
 fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<ReactionInfo> {
@@ -1178,6 +1170,7 @@ mod tests {
             pending_reactions: HashMap::new(),
             card_overrides: HashMap::new(),
             translation: TranslationContext::default(),
+            skin_tone: 0,
         }
     }
 
@@ -1514,10 +1507,13 @@ mod tests {
             created_at: None,
         };
         let kinds = ["yes-tone2", "👍🏿", "like", "👍🏻", "yes-tone2"];
-        let chips = reaction_chips(&kinds.map(reaction), &context());
+        let mut context = context();
+        context.skin_tone = 3;
+        let chips = reaction_chips(&kinds.map(reaction), &context);
         assert_eq!(chips.len(), 1);
         assert_eq!(chips[0].count, 5);
         assert_eq!(chips[0].label, "👍🏼👍🏿👍");
+        assert_eq!(chips[0].click_glyph, "👍🏽");
     }
 
     #[test]

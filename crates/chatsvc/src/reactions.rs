@@ -6,6 +6,9 @@ const EMOTIONS: &str = include_str!("../assets/emotions.tsv");
 const EMOTICONS: &str = include_str!("../../app/assets/emoticons.tsv");
 const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
 const TONE_MARKER: &str = "-tone";
+const ZERO_WIDTH_JOINER: char = '\u{200d}';
+const VARIATION_SELECTOR: char = '\u{fe0f}';
+const MAX_TONE: u8 = 5;
 
 type Index = HashMap<&'static str, Vec<&'static str>>;
 
@@ -78,11 +81,52 @@ pub fn reaction_keys(glyph: &str) -> Vec<String> {
     }
 }
 
+/// The Teams rule: the modifier goes in once, before the first joiner, otherwise at the end;
+/// a variation selector at that spot is dropped.
+pub fn insert_skin_tone(base: &str, tone: u8) -> String {
+    let Some(modifier) = (1..=MAX_TONE)
+        .contains(&tone)
+        .then(|| char::from_u32(*SKIN_TONES.start() as u32 + u32::from(tone) - 1))
+        .flatten()
+    else {
+        return base.to_owned();
+    };
+    let (head, tail) = base.split_at(base.find(ZERO_WIDTH_JOINER).unwrap_or(base.len()));
+    format!(
+        "{}{modifier}{tail}",
+        head.strip_suffix(VARIATION_SELECTOR).unwrap_or(head)
+    )
+}
+
+/// `yes-tone2` is 👍🏼: the chat service key of a reaction as the glyph Graph would report,
+/// but with the tone Graph drops.
+pub fn reaction_glyph_for_key(key: &str) -> Option<String> {
+    let (base_key, tone) = match key.rsplit_once(TONE_MARKER) {
+        Some((base, tone)) => match tone.parse::<u8>() {
+            Ok(tone) => (base, Some(tone)),
+            Err(_) => (key, None),
+        },
+        None => (key, None),
+    };
+    let base = emotion_glyph(base_key)?;
+    Some(match tone {
+        Some(tone) => insert_skin_tone(base, tone),
+        None => base.to_owned(),
+    })
+}
+
 pub fn emotion_glyph(key: &str) -> Option<&'static str> {
-    index()
-        .iter()
-        .find(|(_, keys)| keys.contains(&key))
-        .map(|(glyph, _)| *glyph)
+    static GLYPHS: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    GLYPHS
+        .get_or_init(|| {
+            EMOTIONS
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .flat_map(|(glyph, keys)| keys.split(' ').map(move |key| (key, glyph)))
+                .collect()
+        })
+        .get(key)
+        .copied()
 }
 
 pub fn emotion_keys(glyph: &str) -> &'static [&'static str] {
@@ -133,6 +177,16 @@ mod tests {
         assert_eq!(reaction_keys("👍🏿"), ["yes-tone5", "like", "yes"]);
         assert_eq!(reaction_keys("👍"), ["like", "yes"]);
         assert_eq!(reaction_key("❤️").as_deref(), Some("heart"));
+    }
+
+    #[test]
+    fn keys_turn_into_glyphs_with_their_tone() {
+        assert_eq!(reaction_glyph_for_key("yes-tone2").as_deref(), Some("👍🏼"));
+        assert_eq!(reaction_glyph_for_key("like").as_deref(), Some("👍"));
+        assert_eq!(reaction_glyph_for_key("heart").as_deref(), Some("❤"));
+        assert_eq!(reaction_glyph_for_key("nope"), None);
+        assert_eq!(insert_skin_tone("🤷\u{200d}♂️", 1), "🤷🏻\u{200d}♂️");
+        assert_eq!(insert_skin_tone("✌️", 3), "✌🏽");
     }
 
     #[test]
