@@ -247,6 +247,7 @@ impl NotificationCenter {
             AppEvent::Sidebar => self.refresh_badge(cx),
             AppEvent::Ring => self.on_rings_changed(cx),
             AppEvent::MeetingReminder => self.on_meeting_reminder(cx),
+            AppEvent::MeetingChime => self.on_meeting_chime(cx),
             AppEvent::Call => self.sync_ringback(cx),
             _ => {}
         }
@@ -563,6 +564,12 @@ impl NotificationCenter {
         }
         self.sync_windows(cx);
         cx.notify();
+    }
+
+    fn on_meeting_chime(&mut self, cx: &mut Context<Self>) {
+        if self.settings.sound && !self.reminders_quiet(cx) && !self.demo_mode {
+            platform::play_meeting_chime();
+        }
     }
 
     pub fn join_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {

@@ -14,6 +14,8 @@ const CHIME_CYCLE_SECONDS: f32 = 2.6;
 const PULSE_NOTES: [f32; 3] = [587.33, 587.33, 587.33];
 const PULSE_NOTE_SECONDS: f32 = 0.26;
 const PULSE_CYCLE_SECONDS: f32 = 2.2;
+const MEETING_NOTES: [f32; 3] = [659.25, 783.99, 1046.5];
+const MEETING_NOTE_SECONDS: f32 = 0.26;
 const RINGBACK_HZ: f32 = 425.;
 const RINGBACK_ON_SECONDS: f32 = 1.;
 const RINGBACK_CYCLE_SECONDS: f32 = 5.;
@@ -72,6 +74,11 @@ impl Ringtone {
 
 pub fn ring_cycle(sample_rate: u32) -> Vec<f32> {
     tone_cycle(sample_rate, &BEEPS, BEEP_SECONDS, CYCLE_SECONDS)
+}
+
+pub fn meeting_chime(sample_rate: u32) -> Vec<f32> {
+    let seconds = MEETING_NOTE_SECONDS * MEETING_NOTES.len() as f32;
+    tone_cycle(sample_rate, &MEETING_NOTES, MEETING_NOTE_SECONDS, seconds)
 }
 
 pub fn ringback_cycle(sample_rate: u32) -> Vec<f32> {
@@ -180,6 +187,18 @@ mod tests {
             Ringtone::Chime.cycle(SAMPLE_RATE),
             Ringtone::Pulse.cycle(SAMPLE_RATE)
         );
+    }
+
+    #[test]
+    fn the_meeting_chime_is_short_quiet_and_audible() {
+        let samples = meeting_chime(SAMPLE_RATE);
+        assert!(samples.len() <= SAMPLE_RATE as usize);
+        assert!(
+            samples
+                .iter()
+                .all(|sample| sample.abs() <= AMPLITUDE + f32::EPSILON)
+        );
+        assert!(samples.iter().any(|sample| sample.abs() > AMPLITUDE * 0.9));
     }
 
     #[test]

@@ -52,7 +52,7 @@ pub use people::{PeopleSections, PersonRow, people_sections};
 pub use share_actions::ZoomStep;
 pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, ShareStage, load_flag, load_strip_width};
 pub use preview::{CameraPreview, preview_backgrounds};
-pub use reminder::{MeetingToasts, subtitle as meeting_subtitle};
+pub use reminder::{MeetingToasts, ReminderPhase, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use stage_split::{
     GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_split,

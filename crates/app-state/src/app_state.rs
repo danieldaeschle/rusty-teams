@@ -69,6 +69,7 @@ pub enum AppEvent {
     LiveMeeting,
     MissedCall(MissedCall),
     MeetingReminder,
+    MeetingChime,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

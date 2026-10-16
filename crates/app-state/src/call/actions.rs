@@ -1283,7 +1283,13 @@ impl AppState {
     }
 
     pub fn refresh_live_meeting(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
-        if self.mode.demo || !self.watches_live_meeting(conversation_id) {
+        if self.watches_live_meeting(conversation_id) {
+            self.fetch_live_meeting(conversation_id, cx);
+        }
+    }
+
+    pub fn fetch_live_meeting(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if self.mode.demo {
             return;
         }
         let Some(launcher) = self.call_launcher.clone() else {
