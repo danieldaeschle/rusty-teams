@@ -403,7 +403,7 @@ impl Render for CompletionMenu {
                 .items_start()
                 .when(vertical_layout, |this| this.flex_col())
                 .child(
-                    editor_popover("completion-menu", cx)
+                    editor_popover("completion-menu", window, cx)
                         .max_w(max_width)
                         .min_w(px(120.))
                         .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT)),
@@ -419,7 +419,7 @@ impl Render for CompletionMenu {
 
                     this.child(
                         div().child(
-                            editor_popover("completion-menu", cx)
+                            editor_popover("completion-menu", window, cx)
                                 .w(configured_max)
                                 .px_2()
                                 .child(render_markdown("doc", doc, window, cx)),

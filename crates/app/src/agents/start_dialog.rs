@@ -20,7 +20,7 @@ use super::{
     mcp_bridge, message_context, raise_notice, runs_handle, start_run, start_run_when_mcp_ready,
 };
 use crate::app_state::AppState;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::{icon, symbol};
 
 const CARD_WIDTH: f32 = 520.;
@@ -661,7 +661,7 @@ impl Render for StartDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::popup())
+                    .dialog_surface()
                     .text_color(theme::text())
                     .occlude()
                     .capture_key_down(cx.listener(Self::on_key_down))

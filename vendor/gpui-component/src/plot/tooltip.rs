@@ -587,7 +587,7 @@ impl RenderOnce for Tooltip {
                 this.absolute()
                     .opacity(progress)
                     .when(min_w_unset, |c| c.min_w(px(150.)))
-                    .popover_style(cx)
+                    .popover_style(window, cx)
                     .p_2()
                     .map(|c| {
                         if cursor.x < within.width * 0.5 {

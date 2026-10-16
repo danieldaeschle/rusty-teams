@@ -7,7 +7,7 @@ use gpui_kit::*;
 
 use super::widgets::{Corner, corner_badge};
 use crate::emoticons::{SKIN_TONE_COUNT, with_tone};
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const CHOICE_SIZE: f32 = 32.;
 const CHOICE_GLYPH_SIZE: f32 = 20.;
@@ -70,10 +70,7 @@ pub fn tone_choices(
                     .gap(px(PANEL_GAP))
                     .p(px(PANEL_PADDING))
                     .rounded(px(8.))
-                    .bg(theme::popup())
-                    .border_1()
-                    .border_color(theme::border_strong())
-                    .shadow_md()
+                    .nested_flyout_surface()
                     .occlude()
                     .on_mouse_down_out(move |_, window, cx| dismiss(window, cx))
                     .children(choices),

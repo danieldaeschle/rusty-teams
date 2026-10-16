@@ -16,7 +16,7 @@ use super::transfer_picker::{PickerMode, TransferPicker};
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{BackgroundPick, CallModel, RecordAction, RecordingChip};
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const STAGE_RADIUS: f32 = 12.;
 const THUMBNAIL_WIDTH: f32 = 64.;
@@ -242,7 +242,7 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
                     .p(px(20.))
                     .gap(px(12.))
                     .rounded(px(10.))
-                    .bg(theme::popup())
+                    .dialog_surface()
                     .text_color(theme::text())
                     .occlude()
                     .child(

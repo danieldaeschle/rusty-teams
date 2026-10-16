@@ -20,7 +20,7 @@ use crate::data::{Directory, is_one_on_one};
 use crate::format;
 use crate::fuzzy;
 use crate::sidebar_model::{AvatarSpec, avatar_for};
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const MAX_RESULTS: usize = 9;
 const MAX_RESULTS_WITH_MESSAGES: usize = 5;
@@ -488,7 +488,7 @@ impl Render for Switcher {
                     .w(px(CARD_WIDTH))
                     .max_h(px(640.))
                     .rounded(px(10.))
-                    .bg(theme::popup())
+                    .flyout_surface()
                     .overflow_hidden()
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .on_key_down(cx.listener(Self::on_key_down))

@@ -121,7 +121,7 @@ impl Render for CallMiniView {
             .border_2()
             .border_color(border)
             .text_color(theme::text())
-            .shadow_lg()
+            .shadow(theme::flyout_shadow())
             .cursor_pointer()
             .on_click(move |_, _, cx| {
                 open_app.update(cx, |state, cx| state.show_call(true, cx));

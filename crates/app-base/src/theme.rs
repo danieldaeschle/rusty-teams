@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use gpui_kit::component::elevation::{self, Elevation, ElevationTokens};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
@@ -19,6 +20,8 @@ const SURFACE_RAISED: u32 = 0x232325;
 const ROW_HOVER: u32 = 0x1c1c1e;
 const POPUP: u32 = 0x2c2c2f;
 const POPUP_HOVER: u32 = 0x38383c;
+const POPUP_NESTED: u32 = 0x3a3a3e;
+const POPUP_NESTED_HOVER: u32 = 0x47474c;
 const REPLY_SURFACE: u32 = 0x19191b;
 const BORDER: u32 = 0x262628;
 const BORDER_STRONG: u32 = 0x3f3f42;
@@ -141,7 +144,68 @@ pub fn apply(cx: &mut App) {
         colors.list_hover = color(ROW_HOVER);
         colors.list_active = color(SURFACE_RAISED);
     });
+    cx.set_global(elevation_tokens());
 }
+
+fn elevation_tokens() -> ElevationTokens {
+    let flyout = Elevation {
+        fill: color(POPUP),
+        hover: color(POPUP_HOVER),
+        shadow: elevation::shadow16(),
+    };
+    let nested_flyout = Elevation {
+        fill: color(POPUP_NESTED),
+        hover: color(POPUP_NESTED_HOVER),
+        shadow: elevation::shadow16(),
+    };
+    ElevationTokens {
+        flyouts: vec![flyout.clone(), nested_flyout],
+        dialog: Elevation {
+            shadow: elevation::shadow64(),
+            ..flyout.clone()
+        },
+        toast: Elevation {
+            shadow: elevation::shadow8(),
+            ..flyout
+        },
+    }
+}
+
+pub fn flyout_shadow() -> Vec<BoxShadow> {
+    elevation::shadow16()
+}
+
+pub fn dialog_shadow() -> Vec<BoxShadow> {
+    elevation::shadow64()
+}
+
+pub fn toast_shadow() -> Vec<BoxShadow> {
+    elevation::shadow8()
+}
+
+pub fn popup_nested() -> Hsla {
+    color(POPUP_NESTED)
+}
+
+pub trait ElevatedSurface: Styled + Sized {
+    fn flyout_surface(self) -> Self {
+        self.bg(popup()).shadow(flyout_shadow())
+    }
+
+    fn nested_flyout_surface(self) -> Self {
+        self.bg(popup_nested()).shadow(flyout_shadow())
+    }
+
+    fn dialog_surface(self) -> Self {
+        self.bg(popup()).shadow(dialog_shadow())
+    }
+
+    fn toast_surface(self) -> Self {
+        self.bg(popup()).shadow(toast_shadow())
+    }
+}
+
+impl<T: Styled + Sized> ElevatedSurface for T {}
 
 pub fn font_family() -> SharedString {
     FONT_FAMILY.into()
@@ -341,11 +405,32 @@ pub fn avatar_palette_len() -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{avatar_color, avatar_palette_len};
+    use super::{POPUP, POPUP_HOVER, POPUP_NESTED, avatar_color, avatar_palette_len, color, elevation_tokens};
 
     #[test]
     fn avatar_colors_wrap_around_the_palette() {
         assert_eq!(avatar_color(0), avatar_color(avatar_palette_len()));
         assert_ne!(avatar_color(0), avatar_color(1));
+    }
+
+    #[test]
+    fn flyout_over_a_dialog_takes_a_lighter_fill_than_the_dialog() {
+        let tokens = elevation_tokens();
+        assert_eq!(tokens.dialog.fill, color(POPUP));
+        assert_eq!(tokens.flyout_at(0).fill, color(POPUP));
+        let nested = tokens.flyout_at(1);
+        assert_eq!(nested.fill, color(POPUP_NESTED));
+        assert!(nested.fill.l > tokens.dialog.fill.l);
+        assert!(nested.hover.l > nested.fill.l);
+        assert_ne!(nested.fill, color(POPUP_HOVER));
+    }
+
+    #[test]
+    fn fluent_shadow_blur_is_halved_for_gpui() {
+        let shadow = super::flyout_shadow();
+        assert_eq!(shadow[0].blur_radius, gpui_kit::px(1.));
+        assert_eq!(shadow[1].offset.y, gpui_kit::px(8.));
+        assert_eq!(shadow[1].blur_radius, gpui_kit::px(8.));
+        assert_eq!(super::dialog_shadow()[1].blur_radius, gpui_kit::px(32.));
     }
 }

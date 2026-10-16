@@ -271,7 +271,7 @@ impl Render for TransferPicker {
                     .border_1()
                     .border_color(theme::border_strong())
                     .text_color(theme::text())
-                    .shadow_lg()
+                    .shadow(theme::dialog_shadow())
                     .occlude()
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(

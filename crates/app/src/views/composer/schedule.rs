@@ -10,7 +10,7 @@ use crate::schedule_time::{
     DayChoice, Preset, PresetKind, ScheduleError, custom_time, day_choices, default_custom_time,
     format_time, parse_time, presets, step_time, validate,
 };
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::symbol;
 
 const MENU_WIDTH: f32 = 190.;
@@ -317,7 +317,7 @@ impl Composer {
                 }))
                 .p(px(4.))
                 .rounded(px(10.))
-                .bg(theme::popup())
+                .flyout_surface()
                 .occlude()
                 .on_mouse_down_out(
                     cx.listener(|this, _, window, cx| this.close_schedule(window, cx)),

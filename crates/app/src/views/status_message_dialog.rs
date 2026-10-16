@@ -15,7 +15,7 @@ use teams_core::StatusNote;
 use super::widgets::symbol;
 use crate::app_state::AppState;
 use crate::own_status::{NOTE_DURATIONS, NOTE_LIMIT, NoteDuration, clamp_note};
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const CARD_WIDTH: f32 = 440.;
 const CARD_RADIUS: f32 = 10.;
@@ -266,7 +266,7 @@ impl Render for StatusMessageDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::popup())
+                    .dialog_surface()
                     .text_color(theme::text())
                     .occlude()
                     .capture_key_down(cx.listener(Self::on_key_down))

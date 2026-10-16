@@ -704,6 +704,7 @@ where
                             bounds,
                             footer_el,
                             dismiss_handler,
+                            window,
                             cx,
                         ))
                         .with_priority(gpui_base::POPUP_PRIORITY),
@@ -1040,6 +1041,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
     bounds: Bounds<Pixels>,
     footer_el: Option<AnyElement>,
     dismiss_handler: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    window: &Window,
     cx: &mut App,
 ) -> AnyElement {
     let has_footer = footer_el.is_some();
@@ -1053,7 +1055,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
                 Length::Auto => this.w(bounds.size.width),
                 Length::Definite(w) => this.w(w),
             })
-            .popover_style(cx)
+            .popover_style(window, cx)
             .child(
                 List::new(list)
                     .when_some(search_placeholder, |this, placeholder| {
