@@ -309,29 +309,6 @@ pub fn resume_invocation(
     )
 }
 
-pub fn fork_invocation(
-    profile: &AgentProfile,
-    action: &AgentAction,
-    prompt: &str,
-    original_session_id: &str,
-    fork_session_id: &str,
-    mcp: Option<&McpEndpoint>,
-    mcp_config_directory: Option<&Path>,
-) -> Result<RunPlan, InvocationError> {
-    if !is_plain_session_id(original_session_id) {
-        return Err(InvocationError::InvalidSessionId);
-    }
-    resume_with_flag(
-        profile,
-        action,
-        prompt,
-        fork_session_id,
-        &format!("--resume {original_session_id} --fork-session {SESSION_FLAG}"),
-        mcp,
-        mcp_config_directory,
-    )
-}
-
 fn resume_with_flag(
     profile: &AgentProfile,
     action: &AgentAction,
@@ -768,46 +745,6 @@ mod tests {
                 .ends_with(&["--permission-mode".to_string(), "auto".to_string()])
         );
         assert_eq!(plan.stop, None);
-    }
-
-    #[test]
-    fn fork_resumes_the_original_into_a_fresh_session_id_and_keeps_the_stop() {
-        let action = AgentAction::answer_this("claude");
-        let plan = fork_invocation(
-            &AgentProfile::claude_wsl(),
-            &action,
-            "go on",
-            "old-6",
-            "new-6",
-            None,
-            None,
-        )
-        .unwrap();
-        assert!(plan.run.args.windows(5).any(|window| window
-            == [
-                "--resume",
-                "old-6",
-                "--fork-session",
-                "--session-id",
-                "new-6"
-            ]));
-        assert_eq!(plan.run.stdin.as_deref(), Some("go on"));
-        assert_eq!(
-            plan.stop.unwrap().args,
-            ["-e", "sh", "-c", APP_STOP_SCRIPT, "sh", "new-6"].map(String::from)
-        );
-        assert!(
-            fork_invocation(
-                &AgentProfile::claude_wsl(),
-                &action,
-                "x",
-                "bad id; rm",
-                "new",
-                None,
-                None
-            )
-            .is_err()
-        );
     }
 
     #[test]

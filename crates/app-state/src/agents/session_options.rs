@@ -1,19 +1,17 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use agents::{Environment, ExternalSession};
+use agents::{DesktopSession, Environment, RunningSession};
 use chrono::{DateTime, Local, Utc};
 use mcp::install::{Homes, Location};
 
 use super::message_context;
-use super::runs::{AgentRun, RunState};
+use super::runs::{AgentRun, InboxTarget, RunState};
 use crate::agent_api::agent_homes;
 use crate::app_state::AppState;
 use crate::notice::truncated;
 
 pub const SESSION_LIMIT: usize = 10;
-const ACTIVE_WINDOW: Duration = Duration::from_secs(120);
 const LABEL_CHARS: usize = 60;
 const WEEK_DAYS: i64 = 7;
 
@@ -24,7 +22,7 @@ pub struct SessionOption {
     pub label: String,
     pub meta: String,
     pub running: bool,
-    pub fork: bool,
+    pub inbox: Option<InboxTarget>,
 }
 
 pub fn relative_age(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
@@ -75,39 +73,83 @@ pub fn run_options(runs: &[&AgentRun], state: &AppState, now: DateTime<Utc>) -> 
                 ),
                 meta: run_meta(run, now),
                 running: run.is_running(),
-                fork: false,
+                inbox: None,
             }
         })
         .collect()
 }
 
-pub fn external_options(
-    sessions: &[ExternalSession],
-    working_dir: &str,
+pub fn merged_options(
+    desktop: &[DesktopSession],
+    running: &[RunningSession],
+    sessions_dir: &Path,
+    known_session_ids: &HashSet<String>,
     now: DateTime<Utc>,
 ) -> Vec<SessionOption> {
-    sessions
-        .iter()
-        .map(|session| {
-            let modified = DateTime::<Utc>::from(session.modified);
-            let active = session.live
-                || modified > now
-                || (now - modified)
-                    .to_std()
-                    .is_ok_and(|age| age < ACTIVE_WINDOW);
+    let mut seen = known_session_ids.clone();
+    let mut entries: Vec<(SessionOption, i64)> = Vec::new();
+    for session in running {
+        if !seen.insert(session.session_id.clone()) {
+            continue;
+        }
+        let desktop_session = desktop
+            .iter()
+            .find(|candidate| candidate.session_id == session.session_id);
+        let title = desktop_session
+            .map(|candidate| candidate.title.clone())
+            .filter(|title| !title.is_empty())
+            .or_else(|| session.name.clone())
+            .unwrap_or_else(|| session.session_id.clone());
+        let working_dir = desktop_session
+            .map(|candidate| candidate.working_dir.clone())
+            .filter(|working_dir| !working_dir.is_empty())
+            .unwrap_or_else(|| session.working_dir.clone());
+        entries.push((
             SessionOption {
                 session_id: session.session_id.clone(),
-                working_dir: working_dir.to_owned(),
+                working_dir,
+                label: truncated(&title, LABEL_CHARS),
+                meta: "Running".to_owned(),
+                running: true,
+                inbox: Some(InboxTarget {
+                    session: session.clone(),
+                    sessions_dir: sessions_dir.to_path_buf(),
+                }),
+            },
+            desktop_session.map_or(0, |candidate| candidate.last_activity_millis),
+        ));
+    }
+    for session in desktop {
+        if !seen.insert(session.session_id.clone()) {
+            continue;
+        }
+        let activity = DateTime::<Utc>::from_timestamp_millis(session.last_activity_millis);
+        entries.push((
+            SessionOption {
+                session_id: session.session_id.clone(),
+                working_dir: session.working_dir.clone(),
                 label: truncated(&session.title, LABEL_CHARS),
-                meta: if active {
-                    "Active elsewhere - sends to a copy".to_owned()
-                } else {
-                    format!("Idle - {}", relative_age(now, modified))
-                },
+                meta: activity.map_or_else(
+                    || "Idle".to_owned(),
+                    |activity| format!("Idle - {}", relative_age(now, activity)),
+                ),
                 running: false,
-                fork: active,
-            }
-        })
+                inbox: None,
+            },
+            session.last_activity_millis,
+        ));
+    }
+    entries.sort_by(|left, right| {
+        right
+            .0
+            .running
+            .cmp(&left.0.running)
+            .then(right.1.cmp(&left.1))
+    });
+    entries
+        .into_iter()
+        .take(SESSION_LIMIT)
+        .map(|(option, _)| option)
         .collect()
 }
 
@@ -130,66 +172,56 @@ fn pick_home<'a>(environment: &Environment, homes: &'a Homes) -> Option<&'a Path
         .map(|(_, home)| home)
 }
 
-fn resolve_working_dir(environment: &Environment, working_dir: &str, home: &Path) -> String {
-    let home_text = home.to_string_lossy();
-    let home_text = match environment {
-        Environment::Host => home_text.into_owned(),
-        Environment::Wsl { .. } => agents::linux_path(&home_text),
-    };
-    match working_dir.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
-            format!("{home_text}{rest}")
-        }
-        _ => working_dir.to_owned(),
-    }
+fn registry_dir(environment: &Environment, homes: &Homes) -> Option<PathBuf> {
+    Some(
+        pick_home(environment, homes)?
+            .join(".claude")
+            .join("sessions"),
+    )
 }
 
-fn claude_dirs(
-    environment: &Environment,
-    working_dir: &str,
-    homes: &Homes,
-) -> Option<(PathBuf, PathBuf)> {
-    let home = pick_home(environment, homes)?;
-    let resolved = resolve_working_dir(environment, working_dir, home);
-    let claude = home.join(".claude");
-    Some((
-        agents::resolve_project_dir(&claude.join("projects"), &resolved),
-        claude.join("sessions"),
-    ))
+fn desktop_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("Claude"))
 }
 
 #[derive(Default)]
-pub struct ExternalLoad {
-    pub sessions: Vec<ExternalSession>,
-    pub live_session_ids: HashSet<String>,
+pub struct SessionLoad {
+    pub desktop: Vec<DesktopSession>,
+    pub running: Vec<RunningSession>,
+    pub sessions_dir: PathBuf,
 }
 
-pub fn load_external(
-    environment: &Environment,
-    working_dir: &str,
-    known_session_ids: &HashSet<String>,
-    demo: bool,
-) -> ExternalLoad {
-    let Some((project_dir, sessions_dir)) =
-        claude_dirs(environment, working_dir, &agent_homes(demo))
-    else {
-        return ExternalLoad::default();
+pub fn load_sessions(environment: &Environment, demo: bool) -> SessionLoad {
+    let Some(sessions_dir) = registry_dir(environment, &agent_homes(demo)) else {
+        return SessionLoad::default();
     };
-    let live = agents::live_session_names(&sessions_dir);
-    ExternalLoad {
-        sessions: agents::scan_external_sessions(
-            &project_dir,
-            &live,
-            known_session_ids,
-            SESSION_LIMIT,
-        ),
-        live_session_ids: live.into_keys().collect(),
+    SessionLoad {
+        desktop: if demo {
+            Vec::new()
+        } else {
+            desktop_dir()
+                .map(|directory| agents::desktop_sessions(&directory))
+                .unwrap_or_default()
+        },
+        running: agents::running_sessions(&sessions_dir),
+        sessions_dir,
     }
 }
 
-pub fn mark_live_runs(options: &mut [SessionOption], live_session_ids: &HashSet<String>) {
-    for option in options {
-        option.fork = !option.running && live_session_ids.contains(&option.session_id);
+pub fn attach_inboxes(options: &mut [SessionOption], load: &SessionLoad) {
+    for option in options.iter_mut().filter(|option| !option.running) {
+        if let Some(session) = load
+            .running
+            .iter()
+            .find(|session| session.session_id == option.session_id)
+        {
+            option.running = true;
+            option.meta = "Running".to_owned();
+            option.inbox = Some(InboxTarget {
+                session: session.clone(),
+                sessions_dir: load.sessions_dir.clone(),
+            });
+        }
     }
 }
 
@@ -205,20 +237,9 @@ pub fn default_wsl_distro(demo: bool) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use chrono::TimeZone;
 
     use super::*;
-
-    fn external(age: Duration) -> ExternalSession {
-        ExternalSession {
-            session_id: "abc".to_owned(),
-            title: "Fix the build".to_owned(),
-            modified: SystemTime::now() - age,
-            live: false,
-        }
-    }
 
     #[test]
     fn relative_age_uses_minutes_hours_weekday_and_date() {
@@ -229,51 +250,6 @@ mod tests {
         assert_eq!(ago(3 * 3600), "3h");
         assert_eq!(ago(2 * 86400).len(), 3);
         assert!(ago(10 * 86400).contains(char::is_whitespace));
-    }
-
-    #[test]
-    fn external_sessions_are_active_under_two_minutes_and_fork() {
-        let now = Utc::now();
-        let options = external_options(
-            &[
-                external(Duration::from_secs(30)),
-                external(Duration::from_secs(3 * 3600 + 30)),
-            ],
-            "/repo",
-            now,
-        );
-        assert_eq!(options[0].meta, "Active elsewhere - sends to a copy");
-        assert!(options[0].fork);
-        assert_eq!(options[1].meta, "Idle - 3h");
-        assert!(!options[1].fork);
-        assert_eq!(options[1].label, "Fix the build");
-        assert_eq!(options[1].working_dir, "/repo");
-        let live = ExternalSession {
-            live: true,
-            ..external(Duration::from_secs(3 * 3600))
-        };
-        let options = external_options(&[live], "/repo", now);
-        assert_eq!(options[0].meta, "Active elsewhere - sends to a copy");
-        assert!(options[0].fork);
-    }
-
-    #[test]
-    fn app_sessions_open_in_a_terminal_are_forked_unless_running_here() {
-        let option = |session_id: &str, running: bool| SessionOption {
-            session_id: session_id.to_owned(),
-            working_dir: "/repo".to_owned(),
-            label: String::new(),
-            meta: String::new(),
-            running,
-            fork: false,
-        };
-        let mut options = vec![option("a", false), option("b", false), option("c", true)];
-        mark_live_runs(
-            &mut options,
-            &HashSet::from(["a".to_owned(), "c".to_owned()]),
-        );
-        let forks: Vec<bool> = options.iter().map(|option| option.fork).collect();
-        assert_eq!(forks, [true, false, false]);
     }
 
     #[test]
@@ -291,7 +267,7 @@ mod tests {
         sent.sent_to = Some(crate::agents::runs::SessionTarget {
             session_id: sent.session_id.clone(),
             working_dir: "~".to_owned(),
-            fork: false,
+            inbox: None,
         });
         let options = run_options(&[&created, &never_started, &sent], &state, Utc::now());
         let ids: Vec<&str> = options
@@ -326,35 +302,94 @@ mod tests {
         assert_eq!(pick_home(&wsl(Some("Debian")), &homes), None);
     }
 
-    #[test]
-    fn a_wsl_home_encodes_the_linux_path_of_the_working_dir() {
-        let homes = Homes {
-            entries: vec![(
-                Location::Wsl {
-                    distro: "Ubuntu".to_owned(),
-                },
-                PathBuf::from(r"\\wsl.localhost\Ubuntu\home\daniel"),
-            )],
-        };
-        let environment = Environment::Wsl { distro: None };
-        let (directory, sessions) = claude_dirs(&environment, "~/Projects/x", &homes).unwrap();
-        assert!(sessions.ends_with(".claude/sessions"));
-        assert_eq!(
-            directory.file_name().unwrap().to_string_lossy(),
-            "-home-daniel-Projects-x"
-        );
-        assert_eq!(
-            resolve_working_dir(&environment, "/srv/app", Path::new("/home/daniel")),
-            "/srv/app"
-        );
+    fn desktop(session_id: &str, last_activity_millis: i64) -> DesktopSession {
+        DesktopSession {
+            session_id: session_id.to_owned(),
+            working_dir: format!("/srv/{session_id}"),
+            title: format!("Title {session_id}"),
+            last_activity_millis,
+        }
+    }
+
+    fn running(session_id: &str) -> RunningSession {
+        RunningSession {
+            session_id: session_id.to_owned(),
+            name: Some(format!("Name {session_id}")),
+            working_dir: "/registry".to_owned(),
+            socket_path: Some("/run/s.sock".to_owned()),
+            process_id: 7,
+        }
+    }
+
+    fn ids(options: &[SessionOption]) -> Vec<&str> {
+        options
+            .iter()
+            .map(|option| option.session_id.as_str())
+            .collect()
     }
 
     #[test]
-    fn a_host_home_expands_the_tilde_before_encoding() {
-        let homes = Homes {
-            entries: vec![(Location::Native, PathBuf::from("/home/daniel"))],
+    fn running_sessions_come_first_then_the_newest_activity() {
+        let options = merged_options(
+            &[
+                desktop("old", 1_000),
+                desktop("live", 500),
+                desktop("new", 9_000),
+            ],
+            &[running("live"), running("registry-only")],
+            Path::new("/sessions"),
+            &HashSet::new(),
+            Utc::now(),
+        );
+        assert_eq!(ids(&options), ["live", "registry-only", "new", "old"]);
+        assert!(options[0].running && options[0].inbox.is_some());
+        assert_eq!(options[0].label, "Title live");
+        assert_eq!(options[0].working_dir, "/srv/live");
+        assert_eq!(options[1].label, "Name registry-only");
+        assert_eq!(options[1].working_dir, "/registry");
+        assert!(!options[2].running && options[2].inbox.is_none());
+    }
+
+    #[test]
+    fn known_run_ids_are_excluded_and_the_limit_applies() {
+        let sessions: Vec<DesktopSession> = (0..15)
+            .map(|index| desktop(&format!("s{index}"), index))
+            .collect();
+        let known = HashSet::from(["s14".to_owned(), "live".to_owned()]);
+        let options = merged_options(
+            &sessions,
+            &[running("live")],
+            Path::new("/sessions"),
+            &known,
+            Utc::now(),
+        );
+        assert_eq!(options.len(), SESSION_LIMIT);
+        assert_eq!(options[0].session_id, "s13");
+        assert!(!ids(&options).contains(&"live"));
+    }
+
+    #[test]
+    fn a_session_known_to_the_registry_gets_an_inbox_on_a_run_option() {
+        let option = |session_id: &str, running: bool| SessionOption {
+            session_id: session_id.to_owned(),
+            working_dir: "/repo".to_owned(),
+            label: String::new(),
+            meta: String::new(),
+            running,
+            inbox: None,
         };
-        let (directory, _) = claude_dirs(&Environment::Host, "~", &homes).unwrap();
-        assert!(directory.ends_with(".claude/projects/-home-daniel"));
+        let mut options = vec![option("a", false), option("b", false), option("c", true)];
+        let load = SessionLoad {
+            desktop: Vec::new(),
+            running: vec![running("a"), running("c")],
+            sessions_dir: PathBuf::from("/sessions"),
+        };
+        attach_inboxes(&mut options, &load);
+        let inboxes: Vec<bool> = options
+            .iter()
+            .map(|option| option.inbox.is_some())
+            .collect();
+        assert_eq!(inboxes, [true, false, false]);
+        assert!(options[0].running);
     }
 }

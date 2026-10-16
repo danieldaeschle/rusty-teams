@@ -13,7 +13,7 @@ use gpui_kit::*;
 
 use super::runs::{SessionTarget, StartOptions, StartRequest};
 use super::session_options::{
-    SessionOption, default_wsl_distro, external_options, load_external, mark_live_runs, run_options,
+    SessionOption, attach_inboxes, default_wsl_distro, load_sessions, merged_options, run_options,
 };
 use super::start_dialog_pickers::{MenuPart, MenuRow, locked_select, picker_row, select};
 use super::{
@@ -62,7 +62,6 @@ pub struct StartDialog {
     run_sessions: Vec<SessionOption>,
     external_sessions: Vec<SessionOption>,
     selected_session: Option<SessionOption>,
-    external_generation: u64,
 }
 
 impl EventEmitter<StartDialogEvent> for StartDialog {}
@@ -138,41 +137,36 @@ impl StartDialog {
             run_sessions,
             external_sessions: Vec::new(),
             selected_session: None,
-            external_generation: 0,
             action,
         };
-        dialog.reload_external(cx);
+        dialog.load_external(cx);
         dialog
     }
 
-    fn reload_external(&mut self, cx: &mut Context<Self>) {
-        self.external_sessions.clear();
+    fn load_external(&mut self, cx: &mut Context<Self>) {
         if !self.scans_external {
             return;
         }
-        self.external_generation += 1;
-        let generation = self.external_generation;
         let environment = self.environment.clone();
-        let working_dir = self.working_dir.clone();
         let known_session_ids = runs_handle(cx)
             .map(|runs| runs.read(cx).session_ids())
             .unwrap_or_default();
         let demo = crate::agent_api::is_demo(cx);
         cx.spawn(async move |this, cx| {
-            let scanned_dir = working_dir.clone();
             let loaded = cx
                 .background_executor()
-                .spawn(async move {
-                    load_external(&environment, &scanned_dir, &known_session_ids, demo)
-                })
+                .spawn(async move { load_sessions(&environment, demo) })
                 .await;
             this.update(cx, |this, cx| {
-                if this.external_generation == generation {
-                    this.external_sessions =
-                        external_options(&loaded.sessions, &working_dir, Utc::now());
-                    mark_live_runs(&mut this.run_sessions, &loaded.live_session_ids);
-                    cx.notify();
-                }
+                this.external_sessions = merged_options(
+                    &loaded.desktop,
+                    &loaded.running,
+                    &loaded.sessions_dir,
+                    &known_session_ids,
+                    Utc::now(),
+                );
+                attach_inboxes(&mut this.run_sessions, &loaded);
+                cx.notify();
             })
             .ok();
         })
@@ -198,10 +192,7 @@ impl StartDialog {
     }
 
     fn choose_working_dir(&mut self, working_dir: String, cx: &mut Context<Self>) {
-        if self.working_dir != working_dir {
-            self.working_dir = working_dir;
-            self.reload_external(cx);
-        }
+        self.working_dir = working_dir;
         cx.notify();
     }
 
@@ -262,7 +253,7 @@ impl StartDialog {
                 session: Some(SessionTarget {
                     session_id: session.session_id.clone(),
                     working_dir: session.working_dir.clone(),
-                    fork: session.fork,
+                    inbox: session.inbox.clone(),
                 }),
             },
             None => StartOptions {
@@ -411,10 +402,7 @@ impl StartDialog {
         }
         if !self.external_sessions.is_empty() {
             parts.push(MenuPart::Separator);
-            parts.push(MenuPart::Header(format!(
-                "Other sessions in {}",
-                self.working_dir
-            )));
+            parts.push(MenuPart::Header("Other sessions".to_owned()));
             parts.extend(self.external_sessions.iter().map(row));
         }
         parts

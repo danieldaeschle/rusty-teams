@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
+
 const TITLE_READ_LIMIT: u64 = 1024 * 1024;
 const PROJECT_DIR_NAME_LIMIT: usize = 200;
 
@@ -64,16 +66,29 @@ fn proc_root(sessions_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-pub fn live_session_names(sessions_dir: &Path) -> HashMap<String, Option<String>> {
-    live_session_names_in(sessions_dir, proc_root(sessions_dir).as_deref())
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunningSession {
+    pub session_id: String,
+    pub name: Option<String>,
+    pub working_dir: String,
+    pub socket_path: Option<String>,
+    pub process_id: u32,
 }
 
-fn live_session_names_in(
-    sessions_dir: &Path,
-    proc_root: Option<&Path>,
-) -> HashMap<String, Option<String>> {
+pub fn running_sessions(sessions_dir: &Path) -> Vec<RunningSession> {
+    running_sessions_in(sessions_dir, proc_root(sessions_dir).as_deref())
+}
+
+pub fn live_session_names(sessions_dir: &Path) -> HashMap<String, Option<String>> {
+    running_sessions(sessions_dir)
+        .into_iter()
+        .map(|session| (session.session_id, session.name))
+        .collect()
+}
+
+fn running_sessions_in(sessions_dir: &Path, proc_root: Option<&Path>) -> Vec<RunningSession> {
     let Ok(entries) = std::fs::read_dir(sessions_dir) else {
-        return HashMap::new();
+        return Vec::new();
     };
     let checkable_root = proc_root.filter(|root| root.is_dir());
     entries
@@ -88,13 +103,30 @@ fn live_session_names_in(
         .filter_map(|entry| {
             let value: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(entry.path()).ok()?).ok()?;
-            let session_id = value["sessionId"].as_str()?.to_owned();
-            let name = value["name"]
-                .as_str()
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned);
-            Some((session_id, name))
+            let text = |key: &str| {
+                value[key]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_owned)
+            };
+            let process_id = entry
+                .path()
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse().ok())
+                .or_else(|| {
+                    value["pid"]
+                        .as_u64()
+                        .and_then(|pid| u32::try_from(pid).ok())
+                })?;
+            Some(RunningSession {
+                session_id: value["sessionId"].as_str()?.to_owned(),
+                name: text("name"),
+                working_dir: text("cwd").unwrap_or_default(),
+                socket_path: text("messagingSocketPath"),
+                process_id,
+            })
         })
         .collect()
 }
@@ -465,6 +497,40 @@ mod tests {
         assert_eq!(sessions[9].session_id, id(9));
     }
 
+    fn names(sessions: Vec<RunningSession>) -> HashMap<String, Option<String>> {
+        sessions
+            .into_iter()
+            .map(|session| (session.session_id, session.name))
+            .collect()
+    }
+
+    #[test]
+    fn running_sessions_carry_their_socket_directory_and_process_id() {
+        let sessions_dir = tempfile::tempdir().unwrap();
+        let proc_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(proc_root.path().join("205357")).unwrap();
+        std::fs::write(
+            sessions_dir.path().join("205357.json"),
+            r#"{"pid":205357,"sessionId":"abc","name":" Review ","cwd":"/srv/app","status":"busy","messagingSocketPath":"/run/user/1000/cc-socks/205357.sock"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sessions_dir.path().join("999.json"),
+            r#"{"pid":999,"sessionId":"dead","cwd":"/srv/gone"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            running_sessions_in(sessions_dir.path(), Some(proc_root.path())),
+            [RunningSession {
+                session_id: "abc".to_owned(),
+                name: Some("Review".to_owned()),
+                working_dir: "/srv/app".to_owned(),
+                socket_path: Some("/run/user/1000/cc-socks/205357.sock".to_owned()),
+                process_id: 205357,
+            }]
+        );
+    }
+
     #[test]
     fn live_sessions_need_a_running_pid_and_use_their_name_as_title() {
         let sessions_dir = tempfile::tempdir().unwrap();
@@ -482,11 +548,14 @@ mod tests {
         file(222, &id(2), "");
         file(333, &id(3), "Dead one");
         std::fs::write(sessions_dir.path().join("444.json"), "garbage").unwrap();
-        let live = live_session_names_in(sessions_dir.path(), Some(proc_root.path()));
+        let live = names(running_sessions_in(
+            sessions_dir.path(),
+            Some(proc_root.path()),
+        ));
         assert_eq!(live.len(), 2);
         assert!(!live.contains_key(&id(3)));
         assert_eq!(
-            live_session_names_in(sessions_dir.path(), Some(Path::new("/nonexistent"))).len(),
+            running_sessions_in(sessions_dir.path(), Some(Path::new("/nonexistent"))).len(),
             3
         );
         let directory = tempfile::tempdir().unwrap();

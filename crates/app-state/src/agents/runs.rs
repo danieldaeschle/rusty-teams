@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use agents::{
     AgentAction, AgentProfile, AgentSettings, McpEndpoint, RunEvent, RunOutcome, RunStatus,
-    RunUpdate,
+    RunUpdate, RunningSession,
 };
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
@@ -29,6 +30,8 @@ const PROGRESS_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const RESUME_PARALLEL_LIMIT: usize = 3;
 const QUEUED_STEP: &str = "Queued";
 const OPENED_NOTICE: &str = "Session opened in a terminal - send cancelled";
+const DELIVERED_TEXT: &str = "The reply arrives as a Teams draft.";
+const RESUMING_STEP: &str = "Session ended - resuming it";
 const RESUMED_STEP: &str = "Resumed after restart";
 const RESUME_PROMPT: &str = "The app was restarted. Continue where you stopped.";
 
@@ -197,7 +200,14 @@ fn first_line(text: &str) -> &str {
 pub struct SessionTarget {
     pub session_id: String,
     pub working_dir: String,
-    pub fork: bool,
+    #[serde(default)]
+    pub inbox: Option<InboxTarget>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InboxTarget {
+    pub session: RunningSession,
+    pub sessions_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -221,15 +231,6 @@ fn plan_for(
             profile,
             action,
             prompt,
-            session_id,
-            endpoint,
-            directory.as_deref(),
-        ),
-        Some(target) if target.fork => agents::fork_invocation(
-            profile,
-            action,
-            prompt,
-            &target.session_id,
             session_id,
             endpoint,
             directory.as_deref(),
@@ -598,11 +599,7 @@ impl AgentRuns {
         }
         let (session_id, prompt) = match &options.session {
             Some(target) => {
-                let session_id = if target.fork {
-                    agents::new_session_id()
-                } else {
-                    target.session_id.clone()
-                };
+                let session_id = target.session_id.clone();
                 let prompt =
                     agents::build_session_prompt(&context, extra, &session_id, &profile.id);
                 (session_id, prompt)
@@ -614,6 +611,10 @@ impl AgentRuns {
                 (session_id, prompt)
             }
         };
+        let inbox = options
+            .session
+            .as_ref()
+            .and_then(|target| target.inbox.clone());
         let run_id = self.next_id;
         self.next_id += 1;
         self.runs.push(AgentRun {
@@ -638,7 +639,7 @@ impl AgentRuns {
             expanded: false,
             dismissed: false,
             process_id: None,
-            pending_prompt: Some(prompt),
+            pending_prompt: inbox.is_none().then(|| prompt.clone()),
             sent_to: options.session.clone(),
             launch_session_id: None,
             launched: false,
@@ -648,7 +649,10 @@ impl AgentRuns {
         {
             run.push_step("MCP server is off - no reply proposal possible".to_owned());
         }
-        self.dispatch(run_id, cx);
+        match inbox {
+            Some(inbox) => self.deliver(run_id, inbox, profile.environment.clone(), prompt, cx),
+            None => self.dispatch(run_id, cx),
+        }
         if let Some(working_dir) = chosen_working_dir {
             self.update_settings(
                 |settings| settings.remember_working_dir(&profile.id, &working_dir),
@@ -659,6 +663,77 @@ impl AgentRuns {
         self.ensure_ticking(cx);
         cx.notify();
         Ok(run_id)
+    }
+
+    fn deliver(
+        &mut self,
+        run_id: u64,
+        inbox: InboxTarget,
+        environment: agents::Environment,
+        prompt: String,
+        cx: &mut Context<Self>,
+    ) {
+        let session_name = inbox
+            .session
+            .name
+            .clone()
+            .unwrap_or_else(|| inbox.session.session_id.clone());
+        cx.spawn(async move |this, cx| {
+            let fallback_prompt = prompt.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    agents::deliver(&environment, &inbox.sessions_dir, &inbox.session, &prompt)
+                })
+                .await;
+            this.update(cx, |runs, cx| {
+                runs.finish_delivery(run_id, &session_name, fallback_prompt, result, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn finish_delivery(
+        &mut self,
+        run_id: u64,
+        session_name: &str,
+        prompt: String,
+        result: Result<(), agents::DeliveryError>,
+        cx: &mut Context<Self>,
+    ) {
+        let status = match result {
+            Ok(()) => RunStatus::Completed {
+                final_text: DELIVERED_TEXT.to_owned(),
+            },
+            Err(agents::DeliveryError::SessionGone) => {
+                if let Some(run) = self.run_mut(run_id).filter(|run| run.is_running()) {
+                    run.pending_prompt = Some(prompt);
+                    run.push_step(RESUMING_STEP.to_owned());
+                    self.dispatch(run_id, cx);
+                    self.persist(cx);
+                    cx.notify();
+                }
+                return;
+            }
+            Err(error) => RunStatus::Failed {
+                message: error.to_string(),
+                stderr_tail: Vec::new(),
+            },
+        };
+        let delivered = matches!(status, RunStatus::Completed { .. });
+        self.finish(
+            run_id,
+            Some(RunOutcome {
+                status,
+                exit_code: None,
+            }),
+            cx,
+        );
+        if delivered && let Some(run) = self.run_mut(run_id) {
+            run.current_step = format!("Delivered to {session_name}");
+            self.persist(cx);
+        }
     }
 
     fn dispatch(&mut self, run_id: u64, cx: &mut Context<Self>) {
@@ -894,7 +969,7 @@ impl AgentRuns {
         for run_id in self.lanes.rename(from, to) {
             if let Some(run) = self.run_mut(run_id) {
                 run.session_id = to.to_owned();
-                if let Some(target) = run.sent_to.as_mut().filter(|target| !target.fork) {
+                if let Some(target) = run.sent_to.as_mut() {
                     target.session_id = to.to_owned();
                 }
             }
@@ -1098,11 +1173,7 @@ impl AgentRuns {
             working_dir: run.sent_to.is_none().then(|| run.working_dir.clone()),
             remember_working_dir: false,
             session: run.sent_to.clone().map(|target| SessionTarget {
-                session_id: if target.fork {
-                    target.session_id
-                } else {
-                    run.session_id.clone()
-                },
+                session_id: run.session_id.clone(),
                 ..target
             }),
         };
@@ -1236,6 +1307,7 @@ pub(super) mod tests {
 
         use gpui_kit::AppContext as _;
 
+        use super::super::InboxTarget;
         use super::{
             AgentRun, AgentRuns, Entity, RunState, SessionTarget, StartOptions, TestAppContext,
             run_store, setup, wait_until_finished,
@@ -1250,7 +1322,7 @@ pub(super) mod tests {
                 session: Some(SessionTarget {
                     session_id,
                     working_dir: std::env::temp_dir().to_string_lossy().into_owned(),
-                    fork: false,
+                    inbox: None,
                 }),
             }
         }
@@ -1547,38 +1619,117 @@ pub(super) mod tests {
             assert_eq!(run.sent_to, None);
         }
 
-        #[gpui_kit::test]
-        fn a_forked_send_gets_a_fresh_session_id_and_adopts_a_reported_one(
-            cx: &mut TestAppContext,
-        ) {
-            let (app, runs) = setup(cx, SESSION_COMMAND);
-            let forked = cx.update(|cx| {
-                runs.update(cx, |runs, cx| {
-                    let mut options = target_of("live-session".to_owned());
-                    options.session.as_mut().unwrap().fork = true;
-                    runs.start_with("ask", "19:chat", "m1", "hi", options, cx)
-                        .unwrap()
-                })
+        fn inbox_options(
+            socket_path: &std::path::Path,
+            sessions_dir: &std::path::Path,
+        ) -> StartOptions {
+            let mut options = target_of("live-session".to_owned());
+            options.session.as_mut().unwrap().inbox = Some(InboxTarget {
+                session: agents::RunningSession {
+                    session_id: "live-session".to_owned(),
+                    name: Some("Review".to_owned()),
+                    working_dir: "/srv".to_owned(),
+                    socket_path: Some(socket_path.to_string_lossy().into_owned()),
+                    process_id: 42,
+                },
+                sessions_dir: sessions_dir.to_path_buf(),
             });
-            cx.update(|cx| {
-                let run = runs.read(cx).get(forked).unwrap().clone();
-                assert_ne!(run.session_id, "live-session");
-                assert!(run.sent_to.as_ref().unwrap().fork);
-                assert!(!run.is_queued());
+            options
+        }
+
+        #[gpui_kit::test]
+        fn a_message_to_a_running_session_is_delivered_without_a_process(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let directory = tempfile::tempdir().unwrap();
+            let socket_path = directory.path().join("s.sock");
+            let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+            std::fs::write(directory.path().join("42.ab.key"), r#"{"peerToken":"tok"}"#).unwrap();
+            let reader = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut received = String::new();
+                std::io::Read::read_to_string(&mut stream, &mut received).unwrap();
+                received
+            });
+            let delivered = cx.update(|cx| {
                 runs.update(cx, |runs, cx| {
-                    runs.apply_update(
-                        forked,
-                        agents::RunUpdate::Event(agents::RunEvent::SessionId(
-                            "reported".to_owned(),
-                        )),
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "hi",
+                        inbox_options(&socket_path, directory.path()),
                         cx,
                     )
-                });
-                assert_eq!(runs.read(cx).get(forked).unwrap().session_id, "reported");
-                let stored = run_store::load_runs(&app.read(cx).store);
-                assert_eq!(stored[0].session_id, "reported");
+                    .unwrap()
+                })
             });
-            wait_until_finished(cx, &runs, forked);
+            wait_until_finished(cx, &runs, delivered);
+            cx.update(|cx| {
+                let run = runs.read(cx).get(delivered).unwrap();
+                assert_eq!(run.state, RunState::Done);
+                assert_eq!(run.current_step, "Delivered to Review");
+                assert_eq!(run.session_id, "live-session");
+                assert_eq!(run.process_id, None);
+                assert!(run.final_text.contains("Teams draft"));
+            });
+            let received = reader.join().unwrap();
+            assert!(received.contains("live-session"));
+            assert!(received.contains("propose_message"));
+            assert!(received.contains("19:chat"));
+            assert!(received.starts_with(r#"{"type":"auth","token":"tok"}"#));
+        }
+
+        #[gpui_kit::test]
+        fn a_session_that_ended_before_delivery_is_resumed_in_place(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(directory.path().join("42.ab.key"), r#"{"peerToken":"tok"}"#).unwrap();
+            let resumed = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "hi",
+                        inbox_options(&directory.path().join("gone.sock"), directory.path()),
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            wait_until_finished(cx, &runs, resumed);
+            cx.update(|cx| {
+                let run = runs.read(cx).get(resumed).unwrap();
+                assert!(run.steps.iter().any(|(_, step)| step.contains("resuming")));
+                assert!(run.launched);
+                assert_eq!(run.session_id, "live-session");
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_delivery_failure_marks_the_run_failed_without_the_token(cx: &mut TestAppContext) {
+            let (_, runs) = setup(cx, SESSION_COMMAND);
+            let directory = tempfile::tempdir().unwrap();
+            let failed = cx.update(|cx| {
+                runs.update(cx, |runs, cx| {
+                    runs.start_with(
+                        "ask",
+                        "19:chat",
+                        "m1",
+                        "hi",
+                        inbox_options(&directory.path().join("s.sock"), directory.path()),
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            wait_until_finished(cx, &runs, failed);
+            cx.update(|cx| {
+                assert!(matches!(
+                    runs.read(cx).get(failed).unwrap().state,
+                    RunState::Failed { .. }
+                ));
+            });
         }
 
         #[gpui_kit::test]
