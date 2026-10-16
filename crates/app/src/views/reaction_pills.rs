@@ -14,7 +14,7 @@ use crate::reaction_model::{
     reaction_time_label, shows_faces,
 };
 use crate::rows::ReactionChip;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const PILL_HEIGHT: f32 = 24.;
 const PILL_EMOJI_SIZE: f32 = 14.;
@@ -249,7 +249,7 @@ fn popover(
         .p(px(6.))
         .gap(px(4.))
         .rounded(px(10.))
-        .bg(theme::popup())
+        .flyout_surface()
         .occlude()
         .on_mouse_down_out(move |_, _, cx| close(cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {

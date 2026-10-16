@@ -6,7 +6,7 @@ use gpui_kit::*;
 use super::message_actions::{Action, bar_button};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 pub struct ScheduledMenu {
     pub key: String,
@@ -43,7 +43,7 @@ pub fn scheduled_toolbar(menu: ScheduledMenu) -> AnyElement {
         .gap(px(1.))
         .items_center()
         .rounded(px(10.))
-        .bg(theme::popup())
+        .flyout_surface()
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             GlobalState::suppress_text_selection(cx)
         })

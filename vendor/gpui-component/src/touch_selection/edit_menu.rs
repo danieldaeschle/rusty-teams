@@ -75,7 +75,7 @@ impl EditMenu {
 }
 
 impl RenderOnce for EditMenu {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let id = self.id;
         let on_paint = self.on_paint;
         // A pill-like bar, as iOS draws its edit menu.
@@ -136,7 +136,7 @@ impl RenderOnce for EditMenu {
                         .relative()
                         .items_stretch()
                         .overflow_hidden()
-                        .popover_style(cx)
+                        .popover_style(window, cx)
                         .rounded(radius)
                         .children(items)
                         .when_some(on_paint, |this, on_paint| {

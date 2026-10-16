@@ -656,7 +656,7 @@ pub fn options_dialog(app: &Entity<AppState>, call: &ActiveCall) -> Option<AnyEl
                     .border_1()
                     .border_color(theme::border_strong())
                     .text_color(theme::text())
-                    .shadow_lg()
+                    .shadow(theme::dialog_shadow())
                     .occlude()
                     .child(
                         div()

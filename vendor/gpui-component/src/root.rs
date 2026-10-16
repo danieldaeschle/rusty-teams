@@ -184,6 +184,7 @@ impl WindowState {
         cx: &mut App,
     ) -> Option<impl IntoElement + use<>> {
         let active_dialogs = root.read(cx).active_dialogs.clone();
+        crate::elevation::set_framework_modal_layers(window, active_dialogs.len(), cx);
 
         if active_dialogs.is_empty() {
             return None;

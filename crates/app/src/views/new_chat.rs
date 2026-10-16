@@ -18,7 +18,7 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::data::{self, Directory, Person};
 use crate::runtime;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
 const SUGGESTED_LIMIT: usize = 6;
@@ -527,7 +527,7 @@ impl NewChatDraft {
             .mt(px(4.))
             .p(px(6.))
             .rounded(px(10.))
-            .bg(theme::popup())
+            .flyout_surface()
             .occlude()
             .when(!results_empty, |popup| {
                 popup.child(

@@ -43,13 +43,12 @@ pub(super) fn render_markdown(
         .selectable(true)
 }
 
-pub(super) fn editor_popover(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
+pub(super) fn editor_popover(id: impl Into<ElementId>, window: &Window, cx: &App) -> Stateful<Div> {
     div()
         .id(id)
         .flex_none()
         .occlude()
-        .popover_style(cx)
-        .shadow_md()
+        .popover_style(window, cx)
         .text_xs()
         .p_1()
 }

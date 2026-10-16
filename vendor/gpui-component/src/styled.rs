@@ -37,64 +37,6 @@ pub(crate) fn popover_ring(cx: &App) -> Hsla {
     cx.theme().foreground.alpha(POPOVER_RING_INK)
 }
 
-/// shadcn/ui's popup surface shadow — a hairline `ring` plus `shadow-md` — at
-/// `strength` of its full ink.
-///
-/// Callers animating a surface in pass a rising `strength`; a resting surface
-/// passes `1.0`.
-///
-/// The two blurred layers use Tailwind's radii **halved**, which is the
-/// conversion CSS requires and not a taste adjustment. CSS defines a box
-/// shadow's blur radius as twice the gaussian's standard deviation, while GPUI's
-/// shader takes the field as the deviation itself (`gaussian(y, sigma)`).
-/// Copying Tailwind's `6px` and `4px` across therefore spreads the shadow over
-/// twice the distance, which is why [`Styled::shadow_md`] reads as a wide grey
-/// haze next to a browser's compact one.
-///
-/// Measured against shadcn's own render, this lands within a luminance step of
-/// it the whole way down the falloff.
-///
-/// The ring is taken as a colour rather than read from the theme here so that an
-/// animation can hold it across frames, where no `App` is in hand.
-#[allow(dead_code)]
-pub(crate) fn popover_shadow(ring: Hsla, strength: f32) -> Vec<BoxShadow> {
-    let strength = strength.clamp(0., 1.);
-    let ink = hsla(0., 0., 0., SURFACE_SHADOW_INK * strength);
-    vec![
-        // The ring, sitting in the 1px band outside the surface. No blur, so it
-        // takes the shader's crisp path rather than the gaussian one.
-        BoxShadow::new(px(0.), px(0.), ring.alpha(ring.a * strength))
-            .blur_radius(px(0.))
-            .spread_radius(px(1.)),
-        BoxShadow::new(px(0.), px(4.), ink)
-            .blur_radius(px(3.))
-            .spread_radius(px(-1.)),
-        BoxShadow::new(px(0.), px(2.), ink)
-            .blur_radius(px(2.))
-            .spread_radius(px(-2.)),
-    ]
-}
-
-/// shadcn/ui's `shadow-lg`, the elevation it lifts a toast to, at `strength` of
-/// its full ink.
-///
-/// A toast sits higher than a popover and is built differently: shadcn gives it
-/// a real 1px border rather than the translucent ring it puts on a popup, so
-/// there is no ring layer here. Its corner radius is left to the caller.
-///
-/// The radii are Tailwind's halved, for the reason [`popover_shadow`] explains.
-pub(crate) fn toast_shadow(strength: f32) -> Vec<BoxShadow> {
-    let ink = hsla(0., 0., 0., SURFACE_SHADOW_INK * strength.clamp(0., 1.));
-    vec![
-        BoxShadow::new(px(0.), px(10.), ink)
-            .blur_radius(px(7.5))
-            .spread_radius(px(-3.)),
-        BoxShadow::new(px(0.), px(4.), ink)
-            .blur_radius(px(3.))
-            .spread_radius(px(-4.)),
-    ]
-}
-
 /// shadcn/ui's `shadow-sm`, the elevation it spends on a control raised out of
 /// the container it sits in — the active pill of a segmented tab bar — at full
 /// ink.
@@ -105,7 +47,7 @@ pub(crate) fn toast_shadow(strength: f32) -> Vec<BoxShadow> {
 /// wide one, and a wide one would read as grime against the trough wall rather
 /// than as lift.
 ///
-/// The radii are Tailwind's halved, for the reason [`popover_shadow`] explains:
+/// The radii are Tailwind's halved, for the reason [`crate::elevation`] explains:
 /// CSS defines a box shadow's blur radius as twice the gaussian's standard
 /// deviation, while GPUI's shader takes the field as the deviation itself
 /// (`gaussian(y, sigma)`). Copying Tailwind's `3px` and `2px` across therefore
@@ -148,12 +90,13 @@ pub trait ThemeStyled: Styled + Sized {
     where
         Self: ParentElement;
 
-    /// Give this element the surface, edge, shadow and radius of a popover.
+    /// Give this element the surface, shadow and radius of a flyout at the
+    /// elevation level `window` currently opens flyouts at.
     ///
     /// This is the one surface every popup shares — Popover, PopupMenu, Select,
     /// Combobox, DatePicker and the editor's hover popovers — so they cannot
-    /// drift apart. See [`popover_shadow`] for what the shadow is modelled on.
-    fn popover_style(self, cx: &App) -> Self;
+    /// drift apart. See [`crate::elevation`].
+    fn popover_style(self, window: &Window, cx: &App) -> Self;
 
     /// Round this element as far as its size allows — a circle if it is square,
     /// a pill if it is not — unless the theme squares its corners.
@@ -184,9 +127,11 @@ impl<T: Styled + Sized> ThemeStyled for T {
         focus_style(self, FocusLine::Edge, window, cx)
     }
 
-    fn popover_style(self, cx: &App) -> Self {
+    fn popover_style(self, window: &Window, cx: &App) -> Self {
         let theme = cx.theme();
-        self.bg(theme.popover)
+        let elevation = crate::elevation::flyout(window, cx);
+        self.bg(elevation.fill)
+            .shadow(elevation.shadow)
             .text_color(theme.popover_foreground)
             .rounded(theme.radius_lg)
     }

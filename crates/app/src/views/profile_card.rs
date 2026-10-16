@@ -17,7 +17,7 @@ use crate::profile_model::{
     ContactKind, ContactRow, StatusBox, contact_rows, has_organization, local_time_label,
     mailto_url, status_box, status_line, work_location_label,
 };
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const CARD_WIDTH: f32 = 340.;
 const CARD_RADIUS: f32 = 10.;
@@ -624,7 +624,7 @@ impl Render for ProfileCard {
             .p(px(CARD_PADDING))
             .gap(px(CARD_GAP))
             .rounded(px(CARD_RADIUS))
-            .bg(theme::popup())
+            .flyout_surface()
             .text_color(theme::text())
             .occlude()
             .on_key_down(cx.listener(Self::on_key_down))

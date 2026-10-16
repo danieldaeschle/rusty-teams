@@ -314,7 +314,7 @@ impl Render for CodeActionMenu {
         let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - pos.x);
 
         deferred(
-            editor_popover("code-action-menu", cx)
+            editor_popover("code-action-menu", window, cx)
                 .absolute()
                 .left(pos.x)
                 .top(pos.y)

@@ -7,7 +7,7 @@ use gpui_kit::*;
 use super::widgets::symbol;
 use crate::emoji::Match;
 use crate::emoticons;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 pub const LIMIT: usize = 40;
 const WIDTH: f32 = 300.;
@@ -183,7 +183,7 @@ pub fn render(
         .w(px(WIDTH))
         .p(px(4.))
         .rounded(px(10.))
-        .bg(theme::popup())
+        .flyout_surface()
         .occlude()
         .child(
             v_flex()

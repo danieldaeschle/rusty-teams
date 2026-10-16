@@ -53,7 +53,7 @@ pub use crate::outgoing::{EditPreview, Outgoing, ReplyPreview};
 use crate::remote_image::RemoteImage;
 use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
 
 const MIN_ROWS: usize = 1;
@@ -2154,7 +2154,7 @@ impl Composer {
                 .w(px(POPUP_WIDTH))
                 .py(px(6.))
                 .rounded(px(10.))
-                .bg(theme::popup())
+                .flyout_surface()
                 .occlude()
                 .children(rows)
                 .into_any_element(),
