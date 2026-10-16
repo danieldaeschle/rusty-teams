@@ -292,7 +292,7 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
     children.push(
         div()
             .w(px(1.))
-            .h(px(16.))
+            .h_full()
             .mx(px(4.))
             .flex_none()
             .bg(theme::popup_hover())
@@ -315,7 +315,7 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
     children.push(more_button(&menu, cx));
     let bar = h_flex()
         .h(px(TOOLBAR_HEIGHT))
-        .p(px(BAR_PADDING))
+        .px(px(BAR_PADDING))
         .gap(px(1.))
         .items_center()
         .rounded(px(10.))
