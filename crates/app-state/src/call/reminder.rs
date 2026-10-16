@@ -9,11 +9,13 @@ use crate::app_state::{AppEvent, AppState};
 pub const LEAD_MINUTES: i64 = 5;
 pub const GRACE_MINUTES: i64 = 5;
 const CHECK_EVERY_SECONDS: i64 = 1;
+const LIVE_POLL_SECONDS: i64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReminderPhase {
     Soon,
     Started,
+    Live,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +32,7 @@ fn event_key(event: &CalendarEvent) -> String {
     format!("{}@{}", event.object_id, event.start.timestamp())
 }
 
-pub fn phase_at(event: &CalendarEvent, now: DateTime<Utc>) -> Option<ReminderPhase> {
+pub fn phase_at(event: &CalendarEvent, now: DateTime<Utc>, live: bool) -> Option<ReminderPhase> {
     let eligible = event.online
         && !event.cancelled
         && !event.all_day
@@ -39,19 +41,37 @@ pub fn phase_at(event: &CalendarEvent, now: DateTime<Utc>) -> Option<ReminderPha
     if !eligible {
         return None;
     }
-    if now >= event.start - Duration::minutes(LEAD_MINUTES) && now < event.start {
-        return Some(ReminderPhase::Soon);
-    }
+    let opens = event.start - Duration::minutes(LEAD_MINUTES);
     let started_until = event
         .end
         .min(event.start + Duration::minutes(GRACE_MINUTES));
+    if live && now >= opens && now < started_until {
+        return Some(ReminderPhase::Live);
+    }
+    if now >= opens && now < event.start {
+        return Some(ReminderPhase::Soon);
+    }
     (now >= event.start && now < started_until).then_some(ReminderPhase::Started)
+}
+
+fn is_live(event: &CalendarEvent, live_threads: &HashSet<String>) -> bool {
+    event
+        .thread_id
+        .as_ref()
+        .is_some_and(|thread_id| live_threads.contains(thread_id))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReminderUpdate {
+    pub changed: bool,
+    pub chime: bool,
 }
 
 pub fn subtitle(toast: &MeetingToast, now: DateTime<Utc>, offset: FixedOffset) -> String {
     let clock = toast.start.with_timezone(&offset).format("%H:%M");
     match toast.phase {
         ReminderPhase::Started => format!("{clock} - started"),
+        ReminderPhase::Live => format!("{clock} - live now"),
         ReminderPhase::Soon => {
             let minutes = ((toast.start - now).num_seconds().max(0) + 59) / 60;
             match minutes {
@@ -67,8 +87,12 @@ pub fn subtitle(toast: &MeetingToast, now: DateTime<Utc>, offset: FixedOffset) -
 pub struct MeetingToasts {
     entries: Vec<MeetingToast>,
     fired: HashSet<(String, ReminderPhase)>,
+    snoozed: HashSet<String>,
+    dismissed: HashSet<String>,
+    chimed: HashSet<String>,
     next_id: u64,
     last_check: Option<DateTime<Utc>>,
+    last_live_poll: Option<DateTime<Utc>>,
 }
 
 impl MeetingToasts {
@@ -90,7 +114,16 @@ impl MeetingToasts {
 
     pub fn dismiss(&mut self, id: u64) -> Option<MeetingToast> {
         let index = self.entries.iter().position(|toast| toast.id == id)?;
-        Some(self.entries.remove(index))
+        let toast = self.entries.remove(index);
+        self.dismissed.insert(toast.event_key.clone());
+        Some(toast)
+    }
+
+    pub fn snooze(&mut self, id: u64) -> Option<MeetingToast> {
+        let index = self.entries.iter().position(|toast| toast.id == id)?;
+        let toast = self.entries.remove(index);
+        self.snoozed.insert(toast.event_key.clone());
+        Some(toast)
     }
 
     pub fn clear(&mut self) -> bool {
@@ -104,22 +137,75 @@ impl MeetingToasts {
             .is_none_or(|last| now - last >= Duration::seconds(CHECK_EVERY_SECONDS))
     }
 
-    pub fn update(&mut self, events: &[CalendarEvent], now: DateTime<Utc>, show: bool) -> bool {
+    pub fn live_candidates(&mut self, events: &[CalendarEvent], now: DateTime<Utc>) -> Vec<String> {
+        let due = self
+            .last_live_poll
+            .is_none_or(|last| now - last >= Duration::seconds(LIVE_POLL_SECONDS));
+        if !due {
+            return Vec::new();
+        }
+        let candidates: Vec<String> = events
+            .iter()
+            .filter(|event| {
+                phase_at(event, now, false).is_some() && !self.dismissed.contains(&event_key(event))
+            })
+            .filter_map(|event| event.thread_id.clone())
+            .collect();
+        if !candidates.is_empty() {
+            self.last_live_poll = Some(now);
+        }
+        candidates
+    }
+
+    pub fn update(
+        &mut self,
+        events: &[CalendarEvent],
+        live_threads: &HashSet<String>,
+        now: DateTime<Utc>,
+        show: bool,
+    ) -> ReminderUpdate {
         self.last_check = Some(now);
         let before = self.entries.clone();
         self.entries.retain(|toast| {
-            events
-                .iter()
-                .any(|event| event_key(event) == toast.event_key && phase_at(event, now).is_some())
+            events.iter().any(|event| {
+                event_key(event) == toast.event_key
+                    && phase_at(event, now, is_live(event, live_threads)).is_some()
+            })
         });
         let keys: HashSet<String> = events.iter().map(event_key).collect();
         self.fired.retain(|(key, _)| keys.contains(key));
+        self.snoozed.retain(|key| keys.contains(key));
+        self.dismissed.retain(|key| keys.contains(key));
+        self.chimed.retain(|key| keys.contains(key));
+        let mut chime = false;
         for event in events {
-            let Some(phase) = phase_at(event, now) else {
+            let Some(phase) = phase_at(event, now, is_live(event, live_threads)) else {
                 continue;
             };
             let key = event_key(event);
-            if !self.fired.insert((key.clone(), phase)) || !show {
+            if self.dismissed.contains(&key) {
+                continue;
+            }
+            let chime_due = phase != ReminderPhase::Soon && !self.chimed.contains(&key);
+            if let Some(existing) = self.entries.iter_mut().find(|toast| toast.event_key == key) {
+                existing.phase = phase;
+                if chime_due {
+                    self.chimed.insert(key);
+                    chime |= show;
+                }
+                continue;
+            }
+            if self.snoozed.contains(&key) {
+                if phase == ReminderPhase::Soon {
+                    continue;
+                }
+                self.snoozed.remove(&key);
+            } else if self.fired.contains(&(key.clone(), phase)) {
+                continue;
+            }
+            self.fired.insert((key.clone(), phase));
+            if !show {
+                self.chimed.insert(key);
                 continue;
             }
             let Some(join_url) = event.join_url.clone() else {
@@ -130,9 +216,9 @@ impl MeetingToasts {
             } else {
                 event.subject.clone()
             };
-            if let Some(existing) = self.entries.iter_mut().find(|toast| toast.event_key == key) {
-                existing.phase = phase;
-                continue;
+            if chime_due {
+                self.chimed.insert(key.clone());
+                chime = true;
             }
             self.next_id += 1;
             self.entries.push(MeetingToast {
@@ -144,7 +230,10 @@ impl MeetingToasts {
                 join_url,
             });
         }
-        self.entries != before
+        ReminderUpdate {
+            changed: self.entries != before,
+            chime,
+        }
     }
 }
 
@@ -153,10 +242,27 @@ impl AppState {
         let now = Utc::now();
         let in_call = self.call.is_some();
         let show = show && !in_call && !self.mode.read_only;
-        let changed = self.meeting_toasts.update(&self.calendar_events, now, show);
-        if (in_call && self.meeting_toasts.clear()) || changed {
+        for thread_id in self
+            .meeting_toasts
+            .live_candidates(&self.calendar_events, now)
+        {
+            self.fetch_live_meeting(&thread_id, cx);
+        }
+        let live_threads: HashSet<String> = self
+            .calendar_events
+            .iter()
+            .filter_map(|event| event.thread_id.clone())
+            .filter(|thread_id| self.running_meeting(thread_id).is_some())
+            .collect();
+        let update = self
+            .meeting_toasts
+            .update(&self.calendar_events, &live_threads, now, show);
+        if (in_call && self.meeting_toasts.clear()) || update.changed {
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
+        }
+        if update.chime {
+            cx.emit(AppEvent::MeetingChime);
         }
     }
 
@@ -174,6 +280,13 @@ impl AppState {
     pub fn join_latest_meeting_toast(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.meeting_toasts.latest().map(|toast| toast.id) {
             self.join_meeting_toast(id, cx);
+        }
+    }
+
+    pub fn snooze_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.meeting_toasts.snooze(id).is_some() {
+            cx.emit(AppEvent::MeetingReminder);
+            cx.notify();
         }
     }
 
@@ -214,21 +327,52 @@ mod tests {
         }
     }
 
+    fn tick(
+        toasts: &mut MeetingToasts,
+        events: &[CalendarEvent],
+        now: DateTime<Utc>,
+        show: bool,
+    ) -> ReminderUpdate {
+        toasts.update(events, &HashSet::new(), now, show)
+    }
+
+    fn tick_live(
+        toasts: &mut MeetingToasts,
+        events: &[CalendarEvent],
+        now: DateTime<Utc>,
+    ) -> ReminderUpdate {
+        let live_threads = HashSet::from(["thread".to_owned()]);
+        toasts.update(events, &live_threads, now, true)
+    }
+
+    fn live_event(id: &str) -> CalendarEvent {
+        CalendarEvent {
+            thread_id: Some("thread".into()),
+            ..event(id)
+        }
+    }
+
     #[test]
     fn the_phase_follows_the_clock_around_the_start() {
         let meeting = event("a");
-        assert_eq!(phase_at(&meeting, at(8, 54, 59)), None);
-        assert_eq!(phase_at(&meeting, at(8, 55, 0)), Some(ReminderPhase::Soon));
-        assert_eq!(phase_at(&meeting, at(8, 59, 59)), Some(ReminderPhase::Soon));
+        assert_eq!(phase_at(&meeting, at(8, 54, 59), false), None);
         assert_eq!(
-            phase_at(&meeting, at(9, 0, 0)),
+            phase_at(&meeting, at(8, 55, 0), false),
+            Some(ReminderPhase::Soon)
+        );
+        assert_eq!(
+            phase_at(&meeting, at(8, 59, 59), false),
+            Some(ReminderPhase::Soon)
+        );
+        assert_eq!(
+            phase_at(&meeting, at(9, 0, 0), false),
             Some(ReminderPhase::Started)
         );
         assert_eq!(
-            phase_at(&meeting, at(9, 4, 59)),
+            phase_at(&meeting, at(9, 4, 59), false),
             Some(ReminderPhase::Started)
         );
-        assert_eq!(phase_at(&meeting, at(9, 5, 0)), None);
+        assert_eq!(phase_at(&meeting, at(9, 5, 0), false), None);
     }
 
     #[test]
@@ -237,8 +381,11 @@ mod tests {
             end: at(9, 3, 0),
             ..event("a")
         };
-        assert_eq!(phase_at(&short, at(9, 2, 59)), Some(ReminderPhase::Started));
-        assert_eq!(phase_at(&short, at(9, 3, 0)), None);
+        assert_eq!(
+            phase_at(&short, at(9, 2, 59), false),
+            Some(ReminderPhase::Started)
+        );
+        assert_eq!(phase_at(&short, at(9, 3, 0), false), None);
     }
 
     #[test]
@@ -260,7 +407,7 @@ mod tests {
             ..event("a")
         };
         for quiet in [declined, cancelled, all_day, offline] {
-            assert_eq!(phase_at(&quiet, at(8, 58, 0)), None);
+            assert_eq!(phase_at(&quiet, at(8, 58, 0), false), None);
         }
     }
 
@@ -268,39 +415,172 @@ mod tests {
     fn each_phase_fires_once_per_meeting() {
         let events = [event("a")];
         let mut toasts = MeetingToasts::default();
-        assert!(!toasts.update(&events, at(8, 54, 0), true));
-        assert!(toasts.update(&events, at(8, 55, 0), true));
+        assert!(!tick(&mut toasts, &events, at(8, 54, 0), true).changed);
+        assert!(tick(&mut toasts, &events, at(8, 55, 0), true).changed);
         assert_eq!(toasts.entries().len(), 1);
         let id = toasts.entries()[0].id;
         toasts.dismiss(id);
-        assert!(!toasts.update(&events, at(8, 56, 0), true));
+        assert!(!tick(&mut toasts, &events, at(8, 56, 0), true).changed);
         assert!(toasts.is_empty());
     }
 
     #[test]
-    fn the_start_brings_a_dismissed_toast_back_and_updates_an_open_one() {
+    fn the_start_moves_an_open_toast_to_started_and_chimes() {
         let events = [event("a")];
         let mut toasts = MeetingToasts::default();
-        toasts.update(&events, at(8, 55, 0), true);
+        assert!(!tick(&mut toasts, &events, at(8, 55, 0), true).chime);
         let id = toasts.entries()[0].id;
-        assert!(toasts.update(&events, at(9, 0, 0), true));
+        let update = tick(&mut toasts, &events, at(9, 0, 0), true);
+        assert!(update.changed && update.chime);
         assert_eq!(toasts.entries().len(), 1);
         assert_eq!(toasts.entries()[0].id, id);
         assert_eq!(toasts.entries()[0].phase, ReminderPhase::Started);
-        let mut dismissed = MeetingToasts::default();
-        dismissed.update(&events, at(8, 55, 0), true);
-        let soon_id = dismissed.entries()[0].id;
-        dismissed.dismiss(soon_id);
-        assert!(dismissed.update(&events, at(9, 0, 0), true));
-        assert_eq!(dismissed.entries()[0].phase, ReminderPhase::Started);
+        assert!(!tick(&mut toasts, &events, at(9, 1, 0), true).chime);
+    }
+
+    #[test]
+    fn a_toast_closed_with_the_corner_x_stays_gone_and_silent() {
+        let events = [event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        let id = toasts.entries()[0].id;
+        toasts.dismiss(id);
+        let update = tick(&mut toasts, &events, at(9, 0, 0), true);
+        assert!(!update.changed && !update.chime);
+        assert!(toasts.is_empty());
+    }
+
+    #[test]
+    fn the_corner_x_only_closes_its_own_meeting() {
+        let events = [event("a"), event("b")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        let first = toasts.entries()[0].id;
+        toasts.dismiss(first);
+        let update = tick(&mut toasts, &events, at(9, 0, 0), true);
+        assert!(update.chime);
+        assert_eq!(toasts.entries().len(), 1);
+        assert_eq!(toasts.entries()[0].subject, "Meeting b");
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Started);
+    }
+
+    #[test]
+    fn a_snoozed_toast_comes_back_at_the_start_with_a_chime() {
+        let events = [event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        let id = toasts.entries()[0].id;
+        toasts.snooze(id);
+        let quiet = tick(&mut toasts, &events, at(8, 58, 0), true);
+        assert!(!quiet.changed && !quiet.chime);
+        let update = tick(&mut toasts, &events, at(9, 0, 0), true);
+        assert!(update.changed && update.chime);
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Started);
+    }
+
+    #[test]
+    fn a_snoozed_toast_comes_back_live_before_the_start_with_a_chime() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        let id = toasts.entries()[0].id;
+        toasts.snooze(id);
+        let update = tick_live(&mut toasts, &events, at(8, 57, 0));
+        assert!(update.changed && update.chime);
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Live);
+    }
+
+    #[test]
+    fn a_toast_closed_with_the_corner_x_stays_gone_when_the_meeting_goes_live() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        let id = toasts.entries()[0].id;
+        toasts.dismiss(id);
+        let update = tick_live(&mut toasts, &events, at(8, 57, 0));
+        assert!(!update.changed && !update.chime);
+        assert!(toasts.is_empty());
+    }
+
+    #[test]
+    fn started_then_live_chimes_once() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        assert!(tick(&mut toasts, &events, at(9, 0, 0), true).chime);
+        let update = tick_live(&mut toasts, &events, at(9, 1, 0));
+        assert!(update.changed && !update.chime);
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Live);
+        assert!(!tick(&mut toasts, &events, at(9, 2, 0), true).chime);
+    }
+
+    #[test]
+    fn live_then_started_chimes_once() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        assert!(tick_live(&mut toasts, &events, at(8, 58, 0)).chime);
+        assert!(!tick_live(&mut toasts, &events, at(9, 0, 0)).chime);
+        let update = tick(&mut toasts, &events, at(9, 1, 0), true);
+        assert!(!update.chime);
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Started);
+    }
+
+    #[test]
+    fn the_live_phase_covers_the_window_and_wins_over_soon_and_started() {
+        let meeting = event("a");
+        assert_eq!(phase_at(&meeting, at(8, 54, 59), true), None);
+        assert_eq!(
+            phase_at(&meeting, at(8, 55, 0), true),
+            Some(ReminderPhase::Live)
+        );
+        assert_eq!(
+            phase_at(&meeting, at(9, 0, 0), true),
+            Some(ReminderPhase::Live)
+        );
+        assert_eq!(
+            phase_at(&meeting, at(9, 4, 59), true),
+            Some(ReminderPhase::Live)
+        );
+        assert_eq!(phase_at(&meeting, at(9, 5, 0), true), None);
+        let declined = CalendarEvent {
+            response: ResponseType::Declined,
+            ..event("a")
+        };
+        assert_eq!(phase_at(&declined, at(9, 0, 0), true), None);
+    }
+
+    #[test]
+    fn a_hidden_reminder_never_chimes_later() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 56, 0), false);
+        let update = tick_live(&mut toasts, &events, at(8, 58, 0));
+        assert!(!update.chime);
+        assert!(!tick(&mut toasts, &events, at(9, 0, 0), true).chime);
+    }
+
+    #[test]
+    fn live_state_is_polled_every_thirty_seconds_inside_the_window() {
+        let events = [live_event("a"), event("b")];
+        let mut toasts = MeetingToasts::default();
+        assert!(toasts.live_candidates(&events, at(8, 54, 0)).is_empty());
+        assert_eq!(
+            toasts.live_candidates(&events, at(8, 55, 0)),
+            vec!["thread".to_owned()]
+        );
+        assert!(toasts.live_candidates(&events, at(8, 55, 29)).is_empty());
+        assert_eq!(toasts.live_candidates(&events, at(8, 55, 30)).len(), 1);
+        tick(&mut toasts, &events, at(8, 56, 0), true);
+        let id = toasts.entries()[0].id;
+        toasts.dismiss(id);
+        assert!(toasts.live_candidates(&events, at(8, 57, 0)).is_empty());
     }
 
     #[test]
     fn a_hidden_reminder_is_spent_and_does_not_appear_later() {
         let events = [event("a")];
         let mut toasts = MeetingToasts::default();
-        assert!(!toasts.update(&events, at(8, 56, 0), false));
-        assert!(!toasts.update(&events, at(8, 57, 0), true));
+        assert!(!tick(&mut toasts, &events, at(8, 56, 0), false).changed);
+        assert!(!tick(&mut toasts, &events, at(8, 57, 0), true).changed);
         assert!(toasts.is_empty());
     }
 
@@ -308,12 +588,12 @@ mod tests {
     fn toasts_leave_when_the_window_closes_or_the_event_goes() {
         let events = [event("a")];
         let mut toasts = MeetingToasts::default();
-        toasts.update(&events, at(8, 56, 0), true);
-        assert!(toasts.update(&events, at(9, 5, 0), true));
+        tick(&mut toasts, &events, at(8, 56, 0), true);
+        assert!(tick(&mut toasts, &events, at(9, 5, 0), true).changed);
         assert!(toasts.is_empty());
         let mut removed = MeetingToasts::default();
-        removed.update(&events, at(8, 56, 0), true);
-        assert!(removed.update(&[], at(8, 57, 0), true));
+        tick(&mut removed, &events, at(8, 56, 0), true);
+        assert!(tick(&mut removed, &[], at(8, 57, 0), true).changed);
         assert!(removed.is_empty());
     }
 
@@ -321,7 +601,7 @@ mod tests {
     fn the_latest_toast_is_the_one_a_shortcut_joins() {
         let events = [event("a"), event("b")];
         let mut toasts = MeetingToasts::default();
-        toasts.update(&events, at(8, 56, 0), true);
+        tick(&mut toasts, &events, at(8, 56, 0), true);
         assert_eq!(
             toasts.latest().map(|toast| toast.subject.as_str()),
             Some("Meeting b")
@@ -357,13 +637,17 @@ mod tests {
             subtitle(&toast(ReminderPhase::Started), at(9, 1, 0), offset),
             "11:00 - started"
         );
+        assert_eq!(
+            subtitle(&toast(ReminderPhase::Live), at(8, 57, 0), offset),
+            "11:00 - live now"
+        );
     }
 
     #[test]
     fn clearing_removes_every_open_toast() {
         let events = [event("a"), event("b")];
         let mut toasts = MeetingToasts::default();
-        toasts.update(&events, at(8, 56, 0), true);
+        tick(&mut toasts, &events, at(8, 56, 0), true);
         assert!(toasts.clear());
         assert!(toasts.is_empty());
         assert!(!toasts.clear());
@@ -373,7 +657,7 @@ mod tests {
     fn checks_run_at_most_once_a_second() {
         let mut toasts = MeetingToasts::default();
         assert!(toasts.is_due_for_check(at(9, 0, 0)));
-        toasts.update(&[], at(9, 0, 0), true);
+        tick(&mut toasts, &[], at(9, 0, 0), true);
         assert!(!toasts.is_due_for_check(at(9, 0, 0)));
         assert!(toasts.is_due_for_check(at(9, 0, 1)));
     }

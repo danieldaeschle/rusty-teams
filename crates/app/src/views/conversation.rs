@@ -645,6 +645,7 @@ impl ConversationView {
             | AppEvent::Ring
             | AppEvent::MissedCall(_)
             | AppEvent::MeetingReminder
+            | AppEvent::MeetingChime
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),

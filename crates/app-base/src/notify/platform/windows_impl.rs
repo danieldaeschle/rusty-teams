@@ -43,7 +43,7 @@ use windows::core::{BOOL, PCWSTR, w};
 use super::stack_plan::{StackPlan, stack_plan};
 use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
-use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, ringback_cycle};
+use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, meeting_chime, ringback_cycle};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../../app/assets/icon/teams-fast-256.png");
@@ -535,7 +535,14 @@ pub fn start_ringback() -> Option<RingTone> {
 }
 
 pub fn play_preview(ringtone: Ringtone) {
-    let cycle = ringtone.cycle(SAMPLE_RATE);
+    play_once(ringtone.cycle(SAMPLE_RATE));
+}
+
+pub fn play_meeting_chime() {
+    play_once(meeting_chime(SAMPLE_RATE));
+}
+
+fn play_once(cycle: Vec<f32>) {
     std::thread::spawn(move || {
         let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
             return;

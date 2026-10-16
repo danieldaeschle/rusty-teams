@@ -80,6 +80,8 @@ pub fn start_ringback() -> Option<RingTone> {
 
 pub fn play_preview(_ringtone: Ringtone) {}
 
+pub fn play_meeting_chime() {}
+
 pub struct Tray;
 
 impl Tray {
