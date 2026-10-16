@@ -523,8 +523,8 @@ impl Remote for Handle {
         Ok(())
     }
 
-    async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
-        self.record(format!("leave {chat_id} {user_id}"));
+    async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        self.record(format!("remove member {chat_id} {user_id}"));
         Ok(())
     }
 
@@ -1398,8 +1398,32 @@ async fn leave_removes_the_chat() {
     let mut events = engine.subscribe();
 
     engine.leave_chat(CHAT).await.unwrap();
-    assert_eq!(fake.calls().last().unwrap(), &format!("leave {CHAT} {ME}"));
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("remove member {CHAT} {ME}")
+    );
     assert!(engine.sidebar().unwrap().chats.is_empty());
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+}
+
+#[tokio::test]
+async fn removing_a_member_drops_them_from_the_cached_chat() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+
+    engine.remove_chat_member(CHAT, "user-ada").await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("remove member {CHAT} user-ada")
+    );
+    let chats = engine.sidebar().unwrap().chats;
+    let member_ids: Vec<Option<&str>> = chats[0]
+        .members
+        .iter()
+        .map(|member| member.user_id.as_deref())
+        .collect();
+    assert_eq!(member_ids, [Some(ME)]);
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 

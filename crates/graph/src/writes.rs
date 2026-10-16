@@ -28,7 +28,7 @@ fn mark_unread_body(user_id: &str, tenant_id: &str, last_read_at: DateTime<Utc>)
     })
 }
 
-fn own_membership_id<'a>(members: &'a [Member], user_id: &str) -> Option<&'a str> {
+fn membership_id<'a>(members: &'a [Member], user_id: &str) -> Option<&'a str> {
     members
         .iter()
         .find(|member| member.user_id.as_deref() == Some(user_id))
@@ -166,9 +166,9 @@ impl Graph {
         .await
     }
 
-    pub async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
+    pub async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()> {
         let members = self.chat_members(chat_id).await?;
-        let membership_id = own_membership_id(&members, user_id).ok_or(Error::NotAMember)?;
+        let membership_id = membership_id(&members, user_id).ok_or(Error::NotAMember)?;
         self.write(
             Method::Delete,
             &urls::chat_member(chat_id, membership_id),
@@ -308,10 +308,10 @@ mod tests {
     }
 
     #[test]
-    fn own_membership_is_found_by_user_id() {
+    fn membership_is_found_by_user_id() {
         let members = [member("m1", "u1"), member("m2", "u2")];
-        assert_eq!(own_membership_id(&members, "u2"), Some("m2"));
-        assert_eq!(own_membership_id(&members, "u3"), None);
+        assert_eq!(membership_id(&members, "u2"), Some("m2"));
+        assert_eq!(membership_id(&members, "u3"), None);
     }
 
     #[test]

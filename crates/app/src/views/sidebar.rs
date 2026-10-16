@@ -434,7 +434,7 @@ fn leave_description(member_count: usize) -> String {
     format!("{who} {verb} that you left. You can only come back if someone adds you.")
 }
 
-fn confirm_leave(
+pub(crate) fn confirm_leave(
     state: &Entity<AppState>,
     chat_id: &str,
     title: &str,

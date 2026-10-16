@@ -34,6 +34,7 @@ use super::attachments::FileActions;
 use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
 use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
+use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
@@ -790,7 +791,7 @@ impl ConversationView {
                 &face.name,
                 AVATAR_SIZE,
             ),
-            _ => member_stack(&app.directory, &faces, faces.len()).into_any_element(),
+            _ => member_stack(&app.directory, &faces, faces.len(), true).into_any_element(),
         };
         h_flex()
             .h(px(if flat {
@@ -3210,7 +3211,7 @@ impl ConversationView {
         let me = directory.me.as_ref();
         let mut lead: Option<AnyElement> = None;
         let mut subline = String::new();
-        let mut stack: Option<Div> = None;
+        let mut stack: Option<AnyElement> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3245,7 +3246,11 @@ impl ConversationView {
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
                         subline = format!("{} participants", chat.members.len());
                         let shown: Vec<Face> = faces.iter().cloned().map(face).collect();
-                        stack = Some(member_stack(directory, &shown, shown.len()));
+                        stack = Some(members_popover(
+                            &self.app,
+                            chat_id,
+                            member_stack(directory, &shown, shown.len(), false),
+                        ));
                     }
                 }
             }
