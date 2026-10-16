@@ -74,7 +74,8 @@ std::unique_ptr<AudioProcessingModule> create_apm(
     bool high_pass_filter_enabled,
     bool noise_suppression_enabled);
 
-std::unique_ptr<AudioProcessingModule> create_gain_apm(float initial_gain_db,
+std::unique_ptr<AudioProcessingModule> create_gain_apm(bool adaptive,
+                                                       float initial_gain_db,
                                                        float fixed_gain_db,
                                                        float max_gain_change_db_per_second);
 

@@ -51,6 +51,7 @@ pub mod ffi {
         ) -> UniquePtr<AudioProcessingModule>;
 
         fn create_gain_apm(
+            adaptive: bool,
             initial_gain_db: f32,
             fixed_gain_db: f32,
             max_gain_change_db_per_second: f32,
@@ -59,3 +60,24 @@ pub mod ffi {
 }
 
 impl_thread_safety!(ffi::AudioProcessingModule, Send + Sync);
+
+/// A gain-only AGC2 module, so callers do not need the cxx crate themselves.
+pub struct GainProcessor {
+    handle: cxx::UniquePtr<ffi::AudioProcessingModule>,
+}
+
+impl GainProcessor {
+    pub fn new(adaptive: bool, initial_gain_db: f32, fixed_gain_db: f32, max_gain_change_db_per_second: f32) -> Self {
+        Self { handle: ffi::create_gain_apm(adaptive, initial_gain_db, fixed_gain_db, max_gain_change_db_per_second) }
+    }
+
+    /// Processes one 10 ms mono frame in place; returns false when the module is missing or rejects the frame.
+    pub fn process(&mut self, frame: &mut [i16], sample_rate: i32) -> bool {
+        if self.handle.is_null() {
+            return false;
+        }
+        let length = frame.len();
+        let pointer = frame.as_mut_ptr();
+        unsafe { self.handle.pin_mut().process_stream(pointer, length, pointer, length, sample_rate, 1) == 0 }
+    }
+}

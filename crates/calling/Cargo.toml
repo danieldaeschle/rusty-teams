@@ -14,7 +14,6 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 futures-util.workspace = true
 libwebrtc = { version = "=0.3.51", features = ["glib-main-loop"] }
-cxx = "1"
 deep_filter = { path = "../../vendor/deep_filter" }
 ndarray = "0.17"
 nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }

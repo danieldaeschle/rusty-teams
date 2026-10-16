@@ -7,7 +7,7 @@ use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 use crate::mic_processing::MicSettings;
 
 const PCM_SCALE: f32 = 32768.0;
-const ATTENUATION_LIMIT_DB: f32 = 100.0;
+const ATTENUATION_LIMIT_DB: f32 = 30.0;
 const MIN_LOCAL_SNR_DB: f32 = -15.0;
 const MAX_LOCAL_SNR_ERB_DB: f32 = 35.0;
 const MAX_LOCAL_SNR_DF_DB: f32 = 35.0;

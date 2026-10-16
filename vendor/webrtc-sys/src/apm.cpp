@@ -75,12 +75,13 @@ std::unique_ptr<AudioProcessingModule> create_apm(
 }
 
 std::unique_ptr<AudioProcessingModule> create_gain_apm(
+    bool adaptive,
     float initial_gain_db,
     float fixed_gain_db,
     float max_gain_change_db_per_second) {
   webrtc::AudioProcessing::Config config;
   config.gain_controller2.enabled = true;
-  config.gain_controller2.adaptive_digital.enabled = true;
+  config.gain_controller2.adaptive_digital.enabled = adaptive;
   config.gain_controller2.adaptive_digital.initial_gain_db = initial_gain_db;
   config.gain_controller2.adaptive_digital.max_gain_change_db_per_second =
       max_gain_change_db_per_second;

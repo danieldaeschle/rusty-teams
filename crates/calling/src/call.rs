@@ -216,7 +216,8 @@ impl CallSpec {
     fn callee_count(&self) -> usize {
         match self {
             CallSpec::People { callees, .. } => callees.len(),
-            CallSpec::Echo | CallSpec::Meeting(_) => 0,
+            CallSpec::Echo => 1,
+            CallSpec::Meeting(_) => 0,
         }
     }
 }
@@ -3181,6 +3182,13 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_echo_call_waits_for_the_echo_bot_before_it_counts_as_connected() {
+        let mut gate = CalleeGate::new(CallSpec::Echo.callee_count());
+        assert!(!gate.media_connected());
+        assert!(gate.callee_joined());
+    }
 
     #[test]
     fn only_a_conflict_answer_retries_a_recording_stop() {
