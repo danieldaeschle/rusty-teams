@@ -98,10 +98,12 @@ cargo run -p app -- --demo
 
 | Task | Command |
 |---|---|
-| Linux build needs clang + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache` |
+| Linux build needs clang + mold (set in `.cargo/config.toml`) | `sudo apt install clang mold` |
+| One target dir for all worktrees (`~/.cache/rusty-teams/target`), once per machine; unset any `CARGO_TARGET_DIR` | `scripts/build-cache.sh setup` |
+| Disk use, and trimming old target dirs and the shared one to 40 GB (dry run without `--apply`) | `scripts/build-cache.sh status`, `scripts/build-cache.sh clean --apply` |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
-| Tests | `cargo test` |
+| Tests (without linking the ~30 example binaries) | `cargo test --workspace --lib --bins --tests` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 | Layout sweep before every UI deploy: 8 screens at 640x480 and 1920x1080, PNGs in `target/layout-sweep` (look at each) | `cargo build -p app && scripts/layout-sweep.sh` |
 | Layout guard: no overlapping or clipped elements, no negative offsets outside `widgets::corner_badge` | `cargo test -p app layout_guard` |

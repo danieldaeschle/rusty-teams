@@ -5,7 +5,8 @@ set -euo pipefail
 repoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crateDir="$(realpath "${1:-$repoRoot/spikes/gpui-list}")"
 binaryName="${2:-}"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$crateDir/target}"
+# One target dir for every worktree and crate (scripts/build-cache.sh): dependencies, libwebrtc and the patched gpui are built once.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/rusty-teams/target}"
 export PATH="$HOME/.cargo/bin:$PATH"
 export XWIN_ACCEPT_LICENSE=1
 export GPUI_FXC_PATH="$repoRoot/scripts/fxc-wsl.sh"

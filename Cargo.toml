@@ -49,6 +49,14 @@ gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
 
+# Linux builds and tests: file:line backtraces for our crates, no debuginfo for dependencies.
+# Full debuginfo (the default) made every test and example binary hundreds of MB, gpui, libwebrtc and tract included.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 incremental = true
 codegen-units = 256

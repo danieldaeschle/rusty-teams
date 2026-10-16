@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/headless-shot.sh OUT.png [--size 1280x800] [--window WxH] [--wait 10] [--settle 1] [--bin target/debug/teams] [--] [xdotool command]...
+# Usage: scripts/headless-shot.sh OUT.png [--size 1280x800] [--window WxH] [--wait 10] [--settle 1] [--bin TARGET_DIR/debug/teams] [--] [xdotool command]...
 # Runs the Linux build with --demo on a private Xvfb display and saves a screenshot.
 # Example: scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello" "paste ```\\ncode\\n```"
 # `type` cannot send a backtick (X11 treats it as a dead key and input stops); use `paste`, which expands \n.
@@ -11,7 +11,7 @@ size=1280x800
 wait_seconds=10
 window_size=
 settle_seconds=1
-binary=target/debug/teams
+binary="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/debug/teams"
 while [[ $# -gt 0 ]]; do
   case $1 in
     --size) size=$2; shift 2 ;;

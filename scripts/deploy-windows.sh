@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Publish the release exe to %LOCALAPPDATA%\Programs\ms-teams-linux\update\. The running app swaps itself.
-# Usage: scripts/deploy-windows.sh [exe, default crates/app/target/x86_64-pc-windows-msvc/release/teams.exe]
+# Usage: scripts/deploy-windows.sh [exe, default the teams.exe scripts/build-windows.sh wrote]
 set -euo pipefail
-repoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-targetDirectory="${CARGO_TARGET_DIR:-$repoRoot/crates/app/target}"
+targetDirectory="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/rusty-teams/target}"
 sourceExe="$(realpath "${1:-$targetDirectory/x86_64-pc-windows-msvc/release/teams.exe}")"
 installRoot="${TEAMS_INSTALL_DIR:-}"
 if [ -z "$installRoot" ]; then
