@@ -2,6 +2,7 @@ pub mod audio;
 pub mod audio_io;
 pub mod background;
 pub mod call;
+pub mod candidates;
 pub mod callee_gate;
 pub mod blur;
 pub mod breakout;

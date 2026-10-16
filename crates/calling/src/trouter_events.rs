@@ -92,6 +92,13 @@ pub struct Acceptance {
     pub links: BTreeMap<String, String>,
     pub controller_name: Option<String>,
     pub keep_alive_seconds: Option<u64>,
+    pub accepted_by: Option<AcceptedBy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedBy {
+    pub mri: String,
+    pub display_name: String,
 }
 
 impl Acceptance {
@@ -113,6 +120,7 @@ pub enum ProgressStatus {
 pub struct MediaAnswer {
     pub sdp: String,
     pub from_mixer: bool,
+    pub no_ring_back: bool,
     pub links: BTreeMap<String, String>,
 }
 
@@ -264,6 +272,10 @@ fn acceptance(body: &Value) -> Result<Acceptance> {
         links: string_links(&accepted["links"]),
         controller_name: accepted["controllerName"].as_str().map(str::to_owned),
         keep_alive_seconds: accepted["callKeepAliveInterval"].as_u64(),
+        accepted_by: accepted["acceptedBy"]["id"].as_str().map(|mri| AcceptedBy {
+            mri: mri.to_owned(),
+            display_name: accepted["acceptedBy"]["displayName"].as_str().unwrap_or_default().to_owned(),
+        }),
     })
 }
 
@@ -284,6 +296,7 @@ fn media_answer(body: &Value) -> Result<MediaAnswer> {
     Ok(MediaAnswer {
         sdp,
         from_mixer: answer["mediaContent"]["fromMixer"].as_bool().unwrap_or(false),
+        no_ring_back: answer["noRingBack"].as_bool().unwrap_or(false),
         links: string_links(&answer["links"]),
     })
 }
@@ -563,6 +576,15 @@ mod tests {
         let CallEvent::End(end) = event else { panic!("not an end") };
         assert_eq!(end.kind(), EndKind::AnsweredElsewhere);
         assert_eq!(end.accepted_elsewhere_by.as_deref(), Some("Daniel"));
+    }
+
+    #[test]
+    fn a_direct_acceptance_names_who_took_the_call() {
+        let body = json!({"callAcceptance": {"acceptedBy": {"id": "8:orgid:bea", "displayName": "Bea", "endpointId": "e"},
+            "mediaContent": {"blob": "v=0\r\n", "fromMixer": false}}});
+        let (_, event) = classify("callAgent/abc/1/call/acceptance/", body).unwrap();
+        let CallEvent::Acceptance(acceptance) = event else { panic!("not acceptance") };
+        assert_eq!(acceptance.accepted_by, Some(AcceptedBy { mri: "8:orgid:bea".into(), display_name: "Bea".into() }));
     }
 
     #[test]

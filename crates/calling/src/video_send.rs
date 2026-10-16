@@ -6,6 +6,7 @@ use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection_factory::PeerConnectionFactory;
 use libwebrtc::rtp_parameters::DegradationPreference;
 use libwebrtc::rtp_sender::RtpSender;
+use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection};
 use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _, VideoFrame, VideoRotation};
 use libwebrtc::video_source::VideoResolution;
@@ -287,6 +288,31 @@ impl LocalVideo {
 
     pub fn has_lines(&self) -> bool {
         self.lines.is_some()
+    }
+
+    pub fn share_mid(&self) -> Option<String> {
+        self.lines.as_ref().and_then(|lines| lines.share.as_ref()).and_then(|share| share.mid())
+    }
+
+    pub fn has_share_line(&self) -> bool {
+        self.lines.as_ref().is_some_and(|lines| lines.share.is_some())
+    }
+
+    pub fn add_share_line(&mut self, share: RtpTransceiver, camera: Option<RtpTransceiver>) -> Result<()> {
+        match (self.lines.as_mut(), camera) {
+            (Some(lines), _) => lines.share = Some(share),
+            (None, Some(camera)) => self.lines = Some(VideoLines { camera, share: Some(share) }),
+            (None, None) => return Err(Error::Webrtc("no video line negotiated".into())),
+        }
+        Ok(())
+    }
+
+    pub fn share_sending(&self) -> bool {
+        self.lines
+            .as_ref()
+            .and_then(|lines| lines.share.as_ref())
+            .and_then(|share| share.current_direction())
+            .is_some_and(|direction| matches!(direction, RtpTransceiverDirection::SendOnly | RtpTransceiverDirection::SendRecv))
     }
 
     pub fn is_available(&self) -> bool {

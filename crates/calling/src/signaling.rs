@@ -603,6 +603,10 @@ impl Signaling {
             .map(|_| ())
     }
 
+    pub async fn reject_renegotiation(&self, url: &str, from: &Participant, call_id: &str, failure: NegotiationFailure) -> Result<()> {
+        self.post_json("POST rejection (renegotiation)", url, negotiation_failure_body(from, call_id, failure)).await
+    }
+
     pub async fn keep_call_alive(&self, call_leg_url: &str) -> Result<()> {
         self.post_json("POST callLeg keep-alive", call_leg_url, json!({"callParticipantUpdate": {}}))
             .await
@@ -664,6 +668,13 @@ fn media_controller_links(callbacks: &CallbackLinks) -> Value {
         "controlVideoStreaming": callbacks.call("controlVideoStreaming"),
         "csrcInfo": callbacks.call("csrcInfo"),
     })
+}
+
+/// The 1:1 chat of two people: both object ids sorted as plain strings.
+pub fn one_to_one_thread(own_object_id: &str, peer_mri: &str) -> Option<String> {
+    let peer = peer_mri.strip_prefix("8:orgid:")?;
+    let (first, second) = if own_object_id <= peer { (own_object_id, peer) } else { (peer, own_object_id) };
+    Some(format!("19:{first}_{second}{ONE_TO_ONE_THREAD_SUFFIX}"))
 }
 
 impl InviteTarget {
@@ -841,6 +852,29 @@ pub fn acceptance_body(answer: &Answer<'_>) -> Value {
             "pstnContent": {"emergencyCallCountry": "", "platformName": PLATFORM_NAME, "publicApiCall": false},
             "callKeepAliveInterval": null,
         },
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NegotiationFailure {
+    InProgress,
+    AnswerError,
+}
+
+impl NegotiationFailure {
+    fn wire(self) -> (u16, u32, &'static str) {
+        match self {
+            NegotiationFailure::InProgress => (491, 3118, "NegotiationIsInProgress"),
+            NegotiationFailure::AnswerError => (488, 3102, "CallEndReasonMediaAnswerError"),
+        }
+    }
+}
+
+pub fn negotiation_failure_body(from: &Participant, call_id: &str, failure: NegotiationFailure) -> Value {
+    let (code, sub_code, phrase) = failure.wire();
+    json!({
+        "mediaNegotiationFailure": {"sender": from.wire(), "code": code, "subCode": sub_code, "phrase": phrase},
+        "debugContent": {"callId": call_id, "endpointId": from.endpoint_id},
     })
 }
 
@@ -1326,6 +1360,23 @@ mod tests {
         assert_eq!(accepted["links"].as_object().unwrap().len(), 7);
         assert!(accepted["links"]["mediaRenegotiation"].as_str().unwrap().ends_with("/call/mediaRenegotiation/"));
         assert_eq!(accepted["callKeepAliveInterval"], Value::Null);
+    }
+
+    #[test]
+    fn the_one_to_one_chat_sorts_both_ids() {
+        assert_eq!(one_to_one_thread("f74e", "8:orgid:a1b2").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
+        assert_eq!(one_to_one_thread("a1b2", "8:orgid:f74e").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
+        assert_eq!(one_to_one_thread("a1b2", "28:bot"), None);
+    }
+
+    #[test]
+    fn a_refused_offer_says_why() {
+        let body = negotiation_failure_body(&from(), "call-1", NegotiationFailure::InProgress);
+        assert_eq!(body["mediaNegotiationFailure"]["code"], 491);
+        assert_eq!(body["mediaNegotiationFailure"]["subCode"], 3118);
+        assert_eq!(body["mediaNegotiationFailure"]["phrase"], "NegotiationIsInProgress");
+        assert_eq!(body["debugContent"]["callId"], "call-1");
+        assert_eq!(negotiation_failure_body(&from(), "c", NegotiationFailure::AnswerError)["mediaNegotiationFailure"]["code"], 488);
     }
 
     #[test]

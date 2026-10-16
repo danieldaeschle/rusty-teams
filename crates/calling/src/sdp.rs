@@ -24,6 +24,10 @@ pub struct Attribute {
 }
 
 impl Attribute {
+    pub fn with_value(name: &str, value: impl Into<String>) -> Self {
+        Attribute::new(name, value)
+    }
+
     fn new(name: &str, value: impl Into<String>) -> Self {
         Attribute {
             name: name.to_owned(),
@@ -762,7 +766,7 @@ fn browser_rtp_line(
         attributes.push(Attribute::flag(direction));
     }
     if carries_candidates {
-        attributes.extend(teams_line.values("candidate").map(|value| Attribute::new("candidate", browser_candidate(value))));
+        attributes.extend(teams_line.values("candidate").chain(teams_line.values("x-candidate-ipv6")).map(|value| Attribute::new("candidate", browser_candidate(value))));
     }
     let (primary, retransmission) = stream_ssrcs(teams_line, stream_index);
     if let Some(primary) = primary {
@@ -821,6 +825,7 @@ fn browser_candidate(value: &str) -> String {
     let tcp_type = match parts.get(2).map(|transport| transport.to_ascii_lowercase()).as_deref() {
         Some("tcp-pass") => Some("passive"),
         Some("tcp-act") => Some("active"),
+        Some("tcp-so") => Some("so"),
         _ => None,
     };
     if tcp_type.is_some() {
@@ -993,6 +998,11 @@ fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candi
         let value = attribute.value.as_deref().unwrap_or_default();
         match attribute.name.as_str() {
             name if TEAMS_ONLY_ATTRIBUTES.contains(&name) => {}
+            "x-candidate-ipv6" => {
+                if carries_candidate {
+                    attributes.push(Attribute::new("candidate", browser_candidate(value)));
+                }
+            }
             name if name.starts_with("x-") => {}
             "mid" | "rtcp-mux" => {}
             name if TRANSPORT_ATTRIBUTES.contains(&name) => {}
