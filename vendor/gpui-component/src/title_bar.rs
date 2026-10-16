@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
+    ActiveTheme, Icon, IconName, InteractiveElementExt as _, StyledExt, h_flex,
 };
 use gpui::{
     AnyElement, App, Background, ClickEvent, Context, Decorations, Hsla, InteractiveElement,
@@ -17,6 +17,10 @@ pub const TITLE_BAR_HEIGHT: Pixels = px(34.);
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
+/// Windows 11 caption button width at 100% scale.
+const CONTROL_BUTTON_WIDTH: Pixels = px(46.);
+/// Box that renders the 16/24 window glyphs 10 px wide, like Segoe Fluent Icons at 10 px.
+const CONTROL_ICON_SIZE: Pixels = px(15.);
 
 fn default_title_bar_background(title_bar: Hsla, background: Hsla) -> Background {
     let title_bar_rgb = title_bar.to_rgb();
@@ -103,8 +107,6 @@ impl TitleBar {
     }
 }
 
-// The Windows control buttons have a fixed width of 35px.
-//
 // We don't need implementation the click event for the control buttons.
 // If user clicked in the bounds, the window event will be triggered.
 #[derive(IntoElement, Clone)]
@@ -208,7 +210,7 @@ impl RenderOnce for ControlIcon {
         div()
             .id(self.id())
             .flex()
-            .w(TITLE_BAR_HEIGHT)
+            .w(CONTROL_BUTTON_WIDTH)
             .h_full()
             .flex_shrink_0()
             .justify_center()
@@ -240,7 +242,7 @@ impl RenderOnce for ControlIcon {
                     }
                 })
             })
-            .child(Icon::new(self.icon()).small())
+            .child(Icon::new(self.icon()).size(CONTROL_ICON_SIZE))
     }
 }
 
