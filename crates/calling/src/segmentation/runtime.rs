@@ -28,8 +28,12 @@ pub fn environment() -> Option<&'static Environment> {
 }
 
 #[cfg(not(windows))]
+const SYSTEM_ONNXRUNTIME: &str = "libonnxruntime.so";
+
+#[cfg(not(windows))]
 fn builder() -> Option<ort::environment::EnvironmentBuilder> {
-    Some(ort::init())
+    let path = std::env::var_os("ORT_DYLIB_PATH").unwrap_or_else(|| SYSTEM_ONNXRUNTIME.into());
+    ort::init_from(path).ok()
 }
 
 #[cfg(windows)]
