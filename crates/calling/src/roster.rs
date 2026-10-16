@@ -249,6 +249,23 @@ impl Roster {
     }
 }
 
+/// Teams builds the roster of a direct call from `acceptedBy` because no mixer reports one; later mixer updates replace it.
+pub fn direct_roster(members: &[(&str, &str)]) -> Value {
+    let participants: serde_json::Map<String, Value> = members
+        .iter()
+        .map(|(mri, name)| {
+            let participant = serde_json::json!({
+                "version": 0,
+                "state": ACTIVE,
+                "details": {"id": mri, "displayName": name},
+                "endpoints": {"direct": {"call": {"mediaStreams": []}}},
+            });
+            ((*mri).to_owned(), participant)
+        })
+        .collect();
+    serde_json::json!({"participants": participants})
+}
+
 fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&Member>) -> Member {
     let display_name = participant["details"]["displayName"]
         .as_str()
@@ -374,6 +391,14 @@ fn source_id(value: &Value) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_direct_call_lists_both_people_until_the_mixer_reports() {
+        let mut roster = Roster::default();
+        assert!(roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+        assert_eq!(roster.members().len(), 2);
+        assert!(!roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+    }
+
     use serde_json::json;
 
     use super::*;

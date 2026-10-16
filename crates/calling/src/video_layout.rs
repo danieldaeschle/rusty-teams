@@ -21,7 +21,7 @@ pub const ONE_TO_ONE_SHARE_MID: &str = "2";
 const CAMERA_LINE_LABEL: &str = "main-video";
 const SHARE_LINE_LABEL: &str = "applicationsharing-video";
 const CAMERA_STREAM: &str = "camera";
-const SCREEN_STREAM: &str = "screen";
+pub const SCREEN_STREAM: &str = "screen";
 const H264: &str = "video/h264";
 const RTX: &str = "video/rtx";
 const NO_SOURCE: i64 = -1;
@@ -138,6 +138,12 @@ pub fn add_video_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -
     }
     let share = add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending, Vec::new())?;
     Ok(VideoLines { camera, share: Some(share) })
+}
+
+/// A sharing line added to a running direct call, the way Teams adds it before its share offer.
+pub fn add_share_line(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<RtpTransceiver> {
+    let sending = h264_only(factory.get_rtp_sender_capabilities(MediaType::Video).codecs);
+    add_line(peer, RtpTransceiverDirection::SendRecv, Some(SCREEN_STREAM), sending, Vec::new())
 }
 
 pub fn add_one_to_one_lines(peer: &PeerConnection, factory: &PeerConnectionFactory) -> Result<VideoLines> {
