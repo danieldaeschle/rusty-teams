@@ -1,0 +1,13 @@
+{
+  "messages": [
+    {
+      "messagetype": "RichText/Media_CallRecording",
+      "content": "<URIObject type=\"Video.2/CallRecording.1\"><RecordingStatus status=\"Success\" code=\"200\"></RecordingStatus><OriginalName v=\"Weekly sync-20260309_100000-Meeting Recording.mp4\" /><RecordingContent contentTypes=\"Recording+Transcript\" duration=\"0:30:32.00\"><item type=\"video\" uri=\"\" videoContent=\"CurtainOnly\" /><item type=\"onedriveForBusinessVideo\" uri=\"https://contoso-my.sharepoint.com/second.mp4\" driveId=\"drive-1\" driveItemId=\"item-2\" /></RecordingContent></URIObject>"
+    },
+    {
+      "messagetype": "RichText/Media_CallRecording",
+      "content": "<URIObject type=\"Video.2/CallRecording.1\"><RecordingStatus status=\"Success\" code=\"200\"></RecordingStatus><OriginalName v=\"first.mp4\" /><RecordingContent contentTypes=\"Recording+Transcript\"><item type=\"video\" uri=\"\" /></RecordingContent></URIObject>"
+    },
+    {"messagetype": "Text", "content": "hello"}
+  ]
+}

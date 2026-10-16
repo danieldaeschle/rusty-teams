@@ -1,18 +1,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use libwebrtc::native::yuv_helper::i420_to_abgr;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
-use crate::blur::{BlurSettings, BlurStage, MASK_HEIGHT, MASK_WIDTH, MaskSource};
-use crate::camera::i420_from_rgba;
+use crate::blur::{BlurSettings, BlurStage, MaskSource};
 use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
+use crate::matte::{Planes, refine};
 use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
 
 pub const SOFT_FOCUS_DEFAULT: u8 = 50;
-const MASK_INPUT_WIDTH: u32 = 512;
-const RGBA_BYTES: usize = 4;
 const AVERAGE_WEIGHT: f64 = 0.1;
 const FIRST_FRAME_GAP: Duration = Duration::from_millis(33);
 const GAMMA_NEUTRAL: f32 = 1.;
@@ -107,7 +104,7 @@ impl EffectsStage {
             self.adjust_brightness(&mut buffer, width, height, elapsed);
         }
         if (blur || standout || effects.needs_mask()) && self.load_masks() {
-            let fresh = self.refresh_mask(&mut buffer, effects.auto_framing);
+            let fresh = self.refresh_mask(&buffer, effects.auto_framing);
             if effects.soft_focus {
                 self.soften(&mut buffer, width, height, effects.soft_focus_strength);
             }
@@ -115,7 +112,7 @@ impl EffectsStage {
                 self.publish_cutout(&mut buffer);
             }
             if blur {
-                buffer = self.compose_background(buffer, width, height);
+                buffer = self.compose_background(buffer);
             }
         }
         buffer = self.frame(buffer, effects.auto_framing, elapsed);
@@ -143,11 +140,11 @@ impl EffectsStage {
         !self.unavailable
     }
 
-    fn refresh_mask(&mut self, buffer: &mut I420Buffer, track_subject: bool) -> bool {
+    fn refresh_mask(&mut self, buffer: &I420Buffer, track_subject: bool) -> bool {
         let Some(masks) = self.masks.as_mut() else { return false };
-        let fresh = masks.refresh(|| mask_input(buffer));
+        let fresh = masks.refresh(|| copy_frame(buffer));
         if track_subject && fresh {
-            self.subject = find_subject(masks.mask(), MASK_WIDTH, MASK_HEIGHT);
+            self.subject = find_subject(&masks.mask().values, masks.mask().width, masks.mask().height);
         }
         fresh
     }
@@ -163,14 +160,11 @@ impl EffectsStage {
         soften_luma(buffer.data_mut().0, stride, width, height, masks.mask(), strength);
     }
 
-    fn compose_background(&mut self, buffer: I420Buffer, width: usize, height: usize) -> I420Buffer {
+    fn compose_background(&mut self, mut buffer: I420Buffer) -> I420Buffer {
         let Some(masks) = self.masks.as_ref().filter(|masks| !masks.mask().is_empty()) else { return buffer };
-        let (stride_y, stride_u, stride_v) = buffer.strides();
-        let (plane_y, plane_u, plane_v) = buffer.data();
-        let mut rgba = vec![0u8; width * height * RGBA_BYTES];
-        i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, (width * RGBA_BYTES) as u32, width as i32, height as i32);
-        self.blur.compose(&mut rgba, width, height, masks.mask());
-        i420_from_rgba(&rgba, width as u32, height as u32)
+        let matte = refine(masks.mask(), Planes::of(&buffer));
+        self.blur.compose(&mut buffer, &matte);
+        buffer
     }
 
     fn frame(&mut self, buffer: I420Buffer, auto_framing: bool, elapsed: Duration) -> I420Buffer {
@@ -191,17 +185,14 @@ impl EffectsStage {
     }
 }
 
-fn mask_input(buffer: &mut I420Buffer) -> (Vec<u8>, usize, usize) {
-    let (width, height) = (buffer.width(), buffer.height());
-    let small_width = width.min(MASK_INPUT_WIDTH) & !1;
-    let small_height = (u64::from(height) * u64::from(small_width) / u64::from(width)) as u32 & !1;
-    let small = if (small_width, small_height) == (width, height) { None } else { Some(buffer.scale(small_width as i32, small_height as i32)) };
-    let source = small.as_ref().unwrap_or(buffer);
-    let (stride_y, stride_u, stride_v) = source.strides();
-    let (plane_y, plane_u, plane_v) = source.data();
-    let mut rgba = vec![0u8; small_width as usize * small_height as usize * RGBA_BYTES];
-    i420_to_abgr(plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, &mut rgba, small_width * RGBA_BYTES as u32, small_width as i32, small_height as i32);
-    (rgba, small_width as usize, small_height as usize)
+fn copy_frame(buffer: &I420Buffer) -> I420Buffer {
+    let mut copy = I420Buffer::new(buffer.width(), buffer.height());
+    let (source_y, source_u, source_v) = buffer.data();
+    let (target_y, target_u, target_v) = copy.data_mut();
+    target_y.copy_from_slice(source_y);
+    target_u.copy_from_slice(source_u);
+    target_v.copy_from_slice(source_v);
+    copy
 }
 
 #[cfg(test)]
@@ -267,12 +258,7 @@ mod tests {
     fn every_effect_stays_inside_the_frame_budget_at_720p() {
         let mut buffer = I420Buffer::new(1280, 720);
         buffer.data_mut().0.iter_mut().enumerate().for_each(|(index, value)| *value = (index % 200) as u8 + 20);
-        let mask: Vec<f32> = (0..MASK_WIDTH * MASK_HEIGHT)
-            .map(|index| {
-                let (x, y) = ((index % MASK_WIDTH) as f32 / MASK_WIDTH as f32 - 0.5, (index / MASK_WIDTH) as f32 / MASK_HEIGHT as f32 - 0.5);
-                if (x * x) / 0.04 + (y * y) / 0.09 <= 1. { 1. } else { 0. }
-            })
-            .collect();
+        let mask = crate::mask::Mask::from_fn(256, 144, |x, y| if ((x - 0.5) * (x - 0.5)) / 0.04 + ((y - 0.5) * (y - 0.5)) / 0.09 <= 1. { 1. } else { 0. });
         let crop = crate::framing::Crop { center_x: 0.5, center_y: 0.5, zoom: 1.6 };
         let total = [
             timed("brightness", || {
@@ -283,8 +269,8 @@ mod tests {
                 let mut copy = I420Buffer::new(1280, 720);
                 soften_luma(copy.data_mut().0, 1280, 1280, 720, &mask, 100);
             }),
-            timed("mask input", || mask_input(&mut buffer)),
-            timed("subject", || find_subject(&mask, MASK_WIDTH, MASK_HEIGHT)),
+            timed("frame copy", || copy_frame(&buffer)),
+            timed("subject", || find_subject(&mask.values, mask.width, mask.height)),
             timed("crop and scale", || crop_and_scale(&buffer, &crop)),
         ]
         .iter()

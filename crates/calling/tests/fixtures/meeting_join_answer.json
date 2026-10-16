@@ -1,0 +1,225 @@
+{
+  "conversationController": "https://conv.example/conv/joined",
+  "links": {
+    "leave": "https://conv.example/conv/joined/leave"
+  },
+  "roster": {
+    "participantCounts": {
+      "lobbyParticipants": 0,
+      "overflowAttendeeCount": 0,
+      "preheatedParticipants": 0,
+      "requestingAttentionAttendees": 0,
+      "requestingAttentionInterpreters": 0,
+      "requestingAttentionPresenters": 0,
+      "streamingClients": 0,
+      "totalAttendees": 0,
+      "totalInterpreters": 0,
+      "totalOrganizers": 1,
+      "totalParticipants": 4,
+      "totalPresenters": 4,
+      "totalUnverifiedUsers": 3
+    },
+    "participants": {
+      "8:orgid:00000000-0000-0000-0000-00000000000a": {
+        "meetingRole": "organizer",
+        "role": "admin",
+        "state": "active",
+        "version": 3,
+        "details": {
+          "id": "8:orgid:00000000-0000-0000-0000-00000000000a",
+          "displayName": "Organizer",
+          "participantType": "inTenant"
+        },
+        "endpoints": {
+          "00000000-0000-0000-0000-000000000000": {
+            "call": {
+              "mediaStreams": [
+                {
+                  "direction": "sendrecv",
+                  "label": "main-audio",
+                  "serverMuted": false,
+                  "sourceId": 201,
+                  "type": "audio"
+                },
+                {
+                  "direction": "recvonly",
+                  "label": "main-video",
+                  "serverMuted": false,
+                  "sourceId": 202,
+                  "type": "video"
+                },
+                {
+                  "direction": "recvonly",
+                  "label": "applicationsharing-video",
+                  "serverMuted": false,
+                  "sourceId": 212,
+                  "type": "applicationsharing-video"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "data",
+                  "serverMuted": false,
+                  "sourceId": 213,
+                  "type": "data"
+                }
+              ]
+            },
+            "endpointState": {
+              "endpointStateSequenceNumber": 3,
+              "state": {
+                "isMuted": true
+              }
+            },
+            "modalityJoined": "Call"
+          }
+        }
+      },
+      "8:teamsvisitor:00000000000000000000000000000001": {
+        "meetingRole": "presenter",
+        "role": "guest",
+        "state": "active",
+        "version": 7,
+        "details": {
+          "id": "8:teamsvisitor:00000000000000000000000000000001",
+          "displayName": "Test Guest 1",
+          "participantType": "anonymous"
+        },
+        "endpoints": {
+          "00000001-0000-0000-0000-000000000000": {
+            "call": {
+              "mediaStreams": [
+                {
+                  "direction": "sendrecv",
+                  "label": "main-audio",
+                  "serverMuted": false,
+                  "sourceId": 414,
+                  "type": "audio"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "main-video",
+                  "serverMuted": false,
+                  "sourceId": 415,
+                  "type": "video"
+                },
+                {
+                  "direction": "recvonly",
+                  "label": "applicationsharing-video",
+                  "serverMuted": false,
+                  "sourceId": 425,
+                  "type": "applicationsharing-video"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "data",
+                  "serverMuted": false,
+                  "sourceId": 426,
+                  "type": "data"
+                }
+              ]
+            },
+            "modalityJoined": "Lobby,Call"
+          }
+        }
+      },
+      "8:teamsvisitor:00000000000000000000000000000002": {
+        "meetingRole": "presenter",
+        "role": "guest",
+        "state": "active",
+        "version": 9,
+        "details": {
+          "id": "8:teamsvisitor:00000000000000000000000000000002",
+          "displayName": "Test Guest 2",
+          "participantType": "anonymous"
+        },
+        "endpoints": {
+          "00000002-0000-0000-0000-000000000000": {
+            "call": {
+              "mediaStreams": [
+                {
+                  "direction": "sendrecv",
+                  "label": "main-audio",
+                  "serverMuted": false,
+                  "sourceId": 627,
+                  "type": "audio"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "main-video",
+                  "serverMuted": false,
+                  "sourceId": 628,
+                  "type": "video"
+                },
+                {
+                  "direction": "recvonly",
+                  "label": "applicationsharing-video",
+                  "serverMuted": false,
+                  "sourceId": 638,
+                  "type": "applicationsharing-video"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "data",
+                  "serverMuted": false,
+                  "sourceId": 639,
+                  "type": "data"
+                }
+              ]
+            },
+            "modalityJoined": "Lobby,Call"
+          }
+        }
+      },
+      "8:teamsvisitor:00000000000000000000000000000003": {
+        "meetingRole": "presenter",
+        "role": "guest",
+        "state": "active",
+        "version": 8,
+        "details": {
+          "id": "8:teamsvisitor:00000000000000000000000000000003",
+          "displayName": "Test Guest 3",
+          "participantType": "anonymous"
+        },
+        "endpoints": {
+          "00000003-0000-0000-0000-000000000000": {
+            "call": {
+              "mediaStreams": [
+                {
+                  "direction": "sendrecv",
+                  "label": "main-audio",
+                  "serverMuted": false,
+                  "sourceId": 840,
+                  "type": "audio"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "main-video",
+                  "serverMuted": false,
+                  "sourceId": 841,
+                  "type": "video"
+                },
+                {
+                  "direction": "recvonly",
+                  "label": "applicationsharing-video",
+                  "serverMuted": false,
+                  "sourceId": 851,
+                  "type": "applicationsharing-video"
+                },
+                {
+                  "direction": "sendrecv",
+                  "label": "data",
+                  "serverMuted": false,
+                  "sourceId": 852,
+                  "type": "data"
+                }
+              ]
+            },
+            "modalityJoined": "Lobby,Call"
+          }
+        }
+      }
+    },
+    "sequenceNumber": 9,
+    "type": "Delta"
+  }
+}

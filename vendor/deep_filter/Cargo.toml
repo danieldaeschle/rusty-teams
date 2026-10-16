@@ -1,0 +1,33 @@
+# Trimmed copy of libDF (DeepFilterNet, https://github.com/Rikorose/DeepFilterNet @ d375b2d):
+# real-time tract runtime and the DeepFilterNet3 model only, ported to tract 0.23.
+[package]
+name = "deep_filter"
+version = "0.5.7-pre"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "df"
+path = "src/lib.rs"
+
+[features]
+default = ["default-model"]
+default-model = []
+timings = []
+
+[dependencies]
+anyhow = "1"
+flate2 = "1"
+itertools = "0.12"
+log = "0.4"
+ndarray = "0.17"
+num-complex = "0.4"
+realfft = "3.1"
+rust-ini = "0.21"
+rustfft = "6.1"
+tar = "0.4"
+tract-core = "0.23"
+tract-hir = "0.23"
+tract-onnx = "0.23"
+tract-pulse = "0.23"

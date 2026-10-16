@@ -1,5 +1,7 @@
 use scraper::{ElementRef, Html, Node};
 
+use crate::jumbo::without_repeated_skin_tone;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontSize {
     Small,
@@ -54,7 +56,10 @@ pub enum Span {
     Image {
         hosted_content_url: String,
     },
-    Quote(Vec<Span>),
+    Quote {
+        message_id: Option<String>,
+        children: Vec<Span>,
+    },
     BlockQuote(Vec<Span>),
 }
 
@@ -142,7 +147,10 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
             start: 1,
             items: vec![convert_children(element)],
         }),
-        "blockquote" if is_reply(element) => spans.push(Span::Quote(convert_children(element))),
+        "blockquote" if is_reply(element) => spans.push(Span::Quote {
+            message_id: element.value().attr("itemid").map(str::to_owned),
+            children: convert_children(element),
+        }),
         "blockquote" => spans.push(Span::BlockQuote(convert_children(element))),
         "emoji" => push_emoji(element, spans),
         "img" => push_image(element, spans),
@@ -368,7 +376,7 @@ fn push_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .map(str::to_owned)
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| raw_text(element));
-    push_text(spans, &glyph);
+    push_text(spans, &without_repeated_skin_tone(&glyph));
 }
 
 fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
@@ -378,7 +386,7 @@ fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .is_some_and(|itemtype| itemtype.contains(EMOJI_ITEMTYPE));
     if is_emoji {
         if let Some(alt) = value.attr("alt") {
-            push_text(spans, alt);
+            push_text(spans, &without_repeated_skin_tone(alt));
         }
         return;
     }
@@ -416,7 +424,7 @@ fn tidy(spans: &mut Vec<Span>) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => tidy(children),
             Span::List { items, .. } => items.iter_mut().for_each(tidy),
@@ -447,7 +455,7 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
                         | Span::List { .. }
                         | Span::Table { .. }
                         | Span::Heading { .. }
-                        | Span::Quote(_)
+                        | Span::Quote { .. }
                         | Span::BlockQuote(_)
                 )
             )

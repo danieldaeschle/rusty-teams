@@ -23,6 +23,7 @@ pub struct MediaNegotiator {
     path: MediaPath,
     own_offer_pending: bool,
     same_peer_offer_pending: bool,
+    path_before_server_escalation: Option<MediaPath>,
 }
 
 impl Default for MediaNegotiator {
@@ -31,6 +32,7 @@ impl Default for MediaNegotiator {
             path: MediaPath::Pending,
             own_offer_pending: false,
             same_peer_offer_pending: false,
+            path_before_server_escalation: None,
         }
     }
 }
@@ -88,10 +90,13 @@ impl MediaNegotiator {
     }
 
     pub fn on_renegotiation(&mut self, new_offer: bool, escalation: bool) -> MediaAction {
-        if self.own_offer_pending || self.same_peer_offer_pending {
+        let new_peer = new_offer || escalation;
+        if (self.own_offer_pending && new_peer) || (self.same_peer_offer_pending && !escalation) {
             return MediaAction::RejectGlare;
         }
+        self.same_peer_offer_pending = false;
         if escalation {
+            self.path_before_server_escalation.get_or_insert(self.path);
             self.path = MediaPath::Mixer;
         }
         if new_offer || escalation {
@@ -101,14 +106,116 @@ impl MediaNegotiator {
         }
     }
 
+    pub fn server_escalation_failed(&mut self) {
+        if let Some(path) = self.path_before_server_escalation.take() {
+            self.path = path;
+        }
+    }
+
+    pub fn server_escalation_done(&mut self) {
+        self.path_before_server_escalation = None;
+    }
+
     pub fn escalation_failed(&mut self) {
         self.own_offer_pending = false;
     }
+
+    pub fn escalate_after_mixer_answer(&mut self) -> bool {
+        if self.path != MediaPath::Direct || self.own_offer_pending {
+            return false;
+        }
+        self.path = MediaPath::Mixer;
+        self.own_offer_pending = true;
+        true
+    }
+
+    pub fn note_mixer_path(&mut self) {
+        if self.path == MediaPath::Direct {
+            self.path = MediaPath::Mixer;
+        }
+    }
+
+    pub fn begin_conference_upgrade(&mut self) -> bool {
+        if self.path != MediaPath::Mixer || self.own_offer_pending || self.same_peer_offer_pending {
+            return false;
+        }
+        self.own_offer_pending = true;
+        true
+    }
+
+    pub fn on_rejection(&mut self) -> RejectedOffer {
+        if std::mem::take(&mut self.same_peer_offer_pending) {
+            return RejectedOffer::SamePeer;
+        }
+        if std::mem::take(&mut self.own_offer_pending) {
+            return RejectedOffer::NewPeer;
+        }
+        RejectedOffer::None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejectedOffer {
+    SamePeer,
+    NewPeer,
+    None,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mixer_answer_on_a_direct_call_starts_one_escalation() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false, true);
+        assert_eq!(negotiator.path(), MediaPath::Direct);
+        assert!(negotiator.escalate_after_mixer_answer());
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        assert!(!negotiator.escalate_after_mixer_answer());
+        assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnNewPeer);
+    }
+
+    #[test]
+    fn a_server_escalation_wins_over_a_pending_same_peer_offer() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false, true);
+        assert!(negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
+        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        assert!(negotiator.begin_conference_upgrade());
+        assert!(!negotiator.begin_conference_upgrade());
+    }
+
+    #[test]
+    fn a_failed_server_escalation_goes_back_to_the_direct_path() {
+        let mut negotiator = MediaNegotiator::default();
+        negotiator.on_acceptance(false, true);
+        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(negotiator.path(), MediaPath::Mixer);
+        negotiator.server_escalation_failed();
+        assert_eq!(negotiator.path(), MediaPath::Direct);
+    }
+
+    #[test]
+    fn a_remote_same_peer_offer_is_answered_while_our_escalation_runs() {
+        let mut negotiator = MediaNegotiator::default();
+        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::ApplyAnswerThenEscalate);
+        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
+        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::RejectGlare);
+    }
+
+    #[test]
+    fn a_rejection_clears_the_pending_offer() {
+        let mut negotiator = MediaNegotiator::default();
+        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::ApplyAnswerThenEscalate);
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::NewPeer);
+        assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
+        assert!(negotiator.begin_same_peer_offer());
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::SamePeer);
+        assert_eq!(negotiator.on_rejection(), RejectedOffer::None);
+    }
 
     #[test]
     fn the_first_answer_decides_the_path() {

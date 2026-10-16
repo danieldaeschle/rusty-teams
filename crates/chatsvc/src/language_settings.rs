@@ -4,6 +4,7 @@ use session::{Method, Request, SPACES, Scope, Session};
 use crate::error::{Error, Result};
 use crate::messages::ensure_success;
 use crate::pins::{CsaTransport, DEFAULT_REGION, SessionTransport};
+use crate::recording_policy::{RecordingPolicy, parse_recording_policy, recording_policy_body};
 use crate::translate::language_code;
 
 const SKYPE_SCOPE: &str = "user_impersonation";
@@ -187,6 +188,20 @@ impl<T: CsaTransport> LanguageSettingsClient<T> {
             .await?;
         ensure_success(&answer)?;
         parse_language_settings(&answer.body)
+    }
+
+    pub async fn read_recording_policy(&self) -> Result<RecordingPolicy> {
+        let url = format!("{}/useraggregatesettings", self.base_url);
+        let answer = self
+            .transport
+            .send(with_headers(Request::with_body(
+                Method::Post,
+                url,
+                recording_policy_body(),
+            )))
+            .await?;
+        ensure_success(&answer)?;
+        Ok(parse_recording_policy(&answer.body))
     }
 
     pub async fn patch(&self, patch: Value) -> Result<()> {
@@ -374,6 +389,29 @@ mod tests {
         assert_eq!(
             requests[1].body.as_ref().unwrap()["translationPreferences"]["translationBehavior"],
             json!("No")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_recording_policy_is_read_from_the_same_route() {
+        let answer = json!({"meetingPolicy": {"value": {"allowCloudRecording": false}}});
+        let transport = Canned {
+            answers: Mutex::new(vec![(200, answer)].into()),
+            requests: Mutex::new(Vec::new()),
+        };
+        let policy = LanguageSettingsClient::with_transport(&transport, "emea")
+            .read_recording_policy()
+            .await
+            .unwrap();
+        assert!(!policy.meeting_recording && policy.call_recording);
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(
+            requests[0].url,
+            "https://teams.cloud.microsoft/api/mt/emea/beta/users/useraggregatesettings"
+        );
+        assert_eq!(
+            requests[0].body,
+            Some(json!({"meetingPolicy": true, "callingPolicy": true}))
         );
     }
 

@@ -3,11 +3,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use chatsvc::settings::{parse_chat_sections, parse_skin_tone, parse_teams_order};
 use chatsvc::{
     ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
     ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
 };
-use chatsvc::settings::{parse_chat_sections, parse_teams_order};
 use chrono::Utc;
 use serde_json::Value;
 use session::Session;
@@ -64,6 +64,12 @@ pub trait FolderSource: Send + Sync {
     fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+    fn preferred_skin_tone(&self) -> Option<u8> {
+        None
+    }
+    fn set_skin_tone(&self, _tone: u8) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
     fn set_section_enabled(&self, section: ChatSection, enabled: bool)
     -> BoxFuture<'_, Result<()>>;
     fn set_folder_expanded<'a>(
@@ -89,6 +95,7 @@ pub struct ChatsvcFolderSource {
     settings: UserSettings,
     channel_settings: ChannelSettings,
     properties: Mutex<Option<Value>>,
+    skin_tone: Mutex<Option<u8>>,
 }
 
 impl ChatsvcFolderSource {
@@ -98,6 +105,7 @@ impl ChatsvcFolderSource {
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
             properties: Mutex::new(None),
+            skin_tone: Mutex::new(None),
         }
     }
 }
@@ -139,9 +147,18 @@ impl FolderSource for ChatsvcFolderSource {
         Box::pin(async {
             let properties = self.settings.properties().await?;
             let sections = parse_chat_sections(&properties);
+            *self.skin_tone.lock().unwrap() = parse_skin_tone(&properties);
             *self.properties.lock().unwrap() = Some(properties);
             Ok(sections)
         })
+    }
+
+    fn preferred_skin_tone(&self) -> Option<u8> {
+        *self.skin_tone.lock().unwrap()
+    }
+
+    fn set_skin_tone(&self, tone: u8) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move { Ok(self.settings.set_skin_tone(tone).await?) })
     }
 
     fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
@@ -426,7 +443,12 @@ impl<R: Remote> SyncEngine<R> {
 
     async fn refresh_section_settings(&self, source: &Arc<dyn FolderSource>) {
         let outcome = match source.section_settings().await {
-            Ok(settings) => self.apply_section_settings(&settings),
+            Ok(settings) => self.apply_section_settings(&settings).and_then(|()| {
+                match source.preferred_skin_tone() {
+                    Some(tone) => crate::skin_tone::store_account_skin_tone(&self.store, tone),
+                    None => Ok(()),
+                }
+            }),
             Err(error) => Err(error),
         };
         if let Err(error) = outcome {
@@ -446,6 +468,11 @@ impl<R: Remote> SyncEngine<R> {
         self.folder_source()?
             .set_section_enabled(section, enabled)
             .await
+    }
+
+    pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
+        self.folder_source()?.set_skin_tone(tone).await?;
+        crate::skin_tone::store_account_skin_tone(&self.store, tone)
     }
 
     pub async fn set_folder_expanded(&self, folder_id: &str, expanded: bool) -> Result<()> {

@@ -6,6 +6,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{FileCard, FileKind, ImageRef, external_image_url};
 
+use super::image_menu::{ImageShare, with_image_menu};
 use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::downloads::{self, DownloadState};
@@ -29,7 +30,11 @@ const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
 const LOCAL_IMAGE_SUFFIX: &str = "/$value";
 
 pub type FileActivate = Rc<dyn Fn(usize, &mut App)>;
-pub type ImageOpen = Rc<dyn Fn(&str, &mut App)>;
+#[derive(Clone)]
+pub struct ImageActions {
+    pub open: Rc<dyn Fn(&str, &mut App)>,
+    pub share: Option<ImageShare>,
+}
 
 #[derive(Clone)]
 pub struct FileActions {
@@ -71,9 +76,10 @@ fn image_view(
     image: &ImageRef,
     id: String,
     directory: &Directory,
-    open_image: Option<&ImageOpen>,
+    open_image: Option<&ImageActions>,
 ) -> AnyElement {
     let (width, height) = image_size(image, directory);
+    let image_id = ElementId::Name(format!("{id}-image").into());
     let frame = div()
         .id(ElementId::Name(id.into()))
         .relative()
@@ -101,20 +107,25 @@ fn image_view(
             .into_any_element();
     };
     let path = entry.path.clone();
+    let share = open_image.and_then(|actions| actions.share.clone());
     let (url, open_image) = (image.url.clone(), open_image.cloned());
-    frame
+    let frame = frame
         .cursor_pointer()
         .child(
             img(entry.path.clone())
+                .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover),
         )
-        .on_click(move |_, _, cx| match &open_image {
-            Some(open_image) => open_image(&url, cx),
-            None => cx.open_with_system(&path),
-        })
-        .into_any_element()
+        .on_click({
+            let path = path.clone();
+            move |_, _, cx| match &open_image {
+                Some(actions) => (actions.open)(&url, cx),
+                None => cx.open_with_system(&path),
+            }
+        });
+    with_image_menu(frame, path, share).into_any_element()
 }
 
 struct KindStyle {
@@ -169,6 +180,7 @@ pub fn file_badge(kind: FileKind, size: f32) -> Div {
 
 fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
     let (width, height) = fit_image(image.size);
+    let image_id = ElementId::Name(format!("{id}-image").into());
     div()
         .id(ElementId::Name(id.into()))
         .w(px(width))
@@ -179,6 +191,7 @@ fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
         .overflow_hidden()
         .child(
             img(image.image.clone())
+                .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover),
@@ -245,8 +258,8 @@ fn file_view(
         .id(ElementId::Name(id.into()))
         .relative()
         .overflow_hidden()
-        .w(px(FILE_CARD_WIDTH))
-        .max_w(relative(1.))
+        .w_full()
+        .max_w(px(FILE_CARD_WIDTH))
         .gap(px(12.))
         .px(px(8.))
         .py(px(8.))
@@ -332,7 +345,7 @@ pub fn message_body(
     id: &str,
     own: bool,
     directory: &Directory,
-    open_image: Option<&ImageOpen>,
+    open_image: Option<&ImageActions>,
     cx: &App,
 ) -> Vec<AnyElement> {
     if !blocks
@@ -381,7 +394,7 @@ pub fn attachments_view(
     id: &str,
     directory: &Directory,
     file_actions: Option<&FileActions>,
-    open_image: Option<&ImageOpen>,
+    open_image: Option<&ImageActions>,
 ) -> Option<Div> {
     let placed = placements(blocks, images, local_images.len());
     let unplaced_images: Vec<(usize, &ImageRef)> = images

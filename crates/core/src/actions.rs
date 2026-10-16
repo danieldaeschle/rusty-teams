@@ -52,7 +52,7 @@ impl<R: Remote> SyncEngine<R> {
         mentions: &[MentionInput],
         extras: &MessageExtras,
     ) -> Result<MessageRecord> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = match (conversation, thread_root_id) {
             (Conversation::Chat, None) => {
@@ -120,7 +120,7 @@ impl<R: Remote> SyncEngine<R> {
         mentions: &[MentionInput],
         extras: &MessageExtras,
     ) -> Result<MessageRecord> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = match conversation {
             Conversation::Chat => {
@@ -204,7 +204,7 @@ impl<R: Remote> SyncEngine<R> {
         mentions: &[MentionInput],
         extras: &MessageExtras,
     ) -> Result<MessageRecord> {
-        let conversation = self.resolve(channel_id)?;
+        let conversation = self.resolve(channel_id).await?;
         let Conversation::Channel { team_id } = &conversation else {
             return Err(Error::Unsupported("posting a root message to a chat"));
         };
@@ -239,7 +239,7 @@ impl<R: Remote> SyncEngine<R> {
         bytes: &[u8],
         progress: impl Fn(u8) + Send + Sync,
     ) -> Result<UploadedFile> {
-        let destination = match self.resolve(conversation_id)? {
+        let destination = match self.resolve(conversation_id).await? {
             Conversation::Chat => UploadDestination::ChatFiles,
             Conversation::Channel { team_id } => {
                 UploadDestination::Folder(self.channel_folder(&team_id, conversation_id).await?)
@@ -262,7 +262,7 @@ impl<R: Remote> SyncEngine<R> {
         conversation_id: &str,
         uploaded: &UploadedFile,
     ) -> Result<()> {
-        if !matches!(self.resolve(conversation_id)?, Conversation::Chat) {
+        if !matches!(self.resolve(conversation_id).await?, Conversation::Chat) {
             return Ok(());
         }
         let other_members = self.other_member_ids(conversation_id).await?;
@@ -314,7 +314,7 @@ impl<R: Remote> SyncEngine<R> {
         conversation_id: &str,
         message_id: &str,
     ) -> Result<Option<MessageRecord>> {
-        let fetched = match self.resolve(conversation_id)? {
+        let fetched = match self.resolve(conversation_id).await? {
             Conversation::Chat => self.remote.chat_message(conversation_id, message_id).await,
             Conversation::Channel { team_id } => {
                 self.fetch_channel_message(&team_id, conversation_id, message_id)
@@ -332,6 +332,8 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(None);
         };
         let mut record = record;
+        self.apply_chat_emotions(conversation_id, std::slice::from_mut(&mut record))
+            .await;
         let delta = self.ingest(conversation_id, vec![record.clone()])?;
         let links_changed = self.attach_links(conversation_id, &mut [&mut record]).await;
         self.announce(conversation_id, !delta.is_empty() || links_changed);
@@ -357,7 +359,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn mark_read(&self, conversation_id: &str) -> Result<()> {
-        if !matches!(self.resolve(conversation_id)?, Conversation::Chat) {
+        if !matches!(self.resolve(conversation_id).await?, Conversation::Chat) {
             return Err(Error::Unsupported("marking a channel as read"));
         }
         let user_id = self.my_user_id().await?;
@@ -459,7 +461,7 @@ impl<R: Remote> SyncEngine<R> {
         thread_root_id: Option<&str>,
         active: bool,
     ) -> Result<()> {
-        let conversation = match (self.resolve(conversation_id)?, thread_root_id) {
+        let conversation = match (self.resolve(conversation_id).await?, thread_root_id) {
             (Conversation::Chat, _) => ConversationRef::chat(conversation_id),
             (Conversation::Channel { .. }, None) => ConversationRef::channel_root(conversation_id),
             (Conversation::Channel { .. }, Some(root_id)) => {
@@ -526,7 +528,7 @@ impl<R: Remote> SyncEngine<R> {
         html: &str,
         mentions: &[MentionInput],
     ) -> Result<()> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         let (mut html, mentions) = outgoing(&conversation, html, mentions)?;
         let target = self.message_target(conversation_id, message_id)?;
         let mut extras = MessageExtras::default();
@@ -556,7 +558,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn message_target(&self, conversation_id: &str, message_id: &str) -> Result<MessageTarget> {
-        Ok(match self.resolve(conversation_id)? {
+        Ok(match self.resolve_stored(conversation_id)? {
             Conversation::Chat => MessageTarget::chat(conversation_id, message_id),
             Conversation::Channel { team_id } => {
                 let root_id = self

@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use super::widgets::symbol;
 use crate::emoji::Match;
+use crate::emoticons;
 use crate::theme;
 
 pub const LIMIT: usize = 40;
@@ -20,16 +21,18 @@ pub struct EmojiPopup {
     pub query: String,
     pub matches: Vec<Match>,
     pub highlighted: usize,
+    pub skin_tone: u8,
     scroll: ScrollHandle,
 }
 
 impl EmojiPopup {
-    pub fn new(range: Range<usize>, query: String, matches: Vec<Match>) -> Self {
+    pub fn new(range: Range<usize>, query: String, matches: Vec<Match>, skin_tone: u8) -> Self {
         EmojiPopup {
             range,
             query,
             matches,
             highlighted: 0,
+            skin_tone,
             scroll: ScrollHandle::new(),
         }
     }
@@ -44,6 +47,11 @@ impl EmojiPopup {
 
     pub fn selected(&self) -> Option<&Match> {
         self.matches.get(self.highlighted)
+    }
+
+    pub fn selected_glyph(&self) -> Option<String> {
+        self.selected()
+            .map(|found| emoticons::with_tone(found.glyph, self.skin_tone))
     }
 }
 
@@ -69,7 +77,7 @@ fn highlighted_text(text: String, highlight: Range<usize>, size: f32, color: Hsl
         .child(StyledText::new(text).with_highlights(marks))
 }
 
-fn row(index: usize, found: &Match, selected: bool) -> Stateful<Div> {
+fn row(index: usize, found: &Match, selected: bool, skin_tone: u8) -> Stateful<Div> {
     let code = format!(":{}:", found.code);
     let code_highlight = if found.alias.is_none() {
         found.highlight.start + 1..found.highlight.end + 1
@@ -107,7 +115,7 @@ fn row(index: usize, found: &Match, selected: bool) -> Stateful<Div> {
                 .text_center()
                 .text_size(px(20.))
                 .line_height(px(ROW_HEIGHT))
-                .child(found.glyph),
+                .child(emoticons::with_tone(found.glyph, skin_tone)),
         )
         .child(highlighted_text(code, code_highlight, 13., theme::text()))
         .when(found.recent, |row| {
@@ -166,7 +174,7 @@ pub fn render(
     let on_pick = std::rc::Rc::new(on_pick);
     let rows = popup.matches.iter().enumerate().map(|(index, found)| {
         let on_pick = on_pick.clone();
-        row(index, found, index == popup.highlighted)
+        row(index, found, index == popup.highlighted, popup.skin_tone)
             .on_click(move |_, window, cx| on_pick(index, window, cx))
     });
     let visible = popup.matches.len().min(VISIBLE_ROWS) as f32;

@@ -4,11 +4,27 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
-const WIDGETS_FILE: &str = "views/widgets.rs";
+const WIDGETS_FILE: &str = "widgets.rs";
 const SCAN_ALLOWLIST: &[(&str, &str)] = &[
     ("views/toolbar_placement.rs", ".top(px(-SLOT_HEIGHT))"),
     ("views/conversation.rs", ".bottom(px(-1.))"),
 ];
+
+fn source_roots() -> Vec<PathBuf> {
+    let crates_directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut roots: Vec<PathBuf> = fs::read_dir(&crates_directory)
+        .expect("read crates directory")
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("app"))
+        })
+        .map(|path| path.join("src"))
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort();
+    roots
+}
 
 fn source_files(directory: &Path, files: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).expect("read source directory") {
@@ -64,30 +80,31 @@ fn matcher_matches_allowlist_from_match_start() {
 
 #[test]
 fn negative_offsets_go_through_corner_badge() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let pattern = offset_pattern();
-    let mut files = Vec::new();
-    source_files(&root, &mut files);
     let mut matched_allowlist = HashSet::new();
     let mut violations = Vec::new();
-    for file in files {
-        let relative = file
-            .strip_prefix(&root)
-            .expect("inside src")
-            .to_string_lossy()
-            .replace('\\', "/");
-        if relative == WIDGETS_FILE || relative == "layout_guard.rs" {
-            continue;
-        }
-        let source = fs::read_to_string(&file).expect("read source file");
-        for (line_number, position, text) in negative_offsets(&pattern, &source, &relative) {
-            match position {
-                Some(position) => {
-                    matched_allowlist.insert(position);
+    for root in source_roots() {
+        let mut files = Vec::new();
+        source_files(&root, &mut files);
+        for file in files {
+            let relative = file
+                .strip_prefix(&root)
+                .expect("inside src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative == WIDGETS_FILE || relative == "layout_guard.rs" {
+                continue;
+            }
+            let source = fs::read_to_string(&file).expect("read source file");
+            for (line_number, position, text) in negative_offsets(&pattern, &source, &relative) {
+                match position {
+                    Some(position) => {
+                        matched_allowlist.insert(position);
+                    }
+                    None => violations.push(format!(
+                        "{relative}:{line_number}: negative absolute offset, use widgets::corner_badge: {text}"
+                    )),
                 }
-                None => violations.push(format!(
-                    "{relative}:{line_number}: negative absolute offset, use widgets::corner_badge: {text}"
-                )),
             }
         }
     }
@@ -105,6 +122,32 @@ fn negative_offsets_go_through_corner_badge() {
             .chain(stale)
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+#[test]
+fn hover_styles_never_toggle_display() {
+    let toggle =
+        Regex::new(r"hover\([^|]*\|\w+\|\s*\w+\s*\.\s*(hidden|flex|block|grid)\(\)").unwrap();
+    let mut files = Vec::new();
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
+    let offenders: Vec<String> = files
+        .iter()
+        .flat_map(|path| {
+            let source = fs::read_to_string(path).unwrap();
+            source
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| toggle.is_match(line))
+                .map(|(index, _)| format!("{}:{}", path.display(), index + 1))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "hover styles must toggle visible()/invisible(), not display (gpui panics \"must call prepaint before paint\"): {offenders:?}"
     );
 }
 
@@ -126,10 +169,14 @@ mod frames {
     use gpui_kit::Entity;
 
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
-    use crate::call::{ActiveCall, CallModel};
+    use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
+    use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::message_row::BUBBLE_TAGS;
+    use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
+    use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call};
     use crate::views::shortcuts::{OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved};
@@ -168,6 +215,11 @@ mod frames {
         "shell/islands/main/prejoin/actions",
     ];
     const PREJOIN_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_guard%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%2c%22Oid%22%3a%22o%22%7d";
+    const CONSULT_GUARDED: &[&str] = &[
+        "shell/islands/main/call-header/call-consult",
+        "shell/islands/main/call-header/call-consult/transfer",
+        "shell/islands/main/call-header/call-consult/resume",
+    ];
     const CALL_TRANSCRIPT: &str = "shell/islands/main/call-transcript";
     const PEOPLE_PANEL: &str = "shell/islands/main/call-people";
     const SHARE_GUARDED: &[&str] = &[
@@ -185,6 +237,14 @@ mod frames {
     const OWN_STATUS: &str = "shell/title-bar/own-status";
     const RECAP_TAB: &str = "shell/islands/main/recap-tab";
     const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
+    const PROPOSAL_CHAT: &str = "demo-chat-release";
+    const REACTION_CHAT: &str = "demo-chat-mara";
+    const AGENT_TAGS: [&str; 4] = [
+        PROPOSAL_CARD,
+        PROPOSAL_THUMBNAILS,
+        PROPOSAL_BUTTONS,
+        REACTION_PILL,
+    ];
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
@@ -199,6 +259,7 @@ mod frames {
         CallTranscript,
         CallPeople,
         CallShare,
+        CallConsult,
     }
 
     fn parent_of(path: &str) -> Option<&str> {
@@ -322,7 +383,16 @@ mod frames {
             .chain(CALLS_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
-            .chain([&AGENTS_LIST, &CALL_TRANSCRIPT, &MENU, &RECAP_TAB, &RECAP_REGION, &PEOPLE_PANEL])
+            .chain(CONSULT_GUARDED)
+            .chain([
+                &AGENTS_LIST,
+                &CALL_TRANSCRIPT,
+                &MENU,
+                &RECAP_TAB,
+                &RECAP_REGION,
+                &PEOPLE_PANEL,
+            ])
+            .chain(&AGENT_TAGS)
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -359,19 +429,48 @@ mod frames {
         ActiveCall::new(1, model, handle.commands, None, handle.video)
     }
 
+    fn consult_calls() -> (ActiveCall, ActiveCall) {
+        let connected = |id: u64, name: &str, mri: &str| {
+            let (handle, _control) = call_channel();
+            let mut model = CallModel::people(name, &[(mri.to_owned(), name.to_owned())]);
+            model.apply(CallUpdate::State(CallState::Connected {
+                since: Instant::now(),
+            }));
+            ActiveCall::new(id, model, handle.commands, None, handle.video)
+        };
+        let held = connected(1, "Christopher Montgomery-Lindqvist", "8:orgid:guard-held");
+        let mut consult = connected(2, "Jonas Ortega", "8:orgid:guard-consult");
+        consult.consult = Some(ConsultCall::new(
+            ("8:orgid:guard-consult".to_owned(), "Jonas Ortega".to_owned()),
+            held.model.peer_name.clone(),
+        ));
+        (consult, held)
+    }
+
     fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
+        mount_with(cx, false)
+    }
+
+    fn mount_with(
+        cx: &mut TestAppContext,
+        agent_api: bool,
+    ) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
         cx.update(gpui_kit::init);
         cx.update(|cx| {
             crate::theme::apply(cx);
             bind_keys(cx);
             let store = Store::open_in_memory().expect("in-memory store");
             demo::seed(&store);
+            let store = Arc::new(store);
+            if agent_api {
+                crate::agent_api::init(store.clone(), true, cx);
+            }
             let mode = Mode {
                 demo: true,
                 read_only: false,
                 demo_sync: None,
             };
-            let state = cx.new(|_| AppState::new(Arc::new(store), mode));
+            let state = cx.new(|_| AppState::new(store, mode));
             install_globals(&state, UserInput::new(), cx);
             crate::agents::install(state.clone(), cx);
             demo::start_session(&state, cx);
@@ -452,6 +551,7 @@ mod frames {
                 Screen::CallTranscript,
                 Screen::CallPeople,
                 Screen::CallShare,
+                Screen::CallConsult,
             ];
             for screen in screens {
                 let (screen_name, status_menu) = match screen {
@@ -500,7 +600,7 @@ mod frames {
                                 call.transcript_open = true;
                                 state.call = Some(call);
                                 let app_entity = cx.entity();
-                                state.transcript_panel = Some(cx.new(|cx| TranscriptPanel::new(app_entity, window, cx)));
+                                state.transcript_panel = Some(cx.new(|cx| TranscriptPanel::new(app_entity, window, cx)).into());
                                 cx.notify();
                             })
                         });
@@ -515,6 +615,17 @@ mod frames {
                         });
                         ("call-share", false)
                     }
+                    Screen::CallConsult => {
+                        visual.update(|_, cx| {
+                            app.update(cx, |state, cx| {
+                                let (consult, held) = consult_calls();
+                                state.call = Some(consult);
+                                state.held_call = Some(held);
+                                cx.notify();
+                            })
+                        });
+                        ("call-consult", false)
+                    }
                     Screen::StatusMenu => {
                         let tags = collect(&mut visual, None);
                         let button = tags
@@ -526,7 +637,10 @@ mod frames {
                         ("status-menu", true)
                     }
                 };
-                let is_call = matches!(screen_name, "call" | "call-people" | "call-transcript" | "call-share");
+                let is_call = matches!(
+                    screen_name,
+                    "call" | "call-people" | "call-transcript" | "call-share" | "call-consult"
+                );
                 let tags = collect(&mut visual, status_menu.then_some(MENU));
                 let mut expected = GUARDED.to_vec();
                 if is_call {
@@ -544,6 +658,9 @@ mod frames {
                 }
                 if screen_name == "call-share" {
                     expected.extend(SHARE_GUARDED);
+                }
+                if screen_name == "call-consult" {
+                    expected.extend(CONSULT_GUARDED);
                 }
                 if status_menu {
                     expected.push(MENU);
@@ -583,6 +700,7 @@ mod frames {
                     visual.update(|_, cx| {
                         app.update(cx, |state, cx| {
                             state.call = None;
+                            state.held_call = None;
                             cx.notify();
                         })
                     });
@@ -617,6 +735,52 @@ mod frames {
         );
     }
     #[gpui_kit::test]
+    fn call_chat_bubbles_stay_inside_the_panel(cx: &mut TestAppContext) {
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            visual.update(|_, cx| {
+                app.update(cx, |state, cx| {
+                    let mut call = gallery_call();
+                    call.conversation_id = Some(RECAP_MEETING_CHAT.to_owned());
+                    call.chat_open = true;
+                    state.call = Some(call);
+                    cx.notify();
+                })
+            });
+            collect(&mut visual, Some(CHAT_PANEL_TAG));
+            let panel = visual
+                .debug_bounds(CHAT_PANEL_TAG)
+                .expect("chat panel rendered");
+            let bubbles: Vec<(usize, Bounds<Pixels>)> = BUBBLE_TAGS
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tag)| visual.debug_bounds(tag).map(|bounds| (index, bounds)))
+                .collect();
+            assert!(!bubbles.is_empty(), "no bubbles rendered in the call chat");
+            let found: Vec<String> = bubbles
+                .into_iter()
+                .filter(|(_, bounds)| !contains(panel, *bounds))
+                .map(|(index, bounds)| {
+                    format!(
+                        "call-chat@{width}x{height}: bubble {index} {} leaves the chat panel {}",
+                        describe(bounds),
+                        describe(panel)
+                    )
+                })
+                .collect();
+            visual.update(|_, cx| {
+                app.update(cx, |state, cx| {
+                    state.call = None;
+                    cx.notify();
+                })
+            });
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    #[gpui_kit::test]
     fn recap_tab_stays_inside_the_main_island(cx: &mut TestAppContext) {
         let (handle, state) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
@@ -644,13 +808,45 @@ mod frames {
             assert!(found.is_empty(), "{}", found.join("\n"));
         }
     }
+
+    #[gpui_kit::test]
+    fn agent_proposals_stay_inside_the_main_island(cx: &mut TestAppContext) {
+        let (handle, state) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            for (chat, expected_tags) in [
+                (PROPOSAL_CHAT, &AGENT_TAGS[..3]),
+                (REACTION_CHAT, &AGENT_TAGS[3..]),
+            ] {
+                visual.update(|_, cx| {
+                    state.update(cx, |state, cx| {
+                        state.select(Selection::Chat(chat.to_owned()), cx)
+                    })
+                });
+                let tags = collect(&mut visual, Some(expected_tags[0]));
+                let mut expected = GUARDED.to_vec();
+                expected.extend(expected_tags);
+                let found: Vec<String> = violations(&tags, window, &expected)
+                    .into_iter()
+                    .map(|(key, message)| format!("{chat}@{width}x{height}:{key}: {message}"))
+                    .collect();
+                assert!(found.is_empty(), "{}", found.join("\n"));
+            }
+        }
+    }
 }
 
 #[test]
 fn lines_are_solid() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
-    source_files(&root, &mut files);
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
     let violations: Vec<String> = files
         .iter()
         .filter(|file| !file.ends_with("layout_guard.rs"))

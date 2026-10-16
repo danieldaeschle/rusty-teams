@@ -69,7 +69,8 @@ impl<R: Remote> SyncEngine<R> {
                 records.push(record);
             }
         }
-        let records = sorted(records);
+        let mut records = sorted(records);
+        self.apply_chat_emotions(chat_id, &mut records).await;
         self.ingest(chat_id, records.clone())?;
         self.announce(chat_id, !records.is_empty());
         Ok(WindowPage {

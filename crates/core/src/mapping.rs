@@ -3,6 +3,8 @@ use graph::{Attachment, Chat, Mention, Message, Reaction};
 use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, TeamRecord};
 
 use crate::adaptive_card::card_content_text;
+use crate::call_event::CallEvent;
+use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::links::EMPTY_LINKS;
 use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
@@ -111,13 +113,18 @@ pub fn channel_record(team_id: &str, channel: &graph::Channel) -> ChannelRecord 
     }
 }
 
-/// `None` for system events and messages without a creation time.
+/// `None` for system events other than calls and messages without a creation time.
 pub fn message_record(conversation_id: &str, message: &Message) -> Option<MessageRecord> {
-    if message
+    let is_system = message
         .message_type
         .as_deref()
-        .is_some_and(|kind| kind != "message")
-    {
+        .is_some_and(|kind| kind != "message");
+    let call_event = message
+        .event_detail
+        .as_ref()
+        .and_then(CallEvent::from_graph)
+        .filter(|_| is_system);
+    if is_system && call_event.is_none() {
         return None;
     }
     let created_at = message.created_date_time?;
@@ -139,7 +146,7 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
         created_at,
         edited_at: message.last_edited_date_time,
         deleted,
-        body_html: if deleted {
+        body_html: if deleted || call_event.is_some() {
             String::new()
         } else {
             body_html(message)
@@ -172,6 +179,7 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
             .map(str::trim)
             .filter(|subject| !subject.is_empty())
             .map(str::to_owned),
+        call_event_json: call_event.as_ref().map(CallEvent::to_json),
     })
 }
 
@@ -221,7 +229,13 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
         content: attachment
             .content
             .clone()
-            .filter(|_| is_card || attachment.content_type.as_deref() == Some("messageReference")),
+            .filter(|_| {
+                is_card
+                    || matches!(
+                        attachment.content_type.as_deref(),
+                        Some("messageReference" | FORWARDED_CONTENT_TYPE)
+                    )
+            }),
     }
 }
 
@@ -294,6 +308,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::call_event::{CallPhase, CallType};
 
     fn chat_with_preview(preview: serde_json::Value) -> Chat {
         serde_json::from_value(json!({
@@ -349,6 +364,190 @@ mod tests {
         );
         assert_eq!(record_with_subject(json!("   ")), None);
         assert_eq!(record_with_subject(json!(null)), None);
+    }
+
+    fn user(id: &str) -> serde_json::Value {
+        json!({"user": {"id": id, "displayName": format!("Name {id}")}})
+    }
+
+    fn call_record(message_type: &str, detail: serde_json::Value) -> Option<MessageRecord> {
+        let message: Message = serde_json::from_value(json!({
+            "id": "1",
+            "messageType": message_type,
+            "createdDateTime": "2026-10-06T09:00:00Z",
+            "from": null,
+            "body": {"contentType": "html", "content": "<systemEventMessage/>"},
+            "eventDetail": detail,
+        }))
+        .unwrap();
+        message_record("c", &message)
+    }
+
+    fn ended(initiator: &str, participants: &[&str], duration: &str) -> serde_json::Value {
+        json!({
+            "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+            "callId": "call-1",
+            "callEventType": "call",
+            "callDuration": duration,
+            "initiator": user(initiator),
+            "callParticipants": participants
+                .iter()
+                .map(|id| json!({"participant": user(id)}))
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    fn event_of(record: &MessageRecord) -> CallEvent {
+        crate::call_event::call_event(record).unwrap()
+    }
+
+    #[test]
+    fn call_ended_by_me_is_kept_with_duration_and_participants() {
+        let record = call_record(
+            "unknownFutureValue",
+            ended("me", &["me", "other"], "PT12M3S"),
+        )
+        .unwrap();
+        let event = event_of(&record);
+        assert_eq!(event.phase, CallPhase::Ended);
+        assert_eq!(event.call_type, CallType::Call);
+        assert_eq!(event.call_id, "call-1");
+        assert_eq!(event.duration_seconds, Some(723));
+        assert_eq!(event.initiator_id.as_deref(), Some("me"));
+        assert_eq!(event.initiator_name.as_deref(), Some("Name me"));
+        assert_eq!(event.participant_ids, ["me", "other"]);
+        assert!(!event.missed(Some("me")));
+        assert!(record.body_html.is_empty());
+        assert_eq!(record.sender_id, None);
+    }
+
+    #[test]
+    fn call_ended_by_other_with_both_participants_is_not_missed() {
+        let record = call_record(
+            "systemEventMessage",
+            ended("other", &["other", "me"], "PT46S"),
+        )
+        .unwrap();
+        assert!(!event_of(&record).missed(Some("me")));
+    }
+
+    #[test]
+    fn unanswered_incoming_call_is_missed() {
+        let record = call_record("unknownFutureValue", ended("other", &["other"], "PT1M")).unwrap();
+        let event = event_of(&record);
+        assert!(event.missed(Some("me")));
+        assert_eq!(event.title(true), "Missed call");
+        assert_eq!(event.duration_seconds, Some(60));
+        assert!(!event.missed(None));
+    }
+
+    #[test]
+    fn guest_participant_counts_for_an_answered_call() {
+        let mut detail = ended("other", &["other"], "PT2M");
+        detail["callParticipants"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"participant": {"guest": {"id": "guest-1", "displayName": "Guest"}}}));
+        let record = call_record("unknownFutureValue", detail).unwrap();
+        let event = event_of(&record);
+        assert_eq!(event.participant_ids, ["other", "guest-1"]);
+        assert!(!event.missed(Some("me")));
+    }
+
+    #[test]
+    fn unanswered_own_call_is_not_missed() {
+        let record = call_record("unknownFutureValue", ended("me", &["me"], "PT1M")).unwrap();
+        let event = event_of(&record);
+        assert!(!event.missed(Some("me")));
+        assert_eq!(event.plain_text(), "Call ended 1m");
+    }
+
+    #[test]
+    fn call_started_is_kept_without_duration() {
+        let record = call_record(
+            "unknownFutureValue",
+            json!({
+                "@odata.type": "#microsoft.graph.callStartedEventMessageDetail",
+                "callId": "call-1",
+                "callEventType": "call",
+                "initiator": {"user": {"id": "other", "displayName": null}},
+            }),
+        )
+        .unwrap();
+        let event = event_of(&record);
+        assert_eq!(event.phase, CallPhase::Started);
+        assert_eq!(event.initiator_id.as_deref(), Some("other"));
+        assert_eq!(event.initiator_name, None);
+        assert_eq!(event.duration_seconds, None);
+        assert_eq!(event.plain_text(), "Call started");
+    }
+
+    #[test]
+    fn meeting_ended_keeps_the_meeting_type() {
+        let mut detail = ended("me", &["me", "a", "b"], "PT1H2M3S");
+        detail["callEventType"] = json!("meeting");
+        let event = event_of(&call_record("unknownFutureValue", detail).unwrap());
+        assert_eq!(event.call_type, CallType::Meeting);
+        assert_eq!(event.duration_seconds, Some(3723));
+        assert_eq!(event.plain_text(), "Meeting ended 1h 2m 3s");
+    }
+
+    #[test]
+    fn screen_share_is_treated_as_a_call() {
+        let mut detail = ended("me", &["me", "a"], "PT5S");
+        detail["callEventType"] = json!("screenShare");
+        let event = event_of(&call_record("unknownFutureValue", detail).unwrap());
+        assert_eq!(event.call_type, CallType::Call);
+    }
+
+    #[test]
+    fn other_system_events_are_still_dropped() {
+        let detail = json!({
+            "@odata.type": "#microsoft.graph.membersAddedEventMessageDetail",
+            "members": [],
+        });
+        assert!(call_record("unknownFutureValue", detail).is_none());
+        assert!(call_record("systemEventMessage", json!(null)).is_none());
+    }
+
+    #[test]
+    fn regular_messages_never_become_call_events() {
+        let record = call_record("message", ended("me", &["me"], "PT1M")).unwrap();
+        assert_eq!(record.call_event_json, None);
+    }
+
+    #[test]
+    fn durations_parse_from_iso_8601() {
+        use crate::call_event::parse_duration_seconds as parse;
+        assert_eq!(parse("PT46S"), Some(46));
+        assert_eq!(parse("PT1M"), Some(60));
+        assert_eq!(parse("PT1M18S"), Some(78));
+        assert_eq!(parse("PT1H2M3S"), Some(3723));
+        assert_eq!(parse("PT40M19.26S"), Some(2419));
+        assert_eq!(parse("P1DT1S"), Some(86_401));
+        for garbage in ["", "P", "PT", "46S", "PT1X", "PTM", "PT12", "nonsense"] {
+            assert_eq!(parse(garbage), None, "{garbage}");
+        }
+    }
+
+    #[test]
+    fn durations_format_like_teams() {
+        use crate::call_event::format_duration as format;
+        assert_eq!(format(3723), "1h 2m 3s");
+        assert_eq!(format(723), "12m 3s");
+        assert_eq!(format(45), "45s");
+        assert_eq!(format(60), "1m");
+        assert_eq!(format(3600), "1h");
+        assert_eq!(format(3605), "1h 0m 5s");
+        assert_eq!(format(0), "0s");
+    }
+
+    #[test]
+    fn unparseable_duration_leaves_no_duration() {
+        let record = call_record("unknownFutureValue", ended("me", &["me", "a"], "soon")).unwrap();
+        let event = event_of(&record);
+        assert_eq!(event.duration_seconds, None);
+        assert_eq!(event.plain_text(), "Call ended");
     }
 
     fn mentions_of(mentioned: serde_json::Value) -> Vec<MentionInfo> {

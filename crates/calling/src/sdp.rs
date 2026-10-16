@@ -24,6 +24,10 @@ pub struct Attribute {
 }
 
 impl Attribute {
+    pub fn with_value(name: &str, value: impl Into<String>) -> Self {
+        Attribute::new(name, value)
+    }
+
     fn new(name: &str, value: impl Into<String>) -> Self {
         Attribute {
             name: name.to_owned(),
@@ -436,7 +440,7 @@ fn signal_rtp_line(
     for attribute in &source.attributes {
         let value = attribute.value.as_deref().unwrap_or_default();
         match attribute.name.as_str() {
-            "ssrc" | "ssrc-group" | "rid" | "simulcast" | "rtcp-xr" | "rtcp-fb" => {}
+            "ssrc" | "ssrc-group" | "rid" | "simulcast" | "rtcp-xr" | "rtcp-fb" | "candidate" | "end-of-candidates" => {}
             "rtpmap" => attributes.push(Attribute::new("rtpmap", signal_rtpmap(value))),
             "fmtp" => {
                 let payload = value.split(' ').next().unwrap_or_default();
@@ -584,9 +588,13 @@ pub fn to_browser_answer(teams_sdp: &str, offer: &SignaledOffer, browser_offer_s
     session.attributes.retain(|attribute| attribute.name.starts_with("x-"));
     session.attributes.push(Attribute::flag("extmap-allow-mixed"));
     session.attributes.push(Attribute::new("msid-semantic", " WMS *"));
-    let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
-    session.attributes.push(Attribute::new("group", format!("BUNDLE {}", mids.join(" "))));
+    session.attributes.push(Attribute::new("group", bundle_group(media.iter().map(|line| (line.port.as_str(), line.mid())))));
     Ok(write(&SessionDescription { session, media }))
+}
+
+fn bundle_group<'a>(lines: impl Iterator<Item = (&'a str, Option<&'a str>)>) -> String {
+    let mids: Vec<&str> = lines.filter(|(port, _)| *port != "0").filter_map(|(_, mid)| mid).collect();
+    format!("BUNDLE {}", mids.join(" "))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -636,6 +644,23 @@ fn transport_attributes(teams_line: &Media, session: &Session) -> Vec<Attribute>
                 .cloned()
         })
         .collect()
+}
+
+const OPUS_SEND_QUALITY: [(&str, &str); 2] = [("maxaveragebitrate", "40000"), ("maxplaybackrate", "48000")];
+
+/// libwebrtc sizes its Opus encoder from these remote fmtp parameters; without them it picks its own bitrate.
+fn with_opus_send_quality(fmtp: &str) -> String {
+    let mut value = fmtp.to_owned();
+    for (name, setting) in OPUS_SEND_QUALITY {
+        if value.split([' ', ';']).any(|parameter| parameter.split('=').next() == Some(name)) {
+            continue;
+        }
+        if !value.ends_with(' ') {
+            value.push(if value.contains(' ') { ';' } else { ' ' });
+        }
+        value.push_str(&format!("{name}={setting}"));
+    }
+    value
 }
 
 fn browser_rtp_line(
@@ -698,16 +723,17 @@ fn browser_rtp_line(
         if !kept_set.contains(payload.as_str()) {
             continue;
         }
-        fmtp_payloads.insert(payload);
         let cleaned = value
             .split(';')
             .filter(|parameter| !parameter.starts_with("rtx-time="))
             .collect::<Vec<_>>()
             .join(";");
-        attributes.push(Attribute::new("fmtp", cleaned));
+        let is_opus = codec_payload("opus").is_some_and(|opus| *opus == payload);
+        fmtp_payloads.insert(payload);
+        attributes.push(Attribute::new("fmtp", if is_opus { with_opus_send_quality(&cleaned) } else { cleaned }));
     }
     if let Some(opus) = codec_payload("opus").filter(|payload| !fmtp_payloads.contains(*payload)) {
-        attributes.push(Attribute::new("fmtp", format!("{opus} usedtx=1")));
+        attributes.push(Attribute::new("fmtp", with_opus_send_quality(&format!("{opus} usedtx=1"))));
     }
     if let (Some(red), Some(opus)) = (codec_payload("red"), codec_payload("opus"))
         && !fmtp_payloads.contains(red)
@@ -740,7 +766,7 @@ fn browser_rtp_line(
         attributes.push(Attribute::flag(direction));
     }
     if carries_candidates {
-        attributes.extend(teams_line.values("candidate").map(|value| Attribute::new("candidate", browser_candidate(value))));
+        attributes.extend(teams_line.values("candidate").chain(teams_line.values("x-candidate-ipv6")).map(|value| Attribute::new("candidate", browser_candidate(value))));
     }
     let (primary, retransmission) = stream_ssrcs(teams_line, stream_index);
     if let Some(primary) = primary {
@@ -799,6 +825,7 @@ fn browser_candidate(value: &str) -> String {
     let tcp_type = match parts.get(2).map(|transport| transport.to_ascii_lowercase()).as_deref() {
         Some("tcp-pass") => Some("passive"),
         Some("tcp-act") => Some("active"),
+        Some("tcp-so") => Some("so"),
         _ => None,
     };
     if tcp_type.is_some() {
@@ -925,8 +952,7 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
     session.bandwidths.clear();
     session.connection = None;
     session.attributes.retain(|attribute| matches!(attribute.name.as_str(), "extmap-allow-mixed" | "msid-semantic"));
-    let mids: Vec<&str> = media.iter().filter_map(Media::mid).collect();
-    session.attributes.push(Attribute::new("group", format!("BUNDLE {}", mids.join(" "))));
+    session.attributes.push(Attribute::new("group", bundle_group(media.iter().map(|line| (line.port.as_str(), line.mid())))));
     Ok(RemoteOffer {
         browser_sdp: write(&SessionDescription { session, media }),
         lines,
@@ -972,6 +998,11 @@ fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candi
         let value = attribute.value.as_deref().unwrap_or_default();
         match attribute.name.as_str() {
             name if TEAMS_ONLY_ATTRIBUTES.contains(&name) => {}
+            "x-candidate-ipv6" => {
+                if carries_candidate {
+                    attributes.push(Attribute::new("candidate", browser_candidate(value)));
+                }
+            }
             name if name.starts_with("x-") => {}
             "mid" | "rtcp-mux" => {}
             name if TRANSPORT_ATTRIBUTES.contains(&name) => {}
@@ -1050,6 +1081,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rejected_lines_stay_out_of_the_bundle() {
+        let lines = [("9", Some("0")), ("0", Some("1")), ("9", Some("2"))];
+        assert_eq!(bundle_group(lines.into_iter()), "BUNDLE 0 2");
+    }
+
     const AUDIO_ONLY_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS stream\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=ice-options:trickle\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=mid:0\r\na=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\na=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\na=sendrecv\r\na=msid:stream track\r\na=rtcp-mux\r\na=rtpmap:111 opus/48000/2\r\na=rtcp-fb:111 transport-cc\r\na=fmtp:111 minptime=10;useinbandfec=1\r\na=rtpmap:63 red/48000/2\r\na=fmtp:63 111/111\r\na=rtpmap:9 G722/8000\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:13 CN/8000\r\na=rtpmap:110 telephone-event/48000\r\na=rtpmap:126 telephone-event/8000\r\na=ssrc:42 cname:abc\r\na=ssrc:42 msid:stream track\r\n";
 
     #[test]
@@ -1068,6 +1105,17 @@ mod tests {
         assert!(text.contains("m=audio 1234 RTP/SAVP 111 63 9 0 8 13 110 126\nc=IN IP4 10.10.10.10\n"));
         assert!(text.ends_with("a=label:main-audio\n"));
         assert_eq!(offer.lines, vec![SignaledLine { browser_mids: vec!["0".into()], role: LineRole::MainAudio }]);
+    }
+
+    #[test]
+    fn a_renegotiation_signals_only_the_placeholder_candidate() {
+        let gathered = AUDIO_ONLY_OFFER.replace(
+            "a=mid:0\r\n",
+            "a=mid:0\r\na=candidate:1 1 udp 2121998079 192.0.2.1 45325 typ host generation 0 network-id 1\r\na=candidate:2 1 tcp 1518018303 2001:db8::1 47585 typ host tcptype passive generation 0 network-id 2\r\na=end-of-candidates\r\n",
+        );
+        let text = to_teams_offer(&gathered, &OfferPlan::default(), &mut counter()).unwrap().sdp;
+        let candidates: Vec<&str> = text.lines().filter(|line| line.starts_with("a=candidate:") || line.starts_with("a=end-of-candidates")).collect();
+        assert_eq!(candidates, vec!["a=candidate:1755259772 1 UDP 2122197247 10.10.10.10 1234 typ host"]);
     }
 
     #[test]
@@ -1093,7 +1141,7 @@ mod tests {
         let browser = to_browser_answer(answer, &offer, AUDIO_ONLY_OFFER).unwrap().replace("\r\n", "\n");
         assert!(browser.contains("m=audio 3480 UDP/TLS/RTP/SAVPF 111 97 13 101\n"), "{browser}");
         assert!(browser.contains("a=rtpmap:97 RED/48000/2\n"));
-        assert!(browser.contains("a=fmtp:111 usedtx=1\n"));
+        assert!(browser.contains("a=fmtp:111 usedtx=1;maxaveragebitrate=40000;maxplaybackrate=48000\n"));
         assert!(browser.contains("a=fmtp:97 111/111\n"));
         assert!(browser.contains("a=rtcp-fb:111 transport-cc\n"));
         assert!(browser.contains("a=ssrc:1000 msid:mainAudio-1000 mainAudio-1000\n"));
@@ -1175,5 +1223,15 @@ mod tests {
     fn folded_gallery_lines_expand_below_their_carrier_mid() {
         assert_eq!(folded_mids("17", 8), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());
         assert_eq!(folded_mids("x", 2), vec!["x-0".to_owned(), "x".to_owned()]);
+    }
+
+    #[test]
+    fn opus_fmtp_gets_the_send_quality_without_overriding_teams() {
+        assert_eq!(
+            with_opus_send_quality("111 minptime=10;useinbandfec=1"),
+            "111 minptime=10;useinbandfec=1;maxaveragebitrate=40000;maxplaybackrate=48000"
+        );
+        assert_eq!(with_opus_send_quality("111 maxplaybackrate=16000"), "111 maxplaybackrate=16000;maxaveragebitrate=40000");
+        assert_eq!(with_opus_send_quality("111"), "111 maxaveragebitrate=40000;maxplaybackrate=48000");
     }
 }

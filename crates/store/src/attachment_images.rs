@@ -5,6 +5,7 @@ use crate::models::AttachmentImage;
 
 pub(crate) const OUTBOX_OWNER: &str = "outbox";
 pub(crate) const DRAFT_OWNER: &str = "draft";
+pub(crate) const PROPOSAL_OWNER: &str = "proposal";
 
 pub(crate) fn replace_images(
     connection: &Connection,

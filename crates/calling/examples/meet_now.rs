@@ -5,7 +5,7 @@ use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
 use calling::{
-    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, Reaction, RecordingKind, ShareKind,
+    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, MuteCommand, Reaction, RecordingKind, ShareKind,
     ShareSource, StopScope,
 };
 use chatsvc::InstanceNames;
@@ -40,6 +40,9 @@ struct Arguments {
     mute_all: bool,
     blur: bool,
     record: bool,
+    audio_only: bool,
+    record_for: Duration,
+    unmute: bool,
     whiteboard_state: bool,
     background: bool,
     stop_media_after: Option<Duration>,
@@ -59,6 +62,9 @@ fn arguments() -> Arguments {
         mute_all: false,
         blur: false,
         record: false,
+        audio_only: false,
+        record_for: RECORD_HOLD,
+        unmute: false,
         whiteboard_state: false,
         background: false,
         stop_media_after: None,
@@ -80,6 +86,9 @@ fn arguments() -> Arguments {
                 parsed.camera = true;
             }
             "--record" => parsed.record = true,
+            "--audio-only" => parsed.audio_only = true,
+            "--record-for" => parsed.record_for = input.next().and_then(|value| value.parse().ok()).map_or(RECORD_HOLD, Duration::from_secs),
+            "--unmute" => parsed.unmute = true,
             "--whiteboard-state" => parsed.whiteboard_state = true,
             "--resolve-by-id" => parsed.resolve_by_id = true,
             "--background" => {
@@ -282,7 +291,7 @@ async fn run() {
                     println!("# recording state: {}", if on { "on" } else { "off" });
                     if on {
                         features.recording_seen_on = true;
-                        features.recording_stop_due = Some(Instant::now() + RECORD_HOLD);
+                        features.recording_stop_due = Some(Instant::now() + arguments.record_for);
                     } else if features.recording_seen_on {
                         features.recording_seen_off = true;
                         features.recording_done = true;
@@ -398,6 +407,9 @@ async fn run() {
                     if arguments.camera {
                         let _ = handle.commands.send(CallCommand::SetCamera(true));
                     }
+                    if arguments.unmute {
+                        let _ = handle.commands.send(CallCommand::Mute(MuteCommand::Unmute));
+                    }
                     if arguments.extras {
                         let _ = handle.commands.send(CallCommand::SetHand(true));
                         for reaction in Reaction::ALL {
@@ -423,7 +435,7 @@ async fn run() {
                         let _ = handle.commands.send(CallCommand::SetBackground(BackgroundChoice::Blur));
                     }
                     if arguments.record {
-                        let _ = handle.commands.send(CallCommand::StartRecording { kind: RecordingKind::Video, title: SUBJECT.to_owned() });
+                        let _ = handle.commands.send(CallCommand::StartRecording { kind: if arguments.audio_only { RecordingKind::AudioOnly } else { RecordingKind::Video }, title: SUBJECT.to_owned() });
                     }
                     if arguments.whiteboard_state {
                         features.whiteboard_wait_until = Some(Instant::now() + WHITEBOARD_WAIT);

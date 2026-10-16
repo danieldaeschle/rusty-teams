@@ -8,7 +8,9 @@ use graph::{
     OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
 };
 use serde_json::json;
-use store::{ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord};
+use store::{
+    ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord,
+};
 use teams_core::{
     Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
     DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
@@ -82,6 +84,8 @@ type ScheduledCall = (String, String, DateTime<Utc>, String);
 #[derive(Default)]
 struct Fake {
     chats: Mutex<Vec<Chat>>,
+    fetchable_chats: Mutex<Vec<Chat>>,
+    single_chat_calls: Mutex<usize>,
     chat_messages: Mutex<Vec<Message>>,
     channel_pages: Mutex<Vec<Vec<Message>>>,
     teams: Mutex<Vec<Team>>,
@@ -207,8 +211,22 @@ impl Remote for Handle {
         Ok(self.chats_from(offset, top))
     }
 
-    async fn chat(&self, _chat_id: &str) -> Result<Chat> {
-        unsupported()
+    async fn chat(&self, chat_id: &str) -> Result<Chat> {
+        *self.single_chat_calls.lock().unwrap() += 1;
+        let found = self
+            .fetchable_chats
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|candidate| candidate.id == chat_id)
+            .cloned();
+        found.ok_or_else(|| {
+            Error::Graph(graph::Error::Session(session::Error::api(
+                404,
+                chat_id,
+                json!({}),
+            )))
+        })
     }
 
     async fn chat_members(&self, _chat_id: &str) -> Result<Vec<Member>> {
@@ -1174,11 +1192,25 @@ async fn a_chat_hidden_in_the_app_stays_hidden_until_a_newer_message_arrives() {
     engine.refresh_sidebar_full().await.unwrap();
     assert!(engine.sidebar().unwrap().chats.is_empty());
 
-    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    *fake.chats.lock().unwrap() = vec![chat(
+        CHAT,
+        Some("Planning"),
+        10_000_000,
+        5,
+        "user-ada",
+        false,
+    )];
     engine.refresh_sidebar().await.unwrap();
     assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
 
-    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 10_000_000, 5, "user-ada", false)];
+    *fake.chats.lock().unwrap() = vec![chat(
+        CHAT,
+        Some("Planning"),
+        10_000_000,
+        5,
+        "user-ada",
+        false,
+    )];
     engine.refresh_sidebar_full().await.unwrap();
     assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
 }
@@ -1487,6 +1519,37 @@ async fn send_message_converts_markdown_and_caches_the_answer() {
             .unwrap()
             >= record.created_at
     );
+}
+
+#[tokio::test]
+async fn unknown_chat_is_fetched_stored_and_resolves() {
+    let fake = Arc::new(Fake::default());
+    let meeting_chat = "19:meeting_abc@thread.v2";
+    *fake.fetchable_chats.lock().unwrap() =
+        vec![chat(meeting_chat, Some("Standup"), 5, 5, ME, false)];
+    fake.set_chat_messages(vec![message(1, 1, "<p>hello</p>")]);
+    let engine = engine_with(&fake, SyncConfig::default());
+    let delta = engine.fetch_newer(meeting_chat).await.unwrap();
+    assert_eq!(delta.added.len(), 1);
+    engine.fetch_newer(meeting_chat).await.unwrap();
+    assert_eq!(*fake.single_chat_calls.lock().unwrap(), 1);
+    engine.send_message(meeting_chat, "hi", None).await.unwrap();
+}
+
+#[tokio::test]
+async fn unknown_chat_missing_remotely_stays_an_error() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    assert!(matches!(
+        engine.fetch_newer("19:meeting_gone@thread.v2").await,
+        Err(Error::UnknownConversation(_))
+    ));
+    assert!(matches!(
+        engine
+            .send_message("19:meeting_gone@thread.v2", "hi", None)
+            .await,
+        Err(Error::UnknownConversation(_))
+    ));
 }
 
 #[tokio::test]
@@ -2896,7 +2959,10 @@ async fn a_failing_folder_list_still_stores_the_team_layout_and_tabs() {
     let error = engine.refresh_folders().await.unwrap_err();
 
     assert!(error.to_string().contains("folders down"));
-    assert_eq!(engine.store().channel_tabs("alpha-general").unwrap().len(), 1);
+    assert_eq!(
+        engine.store().channel_tabs("alpha-general").unwrap().len(),
+        1
+    );
     assert!(
         engine
             .store()
@@ -4366,7 +4432,10 @@ async fn translating_in_an_unknown_conversation_fails() {
             &teams_core::TranslationTrigger::OnDemand,
         )
         .await;
-    assert!(matches!(outcome, Err(teams_core::Error::UnknownConversation(_))));
+    assert!(matches!(
+        outcome,
+        Err(teams_core::Error::UnknownConversation(_))
+    ));
 }
 
 #[tokio::test]
@@ -4382,7 +4451,11 @@ async fn load_window_ingests_found_messages_oldest_first_and_keeps_cursors() {
 
     let page = engine.load_window(CHAT, "m0003").await.unwrap();
 
-    let ids: Vec<&str> = page.records.iter().map(|record| record.message_id.as_str()).collect();
+    let ids: Vec<&str> = page
+        .records
+        .iter()
+        .map(|record| record.message_id.as_str())
+        .collect();
     assert_eq!(ids, ["m0001", "m0003"]);
     assert_eq!(page.oldest, Some(base() + Duration::minutes(1)));
     assert_eq!(page.newest, Some(base() + Duration::minutes(3)));
@@ -4401,8 +4474,68 @@ async fn fetch_chat_message_does_not_store_the_message() {
     let engine = chat_engine(&fake, small_pages()).await;
     fake.set_chat_messages(vec![message(7, 7, "<p>pinned</p>")]);
 
-    let record = engine.fetch_chat_message(CHAT, "m0007").await.unwrap().unwrap();
+    let record = engine
+        .fetch_chat_message(CHAT, "m0007")
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(record.message_id, "m0007");
     assert_eq!(engine.store().message_count(CHAT).unwrap(), 0);
+}
+
+fn forwarded_message(id: &str, minute: i64) -> Message {
+    let content = json!({
+        "originalMessageId": "orig-1",
+        "originalMessageContent": "<p>original words</p>",
+        "originalConversationId": "19:origin@thread.v2",
+        "originalSentDateTime": base().to_rfc3339(),
+        "originalMessageSender": {"user": {"id": "user-cleo", "displayName": null}},
+    });
+    serde_json::from_value(json!({
+        "id": id,
+        "messageType": "message",
+        "createdDateTime": (base() + Duration::minutes(minute)).to_rfc3339(),
+        "from": {"user": {"id": ME, "displayName": null}},
+        "body": {"contentType": "html", "content": "<attachment id=\"orig-1\"></attachment>"},
+        "attachments": [{
+            "id": "orig-1",
+            "contentType": "forwardedMessageReference",
+            "content": content.to_string(),
+        }],
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_forward_cached_without_its_content_is_read_again_once() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    let mut messages = numbered(11);
+    messages.push(forwarded_message("m0000", 0));
+    fake.set_chat_messages(messages);
+    let mut stale = teams_core::message_record(CHAT, &forwarded_message("m0000", 0)).unwrap();
+    stale.attachments_json = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"orig-1","content":null}]"#.to_owned();
+    store.upsert_messages(&[stale]).unwrap();
+
+    engine.fetch_newer(CHAT).await.unwrap();
+
+    let healed = store
+        .messages_by_id(CHAT, &["m0000".to_owned()])
+        .unwrap()
+        .remove("m0000")
+        .unwrap();
+    assert_eq!(teams_core::forwarded_texts(&healed), ["original words"]);
+    let reads = |fake: &Fake| {
+        fake.calls()
+            .iter()
+            .filter(|call| *call == "chat_message m0000")
+            .count()
+    };
+    assert_eq!(reads(&fake), 1);
+    engine.fetch_newer(CHAT).await.unwrap();
+    assert_eq!(reads(&fake), 1);
 }

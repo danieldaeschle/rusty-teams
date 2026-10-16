@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
+    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
     MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle, SourceError,
     SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
@@ -15,7 +15,7 @@ use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use serde_json::{Value, json};
-use store::{ChannelRecord, ChatRecord, MessageRecord, Store, TeamRecord};
+use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -84,6 +84,14 @@ impl TeamsSource for FakeSource {
                 sender: Some("Ada Example".to_owned()),
                 text: "budget plan".to_owned(),
             }),
+            forwarded: vec![ForwardedInfo {
+                message_id: "m0".to_owned(),
+                conversation_id: Some("19:origin@thread.v2".to_owned()),
+                sender: Some("Cleo Example".to_owned()),
+                sender_id: Some("user-cleo".to_owned()),
+                time: Some("2026-10-06T08:00:00+00:00".to_owned()),
+                text: "original words".to_owned(),
+            }],
             cards: vec!["Build passed".to_owned()],
             links: vec![LinkInfo {
                 url: "https://news.example.com/story".to_owned(),
@@ -108,6 +116,63 @@ impl TeamsSource for FakeSource {
                 height: 1,
             })
         })
+    }
+
+    fn plain_mention_spans(
+        &self,
+        markdown: &str,
+        names: &[String],
+        ignore_case: bool,
+    ) -> Vec<Vec<std::ops::Range<usize>>> {
+        let boundary = |character: Option<char>| character.is_some_and(char::is_alphanumeric);
+        names
+            .iter()
+            .map(|name| {
+                markdown
+                    .match_indices('@')
+                    .filter_map(|(start, _)| {
+                        let end = start + 1 + name.len();
+                        let candidate = markdown.get(start + 1..end)?;
+                        let same = if ignore_case {
+                            candidate.eq_ignore_ascii_case(name)
+                        } else {
+                            candidate == name
+                        };
+                        let in_code = markdown[..start].matches('`').count() % 2 == 1;
+                        let in_url = markdown[..start].ends_with('/');
+                        (same
+                            && !in_code
+                            && !in_url
+                            && !markdown[..start].chars().next_back().is_some_and(|before| {
+                                !before.is_whitespace() && !"([{\"'<,:;".contains(before)
+                            })
+                            && !boundary(markdown[end..].chars().next()))
+                        .then_some(start..end)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn image_dimensions(&self, bytes: &[u8]) -> Option<(u32, u32)> {
+        let word = |start: usize| {
+            Some(u32::from_be_bytes(
+                bytes.get(start..start + 4)?.try_into().ok()?,
+            ))
+        };
+        Some((word(16)?, word(20)?))
+    }
+
+    fn rendered_text(&self, markdown: &str) -> String {
+        markdown.to_owned()
+    }
+
+    fn refresh_recent(&self, _conversation_ids: Vec<String>) -> SourceFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn reaction_supported(&self, emoji: &str) -> bool {
+        matches!(emoji, "\u{1F44D}" | "\u{2764}")
     }
 
     fn calendar(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> SourceFuture<'_, Vec<Meeting>> {
@@ -215,7 +280,20 @@ fn seed(store: &Store) {
     let chat = |id: &str, title: &str| chat_of_kind(id, "group", title);
     store
         .upsert_chats(&[
-            chat(ALLOWED_CHAT, "Planning"),
+            ChatRecord {
+                members: [
+                    ("user-me", "Me"),
+                    ("user-ada", "Ada Example"),
+                    ("user-bob", "Bob Sample"),
+                ]
+                .into_iter()
+                .map(|(user_id, display_name)| MemberRecord {
+                    user_id: Some(user_id.to_owned()),
+                    display_name: display_name.to_owned(),
+                })
+                .collect(),
+                ..chat(ALLOWED_CHAT, "Planning")
+            },
             chat(HIDDEN_CHAT, "Secrets"),
             chat_of_kind(MEETING_CHAT, "meeting", "Sprint review"),
             chat_of_kind(LIVE_MEETING_CHAT, "meeting", "Live sync"),
@@ -323,7 +401,7 @@ async fn raw_status(addr: std::net::SocketAddr, host: &str, authorization: Optio
 }
 
 #[tokio::test]
-async fn lists_all_ten_tools_and_marks_reads_read_only() {
+async fn lists_all_eleven_tools_and_marks_reads_read_only() {
     let harness = Harness::start(true).await;
     let client = harness.client().await;
     let tools = client.list_all_tools().await.unwrap();
@@ -334,12 +412,13 @@ async fn lists_all_ten_tools_and_marks_reads_read_only() {
             .annotations
             .as_ref()
             .and_then(|annotations| annotations.read_only_hint);
-        assert_eq!(
-            read_only == Some(true),
-            tool.name != "propose_message",
-            "{}",
-            tool.name
-        );
+        let proposes = tool.name.starts_with("propose_");
+        assert_eq!(read_only == Some(true), !proposes, "{}", tool.name);
+        if proposes {
+            let annotations = tool.annotations.as_ref().unwrap();
+            assert_eq!(annotations.read_only_hint, Some(false), "{}", tool.name);
+            assert_eq!(annotations.destructive_hint, Some(false), "{}", tool.name);
+        }
     }
     assert_eq!(
         names,
@@ -350,6 +429,7 @@ async fn lists_all_ten_tools_and_marks_reads_read_only() {
             "list_chats",
             "list_meetings",
             "propose_message",
+            "propose_reaction",
             "read_messages",
             "recent_messages",
             "search_messages",
@@ -689,6 +769,7 @@ async fn read_messages_adds_rich_fields_only_where_present() {
         "mentions",
         "files",
         "quote",
+        "forwarded",
         "cards",
         "links",
         "thread_root_id",
@@ -715,6 +796,8 @@ async fn read_messages_adds_rich_fields_only_where_present() {
     assert_eq!(rich["files"][0]["name"], "Plan.docx");
     assert_eq!(rich["files"][0]["type"], "word");
     assert_eq!(rich["quote"]["message_id"], "m1");
+    assert_eq!(rich["forwarded"][0]["sender"], "Cleo Example");
+    assert_eq!(rich["forwarded"][0]["text"], "original words");
     assert_eq!(rich["cards"], json!(["Build passed"]));
     assert_eq!(rich["links"][0]["title"], "A story");
 }
@@ -957,4 +1040,628 @@ async fn recent_messages_unread_only_covers_chats_and_channels() {
         message_ids(&json_of(&body)),
         ["t2", "t1", RICH_MESSAGE, "m4"]
     );
+}
+
+fn padded_png(size: usize) -> Vec<u8> {
+    let mut bytes = PIXEL_PNG.to_vec();
+    bytes.resize(size, 0);
+    bytes
+}
+
+fn image_argument(bytes: &[u8], mime_type: &str) -> Value {
+    json!({"data_base64": STANDARD.encode(bytes), "mime_type": mime_type})
+}
+
+async fn propose_error(
+    client: &RunningService<rmcp::RoleClient, ClientConfig>,
+    arguments: Value,
+) -> String {
+    let (is_error, text) = call(client, "propose_message", arguments).await;
+    assert!(is_error, "{text}");
+    text
+}
+
+#[tokio::test]
+async fn propose_keeps_mentions_in_text_order() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": ALLOWED_CHAT,
+            "text": "Thanks @Ada Example and @Bob Sample",
+            "mentions": [
+                {"user_id": "user-ada", "name": "Ada Example"},
+                {"user_id": "user-bob", "name": "Bob Sample"},
+            ],
+        }),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let proposal = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    let mentions: Vec<(&str, &str)> = proposal
+        .mentions
+        .iter()
+        .map(|mention| (mention.user_id.as_str(), mention.name.as_str()))
+        .collect();
+    assert_eq!(
+        mentions,
+        [("user-ada", "Ada Example"), ("user-bob", "Bob Sample")]
+    );
+}
+
+#[tokio::test]
+async fn propose_rejects_mentions_that_do_not_fit_the_text_or_the_chat() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let base = |text: &str, mentions: Value| json!({"conversation_id": ALLOWED_CHAT, "text": text, "mentions": mentions});
+    let ada = json!({"user_id": "user-ada", "name": "Ada Example"});
+    let bob = json!({"user_id": "user-bob", "name": "Bob Sample"});
+
+    let text = propose_error(&client, base("Hello Ada Example", json!([ada]))).await;
+    assert!(text.contains("@Ada Example"), "{text}");
+
+    let text = propose_error(
+        &client,
+        base("@Bob Sample and @Ada Example", json!([ada, bob])),
+    )
+    .await;
+    assert!(text.contains("@Bob Sample"), "{text}");
+
+    let stranger = json!({"user_id": "user-eve", "name": "Eve"});
+    let text = propose_error(&client, base("hi @Eve", json!([stranger]))).await;
+    assert!(text.contains("not a member"), "{text}");
+
+    let wrong_name = json!({"user_id": "user-ada", "name": "Bob"});
+    let text = propose_error(&client, base("hi @Bob", json!([wrong_name]))).await;
+    assert!(text.contains("does not match"), "{text}");
+
+    let text = propose_error(&client, base("hi @Ada Examples", json!([ada]))).await;
+    assert!(text.contains("whole word"), "{text}");
+
+    let first_name = json!({"user_id": "user-ada", "name": "Ada"});
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        base("hi @Ada!", json!([first_name])),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    harness.hub.resolve(
+        &harness.hub.pending_proposal(ALLOWED_CHAT).unwrap().id,
+        Outcome::Discarded,
+    );
+
+    let blank = json!({"user_id": " ", "name": "Ada Example"});
+    let text = propose_error(&client, base("hi @Ada Example", json!([blank]))).await;
+    assert!(text.contains("user_id and a name"), "{text}");
+
+    assert!(harness.hub.pending_proposal(ALLOWED_CHAT).is_none());
+
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": CHANNEL,
+            "text": "hi @Ada",
+            "mentions": [{"user_id": "user-ada", "name": "Ada"}],
+        }),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let (is_error, text) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": CHANNEL,
+            "text": "hi @Eve",
+            "mentions": [{"user_id": "user-eve", "name": "Eve"}],
+        }),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("not known in this conversation"), "{text}");
+}
+
+#[tokio::test]
+async fn propose_stores_four_images_of_four_megabytes() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let four_megabytes = padded_png(4 * 1024 * 1024);
+    let images: Vec<Value> = (0..4)
+        .map(|_| image_argument(&four_megabytes, "image/png"))
+        .collect();
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "look", "images": images}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let proposal = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    assert_eq!(proposal.images.len(), 4);
+    assert_eq!(proposal.images[0].name, "image-1.png");
+    assert_eq!(proposal.images[3].mime_type, "image/png");
+    assert_eq!(proposal.images[0].bytes.len(), 4 * 1024 * 1024);
+    let stored = harness.store.pending_agent_proposals().unwrap();
+    assert_eq!(stored[0].images.len(), 4);
+    assert!(harness.hub.resolve(&proposal.id, Outcome::Discarded));
+    assert!(harness.store.pending_agent_proposals().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn propose_rejects_bad_images() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let with_images = |images: Vec<Value>| json!({"conversation_id": ALLOWED_CHAT, "text": "look", "images": images});
+    let png = image_argument(&PIXEL_PNG, "image/png");
+
+    let text = propose_error(&client, with_images(vec![png.clone(); 5])).await;
+    assert!(text.contains("at most 4"), "{text}");
+
+    let too_big = image_argument(&padded_png(4 * 1024 * 1024 + 1), "image/png");
+    let text = propose_error(&client, with_images(vec![too_big])).await;
+    assert!(text.contains("larger than 4 MB"), "{text}");
+
+    let fake = image_argument(b"<svg></svg>", "image/png");
+    let text = propose_error(&client, with_images(vec![fake])).await;
+    assert!(text.contains("not a png, jpeg, gif or webp"), "{text}");
+
+    let mislabelled = image_argument(&PIXEL_PNG, "image/jpeg");
+    let text = propose_error(&client, with_images(vec![mislabelled])).await;
+    assert!(text.contains("does not match"), "{text}");
+
+    let mut wide = PIXEL_PNG.to_vec();
+    wide[16..20].copy_from_slice(&9000u32.to_be_bytes());
+    let text = propose_error(
+        &client,
+        with_images(vec![image_argument(&wide, "image/png")]),
+    )
+    .await;
+    assert!(text.contains("at most 8192 px"), "{text}");
+
+    let mut megapixels = PIXEL_PNG.to_vec();
+    megapixels[16..20].copy_from_slice(&8000u32.to_be_bytes());
+    megapixels[20..24].copy_from_slice(&6000u32.to_be_bytes());
+    let text = propose_error(
+        &client,
+        with_images(vec![image_argument(&megapixels, "image/png")]),
+    )
+    .await;
+    assert!(text.contains("megapixels"), "{text}");
+
+    let broken = json!({"data_base64": "!!!", "mime_type": "image/png"});
+    let text = propose_error(&client, with_images(vec![broken])).await;
+    assert!(text.contains("not valid base64"), "{text}");
+
+    assert!(harness.hub.pending_proposal(ALLOWED_CHAT).is_none());
+}
+
+#[tokio::test]
+async fn a_request_over_the_body_cap_is_rejected() {
+    let harness = Harness::start(true).await;
+    let post = |length: usize| {
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"ping","params":{{"pad":"{}"}}}}"#,
+            "a".repeat(length)
+        );
+        reqwest::Client::new()
+            .post(harness.url())
+            .bearer_auth(TOKEN)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+    };
+    let status = post(25 * 1024 * 1024).await.unwrap().status();
+    assert_eq!(status, 413);
+    let status = post(20 * 1024 * 1024).await.unwrap().status();
+    assert_ne!(status, 413);
+}
+
+#[tokio::test]
+async fn oversized_arguments_of_read_tools_are_refused() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, text) = call(
+        &client,
+        "search_messages",
+        json!({"query": "a".repeat(10_000)}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("query is longer"), "{text}");
+}
+
+async fn next_events(
+    client: &RunningService<rmcp::RoleClient, ClientConfig>,
+    cursor: u64,
+) -> Value {
+    let (_, events) = call(
+        client,
+        "wait_for_event",
+        json!({"timeout_seconds": 5, "since": cursor}),
+    )
+    .await;
+    json_of(&events)
+}
+
+async fn event_cursor(client: &RunningService<rmcp::RoleClient, ClientConfig>) -> u64 {
+    let (_, start) = call(client, "wait_for_event", json!({"timeout_seconds": 1})).await;
+    json_of(&start)["next"].as_u64().unwrap()
+}
+
+#[tokio::test]
+async fn reaction_proposal_resolution_reaches_wait_for_event() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let cursor = event_cursor(&client).await;
+    let (is_error, body) = call(
+        &client,
+        "propose_reaction",
+        json!({"conversation_id": ALLOWED_CHAT, "message_id": "m2", "emoji": "\u{1F44D}", "agent": "claude"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let body = json_of(&body);
+    assert_eq!(body["state"], "pending");
+    let proposal_id = body["proposal_id"].as_str().unwrap();
+    assert_eq!(harness.hub.pending_reactions(ALLOWED_CHAT).len(), 1);
+    assert!(
+        harness
+            .hub
+            .resolve_reaction(proposal_id, mcp::ReactionOutcome::Accepted)
+    );
+    let events = next_events(&client, cursor).await;
+    let event = &events["events"][0];
+    assert_eq!(event["type"], "reaction_resolved");
+    assert_eq!(event["outcome"], "accepted");
+    assert_eq!(event["proposal_id"], proposal_id);
+    assert_eq!(event["message_id"], "m2");
+}
+
+#[tokio::test]
+async fn a_message_and_a_reaction_proposal_stay_pending_side_by_side() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "Sounds good"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let (is_error, body) = call(
+        &client,
+        "propose_reaction",
+        json!({"conversation_id": ALLOWED_CHAT, "message_id": "m2", "emoji": "\u{2764}"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    assert!(harness.hub.pending_proposal(ALLOWED_CHAT).is_some());
+    assert_eq!(harness.hub.pending_reactions(ALLOWED_CHAT).len(), 1);
+    assert_eq!(harness.store.pending_agent_proposals().unwrap().len(), 1);
+    assert_eq!(harness.store.pending_agent_reactions().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn propose_reaction_checks_scope_message_and_emoji() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let reaction = |conversation_id: &str, message_id: &str, emoji: &str| json!({"conversation_id": conversation_id, "message_id": message_id, "emoji": emoji});
+    let cases = [
+        (
+            reaction(HIDDEN_CHAT, "m3", "\u{1F44D}"),
+            "not found or not allowed",
+        ),
+        (
+            reaction(ALLOWED_CHAT, "m3", "\u{1F44D}"),
+            "not a message of this conversation",
+        ),
+        (
+            reaction(ALLOWED_CHAT, "m2", "not an emoji"),
+            "not a reaction Teams supports",
+        ),
+    ];
+    for (arguments, expected) in cases {
+        let (is_error, text) = call(&client, "propose_reaction", arguments).await;
+        assert!(is_error, "{text}");
+        assert!(text.contains(expected), "{text}");
+    }
+    assert!(harness.hub.pending_reactions(ALLOWED_CHAT).is_empty());
+
+    let mut deleted = harness
+        .store
+        .messages_by_id(ALLOWED_CHAT, &["m2".to_owned()])
+        .unwrap()
+        .remove("m2")
+        .unwrap();
+    deleted.deleted = true;
+    harness.store.upsert_messages(&[deleted]).unwrap();
+    let (is_error, text) = call(
+        &client,
+        "propose_reaction",
+        reaction(ALLOWED_CHAT, "m2", "\u{1F44D}"),
+    )
+    .await;
+    assert!(is_error, "{text}");
+
+    let off = Harness::start(false).await;
+    let client = off.client().await;
+    let (is_error, text) = call(
+        &client,
+        "propose_reaction",
+        reaction(ALLOWED_CHAT, "m2", "\u{1F44D}"),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("turned off"), "{text}");
+}
+
+#[tokio::test]
+async fn reaction_changes_reach_wait_for_event() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let cursor = event_cursor(&client).await;
+    harness.hub.reaction_changed(
+        ALLOWED_CHAT,
+        "m2",
+        vec![ReactionInfo {
+            emoji: "\u{1F44D}".to_owned(),
+            count: 1,
+            mine: false,
+        }],
+    );
+    harness.hub.reaction_changed(HIDDEN_CHAT, "m3", Vec::new());
+    let events = next_events(&client, cursor).await;
+    let events = events["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "reaction_changed");
+    assert_eq!(events[0]["message_id"], "m2");
+    assert_eq!(events[0]["reactions"][0]["emoji"], "\u{1F44D}");
+    assert_eq!(events[0]["reactions"][0]["count"], 1);
+}
+
+#[tokio::test]
+async fn pending_reaction_proposals_are_capped_per_conversation() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    for index in 0..20 {
+        harness
+            .hub
+            .add_reaction_proposal(mcp::NewReactionProposal {
+                conversation_id: ALLOWED_CHAT.to_owned(),
+                message_id: format!("m-{index}"),
+                emoji: "\u{1F44D}".to_owned(),
+                ..mcp::NewReactionProposal::default()
+            })
+            .unwrap();
+    }
+    let (is_error, text) = call(
+        &client,
+        "propose_reaction",
+        json!({"conversation_id": ALLOWED_CHAT, "message_id": "m2", "emoji": "\u{1F44D}"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("already waiting"), "{text}");
+}
+
+#[tokio::test]
+async fn proposals_wait_for_a_free_permit_but_other_tools_do_not() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let permits = harness.hub.proposal_permits();
+    let held = permits.clone().acquire_many_owned(4).await.unwrap();
+    let blocked = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        call(
+            &client,
+            "propose_message",
+            json!({"conversation_id": ALLOWED_CHAT, "text": "hi"}),
+        ),
+    )
+    .await;
+    assert!(blocked.is_err());
+    let (is_error, _) = call(&client, "list_chats", json!({})).await;
+    assert!(!is_error);
+    drop(held);
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "hi"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+}
+
+#[tokio::test]
+async fn mention_names_follow_whole_word_and_comma_rules() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let later_whole_word = json!({"conversation_id": ALLOWED_CHAT, "text": "@Adam and @Ada",
+        "mentions": [{"user_id": "user-ada", "name": "Ada"}]});
+    let (is_error, body) = call(&client, "propose_message", later_whole_word).await;
+    assert!(!is_error, "{body}");
+
+    let only_a_prefix = json!({"conversation_id": ALLOWED_CHAT, "text": "@Adam only",
+        "mentions": [{"user_id": "user-ada", "name": "Ada"}]});
+    let (is_error, body) = call(&client, "propose_message", only_a_prefix).await;
+    assert!(is_error, "{body}");
+
+    let at_the_end = json!({"conversation_id": ALLOWED_CHAT, "text": "ping @Ada",
+        "mentions": [{"user_id": "user-ada", "name": "Ada"}]});
+    let (is_error, body) = call(&client, "propose_message", at_the_end).await;
+    assert!(!is_error, "{body}");
+}
+
+fn mention_ids(proposal: &mcp::Proposal) -> Vec<(&str, &str)> {
+    proposal
+        .mentions
+        .iter()
+        .map(|mention| (mention.user_id.as_str(), mention.name.as_str()))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_exact_full_name_is_mentioned_without_the_mentions_parameter() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "Done, @ada example and @Bob Sample!"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    assert!(json_of(&body).get("not_mentioned").is_none(), "{body}");
+    let proposal = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    assert_eq!(
+        mention_ids(&proposal),
+        [("user-ada", "ada example"), ("user-bob", "Bob Sample")]
+    );
+}
+
+#[tokio::test]
+async fn explicit_and_automatic_mentions_merge_in_text_order_without_duplicates() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": ALLOWED_CHAT,
+            "text": "@Bob Sample then @Ada Example and @Bob Sample again",
+            "mentions": [{"user_id": "user-bob", "name": "Bob Sample"}],
+        }),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let proposal = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    assert_eq!(
+        mention_ids(&proposal),
+        [("user-bob", "Bob Sample"), ("user-ada", "Ada Example")]
+    );
+}
+
+#[tokio::test]
+async fn a_first_name_alone_is_not_mentioned_but_reported() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "Thanks @Ada, mail me at a@b.example"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    assert!(
+        harness
+            .hub
+            .pending_proposal(ALLOWED_CHAT)
+            .unwrap()
+            .mentions
+            .is_empty()
+    );
+    let reported = json_of(&body)["not_mentioned"].to_string();
+    assert!(reported.contains("@Ada"), "{reported}");
+    assert!(!reported.contains("@b"), "{reported}");
+}
+
+#[tokio::test]
+async fn people_with_the_same_name_are_not_mentioned_and_are_reported() {
+    let harness = Harness::start(true).await;
+    let twin = |id: &str, sender: &str, minute: u32| MessageRecord {
+        conversation_id: CHANNEL.to_owned(),
+        message_id: id.to_owned(),
+        sender_id: Some(sender.to_owned()),
+        sender_name: Some("Twin Name".to_owned()),
+        created_at: Utc.with_ymd_and_hms(2026, 10, 6, 9, minute, 0).unwrap(),
+        body_html: "<p>hi</p>".to_owned(),
+        attachments_json: "[]".to_owned(),
+        reactions_json: "[]".to_owned(),
+        mentions_json: "[]".to_owned(),
+        links_json: "[]".to_owned(),
+        ..MessageRecord::default()
+    };
+    harness
+        .store
+        .upsert_messages(&[
+            twin("tw1", "user-twin-a", 20),
+            twin("tw2", "user-twin-b", 21),
+        ])
+        .unwrap();
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({"conversation_id": CHANNEL, "text": "@Twin Name please look, @Ada Example too"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let proposal = harness.hub.pending_proposal(CHANNEL).unwrap();
+    assert_eq!(mention_ids(&proposal), [("user-ada", "Ada Example")]);
+    let reported = json_of(&body)["not_mentioned"].to_string();
+    assert!(
+        reported.contains("@Twin Name") && reported.contains("ambiguous"),
+        "{reported}"
+    );
+}
+
+#[tokio::test]
+async fn mentions_in_links_code_and_after_words_are_skipped_and_reported() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, body) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": ALLOWED_CHAT,
+            "text": "see medium.com/@Ada and ` @Ada Example ` and ops@Bob Sample, but @Ada Example please",
+        }),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let proposal = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    assert_eq!(mention_ids(&proposal), [("user-ada", "Ada Example")]);
+    let reported = json_of(&body)["not_mentioned"].to_string();
+    assert!(
+        reported.contains("inside a link, code or formatting"),
+        "{reported}"
+    );
+    assert!(!reported.contains("@Bob Sample"), "{reported}");
+}
+
+#[tokio::test]
+async fn an_explicit_mention_that_only_sits_in_code_is_rejected() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, text) = call(
+        &client,
+        "propose_message",
+        json!({
+            "conversation_id": ALLOWED_CHAT,
+            "text": "run `@Ada Example` now",
+            "mentions": [{"user_id": "user-ada", "name": "Ada Example"}],
+        }),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("plain text"), "{text}");
+}
+
+#[tokio::test]
+async fn proposing_a_reaction_the_user_already_made_is_refused() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let (is_error, text) = call(
+        &client,
+        "propose_reaction",
+        json!({"conversation_id": ALLOWED_CHAT, "message_id": RICH_MESSAGE, "emoji": "\u{1F44D}"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("already reacted"), "{text}");
+    assert!(harness.hub.pending_reactions(ALLOWED_CHAT).is_empty());
 }

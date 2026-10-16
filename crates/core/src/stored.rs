@@ -5,6 +5,7 @@ use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
 use crate::external_image::{external_image_url, is_giphy_url};
+use crate::forwarded::{ForwardHeader, ForwardInfo, forwarded_texts, inline_forwards, no_forward_header};
 use crate::markdown::escape_html;
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
@@ -238,7 +239,7 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
     if record.deleted {
         return Vec::new();
     }
-    let fragment = Html::parse_fragment(&record.body_html);
+    let fragment = Html::parse_fragment(&inline_forwards(record, record.body_html.clone(), &no_forward_header));
     let mut found: Vec<ImageRef> = Vec::new();
     for element in fragment
         .root_element()
@@ -382,17 +383,20 @@ pub fn files(record: &MessageRecord) -> Vec<FileCard> {
 pub fn copy_text(record: &MessageRecord) -> String {
     let mut text = String::new();
     push_plain(&mut text, &message_spans(record));
-    for card_text in card_texts(record) {
+    for extra_text in forwarded_texts(record).into_iter().chain(card_texts(record)) {
         text.push('\n');
-        text.push_str(&card_text);
+        text.push_str(&extra_text);
     }
     text.trim().to_owned()
 }
 
 pub fn readable_text(record: &MessageRecord) -> String {
+    if let Some(event) = crate::call_event::call_event(record) {
+        return event.plain_text();
+    }
     let spans: Vec<Span> = message_spans(record)
         .into_iter()
-        .filter(|span| !matches!(span, Span::Quote(_)))
+        .filter(|span| !matches!(span, Span::Quote { .. }))
         .collect();
     let mut text = String::new();
     push_plain(&mut text, &spans);
@@ -465,7 +469,7 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => push_plain(text, children),
             Span::Heading { children, .. } => {
@@ -555,17 +559,32 @@ pub const PROFILE_LINK_PREFIX: &str = "teams-profile:";
 
 /// Like `message_spans`, with the id of each user mention replaced by a profile link.
 pub fn linked_message_spans(record: &MessageRecord) -> Vec<Span> {
+    linked_message_spans_with(record, &|_| None, &no_forward_header)
+}
+
+/// Like `linked_message_spans`, but a quote shows `quoted_text(message_id)` when known instead of the one-line server preview, and a forward shows `forward_header(forward)` above the original.
+pub fn linked_message_spans_with(
+    record: &MessageRecord,
+    quoted_text: &dyn Fn(&str) -> Option<String>,
+    forward_header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
+) -> Vec<Span> {
     let infos = mentions(record);
-    let mut spans = spans_with_mentions(record, &infos);
+    let html = inline_forwards(record, with_inline_quotes(record, quoted_text), forward_header);
+    let mut spans = html_to_spans(&html);
+    merge_split_mentions(&mut spans, &infos);
     link_user_mentions(&mut spans, &infos);
     spans
 }
 
 /// The spans of `record` with its body replaced by the translated html.
-pub fn translated_spans(record: &MessageRecord, translated_html: &str) -> Vec<Span> {
+pub fn translated_spans(
+    record: &MessageRecord,
+    translated_html: &str,
+    forward_header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
+) -> Vec<Span> {
     let mut translated = record.clone();
     translated.body_html = translated_html.to_owned();
-    linked_message_spans(&translated)
+    linked_message_spans_with(&translated, &|_| None, forward_header)
 }
 
 fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
@@ -580,7 +599,7 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => link_user_mentions(children, infos),
             Span::List { items, .. } => items
@@ -606,17 +625,20 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
 }
 
 fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Span> {
-    let mut spans = html_to_spans(&with_inline_quotes(record));
+    let mut spans = html_to_spans(&with_inline_quotes(record, &|_| None));
     merge_split_mentions(&mut spans, infos);
     spans
 }
 
-fn with_inline_quotes(record: &MessageRecord) -> String {
+fn with_inline_quotes(record: &MessageRecord, quoted_text: &dyn Fn(&str) -> Option<String>) -> String {
     let mut html = record.body_html.clone();
     for attachment in attachments(record) {
-        let Some(quote) = attachment.quote else {
+        let Some(mut quote) = attachment.quote else {
             continue;
         };
+        if let Some(text) = quoted_text(&quote.message_id).filter(|text| !text.trim().is_empty()) {
+            quote.preview = text;
+        }
         let id = attachment.id.unwrap_or_else(|| quote.message_id.clone());
         let tag = format!("<attachment id=\"{id}\"></attachment>");
         let block = quote_html(&quote);
@@ -629,17 +651,26 @@ fn with_inline_quotes(record: &MessageRecord) -> String {
     html
 }
 
-fn quote_html(quote: &QuoteInfo) -> String {
+pub fn quote_html(quote: &QuoteInfo) -> String {
     let sender = quote
         .sender_name
         .as_deref()
         .map(|name| format!("<strong itemprop=\"mri\">{}</strong>", escape_html(name)))
         .unwrap_or_default();
+    let time = quote_time(&quote.message_id)
+        .map(|time| format!(" <span itemprop=\"time\">{time}</span>"))
+        .unwrap_or_default();
+    let preview = escape_html(quote.preview.trim()).replace('\n', "<br>");
     format!(
-        "<blockquote itemscope=\"\" itemtype=\"http://{REPLY_ITEMTYPE}\" itemid=\"{}\">{sender}<p itemprop=\"preview\">{}</p></blockquote>",
+        "<blockquote itemscope=\"\" itemtype=\"http://{REPLY_ITEMTYPE}\" itemid=\"{}\">{sender}{time}<p itemprop=\"preview\">{preview}</p></blockquote>",
         escape_html(&quote.message_id),
-        escape_html(&quote.preview),
     )
+}
+
+fn quote_time(message_id: &str) -> Option<String> {
+    let millis = message_id.parse::<i64>().ok()?;
+    let time = chrono::DateTime::from_timestamp_millis(millis)?;
+    Some(time.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string())
 }
 
 pub fn user_mention_inputs(record: &MessageRecord) -> Vec<MentionInput> {
@@ -661,7 +692,7 @@ fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => collect_user_mentions(children, infos, inputs),
             Span::List { items, .. } => items
@@ -707,7 +738,7 @@ fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
             | Span::Underline(children)
             | Span::Colored { children, .. }
             | Span::Heading { children, .. }
-            | Span::Quote(children)
+            | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => merge_split_mentions(children, mentions),
             Span::List { items, .. } => items
@@ -775,6 +806,7 @@ mod tests {
             attachments_json: attachments_json.to_owned(),
             reactions_json: "[]".to_owned(),
             mentions_json: "[]".to_owned(),
+            call_event_json: None,
         }
     }
 
@@ -845,6 +877,23 @@ mod tests {
         assert!(text.contains("- one\n- two\n"), "{text}");
         assert!(text.contains("let x = 1;\n"), "{text}");
         assert!(text.ends_with("last"), "{text}");
+    }
+
+    #[test]
+    fn a_quote_keeps_its_lines_and_shows_when_the_quoted_message_was_sent() {
+        let html = quote_html(&QuoteInfo {
+            message_id: "1760517360000".to_owned(),
+            preview: "first link\nsecond link".to_owned(),
+            sender_name: Some("Ada".to_owned()),
+        });
+        assert!(html.contains("first link<br>second link"), "{html}");
+        assert!(html.contains("/2025 "), "{html}");
+        let without_time = quote_html(&QuoteInfo {
+            message_id: "Q9".to_owned(),
+            preview: "text".to_owned(),
+            sender_name: None,
+        });
+        assert!(!without_time.contains("itemprop=\"time\""), "{without_time}");
     }
 
     #[test]
@@ -1078,7 +1127,7 @@ mod tests {
             json,
         );
         let spans = message_spans(&stored);
-        let Some(Span::Quote(children)) = spans.first() else {
+        let Some(Span::Quote { children, .. }) = spans.first() else {
             panic!("expected a reply quote first, got {spans:?}");
         };
         let mut quoted = String::new();
@@ -1094,7 +1143,7 @@ mod tests {
     fn a_message_reference_without_its_tag_still_shows_the_quote() {
         let json = r#"[{"content_type":"messageReference","name":null,"url":null,"text":null,"quote":{"message_id":"Q1","preview":"hi","sender_name":null}}]"#;
         let spans = message_spans(&record("<p>answer</p>", json));
-        assert!(matches!(spans.first(), Some(Span::Quote(_))));
+        assert!(matches!(spans.first(), Some(Span::Quote { .. })));
     }
 
     fn with_mentions(body_html: &str, mentions_json: &str) -> MessageRecord {

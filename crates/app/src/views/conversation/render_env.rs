@@ -7,19 +7,23 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::*;
+use mcp::ReactionProposal;
 use teams_core::{ImageRef, LinkPreview};
 
 use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
+use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
-use crate::views::attachments::ImageOpen;
+use crate::views::attachments::ImageActions;
+use crate::views::call_card::CallActions;
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
+use crate::views::reaction_proposal_pill::ReactionPill;
 use crate::views::toolbar_placement::TimelineBounds;
 use crate::views::translation_line::{LineAction, TranslationActions};
 
@@ -31,6 +35,7 @@ pub(super) struct RenderEnv {
     pub reply_editor: Option<(String, Entity<Composer>)>,
     pub timeline: TimelineBounds,
     pub agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
+    pub reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -71,6 +76,35 @@ impl RenderEnv {
                 app.update(cx, |state, cx| state.request_images(missing_images, cx));
             });
         }
+    }
+
+    fn reaction_pill(&self, message: &MessageRow) -> Option<ReactionPill> {
+        let proposal = self
+            .reaction_proposals
+            .borrow()
+            .get(&message.key)
+            .cloned()?;
+        let (accept_view, discard_view) = (self.view.clone(), self.view.clone());
+        let (accept_key, discard_key) = (message.key.clone(), message.key.clone());
+        let (emoji, discard_id, accept_id) = (
+            proposal.emoji.clone(),
+            proposal.id.clone(),
+            proposal.id.clone(),
+        );
+        Some(ReactionPill {
+            agent: agent_label(proposal.agent.as_deref()),
+            emoji: proposal.emoji,
+            accept: Rc::new(move |cx| {
+                accept_view
+                    .update(cx, |this, cx| this.accept_reaction(&accept_key, &accept_id, &emoji, cx))
+                    .ok();
+            }),
+            discard: Rc::new(move |cx| {
+                discard_view
+                    .update(cx, |this, cx| this.discard_reaction(&discard_key, &discard_id, cx))
+                    .ok();
+            }),
+        })
     }
 
     fn bot_identity(
@@ -127,8 +161,10 @@ impl RenderEnv {
             })
         });
         self.request_missing_media(message, cx);
-        let is_real =
-            !self.drafting && !message.key.starts_with(PENDING_KEY_PREFIX) && scheduled.is_none();
+        let is_real = !self.drafting
+            && !message.key.starts_with(PENDING_KEY_PREFIX)
+            && scheduled.is_none()
+            && message.call.is_none();
         let hovered = is_real.then(|| {
             let (view, key) = (view.clone(), message.key.clone());
             Rc::new(move |hovered: bool, cx: &mut App| {
@@ -201,15 +237,27 @@ impl RenderEnv {
                     .file_actions(&message.key, &message.files, view.clone())
             });
         let open_image = (is_real && !message.deleted && !message.images.is_empty()).then(|| {
-            let (view, key) = (view.clone(), message.key.clone());
-            Rc::new(move |url: &str, cx: &mut App| {
-                view.update(cx, |this, cx| this.open_image_viewer(&key, url, cx))
-                    .ok();
-            }) as ImageOpen
+            let (open_view, open_key) = (view.clone(), message.key.clone());
+            let (share_view, share_key) = (view.clone(), message.key.clone());
+            ImageActions {
+                open: Rc::new(move |url: &str, cx: &mut App| {
+                    open_view
+                        .update(cx, |this, cx| this.open_image_viewer(&open_key, url, cx))
+                        .ok();
+                }),
+                share: Some(Rc::new(move |cx: &mut App| {
+                    share_view
+                        .update(cx, |this, cx| this.forward_message(&share_key, cx))
+                        .ok();
+                })),
+            }
         });
         let bot = self.bot_identity(message, cx);
         let actionable_run = (is_real && !message.deleted)
             .then(|| self.agent_runs.borrow().get(&message.key).cloned())
+            .flatten();
+        let reaction_proposal = (is_real && !message.deleted)
+            .then(|| self.reaction_pill(message))
             .flatten();
         let translation = (is_real && !message.deleted)
             .then(|| self.translation_actions(message))
@@ -248,7 +296,35 @@ impl RenderEnv {
             translation,
             timeline: self.timeline.clone(),
             agent_run: actionable_run,
+            call: self.call_actions(message, cx),
+            reaction_proposal,
         }
+    }
+
+    fn call_actions(&self, message: &MessageRow, cx: &App) -> CallActions {
+        let Some(call) = &message.call else {
+            return CallActions {
+                call_back: None,
+                join: None,
+            };
+        };
+        let app = self.app.clone();
+        let conversation_id = message.conversation_id.clone();
+        let call_back = call.missed.then(|| {
+            let (app, conversation_id) = (app.clone(), conversation_id.clone());
+            boxed(move |cx| {
+                app.update(cx, |state, cx| state.start_chat_call(&conversation_id, cx));
+            })
+        });
+        let joinable = call.started && app.read(cx).running_meeting(&conversation_id).is_some();
+        let join = joinable.then(|| {
+            boxed(move |cx| {
+                app.update(cx, |state, cx| {
+                    state.join_meeting_call(&conversation_id, cx)
+                });
+            })
+        });
+        CallActions { call_back, join }
     }
 
     fn translation_actions(&self, message: &MessageRow) -> Option<TranslationActions> {

@@ -9,6 +9,7 @@ use crate::breakout::BreakoutMove;
 use crate::captions::{CaptionEntry, CaptionState};
 use crate::recording::{RecordingKind, StopScope};
 use crate::devices::{DeviceChoice, DeviceLists};
+use crate::diagnostics::{CallDiagnostics, StatsSample};
 use crate::error::{Error, Result};
 use crate::health::CallHealth;
 use crate::hold::HoldState;
@@ -21,6 +22,7 @@ use crate::roster::{MeetingRole, RosterEntry};
 use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
 use crate::signaling::{Callee, MeetingTarget};
+use crate::transfer::Replacement;
 use crate::state::CallState;
 use crate::video_layout::VideoWant;
 use crate::video_frame::VideoHub;
@@ -71,7 +73,7 @@ pub enum CallCommand {
     SetCaptionLanguage(String),
     ConsentToRecording,
     Hold(bool),
-    Transfer { target: Callee, replaces: Option<String> },
+    Transfer { target: Callee, replaces: Option<Replacement> },
     OpenWhiteboard { title: String },
     Hangup,
     EndMeeting,
@@ -92,6 +94,8 @@ pub enum CallUpdate {
     Selected { input: DeviceChoice, output: DeviceChoice },
     ListenOnly(bool),
     Stats { inbound_packets: u64, outbound_packets: u64 },
+    Sample(StatsSample),
+    Diagnostics(Box<CallDiagnostics>),
     Progress(Progress),
     Roster(Vec<RosterEntry>),
     Speakers(Vec<String>),
@@ -112,6 +116,7 @@ pub enum CallUpdate {
     Health(CallHealth),
     IncomingVideo(bool),
     Recording(bool),
+    RecordingPending(bool),
     RecordingAudioOnly(bool),
     Transcribing(bool),
     ConsentRequired(bool),
@@ -120,12 +125,14 @@ pub enum CallUpdate {
     WhiteboardUrl(String),
     BreakoutMove(BreakoutMove),
     BreakoutRoom { main: MeetingTarget },
-    ReplacementLink(String),
+    ReplacementLink(Replacement),
+    TransferResult { succeeded: bool },
     Capability(MeetingCapability),
     MeetingOptions(std::result::Result<MeetingOptions, String>),
     MeetingOptionsSaved(std::result::Result<MeetingOptions, String>),
     Organizer { action: String, outcome: std::result::Result<u16, String> },
     MeetingChat(String),
+    MeetingTenant(String),
     Notice(String),
 }
 

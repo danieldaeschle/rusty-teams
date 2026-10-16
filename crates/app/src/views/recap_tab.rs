@@ -22,7 +22,7 @@ use crate::downloads::DownloadState;
 use crate::recap::{
     ATTENDANCE_FAILED, ATTENDANCE_OFF, EMPTY_RECAP, Load, NO_TRANSCRIPT, clock_label,
     expiry_is_urgent, expiry_label, highlight_segments, matching_turns, occurrence_label,
-    span_label, time_label,
+    shows_recording, span_label, time_label,
 };
 use crate::theme;
 
@@ -504,7 +504,9 @@ pub fn render_recap(view: RecapView, run: &RecapRun) -> AnyElement {
                         .px(px(SIDE_PADDING))
                         .gap(px(SECTION_GAP))
                         .child(picker(&view, offset, today, run))
-                        .child(recording_section(&view, run))
+                        .when(shows_recording(view.details), |column| {
+                            column.child(recording_section(&view, run))
+                        })
                         .child(transcript_section(&view, run))
                         .child(attendance_section(&view, offset)),
                 )

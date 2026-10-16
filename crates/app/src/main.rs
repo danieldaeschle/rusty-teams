@@ -3,75 +3,14 @@
     windows_subsystem = "windows"
 )]
 
-mod activity;
-mod agent_api;
-mod agents;
-mod app_state;
-mod assets;
-mod avatar_image;
-mod backend;
-mod call;
-mod card_actions;
-mod card_inputs;
-mod card_refresh;
-mod card_state;
-mod channel_files;
-mod chat_actions;
-mod crash_log;
-mod data;
-mod demo;
-mod demo_cards;
-mod demo_chart_cards;
-mod demo_gifs;
-mod demo_input_cards;
-mod demo_library;
-mod demo_profiles;
-mod demo_recap;
-mod diagnostics;
-mod downloads;
-mod emoji;
-mod format;
-mod frame_log;
-mod fuzzy;
-mod gifs;
-mod image_view_gallery;
-mod image_view_math;
+pub mod agents;
+pub mod call;
 #[cfg(test)]
 mod layout_guard;
-mod local_previews;
-mod message_actions;
-mod notice;
-mod notify;
-mod outbox;
-mod own_status;
-mod pending_rows;
-mod people;
-mod presence_link;
-mod profile_model;
-mod profile_state;
-mod reaction_model;
-mod read_state;
-mod recap;
-mod remote_image;
-mod render;
-mod rows;
-mod runtime;
-mod schedule_time;
-mod scheduled;
-mod scheduled_rows;
-mod section_actions;
-mod sidebar_model;
-mod single_instance;
-mod stickers;
-mod stored_outgoing;
-mod task_dialog;
-mod theme;
-mod translation;
-mod translation_actions;
-mod typing;
-mod updater;
-mod user_activity;
+pub mod notify;
 mod views;
+
+pub use state::*;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -82,10 +21,10 @@ use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 use store::Store;
 
-use app_state::{AppState, Mode};
+use crate::app_state::{AppState, Mode};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
-pub const APP_NAME: &str = "Rusty Teams";
+const VERSION_MARKER: &str = concat!("teams-build:", env!("TEAMS_BUILD_VERSION"));
 const HTTP_USER_AGENT: &str = "teams-linux";
 const WINDOW_WIDTH: f32 = 1240.;
 const WINDOW_HEIGHT: f32 = 820.;
@@ -195,6 +134,7 @@ fn open_store(path: &std::path::Path) -> Store {
 }
 
 fn main() {
+    app_base::version::set_build_version(VERSION_MARKER.trim_start_matches("teams-build:"));
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
     let arguments = parse_arguments();
@@ -241,7 +181,7 @@ fn main() {
         application = application.with_http_client(Arc::new(http_client));
     }
 
-    application.with_assets(assets::AppAssets).run(move |cx| {
+    application.with_assets(app_base::assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         cx.on_app_quit(|_| {
             updater::exit_after_grace();

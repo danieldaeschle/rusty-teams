@@ -37,7 +37,7 @@ use super::channel_tabs::ChannelPane;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
-use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder, existing_one_on_one};
+use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder};
 use super::post_card::render_post;
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
@@ -45,14 +45,15 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, StartRequest};
-use crate::app_state::{AppEvent, AppState, Selection, selection_title};
+use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_title};
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
-use crate::data::{is_one_on_one, others};
+use crate::data::{existing_one_on_one, is_one_on_one, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
+use crate::emoticons;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
@@ -63,7 +64,9 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
-    has_own_reaction, message_draft, message_text, place_local_rows, placeholder_rows,
+    forward_sender_ids,
+    has_own_reaction, message_draft, message_text, own_reaction_glyph, place_local_rows,
+    placeholder_rows,
     reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
 };
 use crate::runtime;
@@ -74,6 +77,7 @@ use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
+use mcp::ReactionProposal;
 use render_env::RenderEnv;
 use shared::SharedState;
 
@@ -96,8 +100,6 @@ const TYPING_LINE_HEIGHT: f32 = 22.;
 const TYPING_DOT_SIZE: f32 = 5.;
 const TYPING_DOT_COUNT: usize = 3;
 const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
-
-actions!(teams, [ReplyToHovered]);
 
 #[derive(Clone, Copy)]
 enum HoverSlot {
@@ -149,6 +151,15 @@ struct ReactionDetails {
     message_key: String,
     anchor_glyph: String,
     tab: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReactionAttempt {
+    Acted,
+    Started,
+    AlreadyThere,
+    MissingMessage,
+    Blocked,
 }
 
 pub struct ConversationView {
@@ -203,6 +214,7 @@ pub struct ConversationView {
     new_folder_input: Option<Entity<InputState>>,
     agent_layouts: HashMap<String, (usize, bool)>,
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
+    reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -426,6 +438,10 @@ impl ConversationView {
         Self::build(app, None, window, cx)
     }
 
+    pub fn timeline_bounds(&self) -> TimelineBounds {
+        self.timeline_bounds.clone()
+    }
+
     pub fn pinned_to(
         app: Entity<AppState>,
         selection: Selection,
@@ -469,6 +485,9 @@ impl ConversationView {
         ];
         if let Some(runs) = crate::agents::runs_handle(cx) {
             subscriptions.push(cx.observe(&runs, |this, _, cx| this.sync_agent_chips(cx)));
+        }
+        if let Some(api) = crate::agent_api::handle(cx) {
+            subscriptions.push(cx.observe(&api, |this, _, cx| this.sync_reaction_pills(cx)));
         }
         let mut view = ConversationView {
             app,
@@ -522,6 +541,7 @@ impl ConversationView {
             new_folder_input: None,
             agent_layouts: HashMap::new(),
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
+            reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -651,10 +671,11 @@ impl ConversationView {
                 } else if let Some(current) = self.current.as_mut() {
                     let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
                     if current.title != title {
-                        current.title = title.clone();
+                        current.title = title;
                         let conversation_id = current.selection.conversation_id().to_owned();
+                        let name = composer_name(&self.app.read(cx).sidebar, &current.selection);
                         self.composer.update(cx, |composer, cx| {
-                            composer.set_conversation(&conversation_id, &title, window, cx)
+                            composer.set_conversation(&conversation_id, &name, window, cx)
                         });
                         cx.notify();
                     }
@@ -804,6 +825,7 @@ impl ConversationView {
         self.toolbar_suppressed = None;
         self.agent_layouts.clear();
         self.agent_runs.borrow_mut().clear();
+        self.reaction_proposals.borrow_mut().clear();
         let title = selection_title(&self.app.read(cx).sidebar, &selection);
         let mode = match selection {
             Selection::Chat(_) => ViewMode::Flat,
@@ -826,6 +848,7 @@ impl ConversationView {
             window_request: None,
         });
         self.refresh_agent_runs(cx);
+        self.refresh_reaction_pills(cx);
         self.sync_generation += 1;
         self.reset_channel_tabs(cx);
         self.reset_recap(cx);
@@ -847,7 +870,7 @@ impl ConversationView {
             .map(|current| {
                 (
                     current.selection.conversation_id().to_owned(),
-                    current.title.clone(),
+                    composer_name(&self.app.read(cx).sidebar, &current.selection),
                 )
             })
             .unwrap_or_default();
@@ -1242,6 +1265,7 @@ impl ConversationView {
             pending_reactions: self.pending_reactions.clone(),
             card_overrides,
             translation,
+            skin_tone: teams_core::skin_tone(&app.store),
         }
     }
 
@@ -1428,14 +1452,15 @@ impl ConversationView {
         };
         let sync_has_more = sync_state.as_ref().is_none_or(|state| state.has_more);
         let mut context = self.row_context(cx);
-        let reactor_ids: Vec<String> = records
+        let unnamed_ids: Vec<String> = records
             .iter()
             .flat_map(teams_core::reactions)
             .filter(|reaction| reaction.user_name.is_none())
             .filter_map(|reaction| reaction.user_id)
+            .chain(forward_sender_ids(&records))
             .filter(|user_id| !context.names.contains_key(user_id))
             .collect();
-        for (user_id, name) in resolve_names(self.app.read(cx), &reactor_ids) {
+        for (user_id, name) in resolve_names(self.app.read(cx), &unnamed_ids) {
             context.names.entry(user_id).or_insert(name);
         }
         for record in &records {
@@ -2431,15 +2456,26 @@ impl ConversationView {
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {
+        self.change_reaction(message_id, glyph, false, None, cx);
+    }
+
+    fn change_reaction(
+        &mut self,
+        message_id: &str,
+        glyph: &str,
+        only_add: bool,
+        accepted_proposal: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> ReactionAttempt {
         let Some(conversation_id) = self.conversation_id() else {
-            return;
+            return ReactionAttempt::Blocked;
         };
         let state = self.app.read(cx);
         let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
         let engine = engine.filter(|_| !mode.read_only);
         if !mode.demo && engine.is_none() {
             self.show_notice("Read-only mode: reaction not sent", cx);
-            return;
+            return ReactionAttempt::Blocked;
         }
         let my_user_id = self.row_context(cx).my_user_id;
         let Some(mut record) = store
@@ -2447,7 +2483,7 @@ impl ConversationView {
             .ok()
             .and_then(|mut found| found.remove(message_id))
         else {
-            return;
+            return ReactionAttempt::MissingMessage;
         };
         let wanted = reaction_glyph(glyph);
         let mut visible = teams_core::reactions(&record);
@@ -2458,6 +2494,21 @@ impl ConversationView {
             Utc::now(),
         );
         let added = !has_own_reaction(&visible, glyph, my_user_id.as_deref());
+        if only_add && !added {
+            return ReactionAttempt::AlreadyThere;
+        }
+        let skin_tone = teams_core::skin_tone(&store);
+        let wanted = if added {
+            wanted
+        } else {
+            let own = own_reaction_glyph(&visible, glyph, my_user_id.as_deref()).unwrap_or(wanted);
+            if emoticons::without_tone(&own) == own {
+                emoticons::with_tone(&own, skin_tone)
+            } else {
+                own
+            }
+        };
+        let glyph = wanted.as_str();
         let Some(engine) = engine.filter(|_| !mode.demo) else {
             let mut reactions = teams_core::reactions(&record);
             set_own_reaction(
@@ -2473,13 +2524,15 @@ impl ConversationView {
                 self.record_reaction_use(glyph, cx);
             }
             self.rebuild(false, cx);
-            return;
+            return ReactionAttempt::Acted;
         };
         let entries = self
             .pending_reactions
             .entry(message_id.to_owned())
             .or_default();
-        entries.retain(|(pending, _)| *pending != wanted);
+        entries.retain(|(pending, _)| {
+            emoticons::without_tone(pending) != emoticons::without_tone(&wanted)
+        });
         entries.push((wanted.clone(), added));
         self.rebuild(false, cx);
         let (message_id, glyph) = (message_id.to_owned(), glyph.to_owned());
@@ -2505,11 +2558,20 @@ impl ConversationView {
                 Err(_) => Err("cancelled".to_owned()),
             };
             this.update(cx, |this, cx| {
-                this.finish_reaction(&conversation_id, &message_id, &glyph, added, outcome, cx)
+                this.finish_reaction(
+                    &conversation_id,
+                    &message_id,
+                    &glyph,
+                    added,
+                    accepted_proposal.as_deref(),
+                    outcome,
+                    cx,
+                )
             })
             .ok();
         })
         .detach();
+        ReactionAttempt::Started
     }
 
     fn finish_reaction(
@@ -2518,11 +2580,21 @@ impl ConversationView {
         message_id: &str,
         glyph: &str,
         added: bool,
+        accepted_proposal: Option<&str>,
         outcome: Result<(), String>,
         cx: &mut Context<Self>,
     ) {
         let wanted = reaction_glyph(glyph);
         let store = self.app.read(cx).store.clone();
+        if let Some(proposal_id) = accepted_proposal.filter(|_| outcome.is_ok()) {
+            crate::agent_api::resolve_reaction_proposal(
+                conversation_id,
+                message_id,
+                proposal_id,
+                mcp::ReactionOutcome::Accepted,
+                cx,
+            );
+        }
         if outcome.is_ok() {
             let my_user_id = self.row_context(cx).my_user_id;
             if let Some(mut record) = store
@@ -2561,7 +2633,7 @@ impl ConversationView {
         let store = self.app.read(cx).store.clone();
         self.recent.update(cx, |recent, cx| {
             recent.reload(&store);
-            recent.record_use(glyph);
+            recent.record_use(&emoticons::without_tone(glyph));
             recent.save(&store);
             cx.notify();
         });
@@ -2842,24 +2914,29 @@ impl ConversationView {
     fn sync_agent_chips(&mut self, cx: &mut Context<Self>) {
         let (snapshot_changed, changed) = self.refresh_agent_runs(cx);
         let any_running = self.agent_runs.borrow().values().any(AgentRun::is_running);
-        if !changed.is_empty() {
-            let indices: Vec<usize> = self
-                .rows
-                .borrow()
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| row.messages().any(|message| changed.contains(&message.key)))
-                .map(|(index, _)| index)
-                .collect();
-            self.scroller.update(cx, |scroller, cx| {
-                for index in indices {
-                    scroller.remeasure_items(index..index + 1, cx);
-                }
-            });
-        }
+        self.remeasure_rows_of(&changed, cx);
         if snapshot_changed || any_running {
             cx.notify();
         }
+    }
+
+    fn remeasure_rows_of(&mut self, keys: &HashSet<String>, cx: &mut Context<Self>) {
+        if keys.is_empty() {
+            return;
+        }
+        let indices: Vec<usize> = self
+            .rows
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.messages().any(|message| keys.contains(&message.key)))
+            .map(|(index, _)| index)
+            .collect();
+        self.scroller.update(cx, |scroller, cx| {
+            for index in indices {
+                scroller.remeasure_items(index..index + 1, cx);
+            }
+        });
     }
 
     fn message_menu(
@@ -3308,6 +3385,7 @@ impl Render for ConversationView {
             reply_editor: self.reply_root.clone().zip(self.reply_composer.clone()),
             timeline: self.timeline_bounds.clone(),
             agent_runs: self.agent_runs.clone(),
+            reaction_proposals: self.reaction_proposals.clone(),
         };
         let scroller = MessageScroller::new(
             "messages",

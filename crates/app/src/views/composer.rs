@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
@@ -23,18 +22,21 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use serde::{Deserialize, Serialize};
 use teams_core::{
-    Draft, DraftLine, Edit, FileReference, FormatState, HostedImage, LineKind, LinkPreview,
-    MarkKind, MentionCandidate, MentionInput, MessageExtras, OBJECT_MARK, SizeStep, TypingStyle,
+    Draft, DraftLine, Edit, FileReference, FormatState, LineKind, LinkPreview, MarkKind,
+    MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
 mod drafts;
 mod schedule;
 
+use super::actions::{
+    COMPOSER_KEY_CONTEXT, EditLink, OpenSwitcher, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic,
+    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+};
 use super::attachment_tray::{
-    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, OutgoingFile, OutgoingImage,
+    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS,
     PasteAction, UploadJob, UploadResult, discard_uploaded, inline_preview, names_of, paste_action,
     pasted_image_name, prepare_pasted_image, read_attachment, render_tray,
 };
@@ -47,6 +49,7 @@ use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_jo
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::emoji;
+pub use crate::outgoing::{EditPreview, Outgoing, ReplyPreview};
 use crate::remote_image::RemoteImage;
 use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
@@ -70,109 +73,10 @@ const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
 const DEMO_FAILURE_STEP: u8 = 6;
 const HISTORY_LIMIT: usize = 200;
 const PASTE_HINT_DURATION: Duration = Duration::from_secs(4);
-pub(super) const KEY_CONTEXT: &str = "Composer";
 const IMAGE_TOKEN_PREFIX: &str = "image-";
-
-actions!(
-    composer,
-    [
-        ToggleBold,
-        ToggleItalic,
-        ToggleUnderline,
-        ToggleStrike,
-        ToggleSuperscript,
-        ToggleSubscript,
-        ToggleCode,
-        EditLink,
-        ScheduleSend
-    ]
-);
 
 pub fn bind_keys(cx: &mut App) {
     super::shortcuts::bind_scopes(cx, &[super::shortcuts::Scope::Composer]);
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplyPreview {
-    pub message_id: String,
-    pub author: String,
-    pub excerpt: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditPreview {
-    pub message_id: String,
-    pub excerpt: String,
-    pub scheduled: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Outgoing {
-    pub draft: Draft,
-    pub subject: Option<String>,
-    pub mentions: Vec<MentionInput>,
-    pub reply: Option<ReplyPreview>,
-    pub edit: Option<EditPreview>,
-    pub images: Vec<OutgoingImage>,
-    pub files: Vec<OutgoingFile>,
-    pub link_preview: Option<LinkPreview>,
-}
-
-impl Outgoing {
-    /// Without list and quote markers, for previews.
-    pub fn text(&self) -> String {
-        self.draft.plain_text()
-    }
-
-    /// The body before mentions become `<at>` tags.
-    pub fn html(&self) -> String {
-        let mut html = String::new();
-        let mut objects = self.images.iter();
-        let mut uploaded = 0;
-        for character in self.draft.to_html().chars() {
-            if character != OBJECT_MARK {
-                html.push(character);
-                continue;
-            }
-            match objects.next() {
-                Some(OutgoingImage::Inline(_)) => {
-                    uploaded += 1;
-                    html.push_str(&format!(
-                        "<img src=\"../hostedContents/{uploaded}/$value\">"
-                    ));
-                }
-                Some(OutgoingImage::Remote(remote)) => html.push_str(&remote.html()),
-                None => {}
-            }
-        }
-        html
-    }
-
-    pub fn has_attachments(&self) -> bool {
-        !self.images.is_empty() || !self.files.is_empty()
-    }
-
-    pub fn extras(&self) -> MessageExtras {
-        MessageExtras {
-            kept: Vec::new(),
-            images: self
-                .images
-                .iter()
-                .filter_map(|outgoing| match outgoing {
-                    OutgoingImage::Inline(inline) => Some(HostedImage {
-                        content_type: inline.image.format.mime_type().to_owned(),
-                        bytes: Arc::new(inline.image.bytes.clone()),
-                    }),
-                    OutgoingImage::Remote(_) => None,
-                })
-                .collect(),
-            files: self
-                .files
-                .iter()
-                .map(|file| file.reference.clone())
-                .collect(),
-        }
-    }
 }
 
 enum UploadEvent {
@@ -1027,7 +931,7 @@ impl Composer {
             return;
         }
         if self.draft.is_blank() && self.selection(cx).is_empty() {
-            window.dispatch_action(Box::new(super::shell::OpenSwitcher), cx);
+            window.dispatch_action(Box::new(OpenSwitcher), cx);
             return;
         }
         self.open_link_editor(window, cx);
@@ -1245,19 +1149,21 @@ impl Composer {
             return;
         }
         let matches = emoji::search(&query, &self.recent_emoji.glyphs(), emoji_popup::LIMIT);
-        self.emoji_popup = (!matches.is_empty()).then(|| EmojiPopup::new(range, query, matches));
+        let skin_tone = teams_core::skin_tone(&self.app.read(cx).store);
+        self.emoji_popup = (!matches.is_empty())
+            .then(|| EmojiPopup::new(range, query, matches, skin_tone));
     }
 
     fn accept_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(popup) = self.emoji_popup.take() else {
             return;
         };
-        let Some(glyph) = popup.selected().map(|found| found.glyph) else {
+        let Some(glyph) = popup.selected_glyph() else {
             return;
         };
         let cursor = popup.range.end;
-        self.replace_text(popup.range, glyph, cursor, window, cx);
-        self.remember_emoji(glyph, cx);
+        self.replace_text(popup.range, &glyph, cursor, window, cx);
+        self.remember_emoji(&crate::emoticons::without_tone(&glyph), cx);
         cx.notify();
     }
 
@@ -1473,7 +1379,12 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_placeholder(&format!("Message {name}"), window, cx);
+        let placeholder = if name.is_empty() {
+            "Type a message".to_owned()
+        } else {
+            format!("Message {name}")
+        };
+        self.set_placeholder(&placeholder, window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
             self.save_draft_now(cx);
             self.draft_save = None;
@@ -2068,6 +1979,33 @@ impl Composer {
         cx.notify();
     }
 
+    fn with_mention_tokens(
+        &mut self,
+        mut content: InputContent,
+        draft: &Draft,
+        mentions: &[MentionInput],
+    ) -> InputContent {
+        let text = draft.text();
+        let mut cursor = 0;
+        for mention in mentions {
+            let Some(range) = teams_core::plain_mention_spans(draft, &mention.text, false)
+                .into_iter()
+                .find(|span| span.start >= cursor)
+            else {
+                continue;
+            };
+            self.mention_counter += 1;
+            let token_id = format!("mention-{}", self.mention_counter);
+            let token = InlineToken::new(token_id.clone(), text[range.clone()].to_owned());
+            if let Ok(next) = content.clone().with_token(range.clone(), token) {
+                content = next;
+                self.mention_inputs.insert(token_id, mention.clone());
+                cursor = range.end;
+            }
+        }
+        content
+    }
+
     pub fn restore(&mut self, outgoing: &Outgoing, window: &mut Window, cx: &mut Context<Self>) {
         self.mention_inputs.clear();
         let image_ids = if outgoing.edit.is_none() {
@@ -2084,28 +2022,44 @@ impl Composer {
                 content = next;
             }
         }
-        let mut cursor = 0;
-        for mention in &outgoing.mentions {
-            let needle = format!("@{}", mention.text);
-            let Some(offset) = text[cursor..].find(&needle) else {
-                continue;
-            };
-            let range = cursor + offset..cursor + offset + needle.len();
-            self.mention_counter += 1;
-            let token_id = format!("mention-{}", self.mention_counter);
-            let token = InlineToken::new(token_id.clone(), needle);
-            if let Ok(next) = content.clone().with_token(range.clone(), token) {
-                content = next;
-                self.mention_inputs.insert(token_id, mention.clone());
-                cursor = range.end;
-            }
-        }
+        let content = self.with_mention_tokens(content, &outgoing.draft, &outgoing.mentions);
         self.load_draft(outgoing.draft.clone(), content, window, cx);
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
         self.link.restore(outgoing.link_preview.clone());
         self.close_popup();
         self.schedule_draft_save(cx);
+        cx.notify();
+    }
+
+    /// Text and mentions replace the draft; images join the tray, where oversized ones upload as files.
+    pub fn load_proposal(
+        &mut self,
+        text: &str,
+        mentions: &[MentionInput],
+        pictures: Vec<(String, Vec<u8>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let draft = Draft::from_markdown(text);
+        self.mention_inputs.clear();
+        let content =
+            self.with_mention_tokens(InputContent::new(draft.text().to_owned()), &draft, mentions);
+        self.load_draft(draft, content, window, cx);
+        self.update_emoji(cx);
+        self.update_mention(cx);
+        self.update_link_preview(cx);
+        for (name, bytes) in pictures {
+            let ids = self.add_pending(std::slice::from_ref(&name), cx);
+            let Some(&id) = ids.first() else {
+                continue;
+            };
+            let loaded = LoadedFile {
+                file_name: Some(name),
+                ..LoadedFile::new(bytes)
+            };
+            self.finish_reading(id, Ok(loaded), window, cx);
+        }
         cx.notify();
     }
 
@@ -2443,6 +2397,7 @@ impl Render for Composer {
         let send = div()
             .id("composer-send")
             .size(px(32.))
+            .ml(px(6.))
             .flex_none()
             .flex()
             .items_center()
@@ -2576,6 +2531,12 @@ impl Render for Composer {
                 .child(notice.to_owned())
         });
         let composer_bounds = self.composer_bounds.clone();
+        let single_line = {
+            let state = self.input.read(cx);
+            state
+                .line_height()
+                .is_none_or(|line_height| state.input_bounds().size.height < line_height * 2.)
+        };
         let (inset, top, bottom) = if self.inline {
             (0., 0., 0.)
         } else {
@@ -2587,7 +2548,7 @@ impl Render for Composer {
             .px(px(inset))
             .pt(px(top))
             .pb(px(bottom))
-            .key_context(KEY_CONTEXT)
+            .key_context(COMPOSER_KEY_CONTEXT)
             .on_action(cx.listener(|this, _: &ToggleBold, _, cx| {
                 if this.link_editor.is_none() {
                     this.toggle_mark(MarkKind::Bold, cx);
@@ -2778,13 +2739,25 @@ impl Render for Composer {
                             .child(
                                 h_flex()
                                     .w_full()
-                                    .items_end()
-                                    .gap(px(6.))
+                                    .map(|row| {
+                                        if single_line {
+                                            row.items_center()
+                                        } else {
+                                            row.items_end()
+                                        }
+                                    })
                                     .py(px(6.))
                                     .pl(px(if can_attach { 6. } else { 12. }))
                                     .pr(px(6.))
-                                    .children(fun)
-                                    .children(attach)
+                                    .when(can_attach, |row| {
+                                        row.child(
+                                            h_flex()
+                                                .flex_none()
+                                                .gap(px(6.))
+                                                .children(fun)
+                                                .children(attach),
+                                        )
+                                    })
                                     .child(
                                         div()
                                             .flex_1()
@@ -2897,7 +2870,7 @@ mod tests {
         use teams_core::FileKind;
 
         use super::super::attachment_tray::InlineImage;
-        use super::{Outgoing, OutgoingFile, OutgoingImage};
+        use crate::outgoing::{Outgoing, OutgoingFile, OutgoingImage};
 
         let outgoing = Outgoing {
             draft: teams_core::Draft::default(),
@@ -2930,20 +2903,20 @@ mod tests {
         assert!(outgoing.has_attachments());
     }
 
-    fn placed_image(width: u32) -> super::OutgoingImage {
+    fn placed_image(width: u32) -> crate::outgoing::OutgoingImage {
         use std::sync::Arc;
 
         use gpui_kit::{Image, ImageFormat};
 
-        super::OutgoingImage::Inline(super::super::attachment_tray::InlineImage {
+        crate::outgoing::OutgoingImage::Inline(super::super::attachment_tray::InlineImage {
             name: "pasted-image.png".into(),
             image: Arc::new(Image::from_bytes(ImageFormat::Png, vec![width as u8])),
             dimensions: Some((width, width)),
         })
     }
 
-    fn remote_gif(title: &str) -> super::OutgoingImage {
-        super::OutgoingImage::Remote(super::RemoteImage {
+    fn remote_gif(title: &str) -> crate::outgoing::OutgoingImage {
+        crate::outgoing::OutgoingImage::Remote(super::RemoteImage {
             kind: crate::remote_image::RemoteKind::Gif,
             url: "https://media0.giphy.com/media/a/giphy.gif".into(),
             title: title.into(),
@@ -2952,8 +2925,8 @@ mod tests {
         })
     }
 
-    fn outgoing_with(text: &str, images: Vec<super::OutgoingImage>) -> super::Outgoing {
-        super::Outgoing {
+    fn outgoing_with(text: &str, images: Vec<crate::outgoing::OutgoingImage>) -> crate::outgoing::Outgoing {
+        crate::outgoing::Outgoing {
             draft: teams_core::Draft::plain(text),
             subject: None,
             mentions: Vec::new(),
@@ -3010,7 +2983,7 @@ mod tests {
     #[test]
     fn a_sticker_carries_the_sticker_itemtype() {
         let sticker = super::RemoteImage::sticker(crate::stickers::popular()[0]);
-        let outgoing = outgoing_with("\u{FFFC}", vec![super::OutgoingImage::Remote(sticker)]);
+        let outgoing = outgoing_with("\u{FFFC}", vec![crate::outgoing::OutgoingImage::Remote(sticker)]);
         assert!(
             outgoing
                 .html()
@@ -3109,7 +3082,7 @@ mod tests {
                 self.cx.update(|cx| composer.read(cx).draft.clone())
             }
 
-            fn outgoing(&mut self) -> super::super::Outgoing {
+            fn outgoing(&mut self) -> crate::outgoing::Outgoing {
                 let composer = self.composer.clone();
                 self.cx
                     .update(|cx| composer.read(cx).outgoing(cx))
@@ -3150,6 +3123,15 @@ mod tests {
                 )],
             });
             typist.press("ctrl-v");
+        }
+
+        fn image_ids(composer: &Composer) -> usize {
+            composer
+                .tray
+                .items()
+                .iter()
+                .filter(|item| composer.tray.image(item.id).is_some())
+                .count()
         }
 
         fn image_tokens(typist: &mut Typist<'_>) -> Vec<(std::ops::Range<usize>, bool)> {
@@ -3279,8 +3261,8 @@ mod tests {
                 .images
                 .iter()
                 .map(|image| match image {
-                    super::super::OutgoingImage::Inline(inline) => inline.dimensions,
-                    super::super::OutgoingImage::Remote(_) => None,
+                    crate::outgoing::OutgoingImage::Inline(inline) => inline.dimensions,
+                    crate::outgoing::OutgoingImage::Remote(_) => None,
                 })
                 .collect();
             assert_eq!(dimensions, [Some((4, 4)), Some((2, 2))]);
@@ -3376,6 +3358,124 @@ mod tests {
             let again = typist.outgoing();
             assert_eq!(again.images, outgoing.images);
             assert_eq!(again.html(), "x<img src=\"../hostedContents/1/$value\">y");
+        }
+
+        fn load(
+            typist: &mut Typist<'_>,
+            entry: &crate::agent_api::ProposalEntry,
+        ) -> Vec<(String, Vec<u8>)> {
+            let composer = typist.composer.clone();
+            let mentions = crate::views::proposal_card::outgoing_for(entry, None).mentions;
+            let pictures = crate::views::proposal_card::picture_files(entry);
+            let loaded = pictures.clone();
+            let text = entry.proposal.text.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.load_proposal(&text, &mentions, pictures, window, cx)
+                });
+            });
+            loaded
+        }
+
+        #[gpui_kit::test]
+        fn a_loaded_proposal_keeps_its_mentions_images_and_the_reply(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::{sample_entry, sample_png};
+
+            let mut typist = typist(cx);
+            let entry = sample_entry(
+                "Thanks @Ada Example",
+                &[("u1", "Ada Example")],
+                &[sample_png(3, 0)],
+            );
+            let composer = typist.composer.clone();
+            let reply = super::super::ReplyPreview {
+                message_id: "m1".into(),
+                author: "Bo".into(),
+                excerpt: "question".into(),
+            };
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, cx| composer.set_reply(Some(reply.clone()), cx));
+            });
+            load(&mut typist, &entry);
+            let tokens = image_tokens(&mut typist);
+            assert_eq!(tokens.iter().filter(|(_, block)| *block).count(), 1);
+            assert_eq!(tokens.len(), 2);
+            let outgoing = typist.outgoing();
+            assert_eq!(outgoing.images.len(), 1);
+            assert_eq!(
+                outgoing.mentions,
+                [teams_core::MentionInput::user("u1", "Ada Example")]
+            );
+            assert_eq!(outgoing.reply, Some(reply));
+            assert!(outgoing.html().starts_with("Thanks @Ada Example"));
+        }
+
+        #[gpui_kit::test]
+        fn a_mention_at_the_start_of_a_line_is_placed_on_send(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::sample_entry;
+
+            let mut typist = typist(cx);
+            let entry = sample_entry("Hi team\n\n@Ada\n\nthanks", &[], &[]);
+            load(&mut typist, &entry);
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.load_proposal(
+                        "Hi team\n\n@Ada\n\nthanks",
+                        &[teams_core::MentionInput::user("u1", "Ada")],
+                        Vec::new(),
+                        window,
+                        cx,
+                    )
+                });
+            });
+            let outgoing = typist.outgoing();
+            let (_, placed) = teams_core::apply_mentions(&outgoing.html(), &outgoing.mentions);
+            assert_eq!(placed.len(), 1, "{}", outgoing.html());
+        }
+
+        #[gpui_kit::test]
+        fn a_text_only_proposal_keeps_a_running_upload(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::sample_entry;
+
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, _| {
+                    let ids = composer.tray.add_pending(&["plan.pdf".to_owned()]);
+                    assert_eq!(ids.len(), 1);
+                });
+            });
+            load(&mut typist, &sample_entry("just text", &[], &[]));
+            let items = typist.cx.update(|cx| composer.read(cx).tray.items().len());
+            assert_eq!(items, 1);
+            assert_eq!(typist.value(), "just text");
+        }
+
+        #[gpui_kit::test]
+        fn proposal_images_join_the_tray_and_big_ones_become_uploads(cx: &mut TestAppContext) {
+            use crate::views::proposal_card::{sample_entry, sample_png};
+
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            typist.act(|_, cx| {
+                composer.update(cx, |composer, _| {
+                    composer.conversation_id = Some("c1".to_owned());
+                    composer.tray.add_pending(&["kept.pdf".to_owned()]);
+                });
+            });
+            let entry = sample_entry(
+                "pictures",
+                &[],
+                &[sample_png(2, 0), sample_png(2, 2 * 1024 * 1024)],
+            );
+            load(&mut typist, &entry);
+            let (items, images) = typist.cx.update(|cx| {
+                let composer = composer.read(cx);
+                (composer.tray.items().len(), image_ids(composer))
+            });
+            assert_eq!(items, 3);
+            assert_eq!(images, 1);
         }
 
         #[gpui_kit::test]

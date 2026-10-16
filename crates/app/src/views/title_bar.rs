@@ -65,7 +65,7 @@ pub fn render_title_bar(
                         .text_size(px(13.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text())
-                        .child(crate::APP_NAME),
+                        .child(app_base::APP_NAME),
                 )
                 .child(div().flex_1().flex().justify_center().child(search))
                 .children(own)

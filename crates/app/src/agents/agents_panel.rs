@@ -175,7 +175,7 @@ impl Render for AgentsPanel {
 mod tests {
     use super::split_runs;
     use crate::agents::runs::RunState;
-    use crate::agents::runs::tests::finished_run;
+    use crate::agents::fixtures::finished_run;
 
     #[test]
     fn running_runs_go_first_and_done_is_capped_at_fifty() {

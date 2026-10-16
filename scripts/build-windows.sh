@@ -27,8 +27,8 @@ rustup target add "$targetName"
 patchedDir="$CARGO_TARGET_DIR/patched/gpui-pre-windows"
 sourceDir="$(cd "$crateDir" && cargo metadata --format-version 1 --filter-platform "$targetName" |
   python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"]=="gpui-pre-windows"))' | xargs dirname)"
-rm -rf "$patchedDir"; mkdir -p "$(dirname "$patchedDir")"; cp -r "$sourceDir" "$patchedDir"; chmod -R u+w "$patchedDir"
-python3 - "$patchedDir/build.rs" <<'PY'
+stagingDir="$(mktemp -d)/gpui-pre-windows"; cp -r "$sourceDir" "$stagingDir"; chmod -R u+w "$stagingDir"
+python3 - "$stagingDir/build.rs" <<'PY'
 import re, sys
 path = sys.argv[1]
 text = open(path).read()
@@ -37,6 +37,15 @@ text = re.sub(r'fn main\(\) \{.*?\n\}\n', 'fn main() {\n    #[cfg(not(debug_asse
 text = re.sub(r'(pub fn find_latest_windows_sdk_binary\(.*?\) -> Result<[^{]*\{).*?(\n    /// You can set)', r'\1\n        let _ = binary;\n        Ok(None)\n    }\n\2', text, count=1, flags=re.S)
 open(path, 'w').write(text)
 PY
+# A fresh copy gets new mtimes, and Cargo then rebuilds gpui and everything above it.
+if ! diff -rq "$stagingDir" "$patchedDir" >/dev/null 2>&1; then
+  rm -rf "$patchedDir"; mkdir -p "$(dirname "$patchedDir")"; cp -rp "$stagingDir" "$patchedDir"
+fi
+rm -rf "$(dirname "$stagingDir")"
+
+# ONNX Runtime (background effects) goes into the exe as an embedded DLL, see tools/onnxruntime-dll.
+(cd "$repoRoot/tools/onnxruntime-dll" && RUSTFLAGS="-C target-feature=-crt-static" cargo xwin build --release --target "$targetName")
+export CALLING_ONNXRUNTIME_DLL="$CARGO_TARGET_DIR/$targetName/release/onnxruntime.dll"
 
 cd "$crateDir"
 binaryArguments=()

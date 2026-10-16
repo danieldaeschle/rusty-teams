@@ -1,0 +1,47 @@
+{
+  "id": "1792157788954",
+  "replyToId": null,
+  "etag": "1792157788954",
+  "messageType": "message",
+  "createdDateTime": "2026-10-16T13:36:28.954Z",
+  "lastModifiedDateTime": "2026-10-16T13:36:28.954Z",
+  "lastEditedDateTime": null,
+  "deletedDateTime": null,
+  "subject": null,
+  "summary": null,
+  "chatId": "19:11111111-1111-4111-8111-111111111111_22222222-2222-4222-8222-222222222222@unq.gbl.spaces",
+  "importance": "normal",
+  "locale": "en-us",
+  "webUrl": null,
+  "channelIdentity": null,
+  "policyViolation": null,
+  "eventDetail": null,
+  "from": {
+    "application": null,
+    "device": null,
+    "user": {
+      "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+      "id": "22222222-2222-4222-8222-222222222222",
+      "displayName": null,
+      "userIdentityType": "aadUser",
+      "tenantId": "44444444-4444-4444-8444-444444444444"
+    }
+  },
+  "body": {
+    "contentType": "html",
+    "content": "<attachment id=\"1792149081221\"></attachment>"
+  },
+  "attachments": [
+    {
+      "id": "1792149081221",
+      "contentType": "forwardedMessageReference",
+      "contentUrl": null,
+      "content": "{\"originalMessageId\":\"1792149081221\",\"originalMessageContent\":\"<p>Keep it short and make sure everyone gets the key part <emoji id=\\\"wink\\\" alt=\\\"😉\\\" title=\\\"Wink\\\"></emoji></p>\\n\",\"originalConversationId\":\"19:5555555555554555a5555555555555aa@thread.v2\",\"originalSentDateTime\":\"2026-10-16T11:11:21.221+00:00\",\"originalMessageSender\":{\"application\":null,\"device\":null,\"user\":{\"userIdentityType\":\"aadUser\",\"tenantId\":\"44444444-4444-4444-8444-444444444444\",\"id\":\"33333333-3333-4333-8333-333333333333\",\"displayName\":null}}}",
+      "name": null,
+      "thumbnailUrl": null,
+      "teamsAppId": null
+    }
+  ],
+  "mentions": [],
+  "reactions": []
+}

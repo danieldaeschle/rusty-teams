@@ -12,7 +12,7 @@ use crate::roster::MeetingRole;
 use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
 use crate::relay::ic3_scope;
 use crate::timeline::Timeline;
-use crate::trouter_events::{CallbackLinks, acceptance_links};
+use crate::trouter_events::{CallbackLinks, acceptance_links, acknowledgement_links};
 use crate::video_layout::MediaDescription;
 
 pub const EPCONV_URL: &str = "https://api-emea.flightproxy.teams.microsoft.com/api/v2/epconv";
@@ -22,6 +22,8 @@ const CLIENT_HEADER: &str = "SkypeSpaces/1415/26091712213/os=windows; osVer=NT 1
 const PLATFORM_NAME: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36";
 const SDP_CONTENT_TYPE: &str = "application/sdp-ngc-1.0";
 const ENDPOINT_CAPABILITIES: u64 = 73463;
+const ONE_TO_ONE_THREAD_SUFFIX: &str = "@unq.gbl.spaces";
+const DIRECT_REQUIRED_FEATURES: &str = "nonByPass";
 const CLIENT_ENDPOINT_CAPABILITIES: u64 = 47150826;
 const ALLOWED_HOST_SUFFIXES: [&str; 2] = [".flightproxy.teams.microsoft.com", ".teams.microsoft.com"];
 const BACKEND_SUFFIX: &str = ".skype.com";
@@ -119,6 +121,7 @@ pub struct Conversation {
     pub controller: String,
     pub links: BTreeMap<String, String>,
     pub chat_thread: Option<String>,
+    pub roster: Option<Value>,
 }
 
 impl Conversation {
@@ -198,6 +201,13 @@ pub struct Invitation<'a> {
     pub callbacks: &'a CallbackLinks,
     pub target: &'a InviteTarget,
     pub modalities: &'a [String],
+    pub direct: bool,
+}
+
+impl Invitation<'_> {
+    pub fn is_direct(&self) -> bool {
+        self.direct && self.target.is_one_to_one()
+    }
 }
 
 pub struct Answer<'a> {
@@ -310,20 +320,12 @@ impl Signaling {
         Ok((target, conversation_from(&response.body)?))
     }
 
-    /// Joins with the offer; the answer may restate the conversation links, otherwise the subscribed ones stay.
+    /// A running meeting answers from the conversation that owns it, so its controller and links replace the subscribed ones.
     pub async fn join_meeting(&self, subscribed: &Conversation, invitation: &Invitation<'_>) -> Result<Conversation> {
         let response = self
             .send("POST join", Method::Post, &subscribed.controller, Some(epconv_body(invitation)))
             .await?;
-        let mut links = subscribed.links.clone();
-        if let Ok(joined) = conversation_from(&response.body) {
-            links.extend(joined.links);
-        }
-        Ok(Conversation {
-            controller: subscribed.controller.clone(),
-            links,
-            chat_thread: subscribed.chat_thread.clone(),
-        })
+        Ok(joined_conversation(subscribed, &response.body))
     }
 
     pub fn next_endpoint_sequence(&self) -> u32 {
@@ -425,11 +427,6 @@ impl Signaling {
         self.send("POST admit", Method::Post, conversation.link("admit")?, Some(body)).await.map(|response| response.status)
     }
 
-    pub async fn admit_all(&self, conversation: &Conversation, from: &Participant, callbacks: &CallbackLinks) -> Result<u16> {
-        let body = organizer::admit_all_body(from.wire(), callbacks, &uuid::Uuid::new_v4().to_string());
-        self.send("POST admitAll", Method::Post, conversation.link("admitAll")?, Some(body)).await.map(|response| response.status)
-    }
-
     pub async fn remove_participant(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
         let body = organizer::remove_participant_body(from.wire(), target, callbacks);
         self.send("POST removeParticipant", Method::Post, conversation.link("removeParticipant")?, Some(body)).await.map(|response| response.status)
@@ -490,9 +487,11 @@ impl Signaling {
         from: &Participant,
         thread_id: &str,
         callbacks: &CallbackLinks,
+        threadless: bool,
     ) -> Result<u16> {
-        let body = captions::add_bot_body(from.wire(), thread_id, callbacks.call_id(), &from.display_name, callbacks);
-        let mut request = self.request(Method::Post, conversation.link("addParticipantAndModality")?, Some(body));
+        let body = captions::add_bot_body(from.wire(), thread_id, callbacks.call_id(), &from.display_name, callbacks, threadless);
+        let link = if threadless { "addParticipant" } else { "addParticipantAndModality" };
+        let mut request = self.request(Method::Post, conversation.link(link)?, Some(body));
         request = request.with_body_token(captions::RECORDER_RESOURCE, captions::RECORDER_SCOPE, captions::INITIATOR_TOKEN_PLACEHOLDER);
         self.exchange(&self.session, "POST add (caption bot)", request).await.map(|response| response.status)
     }
@@ -593,14 +592,19 @@ impl Signaling {
         self.post_json("POST progress", url, ringing_body(from)).await
     }
 
-    pub async fn accept(&self, url: &str, answer: &Answer<'_>) -> Result<()> {
-        self.post_json("POST acceptance", url, acceptance_body(answer)).await
+    pub async fn accept(&self, url: &str, answer: &Answer<'_>) -> Result<BTreeMap<String, String>> {
+        let response = self.send("POST acceptance", Method::Post, url, Some(acceptance_body(answer))).await?;
+        Ok(acknowledgement_links(&response.body))
     }
 
     pub async fn decline(&self, call_leg_url: &str) -> Result<()> {
         self.send("DELETE callLeg (decline)", Method::Delete, call_leg_url, Some(decline_body()))
             .await
             .map(|_| ())
+    }
+
+    pub async fn reject_renegotiation(&self, url: &str, from: &Participant, call_id: &str, failure: NegotiationFailure) -> Result<()> {
+        self.post_json("POST rejection (renegotiation)", url, negotiation_failure_body(from, call_id, failure)).await
     }
 
     pub async fn keep_call_alive(&self, call_leg_url: &str) -> Result<()> {
@@ -666,8 +670,36 @@ fn media_controller_links(callbacks: &CallbackLinks) -> Value {
     })
 }
 
-fn group_chat(target: &InviteTarget) -> Value {
-    match target {
+/// The 1:1 chat of two people: both object ids sorted as plain strings.
+pub fn one_to_one_thread(own_object_id: &str, peer_mri: &str) -> Option<String> {
+    let peer = peer_mri.strip_prefix("8:orgid:")?;
+    let (first, second) = if own_object_id <= peer { (own_object_id, peer) } else { (peer, own_object_id) };
+    Some(format!("19:{first}_{second}{ONE_TO_ONE_THREAD_SUFFIX}"))
+}
+
+impl InviteTarget {
+    pub fn is_one_to_one(&self) -> bool {
+        match self {
+            InviteTarget::People { callees, thread_id } => callees.len() == 1 && thread_id.ends_with(ONE_TO_ONE_THREAD_SUFFIX),
+            InviteTarget::Echo | InviteTarget::Meeting(_) => false,
+        }
+    }
+}
+
+fn invitation_media(invitation: &Invitation<'_>) -> Value {
+    if !invitation.is_direct() {
+        return media_content(invitation.offer_sdp, invitation.media_leg_id, true);
+    }
+    let mut content = media_content(invitation.offer_sdp, invitation.media_leg_id, false);
+    content["requiredFeatures"] = json!(DIRECT_REQUIRED_FEATURES);
+    content
+}
+
+fn group_chat(invitation: &Invitation<'_>) -> Value {
+    if invitation.is_direct() {
+        return Value::Null;
+    }
+    match invitation.target {
         InviteTarget::Echo => Value::Null,
         InviteTarget::People { thread_id, .. } => json!({"threadId": thread_id, "messageId": null}),
         InviteTarget::Meeting(meeting) => json!({"threadId": meeting.thread_id, "messageId": MEETING_MESSAGE_ID}),
@@ -712,7 +744,7 @@ pub fn epconv_body(invitation: &Invitation<'_>) -> Value {
         "clientEndpointCapabilities": CLIENT_ENDPOINT_CAPABILITIES,
         "endpointMetadata": {"holographicCapabilities": 3},
         "groupContext": null,
-        "groupChat": group_chat(target),
+        "groupChat": group_chat(invitation),
         "meetingInfo": meeting_info,
         "meetingData": meeting_data,
         "endpointState": endpoint_state(),
@@ -726,7 +758,7 @@ pub fn epconv_body(invitation: &Invitation<'_>) -> Value {
             "clientContentForMediaController": media_controller_links(callbacks),
             "pstnContent": {"emergencyCallCountry": "", "platformName": PLATFORM_NAME, "publicApiCall": false},
             "emergencyContent": null,
-            "mediaContent": media_content(invitation.offer_sdp, invitation.media_leg_id, true),
+            "mediaContent": invitation_media(invitation),
         },
     })
 }
@@ -823,6 +855,29 @@ pub fn acceptance_body(answer: &Answer<'_>) -> Value {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NegotiationFailure {
+    InProgress,
+    AnswerError,
+}
+
+impl NegotiationFailure {
+    fn wire(self) -> (u16, u32, &'static str) {
+        match self {
+            NegotiationFailure::InProgress => (491, 3118, "NegotiationIsInProgress"),
+            NegotiationFailure::AnswerError => (488, 3102, "CallEndReasonMediaAnswerError"),
+        }
+    }
+}
+
+pub fn negotiation_failure_body(from: &Participant, call_id: &str, failure: NegotiationFailure) -> Value {
+    let (code, sub_code, phrase) = failure.wire();
+    json!({
+        "mediaNegotiationFailure": {"sender": from.wire(), "code": code, "subCode": sub_code, "phrase": phrase},
+        "debugContent": {"callId": call_id, "endpointId": from.endpoint_id},
+    })
+}
+
 pub fn renegotiation_body(
     from: &Participant,
     callbacks: &CallbackLinks,
@@ -830,6 +885,7 @@ pub fn renegotiation_body(
     media_leg_id: &str,
     modalities: &[String],
     new_offer: bool,
+    direct: bool,
 ) -> Value {
     json!({
         "mediaNegotiation": {
@@ -839,13 +895,16 @@ pub fn renegotiation_body(
                 "mediaAnswer": callbacks.call("mediaAnswer"),
                 "rejection": callbacks.call("rejection"),
             },
-            "mediaContent": renegotiation_content(offer_sdp, media_leg_id, new_offer),
+            "mediaContent": renegotiation_content(offer_sdp, media_leg_id, new_offer, direct),
         },
     })
 }
 
-fn renegotiation_content(sdp: &str, media_leg_id: &str, new_offer: bool) -> Value {
-    let mut content = media_content(sdp, media_leg_id, true);
+fn renegotiation_content(sdp: &str, media_leg_id: &str, new_offer: bool, direct: bool) -> Value {
+    let mut content = media_content(sdp, media_leg_id, !direct);
+    if direct {
+        content["requiredFeatures"] = json!(DIRECT_REQUIRED_FEATURES);
+    }
     content["newOffer"] = json!(new_offer);
     content
 }
@@ -889,7 +948,22 @@ fn conversation_from(body: &Value) -> Result<Conversation> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body) })
+    let roster = Some(&body["roster"]).filter(|roster| roster.is_object()).cloned();
+    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body), roster })
+}
+
+fn joined_conversation(subscribed: &Conversation, answer: &Value) -> Conversation {
+    let Ok(joined) = conversation_from(answer) else {
+        return subscribed.clone();
+    };
+    let mut links = subscribed.links.clone();
+    links.extend(joined.links);
+    Conversation {
+        controller: joined.controller,
+        links,
+        chat_thread: joined.chat_thread.or_else(|| subscribed.chat_thread.clone()),
+        roster: joined.roster.or_else(|| subscribed.roster.clone()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1056,6 +1130,7 @@ mod tests {
             callbacks: &callbacks,
             target,
             modalities: &["Audio".to_owned()],
+            direct: true,
         })
     }
 
@@ -1106,17 +1181,31 @@ mod tests {
     }
 
     #[test]
-    fn one_to_one_body_names_the_callee_and_the_chat() {
+    fn one_to_one_body_names_the_callee_without_a_chat_thread() {
         let target = InviteTarget::People {
             callees: vec![callee("8:orgid:b", "Bea")],
             thread_id: "19:a_b@unq.gbl.spaces".into(),
         };
         let body = body_for(&target);
         assert_eq!(body["participants"]["to"], json!([{"id": "8:orgid:b", "displayName": "Bea"}]));
-        assert_eq!(body["groupChat"], json!({"threadId": "19:a_b@unq.gbl.spaces", "messageId": null}));
+        assert_eq!(body["groupChat"], Value::Null);
+        let media = &body["callInvitation"]["mediaContent"];
+        assert_eq!(media["requiredFeatures"], "nonByPass");
+        assert!(media.get("mediaDescriptions").is_none());
         assert!(body["conversationRequest"].get("scenario").is_none());
         assert_eq!(body["meetingInfo"], Value::Null);
         assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio"]));
+    }
+
+    #[test]
+    fn a_one_to_one_call_that_may_not_go_direct_keeps_the_chat_thread() {
+        let from = from();
+        let callbacks = callbacks();
+        let target = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
+        let modalities = vec!["Audio".to_owned()];
+        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities, direct: false });
+        assert_eq!(body["groupChat"]["threadId"], "19:a_b@unq.gbl.spaces");
+        assert!(body["callInvitation"]["mediaContent"]["mediaDescriptions"].is_object());
     }
 
     #[test]
@@ -1131,6 +1220,9 @@ mod tests {
         assert_eq!(to[2]["id"], "8:orgid:d");
         assert_eq!(body["groupChat"]["threadId"], "19:group@thread.v2");
         assert_eq!(body["groupChat"]["messageId"], Value::Null);
+        let media = &body["callInvitation"]["mediaContent"];
+        assert!(media.get("requiredFeatures").is_none());
+        assert!(media["mediaDescriptions"].is_object());
     }
 
     #[test]
@@ -1233,6 +1325,23 @@ mod tests {
     }
 
     #[test]
+    fn a_running_meeting_answers_from_its_owning_conversation_with_the_roster() {
+        let subscribed = conversation_from(&json!({
+            "conversationController": "https://conv/subscribed",
+            "links": {"leave": "https://conv/subscribed/leave", "mute": "https://conv/subscribed/mute"},
+        }))
+        .unwrap();
+        assert_eq!(subscribed.roster, None);
+        let answer: Value = serde_json::from_str(include_str!("../tests/fixtures/meeting_join_answer.json")).unwrap();
+        let joined = joined_conversation(&subscribed, &answer);
+        assert_eq!(joined.controller, "https://conv.example/conv/joined");
+        assert_eq!(joined.link("leave").unwrap(), "https://conv.example/conv/joined/leave");
+        assert_eq!(joined.link("mute").unwrap(), "https://conv/subscribed/mute");
+        assert_eq!(joined.roster.unwrap()["participants"].as_object().unwrap().len(), 4);
+        assert_eq!(joined_conversation(&subscribed, &json!({})).controller, "https://conv/subscribed");
+    }
+
+    #[test]
     fn acceptance_carries_the_answer_and_callback_links() {
         let from = from();
         let callbacks = callbacks();
@@ -1254,15 +1363,35 @@ mod tests {
     }
 
     #[test]
+    fn the_one_to_one_chat_sorts_both_ids() {
+        assert_eq!(one_to_one_thread("f74e", "8:orgid:a1b2").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
+        assert_eq!(one_to_one_thread("a1b2", "8:orgid:f74e").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
+        assert_eq!(one_to_one_thread("a1b2", "28:bot"), None);
+    }
+
+    #[test]
+    fn a_refused_offer_says_why() {
+        let body = negotiation_failure_body(&from(), "call-1", NegotiationFailure::InProgress);
+        assert_eq!(body["mediaNegotiationFailure"]["code"], 491);
+        assert_eq!(body["mediaNegotiationFailure"]["subCode"], 3118);
+        assert_eq!(body["mediaNegotiationFailure"]["phrase"], "NegotiationIsInProgress");
+        assert_eq!(body["debugContent"]["callId"], "call-1");
+        assert_eq!(negotiation_failure_body(&from(), "c", NegotiationFailure::AnswerError)["mediaNegotiationFailure"]["code"], 488);
+    }
+
+    #[test]
     fn renegotiation_messages_name_their_reply_links() {
         let from = from();
         let callbacks = callbacks();
-        let offer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned()], true);
+        let offer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned()], true, false);
         let negotiation = &offer["mediaNegotiation"];
         assert_eq!(negotiation["mediaContent"]["newOffer"], true);
         assert_eq!(negotiation["callModalities"], json!(["Audio"]));
-        let same_peer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned(), "Video".to_owned()], false);
+        let same_peer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned(), "Video".to_owned()], false, true);
         assert_eq!(same_peer["mediaNegotiation"]["mediaContent"]["newOffer"], false);
+        assert_eq!(same_peer["mediaNegotiation"]["mediaContent"]["requiredFeatures"], "nonByPass");
+        assert!(same_peer["mediaNegotiation"]["mediaContent"].get("mediaDescriptions").is_none());
+        assert!(negotiation["mediaContent"]["mediaDescriptions"].is_object());
         assert_eq!(same_peer["mediaNegotiation"]["callModalities"], json!(["Audio", "Video"]));
         assert!(negotiation["links"]["mediaAnswer"].as_str().unwrap().ends_with("/call/mediaAnswer/"));
         assert!(negotiation["links"]["rejection"].as_str().unwrap().ends_with("/call/rejection/"));
@@ -1279,7 +1408,7 @@ mod tests {
         let callbacks = callbacks();
         let target = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
         let modalities = vec!["Audio".to_owned(), "Video".to_owned()];
-        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities });
+        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities, direct: true });
         assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio", "Video"]));
     }
 

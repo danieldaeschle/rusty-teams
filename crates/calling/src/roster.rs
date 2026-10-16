@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::transfer::Replacement;
+
 const ACTIVE: &str = "active";
 const AUDIO: &str = "audio";
 const VIDEO: &str = "video";
@@ -82,6 +84,7 @@ pub struct Member {
     pub role: Option<MeetingRole>,
     pub limits: AttendeeLimits,
     pub captions: Option<CaptionBot>,
+    pub replacement: Option<Replacement>,
     version: u64,
 }
 
@@ -159,6 +162,23 @@ impl Roster {
         *self != before
     }
 
+    /// A conversation answer lists everyone present; deltas only ever name who changed.
+    pub fn apply_snapshot(&mut self, snapshot: &Value) -> bool {
+        let before = self.clone();
+        self.apply(snapshot);
+        if let (Some(sequence), Some(listed)) = (snapshot["sequenceNumber"].as_u64(), snapshot["participants"].as_object()) {
+            self.members.retain(|member| listed.contains_key(&member.mri) || member.version > sequence);
+        }
+        *self != before
+    }
+
+    pub fn transfer_replacement(&self, own_mri: &str) -> Option<Replacement> {
+        self.members
+            .iter()
+            .filter(|member| member.mri != own_mri && !member.mri.starts_with(BOT_PREFIX) && !member.in_lobby)
+            .find_map(|member| member.replacement.clone())
+    }
+
     pub fn hand_of(&self, mri: &str) -> Option<&RaisedHand> {
         self.members.iter().find(|member| member.mri == mri)?.hand.as_ref()
     }
@@ -184,6 +204,11 @@ impl Roster {
         self.members.iter().any(|member| member.mri == mri && member.organizer)
     }
 
+    /// Teams web admits everyone by listing them: the server's `admitAll` leaves anonymous guests waiting.
+    pub fn lobby_mris(&self) -> Vec<String> {
+        self.members.iter().filter(|member| member.in_lobby).map(|member| member.mri.clone()).collect()
+    }
+
     pub fn is_in_lobby(&self, mri: &str) -> Option<bool> {
         self.members.iter().find(|member| member.mri == mri).map(|member| member.in_lobby)
     }
@@ -194,6 +219,10 @@ impl Roster {
             .find(|member| member.mri == mri)
             .map(|member| member.streams.clone())
             .unwrap_or_default()
+    }
+
+    pub fn screen_source_of(&self, mri: &str) -> Option<u32> {
+        self.members.iter().find(|member| member.mri == mri)?.screen_source
     }
 
     pub fn video_candidates(&self, own_mri: &str) -> Vec<(String, u32)> {
@@ -218,6 +247,23 @@ impl Roster {
             .map(|member| member.mri.clone())
             .collect()
     }
+}
+
+/// Teams builds the roster of a direct call from `acceptedBy` because no mixer reports one; later mixer updates replace it.
+pub fn direct_roster(members: &[(&str, &str)]) -> Value {
+    let participants: serde_json::Map<String, Value> = members
+        .iter()
+        .map(|(mri, name)| {
+            let participant = serde_json::json!({
+                "version": 0,
+                "state": ACTIVE,
+                "details": {"id": mri, "displayName": name},
+                "endpoints": {"direct": {"call": {"mediaStreams": []}}},
+            });
+            ((*mri).to_owned(), participant)
+        })
+        .collect();
+    serde_json::json!({"participants": participants})
 }
 
 fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&Member>) -> Member {
@@ -260,8 +306,17 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
             camera_released: published_state(participant, &endpoints, CAMERA_RELEASED),
         },
         captions: mri.starts_with(BOT_PREFIX).then(|| caption_bot(mri, &endpoints)).flatten(),
+        replacement: in_call.iter().copied().chain(&endpoints).find_map(|endpoint| leg_replacement(endpoint)),
         version,
     }
+}
+
+fn leg_replacement(endpoint: &Value) -> Option<Replacement> {
+    let link = endpoint["callLinks"]["replacement"].as_str().filter(|link| !link.is_empty())?;
+    Some(Replacement {
+        link: link.to_owned(),
+        participant_id: endpoint["participantId"].as_str().map(str::to_owned),
+    })
 }
 
 fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
@@ -336,6 +391,14 @@ fn source_id(value: &Value) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_direct_call_lists_both_people_until_the_mixer_reports() {
+        let mut roster = Roster::default();
+        assert!(roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+        assert_eq!(roster.members().len(), 2);
+        assert!(!roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+    }
+
     use serde_json::json;
 
     use super::*;
@@ -409,6 +472,20 @@ mod tests {
         roster.apply(&delta(json!({"8:orgid:me": participant("Me", 2, "active", true, 201)})));
         assert_eq!(roster.is_in_lobby("8:orgid:me"), Some(false));
         assert_eq!(roster.is_in_lobby("8:orgid:nobody"), None);
+    }
+
+    #[test]
+    fn lobby_mris_lists_only_people_waiting() {
+        let mut roster = Roster::default();
+        let waiting = |name: &str| json!({"version": 1, "state": "active", "details": {"displayName": name}, "endpoints": {"ep": {"lobby": {"mediaStreams": []}}}});
+        roster.apply(&delta(json!({
+            "8:teamsvisitor:one": waiting("One"),
+            "8:orgid:me": participant("Me", 1, "active", true, 201),
+            "8:teamsvisitor:two": waiting("Two"),
+        })));
+        let mut waiting_mris = roster.lobby_mris();
+        waiting_mris.sort();
+        assert_eq!(waiting_mris, vec!["8:teamsvisitor:one".to_owned(), "8:teamsvisitor:two".to_owned()]);
     }
 
     #[test]
@@ -623,6 +700,36 @@ mod tests {
         assert!(!roster.caption_bot().unwrap().audio_only);
     }
 
+    const JOIN_ANSWER: &str = include_str!("../tests/fixtures/meeting_join_answer.json");
+
+    #[test]
+    fn a_late_joiner_sees_everyone_from_the_join_answer() {
+        let answer: Value = serde_json::from_str(JOIN_ANSWER).unwrap();
+        let mut roster = Roster::default();
+        assert!(roster.apply_snapshot(&answer["roster"]));
+        let mut names: Vec<String> = roster.entries().into_iter().map(|entry| entry.display_name).collect();
+        names.sort();
+        assert_eq!(names, ["Organizer", "Test Guest 1", "Test Guest 2", "Test Guest 3"]);
+        assert_eq!(roster.video_candidates("8:orgid:00000000-0000-0000-0000-00000000000a").len(), 3);
+        let own_delta = delta(json!({"8:orgid:00000000-0000-0000-0000-00000000000a": participant("Organizer", 10, "active", true, 840)}));
+        roster.apply(&own_delta);
+        assert_eq!(roster.members().len(), 4);
+    }
+
+    #[test]
+    fn a_snapshot_drops_people_it_no_longer_lists_unless_a_newer_delta_added_them() {
+        let mut roster = Roster::default();
+        roster.apply(&delta(json!({
+            "8:orgid:gone": participant("Gone", 3, "active", false, 201),
+            "8:orgid:new": participant("New", 12, "active", false, 301),
+        })));
+        let snapshot = json!({"type": "Delta", "sequenceNumber": 9, "participants": {"8:orgid:a": participant("Ana", 4, "active", false, 401)}});
+        assert!(roster.apply_snapshot(&snapshot));
+        let mut mris: Vec<&str> = roster.members().iter().map(|member| member.mri.as_str()).collect();
+        mris.sort();
+        assert_eq!(mris, ["8:orgid:a", "8:orgid:new"]);
+    }
+
     #[test]
     fn caption_speakers_resolve_by_mri_or_object_id() {
         let mut roster = Roster::default();
@@ -630,5 +737,28 @@ mod tests {
         assert_eq!(roster.name_of("8:orgid:abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("zzz"), None);
+    }
+
+    #[test]
+    fn the_transfer_replacement_is_the_other_persons_call_leg() {
+        let mut roster = Roster::default();
+        let leg = |participant_id: &str, link: &str| json!({
+            "version": 1,
+            "state": "active",
+            "endpoints": {"ep": {"participantId": participant_id, "callLinks": {"replacement": link}, "call": {}}},
+        });
+        roster.apply(&delta(json!({
+            "8:orgid:me": leg("leg-me", "https://cc/me/replacement"),
+            "28:bot": leg("leg-bot", "https://cc/bot/replacement"),
+            "8:orgid:ana": leg("leg-ana", "https://cc/ana/replacement"),
+        })));
+        assert_eq!(
+            roster.transfer_replacement("8:orgid:me"),
+            Some(Replacement { link: "https://cc/ana/replacement".into(), participant_id: Some("leg-ana".into()) })
+        );
+        assert_eq!(roster.transfer_replacement("8:orgid:ana").map(|replacement| replacement.participant_id), Some(Some("leg-me".into())));
+        let mut without_links = Roster::default();
+        without_links.apply(&delta(json!({"8:orgid:ana": participant("Ana", 1, "active", false, 10)})));
+        assert_eq!(without_links.transfer_replacement("8:orgid:me"), None);
     }
 }

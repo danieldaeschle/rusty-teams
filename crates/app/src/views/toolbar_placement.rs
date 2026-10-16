@@ -3,8 +3,7 @@ use std::rc::Rc;
 
 use gpui_kit::*;
 
-use super::message_actions::HoverChange;
-
+pub type HoverChange = Rc<dyn Fn(bool, &mut App)>;
 pub type TimelineBounds = Rc<Cell<Option<Bounds<Pixels>>>>;
 
 pub const TOOLBAR_HEIGHT: f32 = 36.;

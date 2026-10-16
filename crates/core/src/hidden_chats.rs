@@ -74,7 +74,8 @@ impl LocallyHidden {
 
     pub(crate) fn hide(&mut self, chat_id: &str, last_message_at: DateTime<Utc>) {
         self.unhidden_at.remove(chat_id);
-        self.hidden_after.insert(chat_id.to_owned(), last_message_at);
+        self.hidden_after
+            .insert(chat_id.to_owned(), last_message_at);
     }
 
     pub(crate) fn unhide(&mut self, chat_id: &str, now: DateTime<Utc>) {
@@ -189,7 +190,12 @@ mod tests {
     fn chatsvc_visible_beats_the_graph_hidden_flag() {
         let mut locally = LocallyHidden::default();
         let chat = chat(None, true);
-        assert!(!resolve_hidden(&chat, &states(Some(false)), &mut locally, now()));
+        assert!(!resolve_hidden(
+            &chat,
+            &states(Some(false)),
+            &mut locally,
+            now()
+        ));
         assert!(resolve_hidden(&chat, &HashMap::new(), &mut locally, now()));
     }
 
@@ -197,7 +203,12 @@ mod tests {
     fn a_local_hide_survives_a_chatsvc_that_still_says_visible() {
         let mut locally = hidden_after("2026-10-10T10:00:00Z");
         let chat = chat(Some("2026-10-10T09:00:00Z"), false);
-        assert!(resolve_hidden(&chat, &states(Some(false)), &mut locally, now()));
+        assert!(resolve_hidden(
+            &chat,
+            &states(Some(false)),
+            &mut locally,
+            now()
+        ));
         assert_eq!(locally, hidden_after("2026-10-10T10:00:00Z"));
     }
 
@@ -205,9 +216,19 @@ mod tests {
     fn only_a_strictly_newer_message_unhides() {
         let mut locally = hidden_after("2026-10-10T10:00:00Z");
         let same = chat(Some("2026-10-10T10:00:00Z"), false);
-        assert!(resolve_hidden(&same, &states(Some(false)), &mut locally, now()));
+        assert!(resolve_hidden(
+            &same,
+            &states(Some(false)),
+            &mut locally,
+            now()
+        ));
         let newer = chat(Some("2026-10-10T10:00:01Z"), false);
-        assert!(!resolve_hidden(&newer, &states(Some(false)), &mut locally, now()));
+        assert!(!resolve_hidden(
+            &newer,
+            &states(Some(false)),
+            &mut locally,
+            now()
+        ));
         assert_eq!(locally, LocallyHidden::default());
     }
 
@@ -216,14 +237,24 @@ mod tests {
         let mut locally = hidden_after("2026-10-10T10:00:00Z");
         let chat = chat(Some("2026-10-10T10:00:30Z"), false);
         let skewed_now = at("2026-10-10T09:00:00Z");
-        assert!(!resolve_hidden(&chat, &states(Some(false)), &mut locally, skewed_now));
+        assert!(!resolve_hidden(
+            &chat,
+            &states(Some(false)),
+            &mut locally,
+            skewed_now
+        ));
     }
 
     #[test]
     fn chatsvc_reporting_hidden_takes_over_and_drops_the_local_entry() {
         let mut locally = hidden_after("2026-10-10T10:00:00Z");
         let chat = chat(Some("2026-10-10T11:00:00Z"), false);
-        assert!(resolve_hidden(&chat, &states(Some(true)), &mut locally, now()));
+        assert!(resolve_hidden(
+            &chat,
+            &states(Some(true)),
+            &mut locally,
+            now()
+        ));
         assert_eq!(locally, LocallyHidden::default());
     }
 
@@ -232,7 +263,12 @@ mod tests {
         let chat = chat(None, false);
         let mut locally = LocallyHidden::default();
         locally.unhide("19:a", now());
-        assert!(!resolve_hidden(&chat, &states(Some(true)), &mut locally, now()));
+        assert!(!resolve_hidden(
+            &chat,
+            &states(Some(true)),
+            &mut locally,
+            now()
+        ));
         assert!(!resolve_hidden(
             &chat,
             &states(Some(true)),
@@ -248,7 +284,12 @@ mod tests {
         assert_eq!(locally, LocallyHidden::default());
 
         locally.unhide("19:a", now());
-        assert!(!resolve_hidden(&chat, &states(Some(false)), &mut locally, now()));
+        assert!(!resolve_hidden(
+            &chat,
+            &states(Some(false)),
+            &mut locally,
+            now()
+        ));
         assert_eq!(locally, LocallyHidden::default());
     }
 

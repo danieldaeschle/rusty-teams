@@ -3,7 +3,6 @@ use gpui_kit::component::{tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::shell::ISLAND_GAP;
 use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
 use super::widgets::icon;
@@ -13,9 +12,8 @@ use crate::app_state::AppState;
 use crate::format;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
+use app_ui_kit::layout::{RAIL_ITEM_WIDTH, RAIL_WIDTH};
 
-pub const RAIL_WIDTH: f32 = ITEM_WIDTH + 2. * ISLAND_GAP;
-const ITEM_WIDTH: f32 = 48.;
 const ITEM_HEIGHT: f32 = 52.;
 const ICON_SIZE: f32 = 20.;
 const LABEL_INSET: f32 = 2.;
@@ -128,7 +126,7 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
     div()
         .id(SharedString::from(format!("rail-{}", item.label)))
         .relative()
-        .w(px(ITEM_WIDTH))
+        .w(px(RAIL_ITEM_WIDTH))
         .h(px(ITEM_HEIGHT))
         .flex()
         .flex_col()
@@ -146,7 +144,7 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .child(icon(item.icon, ICON_SIZE, color))
         .child(
             div()
-                .max_w(px(ITEM_WIDTH - 2. * LABEL_INSET))
+                .max_w(px(RAIL_ITEM_WIDTH - 2. * LABEL_INSET))
                 .truncate()
                 .h(px(LABEL_HEIGHT))
                 .text_size(px(9.))

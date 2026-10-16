@@ -40,7 +40,35 @@ fn named_input(choice: &DeviceChoice) -> Option<Device> {
         .find(|device| device.description().is_ok_and(|description| description.name() == wanted))
 }
 
-pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Capture> {
+pub struct MicrophoneStart {
+    pub capture: Capture,
+    pub source: String,
+}
+
+#[cfg(windows)]
+pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
+    match crate::mic_windows::start_communications_microphone(choice, queue.clone()) {
+        Ok((capture, name, effects)) => {
+            let active: Vec<String> = effects.iter().filter(|effect| effect.enabled).map(|effect| effect.name()).collect();
+            Ok(MicrophoneStart {
+                capture,
+                source: format!("wasapi communications ({name}), windows effects: {}", active.join(", ")),
+            })
+        }
+        Err(error) => {
+            let capture = start_cpal_microphone(choice, queue)?;
+            Ok(MicrophoneStart { capture, source: format!("cpal, wasapi communications failed: {error}") })
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
+    let capture = start_cpal_microphone(choice, queue)?;
+    Ok(MicrophoneStart { capture, source: "cpal".into() })
+}
+
+fn start_cpal_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Capture> {
     let device = named_input(choice)
         .or_else(|| cpal::default_host().default_input_device())
         .ok_or_else(|| Error::Audio("no microphone".into()))?;

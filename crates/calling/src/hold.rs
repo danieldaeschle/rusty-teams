@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::error::Result;
 use crate::sdp::parse;
 
@@ -68,6 +70,54 @@ pub fn rewrite_directions(sdp: &str, pick: impl Fn(MediaLine<'_>) -> Option<&'st
     lines.join(newline)
 }
 
+pub fn direction_of(sdp: &str, mid: &str) -> Option<String> {
+    let lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    sections(&lines)
+        .into_iter()
+        .find(|section| section.mid == mid)
+        .and_then(|section| section.direction_line)
+        .and_then(|line| lines[line].strip_prefix("a=").map(str::to_owned))
+}
+
+pub fn stop_sending_on(sdp: &str, mid: &str) -> String {
+    let newline = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    for section in sections(&lines) {
+        let Some(direction_line) = section.direction_line else { continue };
+        if section.mid != mid {
+            continue;
+        }
+        let receive_only = match lines[direction_line].as_str() {
+            "a=sendrecv" => "recvonly",
+            "a=sendonly" => INACTIVE,
+            _ => continue,
+        };
+        lines[direction_line] = format!("a={receive_only}");
+    }
+    lines.join(newline)
+}
+
+fn mirrored(direction: &str) -> &'static str {
+    match direction {
+        "sendonly" => "recvonly",
+        "recvonly" => "sendonly",
+        "inactive" => INACTIVE,
+        _ => "sendrecv",
+    }
+}
+
+pub fn keep_media_running(browser_answer: &str, browser_offer: &str) -> String {
+    let offer_lines: Vec<String> = browser_offer.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let offered: HashMap<String, &'static str> = sections(&offer_lines)
+        .into_iter()
+        .filter_map(|section| {
+            let direction = offer_lines[section.direction_line?].strip_prefix("a=")?;
+            Some((section.mid, mirrored(direction)))
+        })
+        .collect();
+    rewrite_directions(browser_answer, |line| offered.get(line.mid).copied())
+}
+
 pub fn all_inactive(sdp: &str) -> String {
     rewrite_directions(sdp, |_| Some(INACTIVE))
 }
@@ -96,6 +146,16 @@ pub fn offer_sends_video(teams_sdp: &str) -> bool {
     })
 }
 
+pub fn offer_modalities(video: bool, sharing: bool) -> Vec<String> {
+    let mut modalities = accepted_modalities(video);
+    if sharing {
+        modalities.push(SCREEN_SHARER.to_owned());
+    }
+    modalities
+}
+
+const SCREEN_SHARER: &str = "ScreenSharer";
+
 pub fn accepted_modalities(video: bool) -> Vec<String> {
     let mut modalities = vec!["Audio".to_owned()];
     if video {
@@ -106,6 +166,22 @@ pub fn accepted_modalities(video: bool) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_direction_of_a_line_is_read_by_mid() {
+        let sdp = "v=0\r\nm=audio 9 RTP 0\r\na=mid:0\r\na=sendrecv\r\nm=video 9 RTP 96\r\na=mid:2\r\na=recvonly\r\n";
+        assert_eq!(super::direction_of(sdp, "2").as_deref(), Some("recvonly"));
+        assert_eq!(super::direction_of(sdp, "7"), None);
+    }
+
+    #[test]
+    fn a_line_that_stops_sending_keeps_receiving() {
+        let sdp = "v=0\r\nm=audio 9 RTP 0\r\na=mid:0\r\na=sendrecv\r\nm=video 9 RTP 96\r\na=mid:1\r\na=sendrecv\r\nm=video 9 RTP 96\r\na=mid:2\r\na=sendonly\r\n";
+        let camera_off = super::stop_sending_on(sdp, "1");
+        assert!(camera_off.contains("a=mid:1\r\na=recvonly"));
+        assert!(camera_off.contains("a=mid:0\r\na=sendrecv"));
+        assert!(super::stop_sending_on(sdp, "2").contains("a=mid:2\r\na=inactive"));
+    }
+
     use super::*;
 
     const OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1 2\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:1\r\na=sendrecv\r\na=rtpmap:102 H264/90000\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:2\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\n";
@@ -149,6 +225,14 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_answer_mirrors_our_offer_so_nothing_stops_locally() {
+        let answer = all_inactive(&OFFER.replace("a=setup:actpass", "a=setup:passive"));
+        let kept = keep_media_running(&answer, OFFER);
+        assert_eq!(directions(&kept), vec!["sendrecv", "sendrecv", "sendonly"]);
+        assert_eq!(kept.lines().count(), answer.lines().count());
+    }
+
+    #[test]
     fn a_hold_is_every_audio_and_video_line_inactive() {
         assert!(is_hold(&all_inactive(OFFER)).unwrap());
         assert!(!is_hold(OFFER).unwrap());
@@ -184,5 +268,7 @@ mod tests {
     fn accepting_with_video_adds_the_modality() {
         assert_eq!(accepted_modalities(false), vec!["Audio"]);
         assert_eq!(accepted_modalities(true), vec!["Audio", "Video"]);
+        assert_eq!(super::offer_modalities(false, true), vec!["Audio", "ScreenSharer"]);
+        assert_eq!(super::offer_modalities(true, true), vec!["Audio", "Video", "ScreenSharer"]);
     }
 }

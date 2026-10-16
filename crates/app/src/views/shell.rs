@@ -4,17 +4,18 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
-use super::call_mini::render_call_mini;
+use super::call_mini::CallMiniView;
 use super::call_stage::{render_call_overlay, render_stage_overlay};
 use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
-use super::conversation::{ConversationView, ReplyToHovered};
+use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
+use super::conversation::ConversationView;
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
 use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
-use super::rail::{RAIL_WIDTH, RailView};
+use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
@@ -24,7 +25,9 @@ use super::shortcuts::{
 };
 use super::call_pop_out::zoom_listener;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
-use super::sidebar::{SIDEBAR_WIDTH, SidebarView};
+use super::sidebar::SidebarView;
+use app_ui_kit::render::hooks::RenderHooks;
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use super::status_bar::render_status_bar;
 use super::status_menu::own_status_button;
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
@@ -32,16 +35,14 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::render_title_bar;
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
-use crate::app_state::{AppEvent, AppState, Selection};
+use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 use crate::call::{CallMedia, CallWindows, ZoomStep};
 use crate::notice::NoticeAction;
-use crate::notify::{NotificationCenter, selection_for};
+use crate::notify::NotificationCenter;
 use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 use crate::user_activity::{self, UserInput};
-
-actions!(teams, [OpenSwitcher, NewChat, ToggleCallMute]);
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
@@ -69,7 +70,6 @@ pub struct Startup {
     pub reply_to_last: bool,
 }
 
-pub const ISLAND_GAP: f32 = 6.;
 pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
 
 pub fn sidebar_hidden_in_call(window_width: f32, panel_open: bool) -> bool {
@@ -85,6 +85,21 @@ impl Global for UserInputHandle {}
 pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx: &mut App) {
     cx.set_global(crate::app_state::AppHandle(state.clone()));
     cx.set_global(UserInputHandle(user_input));
+    cx.set_global(RenderHooks {
+        open_profile_link: super::profile_card::open_profile_link,
+        jump_to_quoted,
+    });
+}
+
+fn jump_to_quoted(message_id: String, cx: &mut App) {
+    let Some(handle) = cx.try_global::<crate::app_state::AppHandle>() else {
+        return;
+    };
+    handle.0.clone().update(cx, |state, cx| {
+        if let Some(selection) = state.selection.clone() {
+            state.jump_to_message(selection, message_id, cx);
+        }
+    });
 }
 
 pub struct AppShell {
@@ -110,6 +125,7 @@ pub struct AppShell {
     update: UpdateStatus,
     user_input: Arc<UserInput>,
     _subscription: Subscription,
+    call_mini: Entity<CallMiniView>,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
     _agents_subscription: Option<Subscription>,
@@ -159,7 +175,11 @@ impl AppShell {
     ) -> Self {
         let call_media = cx.new(|_| CallMedia);
         state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
-        let call_media_observation = cx.observe(&call_media, |_, _, cx| cx.notify());
+        let call_media_observation = cx.observe(&call_media, |this, _, cx| {
+            if this.state.read(cx).viewing_call() {
+                cx.notify();
+            }
+        });
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
@@ -216,6 +236,8 @@ impl AppShell {
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, agents_panel, cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
+        let timeline = conversation.read(cx).timeline_bounds();
+        let call_mini = cx.new(|cx| CallMiniView::new(state.clone(), timeline, cx));
         let subscription =
             cx.subscribe_in(&state, window, |this, _, event: &AppEvent, window, cx| {
                 if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
@@ -285,6 +307,7 @@ impl AppShell {
             update: UpdateStatus::UpToDate,
             user_input,
             _subscription: subscription,
+            call_mini,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
             _agents_subscription: agents_subscription,
@@ -762,7 +785,7 @@ impl Render for AppShell {
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         self.sync_prejoin(window, cx);
-        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone());
+        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);
@@ -784,7 +807,11 @@ impl Render for AppShell {
             view => (view, None),
         };
         self.sync_window_fullscreen(call_fullscreen, window);
-        let call_mini = render_call_mini(&self.state, state);
+        let call_mini = state
+            .call
+            .as_ref()
+            .is_some_and(|call| !call.viewing)
+            .then(|| self.call_mini.clone());
         let stage_overlay = render_stage_overlay(&self.state, state);
         let status = render_status_bar(
             state,

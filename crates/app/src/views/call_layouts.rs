@@ -13,25 +13,21 @@ use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::call_organizer::render_focus_stage;
-use super::call_view::{
-    GRID_PADDING, STRIP_GAP, STRIP_VISIBLE, TILE_GAP, own_tile, person_tile,
-};
+use super::call_view::{own_tile, person_tile};
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
-    ActiveCall, CallLayout, CallModel, FILMSTRIP_MAX, Filmstrip, Focus, GALLERY_MAX, Overflow, Tile, TileSize,
-    filmstrip, gallery_grid, shown_bubbles, split_overflow,
+    ActiveCall, CallLayout, CallModel, GRID_PADDING, STRIP_GAP, SpeakerSplit,
+    StripSplit, TILE_GAP, Tile, TileSize, focus_stage_size, gallery_grid, gallery_split,
+    measured_stage, shown_bubbles, speaker_split, strip_split,
 };
-use calling::{TileDetail, VideoWant};
 use crate::theme;
 
-const FALLBACK_STAGE: (f32, f32) = (900., 560.);
 const MEASURE_TOLERANCE: f32 = 0.5;
 const OVERLAY_INSET: f32 = 16.;
 const DIVIDER_LINE: f32 = 4.;
 const DIVIDER_LENGTH: f32 = 48.;
 const CHIP_TOP: f32 = 12.;
-const FILMSTRIP_TILE_MAX: f32 = 220.;
 const TILE_RADIUS: f32 = 12.;
 const HIDDEN_LIST_WIDTH: f32 = 260.;
 const HIDDEN_LIST_HEIGHT: f32 = 320.;
@@ -45,14 +41,6 @@ const BUBBLE_FADE_FROM: f32 = 0.9;
 const BUBBLE_BACKGROUND: f32 = 0.72;
 const CHIP_BACKGROUND: f32 = 0.6;
 pub const FULLSCREEN_HINT: &str = "Press Esc to exit full screen";
-
-pub fn measured_stage(call: &ActiveCall) -> (f32, f32) {
-    let (width, height) = call.stage_size.get();
-    if width < 1. || height < 1. {
-        return FALLBACK_STAGE;
-    }
-    (width, height)
-}
 
 fn measure_stage(call: &ActiveCall) -> impl IntoElement {
     let stage_size = call.stage_size.clone();
@@ -360,12 +348,6 @@ fn rows_of(cells: Vec<AnyElement>, columns: usize) -> Vec<Div> {
     }
 }
 
-fn gallery_split(model: &CallModel) -> (Vec<&Tile>, Overflow) {
-    let others = model.layout_tiles();
-    let overflow = split_overflow(others.len(), model.own_cells(), GALLERY_MAX);
-    (others, overflow)
-}
-
 fn gallery_body(
     app: &Entity<AppState>,
     state: &AppState,
@@ -407,35 +389,6 @@ fn gallery_body(
         .into_any_element()
 }
 
-struct SpeakerSplit<'a> {
-    focus: Option<Focus>,
-    others: Vec<&'a Tile>,
-    own_cells: usize,
-    plan: Filmstrip,
-}
-
-fn speaker_split(model: &CallModel, stage: (f32, f32)) -> SpeakerSplit<'_> {
-    let focus = model.speaker_focus();
-    let focus_mri = focus.as_ref().map(|focus| focus.mri.as_str());
-    let mut others: Vec<&Tile> = model
-        .layout_tiles()
-        .into_iter()
-        .filter(|tile| Some(tile.mri.as_str()) != focus_mri)
-        .collect();
-    let own_cells = usize::from(model.own_cells() > 0 && !focus.as_ref().is_some_and(|f| f.own));
-    let plan = filmstrip(
-        others.len(),
-        own_cells,
-        stage.0 - 2. * GRID_PADDING,
-        TILE_GAP,
-        FILMSTRIP_TILE_MAX,
-    );
-    if plan.overflow.shown < FILMSTRIP_MAX.min(others.len()) {
-        others.sort_by_key(|tile| !model.is_recent_speaker(&tile.mri));
-    }
-    SpeakerSplit { focus, others, own_cells, plan }
-}
-
 fn speaker_body(
     app: &Entity<AppState>,
     state: &AppState,
@@ -444,10 +397,12 @@ fn speaker_body(
     stage: (f32, f32),
 ) -> AnyElement {
     let SpeakerSplit { focus, others, own_cells, plan } = speaker_split(model, stage);
+    let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
+    let has_filmstrip = plan.overflow.shown + own_cells + usize::from(plan.overflow.hidden > 0) > 0;
+    let focus_size = focus_stage_size(stage, GRID_PADDING, TILE_GAP, has_filmstrip.then_some(size.height));
     let main = focus
         .as_ref()
-        .and_then(|focus| render_focus_stage(app, state, focus, now));
-    let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
+        .and_then(|focus| render_focus_stage(app, state, focus, focus_size, now));
     let shown = &others[..plan.overflow.shown];
     let mut tiles: Vec<AnyElement> = shown
         .iter()
@@ -478,6 +433,7 @@ fn speaker_body(
                 .min_h_0()
                 .w_full()
                 .items_center()
+                .justify_center()
                 .children(main),
         )
         .when(!tiles.is_empty(), |column| {
@@ -499,28 +455,29 @@ fn people_strip(
     state: &AppState,
     model: &CallModel,
     now: Instant,
-    available: (f32, f32),
+    stage: (f32, f32),
 ) -> Stateful<Div> {
-    let strip_width = state.call_strip_width.min(((available.0 - TILE_GAP) / 2.).max(0.));
-    let tile = TileSize::sixteen_by_nine(strip_width);
-    let mut cells: Vec<AnyElement> = model
-        .strip_tiles()
-        .into_iter()
-        .filter(|tile_model| !model.hidden_for_no_video(tile_model))
-        .map(|remote| person_tile(app, state, model, remote, tile, now))
+    let StripSplit { width, others, plan } = strip_split(model, state.call_strip_width, stage);
+    let size = TileSize::sixteen_by_nine(plan.tile_width);
+    let shown = &others[..plan.overflow.shown];
+    let mut cells: Vec<AnyElement> = shown
+        .iter()
+        .map(|remote| person_tile(app, state, model, remote, size, now))
         .collect();
     if model.own_cells() > 0 {
         let own_index = model.own_cell_index(cells.len());
-        cells.insert(own_index, own_tile(app, state, model, tile, now));
+        cells.insert(own_index, own_tile(app, state, model, size, now));
+    }
+    if plan.overflow.hidden > 0 {
+        cells.push(overflow_tile(app, state, size, &others[plan.overflow.shown..]));
     }
     v_flex()
         .id("call-strip")
         .debug_selector(|| "shell/islands/main/call-stage/share-strip".into())
         .flex_none()
-        .w(px(tile.width))
-        .max_h(px((STRIP_VISIBLE * (tile.height + STRIP_GAP) - STRIP_GAP).min(available.1)))
+        .w(px(width))
+        .items_center()
         .gap(px(STRIP_GAP))
-        .overflow_y_scroll()
         .children(cells)
 }
 
@@ -579,48 +536,9 @@ fn share_body(
         })
         .child(share)
         .when(layout != CallLayout::Content, |row| {
-            row.child(strip_divider(app, dragging)).child(people_strip(
-                app,
-                state,
-                model,
-                now,
-                (stage.0 - 2. * GRID_PADDING, stage.1 - 2. * GRID_PADDING),
-            ))
+            row.child(strip_divider(app, dragging)).child(people_strip(app, state, model, now, stage))
         })
         .into_any_element()
-}
-
-const LARGE_GALLERY_TILES: usize = 4;
-
-fn want(tile: &Tile, detail: TileDetail) -> VideoWant {
-    VideoWant { mri: tile.mri.clone(), detail }
-}
-
-pub fn video_wants(model: &CallModel, stage: (f32, f32)) -> Vec<VideoWant> {
-    if model.has_content() {
-        if model.effective_layout() == CallLayout::Content {
-            return Vec::new();
-        }
-        return model
-            .strip_tiles()
-            .into_iter()
-            .filter(|tile| !model.hidden_for_no_video(tile))
-            .map(|tile| want(tile, TileDetail::Small))
-            .collect();
-    }
-    if model.effective_layout() == CallLayout::Speaker {
-        let split = speaker_split(model, stage);
-        let stage_person = split.focus.iter().filter(|focus| !focus.own).map(|focus| VideoWant {
-            mri: focus.mri.clone(),
-            detail: TileDetail::Stage,
-        });
-        return stage_person
-            .chain(split.others[..split.plan.overflow.shown].iter().map(|tile| want(tile, TileDetail::Small)))
-            .collect();
-    }
-    let (others, overflow) = gallery_split(model);
-    let detail = if overflow.shown <= LARGE_GALLERY_TILES { TileDetail::Stage } else { TileDetail::Small };
-    others[..overflow.shown].iter().map(|tile| want(tile, detail)).collect()
 }
 
 pub(super) fn stage_region(
@@ -660,108 +578,4 @@ pub(super) fn stage_region(
                 .chain(fullscreen_hint(call, now, OVERLAY_INSET)),
         )
         .into_any_element()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Instant;
-
-    use calling::{CallUpdate, RosterEntry, TileDetail, VideoWant};
-
-    use super::{
-        CallLayout, CallModel, FILMSTRIP_TILE_MAX, GALLERY_MAX, GRID_PADDING, TILE_GAP, filmstrip, split_overflow,
-        video_wants,
-    };
-
-    const STAGE: (f32, f32) = (1400., 800.);
-
-    fn person(index: usize, has_video: bool) -> RosterEntry {
-        RosterEntry {
-            mri: format!("8:orgid:p{index}"),
-            display_name: format!("P{index}"),
-            muted: false,
-            in_lobby: false,
-            has_video,
-            sharing: false,
-            hand: None,
-            spotlight: None,
-            organizer: false,
-            role: None,
-            limits: Default::default(),
-        }
-    }
-
-    fn meeting(people: Vec<RosterEntry>) -> CallModel {
-        let mut model = CallModel::meeting("Standup", false);
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
-        model.apply(CallUpdate::Roster(people));
-        model
-    }
-
-    fn crowd(count: usize) -> CallModel {
-        meeting((0..count).map(|index| person(index, true)).collect())
-    }
-
-    fn details(wants: &[VideoWant]) -> Vec<TileDetail> {
-        wants.iter().map(|want| want.detail).collect()
-    }
-
-    #[test]
-    fn a_small_gallery_asks_for_large_pictures() {
-        let wants = video_wants(&crowd(3), STAGE);
-        assert_eq!(wants.len(), 3);
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Stage));
-    }
-
-    #[test]
-    fn a_big_gallery_asks_for_small_pictures_and_skips_the_plus_n_people() {
-        let model = crowd(14);
-        let wants = video_wants(&model, STAGE);
-        assert_eq!(wants.len(), split_overflow(14, 1, GALLERY_MAX).shown);
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
-        let hidden: Vec<&str> = model.layout_tiles()[wants.len()..].iter().map(|tile| tile.mri.as_str()).collect();
-        assert!(wants.iter().all(|want| !hidden.contains(&want.mri.as_str())));
-    }
-
-    #[test]
-    fn people_hidden_for_having_no_video_get_no_picture_request() {
-        let mut model = meeting(vec![person(0, true), person(1, false), person(2, false)]);
-        model.view.hide_no_video = true;
-        let wants = video_wants(&model, STAGE);
-        assert_eq!(wants.iter().map(|want| want.mri.as_str()).collect::<Vec<_>>(), vec!["8:orgid:p0"]);
-    }
-
-    #[test]
-    fn the_speaker_stage_is_large_and_the_filmstrip_small() {
-        let mut model = crowd(5);
-        model.view.choose(CallLayout::Speaker);
-        model.refresh_layout(Instant::now());
-        let focus = model.speaker_focus().expect("a stage person").mri;
-        let wants = video_wants(&model, STAGE);
-        assert_eq!(wants[0], VideoWant { mri: focus.clone(), detail: TileDetail::Stage });
-        assert_eq!(wants.len(), 5);
-        assert!(wants[1..].iter().all(|want| want.detail == TileDetail::Small && want.mri != focus));
-    }
-
-    #[test]
-    fn the_speaker_filmstrip_drops_people_that_do_not_fit() {
-        let mut model = crowd(12);
-        model.view.choose(CallLayout::Speaker);
-        model.refresh_layout(Instant::now());
-        let wants = video_wants(&model, (500., 800.));
-        let fitting = filmstrip(11, 1, 500. - 2. * GRID_PADDING, TILE_GAP, FILMSTRIP_TILE_MAX).overflow.shown;
-        assert!(fitting < 11);
-        assert_eq!(wants.len(), 1 + fitting);
-    }
-
-    #[test]
-    fn next_to_shared_content_everybody_in_the_strip_is_small_and_content_focus_wants_nobody() {
-        let mut model = crowd(3);
-        model.apply(CallUpdate::ScreenShare(Some("8:orgid:p1".into())));
-        let wants = video_wants(&model, STAGE);
-        assert_eq!(wants.len(), 3);
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
-        model.view.choose(CallLayout::Content);
-        assert!(video_wants(&model, STAGE).is_empty());
-    }
 }

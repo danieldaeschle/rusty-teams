@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value, json};
 
-use crate::card_date::format_card_dates;
 use crate::card_chart::{CardChart, is_chart_type, parse_chart};
+use crate::card_date::format_card_dates;
 use crate::card_inputs::{CardInput, RatingDisplay, merge_input_data, parse_input, parse_rating};
 use crate::card_layout::{
     ContainerLayout, HorizontalAlignment, parse_color_hex, parse_horizontal_alignment,

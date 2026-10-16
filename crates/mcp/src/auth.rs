@@ -6,7 +6,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use subtle::ConstantTimeEq;
 
-pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+pub const MAX_BODY_BYTES: usize = 24 * 1024 * 1024;
 const LOOPBACK_HOSTS: [&str; 2] = ["127.0.0.1", "localhost"];
 const BEARER_PREFIX: &str = "Bearer ";
 

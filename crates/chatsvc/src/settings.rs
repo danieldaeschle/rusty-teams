@@ -8,9 +8,11 @@ use crate::pins::DEFAULT_REGION;
 const SETTINGS_KEY: &str = "simpleCollabUserSettings";
 const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
 const TEAMS_ORDER_KEY: &str = "teamsOrder";
+const SKIN_TONE_KEY: &str = "preferredSkinToneIndex";
+const MAX_SKIN_TONE: u8 = 5;
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
-const MUTED_DEFAULT: bool = true;
+const MUTED_DEFAULT: bool = false;
 const MEETING_DEFAULT: bool = false;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +93,16 @@ impl<T: MessageTransport> UserSettings<T> {
         ensure_success(&answer)
     }
 
+    pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
+        let url = format!("{}?name={SKIN_TONE_KEY}", self.base_url);
+        let body = json!({ SKIN_TONE_KEY: tone.to_string() });
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Put, url, body))
+            .await?;
+        ensure_success(&answer)
+    }
+
     pub async fn properties(&self) -> Result<Value> {
         let answer = self.transport.send(Request::get(&self.base_url)).await?;
         ensure_success(&answer)?;
@@ -117,6 +129,15 @@ pub fn parse_chat_sections(properties: &Value) -> ChatSectionSettings {
         muted: settings.get(MUTED_FIELD).and_then(Value::as_bool),
         meeting: settings.get(MEETING_FIELD).and_then(Value::as_bool),
     }
+}
+
+pub fn parse_skin_tone(properties: &Value) -> Option<u8> {
+    let value = properties.get(SKIN_TONE_KEY)?;
+    let tone = match value {
+        Value::String(text) => text.parse().ok()?,
+        other => u8::try_from(other.as_u64()?).ok()?,
+    };
+    (tone <= MAX_SKIN_TONE).then_some(tone)
 }
 
 pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
@@ -187,10 +208,17 @@ mod tests {
     }
 
     #[test]
+    fn skin_tone_is_read_from_the_string_property() {
+        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})), Some(2));
+        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})), None);
+        assert_eq!(parse_skin_tone(&json!({})), None);
+    }
+
+    #[test]
     fn unset_fields_use_the_teams_defaults() {
         let parsed = parse_chat_sections(&json!({}));
         assert_eq!(parsed, ChatSectionSettings::default());
-        assert!(parsed.enabled(ChatSection::Muted));
+        assert!(!parsed.enabled(ChatSection::Muted));
         assert!(!parsed.enabled(ChatSection::Meeting));
     }
 

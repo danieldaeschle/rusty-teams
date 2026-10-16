@@ -1,0 +1,113 @@
+use gpui_kit::assets::IconName;
+use gpui_kit::component::Icon;
+use gpui_kit::*;
+
+use app_base::format;
+use app_base::theme;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unread {
+    None,
+    Silent,
+    Dot,
+    Count(u32),
+}
+
+impl Unread {
+    pub fn is_unread(self) -> bool {
+        self != Unread::None
+    }
+}
+
+pub fn icon(name: IconName, size: f32, color: Hsla) -> Icon {
+    Icon::new(name).size(px(size)).text_color(color)
+}
+
+pub fn symbol(name: &str, size: f32, color: Hsla) -> Icon {
+    Icon::empty()
+        .path(format!("symbols/{name}.svg"))
+        .size(px(size))
+        .text_color(color)
+}
+
+#[derive(Clone, Copy)]
+pub enum Corner {
+    TopRight,
+    BottomRight,
+}
+
+pub fn corner_badge(corner: Corner, overhang: f32) -> Div {
+    let badge = div().absolute().right(px(-overhang));
+    match corner {
+        Corner::TopRight => badge.top(px(-overhang)),
+        Corner::BottomRight => badge.bottom(px(-overhang)),
+    }
+}
+
+pub fn count_badge(count: u32, muted: bool) -> Div {
+    let (background, foreground) = if muted {
+        (theme::badge_muted(), theme::text_strong())
+    } else {
+        (theme::accent(), theme::on_accent())
+    };
+    div()
+        .min_w(px(18.))
+        .h(px(18.))
+        .px(px(5.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(9.))
+        .bg(background)
+        .text_color(foreground)
+        .text_size(px(11.))
+        .line_height(px(18.))
+        .font_weight(FontWeight::BOLD)
+        .child(format::badge_text(count))
+}
+
+pub fn page_header(title: &str) -> Div {
+    div()
+        .h(px(52.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(6.))
+        .pl(px(16.))
+        .pr(px(12.))
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(16.))
+                .font_weight(FontWeight::BOLD)
+                .child(title.to_owned()),
+        )
+}
+
+pub fn dot(size: f32) -> Div {
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .bg(theme::accent())
+}
+
+pub fn unread_marker(unread: Unread, muted: bool) -> Option<Div> {
+    match unread {
+        Unread::None | Unread::Silent => None,
+        Unread::Dot if muted => Some(dot(8.).bg(theme::badge_muted())),
+        Unread::Dot => Some(dot(8.)),
+        Unread::Count(count) => Some(count_badge(count, muted)),
+    }
+}
+
+const SMILE_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/></svg>"#;
+
+#[allow(dead_code)]
+pub fn smile_icon(size: f32, color: Hsla) -> Icon {
+    Icon::default()
+        .data(SMILE_SVG)
+        .size(px(size))
+        .text_color(color)
+}

@@ -14,10 +14,15 @@ chrono.workspace = true
 embed-resource = "3"
 
 [dev-dependencies]
+app-state = { workspace = true, features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [dependencies]
+app-base.workspace = true
+app-call-model.workspace = true
+app-state.workspace = true
+app-ui-kit.workspace = true
 agents.workspace = true
 calling.workspace = true
 chatsvc.workspace = true
@@ -38,27 +43,5 @@ tokio.workspace = true
 uuid.workspace = true
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-raw-window-handle = "0.6"
-x11rb = { version = "0.13", features = ["shape"] }
-
 [target.'cfg(windows)'.dependencies]
 webview.workspace = true
-raw-window-handle = "0.6"
-rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
-tray-icon = { version = "0.21", default-features = false }
-windows = { version = "0.62", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Dwm",
-    "Win32_Graphics_Gdi",
-    "Win32_Security",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Com",
-    "Win32_System_Pipes",
-    "Win32_System_SystemInformation",
-    "Win32_System_Threading",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }

@@ -153,10 +153,18 @@ fn parse_service_presences(body: &Value) -> Vec<Presence> {
             Some(Presence {
                 user_id: mri.strip_prefix(ORGID_PREFIX).unwrap_or(mri).to_owned(),
                 availability: presence.get("availability")?.as_str()?.to_owned(),
-                activity: presence
-                    .get("activity")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
+                activity: if presence
+                    .pointer("/calendarData/isOutOfOffice")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    Some("OutOfOffice".to_owned())
+                } else {
+                    presence
+                        .get("activity")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                },
             })
         })
         .collect()
@@ -227,5 +235,15 @@ mod tests {
         ]));
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].user_id, "a");
+    }
+
+    #[test]
+    fn out_of_office_from_the_calendar_becomes_the_activity() {
+        let parsed = parse_service_presences(&json!([
+            {"mri": "8:orgid:a", "presence": {"availability": "Offline", "activity": "OffWork", "calendarData": {"isOutOfOffice": true}}},
+            {"mri": "8:orgid:b", "presence": {"availability": "Available", "activity": "Available", "calendarData": {"isOutOfOffice": false}}}
+        ]));
+        assert_eq!(parsed[0].activity.as_deref(), Some("OutOfOffice"));
+        assert_eq!(parsed[1].activity.as_deref(), Some("Available"));
     }
 }

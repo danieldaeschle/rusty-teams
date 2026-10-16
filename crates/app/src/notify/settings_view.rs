@@ -264,6 +264,12 @@ impl SettingsView {
         cx.notify();
     }
 
+    fn set_report_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        let app = self.center.read(cx).app().clone();
+        app.update(cx, |state, cx| state.set_call_report_enabled(on, cx));
+        cx.notify();
+    }
+
     fn change_effects(&mut self, change: fn(&mut CameraEffects), cx: &mut Context<Self>) {
         let app = self.center.read(cx).app().clone();
         let mut effects = app.read(cx).call_effects;
@@ -410,6 +416,7 @@ pub(super) fn titled_with(
 ) -> Div {
     v_flex()
         .flex_1()
+        .min_w(px(0.))
         .child(
             div()
                 .text_size(px(14.))
@@ -519,6 +526,8 @@ impl SettingsView {
         let mic = self.center.read(cx).app().read(cx).call_mic;
         let noise_view = view.clone();
         let music_view = view.clone();
+        let report_view = view.clone();
+        let report_on = self.center.read(cx).app().read(cx).call_report_enabled;
         let effects = self.center.read(cx).app().read(cx).call_effects;
         let image = self.preview.image(Instant::now());
         let status = if self.preview_blocked {
@@ -639,6 +648,19 @@ impl SettingsView {
                 }),
             )
             .child(
+                control_row(
+                    "Save a test report after each call",
+                    "Pseudonymized, stays on this computer",
+                    switch(report_on),
+                )
+                .id("call-report-row")
+                .cursor_pointer()
+                .hover(|row| row.bg(theme::row_hover()))
+                .on_click(move |_, _, cx| {
+                    report_view.update(cx, |view, cx| view.set_report_enabled(!report_on, cx))
+                }),
+            )
+            .child(
                 v_flex()
                     .w_full()
                     .px(px(20.))
@@ -716,7 +738,13 @@ impl Render for SettingsView {
         );
         let body = match self.section {
             Section::Notifications => self.notifications_section(cx).into_any_element(),
-            Section::Devices => self.devices_section(cx).into_any_element(),
+            Section::Devices => div()
+                .id("devices-scroll")
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .child(self.devices_section(cx))
+                .into_any_element(),
             Section::Agents => div()
                 .id("agents-scroll")
                 .flex_1()

@@ -105,7 +105,7 @@ impl<R: Remote> SyncEngine<R> {
         query: &str,
         limit: usize,
     ) -> Result<Vec<MentionCandidate>> {
-        let conversation = self.resolve(conversation_id)?;
+        let conversation = self.resolve(conversation_id).await?;
         let query = query.trim().trim_start_matches('@').trim().to_lowercase();
         let my_user_id = self.store.meta(META_USER_ID)?.unwrap_or_default();
         let mut seen: HashSet<String> = HashSet::from([my_user_id]);

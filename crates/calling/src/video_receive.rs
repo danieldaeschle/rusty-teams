@@ -196,7 +196,7 @@ impl VideoReceive {
                 .map(|(mri, source)| Assignment { mri, source, detail: TileDetail::Stage });
             if wanted != self.screen_held {
                 let route_after = wanted.as_ref().map(|_| VideoKey::Screen);
-                self.router.set(&slot.mid, None);
+                self.router.set(&slot.mid, route_after.clone());
                 requester.send(
                     SourceRequest {
                         mid: slot.mid.clone(),

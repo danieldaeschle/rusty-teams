@@ -166,12 +166,12 @@ fn reply_quote() {
     assert_eq!(
         html_to_spans(html),
         vec![
-            Span::Quote(vec![
+            Span::Quote { message_id: Some("170".into()), children: vec![
                 Span::Bold(vec![text("Bob Sample")]),
                 text("12:01"),
                 Span::LineBreak,
                 text("original text"),
-            ]),
+            ] },
             Span::LineBreak,
             text("my answer"),
         ]
@@ -373,6 +373,7 @@ fn record_with(body_html: &str, attachments_json: &str) -> MessageRecord {
         attachments_json: attachments_json.to_owned(),
         reactions_json: "[]".to_owned(),
         mentions_json: "[]".to_owned(),
+        call_event_json: None,
     }
 }
 

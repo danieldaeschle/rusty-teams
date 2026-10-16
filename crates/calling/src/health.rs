@@ -64,7 +64,7 @@ impl HealthSample {
     fn instant_level(&self) -> NetworkLevel {
         if self.is_bad() {
             NetworkLevel::Bad
-        } else if self.is_poor() || self.limitation == Limitation::Bandwidth {
+        } else if self.is_poor() {
             NetworkLevel::Poor
         } else {
             NetworkLevel::Good
@@ -135,7 +135,7 @@ impl QualityTracker {
         let poor = run_since(&mut self.poor_since, sample.is_poor(), now);
         let target = if bad {
             NetworkLevel::Bad
-        } else if poor || self.share_of(Limitation::Bandwidth, now) > LIMIT_SHARE {
+        } else if poor {
             NetworkLevel::Poor
         } else {
             NetworkLevel::Good
@@ -356,11 +356,10 @@ mod tests {
     }
 
     #[test]
-    fn bandwidth_limits_for_over_half_the_window_make_it_poor() {
+    fn bandwidth_limits_alone_keep_it_good() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
         let limited = HealthSample { limitation: Limitation::Bandwidth, ..Default::default() };
-        assert_eq!(feed(&mut tracker, start, 0, 4, &limited).level, NetworkLevel::Good);
-        assert_eq!(feed(&mut tracker, start, 6, 6, &limited).level, NetworkLevel::Poor);
+        assert_eq!(feed(&mut tracker, start, 0, 30, &limited).level, NetworkLevel::Good);
     }
 
     #[test]

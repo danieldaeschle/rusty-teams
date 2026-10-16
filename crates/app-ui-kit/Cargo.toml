@@ -1,0 +1,15 @@
+[package]
+name = "app-ui-kit"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[dependencies]
+app-base.workspace = true
+gpui-kit.workspace = true
+store.workspace = true
+teams-core.workspace = true

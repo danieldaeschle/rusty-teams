@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
-use super::toolbar_placement::{TOOLBAR_HEIGHT, toolbar_slot};
+use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
 use crate::rows::reaction_glyph;
 use crate::theme;
@@ -27,7 +27,6 @@ pub const QUICK_REACTION_COUNT: usize = 4;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
-pub type HoverChange = Rc<dyn Fn(bool, &mut App)>;
 
 #[derive(Clone)]
 pub struct DelegateEntry {

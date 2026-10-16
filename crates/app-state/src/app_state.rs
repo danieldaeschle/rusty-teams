@@ -1,0 +1,1160 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Instant;
+
+use chatsvc::TypingEvent;
+use chrono::{DateTime, Utc};
+use gpui_kit::*;
+use store::{ChatRecord, Sidebar, Store};
+use teams_core::{
+    ChatApp, ChatSection, ChatSectionSettings, CoreEvent, ImageRef, PinnedMessage, PresenceStatus,
+    ScheduledDraft,
+};
+
+use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
+use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
+use crate::card_state::{CardState, TaskDialogState};
+use crate::data::{self, Directory};
+use crate::image_view_gallery::ViewerRequest;
+use crate::local_previews::{LocalPreview, load_local_previews};
+use crate::message_actions::{ForwardSource, SavedSet};
+use crate::notice::Notice;
+use crate::profile_state::{ProfileCache, ProfileRequest};
+use crate::translation::TranslationState;
+use crate::typing::TypingState;
+use calling::meeting::LiveMeeting;
+
+const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
+const RECENT_MESSAGES_FOR_TYPING: usize = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    Chat(String),
+    Channel(String),
+}
+
+impl Selection {
+    pub fn conversation_id(&self) -> &str {
+        match self {
+            Selection::Chat(id) | Selection::Channel(id) => id,
+        }
+    }
+}
+
+pub enum AppEvent {
+    Sidebar,
+    Selection,
+    Messages(String),
+    Images(Vec<String>),
+    Jump,
+    Status,
+    Directory,
+    Cards(String),
+    TaskDialog,
+    Typing,
+    LocalPreviews,
+    Outbox(String),
+    Scheduled,
+    Pins(String),
+    Saved,
+    CallHistory,
+    Translation,
+    Forward,
+    ImageViewer,
+    StatusMessage,
+    NotificationSettings,
+    Profile,
+    Call,
+    Ring,
+    LiveMeeting,
+    MissedCall(MissedCall),
+    MeetingReminder,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Mode {
+    pub demo: bool,
+    pub read_only: bool,
+    pub demo_sync: Option<std::time::Duration>,
+}
+
+pub struct AppState {
+    pub store: Arc<Store>,
+    pub engine: Option<Arc<Engine>>,
+    pub sidebar: Sidebar,
+    pub favorite_ids: Vec<String>,
+    pub selection: Option<Selection>,
+    pub new_chat: bool,
+    pub connection: ConnectionState,
+    pub live: LiveState,
+    pub last_sync: Option<DateTime<Utc>>,
+    pub mode: Mode,
+    pub directory: Directory,
+    pub collapsed: HashSet<String>,
+    pub expanded_lists: HashSet<String>,
+    pub start_on_channels: bool,
+    pub pending_jump: Option<(String, String)>,
+    pub cards: CardState,
+    pub task_dialog: Option<TaskDialogState>,
+    pub bot_apps: HashMap<String, Vec<ChatApp>>,
+    pub bot_apps_pending: HashSet<String>,
+    pub notice: Option<Notice>,
+    pub notice_count: u64,
+    pub keep_unread: Option<String>,
+    pub typing: TypingState,
+    typing_timer_running: bool,
+    pub local_previews: HashMap<String, LocalPreview>,
+    pub scheduled: Vec<ScheduledDraft>,
+    pub scheduled_polling: bool,
+    pub saved: SavedSet,
+    pub call_history: Vec<teams_core::CallLogEntry>,
+    pub calendar_events: Vec<chatsvc::CalendarEvent>,
+    pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    pub calls_list: crate::call::CallsList,
+    pub pins: HashMap<String, Vec<PinnedMessage>>,
+    pub forward_request: Option<ForwardSource>,
+    pub image_viewer_request: Option<ViewerRequest>,
+    pub own_status: PresenceStatus,
+    pub own_email: String,
+    pub own_time_zone: Option<String>,
+    pub own_time_zone_requested: bool,
+    pub status_menu_open: bool,
+    pub status_message_request: bool,
+    pub profiles: ProfileCache,
+    pub profile_request: Option<ProfileRequest>,
+    pub call: Option<ActiveCall>,
+    pub held_call: Option<ActiveCall>,
+    pub call_media: Option<Entity<CallMedia>>,
+    pub call_launcher: Option<Arc<CallLauncher>>,
+    pub call_count: u64,
+    pub call_share_sound: bool,
+    pub recording_policy: teams_core::RecordingPolicy,
+    pub own_tenant: Option<String>,
+    pub call_share_motion: bool,
+    pub call_share_standout: bool,
+    pub call_report_enabled: bool,
+    pub call_strip_width: f32,
+    pub call_view: crate::call::ViewSettings,
+    pub call_background: crate::call::BackgroundPick,
+    pub call_camera: calling::DeviceChoice,
+    pub call_input: calling::DeviceChoice,
+    pub call_output: calling::DeviceChoice,
+    pub call_mic: calling::MicSettings,
+    pub call_effects: calling::CameraEffects,
+    pub meet_now_pending: bool,
+    pub prejoin: Option<crate::call::PendingJoin>,
+    pub prejoin_count: u64,
+    pub join_options: crate::call::JoinOptions,
+    pub rsvp_send_response: bool,
+    pub meeting_toasts: crate::call::MeetingToasts,
+    pub demo_meetings: Vec<chatsvc::CalendarEvent>,
+    pub call_backgrounds: crate::call::BackgroundLibrary,
+    pub transfer_picker: Option<AnyView>,
+    pub transcript_panel: Option<AnyView>,
+    pub rings: Rings,
+    pub live_meetings: HashMap<String, LiveMeeting>,
+    pub live_refreshing: HashSet<String>,
+    pub translation: TranslationState,
+    pub section_changes: crate::section_actions::SectionChanges,
+}
+
+pub struct AppHandle(pub Entity<AppState>);
+
+impl Global for AppHandle {}
+
+impl EventEmitter<AppEvent> for AppState {}
+
+pub fn selection_for(sidebar: &Sidebar, conversation_id: &str) -> Option<Selection> {
+    if sidebar.chats.iter().any(|chat| chat.id == conversation_id) {
+        return Some(Selection::Chat(conversation_id.to_owned()));
+    }
+    sidebar
+        .teams
+        .iter()
+        .flat_map(|team| team.channels.iter())
+        .any(|channel| channel.id == conversation_id)
+        .then(|| Selection::Channel(conversation_id.to_owned()))
+}
+
+pub fn chat_title(chat: &ChatRecord) -> String {
+    chat.display_title()
+}
+
+pub fn composer_name(sidebar: &Sidebar, selection: &Selection) -> String {
+    let unnamed_group = match selection {
+        Selection::Chat(id) => sidebar.chats.iter().any(|chat| {
+            &chat.id == id
+                && chat.title.trim().is_empty()
+                && !chat.kind.eq_ignore_ascii_case("oneOnOne")
+        }),
+        Selection::Channel(_) => false,
+    };
+    if unnamed_group {
+        String::new()
+    } else {
+        selection_title(sidebar, selection)
+    }
+}
+
+pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
+    match selection {
+        Selection::Chat(id) => sidebar
+            .chats
+            .iter()
+            .find(|chat| &chat.id == id)
+            .map(chat_title)
+            .unwrap_or_else(|| "Chat".to_owned()),
+        Selection::Channel(id) => sidebar
+            .teams
+            .iter()
+            .find_map(|team| {
+                team.channels
+                    .iter()
+                    .find(|channel| &channel.id == id)
+                    .map(|channel| format!("{} / {}", team.team.name, channel.name))
+            })
+            .unwrap_or_else(|| "Channel".to_owned()),
+    }
+}
+
+impl AppState {
+    pub fn new(store: Arc<Store>, mode: Mode) -> Self {
+        let sidebar = store.sidebar().unwrap_or_default();
+        let mut state = AppState {
+            store,
+            engine: None,
+            sidebar,
+            favorite_ids: Vec::new(),
+            selection: None,
+            new_chat: false,
+            connection: if mode.demo {
+                ConnectionState::Online
+            } else {
+                ConnectionState::Connecting
+            },
+            live: LiveState::Off,
+            last_sync: None,
+            mode,
+            directory: Directory::default(),
+            collapsed: HashSet::new(),
+            expanded_lists: HashSet::new(),
+            start_on_channels: false,
+            pending_jump: None,
+            cards: CardState::default(),
+            task_dialog: None,
+            bot_apps: HashMap::new(),
+            bot_apps_pending: HashSet::new(),
+            notice: None,
+            notice_count: 0,
+            keep_unread: None,
+            typing: TypingState::default(),
+            typing_timer_running: false,
+            local_previews: HashMap::new(),
+            scheduled: Vec::new(),
+            scheduled_polling: false,
+            saved: SavedSet::default(),
+            call_history: Vec::new(),
+            calendar_events: Vec::new(),
+            calendar_nudge: None,
+            calls_list: crate::call::CallsList::default(),
+            pins: HashMap::new(),
+            forward_request: None,
+            image_viewer_request: None,
+            own_status: PresenceStatus::default(),
+            own_email: String::new(),
+            own_time_zone: None,
+            own_time_zone_requested: false,
+            status_menu_open: false,
+            status_message_request: false,
+            profiles: ProfileCache::new(),
+            profile_request: None,
+            call: None,
+            held_call: None,
+            call_media: None,
+            call_launcher: None,
+            call_count: 0,
+            call_share_sound: false,
+            recording_policy: teams_core::RecordingPolicy::default(),
+            own_tenant: None,
+            call_share_motion: false,
+            call_share_standout: false,
+            call_report_enabled: true,
+            call_strip_width: crate::call::STRIP_DEFAULT_WIDTH,
+            call_view: crate::call::ViewSettings::default(),
+            call_background: crate::call::BackgroundPick::None,
+            call_camera: calling::DeviceChoice::SystemDefault,
+            call_input: calling::DeviceChoice::SystemDefault,
+            call_output: calling::DeviceChoice::SystemDefault,
+            call_mic: calling::MicSettings::default(),
+            call_effects: calling::CameraEffects::default(),
+            meet_now_pending: false,
+            prejoin: None,
+            prejoin_count: 0,
+            join_options: crate::call::JoinOptions::default(),
+            rsvp_send_response: true,
+            meeting_toasts: crate::call::MeetingToasts::default(),
+            demo_meetings: Vec::new(),
+            call_backgrounds: if mode.demo {
+                crate::call::demo_library()
+            } else {
+                crate::call::BackgroundLibrary::new(crate::call::default_cache_directory())
+            },
+            transfer_picker: None,
+            transcript_panel: None,
+            rings: Rings::default(),
+            live_meetings: HashMap::new(),
+            live_refreshing: HashSet::new(),
+            translation: TranslationState::default(),
+            section_changes: crate::section_actions::SectionChanges::default(),
+        };
+        state.local_previews = load_local_previews(&state.store);
+        state.collapsed = state.load_collapsed();
+        state.call_share_sound = crate::call::load_share_sound(&state.store);
+        state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
+        state.call_share_standout = crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
+        state.call_report_enabled = crate::call::load_report_enabled(&state.store);
+        state.call_strip_width = crate::call::load_strip_width(&state.store);
+        state.call_view = crate::call::ViewSettings::load(&state.store);
+        state.call_background = crate::call::load_background(&state.store);
+        state.call_camera = crate::call::load_camera(&state.store);
+        state.call_input = crate::call::load_input(&state.store);
+        state.call_output = crate::call::load_output(&state.store);
+        state.call_mic = crate::call::load_mic(&state.store);
+        state.call_effects = crate::call::load_camera_effects(&state.store);
+        state.join_options = crate::call::load_join_options(&state.store);
+        state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);
+        state.load_cached_translation_settings();
+        if !mode.demo {
+            state.directory.load_cached_presence(&state.store);
+            state.reload_directory();
+        }
+        state
+    }
+
+    fn load_collapsed(&self) -> HashSet<String> {
+        self.store
+            .meta(COLLAPSED_META_KEY)
+            .ok()
+            .flatten()
+            .map(|value| {
+                value
+                    .lines()
+                    .map(str::to_owned)
+                    .filter(|id| !id.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn toggle_collapsed(&mut self, section_id: &str, cx: &mut Context<Self>) {
+        if data::is_pending_folder(section_id) {
+            return;
+        }
+        let now_collapsed = self.collapsed.insert(section_id.to_owned());
+        if !now_collapsed {
+            self.collapsed.remove(section_id);
+        }
+        self.save_collapsed();
+        self.sync_folder_expanded(section_id, !now_collapsed);
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn older_chats(&self) -> (bool, bool) {
+        self.engine.as_ref().map_or((false, false), |engine| {
+            (engine.has_older_chats(), engine.is_loading_older_chats())
+        })
+    }
+
+    pub fn request_older_chats(&self) {
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        if !engine.has_older_chats() || engine.is_loading_older_chats() {
+            return;
+        }
+        drop(crate::runtime::spawn(async move {
+            if let Err(error) = engine.load_older_chats().await {
+                crate::diagnostics::record(format!("sync: older chats not loaded: {error}"));
+            }
+        }));
+    }
+
+    pub fn toggle_list_expanded(&mut self, section_id: &str, cx: &mut Context<Self>) {
+        if !self.expanded_lists.remove(section_id) {
+            self.expanded_lists.insert(section_id.to_owned());
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    fn save_collapsed(&self) {
+        let mut ids: Vec<&str> = self.collapsed.iter().map(String::as_str).collect();
+        ids.sort_unstable();
+        let _ = self.store.set_meta(COLLAPSED_META_KEY, &ids.join("\n"));
+    }
+
+    fn sync_folder_expanded(&mut self, folder_id: &str, expanded: bool) {
+        let Some(folder) = self
+            .directory
+            .folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id && folder.expanded.is_some())
+        else {
+            return;
+        };
+        folder.expanded = Some(expanded);
+        let _ = self.store.set_folder_expanded(folder_id, expanded);
+        if let Some(engine) = self.engine.clone().filter(|_| !self.mode.read_only) {
+            let folder_id = folder_id.to_owned();
+            drop(crate::runtime::spawn(async move {
+                engine.set_folder_expanded(&folder_id, expanded).await
+            }));
+        }
+    }
+
+    fn adopt_folder_expanded(&mut self) {
+        let snapshot = self.collapsed.clone();
+        for folder in &self.directory.folders {
+            match folder.expanded {
+                Some(true) => {
+                    self.collapsed.remove(&folder.id);
+                }
+                Some(false) => {
+                    self.collapsed.insert(folder.id.clone());
+                }
+                None => {}
+            }
+        }
+        if self.collapsed != snapshot {
+            self.save_collapsed();
+        }
+    }
+
+    pub fn set_chat_section(
+        &mut self,
+        section: ChatSection,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous = self.directory.section_settings;
+        let mut updated = previous;
+        updated.set(section, enabled);
+        self.apply_section_settings(updated, cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Chat list setting",
+            async move { engine.set_section_enabled(section, enabled).await },
+            move |state, cx| state.apply_section_settings(previous, cx),
+            |_, _| {},
+            cx,
+        );
+    }
+
+    pub fn set_skin_tone(&mut self, tone: u8, cx: &mut Context<Self>) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous = teams_core::skin_tone(&self.store);
+        let _ = teams_core::store_account_skin_tone(&self.store, tone);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Skin tone",
+            async move { engine.set_skin_tone(tone).await },
+            move |state, _| {
+                let _ = teams_core::store_account_skin_tone(&state.store, previous);
+            },
+            |_, _| {},
+            cx,
+        );
+    }
+
+    fn apply_section_settings(&mut self, settings: ChatSectionSettings, cx: &mut Context<Self>) {
+        self.directory.section_settings = settings;
+        let _ = teams_core::store_section_settings(&self.store, &settings);
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn reload_directory(&mut self) {
+        self.directory.me = data::me(&self.store);
+        self.own_email = self
+            .store
+            .meta("me_email")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        self.directory.folders = data::folders(&self.store, &self.favorite_ids);
+        self.reapply_section_changes();
+        self.directory.section_settings = teams_core::stored_section_settings(&self.store);
+        self.adopt_folder_expanded();
+        self.directory.pinned_channels = data::pinned_channels(&self.store);
+        if self.directory.pinned_channels.is_empty() {
+            let known: HashSet<&str> = self
+                .sidebar
+                .teams
+                .iter()
+                .flat_map(|team| team.channels.iter().map(|channel| channel.id.as_str()))
+                .collect();
+            self.directory.pinned_channels = self
+                .favorite_ids
+                .iter()
+                .filter(|id| known.contains(id.as_str()))
+                .cloned()
+                .collect();
+        }
+        self.resolve_pending_avatars();
+        self.sync_presence();
+        self.directory.unread_counts = match &self.engine {
+            Some(engine) => data::unread_counts(engine, &self.sidebar.chats),
+            None => Default::default(),
+        };
+    }
+
+    pub fn request_avatars(&mut self, user_ids: Vec<String>, cx: &mut Context<Self>) {
+        let wanted = self.directory.missing_avatars(user_ids);
+        if wanted.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        let mut uncached = Vec::new();
+        for user_id in wanted {
+            match data::cached_avatar(&self.store, &user_id) {
+                Some(cached) => {
+                    self.directory.set_avatar(&user_id, cached);
+                    changed = true;
+                }
+                None => uncached.push(user_id),
+            }
+        }
+        if let Some(engine) = self.engine.clone().filter(|_| !uncached.is_empty()) {
+            self.directory.mark_avatars_pending(&uncached);
+            let done = data::fetch_avatars(&engine, uncached);
+            self.on_done(done, cx, |state, cx| {
+                state.resolve_pending_avatars();
+                cx.emit(AppEvent::Directory);
+                cx.notify();
+            });
+            changed = true;
+        }
+        if changed {
+            cx.emit(AppEvent::Directory);
+            cx.notify();
+        }
+    }
+
+    pub fn request_images(&mut self, images: Vec<ImageRef>, cx: &mut Context<Self>) {
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        let wanted = self
+            .directory
+            .images_to_request(images.iter().map(|image| image.url.clone()));
+        let mut changed = false;
+        for image in images
+            .into_iter()
+            .filter(|image| wanted.contains(&image.url))
+        {
+            match engine.image_path(&image) {
+                Some(path) => {
+                    self.directory.set_image(&image.url, &path);
+                    changed = true;
+                }
+                None => {
+                    let done = data::fetch_image(&engine, image.clone());
+                    cx.spawn(async move |this, cx| {
+                        if !matches!(done.await, Ok(Ok(()))) {
+                            this.update(cx, |state, cx| {
+                                state.directory.mark_image_failed(&image.url);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    })
+                    .detach();
+                }
+            }
+        }
+        if changed {
+            cx.emit(AppEvent::Images(wanted));
+            cx.notify();
+        }
+    }
+
+    pub fn jump_to_message(
+        &mut self,
+        selection: Selection,
+        message_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_jump = Some((selection.conversation_id().to_owned(), message_id));
+        if self.selection.as_ref() == Some(&selection) {
+            cx.emit(AppEvent::Jump);
+        } else {
+            self.select(selection, cx);
+        }
+    }
+
+    fn on_done(
+        &self,
+        done: data::Done,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let _ = done.await;
+            this.update(cx, |state, cx| then(state, cx)).ok();
+        })
+        .detach();
+    }
+
+    fn resolve_pending_avatars(&mut self) {
+        for user_id in self.directory.pending_avatars() {
+            if let Some(cached) = data::cached_avatar(&self.store, &user_id) {
+                self.directory.set_avatar(&user_id, cached);
+            }
+        }
+    }
+
+    fn sync_presence(&mut self) -> Vec<String> {
+        let Some(engine) = self.engine.clone() else {
+            return Vec::new();
+        };
+        self.directory
+            .requested_presence_ids()
+            .into_iter()
+            .filter(|user_id| {
+                let Some(kind) = data::presence_kind(&engine, user_id) else {
+                    return false;
+                };
+                let activity_changed = self
+                    .directory
+                    .set_activity(user_id, data::presence_activity(&engine, user_id));
+                self.directory.set_presence(user_id, kind) || activity_changed
+            })
+            .collect()
+    }
+
+    pub fn request_presence(&mut self, user_ids: Vec<String>, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let pushed = self.live == LiveState::Live;
+        let wanted = self.directory.stale_presence(user_ids, now, pushed);
+        if wanted.is_empty() {
+            return;
+        }
+        self.directory.mark_presence_pending(&wanted);
+        if let Some(engine) = self.engine.clone() {
+            self.directory.mark_presence_requested(&wanted, now);
+            drop(data::watch_presence(&engine, wanted.clone()));
+            let done = data::refresh_presence(&engine, wanted.clone());
+            self.on_done(done, cx, move |state, cx| {
+                state.sync_presence();
+                state.directory.save_presence(&state.store, &wanted);
+                state.directory.settle_presence(&wanted);
+                cx.emit(AppEvent::Directory);
+                cx.notify();
+            });
+        }
+    }
+
+    pub fn move_chat(
+        &mut self,
+        conversation_id: &str,
+        folder_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mode.read_only {
+            return;
+        }
+        let previous_folder = self
+            .directory
+            .folder_of(conversation_id)
+            .map(|folder| folder.id.clone());
+        self.directory.assign(conversation_id, folder_id);
+        if let Some(engine) = self.engine.clone() {
+            let previous = previous_folder.clone();
+            let done = match (folder_id, previous.as_deref()) {
+                (Some(folder_id), _) => {
+                    Some(data::move_to_folder(&engine, conversation_id, folder_id))
+                }
+                (None, Some(previous)) => {
+                    Some(data::remove_from_folder(&engine, conversation_id, previous))
+                }
+                (None, None) => None,
+            };
+            if let Some(done) = done {
+                self.on_done(done, cx, |state, cx| {
+                    state.reload_directory();
+                    cx.emit(AppEvent::Sidebar);
+                    cx.notify();
+                });
+            }
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn mark_chat_read(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if self.keeps_unread(conversation_id) {
+            self.keep_unread = None;
+        }
+        if self.mode.demo {
+            if let Some(chat) = self
+                .sidebar
+                .chats
+                .iter()
+                .find(|chat| chat.id == conversation_id)
+            {
+                let mut read = chat.clone();
+                read.unread = false;
+                let _ = self.store.upsert_chats(&[read]);
+                self.reload_sidebar(cx);
+            }
+            return;
+        }
+        if self.mode.read_only {
+            return;
+        }
+        if let Some(engine) = self.engine.clone() {
+            let _ = self
+                .store
+                .mark_chat_read(conversation_id, chrono::Utc::now());
+            self.reload_sidebar(cx);
+            let conversation_id = conversation_id.to_owned();
+            drop(crate::runtime::spawn(async move {
+                engine.mark_read(&conversation_id).await
+            }));
+        }
+    }
+
+    pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
+        self.new_chat = true;
+        self.show_call(false, cx);
+        cx.emit(AppEvent::Selection);
+        cx.notify();
+    }
+
+    pub fn close_new_chat(&mut self, cx: &mut Context<Self>) {
+        if !self.new_chat {
+            return;
+        }
+        self.new_chat = false;
+        cx.emit(AppEvent::Selection);
+        cx.notify();
+    }
+
+    pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
+        self.show_call(false, cx);
+        self.cancel_prejoin(cx);
+        let was_drafting = std::mem::take(&mut self.new_chat);
+        if !was_drafting && self.selection.as_ref() == Some(&selection) {
+            return;
+        }
+        let conversation_id = selection.conversation_id().to_owned();
+        self.selection = Some(selection);
+        self.keep_unread = None;
+        cx.emit(AppEvent::Selection);
+        cx.notify();
+        self.refresh_live_meeting(&conversation_id, cx);
+        self.refresh_language_stamps(&conversation_id, cx);
+    }
+
+    fn apply_typing(&mut self, event: TypingEvent, cx: &mut Context<Self>) {
+        let is_me = self
+            .directory
+            .me
+            .as_ref()
+            .is_some_and(|me| me.user_id == event.user_id);
+        if is_me {
+            return;
+        }
+        if event.active {
+            let display_name = match event.display_name.trim() {
+                "" => crate::people::resolve_names(self, std::slice::from_ref(&event.user_id))
+                    .remove(&event.user_id)
+                    .unwrap_or_default(),
+                _ => event.display_name.clone(),
+            };
+            self.typing.start(
+                &event.conversation_id,
+                &event.user_id,
+                &display_name,
+                Instant::now(),
+                event.received_at,
+            );
+            self.request_avatars(vec![event.user_id.clone()], cx);
+            self.schedule_typing_expiry(cx);
+        } else {
+            self.typing.clear(&event.conversation_id, &event.user_id);
+        }
+        cx.emit(AppEvent::Typing);
+        cx.notify();
+    }
+
+    fn clear_typists_who_sent(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if !self.typing.is_active(conversation_id) {
+            return;
+        }
+        let Ok(recent) = self
+            .store
+            .messages(conversation_id, None, RECENT_MESSAGES_FOR_TYPING)
+        else {
+            return;
+        };
+        let mut changed = false;
+        for message in recent {
+            if let Some(sender_id) = message.sender_id.as_deref() {
+                changed |= self
+                    .typing
+                    .message_from(conversation_id, sender_id, message.created_at);
+            }
+        }
+        if changed {
+            cx.emit(AppEvent::Typing);
+            cx.notify();
+        }
+    }
+
+    fn schedule_typing_expiry(&mut self, cx: &mut Context<Self>) {
+        if self.typing_timer_running {
+            return;
+        }
+        self.typing_timer_running = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let next = this.update(cx, |state, _| {
+                    let next = state.typing.next_expiry();
+                    state.typing_timer_running = next.is_some();
+                    next
+                });
+                let Ok(Some(next)) = next else { return };
+                cx.background_executor()
+                    .timer(next.saturating_duration_since(Instant::now()))
+                    .await;
+                let alive = this.update(cx, |state, cx| {
+                    if state.typing.expire(Instant::now()) {
+                        cx.emit(AppEvent::Typing);
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn reload_sidebar(&mut self, cx: &mut Context<Self>) {
+        if let Ok(sidebar) = self.store.sidebar() {
+            self.sidebar = sidebar;
+            self.apply_bot_titles();
+        }
+        self.calls_list.invalidate();
+        if !self.mode.demo {
+            self.reload_directory();
+            self.load_own_time_zone(cx);
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn apply(&mut self, event: BackendEvent, cx: &mut Context<Self>) {
+        match event {
+            BackendEvent::Connection(connection) => {
+                self.connection = connection;
+                cx.emit(AppEvent::Status);
+            }
+            BackendEvent::Calls(launcher) => {
+                launcher.set_default_camera(self.call_camera.clone());
+                self.call_launcher = Some(launcher);
+                self.load_own_time_zone(cx);
+            }
+            BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
+            BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),
+            BackendEvent::Ring(event) => self.on_engine_event(event, cx),
+            BackendEvent::ThreadChanged(conversation_id) => {
+                self.on_thread_changed(&conversation_id, cx)
+            }
+            BackendEvent::Engine(engine) => {
+                crate::agent_api::engine_ready(engine.clone(), cx);
+                self.engine = Some(engine);
+                self.resend_outbox(cx);
+                self.refresh_scheduled(cx);
+                self.refresh_translation_settings(cx);
+                self.refresh_recording_policy(cx);
+                let waiting = self.directory.waiting_presence_ids();
+                self.request_presence(waiting, cx);
+                self.refresh_own_status(cx);
+                cx.emit(AppEvent::Status);
+            }
+            BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar_after_sync(cx),
+            BackendEvent::Core(
+                CoreEvent::MessagesChanged { conversation_id }
+                | CoreEvent::ReceiptsChanged { conversation_id },
+            ) => {
+                self.clear_typists_who_sent(&conversation_id, cx);
+                self.refresh_language_stamps(&conversation_id, cx);
+                cx.emit(AppEvent::Messages(conversation_id));
+            }
+            BackendEvent::Core(CoreEvent::PinsChanged { conversation_id }) => {
+                self.refresh_pins(&conversation_id, cx);
+            }
+            BackendEvent::Core(CoreEvent::ImagesChanged { keys }) => {
+                if let Some(engine) = &self.engine {
+                    for key in &keys {
+                        let image = ImageRef {
+                            id: String::new(),
+                            url: key.clone(),
+                            width: None,
+                            height: None,
+                            alt: None,
+                        };
+                        if let Some(path) = engine.image_path(&image) {
+                            self.directory.set_image(key, &path);
+                        }
+                    }
+                }
+                cx.emit(AppEvent::Images(keys));
+            }
+            BackendEvent::Core(CoreEvent::PresenceChanged) => {
+                let changed = self.sync_presence();
+                self.directory.save_presence(&self.store, &changed);
+                cx.emit(AppEvent::Directory);
+                cx.notify();
+            }
+            BackendEvent::Core(CoreEvent::PresenceStatusChanged(status)) => {
+                self.apply_own_status(status, cx);
+                self.reload_directory();
+            }
+            BackendEvent::Core(_) => {
+                if !self.mode.demo {
+                    self.reload_directory();
+                }
+                cx.emit(AppEvent::Directory);
+            }
+            BackendEvent::Typing(event) => self.apply_typing(event, cx),
+            BackendEvent::Live(live) => {
+                self.live = live;
+                cx.emit(AppEvent::Status);
+            }
+            BackendEvent::Favorites(ids) => {
+                self.favorite_ids = ids;
+                if !self.mode.demo {
+                    self.reload_directory();
+                }
+                cx.emit(AppEvent::Sidebar);
+            }
+            BackendEvent::Synced(time) => {
+                if self.last_sync.is_none() {
+                    self.refresh_saved(cx);
+                }
+                self.last_sync = Some(time);
+                cx.emit(AppEvent::Status);
+            }
+        }
+        cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chatsvc::TypingEvent;
+    use chrono::{Duration, Utc};
+    use gpui_kit::{AppContext as _, TestAppContext};
+    use store::{
+        ChannelRecord, ChatRecord, MemberRecord, MessageRecord, SidebarTeam, Store, TeamRecord,
+    };
+    use teams_core::CoreEvent;
+
+    use super::{AppState, Mode, Selection, chat_title, selection_for, selection_title};
+    use crate::backend::BackendEvent;
+    use crate::data::Person;
+    use store::Sidebar;
+
+    fn chat(id: &str, title: &str, unread: bool) -> ChatRecord {
+        ChatRecord {
+            id: id.into(),
+            kind: "group".into(),
+            title: title.into(),
+            member_summary: "Member".into(),
+            last_message_at: None,
+            last_read_at: None,
+            unread,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn selection_kind_follows_sidebar() {
+        assert_eq!(
+            selection_for(&sidebar(), "c1"),
+            Some(Selection::Chat("c1".into()))
+        );
+        assert_eq!(
+            selection_for(&sidebar(), "ch"),
+            Some(Selection::Channel("ch".into()))
+        );
+        assert_eq!(selection_for(&sidebar(), "x"), None);
+    }
+
+    fn sidebar() -> Sidebar {
+        Sidebar {
+            chats: vec![chat("c1", "First", true), chat("c2", "", false)],
+            teams: vec![SidebarTeam {
+                team: TeamRecord {
+                    id: "t".into(),
+                    name: "Team".into(),
+                },
+                channels: vec![ChannelRecord {
+                    id: "ch".into(),
+                    team_id: "t".into(),
+                    name: "General".into(),
+                    membership_type: None,
+                    last_message_at: None,
+                    unread: false,
+                }],
+                hidden: false,
+                hidden_channel_ids: Vec::new(),
+                notifications: Default::default(),
+            }],
+        }
+    }
+
+    #[test]
+    fn empty_chat_title_falls_back_to_members() {
+        assert_eq!(chat_title(&sidebar().chats[1]), "Member");
+    }
+
+    #[test]
+    fn selection_titles() {
+        assert_eq!(
+            selection_title(&sidebar(), &Selection::Channel("ch".into())),
+            "Team / General"
+        );
+        assert_eq!(
+            selection_title(&sidebar(), &Selection::Chat("c1".into())),
+            "First"
+        );
+    }
+
+    fn typing_event(user_id: &str, active: bool) -> BackendEvent {
+        BackendEvent::Typing(TypingEvent {
+            conversation_id: "c1".into(),
+            user_id: user_id.into(),
+            display_name: format!("Name {user_id}"),
+            active,
+            received_at: Utc::now(),
+        })
+    }
+
+    #[gpui_kit::test]
+    fn toggle_collapsed_ignores_pending_sections(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.toggle_collapsed("pending-section:1", cx);
+                assert!(state.collapsed.is_empty());
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn typing_events_track_other_users_and_ignore_me(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| {
+            cx.new(|_| {
+                let mut state = AppState::new(store.clone(), Mode::default());
+                state.directory.me = Some(Person {
+                    user_id: "me".into(),
+                    display_name: "Me".into(),
+                });
+                state
+            })
+        });
+        let names = |cx: &mut TestAppContext| cx.update(|cx| app.read(cx).typing.names("c1"));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(typing_event("me", true), cx);
+                state.apply(typing_event("ada", true), cx);
+            })
+        });
+        assert_eq!(names(cx), vec!["Name ada".to_owned()]);
+
+        let message = MessageRecord {
+            conversation_id: "c1".into(),
+            message_id: "m1".into(),
+            sender_id: Some("ada".into()),
+            created_at: Utc::now() + Duration::seconds(1),
+            ..Default::default()
+        };
+        store.upsert_messages(&[message]).unwrap();
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(
+                    BackendEvent::Core(CoreEvent::MessagesChanged {
+                        conversation_id: "c1".into(),
+                    }),
+                    cx,
+                )
+            })
+        });
+        assert!(names(cx).is_empty());
+
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(typing_event("ada", true), cx);
+                state.apply(typing_event("ada", false), cx);
+            })
+        });
+        assert!(names(cx).is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn typing_without_a_display_name_uses_the_chat_member_name(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| {
+            cx.new(|_| {
+                let mut state = AppState::new(store.clone(), Mode::default());
+                let mut member_chat = chat("c1", "First", false);
+                member_chat.members = vec![MemberRecord {
+                    user_id: Some("ada".into()),
+                    display_name: "Ada Lovelace".into(),
+                }];
+                state.sidebar.chats = vec![member_chat];
+                state
+            })
+        });
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply(
+                    BackendEvent::Typing(TypingEvent {
+                        conversation_id: "c1".into(),
+                        user_id: "ada".into(),
+                        display_name: String::new(),
+                        active: true,
+                        received_at: Utc::now(),
+                    }),
+                    cx,
+                )
+            })
+        });
+        assert_eq!(
+            cx.update(|cx| app.read(cx).typing.names("c1")),
+            vec!["Ada Lovelace".to_owned()]
+        );
+    }
+}

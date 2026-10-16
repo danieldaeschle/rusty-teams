@@ -7,7 +7,7 @@ const MAX_CALLBACK_BODY: usize = 4 * 1024 * 1024;
 /// A Trouter request for a callback URL the client handed out (`<surl>callAgent/...`), held open until replied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrouterCallback {
-    pub request_id: u64,
+    pub request_id: i64,
     pub path: String,
     pub content_encoding: Option<String>,
     pub body: String,
@@ -15,7 +15,7 @@ pub struct TrouterCallback {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CallbackReply {
-    pub request_id: u64,
+    pub request_id: i64,
     pub status: u16,
     pub body: String,
 }
@@ -27,7 +27,7 @@ pub struct CallbackReplier {
 }
 
 impl CallbackReplier {
-    pub fn reply(&self, request_id: u64, status: u16, body: impl Into<String>) {
+    pub fn reply(&self, request_id: i64, status: u16, body: impl Into<String>) {
         let _ = self.sender.send(CallbackReply {
             request_id,
             status,
@@ -40,7 +40,7 @@ impl CallbackReplier {
 struct WireCallback {
     channel: String,
     #[serde(rename = "requestId")]
-    request_id: u64,
+    request_id: i64,
     path: String,
     #[serde(rename = "contentEncoding", default)]
     content_encoding: Option<String>,
@@ -85,6 +85,12 @@ mod tests {
         assert_eq!(callback.path, "callAgent/a/b/call/acceptance/");
         assert_eq!(callback.content_encoding.as_deref(), Some("gzip"));
         assert_eq!(callback.body, "H4sI");
+    }
+
+    #[test]
+    fn negative_request_ids_are_callbacks_too() {
+        let payload = r#"{"channel":"callback","requestId":-2,"path":"callAgent/a/b/conversation/rosterUpdate/","body":"{}"}"#;
+        assert_eq!(decode_callback(payload).unwrap().request_id, -2);
     }
 
     #[test]

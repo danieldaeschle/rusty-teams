@@ -7,14 +7,17 @@ mod settings;
 mod source;
 mod tools;
 
-pub use hub::{AgentHub, CaptionLine, Event, EventKind, Outcome, Proposal, UiEvent};
+pub use hub::{
+    AgentHub, CaptionLine, Event, EventKind, NewProposal, NewReactionProposal, Outcome, Proposal,
+    ProposalImage, ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
+};
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
 pub use server::{ServerError, ServerHandle, start};
 pub use settings::{
     load as load_policy, load_or_create_token, regenerate_token, save as save_policy,
 };
 pub use source::{
-    EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
+    EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
     QuoteInfo, ReactionInfo, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 

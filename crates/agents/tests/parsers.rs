@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use agents::{OutputFormat, OutputParser, RunEvent, parse_line};
 
 fn parse_fixture(format: OutputFormat, name: &str) -> Vec<RunEvent> {
@@ -96,5 +98,31 @@ fn text_format_accumulates() {
     assert_eq!(
         parser.finish(),
         vec![RunEvent::Final("hello\n\nworld".to_string())]
+    );
+}
+
+#[test]
+fn claude_api_error_becomes_an_api_retry() {
+    let line = r#"{"type":"system","subtype":"api_error","error":{"message":"Connection error.","formatted":"No response from API","connection":{"code":"StreamNoResponse"},"noResponse":{"waitedMs":190000,"retryWaitMs":599000}},"session_id":"abc"}"#;
+    let events = parse_line(OutputFormat::ClaudeStreamJson, line);
+    assert_eq!(
+        events,
+        vec![RunEvent::ApiRetry {
+            message: "No response from API".to_string(),
+            retry_in: Some(Duration::from_millis(599_000)),
+        }]
+    );
+}
+
+#[test]
+fn claude_api_error_without_a_delay_has_no_retry_time() {
+    let line = r#"{"type":"system","subtype":"api_error","error":"Connection error."}"#;
+    let events = parse_line(OutputFormat::ClaudeStreamJson, line);
+    assert_eq!(
+        events,
+        vec![RunEvent::ApiRetry {
+            message: "Connection error.".to_string(),
+            retry_in: None,
+        }]
     );
 }

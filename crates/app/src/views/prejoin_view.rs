@@ -42,6 +42,8 @@ pub struct PrejoinView {
     cameras: Vec<DeviceEntry>,
     devices: DeviceLists,
     camera: DeviceChoice,
+    input: DeviceChoice,
+    output: DeviceChoice,
     applied_background: crate::call::BackgroundPick,
     tick: u32,
     _subscription: Subscription,
@@ -99,6 +101,7 @@ impl PrejoinView {
         let mut options = state.join_options.clone();
         options.camera_on = options.camera_on && !state.mode.read_only;
         let camera = state.call_camera.clone();
+        let (input, output) = (state.call_input.clone(), state.call_output.clone());
         let mut view = PrejoinView {
             pending_id: pending.id,
             demo,
@@ -111,6 +114,8 @@ impl PrejoinView {
                 DeviceLists::default()
             },
             camera,
+            input,
+            output,
             applied_background: crate::call::BackgroundPick::None,
             tick: 0,
             _subscription: subscription,
@@ -239,12 +244,16 @@ impl PrejoinView {
     }
 
     fn pick_input(&mut self, choice: DeviceChoice, cx: &mut Context<Self>) {
-        self.options.input = choice;
+        self.input = choice.clone();
+        self.app
+            .update(cx, |state, cx| state.select_call_input(choice, cx));
         cx.notify();
     }
 
     fn pick_output(&mut self, choice: DeviceChoice, cx: &mut Context<Self>) {
-        self.options.output = choice;
+        self.output = choice.clone();
+        self.app
+            .update(cx, |state, cx| state.select_call_output(choice, cx));
         cx.notify();
     }
 
@@ -277,7 +286,7 @@ impl PrejoinView {
         let face = match (&image, self.options.camera_on) {
             (Some(image), _) => img(ImageSource::Render(image.clone()))
                 .size_full()
-                .object_fit(ObjectFit::Cover)
+                .object_fit(ObjectFit::Contain)
                 .into_any_element(),
             (None, true) => centered_note(&self.preview_status()),
             (None, false) => v_flex()
@@ -454,8 +463,8 @@ impl Render for PrejoinView {
             .unwrap_or_default();
         let audio_on = self.options.audio == AudioChoice::Computer;
         let (cameras, camera) = (self.cameras.clone(), self.camera.clone());
-        let (inputs, input) = (self.devices.input_entries(), self.options.input.clone());
-        let (outputs, output) = (self.devices.output_entries(), self.options.output.clone());
+        let (inputs, input) = (self.devices.input_entries(), self.input.clone());
+        let (outputs, output) = (self.devices.output_entries(), self.output.clone());
         let devices = h_flex()
             .debug_selector(|| "shell/islands/main/prejoin/devices".into())
             .flex_none()

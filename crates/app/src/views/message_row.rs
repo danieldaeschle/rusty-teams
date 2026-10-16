@@ -1,19 +1,22 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
 
 use super::adaptive_card::cards_view;
-use super::attachments::{FileActions, ImageOpen, attachments_view, message_body};
+use super::attachments::{FileActions, ImageActions, attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
+use super::call_card::{CallActions, call_card_row};
+use super::jumbo_emoji::jumbo_row;
 use super::link_preview::{link_preview_card, meeting_join_chip};
-use super::message_actions::{HoverChange, MessageMenu, message_toolbar};
+use super::message_actions::{MessageMenu, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
 use super::reaction_pills::{ReactionControls, reaction_pills};
+use super::reaction_proposal_pill::{ReactionPill, reaction_pill};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
-use super::toolbar_placement::{TimelineBounds, placed_toolbar};
+use super::toolbar_placement::{HoverChange, TimelineBounds, placed_toolbar};
 use super::translation_line::{TranslationActions, translation_line};
 use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, run_chip};
@@ -23,14 +26,30 @@ use crate::render::Block;
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
+use app_ui_kit::layout::ROW_PADDING;
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 
+pub const BUBBLE_TAGS: [&str; 12] = [
+    "message-bubble/0",
+    "message-bubble/1",
+    "message-bubble/2",
+    "message-bubble/3",
+    "message-bubble/4",
+    "message-bubble/5",
+    "message-bubble/6",
+    "message-bubble/7",
+    "message-bubble/8",
+    "message-bubble/9",
+    "message-bubble/10",
+    "message-bubble/11",
+];
 pub(super) const AVATAR_SIZE: f32 = 28.;
 pub(super) const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
+const NARROW_BUBBLE_WIDTH: f32 = 300.;
 const REACTION_FOOTER_HEIGHT: f32 = 24.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
@@ -56,12 +75,14 @@ pub struct RowActions {
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
     pub files: Option<FileActions>,
-    pub open_image: Option<ImageOpen>,
+    pub open_image: Option<ImageActions>,
     pub highlighted: bool,
     pub saved: bool,
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
     pub agent_run: Option<AgentRun>,
+    pub call: CallActions,
+    pub reaction_proposal: Option<ReactionPill>,
 }
 
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
@@ -86,16 +107,24 @@ fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
         )
 }
 
-fn day_separator(label: &str) -> Div {
+pub(super) fn day_separator(label: &str) -> Div {
     separator_pill(label, theme::row_hover(), theme::text_muted())
 }
 
-fn new_marker() -> Div {
+pub(super) fn new_marker() -> Div {
     separator_pill(
         "New",
         theme::mention_background(false),
         theme::accent_text(),
     )
+}
+
+fn bubble_max_width(timeline: &TimelineBounds, reserved: f32) -> Length {
+    let Some(bounds) = timeline.get() else {
+        return relative(MAX_WIDTH_RATIO).into();
+    };
+    let row_width = (f32::from(bounds.size.width) - 2. * ROW_PADDING - reserved).max(0.);
+    px((row_width * MAX_WIDTH_RATIO).max(row_width.min(NARROW_BUBBLE_WIDTH))).into()
 }
 
 fn bubble(
@@ -107,18 +136,28 @@ fn bubble(
     cx: &App,
 ) -> Stateful<Div> {
     let corners = bubble_corners(own, row.series);
+    let jumbo = row.jumbo.as_deref().filter(|_| {
+        !row.deleted && matches!(row.delivery, Delivery::Delivered | Delivery::Sending)
+    });
     let mut element = div()
         .id(ElementId::Name(format!("bubble-{index}").into()))
         .when_some(extras.hover.clone(), |element, hover| {
             element.on_hover(move |is_hovered, _, cx| hover(*is_hovered, cx))
         })
         .relative()
-        .rounded_tl(px(corners.top_left))
-        .rounded_tr(px(corners.top_right))
-        .rounded_br(px(corners.bottom_right))
-        .rounded_bl(px(corners.bottom_left))
-        .px(px(12.))
-        .py(px(8.))
+        .max_w_full()
+        .when_some(BUBBLE_TAGS.get(index).copied(), |element, tag| {
+            element.debug_selector(|| tag.into())
+        })
+        .when(jumbo.is_none(), |element| {
+            element
+                .rounded_tl(px(corners.top_left))
+                .rounded_tr(px(corners.top_right))
+                .rounded_br(px(corners.bottom_right))
+                .rounded_bl(px(corners.bottom_left))
+                .px(px(12.))
+                .py(px(8.))
+        })
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
     if row.deleted {
@@ -134,7 +173,7 @@ fn bubble(
     let failed = matches!(row.delivery, Delivery::Failed(_));
     let scheduled = matches!(row.delivery, Delivery::Scheduled(_));
     element = element
-        .when(!scheduled, |bubble| {
+        .when(!scheduled && jumbo.is_none(), |bubble| {
             bubble.bg(if own && !failed {
                 theme::bubble_own()
             } else {
@@ -159,13 +198,30 @@ fn bubble(
     if row.forwarded {
         content = content.child(forwarded_header());
     }
-    let padded_blocks = if has_reactions {
+    let attachments = attachments_view(
+        &row.blocks,
+        &row.images,
+        &row.local_images,
+        &row.files,
+        &format!("message-{index}"),
+        directory,
+        extras.files.as_ref(),
+        extras.open_image.as_ref(),
+    );
+    let cards = cards_view(&row.adaptive_cards, &row.conversation_id, &row.key, cx);
+    let trailing_content = attachments.is_some()
+        || row.meeting_link.is_some()
+        || row.link_preview.is_some()
+        || !cards.is_empty();
+    let padded_blocks = if has_reactions || trailing_content || jumbo.is_some() {
         None
     } else {
         with_meta_room(&row.blocks, meta_room(row, own, saved))
     };
     let meta_inline = has_text(row) && padded_blocks.is_some();
-    if has_text(row) {
+    if let Some(jumbo) = jumbo {
+        content = content.child(jumbo_row(&row.key, jumbo, own));
+    } else if has_text(row) {
         content = content.children(message_body(
             padded_blocks.as_deref().unwrap_or(&row.blocks),
             &row.images,
@@ -177,16 +233,7 @@ fn bubble(
             cx,
         ));
     }
-    content = content.children(attachments_view(
-        &row.blocks,
-        &row.images,
-        &row.local_images,
-        &row.files,
-        &format!("message-{index}"),
-        directory,
-        extras.files.as_ref(),
-        extras.open_image.as_ref(),
-    ));
+    content = content.children(attachments);
     content = content.children(
         row.meeting_link
             .clone()
@@ -201,12 +248,7 @@ fn bubble(
             None,
         )
     }));
-    content = content.children(cards_view(
-        &row.adaptive_cards,
-        &row.conversation_id,
-        &row.key,
-        cx,
-    ));
+    content = content.children(cards);
     if has_reactions {
         content = content.child(
             h_flex()
@@ -269,15 +311,16 @@ struct BubbleExtras {
     react: Option<PickHandler>,
     controls: Option<ReactionControls>,
     files: Option<FileActions>,
-    open_image: Option<ImageOpen>,
+    open_image: Option<ImageActions>,
     saved: bool,
     translation: Option<TranslationActions>,
     timeline: TimelineBounds,
     agent_run: Option<AgentRun>,
+    reaction_proposal: Option<ReactionPill>,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
-    run.map(|run| div().pt(px(2.)).child(run_chip(&run, theme::row_hover())))
+    run.map(|run| div().py(px(2.)).child(run_chip(&run, theme::row_hover())))
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -322,11 +365,19 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
             own && row.delivery == Delivery::Delivered,
             |meta| match row.receipt {
                 Receipt::Hidden => meta,
-                Receipt::Pending => meta.child(receipt_slot(tint)),
-                Receipt::Sent => meta.child(symbol("done", META_CHECK_SIZE, tint)),
-                Receipt::Read => meta.child(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                Receipt::Pending => meta.child(receipt_slot(tint).relative().top(px(1.))),
+                Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
+                Receipt::Read => meta.child(on_baseline(symbol(
+                    "done_all",
+                    META_CHECK_SIZE,
+                    theme::own_read(),
+                ))),
             },
         )
+}
+
+fn on_baseline(check: Icon) -> Div {
+    div().relative().top(px(1.)).child(check)
 }
 
 fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> AnimationElement<E> {
@@ -386,7 +437,7 @@ pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
     div()
         .id(ElementId::Name(format!("row-{index}").into()))
         .w_full()
-        .px(px(20.))
+        .px(px(ROW_PADDING))
         .pt(px(SERIES_START_GAP))
         .child(pulse("skeleton", line))
         .into_any_element()
@@ -490,12 +541,15 @@ fn others_row(
 ) -> Div {
     let translation = extras.translation.take();
     let agent_run = extras.agent_run.take();
+    let reaction_proposal = extras.reaction_proposal.take();
     let first = !row.series.has_prev;
     let author = bot.map_or_else(|| row.author.clone(), |bot| bot.name.clone());
     let profile_user = row.sender_id.as_deref().filter(|_| bot.is_none());
     let mut column = v_flex()
         .gap(px(2.))
-        .max_w(relative(MAX_WIDTH_RATIO))
+        .flex_1()
+        .min_w_0()
+        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP))
         .items_start();
     if first {
         column = column.child(
@@ -513,6 +567,7 @@ fn others_row(
     }
     column = column.child(bubble(row, index, false, directory, extras, cx));
     column = column.children(agent_chip(agent_run));
+    column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -555,13 +610,21 @@ fn own_row(
 ) -> Div {
     let translation = extras.translation.take();
     let agent_run = extras.agent_run.take();
+    let reaction_proposal = extras.reaction_proposal.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
-        div()
-            .max_w(relative(MAX_WIDTH_RATIO))
-            .child(bubble(row, index, true, directory, extras, cx)),
+        h_flex()
+            .w_full()
+            .justify_end()
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w(bubble_max_width(&extras.timeline, 0.))
+                    .child(bubble(row, index, true, directory, extras, cx)),
+            ),
     );
     column = column.children(agent_chip(agent_run));
+    column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
     column = column.children(translation_line(row, index, translation.as_ref()));
     if let Some(note) = delivery_note(row, delivery, index) {
         column = column.child(note);
@@ -576,6 +639,9 @@ pub fn render_message_row(
     directory: &Directory,
     cx: &App,
 ) -> AnyElement {
+    if let Some(call) = &row.call {
+        return call_card_row(row, call, index, directory, actions.call);
+    }
     let RowActions {
         bot,
         delivery,
@@ -592,6 +658,8 @@ pub fn render_message_row(
         translation,
         timeline,
         agent_run,
+        call: _,
+        reaction_proposal,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -605,6 +673,7 @@ pub fn render_message_row(
         translation,
         timeline,
         agent_run,
+        reaction_proposal,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {
@@ -612,7 +681,7 @@ pub fn render_message_row(
     } else {
         px(SERIES_START_GAP)
     };
-    let mut container = v_flex().w_full().px(px(20.));
+    let mut container = v_flex().w_full().px(px(ROW_PADDING));
     if let Some(day) = &row.day_header {
         container = container.child(day_separator(day));
     }

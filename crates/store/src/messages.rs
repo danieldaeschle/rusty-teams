@@ -10,7 +10,7 @@ use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
 
 const MESSAGE_COLUMNS: &str = "conversation_id, message_id, reply_to_id, sender_id, sender_name, created_at, \
-     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json, subject";
+     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json, subject, call_event_json";
 
 impl Store {
     pub fn upsert_messages(&self, messages: &[MessageRecord]) -> Result<()> {
@@ -19,7 +19,7 @@ impl Store {
         {
             let mut upsert = transaction.prepare_cached(&format!(
                 "INSERT INTO messages ({MESSAGE_COLUMNS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT (conversation_id, message_id) DO UPDATE SET
                     reply_to_id = excluded.reply_to_id, sender_id = excluded.sender_id,
                     sender_name = excluded.sender_name, created_at = excluded.created_at,
@@ -28,6 +28,7 @@ impl Store {
                     mentions_json = excluded.mentions_json,
                     sender_application_id = excluded.sender_application_id,
                     subject = COALESCE(excluded.subject, messages.subject),
+                    call_event_json = excluded.call_event_json,
                     links_json = CASE WHEN excluded.links_json IN ('', '[]')
                         THEN messages.links_json ELSE excluded.links_json END"
             ))?;
@@ -48,6 +49,7 @@ impl Store {
                     message.sender_application_id,
                     message.links_json,
                     message.subject,
+                    message.call_event_json,
                 ])?;
                 index_message(&transaction, message)?;
             }
@@ -80,6 +82,7 @@ impl Store {
         let count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM messages
              WHERE conversation_id = ?1 AND deleted = 0 AND created_at > ?2
+               AND call_event_json IS NULL
                AND (sender_id IS NULL OR sender_id != ?3)",
             params![
                 conversation_id,
@@ -102,6 +105,7 @@ impl Store {
             .query_row(
                 "SELECT message_id FROM messages
                  WHERE conversation_id = ?1 AND deleted = 0 AND created_at > ?2
+                   AND call_event_json IS NULL
                    AND (sender_id IS NULL OR sender_id != ?3)
                  ORDER BY created_at ASC, message_id ASC LIMIT 1",
                 params![
@@ -248,6 +252,23 @@ impl Store {
         Ok(messages)
     }
 
+    pub fn messages_with_attachment_type(
+        &self,
+        conversation_id: &str,
+        content_type: &str,
+    ) -> Result<Vec<MessageRecord>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages
+             WHERE conversation_id = ?1 AND instr(attachments_json, ?2) > 0"
+        ))?;
+        let needle = format!("\"content_type\":\"{content_type}\"");
+        let messages = statement
+            .query_map(params![conversation_id, needle], message_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(messages)
+    }
+
     pub fn messages_by_id(
         &self,
         conversation_id: &str,
@@ -269,6 +290,54 @@ impl Store {
             found.insert(message.message_id.clone(), message);
         }
         Ok(found)
+    }
+
+    /// Newest first: (message_id, reactions_json) of the sender's undeleted messages.
+    pub fn reaction_state_of_sender(
+        &self,
+        conversation_id: &str,
+        sender_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String)>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "SELECT message_id, reactions_json FROM messages
+             WHERE conversation_id = ?1 AND sender_id = ?2 AND deleted = 0
+             ORDER BY created_at DESC, message_id DESC LIMIT ?3",
+        )?;
+        let rows = statement
+            .query_map(params![conversation_id, sender_id, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows)
+    }
+
+    /// (user_id, display name) of the senders and mentioned people in the newest `scan` messages.
+    pub fn conversation_people(
+        &self,
+        conversation_id: &str,
+        scan: usize,
+    ) -> Result<Vec<(String, String)>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "WITH recent AS (
+                SELECT sender_id, sender_name, mentions_json FROM messages
+                WHERE conversation_id = ?1 ORDER BY created_at DESC, message_id DESC LIMIT ?2)
+             SELECT DISTINCT sender_id, sender_name FROM recent
+             WHERE sender_id IS NOT NULL AND sender_name IS NOT NULL
+             UNION
+             SELECT DISTINCT json_extract(mention.value, '$.user_id'), json_extract(mention.value, '$.name')
+             FROM recent, json_each(CASE WHEN json_valid(mentions_json) THEN mentions_json ELSE '[]' END) AS mention
+             WHERE json_extract(mention.value, '$.user_id') IS NOT NULL
+               AND json_extract(mention.value, '$.name') IS NOT NULL",
+        )?;
+        let people = statement
+            .query_map(params![conversation_id, scan as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(people)
     }
 
     pub fn display_names(&self, user_ids: &[String]) -> Result<HashMap<String, String>> {
@@ -343,5 +412,6 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         sender_application_id: row.get(12)?,
         links_json: row.get(13)?,
         subject: row.get(14)?,
+        call_event_json: row.get(15)?,
     })
 }

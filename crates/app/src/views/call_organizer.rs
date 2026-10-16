@@ -16,12 +16,11 @@ use super::call_control_fold::{Foldable, FoldedControls, folded_items};
 use super::call_extras::{
     CameraMenu, background_items, effect_items, open_transfer_picker,
 };
-use super::call_record::{record_submenu, transcript_and_settings_items};
-use super::call_people::add_people_item;
+use super::call_record::{record_items, transcript_and_settings_items};
 use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
-use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus};
+use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus, contain_size};
 use crate::notice::truncated;
 use crate::theme;
 
@@ -35,6 +34,7 @@ const CAPTION_TOP: f32 = 72.;
 const CAPTION_FADE_SECONDS: f32 = 1.;
 const CAPTION_BACKGROUND: f32 = 0.72;
 const FOCUS_RADIUS: f32 = 12.;
+const FOCUS_BORDER: f32 = 2.;
 const FOCUS_AVATAR: f32 = 140.;
 const CHIP_HEIGHT: f32 = 24.;
 const MORE_SIZE: f32 = 28.;
@@ -45,7 +45,7 @@ fn dark_text() -> Hsla {
     hsla(0., 0., 0.08, 1.)
 }
 
-pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) -> Stateful<Div> {
+pub(super) fn pill(id: impl Into<ElementId>, label: impl Into<SharedString>, filled: bool) -> Stateful<Div> {
     let (background, foreground) = if filled {
         (dark_text(), theme::white())
     } else {
@@ -65,7 +65,7 @@ pub(super) fn pill(id: impl Into<ElementId>, label: &'static str, filled: bool) 
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
-        .child(label)
+        .child(label.into())
 }
 
 pub fn lobby_text(waiting: usize) -> String {
@@ -353,8 +353,8 @@ fn more_overlay(
         (app.clone(), model.clone(), mri.to_owned(), name.to_owned());
     div()
         .absolute()
-        .top(px(6.))
-        .right(px(38.))
+        .top(px(8.))
+        .right(px(8.))
         .opacity(0.)
         .group_hover(group, |more| more.opacity(1.))
         .child(
@@ -421,8 +421,10 @@ pub fn more_button(
     model: &CallModel,
     folded: &FoldedControls,
 ) -> Option<AnyElement> {
-    let in_meeting = model.kind == crate::call::CallKind::Meeting;
-    if !in_meeting && !model.is_one_to_one() {
+    if !matches!(
+        model.kind,
+        crate::call::CallKind::Meeting | crate::call::CallKind::Direct | crate::call::CallKind::Group
+    ) {
         return None;
     }
     let app = app.clone();
@@ -464,10 +466,10 @@ fn more_menu(
     folded: &FoldedControls,
 ) -> PopupMenu {
     let popup = folded_items(popup.min_w(px(MENU_WIDTH)), window, cx, app, model, folded);
-    let popup = if model.is_one_to_one() {
-        one_to_one_items(popup, app, model)
-    } else {
-        meeting_items(popup, window, cx, app, model)
+    let popup = match model.kind {
+        crate::call::CallKind::Meeting => meeting_items(popup, window, cx, app, model),
+        crate::call::CallKind::Direct => one_to_one_items(popup, window, cx, app, model),
+        _ => record_items(popup, window, cx, app, model),
     };
     incoming_video_item(popup, app, model)
 }
@@ -486,7 +488,13 @@ fn incoming_video_item(popup: PopupMenu, app: &Entity<AppState>, model: &CallMod
     )
 }
 
-fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> PopupMenu {
+fn one_to_one_items(
+    mut popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+    model: &CallModel,
+) -> PopupMenu {
     let (hold_app, transfer_app) = (app.clone(), app.clone());
     let held = model.hold == HoldState::Local;
     popup = popup.item(
@@ -495,8 +503,8 @@ fn one_to_one_items(mut popup: PopupMenu, app: &Entity<AppState>, model: &CallMo
             .disabled(!held && !model.can_hold())
             .on_click(move |_, _, cx| hold_app.update(cx, |state, cx| state.toggle_call_hold(cx))),
     );
+    popup = record_items(popup, window, cx, app, model);
     let can_transfer = model.can_transfer();
-    popup = popup.item(add_people_item(app, model));
     popup.item(
         PopupMenuItem::new("Transfer...")
             .icon(IconName::Forward)
@@ -521,9 +529,7 @@ fn meeting_items(
                 .on_click(move |_, _, cx| mute_app.update(cx, |state, cx| state.mute_all_call(cx))),
         );
     }
-    if model.can_record() {
-        popup = record_submenu(popup, window, cx, app, model);
-    }
+    popup = record_items(popup, window, cx, app, model);
     if model.can_open_whiteboard() {
         popup = popup.item(
             PopupMenuItem::new("Whiteboard")
@@ -698,6 +704,7 @@ pub fn render_focus_stage(
     app: &Entity<AppState>,
     state: &AppState,
     focus: &Focus,
+    size: (f32, f32),
     now: Instant,
 ) -> Option<AnyElement> {
     let call = state.call.as_ref()?;
@@ -722,34 +729,44 @@ pub fn render_focus_stage(
         )
     };
     let image: Option<Arc<RenderImage>> = call.pictures.live(&key, now);
-    let picture = match image {
-        Some(image) => img(ImageSource::Render(image))
-            .size_full()
-            .object_fit(ObjectFit::Contain)
-            .into_any_element(),
-        None => div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(person_avatar(
-                &state.directory,
-                user_id.as_deref(),
-                &name,
-                FOCUS_AVATAR,
-            ))
-            .into_any_element(),
+    let avatar_only = image.is_none();
+    let (picture_size, picture) = match image {
+        Some(image) => {
+            let pixels = image.size(0);
+            let (width, height) = contain_size(size, (pixels.width.0 as f32, pixels.height.0 as f32));
+            let picture = img(ImageSource::Render(image))
+                .size_full()
+                .object_fit(ObjectFit::Fill)
+                .rounded(px(FOCUS_RADIUS))
+                .into_any_element();
+            ((width, height), picture)
+        }
+        None => (
+            contain_size(size, (16., 9.)),
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(person_avatar(
+                    &state.directory,
+                    user_id.as_deref(),
+                    &name,
+                    FOCUS_AVATAR,
+                ))
+                .into_any_element(),
+        ),
     };
     let stage = div()
         .id("call-focus-stage")
         .relative()
-        .flex_1()
-        .min_w_0()
-        .h_full()
+        .w(px(picture_size.0))
+        .h(px(picture_size.1))
+        .flex_none()
         .overflow_hidden()
         .rounded(px(FOCUS_RADIUS))
-        .bg(hsla(0., 0., 0.04, 1.))
-        .border_2()
+        .when(avatar_only, |stage| stage.bg(hsla(0., 0., 0.04, 1.)))
+        .border(px(FOCUS_BORDER))
         .border_color(if speaking {
             theme::green()
         } else {
@@ -768,8 +785,8 @@ pub fn render_focus_stage(
         .child(
             h_flex()
                 .absolute()
-                .left(px(12.))
-                .bottom(px(12.))
+                .left(px(8.))
+                .bottom(px(8.))
                 .gap(px(8.))
                 .px(px(8.))
                 .py(px(4.))
@@ -783,9 +800,18 @@ pub fn render_focus_stage(
                     plate.child(icon(IconName::MicOff, 14., theme::red()))
                 }),
         );
-    Some(attach_tile_menu(
-        stage, app, model, &focus.mri, &name, focus.own,
-    ))
+    let stage = attach_tile_menu(stage, app, model, &focus.mri, &name, focus.own);
+    Some(
+        div()
+            .w(px(size.0))
+            .h(px(size.1))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(stage)
+            .into_any_element(),
+    )
 }
 
 pub fn captions_state_hint(model: &CallModel) -> Option<&'static str> {

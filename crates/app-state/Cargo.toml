@@ -1,0 +1,42 @@
+[package]
+name = "app-state"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-support = []
+
+[lib]
+name = "state"
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+
+[dependencies]
+agents.workspace = true
+app-base.workspace = true
+app-call-model.workspace = true
+app-ui-kit.workspace = true
+calling.workspace = true
+chatsvc.workspace = true
+chrono.workspace = true
+directories.workspace = true
+gpui-kit.workspace = true
+graph.workspace = true
+log = "0.4"
+mcp.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+session.workspace = true
+store.workspace = true
+teams-core.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+
+[target.'cfg(windows)'.dependencies]
+webview.workspace = true

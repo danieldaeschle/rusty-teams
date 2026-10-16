@@ -10,8 +10,10 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::skin_tone_choices::{tone_badge, tone_choices};
 use crate::app_state::AppState;
 use crate::emoji;
+use crate::emoticons;
 use crate::rows::reaction_glyph;
 use crate::theme;
 
@@ -63,6 +65,8 @@ pub struct ReactionPicker {
     recent: Entity<emoji::Recent>,
     selected: HashSet<String>,
     target: Option<PickTarget>,
+    skin_tone: u8,
+    tone_menu: Option<(String, Point<Pixels>)>,
     _subscription: Subscription,
 }
 
@@ -82,6 +86,8 @@ impl ReactionPicker {
             recent,
             selected: HashSet::new(),
             target: None,
+            skin_tone: 0,
+            tone_menu: None,
             _subscription: subscription,
         }
     }
@@ -98,11 +104,16 @@ impl ReactionPicker {
             on_done,
             popover,
         });
-        self.selected = selected;
+        self.selected = selected
+            .iter()
+            .map(|glyph| emoticons::without_tone(glyph))
+            .collect();
     }
 
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let store = self.app.read(cx).store.clone();
+        self.skin_tone = teams_core::skin_tone(&store);
+        self.tone_menu = None;
         self.recent.update(cx, |recent, cx| {
             recent.reload(&store);
             cx.notify();
@@ -165,7 +176,8 @@ impl ReactionPicker {
         let Some(target) = target else {
             return;
         };
-        let normalized = reaction_glyph(glyph);
+        self.tone_menu = None;
+        let normalized = emoticons::without_tone(&reaction_glyph(glyph));
         if !self.selected.remove(&normalized) {
             self.selected.insert(normalized);
         }
@@ -181,11 +193,57 @@ impl ReactionPicker {
         (target.on_done)(window, cx);
     }
 
-    fn cell(&self, glyph: String, index: usize, cx: &mut Context<Self>) -> Stateful<Div> {
-        let picked = glyph.clone();
-        let selected = self.selected.contains(&reaction_glyph(&glyph));
+    fn pick_tone(&mut self, glyph: &str, tone: u8, window: &mut Window, cx: &mut Context<Self>) {
+        self.skin_tone = tone;
+        self.app.update(cx, |state, cx| state.set_skin_tone(tone, cx));
+        self.pick(&emoticons::with_tone(glyph, tone), false, window, cx);
+    }
+
+    fn tone_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (base, position) = self.tone_menu.clone()?;
+        let (pick_view, dismiss_view) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let glyph = base.clone();
+        Some(tone_choices(
+            "reaction-picker-tones",
+            position,
+            &glyph,
+            self.skin_tone,
+            Rc::new(move |tone, window, cx| {
+                pick_view
+                    .update(cx, |this, cx| this.pick_tone(&base, tone, window, cx))
+                    .ok();
+            }),
+            Rc::new(move |_, cx| {
+                dismiss_view
+                    .update(cx, |this, cx| {
+                        this.tone_menu = None;
+                        cx.notify();
+                    })
+                    .ok();
+            }),
+        ))
+    }
+
+    fn cell(
+        &self,
+        glyph: String,
+        index: usize,
+        toned: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let toneable = toned && emoticons::is_toneable(&glyph);
+        let shown = if toneable {
+            emoticons::with_tone(&glyph, self.skin_tone)
+        } else {
+            glyph.clone()
+        };
+        let picked = shown.clone();
+        let selected = self
+            .selected
+            .contains(&emoticons::without_tone(&reaction_glyph(&glyph)));
         div()
             .id(("reaction-picker-cell", index))
+            .relative()
             .size(px(CELL_SIZE))
             .flex()
             .items_center()
@@ -195,7 +253,18 @@ impl ReactionPicker {
             .cursor_pointer()
             .when(selected, |cell| cell.bg(theme::reaction_on_own()))
             .hover(|cell| cell.bg(theme::popup_hover()))
-            .child(glyph)
+            .child(shown)
+            .when(toneable, |cell| {
+                let base = glyph.clone();
+                cell.child(tone_badge()).on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        this.tone_menu = Some((base.clone(), event.position));
+                        cx.notify();
+                    }),
+                )
+            })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 this.pick(&picked, event.modifiers().shift, window, cx)
             }))
@@ -215,12 +284,12 @@ impl Render for ReactionPicker {
         let quick = PICKER_QUICK
             .iter()
             .enumerate()
-            .map(|(index, glyph)| self.cell((*glyph).to_owned(), 1000 + index, cx))
+            .map(|(index, glyph)| self.cell((*glyph).to_owned(), 1000 + index, false, cx))
             .collect::<Vec<_>>();
         let mut rows = Vec::new();
         let mut row = Vec::new();
         for (index, glyph) in results.into_iter().enumerate() {
-            row.push(self.cell(glyph, index, cx));
+            row.push(self.cell(glyph, index, true, cx));
             if row.len() == GRID_COLUMNS {
                 rows.push(h_flex().gap(px(2.)).children(std::mem::take(&mut row)));
             }
@@ -250,5 +319,6 @@ impl Render for ReactionPicker {
                     .child(label),
             )
             .child(v_flex().gap(px(2.)).children(rows))
+            .children(self.tone_menu(cx))
     }
 }

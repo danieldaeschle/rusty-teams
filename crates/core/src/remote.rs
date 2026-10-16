@@ -2,9 +2,9 @@ use chatsvc::{
     CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState, Conversations,
     ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
     LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
-    MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus, Receipts,
-    SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest, Translation,
-    TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
+    MessageEmotions, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
+    Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
+    Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -351,6 +351,15 @@ pub trait Remote {
         Err(Error::Unsupported("link previews"))
     }
 
+    async fn message_emotions(
+        &self,
+        _conversation: &ConversationRef,
+        _newest_message_id: &str,
+        _page_size: usize,
+    ) -> Result<Vec<MessageEmotions>> {
+        Err(Error::Unsupported("chat service reactions"))
+    }
+
     async fn set_message_links(&self, _target: &MessageTarget, _links_json: &str) -> Result<()> {
         Err(Error::Unsupported("link previews"))
     }
@@ -399,6 +408,10 @@ pub trait Remote {
 
     async fn patch_language_settings(&self, _patch: serde_json::Value) -> Result<()> {
         Err(Error::Unsupported("translation settings"))
+    }
+
+    async fn recording_policy(&self) -> Result<RecordingPolicy> {
+        Err(Error::Unsupported("recording policy"))
     }
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
@@ -643,19 +656,20 @@ impl Remote for Graph {
     }
 
     async fn set_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
-        if let Some(key) = chatsvc::emotion_key(reaction_type) {
+        if let Some(key) = chatsvc::reaction_key(reaction_type) {
             return Ok(Messages::new(self.session())
-                .set_emotion(&conversation_ref(target), target.message_id(), key)
+                .set_emotion(&conversation_ref(target), target.message_id(), &key)
                 .await?);
         }
         Ok(Graph::set_reaction(self, target, reaction_type).await?)
     }
 
     async fn unset_reaction(&self, target: &MessageTarget, reaction_type: &str) -> Result<()> {
-        let keys = chatsvc::emotion_keys(reaction_type);
+        let keys = chatsvc::reaction_keys(reaction_type);
         if !keys.is_empty() {
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
             return Ok(Messages::new(self.session())
-                .unset_emotions(&conversation_ref(target), target.message_id(), keys)
+                .unset_emotions(&conversation_ref(target), target.message_id(), &keys)
                 .await?);
         }
         Ok(Graph::unset_reaction(self, target, reaction_type).await?)
@@ -952,6 +966,17 @@ impl Remote for Graph {
             .await?)
     }
 
+    async fn message_emotions(
+        &self,
+        conversation: &ConversationRef,
+        newest_message_id: &str,
+        page_size: usize,
+    ) -> Result<Vec<MessageEmotions>> {
+        Ok(Messages::new(self.session())
+            .message_emotions(&conversation.conversation_id(), newest_message_id, page_size)
+            .await?)
+    }
+
     async fn set_message_links(&self, target: &MessageTarget, links_json: &str) -> Result<()> {
         Ok(Messages::new(self.session())
             .set_links(&conversation_ref(target), target.message_id(), links_json)
@@ -1004,6 +1029,12 @@ impl Remote for Graph {
 
     async fn language_settings(&self) -> Result<LanguageSettings> {
         Ok(LanguageSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn recording_policy(&self) -> Result<RecordingPolicy> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .read_recording_policy()
+            .await?)
     }
 
     async fn patch_language_settings(&self, patch: serde_json::Value) -> Result<()> {

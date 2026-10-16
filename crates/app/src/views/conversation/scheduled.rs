@@ -17,7 +17,8 @@ use crate::scheduled_rows::{
     draft_id_of, draft_key, scheduled_feed_rows, scheduled_outgoing, scheduled_rows,
 };
 use crate::views::composer::{EditPreview, Outgoing};
-use crate::views::message_actions::{Action, HoverChange};
+use crate::views::message_actions::Action;
+use crate::views::toolbar_placement::HoverChange;
 use crate::views::message_row::{DeliveryActions, RowAction};
 use crate::views::scheduled_toolbar::ScheduledMenu;
 use std::sync::Arc;

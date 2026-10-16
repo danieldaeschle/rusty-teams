@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
-use crate::blur::{MASK_HEIGHT, MASK_WIDTH, axis, smoothstep};
+use crate::mask::{Mask, axis};
+use crate::matte::{Planes, refine};
 use crate::blur::BlurSettings;
 
 const CUTOUT_WIDTH: u32 = 480;
@@ -30,8 +31,8 @@ fn corner_coverage(column: usize, row: usize, width: usize, height: usize, radiu
 }
 
 impl Cutout {
-    pub fn from_camera(camera: &mut I420Buffer, mask: &[f32]) -> Option<Cutout> {
-        if mask.len() != MASK_WIDTH * MASK_HEIGHT || camera.width() < 2 || camera.height() < 2 {
+    pub fn from_camera(camera: &mut I420Buffer, mask: &Mask) -> Option<Cutout> {
+        if mask.is_empty() || camera.width() < 2 || camera.height() < 2 {
             return None;
         }
         let width = CUTOUT_WIDTH.min(camera.width()) & !1;
@@ -40,8 +41,7 @@ impl Cutout {
         let (width, height) = (width as usize, height as usize);
         let (stride_y, stride_u, stride_v) = scaled.strides();
         let (plane_y, plane_u, plane_v) = scaled.data();
-        let mask_x = axis(width, MASK_WIDTH);
-        let mask_y = axis(height, MASK_HEIGHT);
+        let matte = refine(mask, Planes::of(&scaled));
         let radius = width as f32 * CORNER_SHARE;
         let mut cutout = Cutout {
             width,
@@ -52,12 +52,8 @@ impl Cutout {
             alpha: Vec::with_capacity(width * height),
         };
         for row in 0..height {
-            let (top, bottom, vertical) = (mask_y.first[row] * MASK_WIDTH, mask_y.second[row] * MASK_WIDTH, mask_y.weight[row]);
             for column in 0..width {
-                let (left, right, across) = (mask_x.first[column], mask_x.second[column], mask_x.weight[column]);
-                let upper = mask[top + left] * (1. - across) + mask[top + right] * across;
-                let lower = mask[bottom + left] * (1. - across) + mask[bottom + right] * across;
-                let person = smoothstep(upper * (1. - vertical) + lower * vertical);
+                let person = f32::from(matte.alpha[row * width + column]) / 255.;
                 let coverage = person * corner_coverage(column, row, width, height, radius);
                 cutout.luma.push(plane_y[row * stride_y as usize + column]);
                 cutout.chroma_blue.push(plane_u[(row / 2) * stride_u as usize + column / 2]);
@@ -185,8 +181,8 @@ mod tests {
         buffer
     }
 
-    fn full_mask(value: f32) -> Vec<f32> {
-        vec![value; MASK_WIDTH * MASK_HEIGHT]
+    fn full_mask(value: f32) -> Mask {
+        Mask::filled(256, 144, value)
     }
 
     fn luma_at(buffer: &I420Buffer, x: usize, y: usize) -> u8 {
@@ -240,6 +236,6 @@ mod tests {
     #[test]
     fn a_missing_mask_gives_no_cutout() {
         let mut camera = gray_frame(640, 360, 100);
-        assert!(Cutout::from_camera(&mut camera, &[]).is_none());
+        assert!(Cutout::from_camera(&mut camera, &Mask::default()).is_none());
     }
 }

@@ -34,7 +34,7 @@ fn is_user_message(message: &Value) -> bool {
     message
         .get("messagetype")
         .and_then(Value::as_str)
-        .is_some_and(|kind| kind == "Text" || kind.starts_with("RichText"))
+        .is_some_and(|kind| kind == "Text" || kind == "Event/Call" || kind.starts_with("RichText"))
 }
 
 fn message_id(message: &Value) -> Option<String> {
@@ -146,7 +146,12 @@ mod tests {
         let window = parse_message_window(&fixture()).unwrap();
         assert_eq!(
             window.message_ids,
-            ["1791368000030", "1791368000020", "1791368000010"]
+            [
+                "1791368000030",
+                "1791368000020",
+                "1791368000015",
+                "1791368000010"
+            ]
         );
         assert_eq!(window.older_cursor.as_deref(), Some("1791368000009"));
         assert_eq!(window.newer_cursor.as_deref(), Some("1791368000031"));

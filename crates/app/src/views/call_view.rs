@@ -24,7 +24,8 @@ use super::call_extras::{
     room_chip, whiteboard_stage,
 };
 use super::call_health::{health_banner, health_indicator};
-use super::call_layouts::{measured_stage, stage_region};
+use super::call_layouts::stage_region;
+use crate::call::measured_stage;
 use super::call_organizer::{
     camera_menu_button, captions_hint_chip, captions_overlay, chevron_button, lobby_banner,
     more_button, pin_chip, spotlight_chip, with_tile_menu,
@@ -32,8 +33,7 @@ use super::call_organizer::{
 use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, people_panel};
 use super::call_stage::{StageMode, popped_placeholder, render_stage};
 use super::call_view_menu::view_button;
-use super::conversation::ConversationView;
-use super::shell::ISLAND_GAP;
+use app_ui_kit::layout::ISLAND_GAP;
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::REACTION_SHOWN;
@@ -52,12 +52,9 @@ const PULSE_PERIOD: Duration = Duration::from_millis(1400);
 const BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const BLINK_DIMMED_OPACITY: f32 = 0.45;
 pub(super) const DISABLED_OPACITY: f32 = 0.4;
-pub(super) const TILE_GAP: f32 = 20.;
-pub(super) const GRID_PADDING: f32 = 24.;
-pub(super) const STRIP_GAP: f32 = 12.;
-pub(super) const STRIP_VISIBLE: f32 = 4.;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
+pub const CHAT_PANEL_TAG: &str = "shell/islands/main/call-chat-panel";
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";
 const AUDIO_OFF_HINT: &str = "Audio is off for this meeting";
 pub const NO_CAMERA_HINT: &str = "No camera found";
@@ -279,17 +276,7 @@ fn tile(
     caption: Option<AnyElement>,
     extras: &TileExtras,
 ) -> Div {
-    let badge = div()
-        .absolute()
-        .top(px(8.))
-        .right(px(8.))
-        .size(px(24.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .bg(theme::red())
-        .child(icon(IconName::MicOff, 13., theme::white()));
+    let badge = mute_badge();
     v_flex()
         .relative()
         .w(px(size.width))
@@ -830,8 +817,12 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
         .into_any_element()
 }
 
+fn has_leave_menu(model: &CallModel) -> bool {
+    model.kind == CallKind::Meeting
+        && (model.can_end_meeting || (model.can_lower_hands() && model.any_hand_raised()))
+}
+
 fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
-    let leave_app = app.clone();
     let end_app = app.clone();
     let can_end = model.can_end_meeting;
     let lower_app = app.clone();
@@ -848,16 +839,9 @@ fn leave_menu(app: &Entity<AppState>, model: &CallModel) -> impl IntoElement {
             theme::text(),
         ))
         .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| {
-            let leave_app = leave_app.clone();
             let end_app = end_app.clone();
             let lower_app = lower_app.clone();
-            let popup = popup.min_w(px(MENU_WIDTH)).item(
-                PopupMenuItem::new("Leave")
-                    .icon(IconName::PhoneOff)
-                    .on_click(move |_, _, cx| {
-                        leave_app.update(cx, |state, cx| state.leave_call(cx))
-                    }),
-            );
+            let popup = popup.min_w(px(MENU_WIDTH));
             let popup = if can_lower_all {
                 popup.item(
                     PopupMenuItem::new("Lower all hands").on_click(move |_, _, cx| {
@@ -1115,7 +1099,7 @@ fn own_tile_body(
 
 fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> FoldedControls {
     let model = &call.model;
-    let has_more = model.kind == CallKind::Meeting || model.is_one_to_one();
+    let has_more = model.kind != CallKind::Test;
     if !has_more {
         return FoldedControls::default();
     }
@@ -1132,7 +1116,7 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
     let fixed = fixed_controls_width(
         model.can_use_camera(),
         has_more,
-        model.kind == CallKind::Meeting,
+        has_leave_menu(model),
     );
     FoldedControls {
         items: folded_for_width(measured_stage(call).0, fixed, &present),
@@ -1146,7 +1130,7 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
 pub fn render_call_view(
     app: &Entity<AppState>,
     state: &AppState,
-    chat: Option<Entity<ConversationView>>,
+    chat: Option<AnyView>,
     fullscreen: bool,
     island_width: f32,
 ) -> Option<AnyElement> {
@@ -1246,9 +1230,7 @@ pub fn render_call_view(
             leave_button(app, model, "call-leave", false)
                 .debug_selector(|| "shell/islands/main/call-controls/leave".into()),
         )
-        .when(model.kind == CallKind::Meeting, |row| {
-            row.child(leave_menu(app, model))
-        });
+        .when(has_leave_menu(model), |row| row.child(leave_menu(app, model)));
 
     let top = v_flex()
         .w_full()
@@ -1354,7 +1336,7 @@ fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> 
         .child(content)
 }
 
-fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElement {
+fn chat_panel(app: &Entity<AppState>, chat: AnyView) -> AnyElement {
     let app = app.clone();
     side_panel(
         "call-chat-panel",
@@ -1363,6 +1345,7 @@ fn chat_panel(app: &Entity<AppState>, chat: Entity<ConversationView>) -> AnyElem
         move |cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)),
         chat,
     )
+    .debug_selector(|| CHAT_PANEL_TAG.into())
     .into_any_element()
 }
 

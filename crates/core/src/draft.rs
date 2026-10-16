@@ -1988,7 +1988,7 @@ impl SpanLines {
                     }
                     self.open = false;
                 }
-                Span::Image { .. } | Span::Quote(_) => {}
+                Span::Image { .. } | Span::Quote { .. } => {}
             }
         }
     }

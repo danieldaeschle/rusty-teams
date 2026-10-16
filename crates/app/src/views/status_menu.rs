@@ -120,6 +120,7 @@ fn status_icon(kind: PresenceKind) -> gpui_kit::component::Icon {
         PresenceKind::Busy => ("status_dot", theme::red()),
         PresenceKind::DoNotDisturb => ("status_dnd", theme::red()),
         PresenceKind::Away => ("status_away", theme::amber()),
+        PresenceKind::OutOfOffice => ("status_dot", theme::out_of_office()),
         PresenceKind::Offline => ("status_ring", theme::text_muted()),
         PresenceKind::Unknown => ("status_ring", theme::text_faint()),
     };

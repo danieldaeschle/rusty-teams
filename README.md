@@ -64,12 +64,13 @@
 - Video and screen sharing: H264 tiles, shared screen on a stage (double click for full window, Esc back), camera and screen share buttons with a "You are sharing" banner. Linux needs glib at run time
 - Incoming calls: topmost ring toast with Decline and Accept, ring tone, missed calls in Activity
 - Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
+- After every call a pseudonymized test report (JSON and Markdown, newest 30) is saved to the app data folder `call-reports`; toast "Test report saved" with Open folder, Settings > Devices switch
 - Organizer controls: lobby banner with Admit and Deny, tile menu (pin, spotlight, mute, remove), Mute all, live captions overlay, camera background blur
 
 **Agents (MCP)**
 - Local MCP server at `http://127.0.0.1:40615/mcp`, off by default: Settings > MCP
-- Agents read allowed chats, channels, meetings and transcripts (images, reactions, files and cards included, newest messages across chats), and propose replies
-- A proposal shows as a card above the composer: Send, Edit or Discard. Agents never send
+- Agents read allowed chats, channels, meetings and transcripts (images, reactions, files and cards included, newest messages across chats), and propose replies with @mentions and images, or an emoji reaction
+- A reply shows as a card above the composer: Send, Edit or Discard. A reaction shows as a note under the message: Accept or Discard. Agents never send
 - One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
 - Delegate a message to a coding-agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar: progress chip, Agents page, toast when it finishes, Open session
 
