@@ -33,6 +33,7 @@ pub struct ChannelLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamLayout {
     pub team_id: String,
+    pub group_id: Option<String>,
     pub hidden: bool,
     pub channels: Vec<ChannelLayout>,
 }
@@ -142,6 +143,11 @@ fn parse_team(team: &Value) -> Option<TeamLayout> {
         .unwrap_or_default();
     Some(TeamLayout {
         team_id: team.get("id")?.as_str()?.to_owned(),
+        group_id: team
+            .get("teamSiteInformation")
+            .and_then(|site| site.get("groupId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         hidden: flag(team, "isFavorite") == Some(false),
         channels,
     })
@@ -170,6 +176,17 @@ mod tests {
         assert!(layout[0].channels[0].hidden);
         assert!(!layout[1].channels[0].hidden);
         assert!(!layout[2].channels[0].hidden);
+    }
+
+    #[test]
+    fn reads_the_group_id_the_graph_team_id_uses() {
+        let body = json!({"teams": [
+            {"id": "19:a@thread.skype", "teamSiteInformation": {"groupId": "group-a"}, "channels": []},
+            {"id": "19:b@thread.tacv2", "channels": []}
+        ]});
+        let layout = parse_team_layout(&body).unwrap();
+        assert_eq!(layout[0].group_id.as_deref(), Some("group-a"));
+        assert_eq!(layout[1].group_id, None);
     }
 
     #[test]

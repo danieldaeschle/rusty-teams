@@ -16,7 +16,7 @@ use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::icon;
 use crate::rows::reaction_glyph;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const BAR_BUTTON: f32 = 30.;
 const BAR_PADDING: f32 = 3.;
@@ -319,7 +319,7 @@ pub fn message_toolbar(menu: MessageMenu, cx: &App) -> AnyElement {
         .gap(px(1.))
         .items_center()
         .rounded(px(10.))
-        .bg(theme::popup())
+        .flyout_surface()
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             GlobalState::suppress_text_selection(cx)
         })

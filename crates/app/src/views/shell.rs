@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{elevation, h_flex, v_flex};
 use gpui_kit::*;
 
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
@@ -761,6 +761,17 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let open_dialogs = [
+            self.state.read(cx).task_dialog.is_some(),
+            self.forward_dialog.is_some(),
+            self.status_dialog.is_some(),
+            self.shortcuts_dialog.is_some(),
+            self.agent_dialog.is_some(),
+        ]
+        .into_iter()
+        .filter(|open| *open)
+        .count();
+        elevation::set_app_modal_layers(window, open_dialogs, cx);
         if let Some(dialog) = self
             .state
             .read(cx)

@@ -1,0 +1,285 @@
+{
+  "csaTeams": {
+    "teams": [
+      {
+        "id": "19:dc35d4548a076206775f4c84275fc134@thread.skype",
+        "displayName": "Team 01",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "030ff571-c3fa-e972-24ae-94728f85de5c"
+        },
+        "channels": [
+          {
+            "id": "19:dc35d4548a076206775f4c84275fc134@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:0db84568b64b1740a9aa89a8dfae4ef3@thread.tacv2",
+        "displayName": "Team 02",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "44f04fc8-9c02-0b1f-cc76-4e2032969633"
+        },
+        "channels": [
+          {
+            "id": "19:0db84568b64b1740a9aa89a8dfae4ef3@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:75f1eddce9a4745b16a4cc2cf86c9a48@thread.skype",
+        "displayName": "Team 03",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "8f7e00e3-8b45-a817-006e-c71e71d788a4"
+        },
+        "channels": [
+          {
+            "id": "19:75f1eddce9a4745b16a4cc2cf86c9a48@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:f51aaf0926aea7d37b3b1b795531abe0@thread.skype",
+        "displayName": "Team 04",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "a670b1e5-955b-d48d-b816-142d02ccf8df"
+        },
+        "channels": [
+          {
+            "id": "19:f51aaf0926aea7d37b3b1b795531abe0@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:6f8ffb0c7835ab1d83fa476d4962a033@thread.tacv2",
+        "displayName": "Team 05",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "f733f4ea-b4cd-185d-9f3d-40425275a36d"
+        },
+        "channels": [
+          {
+            "id": "19:6f8ffb0c7835ab1d83fa476d4962a033@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:de516a22deb12d09ede0f69a57ca4e13@thread.skype",
+        "displayName": "Team 06",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "6436151b-9bce-b593-8924-62fa1b684318"
+        },
+        "channels": [
+          {
+            "id": "19:de516a22deb12d09ede0f69a57ca4e13@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:def2e9f97717cd2fba41ba87555d7c63@thread.tacv2",
+        "displayName": "Team 07",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": true,
+        "teamSiteInformation": {
+          "groupId": "15474fa0-1e6b-099f-aaed-97b4343022bf"
+        },
+        "channels": [
+          {
+            "id": "19:def2e9f97717cd2fba41ba87555d7c63@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:1daab460cb790063a6ee222674093594@thread.tacv2",
+        "displayName": "Team 08",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "f8528bec-6107-689e-4786-a1bffaab4b58"
+        },
+        "channels": [
+          {
+            "id": "19:1daab460cb790063a6ee222674093594@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:04c7499a69cade0bc479267881eed5dc@thread.tacv2",
+        "displayName": "Team 09",
+        "isFavorite": true,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "c887f3c7-966f-58b8-f7df-66478f478793"
+        },
+        "channels": [
+          {
+            "id": "19:04c7499a69cade0bc479267881eed5dc@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:55ef6fb187169de1622ed6e42010ea34@thread.skype",
+        "displayName": "Team 10",
+        "isFavorite": false,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "48c9a895-cf8f-8c24-c9d6-f61e24ac4745"
+        },
+        "channels": [
+          {
+            "id": "19:55ef6fb187169de1622ed6e42010ea34@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:0c110f42185bf611d6fe52a34c16ad23@thread.tacv2",
+        "displayName": "Team 11",
+        "isFavorite": false,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "948db8b9-8c5d-cf13-3125-b117683558db"
+        },
+        "channels": [
+          {
+            "id": "19:0c110f42185bf611d6fe52a34c16ad23@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:5f51a5550b71412e578f2a1404cafd88@thread.tacv2",
+        "displayName": "Team 12",
+        "isFavorite": false,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "7c59b24e-6c03-1b54-a992-80600afa7a21"
+        },
+        "channels": [
+          {
+            "id": "19:5f51a5550b71412e578f2a1404cafd88@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:4cdfbde067825fb660f0a8b2f7c62927@thread.skype",
+        "displayName": "Team 13",
+        "isFavorite": false,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "856b69f7-7ba6-bf1d-feb3-8de52e1d825d"
+        },
+        "channels": [
+          {
+            "id": "19:4cdfbde067825fb660f0a8b2f7c62927@thread.skype",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      },
+      {
+        "id": "19:ef17a45e03ff71825a45a1fd39643c85@thread.tacv2",
+        "displayName": "Team 14",
+        "isFavorite": false,
+        "isDeleted": false,
+        "isGeneralChannelFavorite": false,
+        "teamSiteInformation": {
+          "groupId": "e3e373e6-4322-2622-fcc0-935dd902dbca"
+        },
+        "channels": [
+          {
+            "id": "19:ef17a45e03ff71825a45a1fd39643c85@thread.tacv2",
+            "isGeneral": true,
+            "isFavorite": true
+          }
+        ]
+      }
+    ]
+  },
+  "userProperties": {
+    "teamsOrder": "[{\"teamId\":\"19:f51aaf0926aea7d37b3b1b795531abe0@thread.skype\",\"order\":0},{\"teamId\":\"19:75f1eddce9a4745b16a4cc2cf86c9a48@thread.skype\",\"order\":1},{\"teamId\":\"19:de516a22deb12d09ede0f69a57ca4e13@thread.skype\",\"order\":2},{\"teamId\":\"19:1daab460cb790063a6ee222674093594@thread.tacv2\",\"order\":3},{\"teamId\":\"19:def2e9f97717cd2fba41ba87555d7c63@thread.tacv2\",\"order\":4},{\"teamId\":\"19:0db84568b64b1740a9aa89a8dfae4ef3@thread.tacv2\",\"order\":5},{\"teamId\":\"19:04c7499a69cade0bc479267881eed5dc@thread.tacv2\",\"order\":6},{\"teamId\":\"19:dc35d4548a076206775f4c84275fc134@thread.skype\",\"order\":7}]"
+  },
+  "teamsWebShownTeams": [
+    {
+      "name": "Team 04",
+      "groupId": "a670b1e5-955b-d48d-b816-142d02ccf8df"
+    },
+    {
+      "name": "Team 03",
+      "groupId": "8f7e00e3-8b45-a817-006e-c71e71d788a4"
+    },
+    {
+      "name": "Team 06",
+      "groupId": "6436151b-9bce-b593-8924-62fa1b684318"
+    },
+    {
+      "name": "Team 08",
+      "groupId": "f8528bec-6107-689e-4786-a1bffaab4b58"
+    },
+    {
+      "name": "Team 07",
+      "groupId": "15474fa0-1e6b-099f-aaed-97b4343022bf"
+    },
+    {
+      "name": "Team 02",
+      "groupId": "44f04fc8-9c02-0b1f-cc76-4e2032969633"
+    },
+    {
+      "name": "Team 09",
+      "groupId": "c887f3c7-966f-58b8-f7df-66478f478793"
+    },
+    {
+      "name": "Team 01",
+      "groupId": "030ff571-c3fa-e972-24ae-94728f85de5c"
+    },
+    {
+      "name": "Team 05",
+      "groupId": "f733f4ea-b4cd-185d-9f3d-40425275a36d"
+    }
+  ]
+}

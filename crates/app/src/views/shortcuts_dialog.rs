@@ -3,7 +3,7 @@ use gpui_kit::*;
 
 use super::shortcuts::{Group, shortcuts_in};
 use super::widgets::symbol;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const CARD_WIDTH: f32 = 520.;
 const CARD_RADIUS: f32 = 10.;
@@ -137,7 +137,7 @@ impl Render for ShortcutsDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::popup())
+                    .dialog_surface()
                     .text_color(theme::text())
                     .occlude()
                     .capture_key_down(cx.listener(Self::on_key_down))

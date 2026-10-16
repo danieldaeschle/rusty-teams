@@ -23,7 +23,6 @@ use crate::{
     ActiveTheme as _, Edges, Icon, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT,
     animation::cubic_bezier,
     button::{Button, ButtonVariants as _},
-    styled::toast_shadow,
     v_flex,
 };
 
@@ -418,6 +417,8 @@ impl Render for Notification {
         };
         let has_icon = icon.is_some();
         let placement = self.placement.unwrap_or(cx.theme().notification.placement);
+        let toast_elevation = crate::elevation::toast(cx);
+        let resting_shadow = toast_elevation.shadow.clone();
 
         BaseToast::new("notification")
             .transition_status(transition_status)
@@ -428,9 +429,9 @@ impl Render for Notification {
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().tokens.popover)
+            .bg(toast_elevation.fill)
             .rounded(cx.theme().radius_lg)
-            .shadow(toast_shadow(1.))
+            .shadow(resting_shadow)
             .py_3p5()
             .px_4()
             .gap_3()
@@ -492,7 +493,9 @@ impl Render for Notification {
                 move |this, delta| {
                     if closing {
                         let opacity = 1. - delta;
-                        let that = this.opacity(opacity).shadow(toast_shadow(opacity.powi(3)));
+                        let that = this
+                            .opacity(opacity)
+                            .shadow(toast_elevation.shadow_at(opacity.powi(3)));
                         let y_offset = match placement {
                             Anchor::TopLeft | Anchor::TopRight | Anchor::TopCenter => {
                                 -delta * NOTIFICATION_TRANSITION_OFFSET
@@ -525,7 +528,7 @@ impl Render for Notification {
                         // threshold, which popped.
                         this.top(px(0.) + y_offset)
                             .opacity(opacity)
-                            .shadow(toast_shadow(opacity.powi(3)))
+                            .shadow(toast_elevation.shadow_at(opacity.powi(3)))
                     }
                 },
             )

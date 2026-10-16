@@ -5,7 +5,7 @@ use super::adaptive_card::card_view;
 use super::widgets::symbol;
 use crate::app_state::{AppHandle, AppState};
 use crate::card_state::TaskDialogState;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const BACKDROP_OPACITY: f32 = 0.55;
 const PANEL_MARGIN: f32 = 32.;
@@ -56,7 +56,7 @@ fn panel(dialog: &TaskDialogState, cx: &App) -> Div {
         .p(px(PANEL_PADDING))
         .gap(px(HEADER_GAP))
         .rounded(px(PANEL_RADIUS))
-        .bg(theme::popup())
+        .dialog_surface()
         .text_color(theme::text())
         .occlude()
         .child(

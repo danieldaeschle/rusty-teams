@@ -61,7 +61,7 @@ fn dropdown_positioner(bounds: Bounds<Pixels>) -> gpui_base::Positioner {
 /// shadow, and mid-fade the shadow shows straight through the panel as a dark
 /// slab. Ramping the ink by the cube of the fade keeps it out of sight until the
 /// panel is opaque enough to cover it, and still lands on the resting shadow
-/// [`popover_shadow`] gives every other popup.
+/// [`crate::elevation::flyout`] gives every other popup.
 ///
 /// # Departures from shadcn
 ///
@@ -292,14 +292,14 @@ impl Popover {
     pub(crate) fn render_popover_content(
         anchor: Anchor,
         appearance: bool,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Stateful<Div> {
         v_flex()
             .id("content")
             .occlude()
             .tab_group()
-            .when(appearance, |this| this.popover_style(cx).p_3())
+            .when(appearance, |this| this.popover_style(window, cx).p_3())
             .map(|this| match anchor {
                 Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => this.top_1(),
                 Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => this.bottom_1(),
@@ -346,7 +346,7 @@ impl RenderOnce for Popover {
                     .id("content")
                     .occlude()
                     .tab_group()
-                    .when(appearance, |this| this.popover_style(cx).p_3())
+                    .when(appearance, |this| this.popover_style(window, cx).p_3())
                     .when_some(content, |this, content| {
                         this.child((content)(state, window, cx))
                     })

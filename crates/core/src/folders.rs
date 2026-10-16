@@ -96,6 +96,7 @@ pub struct ChatsvcFolderSource {
     channel_settings: ChannelSettings,
     properties: Mutex<Option<Value>>,
     skin_tone: Mutex<Option<u8>>,
+    group_ids: Mutex<HashMap<String, String>>,
 }
 
 impl ChatsvcFolderSource {
@@ -106,6 +107,7 @@ impl ChatsvcFolderSource {
             channel_settings: ChannelSettings::new(session),
             properties: Mutex::new(None),
             skin_tone: Mutex::new(None),
+            group_ids: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -122,6 +124,7 @@ impl FolderSource for ChatsvcFolderSource {
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
         Box::pin(async {
             let layout = self.pins.team_layout().await?;
+            *self.group_ids.lock().unwrap() = group_ids_by_thread(&layout);
             let unknown: Vec<String> = layout
                 .iter()
                 .flat_map(|team| &team.channels)
@@ -168,7 +171,16 @@ impl FolderSource for ChatsvcFolderSource {
                 Some(properties) => properties,
                 None => self.settings.properties().await?,
             };
-            Ok(parse_teams_order(&properties))
+            let known = self.group_ids.lock().unwrap().clone();
+            let group_ids = if known.is_empty() {
+                group_ids_by_thread(&self.pins.team_layout().await?)
+            } else {
+                known
+            };
+            Ok(order_by_group_id(
+                parse_teams_order(&properties),
+                &group_ids,
+            ))
         })
     }
 
@@ -262,6 +274,26 @@ fn stored_team_order(teams: &[store::SidebarTeam]) -> Vec<(String, i64)> {
         .collect()
 }
 
+fn group_ids_by_thread(layout: &[chatsvc::TeamLayout]) -> HashMap<String, String> {
+    layout
+        .iter()
+        .filter_map(|team| Some((team.team_id.clone(), team.group_id.clone()?)))
+        .collect()
+}
+
+fn order_by_group_id(
+    order: Vec<(String, i64)>,
+    group_ids: &HashMap<String, String>,
+) -> Vec<(String, i64)> {
+    order
+        .into_iter()
+        .map(|(team_id, position)| match group_ids.get(&team_id) {
+            Some(group_id) => (group_id.clone(), position),
+            None => (team_id, position),
+        })
+        .collect()
+}
+
 fn sort_teams_by_order(teams: &mut [TeamLayoutRecord], order: &[(String, i64)]) {
     let positions: HashMap<&str, i64> = order
         .iter()
@@ -318,7 +350,7 @@ fn layout_record(
     fallback: &HashMap<String, ChannelNotifications>,
 ) -> TeamLayoutRecord {
     TeamLayoutRecord {
-        team_id: team.team_id,
+        team_id: team.group_id.unwrap_or(team.team_id),
         hidden: team.hidden,
         channels: team
             .channels
@@ -593,6 +625,56 @@ mod tests {
         ];
         sort_teams_by_order(&mut teams, &order);
         assert_eq!(team_ids(&teams), ["a", "b", "x", "y", "z"]);
+    }
+
+    #[test]
+    fn real_payloads_give_the_team_order_teams_web_shows() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/team_order.json")).unwrap();
+        let layout = chatsvc::pins::parse_team_layout(&fixture["csaTeams"]).unwrap();
+        let group_ids = group_ids_by_thread(&layout);
+        let order = order_by_group_id(parse_teams_order(&fixture["userProperties"]), &group_ids);
+        let mut records: Vec<TeamLayoutRecord> = layout
+            .into_iter()
+            .map(|team| layout_record(team, &HashMap::new()))
+            .collect();
+        sort_teams_by_order(&mut records, &order);
+        let store = Store::open_in_memory().unwrap();
+        let names: HashMap<String, String> = fixture["csaTeams"]["teams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|team| {
+                let group_id = team["teamSiteInformation"]["groupId"].as_str().unwrap();
+                let name = team["displayName"].as_str().unwrap();
+                (group_id.to_owned(), name.to_owned())
+            })
+            .collect();
+        let graph_teams: Vec<store::TeamRecord> = names
+            .iter()
+            .map(|(group_id, name)| store::TeamRecord {
+                id: group_id.clone(),
+                name: name.clone(),
+            })
+            .collect();
+        store.upsert_teams(&graph_teams).unwrap();
+        store.replace_team_layout(&records).unwrap();
+
+        let shown: Vec<String> = store
+            .sidebar()
+            .unwrap()
+            .teams
+            .into_iter()
+            .filter(|team| !team.hidden)
+            .map(|team| team.team.id)
+            .collect();
+        let expected: Vec<String> = fixture["teamsWebShownTeams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|team| team["groupId"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(shown, expected);
     }
 
     #[test]

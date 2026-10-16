@@ -90,7 +90,8 @@ impl ParentElement for MenuItemElement {
 }
 
 impl RenderOnce for MenuItemElement {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let highlight = crate::elevation::flyout(window, cx).hover;
         h_flex()
             .id(self.id)
             .test_support()
@@ -114,11 +115,11 @@ impl RenderOnce for MenuItemElement {
                 // element before registering its group, and that fallback keeps
                 // the pointer's item lit after a key moves the highlight away.
                 this.hover(|this| {
-                    this.bg(cx.theme().tokens.sidebar_accent)
+                    this.bg(highlight)
                         .text_color(cx.theme().sidebar_accent_foreground)
                 })
                 .when(self.selected, |this| {
-                    this.bg(cx.theme().tokens.sidebar_accent)
+                    this.bg(highlight)
                         .text_color(cx.theme().sidebar_accent_foreground)
                 })
                 .when_some(self.on_click, |this, on_click| {

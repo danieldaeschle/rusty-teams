@@ -91,6 +91,7 @@ impl Styled for Tooltip {
 }
 impl Render for Tooltip {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let flyout_fill = crate::elevation::flyout(window, cx).fill;
         let key_binding = if let Some(key_binding) = &self.key_binding {
             Some(key_binding.clone())
         } else {
@@ -111,9 +112,9 @@ impl Render for Tooltip {
                 .h_flex()
                 .font_family(cx.theme().font_family.clone())
                 .m_3()
-                .bg(cx.theme().tokens.popover)
+                .bg(flyout_fill)
+                .shadow(crate::elevation::shadow8())
                 .text_color(cx.theme().popover_foreground)
-                .bg(cx.theme().tokens.popover)
                 .rounded(cx.theme().radius)
                 .justify_between()
                 .py_0p5()

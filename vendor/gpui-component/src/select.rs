@@ -616,7 +616,7 @@ where
                                     Length::Auto => this.w(bounds.size.width),
                                     Length::Definite(w) => this.w(w),
                                 })
-                                .popover_style(cx)
+                                .popover_style(window, cx)
                                 .child(
                                     List::new(&self.state.list)
                                         .when_some(

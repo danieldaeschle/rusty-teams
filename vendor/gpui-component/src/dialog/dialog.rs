@@ -3,7 +3,7 @@ use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    Action, Anchor, Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges,
+    Action, Anchor, Animation, AnimationExt as _, AnyElement, App, ClickEvent, Edges,
     FocusHandle, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
     SharedString, StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
     prelude::FluentBuilder, px,
@@ -611,6 +611,8 @@ impl RenderOnce for Dialog {
             1.,
         ));
 
+        let dialog_elevation = crate::elevation::dialog(cx);
+
         anchored()
             .position(point(window_paddings.left, window_paddings.top))
             .snap_to_window()
@@ -666,9 +668,7 @@ impl RenderOnce for Dialog {
                                         .id(layer_ix)
                                         .test_support()
                                         .debug_selector(move || format!("dialog-{layer_ix}"))
-                                        .bg(cx.theme().tokens.background)
-                                        .border_1()
-                                        .border_color(cx.theme().border)
+                                        .bg(dialog_elevation.fill)
                                         .rounded(cx.theme().radius_lg)
                                         .min_h_24()
                                         .pt(paddings.top)
@@ -753,24 +753,7 @@ impl RenderOnce for Dialog {
                                             "slide-down-shadow",
                                             animation.clone(),
                                             move |this, delta| {
-                                                // This is equivalent to `shadow_xl` with an extra opacity.
-                                                let shadow = vec![
-                                                    BoxShadow {
-                                                        color: hsla(0., 0., 0., 0.1 * delta),
-                                                        offset: point(px(0.), px(20.)),
-                                                        blur_radius: px(25.),
-                                                        spread_radius: px(-5.),
-                                                        inset: false,
-                                                    },
-                                                    BoxShadow {
-                                                        color: hsla(0., 0., 0., 0.1 * delta),
-                                                        offset: point(px(0.), px(8.)),
-                                                        blur_radius: px(10.),
-                                                        spread_radius: px(-6.),
-                                                        inset: false,
-                                                    },
-                                                ];
-                                                this.shadow(shadow)
+                                                this.shadow(dialog_elevation.shadow_at(delta))
                                             },
                                         )
                                         .text_selection_scope(selection_scope),

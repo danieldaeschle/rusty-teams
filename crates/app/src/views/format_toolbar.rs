@@ -7,7 +7,7 @@ use gpui_kit::*;
 use teams_core::FormatState;
 
 use super::widgets::symbol;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const PADDING: f32 = 4.;
 const BUTTON: f32 = 28.;
@@ -339,7 +339,7 @@ pub fn render(placement: Placement, mode: Mode<'_>) -> AnyElement {
                         div()
                             .p(px(PADDING))
                             .rounded(px(10.))
-                            .bg(theme::popup())
+                            .flyout_surface()
                             .child(content),
                     )
                     .child(arrow(placement.arrow_x)),

@@ -15,7 +15,7 @@ use crate::fuzzy;
 use crate::message_actions::ForwardSource;
 use crate::notice::short_error;
 use crate::runtime;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const MAX_RESULTS: usize = 8;
 const CARD_WIDTH: f32 = 480.;
@@ -461,7 +461,7 @@ impl Render for ForwardDialog {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::popup())
+                    .dialog_surface()
                     .text_color(theme::text())
                     .occlude()
                     .on_key_down(cx.listener(Self::on_key_down))
