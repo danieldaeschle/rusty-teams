@@ -80,8 +80,6 @@ pub fn render_status_bar(
         .items_center()
         .text_size(px(11.))
         .bg(theme::background())
-        .border_t_1()
-        .border_color(theme::border())
         .text_color(theme::text_muted());
     match live {
         Some((label, tone)) if connection_tone == Tone::Good => {

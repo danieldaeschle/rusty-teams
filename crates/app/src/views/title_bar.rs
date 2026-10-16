@@ -52,6 +52,7 @@ pub fn render_title_bar(
         .on_click(on_search);
     let bar = TitleBar::new()
         .h(px(TITLE_BAR_HEIGHT))
+        .border_b_0()
         .bg(theme::background())
         .child(
             h_flex()
