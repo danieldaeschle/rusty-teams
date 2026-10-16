@@ -25,6 +25,11 @@ const PINS_INTERVAL: Duration = Duration::from_secs(90);
 const CALENDAR_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const CALENDAR_MIN_GAP: Duration = Duration::from_secs(30);
 const REALTIME_RETRY: Duration = Duration::from_secs(15);
+const ARRIVAL_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(1),
+    Duration::from_secs(3),
+    Duration::from_secs(8),
+];
 const PRESENCE_RESUBSCRIBE: Duration = Duration::from_secs(30 * 60);
 const MAX_ERROR_CHARS: usize = 120;
 const IMAGE_DIRECTORY: &str = "images";
@@ -340,7 +345,13 @@ pub fn refresh_plan(event: &MessageEvent) -> Option<RefreshPlan> {
             },
             None => RefreshPlan::Newer { conversation_id },
         }),
-        EventKind::NewMessage => Some(RefreshPlan::Newer { conversation_id }),
+        EventKind::NewMessage => Some(match event.message_id.clone() {
+            Some(message_id) => RefreshPlan::Arrival {
+                conversation_id,
+                message_id,
+            },
+            None => RefreshPlan::Newer { conversation_id },
+        }),
         _ => None,
     }
 }
@@ -349,6 +360,10 @@ pub fn refresh_plan(event: &MessageEvent) -> Option<RefreshPlan> {
 pub enum RefreshPlan {
     Newer {
         conversation_id: String,
+    },
+    Arrival {
+        conversation_id: String,
+        message_id: String,
     },
     Message {
         conversation_id: String,
@@ -365,9 +380,10 @@ async fn handle_message_event(
         return;
     };
     let outcome = match &plan {
-        RefreshPlan::Newer { conversation_id } => {
-            engine.fetch_newer(conversation_id).await.map(|_| ())
-        }
+        RefreshPlan::Newer { conversation_id }
+        | RefreshPlan::Arrival {
+            conversation_id, ..
+        } => engine.fetch_newer(conversation_id).await.map(|_| ()),
         RefreshPlan::Message {
             conversation_id,
             message_id,
@@ -379,6 +395,18 @@ async fn handle_message_event(
     let unknown = matches!(outcome, Err(teams_core::Error::UnknownConversation(_)));
     if unknown || event.kind == EventKind::NewMessage {
         let _ = nudge.send(());
+    }
+    if let (
+        Ok(()),
+        RefreshPlan::Arrival {
+            conversation_id,
+            message_id,
+        },
+    ) = (outcome, &plan)
+    {
+        let _ = engine
+            .fetch_until_cached(conversation_id, message_id, &ARRIVAL_RETRY_DELAYS)
+            .await;
     }
 }
 
@@ -456,9 +484,16 @@ mod tests {
     }
 
     #[test]
-    fn new_message_fetches_newer() {
+    fn new_message_waits_for_its_arrival() {
         assert_eq!(
             refresh_plan(&event(EventKind::NewMessage, Some("c"), Some("m"))),
+            Some(RefreshPlan::Arrival {
+                conversation_id: "c".into(),
+                message_id: "m".into()
+            })
+        );
+        assert_eq!(
+            refresh_plan(&event(EventKind::NewMessage, Some("c"), None)),
             Some(RefreshPlan::Newer {
                 conversation_id: "c".into()
             })

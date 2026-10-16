@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
 use store::{ChannelNotifications, MessageRecord, Sidebar, Store};
@@ -8,6 +8,34 @@ use crate::app_state::chat_title;
 
 const RECENT_WINDOW: usize = 20;
 const FILE_FALLBACK: &str = "File";
+const LATE_ARRIVALS_KEPT: usize = 500;
+
+#[derive(Default)]
+pub struct LateArrivals {
+    keys: HashSet<(String, String)>,
+    order: VecDeque<(String, String)>,
+}
+
+impl LateArrivals {
+    pub fn insert(&mut self, conversation_id: &str, message_ids: Vec<String>) {
+        for message_id in message_ids {
+            let key = (conversation_id.to_owned(), message_id);
+            if self.keys.insert(key.clone()) {
+                self.order.push_back(key);
+            }
+        }
+        while self.order.len() > LATE_ARRIVALS_KEPT {
+            if let Some(oldest) = self.order.pop_front() {
+                self.keys.remove(&oldest);
+            }
+        }
+    }
+
+    pub fn contains(&self, conversation_id: &str, message_id: &str) -> bool {
+        self.keys
+            .contains(&(conversation_id.to_owned(), message_id.to_owned()))
+    }
+}
 
 pub struct IncomingTracker {
     started: DateTime<Utc>,
@@ -27,11 +55,16 @@ impl IncomingTracker {
         store: &Store,
         sidebar: &Sidebar,
         my_user_id: Option<&str>,
+        late_arrivals: &LateArrivals,
         conversation_id: &str,
     ) -> Vec<Incoming> {
         let Ok(records) = store.messages(conversation_id, None, RECENT_WINDOW) else {
             return Vec::new();
         };
+        let records = records
+            .into_iter()
+            .filter(|record| !late_arrivals.contains(&record.conversation_id, &record.message_id))
+            .collect();
         self.fresh(records, store, sidebar, my_user_id)
     }
 
@@ -43,6 +76,7 @@ impl IncomingTracker {
         my_user_id: Option<&str>,
     ) -> Vec<Incoming> {
         let mut incoming = Vec::new();
+        let newest_own = newest_own_message(&records, my_user_id);
         for record in records {
             let watermark = self
                 .watermarks
@@ -55,7 +89,11 @@ impl IncomingTracker {
             }
             self.watermarks
                 .insert(record.conversation_id.clone(), record.created_at);
-            if record.deleted || record.call_event_json.is_some() || is_own(&record, my_user_id) {
+            if record.deleted
+                || record.call_event_json.is_some()
+                || is_own(&record, my_user_id)
+                || seen_elsewhere(&record, sidebar, my_user_id, &newest_own)
+            {
                 continue;
             }
             if let Some(entry) = build_incoming(&record, store, sidebar, my_user_id) {
@@ -68,6 +106,47 @@ impl IncomingTracker {
 
 fn is_own(record: &MessageRecord, my_user_id: Option<&str>) -> bool {
     matches!((record.sender_id.as_deref(), my_user_id), (Some(sender), Some(me)) if sender == me)
+}
+
+fn newest_own_message(
+    records: &[MessageRecord],
+    my_user_id: Option<&str>,
+) -> HashMap<String, DateTime<Utc>> {
+    let mut newest = HashMap::new();
+    for record in records.iter().filter(|record| is_own(record, my_user_id)) {
+        let entry = newest
+            .entry(record.conversation_id.clone())
+            .or_insert(record.created_at);
+        *entry = (*entry).max(record.created_at);
+    }
+    newest
+}
+
+fn seen_elsewhere(
+    record: &MessageRecord,
+    sidebar: &Sidebar,
+    my_user_id: Option<&str>,
+    newest_own: &HashMap<String, DateTime<Utc>>,
+) -> bool {
+    let read_on_another_device = sidebar
+        .chats
+        .iter()
+        .find(|chat| chat.id == record.conversation_id)
+        .and_then(|chat| chat.last_read_at)
+        .is_some_and(|read_at| read_at >= record.created_at);
+    let answered_later = newest_own
+        .get(&record.conversation_id)
+        .is_some_and(|own_at| *own_at >= record.created_at);
+    read_on_another_device || answered_later || reacted_by_me(record, my_user_id)
+}
+
+fn reacted_by_me(record: &MessageRecord, my_user_id: Option<&str>) -> bool {
+    let Some(me) = my_user_id else {
+        return false;
+    };
+    teams_core::reactions(record)
+        .iter()
+        .any(|reaction| reaction.user_id.as_deref() == Some(me))
 }
 
 pub fn build_incoming(
@@ -348,6 +427,101 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let found = tracker.fresh(vec![own], &store, &sidebar(), Some("me"));
         assert!(found.is_empty());
+    }
+
+    #[test]
+    fn message_first_stored_by_my_reaction_from_the_phone_is_skipped() {
+        let start = Utc::now();
+        let mut tracker = IncomingTracker::new(start);
+        let mut reacted = record("direct", "u1", start + Duration::seconds(5), "PR link");
+        reacted.reactions_json =
+            r#"[{"reaction_type":"👍🏼","user_id":"me","user_name":null,"created_at":null}]"#.into();
+        let mut liked_by_other = record("group", "u1", start + Duration::seconds(6), "hi");
+        liked_by_other.reactions_json =
+            r#"[{"reaction_type":"👍","user_id":"u2","user_name":null,"created_at":null}]"#.into();
+        let store = Store::open_in_memory().unwrap();
+        let found = tracker.fresh(
+            vec![reacted, liked_by_other],
+            &store,
+            &sidebar(),
+            Some("me"),
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].conversation_id, "group");
+    }
+
+    #[test]
+    fn message_stored_late_by_an_update_is_not_an_arrival() {
+        let start = Utc::now();
+        let store = Store::open_in_memory().unwrap();
+        let late = record("direct", "u1", start + Duration::seconds(5), "PR link");
+        let arrived = record("direct", "u1", start + Duration::seconds(6), "neu");
+        store.upsert_messages(&[late.clone(), arrived]).unwrap();
+        let mut late_arrivals = LateArrivals::default();
+        late_arrivals.insert("direct", vec![late.message_id.clone()]);
+        let found = IncomingTracker::new(start).collect(
+            &store,
+            &sidebar(),
+            Some("me"),
+            &late_arrivals,
+            "direct",
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview, Preview::Text("neu".into()));
+    }
+
+    #[test]
+    fn late_arrivals_forget_the_oldest_beyond_the_limit() {
+        let mut late_arrivals = LateArrivals::default();
+        late_arrivals.insert(
+            "c",
+            (0..=LATE_ARRIVALS_KEPT).map(|n| n.to_string()).collect(),
+        );
+        assert!(!late_arrivals.contains("c", "0"));
+        assert!(late_arrivals.contains("c", "1"));
+        assert!(late_arrivals.contains("c", &LATE_ARRIVALS_KEPT.to_string()));
+        assert!(!late_arrivals.contains("other", "1"));
+    }
+
+    #[test]
+    fn message_read_on_another_device_is_skipped() {
+        let start = Utc::now();
+        let at = start + Duration::seconds(5);
+        let store = Store::open_in_memory().unwrap();
+        let mut read = sidebar();
+        read.chats[0].last_read_at = Some(at);
+        let found = IncomingTracker::new(start).fresh(
+            vec![record("direct", "u1", at, "x")],
+            &store,
+            &read,
+            Some("me"),
+        );
+        assert!(found.is_empty());
+        read.chats[0].last_read_at = Some(at - Duration::milliseconds(1));
+        let found = IncomingTracker::new(start).fresh(
+            vec![record("direct", "u1", at, "x")],
+            &store,
+            &read,
+            Some("me"),
+        );
+        assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn message_answered_from_another_device_is_skipped() {
+        let start = Utc::now();
+        let theirs = record("direct", "u1", start + Duration::seconds(5), "frage");
+        let mine = record("direct", "me", start + Duration::seconds(9), "antwort");
+        let store = Store::open_in_memory().unwrap();
+        let found = IncomingTracker::new(start).fresh(
+            vec![theirs.clone(), mine],
+            &store,
+            &sidebar(),
+            Some("me"),
+        );
+        assert!(found.is_empty());
+        let found = IncomingTracker::new(start).fresh(vec![theirs], &store, &sidebar(), Some("me"));
+        assert_eq!(found.len(), 1);
     }
 
     #[test]

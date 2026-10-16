@@ -274,6 +274,7 @@ impl NotificationCenter {
             &state.store,
             &state.sidebar,
             my_user_id.as_deref(),
+            &state.late_arrivals,
             conversation_id,
         );
         for incoming in found {

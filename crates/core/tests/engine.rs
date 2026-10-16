@@ -87,6 +87,7 @@ struct Fake {
     fetchable_chats: Mutex<Vec<Chat>>,
     single_chat_calls: Mutex<usize>,
     chat_messages: Mutex<Vec<Message>>,
+    lagging_message: Mutex<Option<(usize, Message)>>,
     channel_pages: Mutex<Vec<Vec<Message>>>,
     teams: Mutex<Vec<Team>>,
     failing_team: Mutex<Option<String>>,
@@ -263,7 +264,20 @@ impl Remote for Handle {
         before: Option<DateTime<Utc>>,
         top: usize,
     ) -> Result<RemotePage> {
-        *self.chat_calls.lock().unwrap() += 1;
+        let calls = {
+            let mut calls = self.chat_calls.lock().unwrap();
+            *calls += 1;
+            *calls
+        };
+        let mut lagging = self.lagging_message.lock().unwrap();
+        if lagging
+            .as_ref()
+            .is_some_and(|(visible_from, _)| calls >= *visible_from)
+            && let Some((_, message)) = lagging.take()
+        {
+            self.chat_messages.lock().unwrap().push(message);
+        }
+        drop(lagging);
         let mut matching: Vec<Message> = self
             .chat_messages
             .lock()
@@ -2246,6 +2260,84 @@ async fn refresh_message_upserts_an_edit_older_than_the_newest_cached() {
     );
 
     assert!(engine.refresh_message(CHAT, "m0999").await.is_err());
+}
+
+#[tokio::test]
+async fn refresh_message_marks_a_message_it_stores_first_as_late() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(3));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let mut reacted = message(4, 4, "<p>PR link</p>");
+    reacted.reactions = serde_json::from_value(json!([
+        {"reactionType": "like", "user": {"user": {"id": ME}}}
+    ]))
+    .unwrap();
+    fake.chat_messages.lock().unwrap().push(reacted);
+    let mut events = engine.subscribe();
+
+    engine.refresh_message(CHAT, "m0004").await.unwrap();
+    assert_eq!(
+        events.try_recv().unwrap(),
+        CoreEvent::MessagesStoredLate {
+            conversation_id: CHAT.to_owned(),
+            message_ids: vec!["m0004".to_owned()],
+        }
+    );
+    assert_eq!(
+        events.try_recv().unwrap(),
+        CoreEvent::MessagesChanged {
+            conversation_id: CHAT.to_owned()
+        }
+    );
+
+    engine.refresh_message(CHAT, "m0004").await.unwrap();
+    while let Ok(event) = events.try_recv() {
+        assert!(!matches!(event, CoreEvent::MessagesStoredLate { .. }));
+    }
+}
+
+#[tokio::test]
+async fn fetch_until_cached_retries_while_graph_lags_behind_the_push() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(3));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let calls_before = *fake.chat_calls.lock().unwrap();
+    *fake.lagging_message.lock().unwrap() = Some((calls_before + 2, message(4, 4, "<p>neu</p>")));
+    let delays = [std::time::Duration::ZERO; 3];
+
+    assert!(engine.fetch_newer(CHAT).await.unwrap().added.is_empty());
+    let delta = engine
+        .fetch_until_cached(CHAT, "m0004", &delays)
+        .await
+        .unwrap();
+    assert_eq!(delta.added.len(), 1);
+    assert_eq!(delta.added[0].message_id, "m0004");
+    assert_eq!(*fake.chat_calls.lock().unwrap(), calls_before + 2);
+
+    let delta = engine
+        .fetch_until_cached(CHAT, "m0004", &delays)
+        .await
+        .unwrap();
+    assert!(delta.is_empty());
+    assert_eq!(*fake.chat_calls.lock().unwrap(), calls_before + 2);
+}
+
+#[tokio::test]
+async fn fetch_until_cached_gives_up_after_the_last_delay() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(3));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let calls_before = *fake.chat_calls.lock().unwrap();
+
+    let delta = engine
+        .fetch_until_cached(CHAT, "m0099", &[std::time::Duration::ZERO; 3])
+        .await
+        .unwrap();
+    assert!(delta.is_empty());
+    assert_eq!(*fake.chat_calls.lock().unwrap(), calls_before + 3);
 }
 
 #[tokio::test]

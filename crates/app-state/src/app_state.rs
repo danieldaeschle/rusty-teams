@@ -19,6 +19,7 @@ use crate::image_view_gallery::ViewerRequest;
 use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
 use crate::notice::Notice;
+use crate::notify::LateArrivals;
 use crate::profile_state::{ProfileCache, ProfileRequest};
 use crate::translation::TranslationState;
 use crate::typing::TypingState;
@@ -85,6 +86,7 @@ pub struct AppState {
     pub sidebar: Sidebar,
     pub favorite_ids: Vec<String>,
     pub selection: Option<Selection>,
+    pub late_arrivals: LateArrivals,
     pub new_chat: bool,
     pub connection: ConnectionState,
     pub live: LiveState,
@@ -227,6 +229,7 @@ impl AppState {
             sidebar,
             favorite_ids: Vec::new(),
             selection: None,
+            late_arrivals: LateArrivals::default(),
             new_chat: false,
             connection: if mode.demo {
                 ConnectionState::Online
@@ -922,6 +925,10 @@ impl AppState {
                 self.refresh_language_stamps(&conversation_id, cx);
                 cx.emit(AppEvent::Messages(conversation_id));
             }
+            BackendEvent::Core(CoreEvent::MessagesStoredLate {
+                conversation_id,
+                message_ids,
+            }) => self.late_arrivals.insert(&conversation_id, message_ids),
             BackendEvent::Core(CoreEvent::PinsChanged { conversation_id }) => {
                 self.refresh_pins(&conversation_id, cx);
             }

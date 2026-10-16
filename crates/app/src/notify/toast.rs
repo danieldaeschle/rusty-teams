@@ -154,6 +154,10 @@ fn flat_button(
         .child(label)
 }
 
+fn keep_clicks_in_toast(area: Stateful<Div>) -> Stateful<Div> {
+    area.on_click(|_, _, cx| cx.stop_propagation())
+}
+
 fn highlighted_preview(text: &str, mention: bool) -> AnyElement {
     let mut styled = StyledText::new(text.to_owned());
     if mention {
@@ -352,7 +356,7 @@ impl ToastView {
             )
     }
 
-    fn reply_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn reply_field(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let focused = self.input.focus_handle(cx).contains_focused(window, cx);
         let empty = self.input.read(cx).value().trim().is_empty();
         let send = div()
@@ -380,7 +384,7 @@ impl ToastView {
                 .child(div().text_color(theme::text_soft()).child(keys))
                 .child(action)
         };
-        v_flex()
+        keep_clicks_in_toast(v_flex().id("toast-reply-field"))
             .w_full()
             .mt(px(8.))
             .gap(px(4.))
@@ -626,5 +630,63 @@ impl Render for PillView {
             .on_click(move |_, _, cx| {
                 center.update(cx, |center, cx| center.hide_all(cx));
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_kit::component::input::{Textarea, TextareaState};
+    use gpui_kit::{
+        AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, Modifiers,
+        ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
+        Window, div, point, px,
+    };
+
+    use super::keep_clicks_in_toast;
+
+    struct ToastHarness {
+        input: Entity<TextareaState>,
+        card_clicks: Rc<Cell<usize>>,
+    }
+
+    impl Render for ToastHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let card_clicks = self.card_clicks.clone();
+            div()
+                .id("toast-card")
+                .size_full()
+                .on_click(move |_, _, _| card_clicks.set(card_clicks.get() + 1))
+                .child(
+                    keep_clicks_in_toast(div().id("toast-reply-field"))
+                        .w(px(300.))
+                        .child(Textarea::new(&self.input)),
+                )
+        }
+    }
+
+    #[gpui_kit::test]
+    fn clicking_the_reply_input_does_not_open_the_chat(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let card_clicks = Rc::new(Cell::new(0));
+        let (harness, window_cx) = cx.add_window_view({
+            let card_clicks = card_clicks.clone();
+            move |window, cx| ToastHarness {
+                input: cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 1)),
+                card_clicks,
+            }
+        });
+        window_cx.update(|window, cx| window.draw(cx).clear(cx));
+        window_cx.simulate_click(point(px(20.), px(12.)), Modifiers::default());
+        assert_eq!(card_clicks.get(), 0);
+        let focused = window_cx.update(|window, cx| {
+            let input = harness.read(cx).input.clone();
+            input.focus_handle(cx).contains_focused(window, cx)
+        });
+        assert!(focused);
+        window_cx.simulate_click(point(px(20.), px(200.)), Modifiers::default());
+        assert_eq!(card_clicks.get(), 1);
     }
 }

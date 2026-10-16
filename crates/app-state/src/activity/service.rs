@@ -166,6 +166,7 @@ impl ActivityCenter {
             &state.store,
             &state.sidebar,
             my_user_id.as_deref(),
+            &state.late_arrivals,
             conversation_id,
         );
         let reacted = my_user_id

@@ -6,7 +6,7 @@ pub mod stack;
 pub mod text;
 
 pub use app_base::notify::{badge, platform, ring_tone};
-pub use incoming::{IncomingTracker, preview_of};
+pub use incoming::{IncomingTracker, LateArrivals, preview_of};
 #[cfg(windows)]
 pub use platform::native_handle;
 pub use rules::{ChatKind, Incoming, Preview, alerts};
