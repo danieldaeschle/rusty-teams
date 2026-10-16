@@ -48,7 +48,24 @@ impl TeamsSource for AppSource {
     }
 
     fn message_extras(&self, message: &MessageRecord, my_user_id: Option<&str>) -> MessageExtras {
-        message_extras(message, my_user_id)
+        let mut extras = message_extras(message, my_user_id);
+        let unnamed: Vec<String> = extras
+            .forwarded
+            .iter()
+            .filter(|forward| forward.sender.is_none())
+            .filter_map(|forward| forward.sender_id.clone())
+            .collect();
+        if let Ok(names) = self.store.display_names(&unnamed) {
+            for forward in &mut extras.forwarded {
+                if forward.sender.is_none() {
+                    forward.sender = forward
+                        .sender_id
+                        .as_ref()
+                        .and_then(|sender_id| names.get(sender_id).cloned());
+                }
+            }
+        }
+        extras
     }
 
     fn image_dimensions(&self, bytes: &[u8]) -> Option<(u32, u32)> {

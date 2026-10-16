@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
+    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
     MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle, SourceError,
     SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
@@ -84,6 +84,14 @@ impl TeamsSource for FakeSource {
                 sender: Some("Ada Example".to_owned()),
                 text: "budget plan".to_owned(),
             }),
+            forwarded: vec![ForwardedInfo {
+                message_id: "m0".to_owned(),
+                conversation_id: Some("19:origin@thread.v2".to_owned()),
+                sender: Some("Cleo Example".to_owned()),
+                sender_id: Some("user-cleo".to_owned()),
+                time: Some("2026-10-06T08:00:00+00:00".to_owned()),
+                text: "original words".to_owned(),
+            }],
             cards: vec!["Build passed".to_owned()],
             links: vec![LinkInfo {
                 url: "https://news.example.com/story".to_owned(),
@@ -761,6 +769,7 @@ async fn read_messages_adds_rich_fields_only_where_present() {
         "mentions",
         "files",
         "quote",
+        "forwarded",
         "cards",
         "links",
         "thread_root_id",
@@ -787,6 +796,8 @@ async fn read_messages_adds_rich_fields_only_where_present() {
     assert_eq!(rich["files"][0]["name"], "Plan.docx");
     assert_eq!(rich["files"][0]["type"], "word");
     assert_eq!(rich["quote"]["message_id"], "m1");
+    assert_eq!(rich["forwarded"][0]["sender"], "Cleo Example");
+    assert_eq!(rich["forwarded"][0]["text"], "original words");
     assert_eq!(rich["cards"], json!(["Build passed"]));
     assert_eq!(rich["links"][0]["title"], "A story");
 }

@@ -4,6 +4,7 @@ use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, TeamRecord};
 
 use crate::adaptive_card::card_content_text;
 use crate::call_event::CallEvent;
+use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::links::EMPTY_LINKS;
 use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
@@ -228,7 +229,13 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
         content: attachment
             .content
             .clone()
-            .filter(|_| is_card || attachment.content_type.as_deref() == Some("messageReference")),
+            .filter(|_| {
+                is_card
+                    || matches!(
+                        attachment.content_type.as_deref(),
+                        Some("messageReference" | FORWARDED_CONTENT_TYPE)
+                    )
+            }),
     }
 }
 

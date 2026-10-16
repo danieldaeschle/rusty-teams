@@ -17,7 +17,7 @@ pub use settings::{
     load as load_policy, load_or_create_token, regenerate_token, save as save_policy,
 };
 pub use source::{
-    EncodedImage, FileInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
+    EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
     QuoteInfo, ReactionInfo, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 

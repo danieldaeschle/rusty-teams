@@ -90,6 +90,16 @@ pub struct QuoteInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ForwardedInfo {
+    pub message_id: String,
+    pub conversation_id: Option<String>,
+    pub sender: Option<String>,
+    pub sender_id: Option<String>,
+    pub time: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LinkInfo {
     pub url: String,
     pub title: Option<String>,
@@ -103,6 +113,7 @@ pub struct MessageExtras {
     pub mentions: Vec<MentionInfo>,
     pub files: Vec<FileInfo>,
     pub quote: Option<QuoteInfo>,
+    pub forwarded: Vec<ForwardedInfo>,
     pub cards: Vec<String>,
     pub links: Vec<LinkInfo>,
 }

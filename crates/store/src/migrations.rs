@@ -89,6 +89,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0020_call_events.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0021_forwarded_content.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

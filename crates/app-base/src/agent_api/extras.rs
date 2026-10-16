@@ -1,5 +1,5 @@
 use mcp::{
-    FileInfo, ImageInfo, ImageKind, LinkInfo, MentionInfo, MessageExtras, QuoteInfo, ReactionInfo,
+    FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, MentionInfo, MessageExtras, QuoteInfo, ReactionInfo,
 };
 use store::MessageRecord;
 use teams_core::MentionTarget;
@@ -47,6 +47,17 @@ pub fn message_extras(record: &MessageRecord, my_user_id: Option<&str>) -> Messa
             sender: quote.sender_name,
             text: quote.preview,
         }),
+        forwarded: teams_core::forwards(record)
+            .into_iter()
+            .map(|forward| ForwardedInfo {
+                text: forward.text(),
+                message_id: forward.message_id,
+                conversation_id: forward.conversation_id,
+                sender: forward.sender_name,
+                sender_id: forward.sender_id,
+                time: forward.sent_at.map(|time| time.to_rfc3339()),
+            })
+            .collect(),
         cards: teams_core::card_texts(record),
         links: teams_core::link_preview(record)
             .into_iter()
@@ -214,6 +225,39 @@ mod tests {
                 ..extras
             },
             MessageExtras::default()
+        );
+    }
+
+    #[test]
+    fn a_forward_lists_the_original_message_apart_from_the_text() {
+        let forwarded = MessageRecord {
+            body_html: r#"<p>fyi</p><attachment id="9"></attachment>"#.to_owned(),
+            attachments_json: serde_json::json!([{
+                "content_type": "forwardedMessageReference",
+                "name": null, "url": null, "text": null, "id": "9",
+                "content": serde_json::json!({
+                    "originalMessageId": "9",
+                    "originalMessageContent": "<p>original <b>words</b></p>",
+                    "originalConversationId": "19:origin@thread.v2",
+                    "originalSentDateTime": "2026-10-06T08:00:00.000+00:00",
+                    "originalMessageSender": {"user": {"id": "user-cleo", "displayName": null}}
+                }).to_string()
+            }])
+            .to_string(),
+            ..record()
+        };
+        let extras = message_extras(&forwarded, None);
+        assert_eq!(extras.text, "fyi");
+        assert_eq!(
+            extras.forwarded,
+            [ForwardedInfo {
+                message_id: "9".to_owned(),
+                conversation_id: Some("19:origin@thread.v2".to_owned()),
+                sender: None,
+                sender_id: Some("user-cleo".to_owned()),
+                time: Some("2026-10-06T08:00:00+00:00".to_owned()),
+                text: "original words".to_owned(),
+            }]
         );
     }
 }

@@ -8,8 +8,8 @@ use store::MessageRecord;
 use teams_core::{
     JumboEmoji, jumbo_emoji,
     AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ImageRef, LinkPreview,
-    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration, images,
-    link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
+    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration,
+    forwarded_texts, images, is_forwarded, link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
     reactions, readable_text, translated_spans,
 };
 
@@ -503,7 +503,6 @@ fn reactor_name(reaction: &ReactionInfo, context: &RowContext) -> String {
 }
 
 const REPLY_EXCERPT_CHARS: usize = 90;
-const FORWARD_ITEMTYPE: &str = "schema.skype.com/Forward";
 
 pub fn message_text(record: &MessageRecord) -> String {
     let own_spans: Vec<Span> = message_spans(record)
@@ -513,6 +512,7 @@ pub fn message_text(record: &MessageRecord) -> String {
     strip_image_placeholders(layout_blocks(&own_spans))
         .into_iter()
         .filter_map(|block| block.markdown())
+        .chain(forwarded_texts(record))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -538,6 +538,14 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
     let first_line = text.lines().map(str::trim).find(|line| !line.is_empty());
     let excerpt = match first_line {
         Some(line) => line.to_owned(),
+        None if let Some(line) = forwarded_texts(record)
+            .iter()
+            .flat_map(|text| text.lines())
+            .map(str::trim)
+            .find(|line| !line.is_empty()) =>
+        {
+            line.to_owned()
+        }
         None if !images(record).is_empty() => "Image".to_owned(),
         None if let Some(line) = card_texts(record)
             .iter()
@@ -666,7 +674,10 @@ pub fn quoted_texts(records: &[MessageRecord]) -> HashMap<String, String> {
         .iter()
         .filter(|record| !record.deleted && wanted.contains(&record.message_id))
         .map(|record| {
-            let text = readable_text(record);
+            let mut text = readable_text(record);
+            if text.is_empty() {
+                text = forwarded_texts(record).join("\n");
+            }
             let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
             let mut shown = lines.iter().take(QUOTE_LINES).copied().collect::<Vec<_>>().join("\n");
             if lines.len() > QUOTE_LINES {
@@ -698,7 +709,11 @@ fn message_row_with(
     } else if let Some(html) = &translation.translated_html {
         layout_blocks(&translated_spans(record, html))
     } else {
-        layout_blocks(&linked_message_spans_with(record, &|id| quoted.get(id).cloned()))
+        layout_blocks(&linked_message_spans_with(
+            record,
+            &|id| quoted.get(id).cloned(),
+            &|user_id| context.names.get(user_id).cloned(),
+        ))
     };
     let blocks = if images.is_empty() {
         blocks
@@ -719,7 +734,7 @@ fn message_row_with(
         time: clock_label(record.created_at, context.offset),
         day_header: Some(format::day_label(local.date_naive(), context.today)),
         blocks,
-        jumbo: (!record.deleted && !is_forwarded(&record.body_html))
+        jumbo: (!record.deleted && !is_forwarded(record))
             .then(|| jumbo_emoji(&record.body_html))
             .flatten(),
         edited: record.edited_at.is_some() && !record.deleted,
@@ -742,14 +757,10 @@ fn message_row_with(
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
         own,
-        forwarded: !record.deleted && is_forwarded(&record.body_html),
+        forwarded: is_forwarded(record),
         translation: translation.line,
         call: None,
     }
-}
-
-pub fn is_forwarded(body_html: &str) -> bool {
-    body_html.contains(FORWARD_ITEMTYPE)
 }
 
 fn finished_call_ids(events: &[Option<CallEvent>]) -> HashSet<&str> {
@@ -1110,19 +1121,47 @@ mod tests {
 
     #[test]
     fn forwarded_messages_are_detected_by_the_forward_blockquote() {
-        assert!(is_forwarded(
-            r#"<p>fyi</p><blockquote itemscope="" itemtype="http://schema.skype.com/Forward" itemid="1">text</blockquote>"#
-        ));
-        assert!(!is_forwarded(
-            r#"<blockquote itemtype="http://schema.skype.com/Reply">text</blockquote>"#
-        ));
-        assert!(!is_forwarded("<p>plain</p>"));
         let mut forwarded = record("f", None, 8, 6);
         forwarded.body_html =
-            r#"<blockquote itemtype="http://schema.skype.com/Forward">text</blockquote>"#.into();
+            r#"<p>fyi</p><blockquote itemscope="" itemtype="http://schema.skype.com/Forward" itemid="1">text</blockquote>"#.into();
         assert!(message_row(&forwarded, &context()).forwarded);
+        forwarded.body_html =
+            r#"<blockquote itemtype="http://schema.skype.com/Reply">text</blockquote>"#.into();
+        assert!(!message_row(&forwarded, &context()).forwarded);
+        forwarded.body_html =
+            r#"<blockquote itemtype="http://schema.skype.com/Forward">text</blockquote>"#.into();
         forwarded.deleted = true;
         assert!(!message_row(&forwarded, &context()).forwarded);
+    }
+
+    #[test]
+    fn a_graph_forward_shows_the_original_sender_and_text_in_a_quote() {
+        let mut forwarded = record("f", None, 8, 6);
+        forwarded.body_html = r#"<attachment id="9"></attachment>"#.into();
+        forwarded.attachments_json = serde_json::json!([{
+            "content_type": "forwardedMessageReference",
+            "name": null, "url": null, "text": null, "id": "9",
+            "content": serde_json::json!({
+                "originalMessageId": "9",
+                "originalMessageContent": "<p>original words</p>",
+                "originalSentDateTime": "2026-10-06T07:00:00.000+00:00",
+                "originalMessageSender": {"user": {"id": "orig", "displayName": null}}
+            }).to_string()
+        }])
+        .to_string();
+        let mut context = context();
+        context.names.insert("orig".into(), "Priya Nair".into());
+        let row = message_row(&forwarded, &context);
+        assert!(row.forwarded);
+        assert!(row.jumbo.is_none());
+        let [Block::Quote(children)] = row.blocks.as_slice() else {
+            panic!("expected one forward quote, got {:?}", row.blocks);
+        };
+        let lines: Vec<String> = children.iter().filter_map(Block::markdown).collect();
+        assert!(lines[0].contains("Priya Nair"), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("original words")), "{lines:?}");
+        assert_eq!(reply_excerpt(&forwarded), "original words");
+        assert_eq!(message_text(&forwarded), "original words");
     }
 
     #[test]
