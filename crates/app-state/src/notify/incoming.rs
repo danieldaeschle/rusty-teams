@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
 use store::{ChannelNotifications, MessageRecord, Sidebar, Store};
@@ -8,6 +8,34 @@ use crate::app_state::chat_title;
 
 const RECENT_WINDOW: usize = 20;
 const FILE_FALLBACK: &str = "File";
+const LATE_ARRIVALS_KEPT: usize = 500;
+
+#[derive(Default)]
+pub struct LateArrivals {
+    keys: HashSet<(String, String)>,
+    order: VecDeque<(String, String)>,
+}
+
+impl LateArrivals {
+    pub fn insert(&mut self, conversation_id: &str, message_ids: Vec<String>) {
+        for message_id in message_ids {
+            let key = (conversation_id.to_owned(), message_id);
+            if self.keys.insert(key.clone()) {
+                self.order.push_back(key);
+            }
+        }
+        while self.order.len() > LATE_ARRIVALS_KEPT {
+            if let Some(oldest) = self.order.pop_front() {
+                self.keys.remove(&oldest);
+            }
+        }
+    }
+
+    pub fn contains(&self, conversation_id: &str, message_id: &str) -> bool {
+        self.keys
+            .contains(&(conversation_id.to_owned(), message_id.to_owned()))
+    }
+}
 
 pub struct IncomingTracker {
     started: DateTime<Utc>,
@@ -27,11 +55,16 @@ impl IncomingTracker {
         store: &Store,
         sidebar: &Sidebar,
         my_user_id: Option<&str>,
+        late_arrivals: &LateArrivals,
         conversation_id: &str,
     ) -> Vec<Incoming> {
         let Ok(records) = store.messages(conversation_id, None, RECENT_WINDOW) else {
             return Vec::new();
         };
+        let records = records
+            .into_iter()
+            .filter(|record| !late_arrivals.contains(&record.conversation_id, &record.message_id))
+            .collect();
         self.fresh(records, store, sidebar, my_user_id)
     }
 
@@ -415,6 +448,39 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].conversation_id, "group");
+    }
+
+    #[test]
+    fn message_stored_late_by_an_update_is_not_an_arrival() {
+        let start = Utc::now();
+        let store = Store::open_in_memory().unwrap();
+        let late = record("direct", "u1", start + Duration::seconds(5), "PR link");
+        let arrived = record("direct", "u1", start + Duration::seconds(6), "neu");
+        store.upsert_messages(&[late.clone(), arrived]).unwrap();
+        let mut late_arrivals = LateArrivals::default();
+        late_arrivals.insert("direct", vec![late.message_id.clone()]);
+        let found = IncomingTracker::new(start).collect(
+            &store,
+            &sidebar(),
+            Some("me"),
+            &late_arrivals,
+            "direct",
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].preview, Preview::Text("neu".into()));
+    }
+
+    #[test]
+    fn late_arrivals_forget_the_oldest_beyond_the_limit() {
+        let mut late_arrivals = LateArrivals::default();
+        late_arrivals.insert(
+            "c",
+            (0..=LATE_ARRIVALS_KEPT).map(|n| n.to_string()).collect(),
+        );
+        assert!(!late_arrivals.contains("c", "0"));
+        assert!(late_arrivals.contains("c", "1"));
+        assert!(late_arrivals.contains("c", &LATE_ARRIVALS_KEPT.to_string()));
+        assert!(!late_arrivals.contains("other", "1"));
     }
 
     #[test]

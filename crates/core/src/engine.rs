@@ -207,6 +207,30 @@ impl<R: Remote> SyncEngine<R> {
         Ok(delta)
     }
 
+    pub async fn fetch_until_cached(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        retry_delays: &[std::time::Duration],
+    ) -> Result<Delta> {
+        let mut delta = Delta::default();
+        for delay in retry_delays {
+            if self.is_cached(conversation_id, message_id)? {
+                break;
+            }
+            tokio::time::sleep(*delay).await;
+            delta.merge(self.fetch_newer(conversation_id).await?);
+        }
+        Ok(delta)
+    }
+
+    fn is_cached(&self, conversation_id: &str, message_id: &str) -> Result<bool> {
+        Ok(self
+            .store
+            .messages_by_id(conversation_id, &[message_id.to_owned()])?
+            .contains_key(message_id))
+    }
+
     pub async fn refresh_thread(&self, conversation_id: &str, root_id: &str) -> Result<Delta> {
         let Conversation::Channel { team_id } = self.resolve(conversation_id).await? else {
             return Err(Error::Unsupported("refreshing a thread of a chat"));
@@ -401,7 +425,8 @@ impl<R: Remote> SyncEngine<R> {
             },
         };
         let mut collected = collected;
-        self.apply_chat_emotions(conversation_id, &mut collected).await;
+        self.apply_chat_emotions(conversation_id, &mut collected)
+            .await;
         let delta = self.ingest(conversation_id, collected)?;
         self.store.set_sync_state(conversation_id, &state)?;
         Ok(delta)
@@ -423,7 +448,8 @@ impl<R: Remote> SyncEngine<R> {
             .iter()
             .filter_map(|message| message_record(conversation_id, message))
             .collect();
-        self.apply_chat_emotions(conversation_id, &mut records).await;
+        self.apply_chat_emotions(conversation_id, &mut records)
+            .await;
         self.ingest(conversation_id, records.clone())?;
         self.store.set_sync_state(
             conversation_id,
@@ -491,6 +517,20 @@ impl<R: Remote> SyncEngine<R> {
         if self.preview_changed.swap(false, Ordering::SeqCst) {
             let _ = self.events.send(CoreEvent::SidebarChanged);
         }
+    }
+
+    pub(crate) fn announce_stored_late(&self, conversation_id: &str, delta: &Delta) {
+        if delta.added.is_empty() {
+            return;
+        }
+        let _ = self.events.send(CoreEvent::MessagesStoredLate {
+            conversation_id: conversation_id.to_owned(),
+            message_ids: delta
+                .added
+                .iter()
+                .map(|record| record.message_id.clone())
+                .collect(),
+        });
     }
 
     pub(crate) fn report(&self, message: String) {
