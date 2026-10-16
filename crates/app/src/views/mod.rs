@@ -30,6 +30,7 @@ pub mod card_input;
 pub mod card_media;
 pub mod card_table;
 pub mod card_widgets;
+pub mod chat_members;
 pub mod composer;
 pub mod conversation;
 pub mod dialog_overlay;

@@ -9,6 +9,7 @@ pub mod card_inputs;
 pub mod card_refresh;
 pub mod card_state;
 pub mod chat_actions;
+pub mod chat_members;
 pub mod data;
 pub mod demo;
 pub mod demo_profiles;

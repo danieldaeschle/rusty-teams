@@ -468,8 +468,19 @@ impl<R: Remote> SyncEngine<R> {
 
     pub async fn leave_chat(&self, chat_id: &str) -> Result<()> {
         let user_id = self.my_user_id().await?;
-        self.remote.leave_chat(chat_id, &user_id).await?;
+        self.remote.remove_chat_member(chat_id, &user_id).await?;
         self.store.remove_chats(&[chat_id.to_owned()])?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        self.remote.remove_chat_member(chat_id, user_id).await?;
+        if let Some(mut chat) = self.store.chat(chat_id)? {
+            chat.members
+                .retain(|member| member.user_id.as_deref() != Some(user_id));
+            self.store.upsert_chats(std::slice::from_ref(&chat))?;
+        }
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }

@@ -259,7 +259,12 @@ pub fn square_avatar(name: &str, key: &str, size: f32, radius: f32) -> Div {
         .child(format::initials(name))
 }
 
-pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div {
+pub fn member_stack(
+    directory: &Directory,
+    faces: &[Face],
+    total: usize,
+    opens_profiles: bool,
+) -> Div {
     const LIMIT: usize = 3;
     const SIZE: f32 = 22.;
     const OVERLAP: f32 = 6.;
@@ -270,7 +275,7 @@ pub fn member_stack(directory: &Directory, faces: &[Face], total: usize) -> Div 
         stack = stack.child(
             opens_profile(
                 div().id(ElementId::Name(format!("member-face-{index}").into())),
-                face.user_id.as_deref(),
+                face.user_id.as_deref().filter(|_| opens_profiles),
             )
             .when(index > 0, |element| element.ml(px(-OVERLAP)))
             .size(px(SIZE))
