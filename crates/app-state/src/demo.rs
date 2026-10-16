@@ -311,7 +311,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: people(&[(PRIYA_ID, "Priya Nair")]),
             time: at(0, 10, 47),
             unread: false,
-            preview: Some((PRIYA_ID, "Priya Nair", "Image")),
+            preview: Some((PRIYA_ID, "Priya Nair", "Sent an image")),
             deleted: false,
         },
         DemoChat {
@@ -321,7 +321,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: people(&[(TOBIAS_ID, "Tobias Klein")]),
             time: at(2, 9, 30),
             unread: false,
-            preview: Some((TOBIAS_ID, "Tobias Klein", "ok")),
+            preview: Some((DEMO_USER_ID, DEMO_USER_NAME, "Forwarded a message")),
             deleted: false,
         },
         DemoChat {
@@ -361,7 +361,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: group(&[(JONAS_ID, "Jonas Ortega"), (PRIYA_ID, "Priya Nair")]),
             time: at(0, 9, 45),
             unread: true,
-            preview: Some((JONAS_ID, "Jonas Ortega", "Recording is available")),
+            preview: Some(("", "", "Recording is ready")),
             deleted: false,
         },
         DemoChat {
@@ -381,7 +381,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: group(&[(JONAS_ID, "Jonas Ortega"), (LEA_ID, "Lea Schneider")]),
             time: at(0, 12, 5),
             unread: true,
-            preview: Some((JONAS_ID, "Jonas Ortega", "Pizza on Friday?")),
+            preview: Some((JONAS_ID, "Jonas Ortega", "\u{1F4F7} GIF")),
             deleted: false,
         },
         DemoChat {
@@ -411,7 +411,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: group(&[(TOBIAS_ID, "Tobias Klein"), (LEA_ID, "Lea Schneider")]),
             time: at(4, 8, 15),
             unread: false,
-            preview: Some((TOBIAS_ID, "Tobias Klein", "Route map attached")),
+            preview: Some((TOBIAS_ID, "Tobias Klein", "Sent a file")),
             deleted: false,
         },
         DemoChat {
@@ -421,7 +421,7 @@ fn demo_chats() -> Vec<DemoChat> {
             members: group(&[(PRIYA_ID, "Priya Nair"), (LEA_ID, "Lea Schneider")]),
             time: at(6, 19, 40),
             unread: false,
-            preview: Some((PRIYA_ID, "Priya Nair", "Next pick: Dune")),
+            preview: Some((PRIYA_ID, "Priya Nair", "Sent a card")),
             deleted: false,
         },
         DemoChat {

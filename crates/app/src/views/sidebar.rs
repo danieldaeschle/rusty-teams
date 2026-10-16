@@ -28,7 +28,7 @@ use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
-    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, NameStyle,
+    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_CHAT_PREVIEW, EMPTY_FOLDER_HINT, NameStyle,
     NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
     channel_name_style, older_chats_trigger_resets, step_id, team_name_style, visible_channel_ids,
     wants_older_chats,
@@ -490,21 +490,13 @@ pub struct SidebarView {
 fn preview_text(preview: &Preview) -> Option<(String, bool)> {
     match preview {
         Preview::Empty => None,
-        Preview::Deleted => Some((DELETED_PREVIEW.to_owned(), true)),
+        Preview::Deleted => Some((DELETED_CHAT_PREVIEW.to_owned(), true)),
         Preview::Typing(text) => Some((text.clone(), true)),
         Preview::Text {
             prefix: Some(prefix),
             text,
         } => Some((format!("{prefix}: {text}"), false)),
         Preview::Text { prefix: None, text } => Some((text.clone(), false)),
-    }
-}
-
-fn preview_icon(text: &str) -> Option<IconName> {
-    match text.rsplit(": ").next()? {
-        "Image" => Some(IconName::Image),
-        "File" => Some(IconName::File),
-        _ => None,
     }
 }
 
@@ -955,7 +947,6 @@ impl SidebarView {
             ),
             (None, Some(local)) => Some(local_preview_row(local, preview_color)),
             (None, None) => preview_text(&item.preview).map(|(text, italic)| {
-                let glyph = preview_icon(&text);
                 h_flex()
                     .flex_1()
                     .min_w_0()
@@ -965,7 +956,6 @@ impl SidebarView {
                     .text_size(px(12.5))
                     .when(italic, |preview| preview.italic())
                     .text_color(preview_color)
-                    .children(glyph.map(|name| icon(name, 12., preview_color)))
                     .child(div().truncate().child(text))
             }),
         };

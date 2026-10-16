@@ -20,6 +20,7 @@ pub const MUTED_ID: &str = "muted_chats";
 pub const SECTION_PAGE_SIZE: usize = 5;
 pub const EMPTY_FOLDER_HINT: &str = "Empty. Drag chats here.";
 pub const DELETED_PREVIEW: &str = "Message deleted";
+pub const DELETED_CHAT_PREVIEW: &str = "This message was deleted";
 const OWN_PREFIX: &str = "You";
 const GROUP_KIND: &str = "group";
 

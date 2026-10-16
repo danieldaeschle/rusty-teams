@@ -31,10 +31,11 @@ impl Store {
                         excluded.last_message_at IS NULL
                         OR COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at) IS NULL
                         OR excluded.last_message_at > COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at)
-                    ) END, last_message_preview = excluded.last_message_preview,
-                    last_message_sender_id = excluded.last_message_sender_id,
-                    last_message_sender_name = excluded.last_message_sender_name,
-                    last_message_deleted = excluded.last_message_deleted",
+                    ) END,
+                    last_message_preview = CASE WHEN ?13 THEN chats.last_message_preview ELSE excluded.last_message_preview END,
+                    last_message_sender_id = CASE WHEN ?13 THEN chats.last_message_sender_id ELSE excluded.last_message_sender_id END,
+                    last_message_sender_name = CASE WHEN ?13 THEN chats.last_message_sender_name ELSE excluded.last_message_sender_name END,
+                    last_message_deleted = CASE WHEN ?13 THEN chats.last_message_deleted ELSE excluded.last_message_deleted END",
             )?;
             let mut clear_members =
                 transaction.prepare_cached("DELETE FROM chat_members WHERE chat_id = ?1")?;
@@ -55,6 +56,7 @@ impl Store {
                     chat.last_message_sender_name,
                     chat.last_message_deleted,
                     chat.last_event_system,
+                    chat.last_event_call,
                 ])?;
                 clear_members.execute([&chat.id])?;
                 for (position, member) in chat.members.iter().enumerate() {
@@ -214,6 +216,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         last_message_deleted: row.get(10)?,
         muted: row.get(11)?,
         last_event_system: false,
+        last_event_call: false,
     })
 }
 

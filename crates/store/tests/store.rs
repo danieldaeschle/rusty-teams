@@ -23,6 +23,42 @@ fn a_system_event_keeps_the_previous_unread_state() {
     }
 }
 
+#[test]
+fn a_call_event_keeps_the_previous_preview() {
+    let store = Store::open_in_memory().unwrap();
+    let mut seeded = chat("chat-call", "Planning", Some(at(5)));
+    seeded.last_message_preview = Some("See you there".to_owned());
+    seeded.last_message_sender_id = Some("user-ada".to_owned());
+    seeded.last_message_sender_name = Some("Ada Example".to_owned());
+    store.upsert_chats(&[seeded]).unwrap();
+
+    let mut call = chat("chat-call", "Planning", Some(at(12)));
+    call.last_event_system = true;
+    call.last_event_call = true;
+    store.upsert_chats(&[call]).unwrap();
+    let stored = store.chat("chat-call").unwrap().unwrap();
+    assert_eq!(
+        stored.last_message_preview.as_deref(),
+        Some("See you there")
+    );
+    assert_eq!(
+        stored.last_message_sender_name.as_deref(),
+        Some("Ada Example")
+    );
+    assert_eq!(stored.last_message_at, Some(at(12)));
+
+    let mut recording = chat("chat-call", "Planning", Some(at(14)));
+    recording.last_event_system = true;
+    recording.last_message_preview = Some("Recording is ready".to_owned());
+    store.upsert_chats(&[recording]).unwrap();
+    let stored = store.chat("chat-call").unwrap().unwrap();
+    assert_eq!(
+        stored.last_message_preview.as_deref(),
+        Some("Recording is ready")
+    );
+    assert_eq!(stored.last_message_sender_name, None);
+}
+
 fn at(minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 6, 9, minute, 0).unwrap()
 }

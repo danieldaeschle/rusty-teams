@@ -2483,7 +2483,10 @@ async fn sidebar_sync_fills_the_last_message_preview() {
     let gone = by_id("c-gone");
     assert!(gone.last_message_deleted);
     assert_eq!(gone.last_message_preview, None);
-    assert_eq!(by_id("c-image").last_message_preview, None);
+    assert_eq!(
+        by_id("c-image").last_message_preview.as_deref(),
+        Some("Sent an image")
+    );
     assert_eq!(
         by_id("c-text")
             .last_message_preview
@@ -2522,6 +2525,36 @@ async fn a_newer_message_updates_the_preview_and_announces_the_sidebar() {
         seen.push(event);
     }
     assert!(seen.contains(&CoreEvent::SidebarChanged));
+}
+
+#[tokio::test]
+async fn a_newer_call_event_leaves_the_preview_alone() {
+    let fake = Arc::new(Fake::default());
+    let mut before = numbered(3);
+    before.push(message(4, 30, "<p>before the call</p>"));
+    fake.set_chat_messages(before.clone());
+    let engine = chat_engine(&fake, SyncConfig::default()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let call: Message = serde_json::from_value(json!({
+        "id": "call", "messageType": "systemEventMessage",
+        "createdDateTime": (base() + Duration::minutes(40)).to_rfc3339(),
+        "body": {"contentType": "html", "content": "<systemEventMessage/>"},
+        "eventDetail": {
+            "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+            "callId": "c1", "callDuration": "PT1M2S", "callEventType": "call",
+            "callParticipants": [],
+        },
+    }))
+    .unwrap();
+    before.push(call);
+    fake.set_chat_messages(before);
+    engine.fetch_newer(CHAT).await.unwrap();
+    let record = engine.sidebar().unwrap().chats.remove(0);
+    assert_eq!(
+        record.last_message_preview.as_deref(),
+        Some("before the call")
+    );
+    assert_eq!(record.last_message_at, Some(base() + Duration::minutes(30)));
 }
 
 #[tokio::test]
