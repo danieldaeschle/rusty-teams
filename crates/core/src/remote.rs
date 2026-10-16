@@ -123,6 +123,7 @@ pub trait Remote {
     async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()>;
     async fn chat_states(&self) -> Result<Vec<ConversationState>>;
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
+    async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
     async fn set_channel_notifications(
         &self,
         channel_id: &str,
@@ -633,6 +634,12 @@ impl Remote for Graph {
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
         Ok(Conversations::new(self.session())
             .set_alerts(chat_id, !muted)
+            .await?)
+    }
+
+    async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_read_horizon(conversation_id, horizon)
             .await?)
     }
 

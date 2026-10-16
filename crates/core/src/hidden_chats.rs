@@ -172,6 +172,7 @@ mod tests {
                 id: "19:a".to_owned(),
                 muted: false,
                 hidden,
+                read: chatsvc::ReadHorizon::default(),
             },
         )])
     }

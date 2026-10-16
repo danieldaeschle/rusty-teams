@@ -735,6 +735,23 @@ impl AppState {
         }
     }
 
+    pub fn mark_channel_read(&mut self, channel_id: &str, cx: &mut Context<Self>) {
+        if self.mode.read_only {
+            return;
+        }
+        let _ = self.store.mark_channel_read(channel_id);
+        self.reload_sidebar(cx);
+        if self.mode.demo {
+            return;
+        }
+        if let Some(engine) = self.engine.clone() {
+            let channel_id = channel_id.to_owned();
+            drop(crate::runtime::spawn(async move {
+                engine.mark_read(&channel_id).await
+            }));
+        }
+    }
+
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
         self.new_chat = true;
         self.show_call(false, cx);

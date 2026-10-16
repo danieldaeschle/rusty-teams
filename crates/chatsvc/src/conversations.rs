@@ -5,6 +5,7 @@ use crate::channel_notifications::{ChannelNotifications, PROPERTY_NAME};
 use crate::error::{Error, Result};
 use crate::messages::{MessageTransport, SessionMessageTransport, encode, ensure_success};
 use crate::pins::DEFAULT_REGION;
+use crate::read_horizon::{self, ReadHorizon};
 
 const PAGE_SIZE: usize = 200;
 const MAX_PAGES: usize = 100;
@@ -15,6 +16,7 @@ pub struct ConversationState {
     pub id: String,
     pub muted: bool,
     pub hidden: Option<bool>,
+    pub read: ReadHorizon,
 }
 
 pub struct Conversations<T: MessageTransport = SessionMessageTransport> {
@@ -82,6 +84,21 @@ impl<T: MessageTransport> Conversations<T> {
         ensure_success(&answer)
     }
 
+    pub async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
+        let url = format!(
+            "{}/{}/properties?name={}",
+            self.base_url,
+            encode(conversation_id),
+            read_horizon::PROPERTY_NAME
+        );
+        let body = json!({ read_horizon::PROPERTY_NAME: horizon });
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Put, url, body))
+            .await?;
+        ensure_success(&answer)
+    }
+
     pub async fn set_channel_notifications(
         &self,
         channel_id: &str,
@@ -141,6 +158,7 @@ fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
                 id: id.to_owned(),
                 muted,
                 hidden: hidden_flag(conversation),
+                read: ReadHorizon::from_conversation(conversation),
             })
         })
         .collect())
@@ -184,6 +202,7 @@ mod tests {
             id: id.to_owned(),
             muted,
             hidden: None,
+            read: ReadHorizon::default(),
         }
     }
 
@@ -318,5 +337,45 @@ mod tests {
         );
         assert_eq!(requests[0].body, Some(json!({"alerts": "false"})));
         assert_eq!(requests[1].body, Some(json!({"alerts": "true"})));
+    }
+
+    #[tokio::test]
+    async fn states_carry_the_read_horizon() {
+        let transport = canned(vec![(
+            200,
+            json!({
+                "conversations": [{
+                    "id": "19:a",
+                    "properties": {"consumptionhorizon": "5;6;7"},
+                    "lastMessage": {"originalarrivaltime": "1970-01-01T00:00:00.009Z", "from": "x/contacts/8:orgid:b"},
+                }],
+            }),
+        )]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_states()
+            .await
+            .unwrap();
+        assert_eq!(states[0].read.consumed_until_ms, 5);
+        assert_eq!(states[0].read.last_message_ms, 9);
+        assert!(states[0].read.is_unread("8:orgid:me"));
+    }
+
+    #[tokio::test]
+    async fn set_read_horizon_puts_the_consumption_horizon_property() {
+        let transport = canned(vec![(200, Value::Null)]);
+        Conversations::with_transport(&transport, "emea")
+            .set_read_horizon("19:a@thread.skype", "9;10;0")
+            .await
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[0].method, Method::Put);
+        assert_eq!(
+            requests[0].url,
+            format!("{BASE}/19%3Aa%40thread.skype/properties?name=consumptionhorizon")
+        );
+        assert_eq!(
+            requests[0].body,
+            Some(json!({"consumptionhorizon": "9;10;0"}))
+        );
     }
 }

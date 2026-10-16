@@ -19,7 +19,7 @@ use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
-use super::widgets::{count_badge, dot, icon, page_header, unread_marker};
+use super::widgets::{count_badge, icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
@@ -28,9 +28,10 @@ use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
-    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, Preview, Section,
-    SectionInput, SectionKind, Step, build_sections, older_chats_trigger_resets, step_id,
-    visible_channel_ids, wants_older_chats,
+    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_PREVIEW, EMPTY_FOLDER_HINT, NameStyle,
+    NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
+    channel_name_style, older_chats_trigger_resets, step_id, team_name_style, visible_channel_ids,
+    wants_older_chats,
 };
 use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
@@ -1220,6 +1221,7 @@ impl SidebarView {
         notifications: ChannelNotifications,
     ) -> AnyElement {
         let unread = channel.unread;
+        let name_style = channel_name_style(unread, true, selected);
         let state = self.state.clone();
         let menu_state = self.state.clone();
         let menu_channel_id = channel_id.to_owned();
@@ -1259,12 +1261,8 @@ impl SidebarView {
                                     .min_w_0()
                                     .truncate()
                                     .text_size(px(13.5))
-                                    .font_weight(if unread {
-                                        FontWeight::BOLD
-                                    } else {
-                                        FontWeight::NORMAL
-                                    })
-                                    .text_color(theme::text())
+                                    .font_weight(name_weight(name_style))
+                                    .text_color(name_color(name_style))
                                     .child(format!("{} / {}", team.name, channel.name)),
                             )
                             .children(notification_badge(notifications.level))
@@ -1281,19 +1279,15 @@ impl SidebarView {
                             ),
                     )
                     .child(
-                        h_flex()
-                            .gap(px(8.))
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(px(12.))
-                                    .text_color(theme::text_muted())
-                                    .child(team.name.clone()),
-                            )
-                            .when(unread, |line| line.child(dot(7.))),
+                        h_flex().gap(px(8.)).items_center().child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(theme::text_muted())
+                                .child(team.name.clone()),
+                        ),
                     ),
             )
             .on_click(move |_, _, cx| {
@@ -1335,7 +1329,7 @@ impl SidebarView {
     ) -> Div {
         let team_id = entry.team.id.clone();
         let expanded = team_expanded(&team_id, &self.collapsed_teams);
-        let unread = entry.channels.iter().any(|channel| channel.unread);
+        let name_style = team_name_style(entry, expanded);
         let toggle_id = team_id.clone();
         list = list.child(
             h_flex()
@@ -1364,15 +1358,10 @@ impl SidebarView {
                         .min_w_0()
                         .truncate()
                         .text_size(px(13.5))
-                        .font_weight(if unread || expanded {
-                            FontWeight::SEMIBOLD
-                        } else {
-                            FontWeight::NORMAL
-                        })
-                        .text_color(theme::text())
+                        .font_weight(name_weight(name_style))
+                        .text_color(name_color(name_style))
                         .child(entry.team.name.clone()),
                 )
-                .when(unread && !expanded, |row| row.child(dot(7.)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if !this.collapsed_teams.remove(&toggle_id) {
                         this.collapsed_teams.insert(toggle_id.clone());
@@ -1395,6 +1384,7 @@ impl SidebarView {
             list = list.child(self.team_channel_row(
                 channel,
                 is_selected(channel),
+                channel_name_style(channel.unread, !is_hidden(channel), is_selected(channel)),
                 entry.channel_notifications(&channel.id),
             ));
         }
@@ -1425,6 +1415,7 @@ impl SidebarView {
                 list = list.child(self.team_channel_row(
                     channel,
                     false,
+                    channel_name_style(channel.unread, false, false),
                     entry.channel_notifications(&channel.id),
                 ));
             }
@@ -1473,6 +1464,7 @@ impl SidebarView {
         &self,
         channel: &ChannelRecord,
         is_selected: bool,
+        name_style: NameStyle,
         notifications: ChannelNotifications,
     ) -> impl IntoElement {
         let state = self.state.clone();
@@ -1508,16 +1500,11 @@ impl SidebarView {
                     .min_w_0()
                     .truncate()
                     .text_size(px(13.5))
-                    .font_weight(if channel.unread {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .text_color(theme::text())
+                    .font_weight(name_weight(name_style))
+                    .text_color(name_color(name_style))
                     .child(channel.name.clone()),
             )
             .children(notification_badge(notifications.level))
-            .when(channel.unread, |row| row.child(dot(7.)))
             .on_click(move |_, _, cx| {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
@@ -1604,6 +1591,22 @@ impl SidebarView {
             .track_scroll(&self.channels_scroll)
             .child(list)
             .into_any_element()
+    }
+}
+
+fn name_weight(style: NameStyle) -> FontWeight {
+    match style.weight {
+        NameWeight::Regular => FontWeight::NORMAL,
+        NameWeight::Semibold => FontWeight::SEMIBOLD,
+        NameWeight::Bold => FontWeight::BOLD,
+    }
+}
+
+fn name_color(style: NameStyle) -> Hsla {
+    if style.highlighted {
+        theme::text()
+    } else {
+        theme::text_muted()
     }
 }
 

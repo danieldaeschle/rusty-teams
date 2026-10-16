@@ -359,8 +359,8 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn mark_read(&self, conversation_id: &str) -> Result<()> {
-        if !matches!(self.resolve(conversation_id).await?, Conversation::Chat) {
-            return Err(Error::Unsupported("marking a channel as read"));
+        if let Conversation::Channel { .. } = self.resolve(conversation_id).await? {
+            return self.mark_channel_read(conversation_id).await;
         }
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(conversation_id).await?;
@@ -368,6 +368,24 @@ impl<R: Remote> SyncEngine<R> {
             .mark_chat_read(conversation_id, &user_id, &tenant_id)
             .await?;
         self.store.mark_chat_read(conversation_id, Utc::now())?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    async fn mark_channel_read(&self, channel_id: &str) -> Result<()> {
+        let now = Utc::now();
+        let last_message_at = self
+            .store
+            .channel(channel_id)?
+            .and_then(|channel| channel.last_message_at)
+            .unwrap_or(now);
+        self.remote
+            .set_read_horizon(
+                channel_id,
+                &chatsvc::read_horizon::read_up_to(last_message_at, now),
+            )
+            .await?;
+        self.store.mark_channel_read(channel_id)?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }

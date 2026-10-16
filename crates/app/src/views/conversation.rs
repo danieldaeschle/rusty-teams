@@ -71,7 +71,7 @@ use crate::rows::{
 };
 use crate::runtime;
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
-use crate::sidebar_model::{AvatarSpec, Face};
+use crate::sidebar_model::{AvatarSpec, Face, channel_unread};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
@@ -1896,24 +1896,30 @@ impl ConversationView {
         if state.viewing_call() && !self.pinned {
             return;
         }
-        let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|c| c.selection.clone())
-        else {
+        let Some(selection) = self.current.as_ref().map(|c| c.selection.clone()) else {
             return;
         };
         if (state.engine.is_none() && !state.mode.demo) || state.mode.read_only {
             return;
         }
-        let unread = state
-            .sidebar
-            .chats
-            .iter()
-            .any(|chat| chat.id == chat_id && chat.unread)
-            && !state.keeps_unread(&chat_id);
+        let unread = match &selection {
+            Selection::Chat(chat_id) => {
+                state
+                    .sidebar
+                    .chats
+                    .iter()
+                    .any(|chat| &chat.id == chat_id && chat.unread)
+                    && !state.keeps_unread(chat_id)
+            }
+            Selection::Channel(channel_id) => channel_unread(&state.sidebar, channel_id),
+        };
         let Some(plan) = plan_read(self.window_active, unread, trigger) else {
             return;
         };
-        self.app
-            .update(cx, |state, cx| state.mark_chat_read(&chat_id, cx));
+        self.app.update(cx, |state, cx| match &selection {
+            Selection::Chat(chat_id) => state.mark_chat_read(chat_id, cx),
+            Selection::Channel(channel_id) => state.mark_channel_read(channel_id, cx),
+        });
         if plan.clear_divider
             && let Some(current) = self.current.as_mut()
             && current.first_unread.take().is_some()

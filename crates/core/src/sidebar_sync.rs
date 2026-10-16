@@ -92,6 +92,7 @@ impl<R: Remote> SyncEngine<R> {
             page = self.remote.chats_at(&link).await?;
         }
         self.store.remove_chats(&hidden_ids)?;
+        self.apply_channel_read_states(states.as_deref(), &my_user_id);
         self.apply_muted_chats(states);
         if full {
             if complete {
@@ -136,6 +137,25 @@ impl<R: Remote> SyncEngine<R> {
         })?;
         self.store.remove_chats(&hidden)?;
         Ok(())
+    }
+
+    fn apply_channel_read_states(&self, states: Option<&[ConversationState]>, my_user_id: &str) {
+        let Some(states) = states else {
+            return;
+        };
+        let read_states: Vec<_> = states
+            .iter()
+            .map(|state| {
+                (
+                    state.id.clone(),
+                    state.read.is_unread(my_user_id),
+                    state.read.last_message_at(),
+                )
+            })
+            .collect();
+        if let Err(error) = self.store.apply_channel_read_states(&read_states) {
+            self.report(format!("cannot refresh unread channels: {error}"));
+        }
     }
 
     fn apply_muted_chats(&self, states: Option<Vec<ConversationState>>) {

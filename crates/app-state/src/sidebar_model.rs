@@ -210,11 +210,71 @@ pub fn unread_chat_count(chats: &[ChatRecord]) -> u32 {
         .count() as u32
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameWeight {
+    Regular,
+    Semibold,
+    Bold,
+}
+
+/// Teams channel list: `highlighted` is colorNeutralForeground1, otherwise colorNeutralForeground3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NameStyle {
+    pub weight: NameWeight,
+    pub highlighted: bool,
+}
+
+impl NameStyle {
+    const PLAIN: NameStyle = NameStyle {
+        weight: NameWeight::Regular,
+        highlighted: false,
+    };
+}
+
+pub fn channel_name_style(unread: bool, shown: bool, selected: bool) -> NameStyle {
+    if !unread || !shown {
+        return NameStyle::PLAIN;
+    }
+    NameStyle {
+        weight: if selected {
+            NameWeight::Regular
+        } else {
+            NameWeight::Bold
+        },
+        highlighted: true,
+    }
+}
+
+pub fn team_has_unread(team: &SidebarTeam) -> bool {
+    team.channels
+        .iter()
+        .any(|channel| channel.unread && !team.hidden_channel_ids.contains(&channel.id))
+}
+
+pub fn team_name_style(team: &SidebarTeam, expanded: bool) -> NameStyle {
+    if expanded || !team_has_unread(team) {
+        return NameStyle::PLAIN;
+    }
+    NameStyle {
+        weight: NameWeight::Semibold,
+        highlighted: true,
+    }
+}
+
+pub fn channel_unread(sidebar: &Sidebar, channel_id: &str) -> bool {
+    sidebar
+        .teams
+        .iter()
+        .flat_map(|team| team.channels.iter())
+        .any(|channel| channel.id == channel_id && channel.unread)
+}
+
 pub fn any_unread_channel(sidebar: &Sidebar) -> bool {
     sidebar
         .teams
         .iter()
-        .any(|team| team.channels.iter().any(|channel| channel.unread))
+        .filter(|team| !team.hidden)
+        .any(team_has_unread)
 }
 
 pub fn build_sections(input: &SectionInput<'_>) -> Vec<Section> {
@@ -672,6 +732,67 @@ mod tests {
                 .collect(),
             notifications: HashMap::new(),
         }
+    }
+
+    fn with_unread(mut entry: SidebarTeam, unread_ids: &[&str]) -> SidebarTeam {
+        for channel in &mut entry.channels {
+            channel.unread = unread_ids.contains(&channel.id.as_str());
+        }
+        entry
+    }
+
+    #[test]
+    fn unread_shown_channel_is_bold_and_highlighted() {
+        let bold = NameStyle {
+            weight: NameWeight::Bold,
+            highlighted: true,
+        };
+        let plain = NameStyle {
+            weight: NameWeight::Regular,
+            highlighted: false,
+        };
+        assert_eq!(channel_name_style(true, true, false), bold);
+        assert_eq!(channel_name_style(false, true, false), plain);
+        assert_eq!(channel_name_style(true, false, false), plain);
+        assert_eq!(
+            channel_name_style(true, true, true),
+            NameStyle {
+                weight: NameWeight::Regular,
+                highlighted: true,
+            }
+        );
+    }
+
+    #[test]
+    fn collapsed_team_with_an_unread_shown_channel_is_semibold() {
+        let entry = with_unread(team("t1", false, &["a", "b"], &["b"]), &["a"]);
+        let semibold = NameStyle {
+            weight: NameWeight::Semibold,
+            highlighted: true,
+        };
+        assert_eq!(team_name_style(&entry, false), semibold);
+        assert_eq!(team_name_style(&entry, true), NameStyle::PLAIN);
+        let only_hidden = with_unread(team("t1", false, &["a", "b"], &["b"]), &["b"]);
+        assert_eq!(team_name_style(&only_hidden, false), NameStyle::PLAIN);
+    }
+
+    #[test]
+    fn rail_dot_counts_shown_channels_of_shown_teams_only() {
+        let sidebar = |teams: Vec<SidebarTeam>| Sidebar {
+            teams,
+            ..Sidebar::default()
+        };
+        let hidden_channel = with_unread(team("t1", false, &["a", "b"], &["b"]), &["b"]);
+        let hidden_team = with_unread(team("t2", true, &["c"], &[]), &["c"]);
+        assert!(!any_unread_channel(&sidebar(vec![
+            hidden_channel,
+            hidden_team
+        ])));
+        let shown = with_unread(team("t1", false, &["a"], &[]), &["a"]);
+        let both = sidebar(vec![shown]);
+        assert!(any_unread_channel(&both));
+        assert!(channel_unread(&both, "a"));
+        assert!(!channel_unread(&both, "missing"));
     }
 
     #[test]

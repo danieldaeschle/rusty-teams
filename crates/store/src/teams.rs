@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params};
 
 use crate::error::Result;
@@ -31,8 +32,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (id) DO UPDATE SET
                     team_id = excluded.team_id, name = excluded.name, membership_type = excluded.membership_type,
-                    last_message_at = COALESCE(excluded.last_message_at, channels.last_message_at),
-                    unread = excluded.unread",
+                    last_message_at = COALESCE(excluded.last_message_at, channels.last_message_at)",
             )?;
             for channel in channels {
                 upsert.execute(params![
@@ -46,6 +46,36 @@ impl Store {
             }
         }
         Ok(transaction.commit()?)
+    }
+
+    /// Read state comes from chatsvc only; channel metadata refreshes leave it alone.
+    pub fn apply_channel_read_states(
+        &self,
+        states: &[(String, bool, Option<DateTime<Utc>>)],
+    ) -> Result<()> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        {
+            let mut update = transaction.prepare_cached(
+                "UPDATE channels SET unread = ?2,
+                    last_message_at = COALESCE(?3, last_message_at)
+                 WHERE id = ?1",
+            )?;
+            for (channel_id, unread, last_message_at) in states {
+                update.execute(params![
+                    channel_id,
+                    unread,
+                    optional_to_millis(*last_message_at)
+                ])?;
+            }
+        }
+        Ok(transaction.commit()?)
+    }
+
+    pub fn mark_channel_read(&self, channel_id: &str) -> Result<()> {
+        self.lock()?
+            .execute("UPDATE channels SET unread = 0 WHERE id = ?1", [channel_id])?;
+        Ok(())
     }
 
     pub fn remove_teams_except(&self, kept_team_ids: &[String]) -> Result<usize> {

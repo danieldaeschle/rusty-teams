@@ -15,6 +15,7 @@ pub mod messages;
 pub mod pins;
 pub mod presence;
 pub mod reactions;
+pub mod read_horizon;
 pub mod recap;
 pub mod realtime;
 pub mod recording_policy;
@@ -35,6 +36,7 @@ pub use cards::{
 };
 pub use channel_notifications::{ChannelNotificationLevel, ChannelNotifications, ChannelSettings};
 pub use conversations::{ConversationState, Conversations};
+pub use read_horizon::ReadHorizon;
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};

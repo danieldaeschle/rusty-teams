@@ -428,6 +428,44 @@ fn channel_upsert_keeps_known_last_message_time() {
 }
 
 #[test]
+fn channel_read_state_survives_a_metadata_refresh() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_teams(&[TeamRecord {
+            id: "t1".to_owned(),
+            name: "A".to_owned(),
+        }])
+        .unwrap();
+    let channel = ChannelRecord {
+        id: "c1".to_owned(),
+        team_id: "t1".to_owned(),
+        name: "General".to_owned(),
+        membership_type: None,
+        last_message_at: None,
+        unread: false,
+    };
+    store
+        .upsert_channels(std::slice::from_ref(&channel))
+        .unwrap();
+    store
+        .apply_channel_read_states(&[
+            ("c1".to_owned(), true, Some(at(9))),
+            ("unknown".to_owned(), true, None),
+        ])
+        .unwrap();
+    store
+        .upsert_channels(std::slice::from_ref(&channel))
+        .unwrap();
+    let stored = store.channel("c1").unwrap().unwrap();
+    assert!(stored.unread);
+    assert_eq!(stored.last_message_at, Some(at(9)));
+    assert!(store.channel("unknown").unwrap().is_none());
+
+    store.mark_channel_read("c1").unwrap();
+    assert!(!store.channel("c1").unwrap().unwrap().unread);
+}
+
+#[test]
 fn pruning_removes_departed_teams_and_channels() {
     let store = Store::open_in_memory().unwrap();
     store

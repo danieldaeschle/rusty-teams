@@ -117,6 +117,7 @@ struct Fake {
     invoke_answer: Mutex<Option<chatsvc::InvokeResponse>>,
     muted_states: Mutex<Vec<(String, bool)>>,
     hidden_states: Mutex<Vec<(String, bool)>>,
+    read_states: Mutex<Vec<(String, chatsvc::ReadHorizon)>>,
     chats_fail: Mutex<bool>,
     muted_fails: Mutex<bool>,
     link_pages: Mutex<Vec<chatsvc::MessageLinks>>,
@@ -525,6 +526,7 @@ impl Remote for Handle {
                 id,
                 muted,
                 hidden: None,
+                read: chatsvc::ReadHorizon::default(),
             })
             .collect();
         states.extend(
@@ -534,6 +536,17 @@ impl Remote for Handle {
                     id,
                     muted: false,
                     hidden: Some(hidden),
+                    read: chatsvc::ReadHorizon::default(),
+                }),
+        );
+        let read = self.read_states.lock().unwrap().clone();
+        states.extend(
+            read.into_iter()
+                .map(|(id, read)| chatsvc::ConversationState {
+                    id,
+                    muted: false,
+                    hidden: None,
+                    read,
                 }),
         );
         Ok(states)
@@ -541,6 +554,11 @@ impl Remote for Handle {
 
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
         self.record(format!("mute {chat_id} {muted}"));
+        Ok(())
+    }
+
+    async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
+        self.record(format!("read horizon {conversation_id} {horizon}"));
         Ok(())
     }
 
@@ -1017,6 +1035,38 @@ async fn refresh_sidebar_fills_chats_teams_and_channels() {
     assert_eq!(sidebar.chats[0].kind, "oneOnOne");
     assert_eq!(sidebar.chats[1].member_summary, "Ada Example");
     assert_eq!(sidebar.teams[0].channels[0].name, "General");
+}
+
+#[tokio::test]
+async fn channel_unread_comes_from_the_read_horizon_and_opening_marks_it_read() {
+    let fake = Arc::new(Fake::default());
+    *fake.teams.lock().unwrap() =
+        vec![serde_json::from_value(json!({"id": "team-1", "displayName": "Squad"})).unwrap()];
+    fake.read_states.lock().unwrap().push((
+        CHANNEL.to_owned(),
+        chatsvc::ReadHorizon {
+            consumed_until_ms: 5,
+            last_message_ms: 9,
+            last_message_from: Some("8:orgid:user-ada".to_owned()),
+            ..chatsvc::ReadHorizon::default()
+        },
+    ));
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.refresh_sidebar().await.unwrap();
+    engine.refresh_sidebar().await.unwrap();
+    let channel = engine.store().channel(CHANNEL).unwrap().unwrap();
+    assert!(channel.unread);
+    assert_eq!(channel.last_message_at, DateTime::from_timestamp_millis(9));
+
+    engine.mark_read(CHANNEL).await.unwrap();
+
+    assert!(!engine.store().channel(CHANNEL).unwrap().unwrap().unread);
+    let call = fake.calls().last().unwrap().clone();
+    assert!(
+        call.starts_with(&format!("read horizon {CHANNEL} 9;")),
+        "{call}"
+    );
+    assert!(call.ends_with(";0"), "{call}");
 }
 
 #[tokio::test]
