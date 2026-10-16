@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use store::Store;
+
 use crate::app_state::AppState;
 
 pub fn local_names(state: &AppState) -> HashMap<String, String> {
@@ -31,8 +33,14 @@ pub fn resolve_names(state: &AppState, user_ids: &[String]) -> HashMap<String, S
         .filter(|user_id| !names.contains_key(*user_id))
         .cloned()
         .collect();
-    if let Ok(stored) = state.store.display_names(&missing) {
-        names.extend(stored);
-    }
+    names.extend(stored_names(&state.store, &missing));
     names
+}
+
+/// Names the cache knows from chat members and sent messages, for people outside the sidebar.
+pub fn stored_names(store: &Store, user_ids: &[String]) -> HashMap<String, String> {
+    if user_ids.is_empty() {
+        return HashMap::new();
+    }
+    store.display_names(user_ids).unwrap_or_default()
 }

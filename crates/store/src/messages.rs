@@ -252,6 +252,23 @@ impl Store {
         Ok(messages)
     }
 
+    pub fn messages_with_attachment_type(
+        &self,
+        conversation_id: &str,
+        content_type: &str,
+    ) -> Result<Vec<MessageRecord>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages
+             WHERE conversation_id = ?1 AND instr(attachments_json, ?2) > 0"
+        ))?;
+        let needle = format!("\"content_type\":\"{content_type}\"");
+        let messages = statement
+            .query_map(params![conversation_id, needle], message_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(messages)
+    }
+
     pub fn messages_by_id(
         &self,
         conversation_id: &str,

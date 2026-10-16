@@ -7,7 +7,8 @@ use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
     JumboEmoji, jumbo_emoji,
-    AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ImageRef, LinkPreview,
+    AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ForwardHeader, ForwardInfo,
+    ImageRef, LinkPreview, forwards,
     ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration,
     forwarded_texts, images, is_forwarded, link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
     reactions, readable_text, translated_spans,
@@ -688,6 +689,33 @@ pub fn quoted_texts(records: &[MessageRecord]) -> HashMap<String, String> {
         .collect()
 }
 
+fn forward_header(forward: &ForwardInfo, context: &RowContext) -> ForwardHeader {
+    ForwardHeader {
+        sender: forward
+            .sender_id
+            .as_ref()
+            .and_then(|user_id| context.names.get(user_id).cloned()),
+        time: forward
+            .sent_at
+            .map(|time| format::post_time_label(time, context.today, context.offset)),
+    }
+}
+
+/// User ids a row needs a name for beyond its author: original senders of forwards.
+pub fn forward_sender_ids(records: &[MessageRecord]) -> Vec<String> {
+    let mut user_ids: Vec<String> = Vec::new();
+    for user_id in records
+        .iter()
+        .flat_map(forwards)
+        .filter_map(|forward| forward.sender_id)
+    {
+        if !user_ids.contains(&user_id) {
+            user_ids.push(user_id);
+        }
+    }
+    user_ids
+}
+
 pub fn message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
     message_row_with(record, context, &HashMap::new())
 }
@@ -704,15 +732,16 @@ fn message_row_with(
     let images = images(record);
     let own = context.my_user_id.is_some() && record.sender_id == context.my_user_id;
     let translation = context.translation.resolve(record, own);
+    let forward_header = |forward: &ForwardInfo| forward_header(forward, context);
     let blocks = if record.deleted {
         vec![Block::Paragraph(Inline::plain(DELETED_TEXT))]
     } else if let Some(html) = &translation.translated_html {
-        layout_blocks(&translated_spans(record, html))
+        layout_blocks(&translated_spans(record, html, &forward_header))
     } else {
         layout_blocks(&linked_message_spans_with(
             record,
             &|id| quoted.get(id).cloned(),
-            &|user_id| context.names.get(user_id).cloned(),
+            &forward_header,
         ))
     };
     let blocks = if images.is_empty() {
@@ -1158,7 +1187,7 @@ mod tests {
             panic!("expected one forward quote, got {:?}", row.blocks);
         };
         let lines: Vec<String> = children.iter().filter_map(Block::markdown).collect();
-        assert!(lines[0].contains("Priya Nair"), "{lines:?}");
+        assert!(lines[0].contains("Priya Nair Yesterday 07:00"), "{lines:?}");
         assert!(lines.iter().any(|line| line.contains("original words")), "{lines:?}");
         assert_eq!(reply_excerpt(&forwarded), "original words");
         assert_eq!(message_text(&forwarded), "original words");

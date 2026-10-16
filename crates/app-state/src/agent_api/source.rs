@@ -55,14 +55,13 @@ impl TeamsSource for AppSource {
             .filter(|forward| forward.sender.is_none())
             .filter_map(|forward| forward.sender_id.clone())
             .collect();
-        if let Ok(names) = self.store.display_names(&unnamed) {
-            for forward in &mut extras.forwarded {
-                if forward.sender.is_none() {
-                    forward.sender = forward
-                        .sender_id
-                        .as_ref()
-                        .and_then(|sender_id| names.get(sender_id).cloned());
-                }
+        let names = crate::people::stored_names(&self.store, &unnamed);
+        for forward in &mut extras.forwarded {
+            if forward.sender.is_none() {
+                forward.sender = forward
+                    .sender_id
+                    .as_ref()
+                    .and_then(|sender_id| names.get(sender_id).cloned());
             }
         }
         extras

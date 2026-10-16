@@ -471,11 +471,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), 20);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 21);
+    assert_eq!(reopened.schema_version().unwrap(), 20);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -507,7 +507,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 20);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -573,7 +573,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 20);
 }
 
 #[test]
@@ -1336,7 +1336,7 @@ fn migration_to_v20_adds_the_call_event_column() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 20);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());

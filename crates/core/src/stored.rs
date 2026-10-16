@@ -5,7 +5,7 @@ use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
 use crate::external_image::{external_image_url, is_giphy_url};
-use crate::forwarded::{forwarded_texts, inline_forwards};
+use crate::forwarded::{ForwardHeader, ForwardInfo, forwarded_texts, inline_forwards, no_forward_header};
 use crate::markdown::escape_html;
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
@@ -239,7 +239,7 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
     if record.deleted {
         return Vec::new();
     }
-    let fragment = Html::parse_fragment(&inline_forwards(record, record.body_html.clone(), &|_| None));
+    let fragment = Html::parse_fragment(&inline_forwards(record, record.body_html.clone(), &no_forward_header));
     let mut found: Vec<ImageRef> = Vec::new();
     for element in fragment
         .root_element()
@@ -559,17 +559,17 @@ pub const PROFILE_LINK_PREFIX: &str = "teams-profile:";
 
 /// Like `message_spans`, with the id of each user mention replaced by a profile link.
 pub fn linked_message_spans(record: &MessageRecord) -> Vec<Span> {
-    linked_message_spans_with(record, &|_| None, &|_| None)
+    linked_message_spans_with(record, &|_| None, &no_forward_header)
 }
 
-/// Like `linked_message_spans`, but a quote shows `quoted_text(message_id)` when known instead of the one-line server preview, and a forward names its original sender by `sender_name(user_id)`.
+/// Like `linked_message_spans`, but a quote shows `quoted_text(message_id)` when known instead of the one-line server preview, and a forward shows `forward_header(forward)` above the original.
 pub fn linked_message_spans_with(
     record: &MessageRecord,
     quoted_text: &dyn Fn(&str) -> Option<String>,
-    sender_name: &dyn Fn(&str) -> Option<String>,
+    forward_header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
 ) -> Vec<Span> {
     let infos = mentions(record);
-    let html = inline_forwards(record, with_inline_quotes(record, quoted_text), sender_name);
+    let html = inline_forwards(record, with_inline_quotes(record, quoted_text), forward_header);
     let mut spans = html_to_spans(&html);
     merge_split_mentions(&mut spans, &infos);
     link_user_mentions(&mut spans, &infos);
@@ -577,10 +577,14 @@ pub fn linked_message_spans_with(
 }
 
 /// The spans of `record` with its body replaced by the translated html.
-pub fn translated_spans(record: &MessageRecord, translated_html: &str) -> Vec<Span> {
+pub fn translated_spans(
+    record: &MessageRecord,
+    translated_html: &str,
+    forward_header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
+) -> Vec<Span> {
     let mut translated = record.clone();
     translated.body_html = translated_html.to_owned();
-    linked_message_spans(&translated)
+    linked_message_spans_with(&translated, &|_| None, forward_header)
 }
 
 fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {

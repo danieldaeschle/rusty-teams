@@ -1,4 +1,7 @@
+use std::sync::LazyLock;
+
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde::Deserialize;
 use store::MessageRecord;
 
@@ -8,6 +11,9 @@ use crate::stored::{AttachmentInfo, attachments, push_plain};
 
 pub const FORWARDED_CONTENT_TYPE: &str = "forwardedMessageReference";
 pub(crate) const FORWARD_ITEMTYPE: &str = "schema.skype.com/Forward";
+
+static MENTION_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<at\b[^>]*>").expect("mention tag pattern"));
 
 /// The original message carried by a Graph `forwardedMessageReference` attachment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,28 +68,35 @@ impl ForwardInfo {
         text.trim().to_owned()
     }
 
-    pub fn html(&self, sender_name: Option<&str>) -> String {
-        let sender = sender_name
+    pub fn html(&self, header: &ForwardHeader) -> String {
+        let sender = header
+            .sender
+            .as_deref()
             .or(self.sender_name.as_deref())
             .map(|name| format!("<strong>{}</strong>", escape_html(name)))
             .unwrap_or_default();
-        let time = self
-            .sent_at
-            .map(|time| {
-                let local = time.with_timezone(&chrono::Local);
-                format!(" <span>{}</span>", local.format("%d/%m/%Y %H:%M"))
-            })
+        let time = header
+            .time
+            .as_deref()
+            .map(|time| format!(" <span>{}</span>", escape_html(time)))
             .unwrap_or_default();
+        let content = MENTION_ID.replace_all(&self.content_html, "<at>");
         format!(
-            "<blockquote itemscope=\"\" itemtype=\"http://{FORWARD_ITEMTYPE}\" itemid=\"{}\">{sender}{time}{}</blockquote>",
+            "<blockquote itemscope=\"\" itemtype=\"http://{FORWARD_ITEMTYPE}\" itemid=\"{}\">{sender}{time}{content}</blockquote>",
             escape_html(&self.message_id),
-            self.content_html,
         )
     }
 }
 
+/// What the forward quote names above the original: sender display name and sent time label.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForwardHeader {
+    pub sender: Option<String>,
+    pub time: Option<String>,
+}
+
 pub fn forwards(record: &MessageRecord) -> Vec<ForwardInfo> {
-    if record.deleted {
+    if record.deleted || !record.attachments_json.contains(FORWARDED_CONTENT_TYPE) {
         return Vec::new();
     }
     attachments(record)
@@ -104,15 +117,22 @@ pub fn is_forwarded(record: &MessageRecord) -> bool {
     !record.deleted && (record.body_html.contains(FORWARD_ITEMTYPE) || !forwards(record).is_empty())
 }
 
+/// A forward attachment cached before its content was kept.
+pub(crate) fn lacks_forward_content(record: &MessageRecord) -> bool {
+    attachments(record).iter().any(|attachment| {
+        attachment.content_type.as_deref() == Some(FORWARDED_CONTENT_TYPE)
+            && attachment.content.is_none()
+    })
+}
+
 /// `html` with each forward's `<attachment id>` tag replaced by its forward blockquote; a forward without a tag goes last.
 pub(crate) fn inline_forwards(
     record: &MessageRecord,
     mut html: String,
-    sender_name: &dyn Fn(&str) -> Option<String>,
+    header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
 ) -> String {
     for forward in forwards(record) {
-        let name = forward.sender_id.as_deref().and_then(sender_name);
-        let block = forward.html(name.as_deref());
+        let block = forward.html(&header(&forward));
         let tag = forward
             .attachment_id
             .as_deref()
@@ -124,6 +144,10 @@ pub(crate) fn inline_forwards(
         }
     }
     html
+}
+
+pub fn no_forward_header(_: &ForwardInfo) -> ForwardHeader {
+    ForwardHeader::default()
 }
 
 #[cfg(test)]
@@ -174,14 +198,16 @@ mod tests {
     #[test]
     fn the_forward_replaces_its_attachment_tag_with_a_quote_naming_the_original_sender() {
         let record = forwarded_record();
-        let spans = linked_message_spans_with(&record, &|_| None, &|user_id| {
-            (user_id == ORIGINAL_SENDER_ID).then(|| "Ada Original".to_owned())
+        let spans = linked_message_spans_with(&record, &|_| None, &|forward| ForwardHeader {
+            sender: (forward.sender_id.as_deref() == Some(ORIGINAL_SENDER_ID))
+                .then(|| "Ada Original".to_owned()),
+            time: Some("13:11".to_owned()),
         });
         let [Span::BlockQuote(children)] = spans.as_slice() else {
             panic!("expected one forward blockquote, got {spans:?}");
         };
         let text = plain(children);
-        assert!(text.starts_with("Ada Original"), "{text}");
+        assert!(text.starts_with("Ada Original 13:11"), "{text}");
         assert!(text.contains(ORIGINAL_TEXT), "{text}");
     }
 
@@ -201,6 +227,52 @@ mod tests {
             preserved.kept[0].content_type.as_deref(),
             Some(FORWARDED_CONTENT_TYPE)
         );
+    }
+
+    #[test]
+    fn a_mention_inside_the_forward_does_not_borrow_the_forwarders_mention() {
+        let mut record = forwarded_record();
+        record.body_html = format!(
+            r#"<p><at id="0">Bob Sample</at></p>{}"#,
+            record.body_html
+        );
+        record.attachments_json = record
+            .attachments_json
+            .replace("<p>Keep", r#"<p><at id=\\\"0\\\">Cleo Other</at> Keep"#);
+        record.mentions_json =
+            r#"[{"user_id":"user-bob","name":"Bob Sample","id":0}]"#.to_owned();
+        assert!(forwards(&record)[0].content_html.contains("Cleo Other"));
+        let spans = linked_message_spans_with(&record, &|_| None, &no_forward_header);
+        let mut mentions = Vec::new();
+        collect_mentions(&spans, &mut mentions);
+        assert_eq!(
+            mentions,
+            [
+                ("Bob Sample".to_owned(), Some("teams-profile:user-bob".to_owned())),
+                ("Cleo Other".to_owned(), None),
+            ]
+        );
+    }
+
+    fn collect_mentions(spans: &[Span], found: &mut Vec<(String, Option<String>)>) {
+        for span in spans {
+            match span {
+                Span::Mention { name, id } => found.push((name.clone(), id.clone())),
+                Span::BlockQuote(children) | Span::Bold(children) => {
+                    collect_mentions(children, found);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn a_forward_cached_without_its_content_needs_a_refetch() {
+        let mut record = forwarded_record();
+        assert!(!lacks_forward_content(&record));
+        record.attachments_json = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"1792149081221","content":null}]"#.to_owned();
+        assert!(lacks_forward_content(&record));
+        assert!(forwards(&record).is_empty());
     }
 
     #[test]

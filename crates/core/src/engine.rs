@@ -128,6 +128,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) chat_apps: Mutex<HashMap<String, Vec<ChatApp>>>,
     pub(crate) link_previews: Mutex<HashMap<String, Option<LinkPreview>>>,
     pub(crate) links_backfilled: Mutex<HashSet<String>>,
+    pub(crate) forwards_healed: Mutex<HashSet<String>>,
     pub(crate) chat_states: Mutex<HashMap<String, ConversationState>>,
     pub(crate) chat_paging: Mutex<ChatPaging>,
     pub(crate) locally_hidden_lock: Mutex<()>,
@@ -162,6 +163,7 @@ impl<R: Remote> SyncEngine<R> {
             chat_apps: Mutex::new(HashMap::new()),
             link_previews: Mutex::new(HashMap::new()),
             links_backfilled: Mutex::new(HashSet::new()),
+            forwards_healed: Mutex::new(HashSet::new()),
             chat_states: Mutex::new(HashMap::new()),
             chat_paging,
             locally_hidden_lock: Mutex::new(()),
@@ -198,9 +200,10 @@ impl<R: Remote> SyncEngine<R> {
                 self.fetch_newer_channel(&team_id, conversation_id).await?
             }
         };
-        let links_changed = self.attach_delta_links(conversation_id, &mut delta).await
-            | self.backfill_links(conversation_id).await;
-        self.announce(conversation_id, !delta.is_empty() || links_changed);
+        let cache_changed = self.attach_delta_links(conversation_id, &mut delta).await
+            | self.backfill_links(conversation_id).await
+            | self.heal_forwards(conversation_id).await;
+        self.announce(conversation_id, !delta.is_empty() || cache_changed);
         Ok(delta)
     }
 

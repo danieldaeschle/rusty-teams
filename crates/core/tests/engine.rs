@@ -4483,3 +4483,59 @@ async fn fetch_chat_message_does_not_store_the_message() {
     assert_eq!(record.message_id, "m0007");
     assert_eq!(engine.store().message_count(CHAT).unwrap(), 0);
 }
+
+fn forwarded_message(id: &str, minute: i64) -> Message {
+    let content = json!({
+        "originalMessageId": "orig-1",
+        "originalMessageContent": "<p>original words</p>",
+        "originalConversationId": "19:origin@thread.v2",
+        "originalSentDateTime": base().to_rfc3339(),
+        "originalMessageSender": {"user": {"id": "user-cleo", "displayName": null}},
+    });
+    serde_json::from_value(json!({
+        "id": id,
+        "messageType": "message",
+        "createdDateTime": (base() + Duration::minutes(minute)).to_rfc3339(),
+        "from": {"user": {"id": ME, "displayName": null}},
+        "body": {"contentType": "html", "content": "<attachment id=\"orig-1\"></attachment>"},
+        "attachments": [{
+            "id": "orig-1",
+            "contentType": "forwardedMessageReference",
+            "content": content.to_string(),
+        }],
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_forward_cached_without_its_content_is_read_again_once() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    let mut messages = numbered(11);
+    messages.push(forwarded_message("m0000", 0));
+    fake.set_chat_messages(messages);
+    let mut stale = teams_core::message_record(CHAT, &forwarded_message("m0000", 0)).unwrap();
+    stale.attachments_json = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"orig-1","content":null}]"#.to_owned();
+    store.upsert_messages(&[stale]).unwrap();
+
+    engine.fetch_newer(CHAT).await.unwrap();
+
+    let healed = store
+        .messages_by_id(CHAT, &["m0000".to_owned()])
+        .unwrap()
+        .remove("m0000")
+        .unwrap();
+    assert_eq!(teams_core::forwarded_texts(&healed), ["original words"]);
+    let reads = |fake: &Fake| {
+        fake.calls()
+            .iter()
+            .filter(|call| *call == "chat_message m0000")
+            .count()
+    };
+    assert_eq!(reads(&fake), 1);
+    engine.fetch_newer(CHAT).await.unwrap();
+    assert_eq!(reads(&fake), 1);
+}

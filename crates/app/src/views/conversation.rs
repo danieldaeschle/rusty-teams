@@ -64,6 +64,7 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
+    forward_sender_ids,
     has_own_reaction, message_draft, message_text, own_reaction_glyph, place_local_rows,
     placeholder_rows,
     reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
@@ -1451,14 +1452,15 @@ impl ConversationView {
         };
         let sync_has_more = sync_state.as_ref().is_none_or(|state| state.has_more);
         let mut context = self.row_context(cx);
-        let reactor_ids: Vec<String> = records
+        let unnamed_ids: Vec<String> = records
             .iter()
             .flat_map(teams_core::reactions)
             .filter(|reaction| reaction.user_name.is_none())
             .filter_map(|reaction| reaction.user_id)
+            .chain(forward_sender_ids(&records))
             .filter(|user_id| !context.names.contains_key(user_id))
             .collect();
-        for (user_id, name) in resolve_names(self.app.read(cx), &reactor_ids) {
+        for (user_id, name) in resolve_names(self.app.read(cx), &unnamed_ids) {
             context.names.entry(user_id).or_insert(name);
         }
         for record in &records {
