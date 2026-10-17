@@ -16,7 +16,9 @@ pub const TEAMS_GROUP: [SettingsSection; 6] = [
     SettingsSection::Devices,
 ];
 pub const RUSTY_GROUP: [SettingsSection; 2] = [SettingsSection::Agents, SettingsSection::Mcp];
-const ITEM_HEIGHT: f32 = 34.;
+const ITEM_MIN_HEIGHT: f32 = 32.;
+const ITEM_PADDING_Y: f32 = 6.;
+const ITEM_LINE_HEIGHT: f32 = 20.;
 const ITEM_GAP: f32 = 2.;
 const ITEM_RADIUS: f32 = 6.;
 const ITEM_ICON: f32 = 16.;
@@ -48,6 +50,14 @@ fn icon_name(section: SettingsSection) -> IconName {
         SettingsSection::Mcp => IconName::Plug,
         SettingsSection::About => IconName::Info,
     }
+}
+
+pub fn item_selector(section: SettingsSection) -> String {
+    format!("settings/nav/item/{}", element_id(section))
+}
+
+pub fn label_selector(section: SettingsSection) -> String {
+    format!("{}/label", item_selector(section))
 }
 
 fn element_id(section: SettingsSection) -> &'static str {
@@ -153,19 +163,20 @@ fn nav_item(
 ) -> Stateful<Div> {
     h_flex()
         .id(element_id(section))
+        .debug_selector(move || item_selector(section))
         .w_full()
-        .h(px(ITEM_HEIGHT))
+        .min_h(px(ITEM_MIN_HEIGHT))
         .flex_none()
         .px(px(12.))
+        .py(px(ITEM_PADDING_Y))
         .gap(px(12.))
         .items_center()
         .rounded(px(ITEM_RADIUS))
         .cursor_pointer()
         .text_size(px(14.))
+        .line_height(px(ITEM_LINE_HEIGHT))
         .when(active, |item| {
-            item.bg(theme::popup_hover())
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
+            item.bg(theme::popup_hover()).text_color(theme::text())
         })
         .when(!active, |item| {
             item.text_color(theme::text_strong())
@@ -180,6 +191,12 @@ fn nav_item(
                 theme::text_muted()
             },
         ))
-        .child(div().flex_1().min_w_0().truncate().child(label(section)))
+        .child(
+            div()
+                .debug_selector(move || label_selector(section))
+                .flex_1()
+                .min_w_0()
+                .child(label(section)),
+        )
         .on_click(move |_, window, cx| on_select(section, window, cx))
 }

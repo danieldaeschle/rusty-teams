@@ -10,7 +10,9 @@ mod nav;
 mod notifications;
 mod rows;
 
-pub use dialog::{SettingsDialog, SettingsDialogEvent};
 #[cfg(test)]
 pub use dialog::metrics;
+pub use dialog::{SettingsDialog, SettingsDialogEvent};
+#[cfg(test)]
+pub use nav::{item_selector, label, label_selector};
 pub(crate) use rows::switch;

@@ -171,7 +171,7 @@ mod frames {
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
     use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
-    use crate::settings::metrics;
+    use crate::settings::{item_selector, label, label_selector, metrics};
     use crate::settings_section::SettingsSection;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
@@ -263,6 +263,10 @@ mod frames {
         "settings/main/body",
     ];
     const SETTINGS_BODY: &str = "settings/main/body";
+    const SETTINGS_NAV: &str = "settings/nav";
+    const SETTINGS_NAV_ABOUT: &str = "settings/nav/about";
+    const NAV_LABEL_SIZE: f32 = 14.;
+    const NAV_LINE_HEIGHT: f32 = 20.;
     const SETTINGS_CONTENT: &str = "settings/main/body/content";
     const MEMBERS_TAGS: &[&str] = &["chat-members-popup", "chat-members-popup/divider"];
     const MEMBERS_CHAT: &str = "demo-chat-release";
@@ -1097,6 +1101,7 @@ mod frames {
                 size: size(px(width), px(height)),
             };
             let inset = metrics(width, height).inset;
+            let label_sizes = NAV_LABEL_SIZES.contains(&(width, height));
             for &section in sections {
                 visual
                     .update(|_, cx| state.update(cx, |state, cx| state.open_settings(section, cx)));
@@ -1106,6 +1111,9 @@ mod frames {
                     .filter(|(key, _)| key.starts_with("settings"))
                     .chain(inset_violations(&tags, INSET_RULES))
                     .collect();
+                if label_sizes {
+                    found.extend(nav_label_violations(&mut visual));
+                }
                 let scrolled_exempt = SCROLLED_INSET_ALLOWLIST
                     .iter()
                     .any(|(exempt, _)| *exempt == section);
@@ -1132,6 +1140,71 @@ mod frames {
                 );
             }
         }
+    }
+
+    const NAV_LABEL_SIZES: [(f32, f32); 3] = [(960., 640.), (1280., 800.), (1920., 1080.)];
+
+    fn nav_label_violations(visual: &mut VisualTestContext) -> Vec<(String, String)> {
+        let Some(nav) = visual.debug_bounds(SETTINGS_NAV) else {
+            return vec![(SETTINGS_NAV.to_owned(), "not rendered".to_owned())];
+        };
+        let mut found = Vec::new();
+        for section in SETTINGS_SECTIONS {
+            let label_path: &'static str = Box::leak(label_selector(section).into_boxed_str());
+            let item_path: &'static str = if section == SettingsSection::About {
+                SETTINGS_NAV_ABOUT
+            } else {
+                Box::leak(item_selector(section).into_boxed_str())
+            };
+            let (Some(label_bounds), Some(item)) = (
+                visual.debug_bounds(label_path),
+                visual.debug_bounds(item_path),
+            ) else {
+                if section != SettingsSection::Agents {
+                    found.push((label_path.to_owned(), "not rendered".to_owned()));
+                }
+                continue;
+            };
+            let text = label(section);
+            let text_width = visual.update(|window, _| {
+                let run = window.text_style().to_run(text.len());
+                f32::from(
+                    window
+                        .text_system()
+                        .shape_line(text.into(), px(NAV_LABEL_SIZE), &[run], None)
+                        .width,
+                )
+            });
+            let label_width = f32::from(label_bounds.size.width);
+            let label_height = f32::from(label_bounds.size.height);
+            if text_width > label_width + TOLERANCE
+                && label_height < 2. * NAV_LINE_HEIGHT - TOLERANCE
+            {
+                found.push((
+                    label_path.to_owned(),
+                    format!("{text:?} needs {text_width} px, has {label_width} px on one line: truncated"),
+                ));
+            }
+            let outside = |inner: Bounds<Pixels>, outer: Bounds<Pixels>| {
+                inner.left() < outer.left() - px(TOLERANCE)
+                    || inner.right() > outer.right() + px(TOLERANCE)
+                    || inner.top() < outer.top() - px(TOLERANCE)
+                    || inner.bottom() > outer.bottom() + px(TOLERANCE)
+            };
+            if outside(label_bounds, item) {
+                found.push((
+                    label_path.to_owned(),
+                    format!("label {label_bounds:?} outside item {item:?}"),
+                ));
+            }
+            if item.left() < nav.left() || item.right() > nav.right() {
+                found.push((
+                    item_path.to_owned(),
+                    format!("item {item:?} outside nav {nav:?}"),
+                ));
+            }
+        }
+        found
     }
 
     fn scrolled_inset_violation(visual: &mut VisualTestContext) -> Option<(String, String)> {
