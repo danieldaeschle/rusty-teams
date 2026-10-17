@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod activity_panel;
 pub mod adaptive_card;
+pub mod add_people_dialog;
 pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
@@ -17,6 +18,7 @@ pub mod call_mini_window;
 pub mod call_organizer;
 pub mod call_people;
 pub mod call_pop_out;
+pub mod call_share_gallery;
 pub mod call_record;
 pub mod call_stage;
 pub mod call_transcript;
@@ -77,6 +79,7 @@ pub mod title_bar;
 pub mod toolbar_placement;
 pub mod transfer_picker;
 pub mod translation_line;
+pub mod window_zoom;
 
 pub use app_ui_kit::{
     card_chart, channel_tabs, draft_style, reaction_proposal_pill, scroll_edge, widgets,

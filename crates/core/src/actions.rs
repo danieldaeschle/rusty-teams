@@ -501,6 +501,27 @@ impl<R: Remote> SyncEngine<R> {
         Ok(())
     }
 
+    pub async fn add_chat_members(
+        &self,
+        chat_id: &str,
+        people: &[store::MemberRecord],
+        share: chatsvc::HistoryShare,
+    ) -> Result<()> {
+        let user_ids: Vec<String> = people
+            .iter()
+            .filter_map(|person| person.user_id.clone())
+            .collect();
+        self.remote
+            .add_chat_members(chat_id, &user_ids, share)
+            .await?;
+        if let Some(mut chat) = self.store.chat(chat_id)? {
+            crate::roster_event::merge_members(&mut chat.members, people);
+            self.store.upsert_chats(std::slice::from_ref(&chat))?;
+        }
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
     pub async fn send_typing(
         &self,
         conversation_id: &str,
@@ -599,6 +620,20 @@ impl<R: Remote> SyncEngine<R> {
         let target = self.message_target(conversation_id, message_id)?;
         let user_id = self.my_user_id().await?;
         self.remote.soft_delete_message(&user_id, &target).await?;
+        self.refresh_message(conversation_id, message_id).await?;
+        Ok(())
+    }
+
+    pub async fn undo_soft_delete_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<()> {
+        let target = self.message_target(conversation_id, message_id)?;
+        let user_id = self.my_user_id().await?;
+        self.remote
+            .undo_soft_delete_message(&user_id, &target)
+            .await?;
         self.refresh_message(conversation_id, message_id).await?;
         Ok(())
     }

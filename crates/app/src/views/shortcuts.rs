@@ -10,8 +10,15 @@ use super::actions::{
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";
 const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input";
-const ALTERNATE_KEYS: &[(&str, &str)] =
-    &[("alt-shift-=", "alt-shift-+"), ("ctrl-alt-=", "ctrl-alt-+")];
+const ALTERNATE_KEYS: &[(&str, &str)] = &[
+    ("Zoom in on shared content", "alt-shift-+"),
+    ("Insert column or row", "ctrl-alt-+"),
+    ("Zoom in", "ctrl-+"),
+    ("Zoom in", "ctrl-shift-="),
+    ("Zoom in", "ctrl-shift-+"),
+    ("Zoom out", "ctrl-_"),
+    ("Zoom out", "ctrl-shift--"),
+];
 
 actions!(
     teams,
@@ -24,6 +31,7 @@ actions!(
         OpenAgents,
         PreviousConversation,
         NextConversation,
+        JumpToLastReadOrNewest,
         AcceptCall,
         DeclineCall,
         JoinMeetingFromToast,
@@ -40,7 +48,10 @@ actions!(
         ZoomShareOut,
         ZoomShareReset,
         ShowShortcuts,
-        OpenSettings
+        OpenSettings,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset
     ]
 );
 
@@ -107,6 +118,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(General, Global, "New chat", "ctrl-n", Some("cmd-n"), NewChat),
     shortcut!(General, GlobalOverTextFields, "Keyboard shortcuts", "ctrl-.", Some("cmd-."), ShowShortcuts),
     shortcut!(General, GlobalOverTextFields, "Settings", "ctrl-,", Some("cmd-,"), OpenSettings),
+    shortcut!(General, OutsideComposer, "Zoom in", "ctrl-=", Some("cmd-="), ZoomIn),
+    shortcut!(General, GlobalOverTextFields, "Zoom out", "ctrl--", Some("cmd--"), ZoomOut),
+    shortcut!(General, GlobalOverTextFields, "Reset zoom level", "ctrl-0", Some("cmd-0"), ZoomReset),
     shortcut!(Navigation, GlobalOverTextFields, "Open Activity", "ctrl-1", Some("cmd-1"), OpenActivity),
     shortcut!(Navigation, GlobalOverTextFields, "Show Chats", "ctrl-2", Some("cmd-2"), OpenChatsTab),
     shortcut!(Navigation, GlobalOverTextFields, "Show Channels", "ctrl-3", Some("cmd-3"), OpenChannelsTab),
@@ -116,6 +130,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Navigation, GlobalOverTextFields, "Previous chat or channel", "alt-up", None, PreviousConversation),
     shortcut!(Navigation, GlobalOverTextFields, "Next chat or channel", "alt-down", None, NextConversation),
     shortcut!(Composer, Global, "Reply to the message under the pointer", "alt-r", None, ReplyToHovered),
+    shortcut!(Composer, Global, "Jump to last read or newest message", "ctrl-j", Some("cmd-j"), JumpToLastReadOrNewest),
     shortcut!(Composer, Composer, "Bold", "ctrl-b", Some("cmd-b"), ToggleBold),
     shortcut!(Composer, Composer, "Italic", "ctrl-i", Some("cmd-i"), ToggleItalic),
     shortcut!(Composer, Composer, "Underline", "ctrl-u", Some("cmd-u"), ToggleUnderline),
@@ -171,7 +186,7 @@ impl Shortcut {
         keys.extend(
             ALTERNATE_KEYS
                 .iter()
-                .filter(|(primary, _)| *primary == self.keys)
+                .filter(|(label, _)| *label == self.label)
                 .map(|(_, alternate)| *alternate),
         );
         keys.extend(self.mac_keys.filter(|_| cfg!(target_os = "macos")));
@@ -354,6 +369,43 @@ mod tests {
         assert_eq!(display_keys("alt-shift--"), "Alt+Shift+Minus");
         assert_eq!(display_keys("alt-shift-0"), "Alt+Shift+0");
         assert_eq!(display_keys("ctrl-alt--"), "Ctrl+Alt+Minus");
+    }
+
+    #[gpui_kit::test]
+    fn zoom_keys_match_teams_and_leave_the_composer_subscript_alone(cx: &mut TestAppContext) {
+        registered(cx);
+        let action_of = |label: &str| {
+            action_name(
+                SHORTCUTS
+                    .iter()
+                    .find(|shortcut| shortcut.label == label)
+                    .unwrap(),
+            )
+        };
+        for (keys, label) in [
+            ("ctrl-=", "Zoom in"),
+            ("ctrl-+", "Zoom in"),
+            ("ctrl-shift-=", "Zoom in"),
+            ("ctrl--", "Zoom out"),
+            ("ctrl-_", "Zoom out"),
+            ("ctrl-0", "Reset zoom level"),
+        ] {
+            assert_eq!(
+                bound_action(cx, keys, &["AppShell"]),
+                Some(action_of(label)),
+                "{keys}"
+            );
+        }
+        let typing = ["AppShell", "Composer", "Input"];
+        assert_eq!(
+            bound_action(cx, "ctrl-=", &typing),
+            Some(action_of("Subscript"))
+        );
+        assert_eq!(
+            bound_action(cx, "ctrl--", &typing),
+            Some(action_of("Zoom out"))
+        );
+        assert_eq!(display_keys("ctrl-="), "Ctrl+Plus");
     }
 
     #[gpui_kit::test]

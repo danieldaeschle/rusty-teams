@@ -558,6 +558,19 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn add_chat_members(
+        &self,
+        chat_id: &str,
+        user_ids: &[String],
+        share: chatsvc::HistoryShare,
+    ) -> Result<()> {
+        self.record(format!(
+            "add members {chat_id} {} {share:?}",
+            user_ids.join(",")
+        ));
+        Ok(())
+    }
+
     async fn chat_states(&self) -> Result<Vec<chatsvc::ConversationState>> {
         if *self.muted_fails.lock().unwrap() {
             return Err(Error::Unsupported("forced failure"));
@@ -660,6 +673,11 @@ impl Remote for Handle {
 
     async fn soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()> {
         self.record(format!("soft_delete {user_id} {}", describe(target)));
+        Ok(())
+    }
+
+    async fn undo_soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()> {
+        self.record(format!("undo_soft_delete {user_id} {}", describe(target)));
         Ok(())
     }
 
@@ -1497,6 +1515,34 @@ async fn removing_a_member_drops_them_from_the_cached_chat() {
         .map(|member| member.user_id.as_deref())
         .collect();
     assert_eq!(member_ids, [Some(ME)]);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+}
+
+#[tokio::test]
+async fn adding_members_writes_them_and_extends_the_cached_chat() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+    let people = [store::MemberRecord {
+        user_id: Some("user-bob".to_owned()),
+        display_name: "Bob".to_owned(),
+    }];
+
+    engine
+        .add_chat_members(CHAT, &people, chatsvc::HistoryShare::Days(7))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("add members {CHAT} user-bob Days(7)")
+    );
+    let chats = engine.sidebar().unwrap().chats;
+    assert!(
+        chats[0]
+            .members
+            .iter()
+            .any(|member| member.user_id.as_deref() == Some("user-bob"))
+    );
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 
@@ -2564,12 +2610,17 @@ async fn chat_actions_call_graph_with_the_right_ids() {
         .await
         .unwrap();
     engine.soft_delete_message(CHAT, "m0003").await.unwrap();
+    engine
+        .undo_soft_delete_message(CHAT, "m0003")
+        .await
+        .unwrap();
     let calls = fake.calls();
     assert_eq!(calls[0], format!("mark_read {CHAT} {ME} tenant-1"));
     assert!(calls.contains(&"set_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"unset_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"edit m0002 new <b>text</b>".to_owned()));
     assert!(calls.contains(&format!("soft_delete {ME} m0003")));
+    assert!(calls.contains(&format!("undo_soft_delete {ME} m0003")));
     assert!(!engine.sidebar().unwrap().chats[0].unread);
 }
 
@@ -3072,6 +3123,7 @@ impl FolderSource for FakeFolders {
         &'a self,
         conversation_id: &'a str,
         target_folder_id: &'a str,
+        _index: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>> {
         Box::pin(async move {
             self.calls
@@ -3226,7 +3278,7 @@ async fn folders_refresh_move_and_remove_go_through_the_source_and_cache() {
     engine.refresh_folders().await.unwrap();
     assert!(events.try_recv().is_err());
 
-    engine.move_to_folder("a", "work").await.unwrap();
+    engine.move_to_folder("a", "work", None).await.unwrap();
     assert_eq!(
         engine.chat_folders().unwrap()[1].conversation_ids,
         ids(&["c", "a"])
@@ -3490,7 +3542,7 @@ async fn folders_without_a_source_are_unsupported() {
         Err(Error::Unsupported(_))
     ));
     assert!(matches!(
-        engine.move_to_folder("a", "b").await,
+        engine.move_to_folder("a", "b", None).await,
         Err(Error::Unsupported(_))
     ));
 }

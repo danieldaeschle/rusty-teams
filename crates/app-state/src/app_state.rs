@@ -90,6 +90,7 @@ pub struct AppState {
     pub selection: Option<Selection>,
     pub late_arrivals: LateArrivals,
     pub new_chat: bool,
+    pub new_chat_people: Vec<store::MemberRecord>,
     pub connection: ConnectionState,
     pub live: LiveState,
     pub last_sync: Option<DateTime<Utc>>,
@@ -108,6 +109,7 @@ pub struct AppState {
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
     pub keep_unread: Option<String>,
+    pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
     typing_timer_running: bool,
     pub local_previews: HashMap<String, LocalPreview>,
@@ -237,6 +239,7 @@ impl AppState {
             selection: None,
             late_arrivals: LateArrivals::default(),
             new_chat: false,
+            new_chat_people: Vec::new(),
             connection: if mode.demo {
                 ConnectionState::Online
             } else {
@@ -259,6 +262,7 @@ impl AppState {
             live_retry: None,
             notice_count: 0,
             keep_unread: None,
+            restorable_deletes: Default::default(),
             typing: TypingState::default(),
             typing_timer_running: false,
             local_previews: HashMap::new(),
@@ -684,6 +688,32 @@ impl AppState {
         folder_id: Option<&str>,
         cx: &mut Context<Self>,
     ) {
+        self.place_chat(conversation_id, folder_id, None, cx);
+    }
+
+    pub fn drop_chat_on(
+        &mut self,
+        conversation_id: &str,
+        target_conversation_id: &str,
+        folder_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if conversation_id == target_conversation_id {
+            return;
+        }
+        let Some(slot) = self.directory.slot_of(folder_id, target_conversation_id) else {
+            return;
+        };
+        self.place_chat(conversation_id, Some(folder_id), Some(slot), cx);
+    }
+
+    pub fn place_chat(
+        &mut self,
+        conversation_id: &str,
+        folder_id: Option<&str>,
+        index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
         if self.mode.read_only {
             return;
         }
@@ -691,13 +721,16 @@ impl AppState {
             .directory
             .folder_of(conversation_id)
             .map(|folder| folder.id.clone());
-        self.directory.assign(conversation_id, folder_id);
+        self.directory.place(conversation_id, folder_id, index);
         if let Some(engine) = self.engine.clone() {
             let previous = previous_folder.clone();
             let done = match (folder_id, previous.as_deref()) {
-                (Some(folder_id), _) => {
-                    Some(data::move_to_folder(&engine, conversation_id, folder_id))
-                }
+                (Some(folder_id), _) => Some(data::move_to_folder(
+                    &engine,
+                    conversation_id,
+                    folder_id,
+                    index,
+                )),
                 (None, Some(previous)) => {
                     Some(data::remove_from_folder(&engine, conversation_id, previous))
                 }

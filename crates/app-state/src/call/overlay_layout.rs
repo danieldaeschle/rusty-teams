@@ -117,10 +117,6 @@ pub fn mini_work_area(
         .unwrap_or(main)
 }
 
-pub fn mini_wanted(call_active: bool, main_minimized: bool) -> bool {
-    call_active && main_minimized
-}
-
 pub fn parse_position(text: &str) -> Option<(i32, i32)> {
     let (left, top) = text.split_once(',')?;
     Some((left.trim().parse().ok()?, top.trim().parse().ok()?))
@@ -274,13 +270,6 @@ mod tests {
     fn mini_scales_with_the_monitor() {
         let rect = mini_rect(work(2.), None);
         assert_eq!((rect.width(), rect.height()), (640, 360));
-    }
-
-    #[test]
-    fn mini_shows_only_in_a_call_with_the_main_window_minimized() {
-        assert!(mini_wanted(true, true));
-        assert!(!mini_wanted(true, false));
-        assert!(!mini_wanted(false, true));
     }
 
     #[test]

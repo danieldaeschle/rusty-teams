@@ -22,7 +22,7 @@ use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
 use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
-use crate::views::message_row::{DeliveryActions, RowActions};
+use crate::views::message_row::{DeliveryActions, RowActions, SharedRowAction};
 use crate::views::post_card::{PostAction, PostActions};
 use crate::views::reaction_proposal_pill::ReactionPill;
 use crate::views::toolbar_placement::TimelineBounds;
@@ -313,7 +313,30 @@ impl RenderEnv {
             agent_run: actionable_run,
             call: self.call_actions(message, cx),
             reaction_proposal,
+            undo_delete: self.undo_delete_action(message, is_real, view, cx),
         }
+    }
+
+    fn undo_delete_action(
+        &self,
+        message: &MessageRow,
+        is_real: bool,
+        view: &WeakEntity<ConversationView>,
+        cx: &App,
+    ) -> SharedRowAction {
+        let restorable = is_real
+            && self.app.read(cx).restorable_deletes.can_undo(
+                &message.conversation_id,
+                &message.key,
+                message.own,
+                message.deleted,
+            );
+        restorable.then(|| {
+            let (view, key) = (view.clone(), message.key.clone());
+            Rc::new(move |cx: &mut App| {
+                view.update(cx, |this, cx| this.undo_delete(&key, cx)).ok();
+            }) as Rc<dyn Fn(&mut App)>
+        })
     }
 
     fn call_actions(&self, message: &MessageRow, cx: &App) -> CallActions {

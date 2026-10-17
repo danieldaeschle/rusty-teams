@@ -10,7 +10,9 @@ use super::call_card::{CallActions, post_call_card};
 use super::call_notice::notice_line;
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::message_toolbar;
-use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
+use super::message_row::{
+    BODY_SIZE, RowActions, deleted_tombstone, delivery_note, forwarded_header, has_text,
+};
 use super::profile_card::opens_profile;
 use super::reaction_pills::reaction_pills;
 use super::reaction_proposal_pill::reaction_pill;
@@ -21,7 +23,6 @@ use super::widgets::{icon, symbol};
 use crate::agents::run_chip;
 use crate::data::Directory;
 use crate::rows::{Delivery, MessageRow, PostRow};
-use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 
 const ROOT_AVATAR: f32 = 32.;
@@ -82,13 +83,7 @@ fn message_content(
 ) -> Div {
     let mut content = v_flex().gap(px(6.));
     if row.deleted {
-        return content.child(
-            div()
-                .text_size(px(13.))
-                .italic()
-                .text_color(theme::text_muted())
-                .child(DELETED_PREVIEW),
-        );
+        return content.child(deleted_tombstone(index, actions.undo_delete.clone()));
     }
     if row.forwarded {
         content = content.child(forwarded_header());

@@ -178,7 +178,9 @@ fn main() {
         backend::start(store.clone(), transport, !arguments.read_only, activity)
     });
 
-    let mut application = gpui_kit::application();
+    let startup_zoom = appearance::load(&store).zoom;
+    let platform = zoom::wrap(gpui_kit::platform::current_platform(false), startup_zoom);
+    let mut application = Application::with_platform(platform);
     if let Ok(http_client) = reqwest_client::ReqwestClient::user_agent(HTTP_USER_AGENT) {
         application = application.with_http_client(Arc::new(http_client));
     }

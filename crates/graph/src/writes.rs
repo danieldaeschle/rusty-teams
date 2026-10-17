@@ -225,6 +225,21 @@ impl Graph {
         .await
     }
 
+    /// `user_id` is only used for chats.
+    pub async fn undo_soft_delete_message(
+        &self,
+        user_id: &str,
+        target: &MessageTarget,
+    ) -> Result<()> {
+        self.write(
+            Method::Post,
+            &target.undo_soft_delete_url(user_id),
+            target.write_scope(),
+            None,
+        )
+        .await
+    }
+
     pub async fn create_one_on_one(&self, my_user_id: &str, user_id: &str) -> Result<Chat> {
         let body = json!({
             "chatType": "oneOnOne",

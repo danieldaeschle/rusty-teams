@@ -76,6 +76,16 @@ impl MessageTarget {
         }
     }
 
+    pub(crate) fn undo_soft_delete_url(&self, user_id: &str) -> String {
+        match self {
+            MessageTarget::Chat {
+                chat_id,
+                message_id,
+            } => urls::undo_soft_delete(user_id, chat_id, message_id),
+            channel => format!("{}/undoSoftDelete", channel.url()),
+        }
+    }
+
     pub(crate) fn reaction_url(&self, action: &str) -> String {
         format!("{}/{action}", self.url())
     }
@@ -124,6 +134,15 @@ mod tests {
         assert_eq!(
             chat.soft_delete_url("u1"),
             "https://graph.microsoft.com/v1.0/users/u1/chats/19%3Aa%40thread.v2/messages/m1/softDelete"
+        );
+        assert_eq!(
+            chat.undo_soft_delete_url("u1"),
+            "https://graph.microsoft.com/v1.0/users/u1/chats/19%3Aa%40thread.v2/messages/m1/undoSoftDelete"
+        );
+        assert!(
+            MessageTarget::channel("t", "19:c@thread.tacv2", "r1", Some("m1"))
+                .undo_soft_delete_url("u")
+                .ends_with("/messages/m1/replies/r1/undoSoftDelete")
         );
         assert!(
             chat.reaction_url("unsetReaction")

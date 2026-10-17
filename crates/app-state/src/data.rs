@@ -9,6 +9,7 @@ use store::{ChatRecord, Store, is_bot_id};
 use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange, is_notes_chat};
 use tokio::sync::oneshot;
 
+use crate::avatar_image::AvatarPhoto;
 use crate::backend::Engine;
 use crate::runtime;
 
@@ -113,7 +114,8 @@ impl Presence {
 pub enum AvatarState {
     Pending,
     Missing,
-    Ready(Arc<Image>),
+    Ready(Arc<AvatarPhoto>),
+    Icon(Arc<Image>),
 }
 
 #[derive(Debug, Clone)]
@@ -201,8 +203,7 @@ impl Directory {
         }
     }
 
-    pub fn set_avatar(&mut self, user_id: &str, image: Option<Arc<Image>>) {
-        let state = image.map_or(AvatarState::Missing, AvatarState::Ready);
+    pub fn set_avatar(&mut self, user_id: &str, state: AvatarState) {
         self.avatars.insert(user_id.to_owned(), state);
     }
 
@@ -330,14 +331,32 @@ impl Directory {
     }
 
     pub fn assign(&mut self, conversation_id: &str, folder_id: Option<&str>) {
+        self.place(conversation_id, folder_id, None);
+    }
+
+    pub fn place(&mut self, conversation_id: &str, folder_id: Option<&str>, index: Option<usize>) {
         for folder in &mut self.folders {
             folder.conversation_ids.retain(|id| id != conversation_id);
         }
         if let Some(folder) =
             folder_id.and_then(|id| self.folders.iter_mut().find(|folder| folder.id == id))
         {
-            folder.conversation_ids.push(conversation_id.to_owned());
+            let position = index.map_or(folder.conversation_ids.len(), |index| {
+                index.min(folder.conversation_ids.len())
+            });
+            folder
+                .conversation_ids
+                .insert(position, conversation_id.to_owned());
         }
+    }
+
+    pub fn slot_of(&self, folder_id: &str, conversation_id: &str) -> Option<usize> {
+        self.folders
+            .iter()
+            .find(|folder| folder.id == folder_id)?
+            .conversation_ids
+            .iter()
+            .position(|id| id == conversation_id)
     }
 
     pub fn move_targets(&self) -> Vec<(String, String)> {
@@ -539,21 +558,24 @@ pub fn pinned_channels(store: &Store) -> Vec<String> {
     store.pinned_channel_ids().unwrap_or_default()
 }
 
-pub fn cached_avatar(store: &Store, user_id: &str) -> Option<Option<Arc<Image>>> {
+pub fn cached_avatar(store: &Store, user_id: &str) -> Option<AvatarState> {
     let record = store.avatar(user_id).ok().flatten()?;
-    Some(record.bytes.map(|bytes| {
-        if is_bot_id(user_id) {
-            Arc::new(Image::from_bytes(image_format(&record.content_type), bytes))
-        } else {
-            avatar_image_from(&record.content_type, bytes)
-        }
-    }))
+    Some(match record.bytes {
+        Some(bytes) => avatar_state_from(&record.content_type, bytes, is_bot_id(user_id)),
+        None => AvatarState::Missing,
+    })
 }
 
-pub fn avatar_image_from(content_type: &str, bytes: Vec<u8>) -> Arc<Image> {
-    match crate::avatar_image::circular_png(&bytes) {
-        Some(masked) => Arc::new(Image::from_bytes(ImageFormat::Png, masked)),
-        None => Arc::new(Image::from_bytes(image_format(content_type), bytes)),
+pub fn avatar_state_from(content_type: &str, bytes: Vec<u8>, is_bot: bool) -> AvatarState {
+    if image_format(content_type) == ImageFormat::Svg {
+        if is_bot {
+            return AvatarState::Icon(Arc::new(Image::from_bytes(ImageFormat::Svg, bytes)));
+        }
+        return AvatarState::Missing;
+    }
+    match AvatarPhoto::from_bytes(bytes) {
+        Some(photo) => AvatarState::Ready(Arc::new(photo)),
+        None => AvatarState::Missing,
     }
 }
 
@@ -643,13 +665,22 @@ pub fn watch_presence(engine: &Arc<Engine>, user_ids: Vec<String>) -> Done {
     run(async move { engine.watch_presence(&user_ids).await })
 }
 
-pub fn move_to_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id: &str) -> Done {
+pub fn move_to_folder(
+    engine: &Arc<Engine>,
+    conversation_id: &str,
+    folder_id: &str,
+    index: Option<usize>,
+) -> Done {
     let (engine, conversation_id, folder_id) = (
         engine.clone(),
         conversation_id.to_owned(),
         folder_id.to_owned(),
     );
-    run(async move { engine.move_to_folder(&conversation_id, &folder_id).await })
+    run(async move {
+        engine
+            .move_to_folder(&conversation_id, &folder_id, index)
+            .await
+    })
 }
 
 pub fn remove_from_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id: &str) -> Done {
@@ -713,6 +744,29 @@ mod tests {
             expanded: None,
             conversation_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
         }
+    }
+
+    #[test]
+    fn place_puts_a_chat_at_the_slot_inside_and_across_folders() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &["a", "b", "c"]),
+                folder("work", FolderKind::UserCreated, &["d"]),
+            ],
+            ..Default::default()
+        };
+        directory.place("a", Some("fav"), Some(2));
+        assert_eq!(directory.folders[0].conversation_ids, vec!["b", "c", "a"]);
+        directory.place("d", Some("fav"), Some(0));
+        assert_eq!(
+            directory.folders[0].conversation_ids,
+            vec!["d", "b", "c", "a"]
+        );
+        assert!(directory.folders[1].conversation_ids.is_empty());
+        directory.place("b", Some("work"), Some(9));
+        assert_eq!(directory.folders[1].conversation_ids, vec!["b"]);
+        assert_eq!(directory.slot_of("fav", "c"), Some(1));
+        assert_eq!(directory.slot_of("work", "c"), None);
     }
 
     #[test]
@@ -821,7 +875,7 @@ mod tests {
     #[test]
     fn missing_avatars_skip_known_and_duplicates() {
         let mut directory = Directory::default();
-        directory.set_avatar("known", None);
+        directory.set_avatar("known", AvatarState::Missing);
         let wanted = directory.missing_avatars(["known", "x", "x", "y"].map(String::from));
         assert_eq!(wanted, vec!["x", "y"]);
         directory.mark_avatars_pending(&wanted);

@@ -194,6 +194,7 @@ mod frames {
         OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
+    use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -201,6 +202,7 @@ mod frames {
         "shell/title-bar/search",
         "shell/title-bar/own-status",
         "shell/title-bar/own-status/avatar",
+        OWN_AVATAR_DISC,
         "shell/islands",
         "shell/islands/rail",
         "shell/islands/sidebar",
@@ -317,6 +319,7 @@ mod frames {
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
+    const ZOOM_STEP: f32 = 1.25;
 
     type Tag = (&'static str, Bounds<Pixels>);
 
@@ -732,11 +735,31 @@ mod frames {
 
     #[gpui_kit::test]
     fn no_element_overlaps_or_leaves_its_container(cx: &mut TestAppContext) {
+        check_layout(cx, &SIZES, 1., KNOWN_VIOLATIONS);
+    }
+
+    #[gpui_kit::test]
+    fn layout_holds_at_a_zoomed_step(cx: &mut TestAppContext) {
+        let (width, height) = SIZES[1];
+        let zoomed = [(width / ZOOM_STEP, height / ZOOM_STEP)];
+        check_layout(cx, &zoomed, ZOOM_STEP, &[]);
+    }
+
+    fn check_layout(
+        cx: &mut TestAppContext,
+        sizes: &[(f32, f32)],
+        zoom: f32,
+        known_violations: &[&str],
+    ) {
         let (handle, app) = mount(cx);
+        let platform_scale = cx
+            .update_window(handle, |_, window, _| window.scale_factor())
+            .expect("test window");
+        cx.simulate_window_scale_factor_change(handle, platform_scale * zoom);
         let mut visual = VisualTestContext::from_window(handle, cx);
         let mut seen_known = HashSet::new();
         let mut unexpected = Vec::new();
-        for (width, height) in SIZES {
+        for &(width, height) in sizes {
             visual.simulate_resize(size(px(width), px(height)));
             let window = Bounds {
                 origin: point(px(0.), px(0.)),
@@ -921,7 +944,7 @@ mod frames {
                 }
                 for (key, message) in found {
                     let full_key = format!("{screen_name}@{width}x{height}:{key}");
-                    if KNOWN_VIOLATIONS.contains(&full_key.as_str()) {
+                    if known_violations.contains(&full_key.as_str()) {
                         seen_known.insert(full_key);
                     } else {
                         unexpected.push(format!("{full_key}: {message}"));
@@ -929,7 +952,7 @@ mod frames {
                 }
             }
         }
-        let stale: Vec<String> = KNOWN_VIOLATIONS
+        let stale: Vec<String> = known_violations
             .iter()
             .filter(|key| !seen_known.contains(**key))
             .map(|key| format!("stale known violation, remove it: {key}"))
@@ -944,6 +967,40 @@ mod frames {
                 .join("\n")
         );
     }
+    #[gpui_kit::test]
+    fn own_avatar_matches_the_teams_me_control(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        collect(&mut visual, Some(OWN_AVATAR_DISC));
+        let disc = visual
+            .debug_bounds(OWN_AVATAR_DISC)
+            .expect("own avatar rendered");
+        let bar = visual
+            .debug_bounds("shell/title-bar")
+            .expect("title bar rendered");
+        assert_eq!(
+            f32::from(disc.size.width),
+            TITLE_AVATAR_SIZE,
+            "{}",
+            describe(disc)
+        );
+        assert_eq!(
+            f32::from(disc.size.height),
+            TITLE_AVATAR_SIZE,
+            "{}",
+            describe(disc)
+        );
+        let top = f32::from(disc.top() - bar.top());
+        let bottom = f32::from(bar.bottom() - disc.bottom());
+        assert!(
+            (top - bottom).abs() <= 1.,
+            "own avatar {} is not centered in the title bar {}",
+            describe(disc),
+            describe(bar)
+        );
+    }
+
     const TITLE_SEARCH: &str = "shell/title-bar/search";
     const TITLE_NEIGHBOURS: &[&str] = &[
         "shell/title-bar/leading",
@@ -1195,6 +1252,13 @@ mod frames {
         crate::theme::set_thread_scheme(Some("teams"));
         check_settings_dialog(cx, &[SettingsSection::Appearance, SettingsSection::General]);
         crate::theme::set_thread_scheme(None);
+    }
+
+    #[gpui_kit::test]
+    fn settings_dialog_keeps_its_inset_in_the_light_theme(cx: &mut TestAppContext) {
+        crate::theme::set_thread_shade(Some(crate::theme::Shade::Light));
+        check_settings_dialog(cx, &[SettingsSection::Appearance, SettingsSection::General]);
+        crate::theme::set_thread_shade(None);
     }
 
     fn check_settings_dialog(cx: &mut TestAppContext, sections: &[SettingsSection]) {

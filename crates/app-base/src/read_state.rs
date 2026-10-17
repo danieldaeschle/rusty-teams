@@ -19,11 +19,39 @@ pub fn plan_read(window_active: bool, chat_unread: bool, trigger: ReadTrigger) -
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JumpTarget {
+    LastRead(usize),
+    Newest,
+}
+
+pub fn jump_target(
+    last_read_index: Option<usize>,
+    top_item: usize,
+    scrolled_up: bool,
+) -> Option<JumpTarget> {
+    match last_read_index {
+        _ if scrolled_up => Some(JumpTarget::Newest),
+        Some(index) if index < top_item => Some(JumpTarget::LastRead(index)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn jump_goes_to_last_read_from_the_newest_and_to_the_newest_from_anywhere_else() {
+        assert_eq!(jump_target(Some(4), 10, false), Some(JumpTarget::LastRead(4)));
+        assert_eq!(jump_target(Some(4), 2, true), Some(JumpTarget::Newest));
+        assert_eq!(jump_target(Some(4), 3, true), Some(JumpTarget::Newest));
+        assert_eq!(jump_target(None, 3, true), Some(JumpTarget::Newest));
+        assert_eq!(jump_target(Some(4), 4, false), None);
+        assert_eq!(jump_target(None, 0, false), None);
+    }
 
     struct LocalState {
         unread_counts: HashMap<String, u32>,

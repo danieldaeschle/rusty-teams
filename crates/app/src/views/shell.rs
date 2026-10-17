@@ -19,11 +19,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
+    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
     OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
-    ToggleCallHand, ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
+    ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
+    ZoomShareReset,
 };
+use super::window_zoom::{WindowZoom, change_zoom};
 use super::call_pop_out::zoom_listener;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::SidebarView;
@@ -140,6 +142,7 @@ pub struct AppShell {
     _agent_subscription: Option<Subscription>,
     _escape_observation: Subscription,
     _activation_observation: Subscription,
+    _appearance_observation: Subscription,
 }
 
 impl AppShell {
@@ -287,6 +290,9 @@ impl AppShell {
                     .update(cx, |state, cx| state.escape_call_fullscreen(cx));
             }
         });
+        let appearance_observation = cx.observe_window_appearance(window, |_, window, cx| {
+            crate::active_appearance::system_appearance_changed(window.appearance(), cx);
+        });
         let activation_observation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.state
@@ -330,6 +336,7 @@ impl AppShell {
             _agent_subscription: agent_subscription,
             _escape_observation: escape_observation,
             _activation_observation: activation_observation,
+            _appearance_observation: appearance_observation,
         };
         shell.apply_open_target(cx);
         shell
@@ -1027,9 +1034,20 @@ impl Render for AppShell {
                 this.state
                     .update(cx, |state, cx| state.toggle_call_fullscreen(cx));
             }))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| change_zoom(&this.state, WindowZoom::In, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| change_zoom(&this.state, WindowZoom::Out, cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| change_zoom(&this.state, WindowZoom::Reset, cx)))
             .on_action(zoom_listener::<ZoomShareIn>(&self.state, ZoomStep::In))
             .on_action(zoom_listener::<ZoomShareOut>(&self.state, ZoomStep::Out))
             .on_action(zoom_listener::<ZoomShareReset>(&self.state, ZoomStep::Reset))
+            .on_action(cx.listener(|this, _: &JumpToLastReadOrNewest, _, cx| {
+                if this.image_viewer.is_some() || this.state.read(cx).viewing_call() {
+                    cx.propagate();
+                    return;
+                }
+                this.conversation
+                    .update(cx, |conversation, cx| conversation.jump_to_last_read_or_newest(cx));
+            }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {

@@ -6,6 +6,7 @@ use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::add_people_dialog::open_add_people;
 use super::avatar::{person_avatar, with_presence};
 use super::profile_card::opens_profile;
 use super::sidebar::confirm_leave;
@@ -104,11 +105,17 @@ fn members_panel(
                 .child(
                     v_flex()
                         .py(px(4.))
-                        .child(
+                        .child({
+                            let (app, popover, chat_id) =
+                                (app.clone(), popover.clone(), chat_id.to_owned());
                             action_row("chat-members-add", IconName::UserPlus, "Add people")
-                                .opacity(0.5)
-                                .cursor_default(),
-                        )
+                                .cursor_pointer()
+                                .hover(|row| row.bg(theme::popup_hover()))
+                                .on_click(move |_, window, cx| {
+                                    popover.update(cx, |state, cx| state.dismiss(window, cx));
+                                    open_add_people(&app, &chat_id, false, window, cx);
+                                })
+                        })
                         .when(leave_allowed, |actions| {
                             let (app, popover, chat_id) =
                                 (app.clone(), popover.clone(), chat_id.to_owned());

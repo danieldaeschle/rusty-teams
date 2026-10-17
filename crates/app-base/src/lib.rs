@@ -36,5 +36,6 @@ pub mod translation;
 pub mod updater;
 pub mod user_activity;
 pub mod version;
+pub mod zoom;
 
 pub const APP_NAME: &str = "Rusty Teams";
