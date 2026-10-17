@@ -12,6 +12,7 @@ const SKIN_TONE_KEY: &str = "preferredSkinToneIndex";
 const MAX_SKIN_TONE: u8 = 5;
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
+const ADAPTIVE_RAIL_FIELD: &str = "hasUserEnabledAdaptiveRailForDesktop";
 const MUTED_DEFAULT: bool = false;
 const MEETING_DEFAULT: bool = false;
 
@@ -34,6 +35,7 @@ impl ChatSection {
 pub struct ChatSectionSettings {
     pub muted: Option<bool>,
     pub meeting: Option<bool>,
+    pub adaptive_rail: Option<bool>,
 }
 
 impl ChatSectionSettings {
@@ -42,6 +44,10 @@ impl ChatSectionSettings {
             ChatSection::Muted => self.muted.unwrap_or(MUTED_DEFAULT),
             ChatSection::Meeting => self.meeting.unwrap_or(MEETING_DEFAULT),
         }
+    }
+
+    pub fn adaptive_rail(&self) -> bool {
+        self.adaptive_rail.unwrap_or(false)
     }
 
     pub fn set(&mut self, section: ChatSection, enabled: bool) {
@@ -128,6 +134,7 @@ pub fn parse_chat_sections(properties: &Value) -> ChatSectionSettings {
     ChatSectionSettings {
         muted: settings.get(MUTED_FIELD).and_then(Value::as_bool),
         meeting: settings.get(MEETING_FIELD).and_then(Value::as_bool),
+        adaptive_rail: settings.get(ADAPTIVE_RAIL_FIELD).and_then(Value::as_bool),
     }
 }
 
@@ -210,8 +217,14 @@ mod tests {
 
     #[test]
     fn skin_tone_is_read_from_the_string_property() {
-        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})), Some(2));
-        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})), None);
+        assert_eq!(
+            parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})),
+            Some(2)
+        );
+        assert_eq!(
+            parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})),
+            None
+        );
         assert_eq!(parse_skin_tone(&json!({})), None);
     }
 
@@ -221,15 +234,17 @@ mod tests {
         assert_eq!(parsed, ChatSectionSettings::default());
         assert!(!parsed.enabled(ChatSection::Muted));
         assert!(!parsed.enabled(ChatSection::Meeting));
+        assert!(!parsed.adaptive_rail());
     }
 
     #[test]
-    fn reads_both_flags_from_the_json_string() {
+    fn reads_every_flag_from_the_json_string() {
         let parsed = parse_chat_sections(&properties(
-            r#"{"id":"simpleCollabUserSettingsId","hasUserEnabledMutedChatSection":false,"hasUserEnabledMeetingChatSection":true}"#,
+            r#"{"id":"simpleCollabUserSettingsId","hasUserEnabledMutedChatSection":false,"hasUserEnabledMeetingChatSection":true,"hasUserEnabledAdaptiveRailForDesktop":true}"#,
         ));
         assert!(!parsed.enabled(ChatSection::Muted));
         assert!(parsed.enabled(ChatSection::Meeting));
+        assert!(parsed.adaptive_rail());
     }
 
     #[test]
@@ -275,7 +290,8 @@ mod tests {
             parse_chat_sections(&json!({SETTINGS_KEY: merged})),
             ChatSectionSettings {
                 muted: Some(false),
-                meeting: Some(true)
+                meeting: Some(true),
+                adaptive_rail: None,
             }
         );
     }

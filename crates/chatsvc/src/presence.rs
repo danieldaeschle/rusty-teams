@@ -147,9 +147,14 @@ impl<T: CardTransport> PresenceService<T> {
         self.send(request, &url).await.map(drop)
     }
 
-    pub async fn register_endpoint(&self, endpoint_id: &str, reporting: ActivityReporting) -> Result<()> {
+    pub async fn register_endpoint(
+        &self,
+        endpoint_id: &str,
+        reporting: ActivityReporting,
+    ) -> Result<()> {
         let url = format!("{BASE_URL}/me/endpoints/");
-        let mut request = Request::with_body(Method::Put, &url, endpoint_body(endpoint_id, reporting));
+        let mut request =
+            Request::with_body(Method::Put, &url, endpoint_body(endpoint_id, reporting));
         request.headers = endpoint_headers(endpoint_id);
         self.send(request, &url).await.map(drop)
     }
@@ -502,7 +507,10 @@ mod tests {
     #[tokio::test]
     async fn register_endpoint_puts_the_transport_endpoint_as_desktop() {
         let service = service(200, Value::Null);
-        service.register_endpoint("epid-1", ActivityReporting::Transport).await.unwrap();
+        service
+            .register_endpoint("epid-1", ActivityReporting::Transport)
+            .await
+            .unwrap();
         let (request, scope) = only_request(&service);
         assert_eq!(request.method, Method::Put);
         assert_eq!(
@@ -533,7 +541,10 @@ mod tests {
     #[tokio::test]
     async fn register_endpoint_can_switch_to_direct_reporting() {
         let service = service(200, Value::Null);
-        service.register_endpoint("epid-1", ActivityReporting::Direct).await.unwrap();
+        service
+            .register_endpoint("epid-1", ActivityReporting::Direct)
+            .await
+            .unwrap();
         let (request, _) = only_request(&service);
         assert_eq!(request.body.unwrap()["activityReporting"], "Direct");
     }
