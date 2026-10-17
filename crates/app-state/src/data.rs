@@ -9,6 +9,7 @@ use store::{ChatRecord, Store, is_bot_id};
 use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange, is_notes_chat};
 use tokio::sync::oneshot;
 
+use crate::avatar_image::AvatarPhoto;
 use crate::backend::Engine;
 use crate::runtime;
 
@@ -113,7 +114,8 @@ impl Presence {
 pub enum AvatarState {
     Pending,
     Missing,
-    Ready(Arc<Image>),
+    Ready(Arc<AvatarPhoto>),
+    Icon(Arc<Image>),
 }
 
 #[derive(Debug, Clone)]
@@ -201,8 +203,7 @@ impl Directory {
         }
     }
 
-    pub fn set_avatar(&mut self, user_id: &str, image: Option<Arc<Image>>) {
-        let state = image.map_or(AvatarState::Missing, AvatarState::Ready);
+    pub fn set_avatar(&mut self, user_id: &str, state: AvatarState) {
         self.avatars.insert(user_id.to_owned(), state);
     }
 
@@ -539,21 +540,24 @@ pub fn pinned_channels(store: &Store) -> Vec<String> {
     store.pinned_channel_ids().unwrap_or_default()
 }
 
-pub fn cached_avatar(store: &Store, user_id: &str) -> Option<Option<Arc<Image>>> {
+pub fn cached_avatar(store: &Store, user_id: &str) -> Option<AvatarState> {
     let record = store.avatar(user_id).ok().flatten()?;
-    Some(record.bytes.map(|bytes| {
-        if is_bot_id(user_id) {
-            Arc::new(Image::from_bytes(image_format(&record.content_type), bytes))
-        } else {
-            avatar_image_from(&record.content_type, bytes)
-        }
-    }))
+    Some(match record.bytes {
+        Some(bytes) => avatar_state_from(&record.content_type, bytes, is_bot_id(user_id)),
+        None => AvatarState::Missing,
+    })
 }
 
-pub fn avatar_image_from(content_type: &str, bytes: Vec<u8>) -> Arc<Image> {
-    match crate::avatar_image::circular_png(&bytes) {
-        Some(masked) => Arc::new(Image::from_bytes(ImageFormat::Png, masked)),
-        None => Arc::new(Image::from_bytes(image_format(content_type), bytes)),
+pub fn avatar_state_from(content_type: &str, bytes: Vec<u8>, is_bot: bool) -> AvatarState {
+    if image_format(content_type) == ImageFormat::Svg {
+        if is_bot {
+            return AvatarState::Icon(Arc::new(Image::from_bytes(ImageFormat::Svg, bytes)));
+        }
+        return AvatarState::Missing;
+    }
+    match AvatarPhoto::from_bytes(bytes) {
+        Some(photo) => AvatarState::Ready(Arc::new(photo)),
+        None => AvatarState::Missing,
     }
 }
 
@@ -821,7 +825,7 @@ mod tests {
     #[test]
     fn missing_avatars_skip_known_and_duplicates() {
         let mut directory = Directory::default();
-        directory.set_avatar("known", None);
+        directory.set_avatar("known", AvatarState::Missing);
         let wanted = directory.missing_avatars(["known", "x", "x", "y"].map(String::from));
         assert_eq!(wanted, vec!["x", "y"]);
         directory.mark_avatars_pending(&wanted);

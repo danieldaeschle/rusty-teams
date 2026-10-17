@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use store::{AvatarRecord, is_bot_id};
 
 use crate::engine::SyncEngine;
@@ -8,6 +8,14 @@ use crate::remote::Remote;
 
 const AVATAR_MAX_AGE_DAYS: i64 = 7;
 const AVATAR_BATCH: usize = 60;
+const PHOTO_RENDITION_SINCE: &str = "2026-10-17T17:00:00Z";
+
+fn avatar_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
+    let since = DateTime::parse_from_rfc3339(PHOTO_RENDITION_SINCE)
+        .map(|since| since.with_timezone(&Utc))
+        .unwrap_or(DateTime::UNIX_EPOCH);
+    (now - Duration::days(AVATAR_MAX_AGE_DAYS)).max(since)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Avatar {
@@ -25,7 +33,7 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn fetch_avatars(&self, user_ids: &[String]) -> Result<()> {
-        let cutoff = Utc::now() - Duration::days(AVATAR_MAX_AGE_DAYS);
+        let cutoff = avatar_cutoff(Utc::now());
         let mut unique = user_ids.to_vec();
         unique.sort();
         unique.dedup();
@@ -122,5 +130,23 @@ impl<R: Remote> SyncEngine<R> {
         for user_id in claimed {
             in_flight.remove(user_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn photos_fetched_before_the_larger_rendition_count_as_stale() {
+        let since = DateTime::parse_from_rfc3339(PHOTO_RENDITION_SINCE)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(avatar_cutoff(since + Duration::days(1)), since);
+        let later = since + Duration::days(30);
+        assert_eq!(
+            avatar_cutoff(later),
+            later - Duration::days(AVATAR_MAX_AGE_DAYS)
+        );
     }
 }

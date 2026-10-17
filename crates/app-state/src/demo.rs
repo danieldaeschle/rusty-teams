@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use gpui_kit::{App, Entity, Image};
+use gpui_kit::{App, Entity};
 use store::{
     ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
     ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
@@ -19,7 +19,7 @@ use teams_core::{
 use crate::activity::{Actor, Entry, Kind};
 use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
-use crate::data::{FolderInfo, FolderKind, Person, PresenceKind};
+use crate::data::{AvatarState, FolderInfo, FolderKind, Person, PresenceKind};
 use crate::demo_gifs;
 use crate::message_actions::ForwardSource;
 
@@ -30,6 +30,7 @@ const DEMO_USER_NAME: &str = "Dana Demo";
 const DEMO_USER_EMAIL: &str = "dana.demo@example.com";
 const DEMO_TIME_ZONE: &str = "W. Europe Standard Time";
 const PHOTO_SIZE: usize = 48;
+const DEMO_PHOTO_SIDE: usize = 240;
 const STAGING_IMAGE_KEY: &str = "demo://staging-dashboard";
 const PENDING_IMAGE_KEY: &str = "demo://pending-screenshot";
 const STAGING_SIZE: (usize, usize) = (960, 540);
@@ -866,8 +867,8 @@ fn seed_agent_access(store: &Store) {
     });
 }
 
-fn photo(palette: &Palette) -> Arc<Image> {
-    crate::data::avatar_image_from("image/png", encode_png(palette))
+fn photo(palette: &Palette) -> AvatarState {
+    crate::data::avatar_state_from("image/png", encode_png(palette), false)
 }
 
 pub fn seed_directory(state: &mut AppState) {
@@ -932,9 +933,9 @@ pub fn seed_directory(state: &mut AppState) {
     directory
         .unread_counts
         .insert("demo-chat-allhands".to_owned(), 120);
-    directory.set_avatar(MARA_ID, Some(photo(&MARA)));
-    directory.set_avatar(PRIYA_ID, Some(photo(&PRIYA)));
-    directory.set_avatar(TOBIAS_ID, Some(photo(&TOBIAS)));
+    directory.set_avatar(MARA_ID, photo(&MARA));
+    directory.set_avatar(PRIYA_ID, photo(&PRIYA));
+    directory.set_avatar(TOBIAS_ID, photo(&TOBIAS));
     for (user_id, kind) in [
         (MARA_ID, PresenceKind::Available),
         (JONAS_ID, PresenceKind::Busy),
@@ -2173,8 +2174,9 @@ fn staging_pixel(column: usize, row: usize) -> [u8; 3] {
 }
 
 fn encode_png(palette: &Palette) -> Vec<u8> {
-    encode_rgb(PHOTO_SIZE, PHOTO_SIZE, |column, row| {
-        let (x, y) = (column as f32 + 0.5, row as f32 + 0.5);
+    let scale = PHOTO_SIZE as f32 / DEMO_PHOTO_SIDE as f32;
+    encode_rgb(DEMO_PHOTO_SIDE, DEMO_PHOTO_SIDE, |column, row| {
+        let (x, y) = ((column as f32 + 0.5) * scale, (row as f32 + 0.5) * scale);
         if inside(x, y, (24., 21.), (8.5, 9.5)) {
             palette.skin
         } else if inside(x, y, (24., 19.), (10.5, 11.)) && y < 22. {

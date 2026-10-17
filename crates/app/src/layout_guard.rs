@@ -192,6 +192,7 @@ mod frames {
         OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
+    use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -199,6 +200,7 @@ mod frames {
         "shell/title-bar/search",
         "shell/title-bar/own-status",
         "shell/title-bar/own-status/avatar",
+        OWN_AVATAR_DISC,
         "shell/islands",
         "shell/islands/rail",
         "shell/islands/sidebar",
@@ -963,6 +965,40 @@ mod frames {
                 .join("\n")
         );
     }
+    #[gpui_kit::test]
+    fn own_avatar_matches_the_teams_me_control(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        collect(&mut visual, Some(OWN_AVATAR_DISC));
+        let disc = visual
+            .debug_bounds(OWN_AVATAR_DISC)
+            .expect("own avatar rendered");
+        let bar = visual
+            .debug_bounds("shell/title-bar")
+            .expect("title bar rendered");
+        assert_eq!(
+            f32::from(disc.size.width),
+            TITLE_AVATAR_SIZE,
+            "{}",
+            describe(disc)
+        );
+        assert_eq!(
+            f32::from(disc.size.height),
+            TITLE_AVATAR_SIZE,
+            "{}",
+            describe(disc)
+        );
+        let top = f32::from(disc.top() - bar.top());
+        let bottom = f32::from(bar.bottom() - disc.bottom());
+        assert!(
+            (top - bottom).abs() <= 1.,
+            "own avatar {} is not centered in the title bar {}",
+            describe(disc),
+            describe(bar)
+        );
+    }
+
     const TITLE_SEARCH: &str = "shell/title-bar/search";
     const TITLE_NEIGHBOURS: &[&str] = &[
         "shell/title-bar/leading",
