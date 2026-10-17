@@ -48,11 +48,12 @@ mod receipts;
 mod recording_rights;
 mod remote;
 mod scheduled;
-mod skin_tone;
 mod search;
 mod sidebar_sync;
+mod skin_tone;
 mod spans;
 mod stored;
+mod table;
 mod time_zone;
 mod translate_sync;
 mod translation;
@@ -66,8 +67,7 @@ pub use adaptive_card::{
 };
 pub use avatars::Avatar;
 pub use call_event::{
-    CallEvent, CallPhase, CallType, Recording, call_event, format_duration,
-    parse_duration_seconds,
+    CallEvent, CallPhase, CallType, Recording, call_event, format_duration, parse_duration_seconds,
 };
 pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
 pub use card_chart::{
@@ -116,6 +116,9 @@ pub use folders::{
     BoxFuture, ChatFolder, ChatsvcFolderSource, FolderChange, FolderKind, FolderSource,
     store_section_settings, stored_section_settings,
 };
+pub use forwarded::{
+    FORWARDED_CONTENT_TYPE, ForwardHeader, ForwardInfo, forwarded_texts, forwards, is_forwarded,
+};
 pub use graph::{
     DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
     MessageExtras, SharedFile, UploadedFile,
@@ -142,18 +145,16 @@ pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
 pub use scheduled::NOTES_CHAT_ID;
 pub use skin_tone::{skin_tone, store_account_skin_tone};
-pub use forwarded::{
-    FORWARDED_CONTENT_TYPE, ForwardHeader, ForwardInfo, forwarded_texts, forwards, is_forwarded,
-};
 pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
-    card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with, mentions, message_quote,
-    message_spans, quote_html, quotes, reaction_summaries, reactions, readable_text, translated_spans,
-    user_mention_inputs,
+    card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with,
+    mentions, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
+    readable_text, translated_spans, user_mention_inputs,
 };
+pub use table::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};
 pub use time_zone::local_time;
 pub use translation::{
     FALLBACK_TARGET, LanguageStamp, confident_language, default_target, language_name, min_chars,
