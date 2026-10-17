@@ -8,6 +8,7 @@ pub const PROPERTY_NAME: &str = "consumptionhorizon";
 pub struct ReadHorizon {
     pub consumed_until_ms: i64,
     pub bookmark_ms: i64,
+    pub bookmark_timestamp_ms: i64,
     pub bookmark_message_set: bool,
     pub last_message_ms: i64,
     pub last_message_from: Option<String>,
@@ -22,6 +23,7 @@ impl ReadHorizon {
         ReadHorizon {
             consumed_until_ms: horizon.arrival_ms,
             bookmark_ms: bookmark.arrival_ms,
+            bookmark_timestamp_ms: bookmark.timestamp_ms,
             bookmark_message_set: bookmark.message_set,
             last_message_ms: last_message_ms(conversation),
             last_message_from: last_message["from"]
@@ -33,10 +35,19 @@ impl ReadHorizon {
     }
 
     pub fn is_unread(&self, my_user_id: &str) -> bool {
-        if self.bookmark_ms != 0 && self.bookmark_message_set {
+        self.is_unread_after(my_user_id, 0)
+    }
+
+    /// `app_horizon_ms` is the `appConsumptionHorizon` entry of the conversation's app ("Mark all as read").
+    pub fn is_unread_after(&self, my_user_id: &str, app_horizon_ms: i64) -> bool {
+        let app_horizon_set = app_horizon_ms > 0;
+        let bookmark_cleared = app_horizon_set && app_horizon_ms >= self.bookmark_timestamp_ms;
+        let bookmark_ms = if bookmark_cleared { 0 } else { self.bookmark_ms };
+        if bookmark_ms != 0 && self.bookmark_message_set {
             return true;
         }
-        let unread = self.bookmark_ms != 0 || self.last_message_ms > self.consumed_until_ms;
+        let consumed_until_ms = self.consumed_until_ms.max(app_horizon_ms);
+        let unread = bookmark_ms != 0 || self.last_message_ms > consumed_until_ms;
         let from_me = self
             .last_message_from
             .as_deref()
@@ -62,6 +73,7 @@ pub fn read_up_to(last_message_at: DateTime<Utc>, now: DateTime<Utc>) -> String 
 
 struct ParsedHorizon {
     arrival_ms: i64,
+    timestamp_ms: i64,
     message_set: bool,
 }
 
@@ -70,6 +82,7 @@ fn parse_horizon(text: Option<&str>) -> ParsedHorizon {
     let number = |part: &str| part.trim().parse::<i64>().ok();
     let unset = ParsedHorizon {
         arrival_ms: 0,
+        timestamp_ms: 0,
         message_set: false,
     };
     let [arrival, timestamp, message_id] = parts.as_slice() else {
@@ -77,8 +90,9 @@ fn parse_horizon(text: Option<&str>) -> ParsedHorizon {
     };
     let message_id = message_id.trim();
     match (number(arrival), number(timestamp)) {
-        (Some(arrival_ms), Some(_)) if !message_id.is_empty() => ParsedHorizon {
+        (Some(arrival_ms), Some(timestamp_ms)) if !message_id.is_empty() => ParsedHorizon {
             arrival_ms,
+            timestamp_ms,
             message_set: message_id != "0",
         },
         _ => unset,
@@ -190,6 +204,31 @@ mod tests {
             Some(("2026-10-16T09:42:25.678Z", "8:orgid:other")),
         );
         assert!(unread(&value));
+    }
+
+    #[test]
+    fn app_horizon_reads_everything_that_arrived_before_it() {
+        let value = conversation(
+            Some("1791884440747;1791885752824;1"),
+            None,
+            Some(("2026-10-16T09:42:25.6780000Z", "8:orgid:other")),
+        );
+        let horizon = ReadHorizon::from_conversation(&value);
+        assert!(horizon.is_unread_after(ME, 0));
+        assert!(horizon.is_unread_after(ME, horizon.last_message_ms - 1));
+        assert!(!horizon.is_unread_after(ME, horizon.last_message_ms));
+    }
+
+    #[test]
+    fn app_horizon_clears_an_older_bookmark_only() {
+        let value = conversation(
+            Some("1792171970947;1792171971513;1"),
+            Some("1792171970000;1792171971513;42"),
+            Some(("2026-10-16T17:32:50.9470000Z", "8:orgid:other")),
+        );
+        let horizon = ReadHorizon::from_conversation(&value);
+        assert!(horizon.is_unread_after(ME, 1792171971512));
+        assert!(!horizon.is_unread_after(ME, 1792171971513));
     }
 
     #[test]

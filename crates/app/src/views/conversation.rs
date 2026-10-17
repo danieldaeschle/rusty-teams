@@ -50,7 +50,6 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::scroll_edge::edge_divider;
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
-use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_title};
 use crate::backend::Engine;
@@ -81,6 +80,7 @@ use crate::sidebar_model::{AvatarSpec, Face, channel_unread};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
 use mcp::ReactionProposal;
@@ -89,6 +89,7 @@ use shared::SharedState;
 
 pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
+pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -881,9 +882,9 @@ impl ConversationView {
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
         self.refresh_pin_previews(cx);
-        if let Some(chat_id) = self.chat_id() {
+        if let Some(conversation_id) = self.pin_conversation_id() {
             self.app
-                .update(cx, |state, cx| state.refresh_pins(&chat_id, cx));
+                .update(cx, |state, cx| state.refresh_pins(&conversation_id, cx));
         }
         let target = self
             .current
@@ -3039,10 +3040,17 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
-        let pinned = chat_id
-            .as_deref()
-            .is_some_and(|chat_id| state.is_pinned(chat_id, key));
         let in_chat = chat_id.is_some();
+        let pin_conversation_id = self.pin_conversation_id();
+        let pinned = pin_conversation_id
+            .as_deref()
+            .is_some_and(|conversation_id| state.is_pinned(conversation_id, key));
+        let pinnable = in_chat
+            || pin_conversation_id.as_deref().is_some_and(|channel_id| {
+                state
+                    .message_record(channel_id, key)
+                    .is_some_and(|record| record.reply_to_id.is_none())
+            });
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
         MessageMenu {
             key: key.to_owned(),
@@ -3057,7 +3065,7 @@ impl ConversationView {
             translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
-            toggle_pinned: in_chat.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            toggle_pinned: pinnable.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
             pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
@@ -3650,6 +3658,7 @@ impl Render for ConversationView {
                 .children(new_post)
                 .child(
                     div()
+                        .debug_selector(|| TIMELINE_TAG.into())
                         .relative()
                         .flex_1()
                         .min_h_0()

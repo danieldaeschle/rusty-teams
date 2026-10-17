@@ -765,6 +765,42 @@ impl AppState {
         }
     }
 
+    pub fn mark_all_channels_read(&mut self, cx: &mut Context<Self>) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous_unread: Vec<(String, bool, Option<DateTime<Utc>>)> = self
+            .sidebar
+            .teams
+            .iter()
+            .flat_map(|team| team.channels.iter())
+            .map(|channel| (channel.id.clone(), channel.unread, None))
+            .collect();
+        let previous_mentions: Vec<(String, store::ChannelMentions)> = self
+            .sidebar
+            .teams
+            .iter()
+            .flat_map(|team| team.mentions.iter())
+            .map(|(channel_id, mentions)| (channel_id.clone(), *mentions))
+            .collect();
+        let _ = self.store.mark_all_channels_read();
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Mark all as read",
+            async move { engine.mark_all_channels_read().await },
+            move |state, cx| {
+                let _ = state.store.apply_channel_read_states(&previous_unread);
+                let _ = state.store.replace_channel_mentions(&previous_mentions);
+                state.reload_sidebar(cx);
+            },
+            |_, _| {},
+            cx,
+        );
+    }
+
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
         self.new_chat = true;
         self.show_call(false, cx);
@@ -1066,6 +1102,7 @@ mod tests {
                 hidden: false,
                 hidden_channel_ids: Vec::new(),
                 notifications: Default::default(),
+                mentions: Default::default(),
             }],
         }
     }

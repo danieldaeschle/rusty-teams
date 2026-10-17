@@ -33,36 +33,42 @@ impl ConversationView {
         }
     }
 
+    pub(super) fn pin_conversation_id(&self) -> Option<String> {
+        self.current
+            .as_ref()
+            .map(|current| current.selection.conversation_id().to_owned())
+    }
+
     pub(super) fn refresh_pin_previews(&mut self, cx: &mut Context<Self>) {
         self.pin_previews.clear();
         self.pin_fetches.clear();
         self.pin_index = 0;
-        let Some(chat_id) = self.chat_id() else {
+        let Some(conversation_id) = self.pin_conversation_id() else {
             return;
         };
-        self.update_pin_previews(&chat_id, cx);
+        self.update_pin_previews(&conversation_id, cx);
         cx.notify();
     }
 
-    pub(super) fn on_pins_changed(&mut self, chat_id: &str, cx: &mut Context<Self>) {
-        if self.chat_id().as_deref() != Some(chat_id) {
+    pub(super) fn on_pins_changed(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
+        if self.pin_conversation_id().as_deref() != Some(conversation_id) {
             return;
         }
         self.pin_index = 0;
-        self.update_pin_previews(chat_id, cx);
+        self.update_pin_previews(conversation_id, cx);
         cx.notify();
     }
 
-    fn update_pin_previews(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+    fn update_pin_previews(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
         let state = self.app.read(cx);
         let ids: Vec<String> = state
-            .pinned_messages(chat_id)
+            .pinned_messages(conversation_id)
             .iter()
             .map(|pin| pin.message_id.clone())
             .collect();
         let records = state
             .store
-            .messages_by_id(chat_id, &ids)
+            .messages_by_id(conversation_id, &ids)
             .unwrap_or_default();
         let mut previews: HashMap<String, PinPreview> = records
             .into_iter()
@@ -82,24 +88,29 @@ impl ConversationView {
         }
         for id in ids {
             if !self.pin_previews.contains_key(&id) {
-                self.fetch_pin_preview(chat_id, id, cx);
+                self.fetch_pin_preview(conversation_id, id, cx);
             }
         }
     }
 
-    fn fetch_pin_preview(&mut self, chat_id: &str, message_id: String, cx: &mut Context<Self>) {
+    fn fetch_pin_preview(
+        &mut self,
+        conversation_id: &str,
+        message_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let Some(engine) = self.app.read(cx).engine.clone() else {
             return;
         };
-        if !self.pin_fetches.insert(message_id.clone()) {
+        if self.chat_id().is_none() || !self.pin_fetches.insert(message_id.clone()) {
             return;
         }
-        let chat_id = chat_id.to_owned();
-        let task_chat_id = chat_id.clone();
+        let conversation_id = conversation_id.to_owned();
+        let task_conversation_id = conversation_id.clone();
         let task_message_id = message_id.clone();
         let receiver = runtime::spawn(async move {
             engine
-                .fetch_chat_message(&task_chat_id, &task_message_id)
+                .fetch_chat_message(&task_conversation_id, &task_message_id)
                 .await
         });
         cx.spawn(async move |this, cx| {
@@ -107,8 +118,9 @@ impl ConversationView {
                 return;
             };
             this.update(cx, |this, cx| {
-                if this.chat_id().as_deref() == Some(chat_id.as_str()) {
-                    this.pin_previews.insert(message_id, PinPreview::of(&record));
+                if this.conversation_id().as_deref() == Some(conversation_id.as_str()) {
+                    this.pin_previews
+                        .insert(message_id, PinPreview::of(&record));
                     cx.notify();
                 }
             })
@@ -128,8 +140,8 @@ impl ConversationView {
     }
 
     pub(super) fn render_pin_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let chat_id = self.chat_id()?;
-        let pins = self.app.read(cx).pinned_messages(&chat_id);
+        let conversation_id = self.pin_conversation_id()?;
+        let pins = self.app.read(cx).pinned_messages(&conversation_id);
         let pin = pins.get(self.pin_index)?;
         let preview = self.pin_previews.get(&pin.message_id);
         let data = PinBannerData {
@@ -149,36 +161,40 @@ impl ConversationView {
     }
 
     fn shown_pin_id(&self, cx: &App) -> Option<String> {
-        let chat_id = self.chat_id()?;
+        let conversation_id = self.pin_conversation_id()?;
         self.app
             .read(cx)
-            .pinned_messages(&chat_id)
+            .pinned_messages(&conversation_id)
             .get(self.pin_index)
             .map(|pin| pin.message_id.clone())
     }
 
     fn open_shown_pin(&mut self, cx: &mut Context<Self>) {
-        let (Some(chat_id), Some(message_id)) = (self.chat_id(), self.shown_pin_id(cx)) else {
+        let (Some(conversation_id), Some(message_id)) =
+            (self.pin_conversation_id(), self.shown_pin_id(cx))
+        else {
             return;
         };
-        self.jump_to_message(&chat_id, &message_id, cx);
+        self.jump_to_message(&conversation_id, &message_id, cx);
     }
 
     fn step_pin(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.chat_id() else {
+        let Some(conversation_id) = self.pin_conversation_id() else {
             return;
         };
-        let total = self.app.read(cx).pinned_messages(&chat_id).len();
+        let total = self.app.read(cx).pinned_messages(&conversation_id).len();
         self.pin_index = cycle_pin(self.pin_index, total, delta);
         cx.notify();
     }
 
     fn unpin_shown_pin(&mut self, cx: &mut Context<Self>) {
-        let (Some(chat_id), Some(message_id)) = (self.chat_id(), self.shown_pin_id(cx)) else {
+        let (Some(conversation_id), Some(message_id)) =
+            (self.pin_conversation_id(), self.shown_pin_id(cx))
+        else {
             return;
         };
         self.app.update(cx, |state, cx| {
-            state.set_pinned(&chat_id, &message_id, false, cx)
+            state.set_pinned(&conversation_id, &message_id, false, cx)
         });
     }
 
@@ -207,9 +223,9 @@ impl ConversationView {
     }
 
     pub(super) fn toggle_pinned(&mut self, message_id: &str, cx: &mut Context<Self>) {
-        if let Some(chat_id) = self.chat_id() {
+        if let Some(conversation_id) = self.pin_conversation_id() {
             self.app.update(cx, |state, cx| {
-                state.toggle_pinned(&chat_id, message_id, cx)
+                state.toggle_pinned(&conversation_id, message_id, cx)
             });
         }
     }

@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use app_ui_kit::widgets::Unread;
 use chrono::{DateTime, FixedOffset, Utc};
 use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam, is_bot_id};
 use teams_core::{ChatSection, is_event_preview};
-use app_ui_kit::widgets::Unread;
 
 use crate::app_state::chat_title;
 use crate::data::{
@@ -260,10 +260,82 @@ pub fn channel_name_style(unread: bool, shown: bool, selected: bool) -> NameStyl
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MentionBadge {
+    Count(u32),
+    Channel,
+    Team,
+}
+
+/// Teams pulls a hidden channel into the list while it holds personal @mentions.
+pub fn channel_shown(team: &SidebarTeam, channel_id: &str) -> bool {
+    !team.hidden_channel_ids.iter().any(|id| id == channel_id)
+        || team.channel_mentions(channel_id).personal > 0
+}
+
+pub fn channel_hoisted(team: &SidebarTeam, channel_id: &str) -> bool {
+    team.hidden_channel_ids.iter().any(|id| id == channel_id)
+        && team.channel_mentions(channel_id).personal > 0
+}
+
+pub fn team_hoisted(team: &SidebarTeam) -> bool {
+    team.hidden
+        && team
+            .channels
+            .iter()
+            .any(|channel| channel_hoisted(team, &channel.id))
+}
+
+pub fn channel_badge(team: &SidebarTeam, channel_id: &str) -> Option<MentionBadge> {
+    let mentions = team.channel_mentions(channel_id);
+    if mentions.personal > 0 {
+        Some(MentionBadge::Count(mentions.personal))
+    } else if mentions.channel > 0 {
+        Some(MentionBadge::Channel)
+    } else if mentions.team > 0 {
+        Some(MentionBadge::Team)
+    } else {
+        None
+    }
+}
+
+/// The collapsed team row sums personal mentions of every channel, the icons only of shown channels.
+pub fn team_badge(team: &SidebarTeam, expanded: bool) -> Option<MentionBadge> {
+    if expanded || !team_has_unread(team) {
+        return None;
+    }
+    let personal: u32 = team
+        .mentions
+        .iter()
+        .filter(|(channel_id, _)| {
+            team.channels
+                .iter()
+                .any(|channel| &channel.id == *channel_id)
+        })
+        .map(|(_, mentions)| mentions.personal)
+        .sum();
+    if personal > 0 {
+        return Some(MentionBadge::Count(personal));
+    }
+    let shown = || {
+        team.channels
+            .iter()
+            .filter(|channel| channel_shown(team, &channel.id))
+            .map(|channel| team.channel_mentions(&channel.id))
+    };
+    if shown().any(|mentions| mentions.channel > 0) {
+        Some(MentionBadge::Channel)
+    } else if shown().any(|mentions| mentions.team > 0) {
+        Some(MentionBadge::Team)
+    } else {
+        None
+    }
+}
+
 pub fn team_has_unread(team: &SidebarTeam) -> bool {
     team.channels
         .iter()
-        .any(|channel| channel.unread && !team.hidden_channel_ids.contains(&channel.id))
+        .any(|channel| channel.unread && channel_shown(team, &channel.id))
 }
 
 pub fn team_name_style(team: &SidebarTeam, expanded: bool) -> NameStyle {
@@ -471,38 +543,87 @@ pub fn visible_channel_ids<'a>(input: &ChannelOrderInput<'a>) -> Vec<&'a str> {
             .teams
             .iter()
             .any(|entry| entry.hidden && holds_selection(entry));
-    let teams = input.teams.iter().filter(|entry| !entry.hidden).chain(
-        input
-            .teams
-            .iter()
-            .filter(|entry| entry.hidden && hidden_teams_shown),
-    );
-    for entry in teams {
+    let main_teams = input
+        .teams
+        .iter()
+        .filter(|entry| !entry.hidden || team_hoisted(entry))
+        .map(|entry| (entry, entry.hidden));
+    let hidden_teams = input
+        .teams
+        .iter()
+        .filter(|entry| entry.hidden && hidden_teams_shown)
+        .map(|entry| (entry, false));
+    for (entry, hoisted_only) in main_teams.chain(hidden_teams) {
         if input.collapsed_teams.contains(&entry.team.id) {
             continue;
         }
-        let is_hidden = |channel: &ChannelRecord| entry.hidden_channel_ids.contains(&channel.id);
-        let is_selected =
-            |channel: &ChannelRecord| Some(channel.id.as_str()) == input.selected_channel;
-        let revealed = input.revealed_channel_teams.contains(&entry.team.id);
-        for channel in entry
-            .channels
-            .iter()
-            .filter(|channel| !is_hidden(channel) || is_selected(channel))
-        {
-            push(&channel.id);
-        }
-        if revealed {
-            for channel in entry
-                .channels
-                .iter()
-                .filter(|channel| is_hidden(channel) && !is_selected(channel))
-            {
-                push(&channel.id);
-            }
+        for channel_id in team_channel_ids(entry, hoisted_only, input) {
+            push(channel_id);
         }
     }
     ids
+}
+
+fn team_channel_ids<'a>(
+    entry: &'a SidebarTeam,
+    hoisted_only: bool,
+    input: &ChannelOrderInput<'_>,
+) -> Vec<&'a str> {
+    let is_selected = |channel: &ChannelRecord| Some(channel.id.as_str()) == input.selected_channel;
+    let rows = team_channel_rows(
+        entry,
+        hoisted_only,
+        input.revealed_channel_teams.contains(&entry.team.id),
+        is_selected,
+    );
+    rows.shown
+        .into_iter()
+        .chain(rows.revealed)
+        .map(|channel| channel.id.as_str())
+        .collect()
+}
+
+pub struct TeamChannelRows<'a> {
+    pub shown: Vec<&'a ChannelRecord>,
+    pub hidden_count: usize,
+    pub revealed: Vec<&'a ChannelRecord>,
+}
+
+/// `hoisted_only` is a hidden team pulled into the main list: it shows only its hoisted channels.
+pub fn team_channel_rows<'a>(
+    entry: &'a SidebarTeam,
+    hoisted_only: bool,
+    revealed: bool,
+    is_selected: impl Fn(&ChannelRecord) -> bool,
+) -> TeamChannelRows<'a> {
+    let shown: Vec<&ChannelRecord> = entry
+        .channels
+        .iter()
+        .filter(|channel| {
+            if hoisted_only {
+                channel_hoisted(entry, &channel.id)
+            } else {
+                is_selected(channel) || channel_shown(entry, &channel.id)
+            }
+        })
+        .collect();
+    if hoisted_only {
+        return TeamChannelRows {
+            shown,
+            hidden_count: 0,
+            revealed: Vec::new(),
+        };
+    }
+    let hidden: Vec<&ChannelRecord> = entry
+        .channels
+        .iter()
+        .filter(|channel| !shown.iter().any(|row| row.id == channel.id))
+        .collect();
+    TeamChannelRows {
+        shown,
+        hidden_count: hidden.len(),
+        revealed: if revealed { hidden } else { Vec::new() },
+    }
 }
 
 fn section(
@@ -746,6 +867,7 @@ mod tests {
                 .map(|id| (*id).to_owned())
                 .collect(),
             notifications: HashMap::new(),
+            mentions: Default::default(),
         }
     }
 
@@ -855,6 +977,111 @@ mod tests {
             order(None, true, &["t2"], &["t1"]),
             vec!["e", "a", "c", "b", "f"]
         );
+    }
+
+    fn with_mentions(mut entry: SidebarTeam, mentions: &[(&str, u32, u32, u32)]) -> SidebarTeam {
+        for (channel_id, personal, channel, team) in mentions {
+            entry.mentions.insert(
+                (*channel_id).to_owned(),
+                store::ChannelMentions {
+                    personal: *personal,
+                    channel: *channel,
+                    team: *team,
+                },
+            );
+        }
+        entry
+    }
+
+    #[test]
+    fn channel_badges_prefer_the_count_then_channel_then_team() {
+        let entry = with_mentions(
+            team("t", false, &["a", "b", "c", "d"], &[]),
+            &[("a", 2, 1, 1), ("b", 0, 3, 1), ("c", 0, 0, 1)],
+        );
+        assert_eq!(channel_badge(&entry, "a"), Some(MentionBadge::Count(2)));
+        assert_eq!(channel_badge(&entry, "b"), Some(MentionBadge::Channel));
+        assert_eq!(channel_badge(&entry, "c"), Some(MentionBadge::Team));
+        assert_eq!(channel_badge(&entry, "d"), None);
+    }
+
+    #[test]
+    fn the_collapsed_team_sums_counts_of_all_channels_and_icons_of_shown_ones() {
+        let entry = with_unread(
+            with_mentions(
+                team("t", false, &["a", "b", "c"], &["b", "c"]),
+                &[("a", 1, 0, 0), ("b", 2, 0, 0), ("c", 0, 1, 0)],
+            ),
+            &["a", "b", "c"],
+        );
+        assert_eq!(team_badge(&entry, false), Some(MentionBadge::Count(3)));
+        assert_eq!(team_badge(&entry, true), None);
+        let icons_only = with_unread(
+            with_mentions(
+                team("t", false, &["a", "c"], &["c"]),
+                &[("a", 0, 0, 1), ("c", 0, 1, 0)],
+            ),
+            &["a", "c"],
+        );
+        assert_eq!(team_badge(&icons_only, false), Some(MentionBadge::Team));
+        let read = with_mentions(team("t", false, &["a"], &[]), &[("a", 1, 0, 0)]);
+        assert_eq!(team_badge(&read, false), None);
+    }
+
+    #[test]
+    fn a_hidden_channel_with_a_personal_mention_is_pulled_into_the_list() {
+        let entry = with_unread(
+            with_mentions(
+                team("t", false, &["a", "b", "c"], &["b", "c"]),
+                &[("b", 1, 0, 0), ("c", 0, 1, 0)],
+            ),
+            &["b", "c"],
+        );
+        assert!(channel_shown(&entry, "b"));
+        assert!(!channel_shown(&entry, "c"));
+        assert!(team_has_unread(&entry));
+        let rows = team_channel_rows(&entry, false, false, |_| false);
+        let shown: Vec<&str> = rows
+            .shown
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(shown, ["a", "b"]);
+        assert_eq!(rows.hidden_count, 1);
+        assert!(rows.revealed.is_empty());
+    }
+
+    #[test]
+    fn a_hidden_team_with_a_hoisted_channel_shows_only_that_channel_in_the_main_list() {
+        let teams = [
+            team("t1", false, &["a"], &[]),
+            with_mentions(team("t2", true, &["b", "c"], &["c"]), &[("c", 1, 0, 0)]),
+        ];
+        assert!(team_hoisted(&teams[1]));
+        assert!(!team_hoisted(&teams[0]));
+        let rows = team_channel_rows(&teams[1], true, true, |_| true);
+        let shown: Vec<&str> = rows
+            .shown
+            .iter()
+            .map(|channel| channel.id.as_str())
+            .collect();
+        assert_eq!(shown, ["c"]);
+        assert_eq!(rows.hidden_count, 0);
+        let empty = HashSet::new();
+        let input = ChannelOrderInput {
+            teams: &teams,
+            pinned_ids: &[],
+            collapsed_teams: &empty,
+            revealed_channel_teams: &empty,
+            hidden_teams_open: false,
+            selected_channel: None,
+        };
+        assert_eq!(visible_channel_ids(&input), ["a", "c"]);
+        let open = ChannelOrderInput {
+            hidden_teams_open: true,
+            ..input
+        };
+        assert_eq!(visible_channel_ids(&open), ["a", "c", "b"]);
     }
 
     #[test]
@@ -1036,7 +1263,10 @@ mod tests {
         let group = chat_item(&chats[1], &context, None);
         assert_eq!(group.presence_user, None);
         assert!(matches!(group.avatar, AvatarSpec::Pair(..)));
-        assert_eq!(avatar_for(&meeting_chat("meeting-1"), None), AvatarSpec::Meeting);
+        assert_eq!(
+            avatar_for(&meeting_chat("meeting-1"), None),
+            AvatarSpec::Meeting
+        );
     }
 
     #[test]
@@ -1048,7 +1278,9 @@ mod tests {
         let collapsed = HashSet::new();
         let mut notes = chat(teams_core::NOTES_CHAT_ID, "oneOnOne", false);
         notes.title = "Me Myself (You)".into();
-        notes.members.retain(|member| member.user_id.as_deref() == Some("me"));
+        notes
+            .members
+            .retain(|member| member.user_id.as_deref() == Some("me"));
         let chats = vec![notes];
         let context = input(&chats, &directory, &collapsed);
         let item = chat_item(&chats[0], &context, None);

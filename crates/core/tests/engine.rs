@@ -135,6 +135,8 @@ struct Fake {
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
     search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
     member_requests: Mutex<Vec<String>>,
+    mention_activities: Mutex<Vec<chatsvc::MentionActivity>>,
+    app_channel_horizon_ms: Mutex<i64>,
 }
 
 impl Fake {
@@ -858,6 +860,49 @@ impl Remote for Handle {
     ) -> Result<()> {
         self.record(format!("unpin {chat_id} {message_id} {parent_id:?}"));
         Ok(())
+    }
+
+    async fn channel_pinned_posts(
+        &self,
+        team_thread_id: &str,
+        channel_id: &str,
+    ) -> Result<Vec<chatsvc::PinnedMessage>> {
+        self.record(format!("channel pins {team_thread_id} {channel_id}"));
+        Ok(vec![chatsvc::PinnedMessage {
+            message_id: "30".to_owned(),
+            pinned_at: None,
+            parent_id: None,
+        }])
+    }
+
+    async fn set_post_pinned(
+        &self,
+        team_thread_id: &str,
+        channel_id: &str,
+        post_id: &str,
+        pinned: bool,
+    ) -> Result<()> {
+        self.record(format!(
+            "post pin {team_thread_id} {channel_id} {post_id} {pinned}"
+        ));
+        Ok(())
+    }
+
+    async fn mention_activities(&self) -> Result<Vec<chatsvc::MentionActivity>> {
+        Ok(self.mention_activities.lock().unwrap().clone())
+    }
+
+    async fn app_consumption_horizon(&self) -> Result<chatsvc::AppConsumptionHorizon> {
+        Ok(chatsvc::AppConsumptionHorizon {
+            channel_ms: *self.app_channel_horizon_ms.lock().unwrap(),
+            ..chatsvc::AppConsumptionHorizon::default()
+        })
+    }
+
+    async fn mark_all_channels_read(&self, now_ms: i64) -> Result<chatsvc::AppConsumptionHorizon> {
+        self.record("mark all channels read".to_owned());
+        *self.app_channel_horizon_ms.lock().unwrap() = now_ms;
+        self.app_consumption_horizon().await
     }
 
     async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<chatsvc::ChatApp>> {
@@ -4626,7 +4671,7 @@ async fn save_uses_the_message_id_as_root_in_chats() {
 }
 
 #[tokio::test]
-async fn pinning_announces_and_is_refused_in_channels() {
+async fn pinning_announces_in_chats() {
     let fake = Arc::new(Fake::default());
     let engine = channel_engine(&fake).await;
     *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
@@ -4647,10 +4692,83 @@ async fn pinning_announces_and_is_refused_in_channels() {
         fake.calls().last().unwrap(),
         &format!("unpin {CHAT} 5 Some(\"folder-1\")")
     );
-    assert!(matches!(
-        engine.pin_message(CHANNEL, "5").await,
-        Err(Error::Unsupported(_))
+}
+
+#[tokio::test]
+async fn channel_pins_use_the_post_pin_routes_of_the_team_thread() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.fetch_newer(CHANNEL).await.unwrap();
+    let pins = engine.chat_pins(CHANNEL).await.unwrap();
+    assert_eq!(pins[0].message_id, "30");
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("channel pins {CHANNEL} {CHANNEL}")
+    );
+    let mut events = engine.subscribe();
+    engine.pin_message(CHANNEL, "30").await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("post pin {CHANNEL} {CHANNEL} 30 true")
+    );
+    assert_eq!(
+        events.try_recv().unwrap(),
+        CoreEvent::PinsChanged {
+            conversation_id: CHANNEL.to_owned()
+        }
+    );
+    engine.unpin_message(CHANNEL, "30", None).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("post pin {CHANNEL} {CHANNEL} 30 false")
+    );
+}
+
+#[tokio::test]
+async fn channel_mentions_follow_the_activity_feed_and_mark_all_as_read() {
+    let fake = Arc::new(Fake::default());
+    fake.read_states.lock().unwrap().push((
+        CHANNEL.to_owned(),
+        chatsvc::ReadHorizon {
+            consumed_until_ms: 5,
+            last_message_ms: 9,
+            last_message_from: Some("8:orgid:user-ada".to_owned()),
+            ..chatsvc::ReadHorizon::default()
+        },
     ));
+    let mention = |activity_id: &str, kind: chatsvc::MentionKind| chatsvc::MentionActivity {
+        activity_id: activity_id.to_owned(),
+        kind,
+        source_thread_id: CHANNEL.to_owned(),
+        source_message_id: None,
+        timestamp_ms: 8,
+        is_read: false,
+    };
+    *fake.mention_activities.lock().unwrap() = vec![
+        mention("1", chatsvc::MentionKind::Personal),
+        mention("2", chatsvc::MentionKind::Team),
+    ];
+    let engine = channel_engine(&fake).await;
+    engine.refresh_sidebar().await.unwrap();
+    let mentions = engine.store().sidebar().unwrap().teams[0].channel_mentions(CHANNEL);
+    assert_eq!((mentions.personal, mentions.team), (1, 1));
+
+    engine.mark_all_channels_read().await.unwrap();
+
+    assert_eq!(fake.calls().last().unwrap(), "mark all channels read");
+    assert!(!engine.store().channel(CHANNEL).unwrap().unwrap().unread);
+    assert!(
+        engine.store().sidebar().unwrap().teams[0]
+            .mentions
+            .is_empty()
+    );
+    engine.refresh_sidebar().await.unwrap();
+    assert!(!engine.store().channel(CHANNEL).unwrap().unwrap().unread);
+    assert!(
+        engine.store().sidebar().unwrap().teams[0]
+            .mentions
+            .is_empty()
+    );
 }
 
 #[tokio::test]

@@ -6,8 +6,9 @@ use std::time::Instant;
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use gpui_kit::{App, Entity, Image};
 use store::{
-    ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
-    ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamLayoutRecord, TeamRecord,
+    ChannelLayoutRecord, ChannelMentions, ChannelNotificationLevel, ChannelNotifications,
+    ChannelRecord, ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store,
+    TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
     Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
@@ -133,6 +134,22 @@ const DEMO_TEAMS: [(&str, &str, [&str; 3]); 4] = [
 const DEMO_TEAM_ORDER: [&str; 4] = ["demo-team-2", "demo-team-1", "demo-team-3", "demo-team-4"];
 const DEMO_HIDDEN_TEAM: &str = "demo-team-4";
 const DEMO_HIDDEN_CHANNEL: &str = "demo-channel-3-3";
+const DEMO_CHANNEL_MENTIONS: [(&str, ChannelMentions); 4] = [
+    ("demo-channel-1-2", mentions(2, 0, 0)),
+    ("demo-channel-2-1", mentions(0, 1, 0)),
+    (DEMO_HIDDEN_CHANNEL, mentions(1, 0, 0)),
+    ("demo-channel-4-2", mentions(1, 0, 1)),
+];
+const PINNED_CHANNEL: &str = "demo-channel-1-1";
+const PINNED_POST: &str = "t3";
+
+const fn mentions(personal: u32, channel: u32, team: u32) -> ChannelMentions {
+    ChannelMentions {
+        personal,
+        channel,
+        team,
+    }
+}
 const DEMO_CHANNEL_NOTIFICATIONS: [(&str, ChannelNotificationLevel, bool); 4] = [
     (
         "demo-channel-1-1",
@@ -797,8 +814,21 @@ pub fn seed(store: &Store) {
             });
         }
     }
+    for channel in channels.iter_mut().filter(|channel| {
+        DEMO_CHANNEL_MENTIONS
+            .iter()
+            .any(|(id, _)| *id == channel.id)
+    }) {
+        channel.unread = true;
+    }
     let _ = store.upsert_channels(&channels);
     let _ = store.replace_team_layout(&demo_team_layout(&channels));
+    let _ = store.replace_channel_mentions(
+        &DEMO_CHANNEL_MENTIONS
+            .iter()
+            .map(|(id, mentions)| ((*id).to_owned(), *mentions))
+            .collect::<Vec<_>>(),
+    );
     let _ = store.set_meta("me_user_id", DEMO_USER_ID);
     let _ = store.set_meta("me_display_name", DEMO_USER_NAME);
     let _ = store.upsert_messages(&release_messages());
@@ -975,6 +1005,14 @@ pub fn seed_directory(state: &mut AppState) {
 }
 
 fn seed_message_actions(state: &mut AppState) {
+    state.pins.insert(
+        PINNED_CHANNEL.to_owned(),
+        vec![PinnedMessage {
+            message_id: PINNED_POST.to_owned(),
+            pinned_at: Some(at(0, 9, 45)),
+            parent_id: None,
+        }],
+    );
     state.pins.insert(
         RELEASE_CHAT.to_owned(),
         vec![PinnedMessage {

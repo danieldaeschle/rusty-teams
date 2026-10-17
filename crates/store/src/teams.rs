@@ -78,6 +78,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn mark_all_channels_read(&self) -> Result<()> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("UPDATE channels SET unread = 0 WHERE unread != 0", [])?;
+        transaction.execute("DELETE FROM channel_mentions", [])?;
+        Ok(transaction.commit()?)
+    }
+
     pub fn remove_teams_except(&self, kept_team_ids: &[String]) -> Result<usize> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction()?;

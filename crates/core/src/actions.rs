@@ -391,6 +391,18 @@ impl<R: Remote> SyncEngine<R> {
             )
             .await?;
         self.store.mark_channel_read(channel_id)?;
+        self.store.clear_channel_mentions(channel_id)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn mark_all_channels_read(&self) -> Result<()> {
+        let horizon = self
+            .remote
+            .mark_all_channels_read(Utc::now().timestamp_millis())
+            .await?;
+        *self.app_channel_horizon_ms.lock().unwrap() = horizon.channel_ms;
+        self.store.mark_all_channels_read()?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }

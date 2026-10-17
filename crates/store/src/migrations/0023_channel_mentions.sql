@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS channel_mentions (
+    channel_id TEXT PRIMARY KEY NOT NULL,
+    personal INTEGER NOT NULL DEFAULT 0,
+    channel INTEGER NOT NULL DEFAULT 0,
+    team INTEGER NOT NULL DEFAULT 0
+);

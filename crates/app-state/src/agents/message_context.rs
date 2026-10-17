@@ -218,6 +218,7 @@ mod tests {
             hidden: false,
             hidden_channel_ids: Vec::new(),
             notifications: Default::default(),
+            mentions: Default::default(),
         });
         let context = build(&state, "19:chat", "reply-2").unwrap();
         let texts: Vec<&str> = context
