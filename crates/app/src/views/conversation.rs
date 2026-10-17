@@ -22,7 +22,10 @@ use teams_core::{
 };
 
 mod channel_details;
-pub use channel_details::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
+pub use channel_details::{
+    CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+    CHANNEL_DETAILS_TAG,
+};
 mod deletes;
 mod detached;
 mod feed;
@@ -639,7 +642,7 @@ impl ConversationView {
                     .as_ref()
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
-                    if self.shared_active() || self.recap_active() {
+                    if self.shared_active() || self.recap_active() || self.channel_details_open {
                         self.refresh_shared_items(cx);
                     }
                     self.rebuild(false, cx);
@@ -3047,7 +3050,8 @@ impl ConversationView {
             translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
-            toggle_pinned: pinnable.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            toggle_pinned: pinnable
+                .then(|| action(|this, key, window, cx| this.toggle_pinned(key, window, cx))),
             pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),

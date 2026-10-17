@@ -5,19 +5,26 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageRecord;
+use teams_core::FileKind;
 
-use super::ConversationView;
+use super::{ChannelPane, ConversationView};
 use crate::app_state::Selection;
+use crate::channel_files::{SharedContent, SharedItem};
 use crate::format;
 use crate::rows::reply_excerpt;
 use crate::theme;
+use crate::views::attachments::file_badge;
 use crate::views::avatar::person_avatar;
 
 pub const CHANNEL_DETAILS_TAG: &str = "shell/islands/main/channel-details";
 pub const CHANNEL_DETAILS_BUTTON: &str = "shell/islands/main/channel-details-button";
+pub const CHANNEL_DETAILS_PINNED_TAG: &str = "shell/islands/main/channel-details/pinned";
+pub const CHANNEL_DETAILS_SHARED_TAG: &str = "shell/islands/main/channel-details/shared";
 const OPEN_LABEL: &str = "Open channel details";
 const CLOSE_LABEL: &str = "Close channel details";
 const PINNED_TITLE: &str = "Pinned";
+const SHARED_TITLE: &str = "Shared";
+const SEE_ALL_SHARED_ARIA: &str = "See all shared files";
 const SEE_ALL_LABEL: &str = "See all";
 const SEE_ALL_ARIA: &str = "See all pinned posts";
 const BACK_LABEL: &str = "Back";
@@ -28,6 +35,7 @@ const HEADER_HEIGHT: f32 = 48.;
 const BUTTON_SIZE: f32 = 32.;
 const ITEM_AVATAR: f32 = 24.;
 const COLLAPSED_PIN_COUNT: usize = 3;
+const SHARED_FILE_COUNT: usize = 3;
 
 pub(super) struct PinnedPostItem {
     pub message_id: String,
@@ -67,6 +75,40 @@ pub(super) fn pinned_post_item(message_id: &str, record: Option<&MessageRecord>)
     }
 }
 
+pub(super) struct SharedFileRow {
+    pub message_id: String,
+    pub name: String,
+    pub kind: FileKind,
+    pub byline: String,
+}
+
+pub(super) fn shared_file_rows(items: &[SharedItem]) -> (Vec<SharedFileRow>, bool) {
+    let offset = Local::now().offset().fix();
+    let today = Utc::now().with_timezone(&offset).date_naive();
+    let mut files = items.iter().filter_map(|item| match &item.content {
+        SharedContent::File(card) => Some((item, card)),
+        SharedContent::Link(_) => None,
+    });
+    let rows = files
+        .by_ref()
+        .take(SHARED_FILE_COUNT)
+        .map(|(item, card)| {
+            let date = format::list_time_label(item.created_at, today, offset);
+            SharedFileRow {
+                message_id: item.message_id.clone(),
+                name: card.name.clone(),
+                kind: card.kind,
+                byline: [item.author.as_str(), date.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            }
+        })
+        .collect();
+    (rows, files.next().is_some())
+}
+
 pub(super) fn shown_pin_count(total: usize, expanded: bool) -> usize {
     if expanded {
         total
@@ -101,6 +143,9 @@ impl ConversationView {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.channel_details_open = !this.channel_details_open;
                     this.pinned_posts_expanded = false;
+                    if this.channel_details_open {
+                        this.refresh_shared_items(cx);
+                    }
                     cx.notify();
                 }))
                 .into_any_element(),
@@ -141,21 +186,18 @@ impl ConversationView {
             .pb(px(PANE_PADDING))
             .gap(px(4.));
         if !items.is_empty() {
+            let mut section = v_flex()
+                .w_full()
+                .gap(px(4.))
+                .debug_selector(|| CHANNEL_DETAILS_PINNED_TAG.into());
             if !expanded {
-                body = body.child(
-                    div()
-                        .py(px(8.))
-                        .text_size(px(14.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .child(PINNED_TITLE),
-                );
+                section = section.child(section_title(PINNED_TITLE));
             }
             for item in items.iter().take(shown) {
-                body = body.child(self.pinned_post_row(&channel_id, item, directory, cx));
+                section = section.child(self.pinned_post_row(&channel_id, item, directory, cx));
             }
             if has_more {
-                body = body.child(
+                section = section.child(
                     Button::new("channel-details-see-all-pins")
                         .ghost()
                         .label(SEE_ALL_LABEL)
@@ -166,6 +208,30 @@ impl ConversationView {
                         })),
                 );
             }
+            body = body.child(section);
+        }
+        let (shared_rows, more_shared) = shared_file_rows(&self.shared.items);
+        if !expanded && !shared_rows.is_empty() {
+            let mut section = v_flex()
+                .w_full()
+                .gap(px(4.))
+                .debug_selector(|| CHANNEL_DETAILS_SHARED_TAG.into())
+                .child(section_title(SHARED_TITLE));
+            for row in &shared_rows {
+                section = section.child(self.shared_file_row(&channel_id, row, cx));
+            }
+            if more_shared {
+                section = section.child(
+                    Button::new("channel-details-see-all-shared")
+                        .ghost()
+                        .label(SEE_ALL_LABEL)
+                        .tooltip(SEE_ALL_SHARED_ARIA)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.select_pane(ChannelPane::Shared, cx);
+                        })),
+                );
+            }
+            body = body.child(section);
         }
         let header = if expanded {
             h_flex()
@@ -288,6 +354,65 @@ impl ConversationView {
     }
 }
 
+impl ConversationView {
+    fn shared_file_row(
+        &self,
+        channel_id: &str,
+        row: &SharedFileRow,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let (channel_id, message_id) = (channel_id.to_owned(), row.message_id.clone());
+        h_flex()
+            .id(SharedString::from(format!(
+                "shared-file-{}-{}",
+                row.message_id, row.name
+            )))
+            .w_full()
+            .p(px(8.))
+            .gap(px(10.))
+            .items_start()
+            .rounded(px(8.))
+            .cursor_pointer()
+            .hover(|item| item.bg(theme::row_hover()))
+            .child(file_badge(row.kind, ITEM_AVATAR))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(13.))
+                            .text_color(theme::text())
+                            .child(row.name.clone()),
+                    )
+                    .when(!row.byline.is_empty(), |column| {
+                        column.child(
+                            div()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(theme::text_muted())
+                                .child(row.byline.clone()),
+                        )
+                    }),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.jump_to_message(&channel_id, &message_id, cx);
+            }))
+            .into_any_element()
+    }
+}
+
+fn section_title(text: &'static str) -> Div {
+    div()
+        .py(px(8.))
+        .text_size(px(14.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text())
+        .child(text)
+}
+
 fn header_title(text: String) -> Div {
     div()
         .flex_1()
@@ -304,7 +429,10 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use store::MessageRecord;
 
-    use super::{FALLBACK_PREVIEW, pinned_post_item, shown_pin_count};
+    use teams_core::{FileCard, FileKind};
+
+    use super::{FALLBACK_PREVIEW, pinned_post_item, shared_file_rows, shown_pin_count};
+    use crate::channel_files::{SharedContent, SharedItem};
 
     fn record(subject: Option<&str>) -> MessageRecord {
         MessageRecord {
@@ -346,5 +474,54 @@ mod tests {
         assert_eq!(shown_pin_count(5, false), 3);
         assert_eq!(shown_pin_count(2, false), 2);
         assert_eq!(shown_pin_count(5, true), 5);
+    }
+
+    fn shared(content: SharedContent, message_id: &str) -> SharedItem {
+        SharedItem {
+            content,
+            author: "Ada Lovelace".into(),
+            post_label: String::new(),
+            message_id: message_id.into(),
+            created_at: Utc.with_ymd_and_hms(2024, 3, 4, 9, 30, 0).unwrap(),
+        }
+    }
+
+    fn file(name: &str) -> SharedContent {
+        SharedContent::File(FileCard {
+            name: name.into(),
+            kind: FileKind::from_name(name),
+            content_type: None,
+            size: None,
+            open_url: format!("https://example.invalid/{name}"),
+        })
+    }
+
+    #[test]
+    fn shared_section_lists_the_newest_files_and_skips_links() {
+        let items = vec![
+            shared(SharedContent::Link("https://example.invalid".into()), "1"),
+            shared(file("plan.docx"), "2"),
+            shared(file("budget.xlsx"), "3"),
+        ];
+        let (rows, more) = shared_file_rows(&items);
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["plan.docx", "budget.xlsx"]);
+        assert!(!more);
+        assert_eq!(rows[0].message_id, "2");
+        assert!(
+            rows[0].byline.starts_with("Ada Lovelace, "),
+            "{}",
+            rows[0].byline
+        );
+    }
+
+    #[test]
+    fn shared_section_offers_see_all_after_three_files() {
+        let items: Vec<SharedItem> = (0..4)
+            .map(|index| shared(file(&format!("file-{index}.pdf")), &index.to_string()))
+            .collect();
+        let (rows, more) = shared_file_rows(&items);
+        assert_eq!(rows.len(), 3);
+        assert!(more);
     }
 }

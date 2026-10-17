@@ -6,6 +6,7 @@ use store::MessageRecord;
 use teams_core::{PinnedMessage, SavedMessage};
 
 use crate::app_state::{AppEvent, AppState, Selection, selection_for};
+use crate::channel_menu::{post_pin_failure, post_pin_notice};
 use crate::format;
 use crate::image_view_gallery::ViewerRequest;
 use crate::notice::short_error;
@@ -229,6 +230,7 @@ impl AppState {
         let Some(engine_or_demo) = self.chat_action_engine(cx) else {
             return;
         };
+        let channel = self.channel_name(chat_id).is_some();
         let previous = self.pinned_messages(chat_id).to_vec();
         let parent_id = previous
             .iter()
@@ -251,6 +253,9 @@ impl AppState {
         }
         self.store_pins(chat_id, updated, cx);
         let Some(engine) = engine_or_demo else {
+            if channel {
+                self.raise_notice(post_pin_notice(pinned).to_owned(), None, cx);
+            }
             return;
         };
         let (owned_chat, owned_message, revert_chat) = (
@@ -258,21 +263,35 @@ impl AppState {
             message_id.to_owned(),
             chat_id.to_owned(),
         );
-        self.run_chat_action(
-            if pinned { "Pin" } else { "Unpin" },
-            async move {
-                if pinned {
-                    engine.pin_message(&owned_chat, &owned_message).await
-                } else {
-                    engine
-                        .unpin_message(&owned_chat, &owned_message, parent_id.as_deref())
-                        .await
-                }
-            },
-            move |state, cx| state.store_pins(&revert_chat, previous, cx),
-            |_, _| {},
-            cx,
-        );
+        let call = async move {
+            if pinned {
+                engine.pin_message(&owned_chat, &owned_message).await
+            } else {
+                engine
+                    .unpin_message(&owned_chat, &owned_message, parent_id.as_deref())
+                    .await
+            }
+        };
+        let revert = move |state: &mut Self, cx: &mut Context<Self>| {
+            state.store_pins(&revert_chat, previous, cx)
+        };
+        if channel {
+            self.run_channel_action(
+                post_pin_failure(pinned),
+                call,
+                revert,
+                Some(post_pin_notice(pinned)),
+                cx,
+            );
+        } else {
+            self.run_chat_action(
+                if pinned { "Pin" } else { "Unpin" },
+                call,
+                revert,
+                |_, _| {},
+                cx,
+            );
+        }
     }
 
     pub fn copy_message_link(

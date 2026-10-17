@@ -180,7 +180,10 @@ mod frames {
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
     };
-    use crate::views::conversation::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
+    use crate::views::conversation::{
+        CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+        CHANNEL_DETAILS_TAG,
+    };
     use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::pin_banner::PIN_BANNER_TAG;
@@ -1507,6 +1510,45 @@ mod frames {
             (f32::from(pane.top() - divider.bottom())).abs() < INSET_TOLERANCE,
             "pane {pane:?} must start under the header divider {divider:?}"
         );
+    }
+
+    #[gpui_kit::test]
+    fn the_channel_details_sections_follow_teams_order_with_equal_insets(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(CHANNEL_DETAILS_BUTTON));
+        let button = visual
+            .debug_bounds(CHANNEL_DETAILS_BUTTON)
+            .expect("channel details button");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some(CHANNEL_DETAILS_SHARED_TAG));
+        let pane = visual
+            .debug_bounds(CHANNEL_DETAILS_TAG)
+            .expect("details pane");
+        let pinned = visual
+            .debug_bounds(CHANNEL_DETAILS_PINNED_TAG)
+            .expect("pinned section");
+        let shared = visual
+            .debug_bounds(CHANNEL_DETAILS_SHARED_TAG)
+            .expect("shared section");
+        assert!(
+            pinned.bottom() <= shared.top(),
+            "pinned {pinned:?} must come before shared {shared:?}"
+        );
+        for (name, section) in [("pinned", pinned), ("shared", shared)] {
+            let left = f32::from(section.left() - pane.left());
+            let right = f32::from(pane.right() - section.right());
+            assert!(
+                (left - right).abs() < INSET_TOLERANCE && left > 0.,
+                "{name} section insets left {left} right {right} must match"
+            );
+        }
     }
 
     fn composer_button_insets(visual: &mut VisualTestContext) -> [f32; 6] {
