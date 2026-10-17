@@ -7,9 +7,10 @@ use crate::settings_section::SettingsSection;
 use crate::theme;
 use crate::views::widgets::icon;
 
-pub const TEAMS_GROUP: [SettingsSection; 5] = [
+pub const TEAMS_GROUP: [SettingsSection; 6] = [
     SettingsSection::General,
     SettingsSection::Notifications,
+    SettingsSection::Appearance,
     SettingsSection::Chats,
     SettingsSection::Calls,
     SettingsSection::Devices,
@@ -25,6 +26,7 @@ pub fn label(section: SettingsSection) -> &'static str {
     match section {
         SettingsSection::General => "General",
         SettingsSection::Notifications => "Notifications and activity",
+        SettingsSection::Appearance => "Appearance and accessibility",
         SettingsSection::Chats => "Chats and channels",
         SettingsSection::Calls => "Calls",
         SettingsSection::Devices => "Devices",
@@ -38,6 +40,7 @@ fn icon_name(section: SettingsSection) -> IconName {
     match section {
         SettingsSection::General => IconName::SlidersHorizontal,
         SettingsSection::Notifications => IconName::Bell,
+        SettingsSection::Appearance => IconName::Palette,
         SettingsSection::Chats => IconName::MessageSquare,
         SettingsSection::Calls => IconName::Phone,
         SettingsSection::Devices => IconName::Headphones,
@@ -51,6 +54,7 @@ fn element_id(section: SettingsSection) -> &'static str {
     match section {
         SettingsSection::General => "settings-nav-general",
         SettingsSection::Notifications => "settings-nav-notifications",
+        SettingsSection::Appearance => "settings-nav-appearance",
         SettingsSection::Chats => "settings-nav-chats",
         SettingsSection::Calls => "settings-nav-calls",
         SettingsSection::Devices => "settings-nav-devices",
@@ -104,28 +108,36 @@ pub fn render_nav(
                 .text_color(theme::text())
                 .child("Settings"),
         )
-        .child(group(TEAMS_GROUP.into_iter().map(item).collect()))
         .child(
-            div()
-                .debug_selector(|| "settings/nav/divider".into())
+            v_flex()
+                .id("settings-nav-groups")
                 .w_full()
-                .h(px(1.))
-                .flex_none()
-                .mt(px(10.))
-                .bg(theme::border_strong()),
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .gap(px(ITEM_GAP))
+                .child(group(TEAMS_GROUP.into_iter().map(item).collect()))
+                .child(
+                    div()
+                        .debug_selector(|| "settings/nav/divider".into())
+                        .w_full()
+                        .h(px(1.))
+                        .flex_none()
+                        .mt(px(10.))
+                        .bg(theme::border_strong()),
+                )
+                .child(
+                    div()
+                        .px(px(2. * NAV_PADDING_X))
+                        .pt(px(12.))
+                        .pb(px(6.))
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_muted())
+                        .child("RUSTY TEAMS"),
+                )
+                .child(group(rusty)),
         )
-        .child(
-            div()
-                .px(px(2. * NAV_PADDING_X))
-                .pt(px(12.))
-                .pb(px(6.))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text_muted())
-                .child("RUSTY TEAMS"),
-        )
-        .child(group(rusty))
-        .child(div().flex_1().min_h(px(0.)))
         .child(
             div()
                 .w_full()

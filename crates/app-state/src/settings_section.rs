@@ -6,6 +6,7 @@ use crate::app_state::{AppEvent, AppState};
 pub enum SettingsSection {
     General,
     Notifications,
+    Appearance,
     Chats,
     Calls,
     Devices,

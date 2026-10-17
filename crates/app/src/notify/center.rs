@@ -24,9 +24,11 @@ use super::stack::{
 use super::taskbar::taskbar_badge_count;
 use super::text::describe;
 use super::toast::{PillView, ToastView};
+use crate::active_appearance::{self, ActiveAppearance};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
+use crate::appearance::AppIcon;
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
@@ -88,10 +90,12 @@ pub struct NotificationCenter {
     hover_hold: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
+    app_icon: AppIcon,
     shown_badge: Option<Badge>,
     animations: bool,
     _subscription: Subscription,
     _activity_observation: Subscription,
+    _appearance_observation: Subscription,
     _agent_subscription: Option<Subscription>,
 }
 
@@ -103,11 +107,20 @@ impl NotificationCenter {
         cx: &mut Context<Self>,
     ) -> Self {
         let settings = settings::load(&app.read(cx).store);
+        let app_icon = active_appearance::current(cx).app_icon;
         let tray = if app.read(cx).mode.demo {
             None
         } else {
-            Tray::new(settings.sounds.notification_sound, settings.do_not_disturb)
+            Tray::new(
+                settings.sounds.notification_sound,
+                settings.do_not_disturb,
+                app_icon.png(),
+            )
         };
+        platform::set_window_icon(window, app_icon.png());
+        let appearance_observation = cx.observe_global::<ActiveAppearance>(|this, cx| {
+            this.apply_app_icon(active_appearance::current(cx).app_icon, cx)
+        });
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
         });
@@ -142,12 +155,14 @@ impl NotificationCenter {
             hover_hold: false,
             unread_mentions: HashSet::new(),
             tray,
+            app_icon,
             shown_badge: None,
             animations: platform::animations_enabled(),
             app,
             activity,
             _subscription: subscription,
             _activity_observation: activity_observation,
+            _appearance_observation: appearance_observation,
             _agent_subscription: agent_subscription,
         };
         cx.spawn(async move |this, cx| {
@@ -901,6 +916,20 @@ impl NotificationCenter {
         self.main_window
             .update(cx, |_, window, _| window.activate_window())
             .ok();
+    }
+
+    fn apply_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
+        if icon == self.app_icon {
+            return;
+        }
+        self.app_icon = icon;
+        let mention = !self.unread_mentions.is_empty();
+        if let Some(tray) = &mut self.tray {
+            tray.set_app_icon(icon.png(), mention);
+        }
+        let _ = self.main_window.update(cx, |_, window, _| {
+            platform::set_window_icon(window, icon.png())
+        });
     }
 
     fn sync_tray(&self) {

@@ -4,6 +4,13 @@ use gpui_kit::component::elevation::{self, Elevation, ElevationTokens};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
+mod schemes;
+
+pub use schemes::{
+    ColorScheme, SCHEMES, active_scheme as scheme, default_scheme, scheme_by_id, set_active_scheme,
+    set_thread_scheme,
+};
+
 const FONT_FAMILY: &str = "Google Sans Flex";
 const MONO_FAMILIES: [&str; 2] = ["Cascadia Code", "Consolas"];
 const BASE_FONT_SIZE: f32 = 14.;
@@ -14,36 +21,7 @@ const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
 
-pub const BACKGROUND: u32 = 0x0f0f10;
-const SURFACE: u32 = 0x161617;
-const SURFACE_RAISED: u32 = 0x232325;
-const ROW_HOVER: u32 = 0x1c1c1e;
-const POPUP: u32 = 0x2c2c2f;
-const POPUP_HOVER: u32 = 0x38383c;
-const POPUP_NESTED: u32 = 0x3a3a3e;
-const POPUP_NESTED_HOVER: u32 = 0x47474c;
-const REPLY_SURFACE: u32 = 0x19191b;
-const BORDER: u32 = 0x262628;
-const BORDER_STRONG: u32 = 0x3f3f42;
-const FOREGROUND: u32 = 0xf4f4f5;
-const TEXT_STRONG: u32 = 0xe4e4e7;
-const TEXT_SOFT: u32 = 0xd4d4d8;
-const TEXT_MUTED: u32 = 0xa1a1a6;
-const TEXT_FAINT: u32 = 0x8e8e93;
-const ACCENT: u32 = 0xce6a3b;
-const ACCENT_TEXT: u32 = 0xe08a5c;
-const ACCENT_SOFT: u32 = 0xf5c4a5;
-const ACCENT_STRONG: u32 = 0xa84f27;
-const BUBBLE_OWN: u32 = 0x4f2a1b;
-const BUBBLE_OTHER: u32 = 0x232325;
-const REACTION_ON_OWN: u32 = 0x6b3a26;
 const WHITE: u32 = 0xffffff;
-const MENTION_BACKGROUND: u32 = 0x3a2a23;
-const MENTION_BACKGROUND_OWN: u32 = 0x3b1d11;
-const OWN_META: u32 = 0xc9a28c;
-const OWN_READ: u32 = 0xf5c4a5;
-const DROP_BACKGROUND: u32 = 0xce6a3b14;
-const SELECTION: u32 = 0xce6a3b66;
 const CODE_SURFACE: u32 = 0x0000003d;
 const CODE_HEADER_BORDER: u32 = 0xffffff0f;
 const INLINE_CODE_FILL: u32 = 0xffffff14;
@@ -51,21 +29,7 @@ const INLINE_CODE_FILL_OWN: u32 = 0x0000003d;
 const QUOTE_FILL: u32 = 0x00000052;
 const INLINE_CODE_BORDER: u32 = 0xffffff1a;
 const TABLE_HEADER: u32 = 0xffffff0d;
-const RULE_OWN: u32 = 0x6a3a25;
-const BADGE_MUTED: u32 = 0x3f3f42;
-const TOAST_MENTION: u32 = 0x2e1d15;
-const GREEN: u32 = 0x22c55e;
-const RED: u32 = 0xef4444;
-const CLOSE_BUTTON_HOVER: u32 = 0xc42b1c;
-const CLOSE_BUTTON_PRESSED: u32 = 0xb5271a;
 const CLOSE_BUTTON_ICON: u32 = 0xffffff;
-const RED_SOFT: u32 = 0xf87171;
-const RED_TINT: u32 = 0xfca5a5;
-const AMBER: u32 = 0xfbbf24;
-const OUT_OF_OFFICE: u32 = 0xc239b3;
-const MEETING_AVATAR: u32 = 0x4f52b2;
-const BOT_AVATAR: u32 = 0x3a96dd;
-const AVATAR_PALETTE: [u32; 6] = [0x9a4a22, 0x44606e, 0x8a3434, 0x4f6a3c, 0x6a4f7a, 0x2f6b63];
 
 pub fn color(hex: u32) -> Hsla {
     rgb(hex).into()
@@ -98,65 +62,65 @@ pub fn apply(cx: &mut App) {
         }
         theme.radius_lg = px(10.);
         let colors = &mut theme.colors;
-        colors.background = color(BACKGROUND);
-        colors.foreground = color(FOREGROUND);
-        colors.border = color(BORDER);
-        colors.muted = color(BORDER);
-        colors.muted_foreground = color(TEXT_MUTED);
-        colors.sidebar = color(SURFACE);
-        colors.sidebar_foreground = color(FOREGROUND);
-        colors.sidebar_border = color(BORDER);
-        colors.sidebar_accent = color(POPUP_HOVER);
-        colors.sidebar_accent_foreground = color(FOREGROUND);
-        colors.sidebar_primary = color(ACCENT);
-        colors.popover = color(POPUP);
-        colors.popover_foreground = color(FOREGROUND);
-        colors.accent = color(SURFACE_RAISED);
-        colors.accent_foreground = color(FOREGROUND);
-        colors.secondary = color(SURFACE_RAISED);
-        colors.secondary_hover = color(BORDER_STRONG);
-        colors.secondary_active = color(BORDER_STRONG);
-        colors.secondary_foreground = color(FOREGROUND);
-        colors.primary = color(ACCENT);
-        colors.primary_hover = color(ACCENT_TEXT);
-        colors.primary_active = color(ACCENT_STRONG);
-        colors.primary_foreground = color(BACKGROUND);
-        colors.link = color(ACCENT_TEXT);
-        colors.link_hover = color(ACCENT_SOFT);
-        colors.link_active = color(ACCENT_STRONG);
-        colors.ring = color(ACCENT);
-        colors.caret = color(ACCENT);
-        colors.input = color(BORDER_STRONG);
-        colors.selection = color_with_alpha(SELECTION);
-        colors.title_bar = color(BACKGROUND);
-        colors.title_bar_border = color(BORDER);
-        colors.status_bar = color(BACKGROUND);
-        colors.status_bar_border = color(BORDER);
-        colors.success = color(GREEN);
-        colors.warning = color(AMBER);
-        colors.danger = color(CLOSE_BUTTON_HOVER);
-        colors.danger_active = color(CLOSE_BUTTON_PRESSED);
+        colors.background = color(scheme().background);
+        colors.foreground = color(scheme().foreground);
+        colors.border = color(scheme().border);
+        colors.muted = color(scheme().border);
+        colors.muted_foreground = color(scheme().text_muted);
+        colors.sidebar = color(scheme().surface);
+        colors.sidebar_foreground = color(scheme().foreground);
+        colors.sidebar_border = color(scheme().border);
+        colors.sidebar_accent = color(scheme().popup_hover);
+        colors.sidebar_accent_foreground = color(scheme().foreground);
+        colors.sidebar_primary = color(scheme().accent);
+        colors.popover = color(scheme().popup);
+        colors.popover_foreground = color(scheme().foreground);
+        colors.accent = color(scheme().surface_raised);
+        colors.accent_foreground = color(scheme().foreground);
+        colors.secondary = color(scheme().surface_raised);
+        colors.secondary_hover = color(scheme().border_strong);
+        colors.secondary_active = color(scheme().border_strong);
+        colors.secondary_foreground = color(scheme().foreground);
+        colors.primary = color(scheme().accent);
+        colors.primary_hover = color(scheme().accent_text);
+        colors.primary_active = color(scheme().accent_strong);
+        colors.primary_foreground = color(scheme().on_accent);
+        colors.link = color(scheme().accent_text);
+        colors.link_hover = color(scheme().accent_soft);
+        colors.link_active = color(scheme().accent_strong);
+        colors.ring = color(scheme().accent);
+        colors.caret = color(scheme().accent);
+        colors.input = color(scheme().border_strong);
+        colors.selection = color_with_alpha(scheme().selection);
+        colors.title_bar = color(scheme().background);
+        colors.title_bar_border = color(scheme().border);
+        colors.status_bar = color(scheme().background);
+        colors.status_bar_border = color(scheme().border);
+        colors.success = color(scheme().green);
+        colors.warning = color(scheme().amber);
+        colors.danger = color(scheme().close_button_hover);
+        colors.danger_active = color(scheme().close_button_pressed);
         colors.danger_foreground = color(CLOSE_BUTTON_ICON);
-        colors.drop_target = color_with_alpha(DROP_BACKGROUND);
-        colors.window_border = color(BORDER);
-        colors.scrollbar_thumb = color(BORDER_STRONG);
-        colors.scrollbar_thumb_hover = color(TEXT_FAINT);
-        colors.list = color(BACKGROUND);
-        colors.list_hover = color(ROW_HOVER);
-        colors.list_active = color(SURFACE_RAISED);
+        colors.drop_target = color_with_alpha(scheme().drop_background);
+        colors.window_border = color(scheme().border);
+        colors.scrollbar_thumb = color(scheme().border_strong);
+        colors.scrollbar_thumb_hover = color(scheme().text_faint);
+        colors.list = color(scheme().background);
+        colors.list_hover = color(scheme().row_hover);
+        colors.list_active = color(scheme().surface_raised);
     });
     cx.set_global(elevation_tokens());
 }
 
 fn elevation_tokens() -> ElevationTokens {
     let flyout = Elevation {
-        fill: color(POPUP),
-        hover: color(POPUP_HOVER),
+        fill: color(scheme().popup),
+        hover: color(scheme().popup_hover),
         shadow: elevation::shadow16(),
     };
     let nested_flyout = Elevation {
-        fill: color(POPUP_NESTED),
-        hover: color(POPUP_NESTED_HOVER),
+        fill: color(scheme().popup_nested),
+        hover: color(scheme().popup_nested_hover),
         shadow: elevation::shadow16(),
     };
     ElevationTokens {
@@ -185,7 +149,7 @@ pub fn toast_shadow() -> Vec<BoxShadow> {
 }
 
 pub fn popup_nested() -> Hsla {
-    color(POPUP_NESTED)
+    color(scheme().popup_nested)
 }
 
 pub trait ElevatedSurface: Styled + Sized {
@@ -213,91 +177,95 @@ pub fn font_family() -> SharedString {
 }
 
 pub fn background() -> Hsla {
-    color(BACKGROUND)
+    color(scheme().background)
+}
+
+pub fn background_hex() -> u32 {
+    scheme().background
 }
 
 pub fn toast_mention_fill() -> Hsla {
-    color(TOAST_MENTION)
+    color(scheme().toast_mention)
 }
 
 pub fn surface() -> Hsla {
-    color(SURFACE)
+    color(scheme().surface)
 }
 
 pub fn surface_raised() -> Hsla {
-    color(SURFACE_RAISED)
+    color(scheme().surface_raised)
 }
 
 pub fn row_hover() -> Hsla {
-    color(ROW_HOVER)
+    color(scheme().row_hover)
 }
 
 pub fn popup() -> Hsla {
-    color(POPUP)
+    color(scheme().popup)
 }
 
 pub fn popup_hover() -> Hsla {
-    color(POPUP_HOVER)
+    color(scheme().popup_hover)
 }
 
 pub fn reply_surface() -> Hsla {
-    color(REPLY_SURFACE)
+    color(scheme().reply_surface)
 }
 
 pub fn border() -> Hsla {
-    color(BORDER)
+    color(scheme().border)
 }
 
 pub fn border_strong() -> Hsla {
-    color(BORDER_STRONG)
+    color(scheme().border_strong)
 }
 
 pub fn text() -> Hsla {
-    color(FOREGROUND)
+    color(scheme().foreground)
 }
 
 pub fn text_strong() -> Hsla {
-    color(TEXT_STRONG)
+    color(scheme().text_strong)
 }
 
 pub fn text_soft() -> Hsla {
-    color(TEXT_SOFT)
+    color(scheme().text_soft)
 }
 
 pub fn text_muted() -> Hsla {
-    color(TEXT_MUTED)
+    color(scheme().text_muted)
 }
 
 pub fn text_faint() -> Hsla {
-    color(TEXT_FAINT)
+    color(scheme().text_faint)
 }
 
 pub fn accent() -> Hsla {
-    color(ACCENT)
+    color(scheme().accent)
 }
 
 pub fn accent_text() -> Hsla {
-    color(ACCENT_TEXT)
+    color(scheme().accent_text)
 }
 
 pub fn accent_soft() -> Hsla {
-    color(ACCENT_SOFT)
+    color(scheme().accent_soft)
 }
 
 pub fn on_accent() -> Hsla {
-    color(BACKGROUND)
+    color(scheme().on_accent)
 }
 
 pub fn bubble_own() -> Hsla {
-    color(BUBBLE_OWN)
+    color(scheme().bubble_own)
 }
 
 pub fn bubble_other() -> Hsla {
-    color(BUBBLE_OTHER)
+    color(scheme().bubble_other)
 }
 
 pub fn reaction_on_own() -> Hsla {
-    color(REACTION_ON_OWN)
+    color(scheme().reaction_on_own)
 }
 
 pub fn white() -> Hsla {
@@ -306,26 +274,26 @@ pub fn white() -> Hsla {
 
 pub fn mention_background(own: bool) -> Hsla {
     color(if own {
-        MENTION_BACKGROUND_OWN
+        scheme().mention_background_own
     } else {
-        MENTION_BACKGROUND
+        scheme().mention_background
     })
 }
 
 pub fn own_meta() -> Hsla {
-    color(OWN_META)
+    color(scheme().own_meta)
 }
 
 pub fn own_read() -> Hsla {
-    color(OWN_READ)
+    color(scheme().own_read)
 }
 
 pub fn mention_text() -> Hsla {
-    color(ACCENT_SOFT)
+    color(scheme().accent_soft)
 }
 
 pub fn drop_background() -> Hsla {
-    color_with_alpha(DROP_BACKGROUND)
+    color_with_alpha(scheme().drop_background)
 }
 
 pub fn code_surface() -> Hsla {
@@ -358,59 +326,62 @@ pub fn table_header() -> Hsla {
 
 pub fn rule(own: bool) -> Hsla {
     if own {
-        color(RULE_OWN)
+        color(scheme().rule_own)
     } else {
         border_strong()
     }
 }
 
 pub fn badge_muted() -> Hsla {
-    color(BADGE_MUTED)
+    color(scheme().badge_muted)
 }
 
 pub fn green() -> Hsla {
-    color(GREEN)
+    color(scheme().green)
 }
 
 pub fn red() -> Hsla {
-    color(RED)
+    color(scheme().red)
 }
 
 pub fn red_soft() -> Hsla {
-    color(RED_SOFT)
+    color(scheme().red_soft)
 }
 
 pub fn red_tint() -> Hsla {
-    color(RED_TINT)
+    color(scheme().red_tint)
 }
 
 pub fn amber() -> Hsla {
-    color(AMBER)
+    color(scheme().amber)
 }
 
 pub fn out_of_office() -> Hsla {
-    color(OUT_OF_OFFICE)
+    color(scheme().out_of_office)
 }
 
 pub fn meeting_avatar() -> Hsla {
-    color(MEETING_AVATAR)
+    color(scheme().meeting_avatar)
 }
 
 pub fn bot_avatar() -> Hsla {
-    color(BOT_AVATAR)
+    color(scheme().bot_avatar)
 }
 
 pub fn avatar_color(index: usize) -> Hsla {
-    color(AVATAR_PALETTE[index % AVATAR_PALETTE.len()])
+    let palette = scheme().avatar_palette;
+    color(palette[index % palette.len()])
 }
 
 pub fn avatar_palette_len() -> usize {
-    AVATAR_PALETTE.len()
+    scheme().avatar_palette.len()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{POPUP, POPUP_HOVER, POPUP_NESTED, avatar_color, avatar_palette_len, color, elevation_tokens};
+    use super::{
+        SCHEMES, avatar_color, avatar_palette_len, color, elevation_tokens, set_thread_scheme,
+    };
 
     #[test]
     fn avatar_colors_wrap_around_the_palette() {
@@ -420,14 +391,18 @@ mod tests {
 
     #[test]
     fn flyout_over_a_dialog_takes_a_lighter_fill_than_the_dialog() {
-        let tokens = elevation_tokens();
-        assert_eq!(tokens.dialog.fill, color(POPUP));
-        assert_eq!(tokens.flyout_at(0).fill, color(POPUP));
-        let nested = tokens.flyout_at(1);
-        assert_eq!(nested.fill, color(POPUP_NESTED));
-        assert!(nested.fill.l > tokens.dialog.fill.l);
-        assert!(nested.hover.l > nested.fill.l);
-        assert_ne!(nested.fill, color(POPUP_HOVER));
+        for scheme in SCHEMES {
+            set_thread_scheme(Some(scheme.id));
+            let tokens = elevation_tokens();
+            assert_eq!(tokens.dialog.fill, color(scheme.popup));
+            assert_eq!(tokens.flyout_at(0).fill, color(scheme.popup));
+            let nested = tokens.flyout_at(1);
+            assert_eq!(nested.fill, color(scheme.popup_nested));
+            assert!(nested.fill.l > tokens.dialog.fill.l);
+            assert!(nested.hover.l > nested.fill.l);
+            assert_ne!(nested.fill, color(scheme.popup_hover));
+        }
+        set_thread_scheme(None);
     }
 
     #[test]

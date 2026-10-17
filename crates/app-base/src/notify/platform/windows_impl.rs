@@ -9,7 +9,7 @@ use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_CLOAKED, DWMWA_COLOR_NONE, DWMWA_EXTENDED_FRAME_BOUNDS,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmGetWindowAttribute,
@@ -29,13 +29,13 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO,
     FlashWindowEx, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IsIconic, IsWindowVisible,
-    LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetLayeredWindowAttributes,
-    SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW,
-    WDA_EXCLUDEFROMCAPTURE, WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
-    WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, ICONINFO, IsIconic,
+    IsWindowVisible, LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
+    SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, SystemParametersInfoW, WDA_EXCLUDEFROMCAPTURE, WM_SETICON, WS_CAPTION,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -44,8 +44,9 @@ use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
-const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../../app/assets/icon/teams-fast-256.png");
 const TRAY_ICON_SIZE: u32 = 32;
+const WINDOW_ICON_SIZE: f32 = 32.;
+const WINDOW_SMALL_ICON_SIZE: f32 = 16.;
 const TRAY_DOT_RADIUS: f32 = 6.;
 const BASE_DPI: f32 = 96.;
 const RING_POLL: Duration = Duration::from_millis(20);
@@ -490,16 +491,19 @@ pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
 }
 
 unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
-    let pixels = render_badge(badge);
+    unsafe { icon_from_bgra(&render_badge(badge), BADGE_SIZE) }
+}
+
+unsafe fn icon_from_bgra(pixels: &[u8], size: u32) -> Option<HICON> {
     unsafe {
         let color = CreateBitmap(
-            BADGE_SIZE as i32,
-            BADGE_SIZE as i32,
+            size as i32,
+            size as i32,
             1,
             32,
             Some(pixels.as_ptr() as *const c_void),
         );
-        let mask = CreateBitmap(BADGE_SIZE as i32, BADGE_SIZE as i32, 1, 1, None);
+        let mask = CreateBitmap(size as i32, size as i32, 1, 1, None);
         let info = ICONINFO {
             fIcon: BOOL(1),
             xHotspot: 0,
@@ -511,6 +515,44 @@ unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
         let _ = DeleteObject(HGDIOBJ(color.0));
         let _ = DeleteObject(HGDIOBJ(mask.0));
         icon
+    }
+}
+
+pub fn set_window_icon(window: &Window, png: &[u8]) {
+    let Some(handle) = native_handle(window) else {
+        return;
+    };
+    let Ok(decoded) = image::load_from_memory(png) else {
+        return;
+    };
+    let dpi = unsafe { GetDpiForWindow(hwnd(handle)) };
+    let scale = if dpi == 0 { 1. } else { dpi as f32 / BASE_DPI };
+    for (kind, base_size) in [
+        (ICON_BIG, WINDOW_ICON_SIZE),
+        (ICON_SMALL, WINDOW_SMALL_ICON_SIZE),
+    ] {
+        let size = (base_size * scale).round() as u32;
+        let mut pixels = decoded
+            .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
+            .to_rgba8()
+            .into_raw();
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        unsafe {
+            let Some(icon) = icon_from_bgra(&pixels, size) else {
+                continue;
+            };
+            let previous = SendMessageW(
+                hwnd(handle),
+                WM_SETICON,
+                Some(WPARAM(kind as usize)),
+                Some(LPARAM(icon.0 as isize)),
+            );
+            if previous.0 != 0 {
+                let _ = DestroyIcon(HICON(previous.0 as *mut c_void));
+            }
+        }
     }
 }
 
@@ -577,8 +619,8 @@ pub struct Tray {
 }
 
 impl Tray {
-    pub fn new(sound_on: bool, do_not_disturb: bool) -> Option<Self> {
-        let (plain, with_dot) = tray_icons()?;
+    pub fn new(sound_on: bool, do_not_disturb: bool, icon_png: &[u8]) -> Option<Self> {
+        let (plain, with_dot) = tray_icons(icon_png)?;
         let open = MenuItem::with_id(ID_OPEN, "Open", true, None);
         let sound = CheckMenuItem::with_id(ID_SOUND, "Mute sound", true, !sound_on, None);
         let dnd = CheckMenuItem::with_id(
@@ -643,6 +685,16 @@ impl Tray {
         commands
     }
 
+    pub fn set_app_icon(&mut self, icon_png: &[u8], mention: bool) {
+        let Some((plain, with_dot)) = tray_icons(icon_png) else {
+            return;
+        };
+        self.plain = plain;
+        self.with_dot = with_dot;
+        let icon = if mention { &self.with_dot } else { &self.plain };
+        let _ = self.icon.set_icon(Some(icon.clone()));
+    }
+
     pub fn sync(&self, sound_on: bool, do_not_disturb: bool, mention: bool) {
         self.sound.set_checked(!sound_on);
         self.do_not_disturb.set_checked(do_not_disturb);
@@ -651,8 +703,8 @@ impl Tray {
     }
 }
 
-fn tray_icons() -> Option<(Icon, Icon)> {
-    let decoded = image::load_from_memory(TRAY_ICON_PNG).ok()?;
+fn tray_icons(icon_png: &[u8]) -> Option<(Icon, Icon)> {
+    let decoded = image::load_from_memory(icon_png).ok()?;
     let resized = decoded
         .resize_exact(
             TRAY_ICON_SIZE,

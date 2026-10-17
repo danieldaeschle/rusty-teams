@@ -42,6 +42,14 @@ pub fn make_window_click_through(window: &Window) {
 #[cfg(not(target_os = "linux"))]
 pub fn make_window_click_through(_window: &Window) {}
 
+#[cfg(target_os = "linux")]
+pub fn set_window_icon(window: &Window, png: &[u8]) {
+    super::x11_input::set_window_icon(window, png);
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_window_icon(_window: &Window, _png: &[u8]) {}
+
 pub fn window_minimized(_handle: NativeHandle) -> bool {
     false
 }
@@ -77,9 +85,11 @@ pub fn play_mp3_until(_bytes: Vec<u8>, _looped: bool, _stop: Arc<AtomicBool>) {}
 pub struct Tray;
 
 impl Tray {
-    pub fn new(_sound_on: bool, _do_not_disturb: bool) -> Option<Self> {
+    pub fn new(_sound_on: bool, _do_not_disturb: bool, _icon_png: &[u8]) -> Option<Self> {
         None
     }
+
+    pub fn set_app_icon(&mut self, _icon_png: &[u8], _mention: bool) {}
 
     pub fn poll(&self) -> Vec<TrayCommand> {
         Vec::new()

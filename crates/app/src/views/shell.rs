@@ -885,6 +885,7 @@ impl Render for AppShell {
             )
         });
         let title_bar = render_title_bar(
+            crate::active_appearance::current(cx).app_icon,
             mode_label(state.mode),
             update_button(
                 &self.update,

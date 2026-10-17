@@ -56,7 +56,7 @@ async fn run(
     };
     let page_html = HostPage {
         task_url: &dialog.url,
-        background: theme::BACKGROUND,
+        background: theme::background_hex(),
         token_acquirer_script: &session::token_acquirer_script(),
     }
     .html();
@@ -64,7 +64,7 @@ async fn run(
         title: dialog.title.clone(),
         width: dialog.width,
         height: dialog.height,
-        background: theme::BACKGROUND,
+        background: theme::background_hex(),
         owner,
         page_url: sdk::host_page_url(),
         page_html,

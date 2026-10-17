@@ -1,4 +1,5 @@
 mod about;
+mod appearance;
 mod calls;
 mod chats;
 mod devices;

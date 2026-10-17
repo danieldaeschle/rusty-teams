@@ -289,9 +289,10 @@ mod frames {
         SettingsSection::Agents,
         "Agents pages carry their own PAGE_PADDING side inset, the body narrows its side padding to keep the text edge",
     )];
-    const SETTINGS_SECTIONS: [SettingsSection; 8] = [
+    const SETTINGS_SECTIONS: [SettingsSection; 9] = [
         SettingsSection::General,
         SettingsSection::Notifications,
+        SettingsSection::Appearance,
         SettingsSection::Chats,
         SettingsSection::Calls,
         SettingsSection::Devices,
@@ -1005,6 +1006,17 @@ mod frames {
 
     #[gpui_kit::test]
     fn settings_dialog_keeps_its_inset_at_every_size(cx: &mut TestAppContext) {
+        check_settings_dialog(cx, &SETTINGS_SECTIONS);
+    }
+
+    #[gpui_kit::test]
+    fn settings_dialog_keeps_its_inset_in_the_teams_scheme(cx: &mut TestAppContext) {
+        crate::theme::set_thread_scheme(Some("teams"));
+        check_settings_dialog(cx, &[SettingsSection::Appearance, SettingsSection::General]);
+        crate::theme::set_thread_scheme(None);
+    }
+
+    fn check_settings_dialog(cx: &mut TestAppContext, sections: &[SettingsSection]) {
         let (handle, state) = mount_with(cx, true);
         let mut visual = VisualTestContext::from_window(handle, cx);
         for (width, height) in SIZES.into_iter().chain([(960., 640.)]) {
@@ -1014,7 +1026,7 @@ mod frames {
                 size: size(px(width), px(height)),
             };
             let inset = metrics(width, height).inset;
-            for section in SETTINGS_SECTIONS {
+            for &section in sections {
                 visual
                     .update(|_, cx| state.update(cx, |state, cx| state.open_settings(section, cx)));
                 let tags = collect(&mut visual, Some(SETTINGS_TAGS[0]));

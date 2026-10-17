@@ -1,4 +1,5 @@
 pub mod agent_api;
+pub mod appearance;
 pub mod agents;
 pub mod assets;
 pub mod avatar_image;

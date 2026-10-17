@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+mod active_appearance;
 pub mod agents;
 pub mod call;
 #[cfg(test)]
@@ -190,6 +191,7 @@ fn main() {
         })
         .detach();
         theme::load_fonts(cx);
+        active_appearance::install(&store, cx);
         theme::apply(cx);
         bind_keys(cx);
         let state = cx.new(|_| {

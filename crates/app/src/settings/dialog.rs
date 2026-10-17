@@ -7,7 +7,7 @@ use super::devices::DevicesView;
 use super::mcp::McpView;
 use super::nav::{NavLayout, label, render_nav};
 use super::rows::ROW_INSET;
-use super::{about, calls, chats, general, notifications};
+use super::{about, appearance, calls, chats, general, notifications};
 use crate::agents::AgentsSettings;
 use crate::app_state::AppState;
 use crate::notify::NotificationCenter;
@@ -135,6 +135,7 @@ impl SettingsDialog {
             SettingsSection::Notifications => {
                 notifications::render(&self.center, cx).into_any_element()
             }
+            SettingsSection::Appearance => appearance::render(&self.app, cx).into_any_element(),
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
             SettingsSection::Devices => self

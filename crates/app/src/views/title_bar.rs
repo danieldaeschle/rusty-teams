@@ -7,6 +7,7 @@ use gpui_kit::*;
 
 use super::widgets::icon;
 use crate::app_state::Mode;
+use crate::appearance::AppIcon;
 use crate::theme;
 use crate::updater::UpdateStatus;
 
@@ -15,11 +16,16 @@ const SEARCH_WIDTH: f32 = 380.;
 const SEARCH_HINT: &str = "Search chats, people and channels";
 const SHORTCUT_HINT: &str = "Ctrl K";
 const APP_ICON_SIZE: f32 = 18.;
-const APP_ICON_PNG: &[u8] = include_bytes!("../../assets/icon/teams-fast-256.png");
 
-fn app_icon() -> Arc<Image> {
-    static ICON: OnceLock<Arc<Image>> = OnceLock::new();
-    ICON.get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, APP_ICON_PNG.to_vec())))
+pub fn app_icon_image(app_icon: AppIcon) -> Arc<Image> {
+    static IMAGES: [OnceLock<Arc<Image>>; AppIcon::ALL.len()] =
+        [const { OnceLock::new() }; AppIcon::ALL.len()];
+    let index = AppIcon::ALL
+        .iter()
+        .position(|candidate| *candidate == app_icon)
+        .unwrap_or(0);
+    IMAGES[index]
+        .get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, app_icon.png().to_vec())))
         .clone()
 }
 
@@ -89,6 +95,7 @@ pub fn update_button(
 }
 
 pub fn render_title_bar(
+    app_icon: AppIcon,
     mode_label: Option<&'static str>,
     update: Option<AnyElement>,
     own: Option<AnyElement>,
@@ -130,7 +137,11 @@ pub fn render_title_bar(
                 .h_full()
                 .gap(px(12.))
                 .items_center()
-                .child(img(app_icon()).size(px(APP_ICON_SIZE)).flex_none())
+                .child(
+                    img(app_icon_image(app_icon))
+                        .size(px(APP_ICON_SIZE))
+                        .flex_none(),
+                )
                 .child(
                     div()
                         .text_size(px(13.))
