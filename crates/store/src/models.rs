@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 pub const BOT_MRI_PREFIX: &str = "28:";
+pub const UNKNOWN_USER_NAME: &str = "Unknown User";
 
 pub fn is_bot_id(user_id: &str) -> bool {
     user_id.starts_with(BOT_MRI_PREFIX)

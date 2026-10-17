@@ -10,8 +10,6 @@ use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
 use crate::stored::{AttachmentInfo, MentionInfo, QuoteInfo, ReactionInfo};
 
-const NO_NAME: &str = "?";
-
 pub fn graph_hidden(chat: &Chat) -> bool {
     chat.viewpoint
         .as_ref()
@@ -49,7 +47,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
         title: chat.title(my_user_id),
         member_summary: others
             .iter()
-            .map(|member| member_name(member))
+            .map(|member| member.name())
             .collect::<Vec<_>>()
             .join(", "),
         last_message_at,
@@ -62,7 +60,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
             .iter()
             .map(|member| MemberRecord {
                 user_id: member.user_id.clone(),
-                display_name: member_name(member).to_owned(),
+                display_name: member.name().to_owned(),
             })
             .collect(),
         last_message_deleted: preview.as_ref().is_some_and(|preview| preview.deleted),
@@ -76,14 +74,6 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
         last_event_system,
         last_event_call,
     }
-}
-
-fn member_name(member: &graph::Member) -> &str {
-    member
-        .display_name
-        .as_deref()
-        .or(member.email.as_deref())
-        .unwrap_or(NO_NAME)
 }
 
 fn is_unread(
@@ -347,6 +337,29 @@ mod tests {
         let record = chat_record(&chat, "me");
         assert!(record.unread);
         assert!(!record.last_event_system);
+    }
+
+    #[test]
+    fn a_member_without_name_or_email_is_an_unknown_user() {
+        let chat: Chat = serde_json::from_value(json!({
+            "id": "19:group@thread.v2",
+            "chatType": "group",
+            "members": [
+                {"userId": "me", "displayName": "Daniel"},
+                {"userId": "gone", "displayName": null, "email": ""},
+                {"userId": "mail", "displayName": " ", "email": "anna@example.com"},
+            ],
+        }))
+        .unwrap();
+        let record = chat_record(&chat, "me");
+        let names: Vec<&str> = record
+            .members
+            .iter()
+            .map(|member| member.display_name.as_str())
+            .collect();
+        assert_eq!(names, ["Daniel", "Unknown User", "anna@example.com"]);
+        assert_eq!(record.title, "Unknown User, anna@example.com");
+        assert_eq!(graph::UNKNOWN_USER_NAME, store::UNKNOWN_USER_NAME);
     }
 
     fn record_with_subject(subject: serde_json::Value) -> Option<String> {

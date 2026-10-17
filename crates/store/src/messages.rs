@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use crate::error::Result;
-use crate::models::{MessageRecord, RecentScope};
+use crate::models::{MessageRecord, RecentScope, UNKNOWN_USER_NAME};
 use crate::search::index_message;
 use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
@@ -348,14 +348,14 @@ impl Store {
         let mut statement = connection.prepare_cached(
             "SELECT value, COALESCE(
                  (SELECT display_name FROM chat_members
-                  WHERE user_id = value AND display_name <> '' LIMIT 1),
+                  WHERE user_id = value AND display_name NOT IN ('', ?2) LIMIT 1),
                  (SELECT sender_name FROM messages
                   WHERE sender_id = value AND sender_name <> ''
                   ORDER BY created_at DESC LIMIT 1))
              FROM json_each(?1)",
         )?;
         let ids = serde_json::to_string(user_ids).unwrap_or_else(|_| "[]".to_owned());
-        let rows = statement.query_map([ids], |row| {
+        let rows = statement.query_map(params![ids, UNKNOWN_USER_NAME], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })?;
         let mut names = HashMap::new();

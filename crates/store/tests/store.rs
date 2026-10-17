@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use store::{
     AvatarRecord, ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications,
     ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord, MemberRecord,
-    MessageRecord, RecentScope, Store, SyncState, TeamLayoutRecord, TeamRecord,
+    MessageRecord, RecentScope, Store, SyncState, TeamLayoutRecord, TeamRecord, UNKNOWN_USER_NAME,
 };
 
 #[test]
@@ -1175,8 +1175,15 @@ fn activity_prune_drops_only_older_rows() {
 #[test]
 fn display_names_prefer_members_then_latest_sender_name() {
     let store = Store::open_in_memory().unwrap();
+    let unnamed_member = ChatRecord {
+        members: vec![MemberRecord {
+            user_id: Some("user-sam".to_owned()),
+            display_name: UNKNOWN_USER_NAME.to_owned(),
+        }],
+        ..chat("chat-2", "Review", Some(at(6)))
+    };
     store
-        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5)))])
+        .upsert_chats(&[chat("chat-1", "Planning", Some(at(5))), unnamed_member])
         .unwrap();
     let sent_by = |message_id: &str, minute: u32, sender: &str, name: Option<&str>| MessageRecord {
         sender_id: Some(sender.to_owned()),

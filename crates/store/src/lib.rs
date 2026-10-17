@@ -30,7 +30,7 @@ pub use models::{
     ChannelNotifications, ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord,
     ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord, MessageRecord,
     OutboxRecord, OutboxState, OutboxTarget, RecentScope, SearchHit, Sidebar, SidebarTeam,
-    SyncState, TeamLayoutRecord, TeamRecord, is_bot_id,
+    SyncState, TeamLayoutRecord, TeamRecord, UNKNOWN_USER_NAME, is_bot_id,
 };
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};
 pub use store::{DATA_DIR_NAME, Store, default_database_path};
