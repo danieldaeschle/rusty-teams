@@ -11,7 +11,7 @@ use gpui_kit::*;
 use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
 use super::avatar::{person_avatar, with_presence, with_presence_badge};
-use super::widgets::{icon, symbol};
+use super::widgets::{menu_icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
 use crate::own_status::{
@@ -30,7 +30,7 @@ const PRESENCE_OVERHANG: f32 = 2.;
 const TITLE_BUTTON_INSET: f32 = 2.;
 const OWN_STATUS_BUTTON_SIZE: f32 =
     TITLE_AVATAR_SIZE + 2. * (PRESENCE_OVERHANG + TITLE_BUTTON_INSET);
-const MENU_ICON_SIZE: f32 = 14.;
+const PRESENCE_ICON_SIZE: f32 = 14.;
 const ICON_COLUMN: f32 = 16.;
 const HEADER_INSET: f32 = 24.;
 
@@ -118,11 +118,7 @@ fn status_icon(kind: PresenceKind) -> gpui_kit::component::Icon {
         PresenceKind::Offline => ("status_ring", theme::text_muted()),
         PresenceKind::Unknown => ("status_ring", theme::text_faint()),
     };
-    symbol(name, MENU_ICON_SIZE, color)
-}
-
-fn menu_icon(name: IconName) -> gpui_kit::component::Icon {
-    icon(name, MENU_ICON_SIZE, theme::text_muted())
+    symbol(name, PRESENCE_ICON_SIZE, color)
 }
 
 fn header(context: &MenuContext, cx: &App) -> Div {

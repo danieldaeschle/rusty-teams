@@ -19,6 +19,7 @@ use gpui_base::{
     ToastTransitionStatus,
 };
 
+use crate::fluent::{TOAST_ICON_GAP, TOAST_ICON_SIZE, TOAST_LINE_HEIGHT};
 use crate::{
     ActiveTheme as _, Edges, Icon, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT,
     animation::cubic_bezier,
@@ -30,6 +31,8 @@ const NOTIFICATION_TRANSITION_DURATION: Duration = Duration::from_millis(400);
 const NOTIFICATION_EXIT_DURATION: Duration = Duration::from_millis(200);
 const NOTIFICATION_TRANSITION_OFFSET: Pixels = px(96.);
 const DEFAULT_NOTIFICATION_WIDTH: Pixels = px(382.);
+const TOAST_PADDING_X: Pixels = px(16.);
+const TOAST_PADDING_Y: Pixels = px(14.);
 const NOTIFICATION_ADVANCE_INTERVAL: Duration = Duration::from_millis(50);
 struct DismissRequest;
 
@@ -432,18 +435,28 @@ impl Render for Notification {
             .bg(toast_elevation.fill)
             .rounded(cx.theme().radius_lg)
             .shadow(resting_shadow)
-            .py_3p5()
-            .px_4()
+            .py(TOAST_PADDING_Y)
+            .px(TOAST_PADDING_X)
             .gap_3()
             .refine_style(&self.style)
             .when_some(icon, |this, icon| {
-                this.child(div().absolute().top(px(18.)).left_4().child(icon))
+                this.child(
+                    div()
+                        .absolute()
+                        .top(TOAST_PADDING_Y)
+                        .left(TOAST_PADDING_X)
+                        .h(TOAST_LINE_HEIGHT)
+                        .flex()
+                        .items_center()
+                        .child(icon.with_size(TOAST_ICON_SIZE)),
+                )
             })
             .child(
                 v_flex()
                     .flex_1()
                     .overflow_hidden()
-                    .when(has_icon, |this| this.pl_6())
+                    .line_height(TOAST_LINE_HEIGHT)
+                    .when(has_icon, |this| this.pl(TOAST_ICON_SIZE + TOAST_ICON_GAP))
                     .when_some(self.title.clone(), |this, title| {
                         this.child(div().text_sm().font_semibold().child(title))
                     })

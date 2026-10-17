@@ -162,6 +162,10 @@ pub fn text_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
         .child(label.into())
 }
 
+pub fn select_selector(id: &str) -> String {
+    format!("settings-select/{id}")
+}
+
 pub fn select(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -179,7 +183,9 @@ pub fn select_with_width(
     choices: Vec<Choice>,
 ) -> impl IntoElement {
     let scrollable = choices.len() > SCROLL_MENU_AFTER;
-    Button::new(id)
+    let id: ElementId = id.into();
+    Button::new(id.clone())
+        .debug_selector(|| select_selector(&id.to_string()))
         .outline()
         .w(px(width))
         .flex_none()
@@ -209,4 +215,5 @@ pub fn select_with_width(
                 )
             })
         })
+        .listbox()
 }

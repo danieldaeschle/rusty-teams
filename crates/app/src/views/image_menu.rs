@@ -2,25 +2,15 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{
-    Icon,
-    menu::{ContextMenuExt as _, PopupMenuItem},
-};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::*;
 
 use super::image_viewer::{suggested_name, write_image};
-use super::widgets::icon;
+use super::widgets::menu_icon;
 use crate::downloads;
 use crate::image_clipboard::ClipboardImage;
-use crate::theme;
-
-const MENU_ICON_SIZE: f32 = 16.;
 
 pub type ImageShare = Rc<dyn Fn(&mut App)>;
-
-fn menu_icon(glyph: IconName) -> Icon {
-    icon(glyph, MENU_ICON_SIZE, theme::text_muted())
-}
 
 pub fn copy_image_file(path: PathBuf, cx: &mut App) {
     cx.spawn(async move |cx| {

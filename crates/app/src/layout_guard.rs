@@ -171,6 +171,7 @@ mod frames {
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
     use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
+    use crate::settings::select_selector;
     use crate::settings::{item_selector, label, label_selector, metrics};
     use crate::settings_section::SettingsSection;
     use crate::user_activity::UserInput;
@@ -186,7 +187,7 @@ mod frames {
     };
     use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
     use crate::views::message_row::BUBBLE_TAGS;
-    use crate::views::pin_banner::PIN_BANNER_TAG;
+    use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
@@ -197,7 +198,21 @@ mod frames {
         OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
+    use crate::views::sidebar::chat_row_selector;
     use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
+    use crate::views::widgets::{
+        COUNT_BADGE, RAIL_BADGE, badge_ink_offset, badge_pill, badge_selector, badge_text_selector,
+        count_badge,
+    };
+    use gpui_kit::MouseButton;
+    use gpui_kit::component::fluent::{
+        DROPDOWN_OFFSET, MENU_ICON_LABEL_GAP, MENU_LIST_PADDING, OPTION_CHECK_GAP,
+        OPTION_CHECK_INSET,
+    };
+    use gpui_kit::component::menu::selectors::{
+        ITEMS_SELECTOR, icon_selector, item_selector as menu_item_selector,
+        label_selector as menu_label_selector,
+    };
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -1429,6 +1444,343 @@ mod frames {
         }
     }
 
+    const MENU_ITEMS_SCANNED: usize = 40;
+    const MENU_CHAT: &str = "demo-chat-release";
+    const THEME_SELECT: &str = "settings-theme";
+
+    struct MenuRow {
+        index: usize,
+        item: Bounds<Pixels>,
+        icon: Option<Bounds<Pixels>>,
+        label: Option<Bounds<Pixels>>,
+    }
+
+    fn menu_rows(visual: &mut VisualTestContext) -> Vec<MenuRow> {
+        (0..MENU_ITEMS_SCANNED)
+            .filter_map(|index| {
+                let item =
+                    visual.debug_bounds(Box::leak(menu_item_selector(index).into_boxed_str()))?;
+                Some(MenuRow {
+                    index,
+                    item,
+                    icon: visual.debug_bounds(Box::leak(icon_selector(index).into_boxed_str())),
+                    label: visual
+                        .debug_bounds(Box::leak(menu_label_selector(index).into_boxed_str())),
+                })
+            })
+            .collect()
+    }
+
+    fn menu_row_violations(rows: &[MenuRow], expected_gap: f32) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        for row in rows {
+            let Some(icon) = row.icon else {
+                continue;
+            };
+            let key = format!("{MENU}/item-{}", row.index);
+            if let Some(label) = row.label {
+                let gap = f32::from(label.left() - icon.right());
+                if (gap - expected_gap).abs() > TOLERANCE {
+                    found.push((
+                        format!("{key}:icon-gap"),
+                        format!(
+                            "icon {} to label {} is {gap} px, expected {expected_gap}",
+                            describe(icon),
+                            describe(label)
+                        ),
+                    ));
+                }
+            }
+            let offset = f32::from(icon.center().y - row.item.center().y);
+            if offset.abs() > TOLERANCE {
+                found.push((
+                    format!("{key}:icon-off-centre"),
+                    format!(
+                        "icon {} sits {offset} px off the centre of item {}",
+                        describe(icon),
+                        describe(row.item)
+                    ),
+                ));
+            }
+        }
+        found
+    }
+
+    fn listbox_violations(
+        trigger: Bounds<Pixels>,
+        menu: Bounds<Pixels>,
+        items: Bounds<Pixels>,
+        rows: &[MenuRow],
+    ) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        let near = |value: f32, expected: f32| (value - expected).abs() <= TOLERANCE;
+        if !near(f32::from(menu.left() - trigger.left()), 0.) {
+            found.push((
+                format!("{MENU}:not-aligned-to-trigger"),
+                format!(
+                    "list {} must start at the trigger's left edge {}",
+                    describe(menu),
+                    describe(trigger)
+                ),
+            ));
+        }
+        if !near(
+            f32::from(menu.top() - trigger.bottom()),
+            f32::from(DROPDOWN_OFFSET),
+        ) {
+            found.push((
+                format!("{MENU}:trigger-offset"),
+                format!(
+                    "list {} must open {} px below the trigger {}",
+                    describe(menu),
+                    f32::from(DROPDOWN_OFFSET),
+                    describe(trigger)
+                ),
+            ));
+        }
+        if menu.size.width < trigger.size.width - px(TOLERANCE) {
+            found.push((
+                format!("{MENU}:narrower-than-trigger"),
+                format!(
+                    "list {} is narrower than the trigger {}",
+                    describe(menu),
+                    describe(trigger)
+                ),
+            ));
+        }
+        if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+            let top = f32::from(first.item.top() - items.top());
+            let bottom = f32::from(items.bottom() - last.item.bottom());
+            let padding = f32::from(MENU_LIST_PADDING);
+            if !near(top, padding) || !near(bottom, padding) {
+                found.push((
+                    format!("{MENU}:uneven-padding"),
+                    format!("list padding top {top} / bottom {bottom}, both must be {padding}"),
+                ));
+            }
+            let expected_inset = f32::from(MENU_LIST_PADDING + OPTION_CHECK_INSET);
+            match first.icon {
+                Some(check) if near(f32::from(check.left() - menu.left()), expected_inset) => {}
+                check => found.push((
+                    format!("{MENU}:check-inset"),
+                    format!(
+                        "check column {check:?} must start {expected_inset} px inside the list {}",
+                        describe(menu)
+                    ),
+                )),
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn menu_rules_flag_gaps_offsets_and_misaligned_lists() {
+        let row =
+            |index: usize, item_top: f32, icon_left: f32, icon_top: f32, label_left: f32| MenuRow {
+                index,
+                item: rectangle(4., item_top, 120., 32.),
+                icon: Some(rectangle(icon_left, icon_top, 20., 20.)),
+                label: Some(rectangle(label_left, item_top + 6., 60., 20.)),
+            };
+        let rows = [row(0, 4., 10., 10., 36.), row(1, 38., 10., 46., 32.)];
+        let keys: Vec<String> = menu_row_violations(&rows, f32::from(MENU_ICON_LABEL_GAP))
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "popup-menu/item-1:icon-gap",
+                "popup-menu/item-1:icon-off-centre"
+            ]
+        );
+
+        let trigger = rectangle(100., 50., 216., 32.);
+        let option = |index: usize, top: f32| MenuRow {
+            index,
+            item: rectangle(104., top, 208., 32.),
+            icon: Some(rectangle(110., top + 8., 16., 16.)),
+            label: Some(rectangle(132., top + 6., 80., 20.)),
+        };
+        let aligned = [option(0, 88.), option(1, 122.)];
+        let menu = rectangle(100., 84., 216., 74.);
+        assert!(listbox_violations(trigger, menu, menu, &aligned).is_empty());
+        let shifted = rectangle(96., 90., 200., 80.);
+        let keys: Vec<String> = listbox_violations(trigger, shifted, shifted, &aligned)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "popup-menu:not-aligned-to-trigger",
+                "popup-menu:trigger-offset",
+                "popup-menu:narrower-than-trigger",
+                "popup-menu:uneven-padding",
+                "popup-menu:check-inset",
+            ]
+        );
+    }
+
+    #[gpui_kit::test]
+    fn menu_items_keep_one_icon_gap_and_centred_icons(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        let chat_row: &'static str = Box::leak(chat_row_selector(MENU_CHAT).into_boxed_str());
+        collect(&mut visual, Some(chat_row));
+        let mut found = Vec::new();
+        let own_status = visual
+            .debug_bounds(OWN_STATUS)
+            .expect("own status button rendered");
+        visual.simulate_click(own_status.center(), Default::default());
+        collect(&mut visual, Some(MENU));
+        let status_rows = menu_rows(&mut visual);
+        assert!(
+            status_rows.iter().any(|row| row.icon.is_some()),
+            "status menu shows icons"
+        );
+        found.extend(menu_row_violations(
+            &status_rows,
+            f32::from(MENU_ICON_LABEL_GAP),
+        ));
+        visual.simulate_keystrokes("escape");
+        collect(&mut visual, None);
+        let row = visual.debug_bounds(chat_row).expect("chat row rendered");
+        visual.simulate_mouse_down(row.center(), MouseButton::Right, Default::default());
+        visual.simulate_mouse_up(row.center(), MouseButton::Right, Default::default());
+        collect(&mut visual, Some(MENU));
+        let chat_rows = menu_rows(&mut visual);
+        assert!(
+            chat_rows.iter().any(|row| row.icon.is_some()),
+            "chat menu shows icons"
+        );
+        found.extend(menu_row_violations(
+            &chat_rows,
+            f32::from(MENU_ICON_LABEL_GAP),
+        ));
+        let found: Vec<String> = found
+            .into_iter()
+            .map(|(key, message)| format!("{key}: {message}"))
+            .collect();
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
+    #[gpui_kit::test]
+    fn settings_select_list_lines_up_with_its_trigger(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.open_settings(SettingsSection::Appearance, cx)
+            })
+        });
+        let select: &'static str = Box::leak(select_selector(THEME_SELECT).into_boxed_str());
+        collect(&mut visual, Some(select));
+        let trigger = visual.debug_bounds(select).expect("theme select rendered");
+        visual.simulate_click(trigger.center(), Default::default());
+        collect(&mut visual, Some(MENU));
+        let menu = visual.debug_bounds(MENU).expect("list rendered");
+        let items = visual
+            .debug_bounds(ITEMS_SELECTOR)
+            .expect("list items rendered");
+        let rows = menu_rows(&mut visual);
+        let found: Vec<String> = listbox_violations(trigger, menu, items, &rows)
+            .into_iter()
+            .chain(menu_row_violations(&rows, f32::from(OPTION_CHECK_GAP)))
+            .map(|(key, message)| format!("{key}: {message}"))
+            .collect();
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
+    const BADGE_SAMPLES: [(u32, bool); 5] =
+        [(1, false), (42, false), (120, false), (7, true), (15, true)];
+
+    struct BadgeSamples;
+
+    impl gpui_kit::Render for BadgeSamples {
+        fn render(
+            &mut self,
+            _: &mut gpui_kit::Window,
+            _: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::{ParentElement as _, Styled as _};
+            gpui_kit::div()
+                .flex()
+                .gap(px(12.))
+                .p(px(12.))
+                .children(BADGE_SAMPLES.map(|(count, rail)| {
+                    if rail {
+                        badge_pill(
+                            count,
+                            RAIL_BADGE,
+                            crate::theme::accent(),
+                            crate::theme::on_accent(),
+                        )
+                    } else {
+                        count_badge(count, false)
+                    }
+                }))
+        }
+    }
+
+    fn badge_violation(
+        text: &str,
+        pill: Bounds<Pixels>,
+        label: Bounds<Pixels>,
+        ink_offset: (f32, f32),
+    ) -> Option<(String, String)> {
+        let ink_x = f32::from(label.center().x) + ink_offset.0;
+        let ink_y = f32::from(label.center().y) + ink_offset.1;
+        let off_x = ink_x - f32::from(pill.center().x);
+        let off_y = ink_y - f32::from(pill.center().y);
+        (off_x.abs() > TOLERANCE || off_y.abs() > TOLERANCE).then(|| {
+            (
+                format!("count-badge/{text}:off-centre"),
+                format!("text ink of {text:?} sits ({off_x:.2}, {off_y:.2}) px off the centre of its circle {}", describe(pill)),
+            )
+        })
+    }
+
+    #[test]
+    fn badge_rule_flags_off_centre_text() {
+        let pill = rectangle(0., 0., 18., 18.);
+        assert!(badge_violation("1", pill, rectangle(6., 0., 6., 18.), (0., 0.)).is_none());
+        assert!(badge_violation("1", pill, rectangle(6., 0., 6., 18.), (1., 0.)).is_some());
+        assert!(badge_violation("1", pill, rectangle(6., 0., 6., 18.), (0., -1.)).is_some());
+    }
+
+    #[gpui_kit::test]
+    fn count_badge_text_sits_in_the_centre_of_its_circle(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::apply);
+        let (_, visual) = cx.add_window_view(|_, _| BadgeSamples);
+        collect(visual, None);
+        let mut found = Vec::new();
+        for (count, rail) in BADGE_SAMPLES {
+            let text = crate::format::badge_text(count);
+            let pill = visual
+                .debug_bounds(Box::leak(badge_selector(&text).into_boxed_str()))
+                .expect("badge rendered");
+            let label = visual
+                .debug_bounds(Box::leak(badge_text_selector(&text).into_boxed_str()))
+                .expect("badge text rendered");
+            let font_size = if rail {
+                RAIL_BADGE.font_size
+            } else {
+                COUNT_BADGE.font_size
+            };
+            let offset = visual.update(|window, _| badge_ink_offset(window, &text, font_size));
+            found.extend(badge_violation(&text, pill, label, offset));
+        }
+        let found: Vec<String> = found
+            .into_iter()
+            .map(|(key, message)| format!("{key}: {message}"))
+            .collect();
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
     const PINNED_CHAT: &str = "demo-chat-release";
     const PINNED_CHANNEL: &str = "demo-channel-1-1";
 
@@ -1455,12 +1807,13 @@ mod frames {
                 ("below divider", f32::from(banner.top() - divider.bottom())),
             ];
             let side = gaps[1].1;
-            if gaps
-                .iter()
-                .any(|(_, gap)| (gap - side).abs() > INSET_TOLERANCE)
+            if (side - BANNER_INSET).abs() > INSET_TOLERANCE
+                || gaps
+                    .iter()
+                    .any(|(_, gap)| (gap - side).abs() > INSET_TOLERANCE)
             {
                 found.push(format!(
-                    "pin banner@{width}x{height}: gaps {gaps:?} must match"
+                    "pin banner@{width}x{height}: gaps {gaps:?} must all be {BANNER_INSET}"
                 ));
             }
         }
