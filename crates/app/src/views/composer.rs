@@ -2107,6 +2107,7 @@ impl Composer {
                     .mx(px(6.))
                     .px(px(6.))
                     .h(px(POPUP_ROW_HEIGHT))
+                    .flex_none()
                     .gap(px(8.))
                     .items_center()
                     .rounded(px(6.))

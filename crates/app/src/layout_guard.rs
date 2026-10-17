@@ -928,3 +928,73 @@ fn lines_are_solid() {
         .collect();
     assert!(violations.is_empty(), "{}", violations.join("\n"));
 }
+
+fn indentation(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+fn chain_lines<'a>(lines: &[&'a str], index: usize) -> Vec<&'a str> {
+    let indent = indentation(lines[index]);
+    let belongs = |line: &&str| line.trim().is_empty() || indentation(line) >= indent;
+    let start = lines[..index]
+        .iter()
+        .rposition(|line| !belongs(line))
+        .map_or(0, |position| position + 1);
+    let end = lines[index..]
+        .iter()
+        .position(|line| !belongs(line))
+        .map_or(lines.len(), |position| index + position);
+    lines[start..end]
+        .iter()
+        .filter(|line| indentation(line) == indent)
+        .copied()
+        .collect()
+}
+
+fn shrinking_rows(row_height: &Regex, source: &str) -> Vec<usize> {
+    let lines: Vec<&str> = source.lines().collect();
+    (0..lines.len())
+        .filter(|&index| row_height.is_match(lines[index]))
+        .filter(|&index| {
+            !chain_lines(&lines, index).iter().any(|line| {
+                let line = line.trim();
+                line.starts_with(".flex_none()") || line.starts_with(".flex_shrink_0()")
+            })
+        })
+        .map(|index| index + 1)
+        .collect()
+}
+
+fn row_height_pattern() -> Regex {
+    Regex::new(r"^\s*\.h\(px\(((\w+_)?(ROW|ENTRY)_HEIGHT|row_height)\)\)").expect("pattern")
+}
+
+#[test]
+fn matcher_finds_rows_without_flex_none() {
+    let source = "fn rows() {\n    h_flex()\n        .h(px(ROW_HEIGHT))\n        .child(\n            div()\n                .flex_none(),\n        );\n    div()\n        .id(1)\n        .h(px(OWN_ROW_HEIGHT))\n        .flex_none();\n}\n";
+    assert_eq!(shrinking_rows(&row_height_pattern(), source), [3]);
+}
+
+#[test]
+fn fixed_height_rows_never_shrink() {
+    let row_height = row_height_pattern();
+    let mut files = Vec::new();
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
+    let violations: Vec<String> = files
+        .iter()
+        .filter(|file| !file.ends_with("layout_guard.rs"))
+        .flat_map(|file| {
+            let source = fs::read_to_string(file).expect("read source file");
+            shrinking_rows(&row_height, &source)
+                .into_iter()
+                .map(|line| format!("{}:{line}", file.display()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "a fixed-height row needs .flex_none(), or a max_h scroll list shrinks it to its content: {violations:?}"
+    );
+}
