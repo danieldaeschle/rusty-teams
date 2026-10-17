@@ -1,5 +1,6 @@
 use chatsvc::{
-    CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState, Conversations,
+    BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState,
+    Conversations,
     ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
     LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
     MessageEmotions, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
@@ -239,6 +240,10 @@ pub trait Remote {
 
     async fn person_profile(&self, _user_id: &str) -> Result<PersonProfile> {
         Err(Error::Unsupported("profile cards"))
+    }
+
+    async fn bot_profiles(&self, _bot_ids: &[String]) -> Result<Vec<BotProfile>> {
+        Err(Error::Unsupported("bot profiles"))
     }
 
     async fn subscribe_presence(
@@ -846,6 +851,10 @@ impl Remote for Graph {
 
     async fn person_profile(&self, user_id: &str) -> Result<PersonProfile> {
         crate::profile::load_profile(self, user_id).await
+    }
+
+    async fn bot_profiles(&self, bot_ids: &[String]) -> Result<Vec<BotProfile>> {
+        Ok(BotProfiles::new(self.session()).fetch(bot_ids).await?)
     }
 
     async fn subscribe_presence(

@@ -8,7 +8,8 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 53] = symbols![
+const SYMBOLS: [(&str, &[u8]); 54] = symbols![
+    "bot",
     "done",
     "done_all",
     "keyboard_return",

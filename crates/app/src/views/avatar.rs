@@ -11,7 +11,7 @@ use crate::format;
 use crate::sidebar_model::{AvatarSpec, Face};
 use crate::theme;
 use crate::views::profile_card::opens_profile;
-use crate::views::widgets::{Corner, corner_badge, icon};
+use crate::views::widgets::{Corner, corner_badge, icon, symbol};
 
 const PAIR_RATIO: f32 = 24. / 36.;
 const PRESENCE_MIN: f32 = 10.;
@@ -23,6 +23,7 @@ const CACHED_PRESENCE_OPACITY: f32 = 0.5;
 const INITIALS_RATIO: f32 = 0.36;
 const PAIR_INITIALS_RATIO: f32 = 0.42;
 const MEETING_ICON_RATIO: f32 = 0.5;
+const BOT_CORNER_RATIO: f32 = 0.25;
 
 fn initials_circle(name: &str, key: &str, size: f32, pending: bool, text_ratio: f32) -> Div {
     let (background, foreground) = if pending {
@@ -113,6 +114,29 @@ pub fn bot_avatar(identity: &BotIdentity, size: f32) -> AnyElement {
     }
 }
 
+pub fn bot_tile(directory: &Directory, face: &Face, size: f32) -> AnyElement {
+    let radius = (size * BOT_CORNER_RATIO).round();
+    let image = face
+        .user_id
+        .as_deref()
+        .and_then(|user_id| directory.avatar(user_id));
+    let tile = div().size(px(size)).flex_none().rounded(px(radius));
+    match image {
+        Some(AvatarState::Ready(image)) => tile
+            .child(
+                img(ImageSource::Image(image.clone()))
+                    .size_full()
+                    .rounded(px(radius))
+                    .object_fit(ObjectFit::Cover),
+            )
+            .into_any_element(),
+        _ => tile
+            .bg(theme::bot_avatar())
+            .child(symbol("bot", size, theme::white()))
+            .into_any_element(),
+    }
+}
+
 pub fn presence_size(avatar_size: f32) -> f32 {
     (avatar_size * PRESENCE_RATIO)
         .round()
@@ -189,6 +213,7 @@ pub fn with_presence(avatar: AnyElement, presence: Presence, size: f32, ring: Hs
 pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hsla) -> AnyElement {
     match spec {
         AvatarSpec::Single(face) => face_circle(directory, face, size, INITIALS_RATIO),
+        AvatarSpec::Bot(face) => bot_tile(directory, face, size),
         AvatarSpec::Meeting => div()
             .size(px(size))
             .flex_none()

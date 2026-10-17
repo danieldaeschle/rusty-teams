@@ -4,12 +4,13 @@ use chatsvc::ConversationState;
 use chrono::{DateTime, Duration, Utc};
 use store::{ChatRecord, Store};
 
+use crate::bot_partners::BotPartners;
 use crate::chat_paging::ChatPaging;
 use crate::engine::{SidebarSummary, SyncEngine};
 use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::hidden_chats::{LocallyHidden, resolve_hidden};
-use crate::mapping::{channel_record, chat_record, team_record};
+use crate::mapping::{channel_record, team_record};
 use crate::remote::{ChatsPage, Remote};
 
 const META_CHATS_FULL_AT: &str = "chats_full_refreshed_at";
@@ -72,6 +73,7 @@ impl<R: Remote> SyncEngine<R> {
         self.drop_chats_hidden_by_chatsvc(states.as_deref())?;
         let mut page = self.remote.chats_page(self.config.chat_page_size).await?;
         loop {
+            self.resolve_bot_partners(&page.items, &my_user_id).await;
             refresh.pages += 1;
             refresh.fetched += page.items.len();
             let (records, hidden) = self.split_page(&page, &my_user_id)?;
@@ -209,6 +211,7 @@ impl<R: Remote> SyncEngine<R> {
             self.refresh_chat_states().await;
         }
         let page = self.remote.chats_at(link).await?;
+        self.resolve_bot_partners(&page.items, &my_user_id).await;
         Ok((my_user_id, page))
     }
 
@@ -267,6 +270,7 @@ impl<R: Remote> SyncEngine<R> {
                 page,
                 my_user_id,
                 &self.chat_states.lock().unwrap(),
+                &self.bot_partners(),
                 locally,
                 now,
             )
@@ -348,6 +352,7 @@ fn split_hidden(
     page: &ChatsPage,
     my_user_id: &str,
     states: &HashMap<String, ConversationState>,
+    partners: &BotPartners,
     locally: &mut LocallyHidden,
     now: DateTime<Utc>,
 ) -> (Vec<ChatRecord>, Vec<String>) {
@@ -357,7 +362,7 @@ fn split_hidden(
         if resolve_hidden(chat, states, locally, now) {
             hidden.push(chat.id.clone());
         } else {
-            records.push(chat_record(chat, my_user_id));
+            records.push(partners.chat_record(chat, my_user_id));
         }
     }
     (records, hidden)

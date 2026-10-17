@@ -2,10 +2,22 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
+pub const BOT_MRI_PREFIX: &str = "28:";
+
+pub fn is_bot_id(user_id: &str) -> bool {
+    user_id.starts_with(BOT_MRI_PREFIX)
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MemberRecord {
     pub user_id: Option<String>,
     pub display_name: String,
+}
+
+impl MemberRecord {
+    pub fn is_bot(&self) -> bool {
+        self.user_id.as_deref().is_some_and(is_bot_id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
