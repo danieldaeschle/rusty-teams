@@ -315,6 +315,7 @@ mod frames {
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
     const KNOWN_VIOLATIONS: &[&str] = &[];
+    const ZOOM_STEP: f32 = 1.25;
 
     type Tag = (&'static str, Bounds<Pixels>);
 
@@ -730,11 +731,31 @@ mod frames {
 
     #[gpui_kit::test]
     fn no_element_overlaps_or_leaves_its_container(cx: &mut TestAppContext) {
+        check_layout(cx, &SIZES, 1., KNOWN_VIOLATIONS);
+    }
+
+    #[gpui_kit::test]
+    fn layout_holds_at_a_zoomed_step(cx: &mut TestAppContext) {
+        let (width, height) = SIZES[1];
+        let zoomed = [(width / ZOOM_STEP, height / ZOOM_STEP)];
+        check_layout(cx, &zoomed, ZOOM_STEP, &[]);
+    }
+
+    fn check_layout(
+        cx: &mut TestAppContext,
+        sizes: &[(f32, f32)],
+        zoom: f32,
+        known_violations: &[&str],
+    ) {
         let (handle, app) = mount(cx);
+        let platform_scale = cx
+            .update_window(handle, |_, window, _| window.scale_factor())
+            .expect("test window");
+        cx.simulate_window_scale_factor_change(handle, platform_scale * zoom);
         let mut visual = VisualTestContext::from_window(handle, cx);
         let mut seen_known = HashSet::new();
         let mut unexpected = Vec::new();
-        for (width, height) in SIZES {
+        for &(width, height) in sizes {
             visual.simulate_resize(size(px(width), px(height)));
             let window = Bounds {
                 origin: point(px(0.), px(0.)),
@@ -919,7 +940,7 @@ mod frames {
                 }
                 for (key, message) in found {
                     let full_key = format!("{screen_name}@{width}x{height}:{key}");
-                    if KNOWN_VIOLATIONS.contains(&full_key.as_str()) {
+                    if known_violations.contains(&full_key.as_str()) {
                         seen_known.insert(full_key);
                     } else {
                         unexpected.push(format!("{full_key}: {message}"));
@@ -927,7 +948,7 @@ mod frames {
                 }
             }
         }
-        let stale: Vec<String> = KNOWN_VIOLATIONS
+        let stale: Vec<String> = known_violations
             .iter()
             .filter(|key| !seen_known.contains(**key))
             .map(|key| format!("stale known violation, remove it: {key}"))
@@ -1193,6 +1214,13 @@ mod frames {
         crate::theme::set_thread_scheme(Some("teams"));
         check_settings_dialog(cx, &[SettingsSection::Appearance, SettingsSection::General]);
         crate::theme::set_thread_scheme(None);
+    }
+
+    #[gpui_kit::test]
+    fn settings_dialog_keeps_its_inset_in_the_light_theme(cx: &mut TestAppContext) {
+        crate::theme::set_thread_shade(Some(crate::theme::Shade::Light));
+        check_settings_dialog(cx, &[SettingsSection::Appearance, SettingsSection::General]);
+        crate::theme::set_thread_shade(None);
     }
 
     fn check_settings_dialog(cx: &mut TestAppContext, sections: &[SettingsSection]) {
