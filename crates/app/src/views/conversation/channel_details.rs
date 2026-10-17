@@ -144,6 +144,8 @@ impl ConversationView {
                     this.channel_details_open = !this.channel_details_open;
                     this.pinned_posts_expanded = false;
                     if this.channel_details_open {
+                        this.find_panel = None;
+                        this.find_subscription = None;
                         this.refresh_shared_items(cx);
                     }
                     cx.notify();

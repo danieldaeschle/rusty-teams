@@ -755,6 +755,16 @@ pub fn activity_entries() -> Vec<Entry> {
         ),
         reaction,
         entry(
+            "demo-chat-allhands",
+            Kind::Mention,
+            "demo-allhands-policy",
+            vec![actor(LEA_ID, "Lea Schneider")],
+            "@Dana please read the new vacation policy before Friday.",
+            1,
+            at(0, 9, 0),
+            false,
+        ),
+        entry(
             "demo-chat-customer-3",
             Kind::Messages,
             "demo-customer-3-closed",

@@ -17,10 +17,12 @@ use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
+use crate::chat_filter::ChatFilterPill;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    AcceptCall, ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
+    FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
+    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
     ZoomShareReset,
@@ -28,7 +30,7 @@ use super::shortcuts::{
 use super::window_zoom::{WindowZoom, change_zoom};
 use super::call_pop_out::zoom_listener;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
-use super::sidebar::SidebarView;
+use super::sidebar::{SidebarEvent, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use super::connection_banner::render_connection_banner;
@@ -138,6 +140,7 @@ pub struct AppShell {
     call_mini: Entity<CallMiniView>,
     _call_media_observation: Subscription,
     _panel_subscriptions: [Subscription; 2],
+    _sidebar_subscription: Subscription,
     _agents_subscription: Option<Subscription>,
     _agent_subscription: Option<Subscription>,
     _escape_observation: Subscription,
@@ -251,6 +254,9 @@ impl AppShell {
             )
         });
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, agents_panel, cx));
+        let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, _: &SidebarEvent, window, cx| {
+            this.restore_focus(window, cx);
+        });
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
         let timeline = conversation.read(cx).timeline_bounds();
@@ -332,6 +338,7 @@ impl AppShell {
             call_mini,
             _call_media_observation: call_media_observation,
             _panel_subscriptions: panel_subscriptions,
+            _sidebar_subscription: sidebar_subscription,
             _agents_subscription: agents_subscription,
             _agent_subscription: agent_subscription,
             _escape_observation: escape_observation,
@@ -967,6 +974,36 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.show_chats(cx));
+            }))
+            .on_action(cx.listener(|this, _: &FindInChat, window, cx| {
+                this.close_image_viewer(window, cx);
+                this.conversation
+                    .update(cx, |conversation, cx| conversation.open_find(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenChatFilter, window, cx| {
+                this.close_image_viewer(window, cx);
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.toggle_filter_box(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &FilterUnreadChats, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Unread, cx));
+            }))
+            .on_action(cx.listener(|this, _: &FilterNonMeetingChats, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Chats, cx));
+            }))
+            .on_action(cx.listener(|this, _: &FilterMeetingChats, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Meetings, cx));
+            }))
+            .on_action(cx.listener(|this, _: &FilterMutedChats, _, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Muted, cx));
+            }))
+            .on_action(cx.listener(|this, _: &ClearChatFilters, window, cx| {
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.clear_filters(window, cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChannelsTab, window, cx| {
                 this.close_image_viewer(window, cx);

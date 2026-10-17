@@ -47,6 +47,7 @@ use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
+use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::group_name_button;
 use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
@@ -104,6 +105,7 @@ const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
 const HEADER_LEAD_SIZE: f32 = 36.;
 const TABS_INLINE_MIN_WIDTH: f32 = 560.;
+const FIND_MIN_TIMELINE_WIDTH: f32 = 360.;
 const TABS_ROW_HEIGHT: f32 = 36.;
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -243,6 +245,8 @@ pub struct ConversationView {
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     receipt_fade: receipt_fade::ReceiptFade,
+    find_panel: Option<Entity<FindPanel>>,
+    find_subscription: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -574,6 +578,8 @@ impl ConversationView {
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
             reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
             receipt_fade: receipt_fade::ReceiptFade::default(),
+            find_panel: None,
+            find_subscription: None,
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -849,6 +855,14 @@ impl ConversationView {
     }
 
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .find_panel
+            .as_ref()
+            .is_some_and(|panel| panel.read(cx).selection() != &selection)
+        {
+            self.find_panel = None;
+            self.find_subscription = None;
+        }
         self.stop_typing(cx);
         self.stop_reply_typing(cx);
         self.new_post_open = false;
@@ -3232,6 +3246,51 @@ impl ConversationView {
         )
     }
 
+    pub fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pinned || self.draft_active {
+            return;
+        }
+        let Some(selection) = self
+            .current
+            .as_ref()
+            .map(|current| current.selection.clone())
+        else {
+            return;
+        };
+        self.channel_details_open = false;
+        if let Some(panel) = &self.find_panel {
+            panel.update(cx, |panel, cx| panel.focus(window, cx));
+            return;
+        }
+        let app = self.app.clone();
+        let panel = cx.new(|cx| FindPanel::new(app, selection.clone(), window, cx));
+        let subscription = cx.subscribe_in(
+            &panel,
+            window,
+            move |this, _, event: &FindPanelEvent, window, cx| match event {
+                FindPanelEvent::Close => this.close_find(window, cx),
+                FindPanelEvent::Jump(message_id) => {
+                    let (selection, message_id) = (selection.clone(), message_id.clone());
+                    this.app.update(cx, |state, cx| {
+                        state.jump_to_message(selection, message_id, cx)
+                    });
+                }
+            },
+        );
+        panel.update(cx, |panel, cx| panel.focus(window, cx));
+        self.find_panel = Some(panel);
+        self.find_subscription = Some(subscription);
+        cx.notify();
+    }
+
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find_panel = None;
+        self.find_subscription = None;
+        self.composer
+            .update(cx, |composer, cx| composer.focus(window, cx));
+        cx.notify();
+    }
+
     fn header_width(&self, window: &Window) -> f32 {
         match self.header_width.get() {
             width if width > 0. => width,
@@ -3671,6 +3730,8 @@ impl Render for ConversationView {
             scroller.into_any_element()
         };
         let channel_details = self.render_channel_details(cx);
+        let find_panel = self.find_panel.clone().filter(|_| !drafting);
+        let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
         let content = v_flex()
             .relative()
             .flex_1()
@@ -3698,12 +3759,24 @@ impl Render for ConversationView {
             .child(self.render_drop_overlay(cx));
         root.child(
             h_flex()
+                .relative()
                 .flex_1()
                 .min_h_0()
                 .w_full()
                 .items_stretch()
                 .child(content)
-                .children(channel_details),
+                .children(channel_details)
+                .children(find_panel.map(|panel| {
+                    div()
+                        .h_full()
+                        .w(px(FIND_PANEL_WIDTH))
+                        .min_w_0()
+                        .flex_shrink(1.)
+                        .when(find_overlays, |slot| {
+                            slot.absolute().top_0().right_0().bottom_0().max_w_full()
+                        })
+                        .child(panel)
+                })),
         )
         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
             if this.reaction_details.is_some() {

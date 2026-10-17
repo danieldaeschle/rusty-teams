@@ -45,6 +45,10 @@ pub struct ActivityPanel {
 impl EventEmitter<ActivityPanelEvent> for ActivityPanel {}
 
 impl ActivityPanel {
+    pub fn activity(&self) -> Entity<ActivityCenter> {
+        self.activity.clone()
+    }
+
     pub fn new(
         app: Entity<AppState>,
         activity: Entity<ActivityCenter>,

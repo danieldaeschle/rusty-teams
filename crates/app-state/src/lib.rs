@@ -11,6 +11,8 @@ pub mod card_refresh;
 pub mod card_state;
 pub mod channel_menu;
 pub mod chat_actions;
+pub mod chat_filter;
+pub mod find_in_chat;
 pub mod chat_members;
 pub mod connection_banner;
 pub mod data;
