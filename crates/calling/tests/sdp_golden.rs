@@ -103,12 +103,19 @@ fn differs_per_run(index: usize, line: &str) -> bool {
         || (index > 1 && line.starts_with("a=fmtp:") && !line.contains("apt="))
 }
 
+/// The answer only goes into the local libwebrtc, never to Teams; it sizes our Opus encoder (fullband, 40 kbps).
+fn with_local_opus_send_quality(mut expected: Vec<Vec<String>>) -> Vec<Vec<String>> {
+    let opus = expected[1].iter_mut().find(|line| *line == "a=fmtp:111 usedtx=1").expect("captured Opus fmtp");
+    *opus = "a=fmtp:111 usedtx=1;maxaveragebitrate=40000;maxplaybackrate=48000".into();
+    expected
+}
+
 #[test]
 fn captured_teams_answer_translates_to_the_captured_browser_answer() {
     let offer = to_teams_offer(BROWSER_OFFER, &captured_plan(), &mut counter()).unwrap();
     let answer = to_browser_answer(TEAMS_ANSWER, &offer, BROWSER_OFFER).unwrap();
     let actual = sections(&sdp::parse(&answer).unwrap());
-    let expected = sections(&sdp::parse(BROWSER_ANSWER).unwrap());
+    let expected = with_local_opus_send_quality(sections(&sdp::parse(BROWSER_ANSWER).unwrap()));
     assert_same(actual, expected, differs_per_run);
 }
 
