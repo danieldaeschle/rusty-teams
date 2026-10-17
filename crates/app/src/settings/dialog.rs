@@ -21,6 +21,8 @@ const CONTENT_MAX_WIDTH: f32 = 744.;
 const CLOSE_SIZE: f32 = 32.;
 const COMPACT_BELOW_WIDTH: f32 = 1100.;
 const COMPACT_BELOW_HEIGHT: f32 = 720.;
+const NAV_WIDTH: f32 = 280.;
+const PADDING: f32 = 24.;
 
 pub enum SettingsDialogEvent {
     Close,
@@ -34,18 +36,11 @@ pub struct DialogMetrics {
 }
 
 pub fn metrics(window_width: f32, window_height: f32) -> DialogMetrics {
-    if window_width < COMPACT_BELOW_WIDTH || window_height < COMPACT_BELOW_HEIGHT {
-        DialogMetrics {
-            inset: 24.,
-            nav_width: 216.,
-            padding: 18.,
-        }
-    } else {
-        DialogMetrics {
-            inset: 48.,
-            nav_width: 264.,
-            padding: 24.,
-        }
+    let compact = window_width < COMPACT_BELOW_WIDTH || window_height < COMPACT_BELOW_HEIGHT;
+    DialogMetrics {
+        inset: if compact { 24. } else { 48. },
+        nav_width: NAV_WIDTH,
+        padding: PADDING,
     }
 }
 
@@ -288,9 +283,17 @@ mod tests {
     #[test]
     fn small_windows_get_the_compact_inset() {
         assert_eq!(metrics(1280., 800.).inset, 48.);
-        assert_eq!(metrics(1920., 1080.).nav_width, 264.);
         assert_eq!(metrics(960., 640.).inset, 24.);
-        assert_eq!(metrics(1280., 640.).nav_width, 216.);
+        assert_eq!(metrics(1280., 640.).inset, 24.);
+    }
+
+    #[test]
+    fn nav_keeps_the_teams_list_pane_minimum_width() {
+        for (width, height) in [(640., 480.), (960., 640.), (1280., 800.), (1920., 1080.)] {
+            let metrics = metrics(width, height);
+            assert_eq!(metrics.nav_width, 280.);
+            assert_eq!(metrics.padding, 24.);
+        }
     }
 
     #[test]
