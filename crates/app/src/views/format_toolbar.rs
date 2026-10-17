@@ -42,9 +42,10 @@ pub enum FormatButton {
     Bulleted,
     Numbered,
     Quote,
+    Table,
 }
 
-pub const GROUPS: [&[FormatButton]; 5] = [
+pub const GROUPS: [&[FormatButton]; 6] = [
     &[
         FormatButton::Bold,
         FormatButton::Italic,
@@ -63,6 +64,7 @@ pub const GROUPS: [&[FormatButton]; 5] = [
         FormatButton::Numbered,
         FormatButton::Quote,
     ],
+    &[FormatButton::Table],
 ];
 
 impl FormatButton {
@@ -82,6 +84,7 @@ impl FormatButton {
             FormatButton::Bulleted => "Bulleted list",
             FormatButton::Numbered => "Numbered list",
             FormatButton::Quote => "Quote",
+            FormatButton::Table => "Insert table",
         }
     }
 
@@ -102,6 +105,7 @@ impl FormatButton {
             FormatButton::Bulleted => symbol("format_list_bulleted", 18., color).into_any_element(),
             FormatButton::Numbered => symbol("format_list_numbered", 18., color).into_any_element(),
             FormatButton::Quote => symbol("format_quote", 18., color).into_any_element(),
+            FormatButton::Table => symbol("table", 18., color).into_any_element(),
         }
     }
 }
@@ -353,7 +357,7 @@ pub fn render(placement: Placement, mode: Mode<'_>) -> AnyElement {
 mod tests {
     use gpui_kit::px;
 
-    use super::{ARROW_MARGIN, BUTTON, GROUPS, bar_width, place};
+    use super::{ARROW_MARGIN, BUTTON, FormatButton, GROUPS, bar_width, place};
 
     #[test]
     fn the_bar_centers_over_the_selection() {
@@ -381,8 +385,9 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_holds_fourteen_buttons_in_five_groups() {
-        assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 14);
-        assert!(bar_width() > 14. * BUTTON);
+    fn the_bar_holds_fifteen_buttons_in_six_groups_with_the_table_last() {
+        assert_eq!(GROUPS.iter().map(|group| group.len()).sum::<usize>(), 15);
+        assert_eq!(GROUPS.last().copied(), Some(&[FormatButton::Table][..]));
+        assert!(bar_width() > 15. * BUTTON);
     }
 }

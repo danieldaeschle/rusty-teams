@@ -176,8 +176,8 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
-    use crate::views::conversation::MEMBERS_BUTTON;
     use crate::views::composer::{COMPOSER_BOX_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG};
+    use crate::views::conversation::MEMBERS_BUTTON;
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -1318,27 +1318,12 @@ const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
     (
         "notify/ring_view.rs",
         "theme::green()",
-        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
-    ),
-    (
-        "notify/meeting_view.rs",
-        "theme::accent()",
-        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
+        "state signal (pulsing ring around the caller while it rings), not a resting outline",
     ),
     (
         "notify/meeting_view.rs",
         "theme::border_strong()",
         "outlined button, not a surface",
-    ),
-    (
-        "notify/toast.rs",
-        "border)",
-        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
-    ),
-    (
-        "notify/toast.rs",
-        "theme::border_strong()",
-        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
     ),
     (
         "settings/mcp.rs",

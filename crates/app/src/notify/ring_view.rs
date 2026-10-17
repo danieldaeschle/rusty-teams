@@ -14,7 +14,6 @@ use crate::views::call_view::pulsing;
 use crate::views::widgets::icon;
 
 pub const RING_AVATAR: f32 = 56.;
-pub(super) const RING_BORDER: f32 = 2.;
 const RING_WIDTH: f32 = 3.;
 const RING_GAP: f32 = 3.;
 pub(super) const TOAST_RADIUS: f32 = 12.;
@@ -84,10 +83,7 @@ impl Render for RingView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.app.read(cx);
         let Some(entry) = state.rings.get(self.ring_id).cloned() else {
-            return div()
-                .size_full()
-                .bg(theme::surface_raised())
-                .into_any_element();
+            return div().size_full().bg(theme::popup()).into_any_element();
         };
         window.set_window_title(&format!("{}: {}", entry.caller_name(), entry.subtitle()));
         let ends_current = state.call.is_some();
@@ -131,9 +127,7 @@ impl Render for RingView {
             .id(("ring", ring_id))
             .size_full()
             .rounded(px(TOAST_RADIUS))
-            .bg(theme::surface_raised())
-            .border(px(RING_BORDER))
-            .border_color(theme::green())
+            .bg(theme::popup())
             .overflow_hidden()
             .child(
                 div().size_full().p(px(TOAST_PADDING)).child(

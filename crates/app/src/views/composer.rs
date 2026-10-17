@@ -947,6 +947,10 @@ impl Composer {
             FormatButton::Bulleted => self.toggle_lines(LineKind::Bullet(0), window, cx),
             FormatButton::Numbered => self.toggle_lines(LineKind::Numbered(0), window, cx),
             FormatButton::Quote => self.toggle_lines(LineKind::Quote, window, cx),
+            FormatButton::Table => {
+                self.toolbar_dismissed = Some(self.selection(cx));
+                self.open_table_picker(cx);
+            }
         }
     }
 
@@ -967,6 +971,8 @@ impl Composer {
             FormatButton::Bulleted => self.draft.line_state(range, &LineKind::Bullet(0)),
             FormatButton::Numbered => self.draft.line_state(range, &LineKind::Numbered(0)),
             FormatButton::Quote => self.draft.line_state(range, &LineKind::Quote),
+            FormatButton::Table if self.table_picker.is_some() => FormatState::On,
+            FormatButton::Table => FormatState::Off,
         }
     }
 
@@ -2573,24 +2579,6 @@ impl Render for Composer {
                 ))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
-        let table_button = can_attach.then(|| {
-            div()
-                .id("composer-table")
-                .size(px(COMPOSER_BUTTON_SIZE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                .cursor_pointer()
-                .hover(|button| button.bg(theme::popup_hover()))
-                .when(self.table_picker.is_some(), |button| {
-                    button.bg(theme::popup_hover())
-                })
-                .tooltip(|window, cx| Tooltip::new("Insert table").build(window, cx))
-                .child(symbol("table", COMPOSER_ICON_SIZE, theme::text_muted()))
-                .on_click(cx.listener(|this, _, _, cx| this.open_table_picker(cx)))
-        });
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
@@ -2969,8 +2957,7 @@ impl Render for Composer {
                                                 .flex_none()
                                                 .gap(px(COMPOSER_BUTTON_INSET))
                                                 .children(fun)
-                                                .children(attach)
-                                                .children(table_button),
+                                                .children(attach),
                                         )
                                     })
                                     .child(
