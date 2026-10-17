@@ -6,6 +6,7 @@ use gpui_kit::*;
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::call_mini::CallMiniView;
 use super::call_stage::{render_call_overlay, render_stage_overlay};
+use super::call_end_view::render_call_end;
 use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
 use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
 use super::conversation::ConversationView;
@@ -811,7 +812,8 @@ impl Render for AppShell {
             - if show_sidebar { SIDEBAR_WIDTH } else { 0. }
             - 2. * ISLAND_GAP;
         let call_view = render_call_view(&self.state, state, chat_panel, call_fullscreen, island_width)
-            .filter(|_| state.viewing_call());
+            .filter(|_| state.viewing_call())
+            .or_else(|| render_call_end(&self.state, state));
         let (call_view, call_overlay) = match call_view {
             Some(view) if call_fullscreen => (None, Some(render_call_overlay(view))),
             view => (view, None),

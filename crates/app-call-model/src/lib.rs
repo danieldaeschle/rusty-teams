@@ -4,6 +4,7 @@ pub mod bubbles;
 pub mod caption_style;
 pub mod demo;
 pub mod demo_scene;
+pub mod end_screen;
 pub mod fullscreen;
 pub mod health;
 pub mod media;

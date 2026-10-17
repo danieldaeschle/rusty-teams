@@ -206,6 +206,38 @@ impl AppState {
         );
     }
 
+    pub fn remove_chat_member(&mut self, chat_id: &str, user_id: &str, cx: &mut Context<Self>) {
+        let Some(chat) = self.chat_record(chat_id) else {
+            return;
+        };
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let mut without_member = chat.clone();
+        without_member
+            .members
+            .retain(|member| member.user_id.as_deref() != Some(user_id));
+        let _ = self
+            .store
+            .upsert_chats(std::slice::from_ref(&without_member));
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        let (owned_chat_id, owned_user_id) = (chat_id.to_owned(), user_id.to_owned());
+        self.run_chat_action(
+            "Remove from chat",
+            async move {
+                engine
+                    .remove_chat_member(&owned_chat_id, &owned_user_id)
+                    .await
+            },
+            move |state, cx| state.restore_chat_locally(&chat, cx),
+            |_, _| {},
+            cx,
+        );
+    }
+
     fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
         self.sidebar
             .chats

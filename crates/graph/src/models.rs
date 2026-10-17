@@ -109,6 +109,7 @@ pub struct Message {
     pub last_modified_date_time: Option<DateTime<Utc>>,
     pub last_edited_date_time: Option<DateTime<Utc>>,
     pub deleted_date_time: Option<DateTime<Utc>>,
+    pub is_deleted: Option<bool>,
     pub reply_to_id: Option<String>,
     pub subject: Option<String>,
     pub from: Option<Sender>,
@@ -126,7 +127,7 @@ pub struct Message {
 
 impl Message {
     pub fn is_deleted(&self) -> bool {
-        self.deleted_date_time.is_some()
+        self.deleted_date_time.is_some() || self.is_deleted == Some(true)
     }
 }
 

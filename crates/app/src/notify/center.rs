@@ -16,6 +16,7 @@ use super::rules::{
     should_flash, should_ringback,
 };
 use super::settings;
+use super::sound_cache;
 use super::settings_view::{Section, SettingsView};
 use super::stack::{
     AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
@@ -25,6 +26,7 @@ use super::toast::{PillView, ToastView};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
 use crate::call::DemoScene;
+use crate::call::end_screen::EndTone;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
 use crate::single_instance;
@@ -145,6 +147,10 @@ impl NotificationCenter {
             }
         })
         .detach();
+        if !center.demo_mode {
+            let end_tones = EndTone::ALL.map(EndTone::file_name);
+            sound_cache::prefetch(&end_tones, cx);
+        }
         if center.app.read(cx).mode.demo {
             if demo_scene().is_none() {
                 cx.spawn(async move |this, cx| {
@@ -248,6 +254,7 @@ impl NotificationCenter {
             AppEvent::Ring => self.on_rings_changed(cx),
             AppEvent::MeetingReminder => self.on_meeting_reminder(cx),
             AppEvent::MeetingChime => self.on_meeting_chime(cx),
+            AppEvent::CallEndTone(tone) => self.on_call_end_tone(*tone, cx),
             AppEvent::Call => self.sync_ringback(cx),
             _ => {}
         }
@@ -570,6 +577,12 @@ impl NotificationCenter {
     fn on_meeting_chime(&mut self, cx: &mut Context<Self>) {
         if self.settings.sound && !self.reminders_quiet(cx) && !self.demo_mode {
             platform::play_meeting_chime();
+        }
+    }
+
+    fn on_call_end_tone(&mut self, tone: EndTone, cx: &mut Context<Self>) {
+        if !self.demo_mode {
+            sound_cache::play(tone.file_name(), cx);
         }
     }
 

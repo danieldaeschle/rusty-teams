@@ -17,6 +17,7 @@ use super::demo::{
 use super::features::{TransferCandidate, room_closed_move};
 use super::media::CallMedia;
 use super::mic::save_mic;
+use super::end_screen::{CallEndScreen, end_tone};
 use super::model::{ActiveCall, CallKind, CallModel, ConsultTransfer, ended_notice};
 use super::prejoin::{DemoMeeting, MeetingJoin};
 use super::report::{
@@ -240,6 +241,7 @@ impl AppState {
     ) {
         self.call_count += 1;
         let call_id = self.call_count;
+        self.call_end = None;
         let CallHandle {
             commands,
             updates,
@@ -551,6 +553,12 @@ impl AppState {
             .pending_move
             .take()
             .or_else(|| room_closed_move(call, &reason));
+        if let Some(tone) = end_tone(call.model.kind, next_move.is_some()) {
+            cx.emit(AppEvent::CallEndTone(tone));
+        }
+        let end_screen = (call.viewing && !back_to_held && next_move.is_none())
+            .then(|| CallEndScreen::for_call(call, &reason))
+            .flatten();
         call.pictures.clear(cx);
         if let Some(thread) = call.chat_thread() {
             crate::agent_api::clear_captions(thread, cx);
@@ -560,9 +568,10 @@ impl AppState {
         if back_to_held {
             self.call = self.held_call.take();
         }
-        match next_move {
-            Some(next_move) => self.join_moved_call(next_move, cx),
-            None => self.raise_notice(notice, None, cx),
+        match (next_move, end_screen) {
+            (Some(next_move), _) => self.join_moved_call(next_move, cx),
+            (None, Some(end_screen)) => self.call_end = Some(end_screen),
+            (None, None) => self.raise_notice(notice, None, cx),
         }
         self.refresh_call_history_after_call(cx);
         cx.emit(AppEvent::Call);
@@ -1085,6 +1094,10 @@ impl AppState {
         if self.call.is_some() {
             return;
         }
+        if let Some(cause) = scene.end_cause() {
+            self.demo_call_end(cause, cx);
+            return;
+        }
         let (script, model, conversation_id) = if scene.is_one_to_one() {
             (
                 DemoCall::People(vec![demo_caller()]),
@@ -1359,6 +1372,7 @@ mod tests {
     use crate::call::background::BackgroundPick;
     use crate::call::{CaptionPosition, CaptionSize, RecordAction, ViewSettings};
     use crate::call::demo::demo_ring;
+    use crate::call::end_screen::EndTone;
     use crate::call::features::room_closed_move;
     use crate::call::model::BreakoutState;
     use crate::data::Person;
@@ -2339,6 +2353,44 @@ mod tests {
                 assert!(state.call.is_none());
                 let notice = state.notice.as_ref().expect("notice");
                 assert_eq!(notice.text, "Call ended 00:42");
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_dropped_call_shows_the_end_screen_and_plays_the_end_tone(cx: &mut TestAppContext) {
+        let app = app_with_call(cx);
+        let tones = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let heard = tones.clone();
+        cx.update(|cx| {
+            cx.subscribe(&app, move |_, event: &AppEvent, _| {
+                if let AppEvent::CallEndTone(tone) = event {
+                    heard.borrow_mut().push(*tone);
+                }
+            })
+            .detach();
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::State(CallState::Ended { reason: EndReason::Dropped }), cx);
+                assert!(state.call.is_none());
+                assert!(state.notice.is_none());
+                let screen = state.call_end.as_ref().expect("end screen");
+                assert_eq!(screen.heading(), "Call dropped");
+                assert_eq!(screen.retry_label(), "Call back");
+                state.dismiss_call_end(cx);
+                assert!(state.call_end.is_none());
+            })
+        });
+        assert_eq!(*tones.borrow(), vec![EndTone::CallEnded]);
+    }
+
+    #[gpui_kit::test]
+    fn a_normal_end_keeps_the_notice_and_no_end_screen(cx: &mut TestAppContext) {
+        let app = app_with_call(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.apply_call_update(7, CallUpdate::State(CallState::Ended { reason: EndReason::Remote(EndKind::Removed) }), cx);
+                assert!(state.call_end.is_none());
+                assert!(state.notice.is_some());
             })
         });
     }

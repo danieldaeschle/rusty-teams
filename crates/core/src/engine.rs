@@ -493,7 +493,11 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub(crate) fn update_chat_preview(&self, records: &[MessageRecord]) -> Result<()> {
-        let Some(newest) = records.iter().max_by_key(|record| record.created_at) else {
+        let Some(newest) = records
+            .iter()
+            .filter(|record| record.call_event_json.is_none())
+            .max_by_key(|record| record.created_at)
+        else {
             return Ok(());
         };
         let preview = OwnedPreview::from_record(newest);

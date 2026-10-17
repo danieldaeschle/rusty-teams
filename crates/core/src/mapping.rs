@@ -41,6 +41,8 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
         .as_ref()
         .map(OwnedPreview::from_graph);
     let last_event_system = preview.as_ref().is_some_and(|preview| preview.system);
+    // Teams leaves calls out of the chat list line: the line of the message before the call stays.
+    let last_event_call = preview.as_ref().is_some_and(|preview| preview.call);
     ChatRecord {
         id: chat.id.clone(),
         kind: chat.chat_type.clone(),
@@ -72,6 +74,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
             .as_ref()
             .and_then(|preview| preview.sender_name.clone()),
         last_event_system,
+        last_event_call,
     }
 }
 

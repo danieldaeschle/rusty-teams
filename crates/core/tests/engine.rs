@@ -523,8 +523,8 @@ impl Remote for Handle {
         Ok(())
     }
 
-    async fn leave_chat(&self, chat_id: &str, user_id: &str) -> Result<()> {
-        self.record(format!("leave {chat_id} {user_id}"));
+    async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()> {
+        self.record(format!("remove member {chat_id} {user_id}"));
         Ok(())
     }
 
@@ -1398,8 +1398,32 @@ async fn leave_removes_the_chat() {
     let mut events = engine.subscribe();
 
     engine.leave_chat(CHAT).await.unwrap();
-    assert_eq!(fake.calls().last().unwrap(), &format!("leave {CHAT} {ME}"));
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("remove member {CHAT} {ME}")
+    );
     assert!(engine.sidebar().unwrap().chats.is_empty());
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+}
+
+#[tokio::test]
+async fn removing_a_member_drops_them_from_the_cached_chat() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+
+    engine.remove_chat_member(CHAT, "user-ada").await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("remove member {CHAT} user-ada")
+    );
+    let chats = engine.sidebar().unwrap().chats;
+    let member_ids: Vec<Option<&str>> = chats[0]
+        .members
+        .iter()
+        .map(|member| member.user_id.as_deref())
+        .collect();
+    assert_eq!(member_ids, [Some(ME)]);
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 
@@ -2483,7 +2507,10 @@ async fn sidebar_sync_fills_the_last_message_preview() {
     let gone = by_id("c-gone");
     assert!(gone.last_message_deleted);
     assert_eq!(gone.last_message_preview, None);
-    assert_eq!(by_id("c-image").last_message_preview, None);
+    assert_eq!(
+        by_id("c-image").last_message_preview.as_deref(),
+        Some("Sent an image")
+    );
     assert_eq!(
         by_id("c-text")
             .last_message_preview
@@ -2522,6 +2549,36 @@ async fn a_newer_message_updates_the_preview_and_announces_the_sidebar() {
         seen.push(event);
     }
     assert!(seen.contains(&CoreEvent::SidebarChanged));
+}
+
+#[tokio::test]
+async fn a_newer_call_event_leaves_the_preview_alone() {
+    let fake = Arc::new(Fake::default());
+    let mut before = numbered(3);
+    before.push(message(4, 30, "<p>before the call</p>"));
+    fake.set_chat_messages(before.clone());
+    let engine = chat_engine(&fake, SyncConfig::default()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let call: Message = serde_json::from_value(json!({
+        "id": "call", "messageType": "systemEventMessage",
+        "createdDateTime": (base() + Duration::minutes(40)).to_rfc3339(),
+        "body": {"contentType": "html", "content": "<systemEventMessage/>"},
+        "eventDetail": {
+            "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+            "callId": "c1", "callDuration": "PT1M2S", "callEventType": "call",
+            "callParticipants": [],
+        },
+    }))
+    .unwrap();
+    before.push(call);
+    fake.set_chat_messages(before);
+    engine.fetch_newer(CHAT).await.unwrap();
+    let record = engine.sidebar().unwrap().chats.remove(0);
+    assert_eq!(
+        record.last_message_preview.as_deref(),
+        Some("before the call")
+    );
+    assert_eq!(record.last_message_at, Some(base() + Duration::minutes(30)));
 }
 
 #[tokio::test]
