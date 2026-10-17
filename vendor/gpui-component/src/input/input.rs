@@ -3,9 +3,9 @@ use std::rc::Rc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AccessibleAction, AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase, Window, div,
-    px, relative,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Rems, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase,
+    Window, div, px, relative,
 };
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
@@ -119,6 +119,7 @@ pub struct Input {
     prefix: Option<AnyElement>,
     suffix: Option<AnyElement>,
     height: Option<DefiniteLength>,
+    line_box_height: Option<Pixels>,
     appearance: bool,
     cleanable: bool,
     mask_toggle: bool,
@@ -246,6 +247,7 @@ impl Input {
             aria_label: None,
             context_menu_builder: None,
             paste_handler: None,
+            line_box_height: None,
             token_renderer: None,
             token_click_listener: None,
             token_hover_listener: None,
@@ -292,6 +294,14 @@ impl Input {
     /// Set height of the input (Multi-line only).
     pub fn h(mut self, height: impl Into<DefiniteLength>) -> Self {
         self.height = Some(height.into());
+        self
+    }
+
+    /// Center each text line of a multi-line input in a box this tall, in
+    /// place of the size's vertical padding, so a single line is exactly this
+    /// tall and lines up with controls of the same height beside it.
+    pub fn line_box_height(mut self, height: Pixels) -> Self {
+        self.line_box_height = Some(height);
         self
     }
 
@@ -588,12 +598,15 @@ impl RenderOnce for Input {
             },
             cx,
         );
+        let padding_y = self.line_box_height.map_or(self.size.input_py(), |height| {
+            ((height - LINE_HEIGHT.to_pixels(window.rem_size())) / 2.).max(px(0.))
+        });
         state.set_editor_paddings(
             if state.presentation(cx).is_multi_line() {
                 Edges {
-                    top: self.size.input_py(),
+                    top: padding_y,
                     right: self.size.input_px(),
-                    bottom: self.size.input_py(),
+                    bottom: padding_y,
                     left: if state.presentation(cx).is_code_editor() {
                         self.size.input_px().min(px(6.))
                     } else {

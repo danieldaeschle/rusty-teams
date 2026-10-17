@@ -176,6 +176,7 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::composer::{COMPOSER_BOX_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG};
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -862,6 +863,66 @@ mod frames {
                     "{section:?}@{width}x{height}: dialog edges {edges:?}, expected {inset}"
                 );
             }
+        }
+    }
+
+    fn composer_button_insets(visual: &mut VisualTestContext) -> [f32; 6] {
+        collect(visual, Some(COMPOSER_SEND_TAG));
+        let mut bounds_of = |path: &'static str| {
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} rendered"))
+        };
+        let composer = bounds_of(COMPOSER_BOX_TAG);
+        let leading = bounds_of(COMPOSER_LEADING_TAG);
+        let send = bounds_of(COMPOSER_SEND_TAG);
+        [
+            f32::from(leading.left() - composer.left()),
+            f32::from(leading.top() - composer.top()),
+            f32::from(composer.bottom() - leading.bottom()),
+            f32::from(composer.right() - send.right()),
+            f32::from(send.top() - composer.top()),
+            f32::from(composer.bottom() - send.bottom()),
+        ]
+    }
+
+    #[gpui_kit::test]
+    fn composer_buttons_keep_equal_insets(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        let single_line = composer_button_insets(&mut visual);
+        let left = single_line[0];
+        assert!(
+            single_line
+                .iter()
+                .all(|inset| (inset - left).abs() < TOLERANCE),
+            "single line: insets left, top, bottom of the first button and right, top, bottom of send {single_line:?}"
+        );
+        let leading = visual
+            .debug_bounds(COMPOSER_LEADING_TAG)
+            .expect("leading buttons");
+        let send = visual.debug_bounds(COMPOSER_SEND_TAG).expect("send button");
+        visual.simulate_click(
+            point((leading.right() + send.left()) / 2., send.center().y),
+            Default::default(),
+        );
+        visual.simulate_keystrokes("o n e shift-enter t w o shift-enter t h r e e");
+        let three_lines = composer_button_insets(&mut visual);
+        assert!(
+            three_lines[1] > single_line[1] + 30.,
+            "three lines did not grow the composer: {three_lines:?}"
+        );
+        for inset in [
+            three_lines[0],
+            three_lines[2],
+            three_lines[3],
+            three_lines[5],
+        ] {
+            assert!(
+                (inset - left).abs() < TOLERANCE,
+                "three lines: insets left, top, bottom of the first button and right, top, bottom of send {three_lines:?}, expected {left}"
+            );
         }
     }
 

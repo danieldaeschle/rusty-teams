@@ -72,6 +72,11 @@ const POPUP_WIDTH: f32 = 380.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
 const COMPOSER_ICON_SIZE: f32 = 20.;
+const COMPOSER_BUTTON_SIZE: f32 = 32.;
+const COMPOSER_BUTTON_INSET: f32 = 6.;
+pub const COMPOSER_BOX_TAG: &str = "composer";
+pub const COMPOSER_LEADING_TAG: &str = "composer/leading";
+pub const COMPOSER_SEND_TAG: &str = "composer/send";
 /// gpui-kit draws a `Size::Size` button's icon at this fraction of the button size.
 const BUTTON_ICON_SCALE: f32 = 0.75;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
@@ -2497,8 +2502,9 @@ impl Render for Composer {
         let can_attach = self.editing.is_none();
         let send = div()
             .id("composer-send")
-            .size(px(32.))
-            .ml(px(6.))
+            .debug_selector(|| COMPOSER_SEND_TAG.into())
+            .size(px(COMPOSER_BUTTON_SIZE))
+            .ml(px(COMPOSER_BUTTON_INSET))
             .flex_none()
             .flex()
             .items_center()
@@ -2532,7 +2538,7 @@ impl Render for Composer {
                         )
                         .rounded(px(8.))
                         .with_size(px(COMPOSER_ICON_SIZE / BUTTON_ICON_SCALE))
-                        .size(px(32.))
+                        .size(px(COMPOSER_BUTTON_SIZE))
                         .tooltip("Emoji, GIFs und Sticker")
                         .icon(symbol("mood", COMPOSER_ICON_SIZE, theme::text_muted())),
                 )
@@ -2550,7 +2556,7 @@ impl Render for Composer {
         let attach = can_attach.then(|| {
             div()
                 .id("composer-attach")
-                .size(px(32.))
+                .size(px(COMPOSER_BUTTON_SIZE))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -2569,7 +2575,7 @@ impl Render for Composer {
         let table_button = can_attach.then(|| {
             div()
                 .id("composer-table")
-                .size(px(32.))
+                .size(px(COMPOSER_BUTTON_SIZE))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -2587,6 +2593,7 @@ impl Render for Composer {
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
+            .line_box_height(px(COMPOSER_BUTTON_SIZE))
             .appearance(false)
             .bordered(false)
             .on_paste(move |item, window, cx| {
@@ -2917,6 +2924,7 @@ impl Render for Composer {
                     .children(self.render_table_picker(cx))
                     .child(
                         v_flex()
+                            .debug_selector(|| COMPOSER_BOX_TAG.into())
                             .relative()
                             .w_full()
                             .rounded(px(12.))
@@ -2946,14 +2954,19 @@ impl Render for Composer {
                                             row.items_end()
                                         }
                                     })
-                                    .py(px(6.))
-                                    .pl(px(if can_attach { 6. } else { 12. }))
-                                    .pr(px(6.))
+                                    .py(px(COMPOSER_BUTTON_INSET))
+                                    .pl(px(if can_attach {
+                                        COMPOSER_BUTTON_INSET
+                                    } else {
+                                        12.
+                                    }))
+                                    .pr(px(COMPOSER_BUTTON_INSET))
                                     .when(can_attach, |row| {
                                         row.child(
                                             h_flex()
+                                                .debug_selector(|| COMPOSER_LEADING_TAG.into())
                                                 .flex_none()
-                                                .gap(px(6.))
+                                                .gap(px(COMPOSER_BUTTON_INSET))
                                                 .children(fun)
                                                 .children(attach)
                                                 .children(table_button),
