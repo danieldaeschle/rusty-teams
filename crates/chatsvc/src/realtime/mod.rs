@@ -13,11 +13,11 @@ use session::Session;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
+pub use callback::{CallbackReplier, TrouterCallback};
 pub use event::{
     EventKind, MessageEvent, PresenceUpdate, RealtimeEvent, StatusEvent, StatusKind,
     TrouterEndpoint, TypingEvent, decode_payload,
 };
-pub use callback::{CallbackReplier, TrouterCallback};
 pub use host::{DEFAULT_TROUTER_HOST, is_trouter_host};
 
 use crate::error::Result;

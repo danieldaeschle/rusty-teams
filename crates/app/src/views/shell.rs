@@ -266,7 +266,8 @@ impl AppShell {
             });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
-        let notifications = cx.new(|cx| NotificationCenter::new(state.clone(), window, cx));
+        let notifications =
+            cx.new(|cx| NotificationCenter::new(state.clone(), activity.clone(), window, cx));
         let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
         let user_input = cx.global::<UserInputHandle>().0.clone();
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {

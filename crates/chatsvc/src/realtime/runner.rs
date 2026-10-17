@@ -34,9 +34,13 @@ impl PageScript {
         let mut worker_source = WORKER_TEMPLATE
             .replace(&quoted(DEFAULT_GLOBAL_NAME), &quoted(&names.global))
             .replace(&quoted(DEFAULT_BINDING_NAME), &quoted(&names.binding))
-            .replace(&quoted(DEFAULT_EPID_KEY), &quoted(&names.endpoint_storage_key));
+            .replace(
+                &quoted(DEFAULT_EPID_KEY),
+                &quoted(&names.endpoint_storage_key),
+            );
         if config.forward_callbacks {
-            worker_source = worker_source.replace(FORWARD_CALLBACKS_OFF, "const FORWARD_CALLBACKS = true;");
+            worker_source =
+                worker_source.replace(FORWARD_CALLBACKS_OFF, "const FORWARD_CALLBACKS = true;");
         }
         if config.ringable {
             worker_source = worker_source.replace(REGISTRATION_OFF, "const RINGABLE = true;");
@@ -90,7 +94,10 @@ pub(super) struct Attached {
     stop_expression: String,
 }
 
-pub(super) async fn attach(session: &Session, script: &PageScript) -> crate::error::Result<Attached> {
+pub(super) async fn attach(
+    session: &Session,
+    script: &PageScript,
+) -> crate::error::Result<Attached> {
     let (control, events) = session.subscribe(App::Teams).await?;
     control.enable_events().await?;
     control.add_binding(&script.binding_name).await?;
@@ -378,11 +385,9 @@ mod tests {
     fn ensure_body_embeds_the_worker_once_before_the_call() {
         let ensure_body = PageScript::new(&RealtimeConfig::default()).ensure_body();
         assert!(ensure_body.starts_with("(() => {"));
-        assert!(
-            ensure_body
-                .trim_end()
-                .ends_with("window.__chatsvcTrouter.ensure({token, host: args.host, activity: args.activity});")
-        );
+        assert!(ensure_body.trim_end().ends_with(
+            "window.__chatsvcTrouter.ensure({token, host: args.host, activity: args.activity});"
+        ));
         assert_eq!(ensure_body.matches("const VERSION").count(), 1);
     }
 
@@ -399,9 +404,20 @@ mod tests {
         };
         let script = PageScript::new(&config);
         assert!(!script.worker_source.contains("__chatsvc"));
-        assert!(script.worker_source.contains("const GLOBAL_NAME = '__callingTrouter';"));
-        assert!(script.worker_source.contains("const FORWARD_CALLBACKS = true;"));
-        assert_eq!(script.stop_expression(), "window.__callingTrouter ? window.__callingTrouter.stop() : null");
+        assert!(
+            script
+                .worker_source
+                .contains("const GLOBAL_NAME = '__callingTrouter';")
+        );
+        assert!(
+            script
+                .worker_source
+                .contains("const FORWARD_CALLBACKS = true;")
+        );
+        assert_eq!(
+            script.stop_expression(),
+            "window.__callingTrouter ? window.__callingTrouter.stop() : null"
+        );
         let default_script = PageScript::new(&RealtimeConfig::default());
         assert!(default_script.worker_source.contains(FORWARD_CALLBACKS_OFF));
     }
@@ -416,9 +432,21 @@ mod tests {
         let quiet = PageScript::new(&RealtimeConfig::default());
         assert!(quiet.worker_source.contains(REGISTRATION_OFF));
         for script in [ringable, quiet] {
-            assert!(script.worker_source.contains("{appId: 'SkypeSpacesWeb', templateKey: 'SkypeSpacesWeb_2.6'}"));
-            assert!(script.worker_source.contains("{appId: 'TeamsCDLWebWorker', templateKey: 'TeamsCDLWebWorker_2.6'}"));
-            assert!(script.worker_source.contains("RINGABLE ? {productContext: ''} : {}"));
+            assert!(
+                script
+                    .worker_source
+                    .contains("{appId: 'SkypeSpacesWeb', templateKey: 'SkypeSpacesWeb_2.6'}")
+            );
+            assert!(
+                script
+                    .worker_source
+                    .contains("{appId: 'TeamsCDLWebWorker', templateKey: 'TeamsCDLWebWorker_2.6'}")
+            );
+            assert!(
+                script
+                    .worker_source
+                    .contains("RINGABLE ? {productContext: ''} : {}")
+            );
         }
     }
 }

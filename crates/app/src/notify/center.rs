@@ -21,8 +21,10 @@ use super::sounds::{CallTone, Ringtone};
 use super::stack::{
     AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
+use super::taskbar::taskbar_badge_count;
 use super::text::describe;
 use super::toast::{PillView, ToastView};
+use crate::activity::ActivityCenter;
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
 use crate::call::DemoScene;
@@ -65,6 +67,7 @@ impl OpenWindow {
 
 pub struct NotificationCenter {
     app: Entity<AppState>,
+    activity: Entity<ActivityCenter>,
     main_window: AnyWindowHandle,
     main_native: Option<NativeHandle>,
     settings: Settings,
@@ -88,11 +91,17 @@ pub struct NotificationCenter {
     shown_badge: Option<Badge>,
     animations: bool,
     _subscription: Subscription,
+    _activity_observation: Subscription,
     _agent_subscription: Option<Subscription>,
 }
 
 impl NotificationCenter {
-    pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        app: Entity<AppState>,
+        activity: Entity<ActivityCenter>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let settings = settings::load(&app.read(cx).store);
         let tray = if app.read(cx).mode.demo {
             None
@@ -102,6 +111,7 @@ impl NotificationCenter {
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
         });
+        let activity_observation = cx.observe(&activity, |this, _, cx| this.refresh_badge(cx));
         let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
             cx.subscribe(&runs, |this, runs, event: &AgentRunsEvent, cx| {
                 if let AgentRunsEvent::Finished(run_id) = event
@@ -135,7 +145,9 @@ impl NotificationCenter {
             shown_badge: None,
             animations: platform::animations_enabled(),
             app,
+            activity,
             _subscription: subscription,
+            _activity_observation: activity_observation,
             _agent_subscription: agent_subscription,
         };
         cx.spawn(async move |this, cx| {
@@ -902,10 +914,15 @@ impl NotificationCenter {
     }
 
     fn refresh_badge(&mut self, cx: &mut Context<Self>) {
-        let (count, still_unread) =
-            unread_summary(&self.app.read(cx).sidebar, &self.unread_mentions);
+        let state = self.app.read(cx);
+        let count = taskbar_badge_count(
+            &state.sidebar,
+            self.activity.read(cx).feed(),
+            state.directory.section_settings.adaptive_rail(),
+        );
+        let still_unread = unread_conversation_ids(&state.sidebar);
         self.unread_mentions
-            .retain(|conversation_id| still_unread.contains(conversation_id));
+            .retain(|conversation_id| still_unread.contains(conversation_id.as_str()));
         let badge = badge_for(count);
         if badge == self.shown_badge {
             return;
@@ -1211,31 +1228,17 @@ fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
     }
 }
 
-pub fn unread_summary(
-    sidebar: &Sidebar,
-    unread_mentions: &HashSet<String>,
-) -> (usize, HashSet<String>) {
+pub fn unread_conversation_ids(sidebar: &Sidebar) -> HashSet<&str> {
     let chats = sidebar.chats.iter().filter(|chat| chat.unread);
     let channels = sidebar
         .teams
         .iter()
         .flat_map(|team| team.channels.iter())
         .filter(|channel| channel.unread);
-    let silenced_chat_ids: HashSet<&str> = sidebar
-        .chats
-        .iter()
-        .filter(|chat| chat.muted && !unread_mentions.contains(&chat.id))
+    chats
         .map(|chat| chat.id.as_str())
-        .collect();
-    let ids: HashSet<String> = chats
-        .map(|chat| chat.id.clone())
-        .chain(channels.map(|channel| channel.id.clone()))
-        .collect();
-    let counted = ids
-        .iter()
-        .filter(|id| !silenced_chat_ids.contains(id.as_str()))
-        .count();
-    (counted, ids)
+        .chain(channels.map(|channel| channel.id.as_str()))
+        .collect()
 }
 
 fn demo_incoming() -> Vec<Incoming> {
@@ -1310,7 +1313,7 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use super::{preview_lines, unread_summary};
+    use super::{preview_lines, unread_conversation_ids};
     use store::Sidebar;
 
     fn sidebar() -> Sidebar {
@@ -1348,21 +1351,12 @@ mod tests {
     }
 
     #[test]
-    fn unread_summary_counts_chats_and_channels() {
-        let (count, ids) = unread_summary(&sidebar(), &HashSet::new());
-        assert_eq!(count, 2);
-        assert!(ids.contains("a") && ids.contains("ch"));
-    }
-
-    #[test]
-    fn muted_chats_only_count_with_an_unread_mention() {
-        let mut quiet = sidebar();
-        quiet.chats[0].muted = true;
-        let (count, ids) = unread_summary(&quiet, &HashSet::new());
-        assert_eq!(count, 1);
-        assert!(ids.contains("a"));
-        let (count, _) = unread_summary(&quiet, &HashSet::from(["a".to_owned()]));
-        assert_eq!(count, 2);
+    fn unread_conversation_ids_hold_chats_and_channels() {
+        let sidebar = sidebar();
+        assert_eq!(
+            unread_conversation_ids(&sidebar),
+            HashSet::from(["a", "ch"])
+        );
     }
 
     #[gpui_kit::test]

@@ -19,10 +19,13 @@ fn host_and_path_shape(url: &str) -> String {
             _ => "*",
         })
         .collect();
-    let host_kind = without_scheme
-        .split('/')
-        .next()
-        .map_or("?", |host| if host.ends_with("-my.sharepoint.com") { "<tenant>-my.sharepoint.com" } else { "other" });
+    let host_kind = without_scheme.split('/').next().map_or("?", |host| {
+        if host.ends_with("-my.sharepoint.com") {
+            "<tenant>-my.sharepoint.com"
+        } else {
+            "other"
+        }
+    });
     format!("{host_kind}/{}", shape.join("/"))
 }
 
@@ -30,15 +33,22 @@ fn error_shape(error: &TranscriptError) -> String {
     match error {
         TranscriptError::Request(session::Error::Api { status, body, .. }) => format!(
             "HTTP {status} code {}",
-            body.pointer("/error/code").and_then(serde_json::Value::as_str).unwrap_or("-")
+            body.pointer("/error/code")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("-")
         ),
-        TranscriptError::Request(other) => format!("request {}", other.to_string().chars().take(60).collect::<String>()),
+        TranscriptError::Request(other) => format!(
+            "request {}",
+            other.to_string().chars().take(60).collect::<String>()
+        ),
         other => format!("{other:?}"),
     }
 }
 
 fn magic(bytes: &[u8]) -> String {
-    let start = bytes.strip_prefix(b"\xEF\xBB\xBF".as_slice()).unwrap_or(bytes);
+    let start = bytes
+        .strip_prefix(b"\xEF\xBB\xBF".as_slice())
+        .unwrap_or(bytes);
     if start.starts_with(b"WEBVTT") {
         format!("WEBVTT (bom {})", start.len() != bytes.len())
     } else if bytes.starts_with(b"PK\x03\x04") {
@@ -51,9 +61,14 @@ fn magic(bytes: &[u8]) -> String {
 #[tokio::main]
 async fn main() {
     let mut arguments = std::env::args().skip(1);
-    let Some(thread_file) = arguments.next() else { usage() };
+    let Some(thread_file) = arguments.next() else {
+        usage()
+    };
     let delete = arguments.any(|argument| argument == "--delete");
-    let thread_id = std::fs::read_to_string(&thread_file).expect("thread file").trim().to_owned();
+    let thread_id = std::fs::read_to_string(&thread_file)
+        .expect("thread file")
+        .trim()
+        .to_owned();
     let endpoint = std::env::var("CDP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
     let session = Session::connect(&endpoint).await.expect("browser");
     let recap = Recap::new(&session);
@@ -76,7 +91,9 @@ async fn main() {
             host_and_path_shape(&occurrence.recording_url)
         );
     }
-    let Some(occurrence) = occurrences.first() else { return };
+    let Some(occurrence) = occurrences.first() else {
+        return;
+    };
 
     let details = match recap.details(occurrence).await {
         Ok(details) => details,
@@ -89,7 +106,9 @@ async fn main() {
         "# details: audio only {}, duration {:?}, expires in days {:?}, transcript {}, item {}",
         details.audio_only,
         details.duration_seconds,
-        details.expires_at.map(|expires_at| chatsvc::recap::days_until_expiry(expires_at, Utc::now())),
+        details
+            .expires_at
+            .map(|expires_at| chatsvc::recap::days_until_expiry(expires_at, Utc::now())),
         details.transcript_id.is_some(),
         host_and_path_shape(&details.item_url)
     );
@@ -99,8 +118,14 @@ async fn main() {
             "# transcript: {} turns, {} with speaker, {} words, spans {:?}",
             turns.len(),
             turns.iter().filter(|turn| !turn.speaker.is_empty()).count(),
-            turns.iter().map(|turn| turn.text.split_whitespace().count()).sum::<usize>(),
-            turns.iter().map(|turn| (turn.start_seconds.round(), turn.end_seconds.round())).collect::<Vec<_>>()
+            turns
+                .iter()
+                .map(|turn| turn.text.split_whitespace().count())
+                .sum::<usize>(),
+            turns
+                .iter()
+                .map(|turn| (turn.start_seconds.round(), turn.end_seconds.round()))
+                .collect::<Vec<_>>()
         ),
         Err(error) => println!("# transcript: error {}", error_shape(&error)),
     }
@@ -123,7 +148,11 @@ async fn main() {
                     text.contains("word/document.xml")
                 );
             }
-            Err(error) => println!("# transcript file {}: error {}", format.query(), error_shape(&error)),
+            Err(error) => println!(
+                "# transcript file {}: error {}",
+                format.query(),
+                error_shape(&error)
+            ),
         }
     }
     let _ = std::fs::remove_dir_all(&directory);

@@ -3106,6 +3106,7 @@ async fn collapse_and_section_settings_go_through_the_source() {
     Arc::get_mut(&mut source).unwrap().settings = ChatSectionSettings {
         muted: Some(false),
         meeting: Some(true),
+        adaptive_rail: Some(true),
     };
     let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
     let mut events = engine.subscribe();
@@ -3117,6 +3118,7 @@ async fn collapse_and_section_settings_go_through_the_source() {
         ChatSectionSettings {
             muted: Some(false),
             meeting: Some(true),
+            adaptive_rail: Some(true),
         }
     );
 

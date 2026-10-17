@@ -344,10 +344,7 @@ impl<'a> Recap<'a> {
             }
             Err(error) => return Err(error),
         };
-        let Some(report_id) = reports
-            .pointer("/value/0/id")
-            .and_then(Value::as_str)
-        else {
+        let Some(report_id) = reports.pointer("/value/0/id").and_then(Value::as_str) else {
             return Ok(Attendance::TurnedOff);
         };
         let report = self
@@ -386,7 +383,9 @@ fn item_url(site: &str, item: &Value) -> Option<String> {
         .pointer("/parentReference/driveId")
         .and_then(Value::as_str)?;
     let item_id = item.get("id").and_then(Value::as_str)?;
-    Some(format!("{site}/_api/v2.1/drives/{drive_id}/items/{item_id}"))
+    Some(format!(
+        "{site}/_api/v2.1/drives/{drive_id}/items/{item_id}"
+    ))
 }
 
 fn decode_binary(body: &Value) -> Option<Vec<u8>> {
@@ -443,7 +442,8 @@ pub fn parse_audio_only_names(chatsvc_messages_json: &Value) -> HashSet<String> 
         .into_iter()
         .flatten()
         .filter(|message| {
-            message.get("messagetype").and_then(Value::as_str) == Some("RichText/Media_CallRecording")
+            message.get("messagetype").and_then(Value::as_str)
+                == Some("RichText/Media_CallRecording")
         })
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .filter(|content| content.contains(AUDIO_ONLY_MARKER))
@@ -505,9 +505,7 @@ pub fn parse_iso_duration(text: &str) -> Option<u64> {
 }
 
 pub fn parse_expiration(listing_json: &Value) -> Option<DateTime<Utc>> {
-    let stamp = listing_json
-        .pointer("/fields/_ExpirationDate")?
-        .as_str()?;
+    let stamp = listing_json.pointer("/fields/_ExpirationDate")?.as_str()?;
     DateTime::parse_from_rfc3339(stamp)
         .ok()
         .map(|stamp| stamp.with_timezone(&Utc))
@@ -589,10 +587,7 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Value {
-        let path = format!(
-            "{}/tests/fixtures/recap/{name}",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let path = format!("{}/tests/fixtures/recap/{name}", env!("CARGO_MANIFEST_DIR"));
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
@@ -602,7 +597,10 @@ mod tests {
         assert_eq!(occurrences.len(), 2);
         assert_eq!(occurrences[0].message_id, "2002");
         assert_eq!(occurrences[0].duration_seconds, Some(1832));
-        assert_eq!(occurrences[0].organizer_id.as_deref(), Some("user-organizer"));
+        assert_eq!(
+            occurrences[0].organizer_id.as_deref(),
+            Some("user-organizer")
+        );
         assert_eq!(occurrences[1].message_id, "2001");
         assert_eq!(occurrences[1].duration_seconds, None);
     }

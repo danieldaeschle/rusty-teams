@@ -31,15 +31,24 @@ async fn main() {
     );
     println!(
         "# with thread: {}",
-        events.iter().filter(|event| event.thread_id.is_some()).count()
+        events
+            .iter()
+            .filter(|event| event.thread_id.is_some())
+            .count()
     );
     println!(
         "# with organizer name: {}",
-        events.iter().filter(|event| event.organizer_name.is_some()).count()
+        events
+            .iter()
+            .filter(|event| event.organizer_name.is_some())
+            .count()
     );
     println!(
         "# not responded: {}, cancelled: {}, all day: {}",
-        events.iter().filter(|event| event.response == chatsvc::ResponseType::NotResponded).count(),
+        events
+            .iter()
+            .filter(|event| event.response == chatsvc::ResponseType::NotResponded)
+            .count(),
         events.iter().filter(|event| event.cancelled).count(),
         events.iter().filter(|event| event.all_day).count()
     );

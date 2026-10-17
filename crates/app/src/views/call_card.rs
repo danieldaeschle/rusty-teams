@@ -3,11 +3,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_notice::{RecapActions, notice_row};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, RowAction, day_separator, new_marker};
 use super::profile_card::opens_profile;
 use super::widgets::symbol;
 use crate::data::Directory;
-use crate::rows::{CallCard, CallIcon, CallParticipant, MessageRow, RecordingCard};
+use crate::rows::{CallCard, CallIcon, CallParticipant, MessageRow};
 use crate::theme;
 
 const SERIES_START_GAP: f32 = 8.;
@@ -20,19 +21,11 @@ const DETAIL_SIZE: f32 = 11.;
 const JOIN_HEIGHT: f32 = 24.;
 const PARTICIPANT_AVATAR: f32 = 20.;
 const PARTICIPANT_GAP: f32 = 2.;
-const TILE_WIDTH: f32 = 288.;
-const TILE_HEIGHT: f32 = 162.;
-const TILE_RADIUS: f32 = 8.;
-const PLAY_CIRCLE: f32 = 40.;
-const PLAY_GLYPH: f32 = 24.;
-const DURATION_INSET: f32 = 6.;
-const CHIP_HEIGHT: f32 = 26.;
 
 pub struct CallActions {
     pub call_back: RowAction,
     pub join: RowAction,
-    pub open_recording: RowAction,
-    pub open_transcript: RowAction,
+    pub recap: RecapActions,
 }
 
 impl CallActions {
@@ -40,8 +33,12 @@ impl CallActions {
         CallActions {
             call_back: None,
             join: None,
-            open_recording: None,
-            open_transcript: None,
+            recap: RecapActions {
+                view_recap: None,
+                open_recording: None,
+                transcript: None,
+                share: None,
+            },
         }
     }
 }
@@ -51,12 +48,12 @@ fn icon_circle(call: &CallCard, own: bool) -> Div {
         CallIcon::Missed => (theme::red().opacity(0.2), "call_missed", theme::red_soft()),
         CallIcon::Call => (circle_fill(own), "call", theme::text()),
         CallIcon::Video => (circle_fill(own), "videocam", theme::text()),
-        CallIcon::Record => (
+        CallIcon::Record | CallIcon::Saved => (
             circle_fill(own),
-            "radio_button_checked",
+            "fluent_record",
             theme::accent_text(),
         ),
-        CallIcon::RecordStop => (circle_fill(own), "stop_circle", theme::text()),
+        CallIcon::RecordStop => (circle_fill(own), "fluent_record_stop", theme::text()),
     };
     h_flex()
         .size(px(ICON_CIRCLE))
@@ -161,130 +158,6 @@ fn participant_stack(
     )
 }
 
-fn recording_thumbnail(recording: &RecordingCard, directory: &Directory) -> AnyElement {
-    let image = recording
-        .thumbnail
-        .as_ref()
-        .and_then(|thumbnail| directory.image(&thumbnail.url));
-    match image {
-        Some(entry) => img(entry.path.clone())
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element(),
-        None => div()
-            .size_full()
-            .bg(theme::code_surface())
-            .into_any_element(),
-    }
-}
-
-fn recording_tile(
-    recording: &RecordingCard,
-    index: usize,
-    directory: &Directory,
-    open_recording: RowAction,
-) -> Stateful<Div> {
-    div()
-        .id(ElementId::Name(format!("call-recording-{index}").into()))
-        .relative()
-        .w(px(TILE_WIDTH))
-        .h(px(TILE_HEIGHT))
-        .flex_none()
-        .rounded(px(TILE_RADIUS))
-        .overflow_hidden()
-        .cursor_pointer()
-        .hover(|tile| tile.opacity(0.92))
-        .child(recording_thumbnail(recording, directory))
-        .child(
-            h_flex()
-                .absolute()
-                .inset_0()
-                .items_center()
-                .justify_center()
-                .child(
-                    h_flex()
-                        .size(px(PLAY_CIRCLE))
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
-                        .bg(black().opacity(0.55))
-                        .child(symbol("play_arrow", PLAY_GLYPH, theme::white())),
-                ),
-        )
-        .children(recording.duration.clone().map(|duration| {
-            div()
-                .absolute()
-                .bottom(px(DURATION_INSET))
-                .right(px(DURATION_INSET))
-                .px(px(6.))
-                .py(px(1.))
-                .rounded(px(4.))
-                .bg(black().opacity(0.65))
-                .text_size(px(DETAIL_SIZE))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::white())
-                .child(duration)
-        }))
-        .when_some(open_recording, |tile, open| {
-            tile.on_click(move |_, _, cx| open(cx))
-        })
-}
-
-fn transcript_chip(index: usize, open_transcript: RowAction) -> Stateful<Div> {
-    h_flex()
-        .id(ElementId::Name(format!("call-transcript-{index}").into()))
-        .h(px(CHIP_HEIGHT))
-        .px(px(10.))
-        .gap(px(6.))
-        .flex_none()
-        .items_center()
-        .rounded(px(6.))
-        .border_1()
-        .border_color(theme::border())
-        .text_size(px(DETAIL_SIZE + 1.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::text())
-        .cursor_pointer()
-        .hover(|chip| chip.bg(theme::popup_hover()))
-        .child(symbol("description", 15., theme::accent_text()))
-        .child("Transcript")
-        .when_some(open_transcript, |chip, open| {
-            chip.on_click(move |_, _, cx| open(cx))
-        })
-}
-
-fn recording_block(
-    recording: &RecordingCard,
-    index: usize,
-    directory: &Directory,
-    open_recording: RowAction,
-    open_transcript: RowAction,
-) -> Div {
-    v_flex()
-        .pt(px(4.))
-        .gap(px(8.))
-        .child(recording_tile(recording, index, directory, open_recording))
-        .child(
-            h_flex()
-                .w(px(TILE_WIDTH))
-                .gap(px(8.))
-                .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(TITLE_SIZE))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .child(recording.title.clone()),
-                )
-                .when(recording.transcript, |line| {
-                    line.child(transcript_chip(index, open_transcript))
-                }),
-        )
-}
-
 fn card(
     call: &CallCard,
     index: usize,
@@ -292,12 +165,7 @@ fn card(
     actions: CallActions,
     directory: &Directory,
 ) -> Div {
-    let CallActions {
-        call_back,
-        join,
-        open_recording,
-        open_transcript,
-    } = actions;
+    let CallActions { call_back, join, .. } = actions;
     let show_join = call.started && join.is_some();
     let summary = h_flex()
         .gap(px(8.))
@@ -341,9 +209,6 @@ fn card(
             theme::bubble_other()
         })
         .child(summary)
-        .children(call.recording.as_ref().map(|recording| {
-            recording_block(recording, index, directory, open_recording, open_transcript)
-        }))
 }
 
 pub(super) fn post_call_card(
@@ -362,6 +227,9 @@ pub(super) fn call_card_row(
     directory: &Directory,
     actions: CallActions,
 ) -> AnyElement {
+    if let Some(notice) = &call.notice {
+        return notice_row(row, call, notice, index, directory, actions.recap);
+    }
     let own = row.own;
     let body = if own {
         h_flex()

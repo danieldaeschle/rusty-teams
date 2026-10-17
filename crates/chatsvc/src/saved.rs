@@ -24,11 +24,7 @@ pub struct SavedMessage {
 }
 
 fn text_or_number(value: &Value, key: &str) -> Option<String> {
-    match value.get(key)? {
-        Value::String(text) if !text.is_empty() => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
+    crate::json_id::id_text(value.get(key)?)
 }
 
 fn activity_of(message: &Value) -> Option<Value> {

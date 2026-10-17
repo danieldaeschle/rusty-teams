@@ -5,6 +5,7 @@ pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
 pub mod call_card;
+pub mod call_notice;
 pub mod call_control_fold;
 pub mod call_end_view;
 pub mod call_controls;
