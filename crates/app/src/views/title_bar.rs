@@ -129,25 +129,27 @@ struct Reserved {
 struct TitleBarRow {
     app_icon: AppIcon,
     mode_label: Option<&'static str>,
-    update: Option<AnyElement>,
-    own: Option<AnyElement>,
+    controls: Vec<AnyElement>,
     on_search: Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
 }
 
 pub fn render_title_bar(
     app_icon: AppIcon,
     mode_label: Option<&'static str>,
-    update: Option<AnyElement>,
-    own: Option<AnyElement>,
+    controls: impl IntoIterator<Item = AnyElement>,
     on_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     TitleBarRow {
         app_icon,
         mode_label,
-        update,
-        own,
+        controls: controls.into_iter().collect(),
         on_search: Box::new(on_search),
     }
+}
+
+// The Windows caption hit-test takes every point the Drag area reaches, so a control without occlusion never gets its click.
+fn outside_caption(control: AnyElement) -> Div {
+    div().flex_none().occlude().child(control)
 }
 
 fn search_box(
@@ -229,8 +231,7 @@ impl RenderOnce for TitleBarRow {
             .h_full()
             .gap(px(12.))
             .items_center()
-            .children(self.update)
-            .children(self.own)
+            .children(self.controls.into_iter().map(outside_caption))
             .child(div().w(px(4.)));
         let row = h_flex()
             .flex_1()
@@ -278,7 +279,104 @@ impl RenderOnce for TitleBarRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{SEARCH_MIN_WIDTH, SEARCH_WIDTH, search_span};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use gpui_kit::component::button::{Button, ButtonVariants as _};
+    use gpui_kit::{
+        Context, Hitbox, HitboxBehavior, InteractiveElement as _, IntoElement, Modifiers,
+        ParentElement, Render, Styled, TestAppContext, Window, canvas, div, px, size,
+    };
+
+    use super::{
+        AppIcon, SEARCH_MIN_WIDTH, SEARCH_WIDTH, UpdateStatus, render_title_bar, search_span,
+        update_button,
+    };
+
+    struct CaptionHarness {
+        caption: Rc<RefCell<Option<Hitbox>>>,
+        restarts: Rc<Cell<usize>>,
+    }
+
+    impl Render for CaptionHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let caption = self.caption.clone();
+            let restarts = self.restarts.clone();
+            let own = div()
+                .debug_selector(|| "shell/title-bar/own-status".into())
+                .child(Button::new("own").ghost().size(px(32.)).child("O"))
+                .into_any_element();
+            div()
+                .relative()
+                .size_full()
+                .child(
+                    canvas(
+                        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                        move |_, hitbox, _, _| *caption.borrow_mut() = Some(hitbox),
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+                .child(render_title_bar(
+                    AppIcon::ALL[0],
+                    Some("Demo"),
+                    [
+                        update_button(&UpdateStatus::Ready, move |_, _, _| {
+                            restarts.set(restarts.get() + 1)
+                        }),
+                        Some(own),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                    |_, _, _| {},
+                ))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn title_bar_controls_stay_out_of_the_caption(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::apply);
+        let caption = Rc::new(RefCell::new(None));
+        let restarts = Rc::new(Cell::new(0));
+        let (_, window_cx) = cx.add_window_view({
+            let caption = caption.clone();
+            let restarts = restarts.clone();
+            move |_, _| CaptionHarness { caption, restarts }
+        });
+        window_cx.simulate_resize(size(px(1280.), px(800.)));
+        for _ in 0..2 {
+            window_cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        let mut found = Vec::new();
+        for (selector, caption_expected) in [
+            ("shell/title-bar/update", false),
+            ("shell/title-bar/own-status", false),
+            ("shell/title-bar/search", false),
+            ("shell/title-bar/leading", true),
+        ] {
+            let Some(bounds) = window_cx.debug_bounds(selector) else {
+                found.push(format!("{selector} was not rendered"));
+                continue;
+            };
+            let center = bounds.center();
+            let in_caption = window_cx.update(|window, _| {
+                caption
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|hitbox| hitbox.is_hovered_at(center, window))
+            });
+            if in_caption != caption_expected {
+                found.push(format!("{selector} in caption: {in_caption}"));
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+        let update = window_cx
+            .debug_bounds("shell/title-bar/update")
+            .expect("update button rendered");
+        window_cx.simulate_click(update.center(), Modifiers::default());
+        assert_eq!(restarts.get(), 1);
+    }
 
     #[test]
     fn search_stays_centered_while_it_fits() {
