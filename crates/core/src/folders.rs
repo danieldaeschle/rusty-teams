@@ -81,6 +81,7 @@ pub trait FolderSource: Send + Sync {
         &'a self,
         conversation_id: &'a str,
         target_folder_id: &'a str,
+        index: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>>;
     fn remove_from_folder<'a>(
         &'a self,
@@ -204,11 +205,12 @@ impl FolderSource for ChatsvcFolderSource {
         &'a self,
         conversation_id: &'a str,
         target_folder_id: &'a str,
+        index: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>> {
         Box::pin(async move {
             Ok(convert(
                 self.pins
-                    .move_to_folder(conversation_id, target_folder_id)
+                    .move_to_folder(conversation_id, target_folder_id, index)
                     .await?,
             ))
         })
@@ -543,10 +545,11 @@ impl<R: Remote> SyncEngine<R> {
         &self,
         conversation_id: &str,
         target_folder_id: &str,
+        index: Option<usize>,
     ) -> Result<()> {
         let folders = self
             .folder_source()?
-            .move_to_folder(conversation_id, target_folder_id)
+            .move_to_folder(conversation_id, target_folder_id, index)
             .await?;
         self.store_folders(&folders, &self.store.pinned_channel_ids()?)
     }

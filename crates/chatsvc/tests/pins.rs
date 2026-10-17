@@ -384,20 +384,23 @@ fn sections(version: i64, custom: &[(&str, &[&str])], pinned: &[&str]) -> Value 
 }
 
 #[tokio::test]
-async fn move_to_folder_removes_from_the_current_custom_folder_then_adds_in_one_request() {
+async fn move_to_folder_adds_then_removes_from_the_current_folder_in_one_request() {
     let mock = Mock::new(vec![
         (200, sections(10, &[("t~u~A", &["c"]), ("t~u~B", &[])], &[])),
         (200, sections(11, &[("t~u~A", &[]), ("t~u~B", &["c"])], &[])),
     ]);
-    let state = pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
+    let state = pins(&mock)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     assert_eq!(state.folders[2].conversation_ids, ["c"]);
     let body = sent(&mock)[1].2.clone().unwrap();
     assert_eq!(body["folderHierarchyVersion"], 10);
     assert_eq!(
         body["actions"],
         json!([
-            {"action": "RemoveItem", "folderId": "t~u~A", "itemId": "c"},
-            {"action": "AddItem", "folderId": "t~u~B", "itemId": "c"}
+            {"action": "AddItem", "folderId": "t~u~B", "itemId": "c"},
+            {"action": "RemoveItem", "folderId": "t~u~A", "itemId": "c"}
         ])
     );
 }
@@ -408,7 +411,10 @@ async fn move_to_folder_without_a_current_folder_only_adds() {
         (200, sections(10, &[("t~u~B", &[])], &[])),
         (200, sections(11, &[("t~u~B", &["c"])], &[])),
     ]);
-    pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
+    pins(&mock)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     assert_eq!(
         sent(&mock)[1].2.as_ref().unwrap()["actions"]
             .as_array()
@@ -425,7 +431,10 @@ async fn move_to_folder_retries_once_and_replans_from_the_412_state() {
         (412, sections(15, &[("t~u~A", &["c"]), ("t~u~B", &[])], &[])),
         (200, sections(16, &[("t~u~A", &[]), ("t~u~B", &["c"])], &[])),
     ]);
-    pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
+    pins(&mock)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     let retry = sent(&mock)[2].2.clone().unwrap();
     assert_eq!(retry["folderHierarchyVersion"], 15);
     assert_eq!(retry["actions"].as_array().unwrap().len(), 2);
@@ -434,14 +443,20 @@ async fn move_to_folder_retries_once_and_replans_from_the_412_state() {
 #[tokio::test]
 async fn move_into_the_folder_it_is_already_in_sends_nothing() {
     let mock = Mock::new(vec![(200, sections(10, &[("t~u~B", &["c"])], &[]))]);
-    pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
+    pins(&mock)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     assert_eq!(sent(&mock).len(), 1);
 }
 
 #[tokio::test]
 async fn unknown_target_folder_is_typed() {
     let mock = Mock::new(vec![(200, sections(10, &[], &[]))]);
-    let error = pins(&mock).move_to_folder("c", "nope").await.unwrap_err();
+    let error = pins(&mock)
+        .move_to_folder("c", "nope", None)
+        .await
+        .unwrap_err();
     assert!(matches!(error, Error::UnknownFolder(_)));
 }
 
@@ -584,13 +599,19 @@ async fn folder_action_posts_still_take_a_full_answer_as_state() {
         (200, partial),
         (200, sections(11, &[("t~u~B", &["c"])], &[])),
     ]);
-    pins(&mock).move_to_folder("c", "t~u~B").await.unwrap();
+    pins(&mock)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     assert_eq!(sent(&mock).len(), 3);
     let idle = Mock::new(vec![
         (200, sections(10, &[("t~u~B", &[])], &[])),
         (200, sections(11, &[("t~u~B", &["c"])], &[])),
     ]);
-    pins(&idle).move_to_folder("c", "t~u~B").await.unwrap();
+    pins(&idle)
+        .move_to_folder("c", "t~u~B", None)
+        .await
+        .unwrap();
     assert_eq!(sent(&idle).len(), 2);
 }
 

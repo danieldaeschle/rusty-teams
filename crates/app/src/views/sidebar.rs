@@ -1004,6 +1004,10 @@ impl SidebarView {
             title: item.title.clone(),
         };
         let menu_context = menu.clone();
+        let reorder_folder = item
+            .folder_id
+            .clone()
+            .filter(|folder_id| !is_pending_folder(folder_id));
         let target = ChatMenuTarget {
             id: item.id.clone(),
             title: item.title.clone(),
@@ -1028,6 +1032,15 @@ impl SidebarView {
             .on_drag(dragged, |dragged, _, _, cx| {
                 let title = dragged.title.clone();
                 cx.new(|_| DragGhost { title })
+            })
+            .when_some(reorder_folder, |row, folder_id| {
+                let (drop_state, target_id) = (self.state.clone(), item.id.clone());
+                row.drag_over::<DraggedChat>(|style, _, _, _| style.bg(theme::drop_background()))
+                    .on_drop(move |dragged: &DraggedChat, _, cx| {
+                        drop_state.update(cx, |state, cx| {
+                            state.drop_chat_on(&dragged.id, &target_id, &folder_id, cx)
+                        });
+                    })
             })
             .child(avatar)
             .child(lines)

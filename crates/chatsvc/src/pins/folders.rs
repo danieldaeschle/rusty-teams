@@ -51,7 +51,7 @@ impl Folders {
 
     fn containing(&self, conversation_id: &str) -> Option<&Folder> {
         self.folders.iter().find(|folder| {
-            folder.kind == FolderKind::UserCreated
+            matches!(folder.kind, FolderKind::Favorites | FolderKind::UserCreated)
                 && folder
                     .conversation_ids
                     .iter()
@@ -143,8 +143,54 @@ fn expanded_body(hierarchy_version: i64, expanded: bool) -> Value {
     })
 }
 
-fn add_item(folder_id: &str, conversation_id: &str) -> Value {
-    json!({"action": "AddItem", "folderId": folder_id, "itemId": conversation_id})
+fn add_item(folder_id: &str, conversation_id: &str, index: Option<usize>) -> Value {
+    let mut action = json!({"action": "AddItem", "folderId": folder_id, "itemId": conversation_id});
+    if let Some(index) = index {
+        action["itemIndex"] = json!(index);
+    }
+    action
+}
+
+fn reorder_items(folder_id: &str, conversation_ids: Vec<String>) -> Value {
+    json!({"action": "ReorderItems", "folderId": folder_id, "newItemsOrder": conversation_ids})
+}
+
+fn placed_order(conversation_ids: &[String], conversation_id: &str, index: usize) -> Vec<String> {
+    let mut order: Vec<String> = conversation_ids
+        .iter()
+        .filter(|id| *id != conversation_id)
+        .cloned()
+        .collect();
+    order.insert(index.min(order.len()), conversation_id.to_owned());
+    order
+}
+
+fn place_actions(
+    state: &Folders,
+    conversation_id: &str,
+    target_folder_id: &str,
+    index: Option<usize>,
+) -> Result<Vec<Value>> {
+    let target = state.find(target_folder_id)?;
+    if target
+        .conversation_ids
+        .iter()
+        .any(|id| id == conversation_id)
+    {
+        let Some(index) = index else {
+            return Ok(Vec::new());
+        };
+        let order = placed_order(&target.conversation_ids, conversation_id, index);
+        if order == target.conversation_ids {
+            return Ok(Vec::new());
+        }
+        return Ok(vec![reorder_items(target_folder_id, order)]);
+    }
+    let mut actions = vec![add_item(target_folder_id, conversation_id, index)];
+    if let Some(current) = state.containing(conversation_id) {
+        actions.push(remove_item(&current.id, conversation_id));
+    }
+    Ok(actions)
 }
 
 fn remove_item(folder_id: &str, conversation_id: &str) -> Value {
@@ -220,28 +266,10 @@ impl<T: CsaTransport> Pins<T> {
         &self,
         conversation_id: &str,
         target_folder_id: &str,
+        index: Option<usize>,
     ) -> Result<Folders> {
-        self.write_folders(|state| {
-            let target = state
-                .folders
-                .iter()
-                .find(|folder| folder.id == target_folder_id)
-                .ok_or_else(|| Error::UnknownFolder(target_folder_id.to_owned()))?;
-            if target
-                .conversation_ids
-                .iter()
-                .any(|id| id == conversation_id)
-            {
-                return Ok(Vec::new());
-            }
-            let mut actions = Vec::new();
-            if let Some(current) = state.containing(conversation_id) {
-                actions.push(remove_item(&current.id, conversation_id));
-            }
-            actions.push(add_item(target_folder_id, conversation_id));
-            Ok(actions)
-        })
-        .await
+        self.write_folders(|state| place_actions(state, conversation_id, target_folder_id, index))
+            .await
     }
 
     pub async fn remove_from_folder(
@@ -489,6 +517,72 @@ mod tests {
             reordered(&order, "f", "x"),
             Err(Error::UnknownFolder(_))
         ));
+    }
+
+    fn state(folders: &[(&str, FolderKind, &[&str])]) -> Folders {
+        Folders {
+            hierarchy_version: 1,
+            folders: folders
+                .iter()
+                .map(|(id, kind, ids)| Folder {
+                    id: (*id).to_owned(),
+                    name: (*id).to_owned(),
+                    kind: *kind,
+                    expanded: true,
+                    conversation_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
+                })
+                .collect(),
+            order: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn placing_inside_the_same_folder_sends_the_full_new_order() {
+        let folders = state(&[("fav", FolderKind::Favorites, &["a", "b", "c", "d"])]);
+        assert_eq!(
+            place_actions(&folders, "a", "fav", Some(2)).unwrap(),
+            [
+                json!({"action": "ReorderItems", "folderId": "fav", "newItemsOrder": ["b", "c", "a", "d"]})
+            ]
+        );
+        assert_eq!(
+            place_actions(&folders, "d", "fav", Some(1)).unwrap(),
+            [
+                json!({"action": "ReorderItems", "folderId": "fav", "newItemsOrder": ["a", "d", "b", "c"]})
+            ]
+        );
+        assert!(
+            place_actions(&folders, "b", "fav", Some(1))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            place_actions(&folders, "b", "fav", None)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn moving_out_of_favorites_adds_at_the_index_then_removes_like_teams() {
+        let folders = state(&[
+            ("fav", FolderKind::Favorites, &["a"]),
+            ("work", FolderKind::UserCreated, &["b", "c"]),
+        ]);
+        assert_eq!(
+            place_actions(&folders, "a", "work", Some(1)).unwrap(),
+            [
+                json!({"action": "AddItem", "folderId": "work", "itemId": "a", "itemIndex": 1}),
+                json!({"action": "RemoveItem", "folderId": "fav", "itemId": "a"}),
+            ]
+        );
+        assert_eq!(
+            place_actions(&folders, "b", "fav", None).unwrap(),
+            [
+                json!({"action": "AddItem", "folderId": "fav", "itemId": "b"}),
+                json!({"action": "RemoveItem", "folderId": "work", "itemId": "b"}),
+            ]
+        );
     }
 
     #[test]

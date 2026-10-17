@@ -685,19 +685,48 @@ impl AppState {
         cx: &mut Context<Self>,
     ) {
         if self.mode.read_only {
+    ) {
+        self.place_chat(conversation_id, folder_id, None, cx);
+    }
+
+    pub fn drop_chat_on(
+        &mut self,
+        conversation_id: &str,
+        target_conversation_id: &str,
+        folder_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if conversation_id == target_conversation_id {
+            return;
+        }
+        let Some(slot) = self.directory.slot_of(folder_id, target_conversation_id) else {
+            return;
+        };
+        self.place_chat(conversation_id, Some(folder_id), Some(slot), cx);
+    }
+
+    pub fn place_chat(
+        &mut self,
+        conversation_id: &str,
+        folder_id: Option<&str>,
+        index: Option<usize>,
+        cx: &mut Context<Self>,
             return;
         }
         let previous_folder = self
             .directory
             .folder_of(conversation_id)
             .map(|folder| folder.id.clone());
-        self.directory.assign(conversation_id, folder_id);
+        self.directory.place(conversation_id, folder_id, index);
         if let Some(engine) = self.engine.clone() {
             let previous = previous_folder.clone();
             let done = match (folder_id, previous.as_deref()) {
-                (Some(folder_id), _) => {
-                    Some(data::move_to_folder(&engine, conversation_id, folder_id))
-                }
+                (Some(folder_id), _) => Some(data::move_to_folder(
+                    &engine,
+                    conversation_id,
+                    folder_id,
+                    index,
+                )),
                 (None, Some(previous)) => {
                     Some(data::remove_from_folder(&engine, conversation_id, previous))
                 }

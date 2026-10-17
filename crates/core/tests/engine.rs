@@ -3037,6 +3037,7 @@ impl FolderSource for FakeFolders {
             for folder in state
                 .iter_mut()
                 .filter(|folder| folder.kind == FolderKind::UserCreated)
+        _index: Option<usize>,
             {
                 folder.conversation_ids.retain(|id| id != conversation_id);
             }
@@ -3181,7 +3182,7 @@ async fn folders_refresh_move_and_remove_go_through_the_source_and_cache() {
     engine.refresh_folders().await.unwrap();
     assert!(events.try_recv().is_err());
 
-    engine.move_to_folder("a", "work").await.unwrap();
+    engine.move_to_folder("a", "work", None).await.unwrap();
     assert_eq!(
         engine.chat_folders().unwrap()[1].conversation_ids,
         ids(&["c", "a"])
@@ -3445,7 +3446,7 @@ async fn folders_without_a_source_are_unsupported() {
         Err(Error::Unsupported(_))
     ));
     assert!(matches!(
-        engine.move_to_folder("a", "b").await,
+        engine.move_to_folder("a", "b", None).await,
         Err(Error::Unsupported(_))
     ));
 }
