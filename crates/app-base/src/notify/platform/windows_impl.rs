@@ -62,6 +62,12 @@ pub fn native_handle(window: &Window) -> Option<NativeHandle> {
     }
 }
 
+pub fn window_transparency_available(_window: &Window) -> bool {
+    // GPUI then renders into an opaque hwnd swap chain without alpha.
+    !std::env::var("GPUI_DISABLE_DIRECT_COMPOSITION")
+        .is_ok_and(|value| value == "true" || value == "1")
+}
+
 pub fn prepare_toast_window(handle: NativeHandle) {
     unsafe {
         // GPUI creates popups with style 0, and Windows adds a caption frame to that on its own.

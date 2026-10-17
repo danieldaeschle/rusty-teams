@@ -39,6 +39,16 @@ pub fn make_window_click_through(window: &Window) {
     super::x11_input::make_input_transparent(window);
 }
 
+#[cfg(target_os = "linux")]
+pub fn window_transparency_available(window: &Window) -> bool {
+    super::x11_input::window_transparency_available(window)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn window_transparency_available(_window: &Window) -> bool {
+    true
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn make_window_click_through(_window: &Window) {}
 

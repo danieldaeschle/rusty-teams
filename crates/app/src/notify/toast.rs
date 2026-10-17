@@ -15,6 +15,7 @@ use super::layout::{
     TOAST_PADDING,
 };
 use super::platform;
+use super::ring_view::toast_radius;
 use super::rules::ChatKind;
 use super::stack::{ReplyState, ToastModel};
 use super::text::{ToastText, describe, mention_ranges};
@@ -25,7 +26,6 @@ use crate::views::composer::submitted_text;
 use crate::views::widgets::symbol;
 
 const CLOSE_SIZE: f32 = 24.;
-const TOAST_RADIUS: f32 = 12.;
 
 pub struct ToastView {
     center: Entity<NotificationCenter>,
@@ -543,7 +543,7 @@ impl Render for ToastView {
             .relative()
             .size_full()
             .opacity(model.opacity(Instant::now()))
-            .rounded(px(TOAST_RADIUS))
+            .rounded(toast_radius(window))
             .bg(fill)
             .overflow_hidden()
             .cursor_pointer()
@@ -586,7 +586,7 @@ impl PillView {
 }
 
 impl Render for PillView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (queued, opacity) = {
             let center = self.center.read(cx);
             (center.queued_count(), center.stack_opacity())
@@ -599,7 +599,7 @@ impl Render for PillView {
             .items_center()
             .justify_center()
             .opacity(opacity)
-            .rounded(px(TOAST_RADIUS))
+            .rounded(toast_radius(window))
             .bg(theme::popup())
             .cursor_pointer()
             .hover(|bar| bar.bg(theme::popup_hover()))

@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use super::center::NotificationCenter;
 use super::layout::{AVATAR_GAP, TOAST_PADDING};
+use super::platform;
 use crate::app_state::AppState;
 use crate::call::RingEntry;
 use crate::theme;
@@ -16,9 +17,17 @@ use crate::views::widgets::icon;
 pub const RING_AVATAR: f32 = 56.;
 const RING_WIDTH: f32 = 3.;
 const RING_GAP: f32 = 3.;
-pub(super) const TOAST_RADIUS: f32 = 12.;
+const TOAST_RADIUS: f32 = 12.;
 const BUTTON_HEIGHT: f32 = 32.;
 pub const ENDS_CURRENT_CALL: &str = "Accept ends current call";
+
+pub(super) fn toast_radius(window: &Window) -> Pixels {
+    px(card_radius(platform::window_transparency_available(window)))
+}
+
+fn card_radius(window_transparent: bool) -> f32 {
+    if window_transparent { TOAST_RADIUS } else { 0. }
+}
 
 pub struct RingView {
     app: Entity<AppState>,
@@ -126,7 +135,7 @@ impl Render for RingView {
         div()
             .id(("ring", ring_id))
             .size_full()
-            .rounded(px(TOAST_RADIUS))
+            .rounded(toast_radius(window))
             .bg(theme::popup())
             .overflow_hidden()
             .child(
@@ -175,5 +184,16 @@ impl Render for RingView {
                 ),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TOAST_RADIUS, card_radius};
+
+    #[test]
+    fn toast_cards_turn_square_without_window_transparency() {
+        assert_eq!(card_radius(true), TOAST_RADIUS);
+        assert_eq!(card_radius(false), 0.);
     }
 }

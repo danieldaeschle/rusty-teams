@@ -1342,8 +1342,30 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use super::{preview_lines, unread_conversation_ids};
+    use gpui_kit::{WindowBackgroundAppearance, WindowKind};
+
+    use super::{Slot, WorkArea, popup_options, preview_lines, unread_conversation_ids};
     use store::Sidebar;
+
+    #[test]
+    fn toast_windows_ask_for_a_transparent_background() {
+        let slot = Slot {
+            x: 0,
+            y: 0,
+            width: 360,
+            height: 120,
+        };
+        let area = WorkArea {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+            scale: 1.,
+        };
+        let options = popup_options(slot, area);
+        assert_eq!(options.window_background, WindowBackgroundAppearance::Transparent);
+        assert_eq!(options.kind, WindowKind::PopUp);
+    }
 
     fn sidebar() -> Sidebar {
         Sidebar {

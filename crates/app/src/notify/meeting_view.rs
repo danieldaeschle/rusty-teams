@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 use super::center::NotificationCenter;
 use super::layout::{AVATAR_GAP, TOAST_PADDING};
-use super::ring_view::{RING_AVATAR, TOAST_RADIUS, answer_button};
+use super::ring_view::{RING_AVATAR, answer_button, toast_radius};
 use crate::app_state::AppState;
 use crate::call::ReminderPhase;
 use crate::call::meeting_subtitle;
@@ -98,7 +98,7 @@ impl Render for MeetingToastView {
         div()
             .id(("meeting-toast", toast_id))
             .size_full()
-            .rounded(px(TOAST_RADIUS))
+            .rounded(toast_radius(window))
             .bg(theme::popup())
             .overflow_hidden()
             .child(

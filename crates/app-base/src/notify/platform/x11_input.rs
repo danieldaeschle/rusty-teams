@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use x11rb::connection::Connection as _;
@@ -27,6 +29,24 @@ pub fn empty_input_region(display: Option<&str>, window: u32) -> Result<(), Box<
 pub fn make_input_transparent(window: &Window) {
     if let Some(id) = x11_window_id(window) {
         let _ = empty_input_region(None, id);
+    }
+}
+
+pub fn compositor_running(display: Option<&str>) -> Result<bool, Box<dyn std::error::Error>> {
+    let (connection, screen_number) = RustConnection::connect(display)?;
+    let selection = format!("_NET_WM_CM_S{screen_number}");
+    let atom = connection.intern_atom(false, selection.as_bytes())?.reply()?.atom;
+    let owner = connection.get_selection_owner(atom)?.reply()?.owner;
+    Ok(owner != x11rb::NONE)
+}
+
+pub fn window_transparency_available(window: &Window) -> bool {
+    static COMPOSITED: OnceLock<bool> = OnceLock::new();
+    match HasWindowHandle::window_handle(window).map(|handle| handle.as_raw()) {
+        Ok(RawWindowHandle::Xcb(_) | RawWindowHandle::Xlib(_)) => {
+            *COMPOSITED.get_or_init(|| compositor_running(None).unwrap_or(false))
+        }
+        _ => true,
     }
 }
 
@@ -129,6 +149,24 @@ mod tests {
         empty_input_region(Some(&display), window).unwrap();
         let after = connection.shape_get_rectangles(window, SK::INPUT).unwrap().reply().unwrap();
         assert!(after.rectangles.is_empty());
+    }
+
+    #[test]
+    fn transparency_needs_a_compositor_owning_the_cm_selection() {
+        let Some((_server, display)) = start_server() else {
+            return;
+        };
+        assert!(!compositor_running(Some(&display)).unwrap());
+        let (connection, screen_number) = RustConnection::connect(Some(&display)).unwrap();
+        let root = connection.setup().roots[screen_number].root;
+        let window = connection.generate_id().unwrap();
+        connection
+            .create_window(COPY_DEPTH_FROM_PARENT, window, root, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
+            .unwrap();
+        let selection = format!("_NET_WM_CM_S{screen_number}");
+        let atom = connection.intern_atom(false, selection.as_bytes()).unwrap().reply().unwrap().atom;
+        connection.set_selection_owner(window, atom, x11rb::CURRENT_TIME).unwrap().check().unwrap();
+        assert!(compositor_running(Some(&display)).unwrap());
     }
 
     #[test]
