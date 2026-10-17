@@ -753,6 +753,76 @@ mod frames {
                 .join("\n")
         );
     }
+    const TITLE_SEARCH: &str = "shell/title-bar/search";
+    const TITLE_NEIGHBOURS: &[&str] = &[
+        "shell/title-bar/leading",
+        "shell/title-bar/mode-pill",
+        "shell/title-bar/trailing",
+        "shell/title-bar/update",
+        OWN_STATUS,
+    ];
+    const TITLE_SEARCH_SIZES: [(f32, f32, bool); 3] = [
+        (1920., 1080., true),
+        (1280., 800., true),
+        (640., 480., false),
+    ];
+
+    #[gpui_kit::test]
+    fn title_search_is_centered_on_the_window(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        let shell = visual.update(|window, cx| {
+            window
+                .root::<gpui_kit::base::Root>()
+                .flatten()
+                .and_then(|root| root.read(cx).view().clone().downcast::<AppShell>().ok())
+                .expect("app shell is the root view")
+        });
+        visual.update(|_, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.set_update_status(crate::updater::UpdateStatus::Ready, cx)
+            })
+        });
+        let mut found = Vec::new();
+        for (width, height, centered) in TITLE_SEARCH_SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            collect(&mut visual, Some(TITLE_SEARCH));
+            let search = visual
+                .debug_bounds(TITLE_SEARCH)
+                .expect("title search rendered");
+            let search_center = f32::from(search.center().x);
+            eprintln!(
+                "title search @{width}x{height}: {} center {search_center:.1}, window center {:.1}",
+                describe(search),
+                width / 2.
+            );
+            if centered && (search_center - width / 2.).abs() > 1. {
+                found.push(format!(
+                    "@{width}x{height}: search center {search_center:.1} is not the window center {:.1}",
+                    width / 2.
+                ));
+            }
+            if !contains(rectangle(0., 0., width, height), search) {
+                found.push(format!(
+                    "@{width}x{height}: search {} leaves the window",
+                    describe(search)
+                ));
+            }
+            for neighbour in TITLE_NEIGHBOURS {
+                match visual.debug_bounds(neighbour) {
+                    None => found.push(format!("@{width}x{height}: {neighbour} was not rendered")),
+                    Some(bounds) if overlaps(search, bounds) => found.push(format!(
+                        "@{width}x{height}: search {} overlaps {neighbour} {}",
+                        describe(search),
+                        describe(bounds)
+                    )),
+                    Some(_) => {}
+                }
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
     #[gpui_kit::test]
     fn call_chat_bubbles_stay_inside_the_panel(cx: &mut TestAppContext) {
         let (handle, app) = mount(cx);
