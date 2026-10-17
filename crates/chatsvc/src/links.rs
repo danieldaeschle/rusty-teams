@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::messages::{ConversationRef, MessageTransport, Messages, encode, ensure_success};
 
 const URLP_BASE: &str = "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url";
-const IMAGE_HOST_SUFFIX: &str = ".asyncgw.teams.microsoft.com";
+pub const LINK_PROXY_HOST_SUFFIX: &str = ".asyncgw.teams.microsoft.com";
 const LIST_VIEW: &str = "msnp24Equivalent";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub struct LinkImage {
 pub fn is_link_image_url(url: &str) -> bool {
     url.strip_prefix("https://")
         .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .is_some_and(|host| host.ends_with(IMAGE_HOST_SUFFIX))
+        .is_some_and(|host| host.ends_with(LINK_PROXY_HOST_SUFFIX))
 }
 
 pub fn parse_message_links(body: &Value) -> Vec<MessageLinks> {

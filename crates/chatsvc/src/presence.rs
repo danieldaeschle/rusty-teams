@@ -6,6 +6,10 @@ use uuid::Uuid;
 use crate::cards::{CardTransport, SessionCardTransport};
 use crate::error::{Error, Result};
 
+mod lookup;
+
+pub use lookup::{MAX_PRESENCE_IDS, PresenceLookup, UserPresence};
+
 const BASE_URL: &str = "https://presence.teams.microsoft.com/v1";
 const PRESENCE_SCOPE: &str = "user_impersonation";
 const CLIENT_VERSION: &str = "1415/26091712213";

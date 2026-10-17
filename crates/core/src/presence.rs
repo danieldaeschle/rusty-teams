@@ -1,8 +1,8 @@
+use chatsvc::presence::MAX_PRESENCE_IDS;
 use chatsvc::{
     ForcedAvailability, PresenceStatus, PresenceUpdate, StatusNote, TrouterEndpoint,
     WorkLocationKind,
 };
-use graph::MAX_PRESENCE_IDS;
 
 use chrono::{DateTime, Utc};
 

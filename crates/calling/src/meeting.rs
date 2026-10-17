@@ -97,10 +97,7 @@ pub fn live_meeting(thread_id: &str, properties: &Value, now_unix: i64) -> Optio
 }
 
 pub async fn fetch_live_meeting(session: &Session, thread_id: &str) -> Result<Option<LiveMeeting>> {
-    let url = format!(
-        "https://teams.cloud.microsoft/api/chatsvc/{CHATSVC_REGION}/v1/users/ME/conversations/{}?view=msnp24Equivalent",
-        thread_id.replace(':', "%3A").replace('@', "%40")
-    );
+    let url = chatsvc::conversations::thread_url(CHATSVC_REGION, thread_id);
     let response = session.send(Request::get(url), &ic3_scope()).await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

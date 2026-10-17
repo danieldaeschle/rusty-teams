@@ -197,6 +197,7 @@ fn tab_button(tab: &ReactionTab, active: bool, select_tab: SelectTab) -> Statefu
 fn entry_row(entry: &ReactionEntry, directory: &Directory) -> Div {
     h_flex()
         .h(px(ENTRY_HEIGHT))
+        .flex_none()
         .px(px(8.))
         .gap(px(8.))
         .items_center()

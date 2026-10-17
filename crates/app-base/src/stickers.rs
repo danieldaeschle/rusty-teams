@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
 const CATALOG: &str = include_str!("../../app/assets/stickers.tsv");
-const IMAGE_BASE: &str = "https://statics.teams.cdn.office.net/evergreen-assets/stickerassets";
+const IMAGE_BASE: &str = chatsvc::teams_cdn::STICKER_BASE_URL;
 const IMAGE_VERSION: u32 = 5;
 const POPULAR_IDS: [&str; 6] = [
     "Clippy_HelloThere",

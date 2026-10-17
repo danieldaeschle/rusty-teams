@@ -13,8 +13,9 @@ use gpui_kit::component::{
     h_flex,
     input::{
         Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, InlineToken, InputContent,
-        InputEvent, InputState, MoveDown, MoveUp, OutdentInline, RangeDecorationCollection, Redo,
-        TextDecorationCollection, Textarea, TextareaMode, TextareaState, Undo,
+        InputEvent, InputState, MoveDown, MoveRight, MoveUp, OutdentInline,
+        RangeDecorationCollection, Redo, TextDecorationCollection, Textarea, TextareaMode,
+        TextareaState, Undo,
     },
     popover::Popover,
     tooltip::Tooltip,
@@ -24,21 +25,24 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
     Draft, DraftLine, Edit, FileReference, FormatState, LineKind, LinkPreview, MarkKind,
-    MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TypingStyle,
+    MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TABLE_MARK, TableEdit, TypingStyle,
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
 mod drafts;
 mod schedule;
+mod table;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT, EditLink, OpenSwitcher, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic,
-    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+    COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLink,
+    InsertTableColumnLeft, InsertTableColumnRight, InsertTableRowAbove, InsertTableRowBelow,
+    OpenSwitcher, PastePlainText, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike,
+    ToggleSubscript, ToggleSuperscript, ToggleUnderline,
 };
 use super::attachment_tray::{
-    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS,
-    PasteAction, UploadJob, UploadResult, discard_uploaded, inline_preview, names_of, paste_action,
-    pasted_image_name, prepare_pasted_image, read_attachment, render_tray,
+    AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, PasteAction, UploadJob,
+    UploadResult, discard_uploaded, inline_preview, names_of, paste_action, pasted_image_name,
+    prepare_pasted_image, read_attachment, render_tray,
 };
 use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
@@ -55,6 +59,7 @@ use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
+use table::{TableKey, TablePicker, TableViews, is_table_token};
 
 const MIN_ROWS: usize = 1;
 const MAX_ROWS: usize = 8;
@@ -67,6 +72,11 @@ const POPUP_WIDTH: f32 = 380.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
 const COMPOSER_ICON_SIZE: f32 = 20.;
+const COMPOSER_BUTTON_SIZE: f32 = 32.;
+const COMPOSER_BUTTON_INSET: f32 = 6.;
+pub const COMPOSER_BOX_TAG: &str = "composer";
+pub const COMPOSER_LEADING_TAG: &str = "composer/leading";
+pub const COMPOSER_SEND_TAG: &str = "composer/send";
 /// gpui-kit draws a `Size::Size` button's icon at this fraction of the button size.
 const BUTTON_ICON_SCALE: f32 = 0.75;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
@@ -126,8 +136,19 @@ struct Conversion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepKind {
-    Typing { at: usize, after_space: bool },
-    Deleting { start: usize, end: usize },
+    Typing {
+        at: usize,
+        after_space: bool,
+    },
+    Deleting {
+        start: usize,
+        end: usize,
+    },
+    CellTyping {
+        table: usize,
+        row: usize,
+        column: usize,
+    },
     Other,
 }
 
@@ -192,6 +213,12 @@ pub struct Composer {
     pending_anchors: HashMap<u64, usize>,
     link: ComposeLink,
     fun_picker: Entity<FunPicker>,
+    tables: TableViews,
+    table_counter: usize,
+    table_picker: Option<TablePicker>,
+    active_cell: Option<(String, teams_core::Cell)>,
+    caret_before_table: usize,
+    caret_text: String,
     _subscriptions: [Subscription; 4],
 }
 
@@ -292,6 +319,9 @@ fn continues(last: &HistoryStep, kind: StepKind) -> bool {
         (StepKind::Deleting { .. }, StepKind::Deleting { start, end }) => {
             caret.is_empty() && (caret.start == end || caret.start == start)
         }
+        (previous @ StepKind::CellTyping { .. }, next @ StepKind::CellTyping { .. }) => {
+            previous == next
+        }
         _ => false,
     }
 }
@@ -328,7 +358,10 @@ impl Composer {
                 .placeholder("Type a message")
         });
         let subscription = cx.subscribe_in(&input, window, Self::on_input_event);
-        let observer = cx.observe(&input, |_, _, cx| cx.notify());
+        let observer = cx.observe_in(&input, window, |this, _, window, cx| {
+            this.redirect_caret_from_table(window, cx);
+            cx.notify();
+        });
         let image_observer = cx.observe(&app, |this, _, cx| {
             if this.link_image_pending(cx) {
                 cx.notify();
@@ -389,6 +422,12 @@ impl Composer {
             pending_anchors: HashMap::new(),
             link: ComposeLink::default(),
             fun_picker,
+            tables: TableViews::default(),
+            table_counter: 0,
+            table_picker: None,
+            active_cell: None,
+            caret_before_table: 0,
+            caret_text: String::new(),
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
         }
     }
@@ -640,6 +679,7 @@ impl Composer {
         }
         self.previous_value = value;
         self.refresh_style(cx);
+        self.sync_tables(window, cx);
     }
 
     fn shift_anchors(&mut self, start: usize, old_end: usize, new_end: usize) {
@@ -737,6 +777,7 @@ impl Composer {
         self.conversion = None;
         self.paste_hint = None;
         self.refresh_style(cx);
+        self.sync_tables(window, cx);
         self.update_emoji(cx);
         self.update_mention(cx);
         self.schedule_draft_save(cx);
@@ -775,6 +816,9 @@ impl Composer {
         self.link_editor = None;
         self.toolbar_dismissed = None;
         self.pending_anchors.clear();
+        self.active_cell = None;
+        self.table_picker = None;
+        self.sync_tables(window, cx);
         self.history.clear();
         self.history_index = 0;
         self.record(StepKind::Other, cx);
@@ -1064,6 +1108,64 @@ impl Composer {
         }
     }
 
+    fn leave_quote(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let selection = self.selection(cx);
+        if !selection.is_empty() || self.input.read(cx).value().as_ref() != self.draft.text() {
+            return false;
+        }
+        match self.draft.leave_quote_at_end(selection.start) {
+            Some(cursor) => {
+                self.commit(Some(cursor), window, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Backspace right after a table or Delete right before one goes into it instead of
+    /// joining the line with the table's.
+    fn enter_table_beside(
+        &mut self,
+        after: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let selection = self.selection(cx);
+        if !selection.is_empty() || self.input.read(cx).value().as_ref() != self.draft.text() {
+            return false;
+        }
+        let found = if after {
+            self.draft.table_before(selection.start)
+        } else {
+            self.draft.table_after(selection.start)
+        };
+        let Some(index) = found else {
+            return false;
+        };
+        self.focus_table_line(index, after, window, cx);
+        true
+    }
+
+    fn cell_has_focus(&self, window: &Window, cx: &App) -> bool {
+        self.focused_cell(window, cx).is_some()
+    }
+
+    fn paste_plain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        let text = text
+            .replace("\r\n", "\n")
+            .replace([OBJECT_MARK, TABLE_MARK], "");
+        if let Some(input) = self.focused_cell_input(window, cx) {
+            input.update(cx, |state, cx| state.replace(text, window, cx));
+            return;
+        }
+        self.pasted_markdown = None;
+        self.input
+            .update(cx, |state, cx| state.replace(text, window, cx));
+    }
+
     fn indent(&mut self, outdent: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let selection = self.selection(cx);
         if !self.draft.indent(selection, outdent) {
@@ -1079,11 +1181,15 @@ impl Composer {
             return false;
         }
         let selected = &self.draft.text()[selection.clone()];
-        let text = selected.replace(OBJECT_MARK, "");
         let lines = if selected.contains(OBJECT_MARK) {
             self.draft.slice_without_objects(selection)
         } else {
             self.draft.slice(selection)
+        };
+        let text = if selected.contains(TABLE_MARK) {
+            Draft::from_lines(&lines).plain_text()
+        } else {
+            selected.replace(OBJECT_MARK, "")
         };
         if text.is_empty() {
             return true;
@@ -1150,8 +1256,8 @@ impl Composer {
         }
         let matches = emoji::search(&query, &self.recent_emoji.glyphs(), emoji_popup::LIMIT);
         let skin_tone = teams_core::skin_tone(&self.app.read(cx).store);
-        self.emoji_popup = (!matches.is_empty())
-            .then(|| EmojiPopup::new(range, query, matches, skin_tone));
+        self.emoji_popup =
+            (!matches.is_empty()).then(|| EmojiPopup::new(range, query, matches, skin_tone));
     }
 
     fn accept_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1764,8 +1870,8 @@ impl Composer {
         let Some(text) = item.text() else {
             return false;
         };
-        if text.contains(OBJECT_MARK) {
-            let cleaned = text.replace(OBJECT_MARK, "");
+        if text.contains([OBJECT_MARK, TABLE_MARK]) {
+            let cleaned = text.replace([OBJECT_MARK, TABLE_MARK], "");
             self.input
                 .update(cx, |state, cx| state.replace(cleaned, window, cx));
             return true;
@@ -2107,6 +2213,7 @@ impl Composer {
                     .mx(px(6.))
                     .px(px(6.))
                     .h(px(POPUP_ROW_HEIGHT))
+                    .flex_none()
                     .gap(px(8.))
                     .items_center()
                     .rounded(px(6.))
@@ -2396,8 +2503,9 @@ impl Render for Composer {
         let can_attach = self.editing.is_none();
         let send = div()
             .id("composer-send")
-            .size(px(32.))
-            .ml(px(6.))
+            .debug_selector(|| COMPOSER_SEND_TAG.into())
+            .size(px(COMPOSER_BUTTON_SIZE))
+            .ml(px(COMPOSER_BUTTON_INSET))
             .flex_none()
             .flex()
             .items_center()
@@ -2431,7 +2539,7 @@ impl Render for Composer {
                         )
                         .rounded(px(8.))
                         .with_size(px(COMPOSER_ICON_SIZE / BUTTON_ICON_SCALE))
-                        .size(px(32.))
+                        .size(px(COMPOSER_BUTTON_SIZE))
                         .tooltip("Emoji, GIFs und Sticker")
                         .icon(symbol("mood", COMPOSER_ICON_SIZE, theme::text_muted())),
                 )
@@ -2449,7 +2557,7 @@ impl Render for Composer {
         let attach = can_attach.then(|| {
             div()
                 .id("composer-attach")
-                .size(px(32.))
+                .size(px(COMPOSER_BUTTON_SIZE))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -2465,9 +2573,28 @@ impl Render for Composer {
                 ))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
+        let table_button = can_attach.then(|| {
+            div()
+                .id("composer-table")
+                .size(px(COMPOSER_BUTTON_SIZE))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(8.))
+                .cursor_pointer()
+                .hover(|button| button.bg(theme::popup_hover()))
+                .when(self.table_picker.is_some(), |button| {
+                    button.bg(theme::popup_hover())
+                })
+                .tooltip(|window, cx| Tooltip::new("Insert table").build(window, cx))
+                .child(symbol("table", COMPOSER_ICON_SIZE, theme::text_muted()))
+                .on_click(cx.listener(|this, _, _, cx| this.open_table_picker(cx)))
+        });
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
+            .line_box_height(px(COMPOSER_BUTTON_SIZE))
             .appearance(false)
             .bordered(false)
             .on_paste(move |item, window, cx| {
@@ -2476,6 +2603,17 @@ impl Render for Composer {
                     .unwrap_or(false)
             })
             .token(move |context, _, cx| {
+                if context.is_block() && is_table_token(context.token()) {
+                    let token_id = context.token().id().to_string();
+                    let width = context.available_width();
+                    if let Some(table) = tokens_composer
+                        .read_with(cx, |this, _| this.render_table_token(&token_id, width))
+                        .ok()
+                        .flatten()
+                    {
+                        return table;
+                    }
+                }
                 if let Some(id) = context
                     .is_block()
                     .then(|| image_id(context.token()))
@@ -2549,42 +2687,70 @@ impl Render for Composer {
             .pt(px(top))
             .pb(px(bottom))
             .key_context(COMPOSER_KEY_CONTEXT)
-            .on_action(cx.listener(|this, _: &ToggleBold, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleBold, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Bold, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleItalic, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleItalic, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Italic, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleUnderline, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleUnderline, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Underline, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleStrike, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleStrike, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Strike, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleSuperscript, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleSuperscript, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Superscript, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleSubscript, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleSubscript, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Subscript, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ToggleCode, _, cx| {
-                if this.link_editor.is_none() {
+            .on_action(cx.listener(|this, _: &ToggleCode, window, cx| {
+                if this.link_editor.is_none() && !this.cell_has_focus(window, cx) {
                     this.toggle_mark(MarkKind::Code, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &EditLink, window, cx| this.edit_link(window, cx)))
+            .on_action(cx.listener(|this, _: &EditLink, window, cx| {
+                if !this.cell_has_focus(window, cx) {
+                    this.edit_link(window, cx);
+                }
+            }))
+            .on_action(
+                cx.listener(|this, _: &PastePlainText, window, cx| this.paste_plain(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &InsertTableRowAbove, window, cx| {
+                this.edit_table(TableEdit::InsertRowAbove, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &InsertTableRowBelow, window, cx| {
+                this.edit_table(TableEdit::InsertRowBelow, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &InsertTableColumnLeft, window, cx| {
+                this.edit_table(TableEdit::InsertColumnLeft, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &InsertTableColumnRight, window, cx| {
+                this.edit_table(TableEdit::InsertColumnRight, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &DeleteTableRow, window, cx| {
+                this.edit_table(TableEdit::DeleteRow, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &DeleteTableColumn, window, cx| {
+                this.edit_table(TableEdit::DeleteColumn, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &DeleteTable, window, cx| {
+                this.edit_table(TableEdit::DeleteTable, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &ScheduleSend, _, cx| this.open_schedule_picker(cx)))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
                 if this.link_editor.is_none() {
@@ -2598,20 +2764,30 @@ impl Render for Composer {
                     cx.stop_propagation();
                 }
             }))
-            .capture_action(cx.listener(|this, _: &Copy, _, cx| {
-                if this.link_editor.is_none() && this.copy_selection(cx) {
+            .capture_action(cx.listener(|this, _: &Copy, window, cx| {
+                if this.link_editor.is_none()
+                    && !this.cell_has_focus(window, cx)
+                    && this.copy_selection(cx)
+                {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Cut, window, cx| {
-                if this.link_editor.is_none() && this.copy_selection(cx) {
+                if this.link_editor.is_none()
+                    && !this.cell_has_focus(window, cx)
+                    && this.copy_selection(cx)
+                {
                     this.input
                         .update(cx, |state, cx| state.replace("", window, cx));
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
-                if this.link_editor.is_some() {
+                if this.cell_has_focus(window, cx) {
+                    if this.table_key(TableKey::Up, window, cx) {
+                        cx.stop_propagation();
+                    }
+                } else if this.link_editor.is_some() {
                 } else if this.schedule.is_some() {
                     this.move_schedule_highlight(-1, window, cx);
                     cx.stop_propagation();
@@ -2624,17 +2800,32 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
-                if this.link_editor.is_some() {
+                if this.cell_has_focus(window, cx) {
+                    if this.table_key(TableKey::Down, window, cx) {
+                        cx.stop_propagation();
+                    }
+                } else if this.link_editor.is_some() {
                 } else if this.schedule.is_some() {
                     this.move_schedule_highlight(1, window, cx);
                     cx.stop_propagation();
                 } else if this.popup_is_open() {
                     this.move_highlight(1, cx);
                     cx.stop_propagation();
+                } else if this.leave_quote(window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &MoveRight, window, cx| {
+                if this.link_editor.is_none()
+                    && !this.cell_has_focus(window, cx)
+                    && this.leave_quote(window, cx)
+                {
+                    cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, action: &Enter, window, cx| {
-                if this.link_editor.is_some() {
+                if this.cell_has_focus(window, cx) {
+                } else if this.link_editor.is_some() {
                     this.apply_link(window, cx);
                     cx.stop_propagation();
                 } else if this.schedule.is_some() {
@@ -2648,7 +2839,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
-                if this.link_editor.is_some() {
+                if this.table_key(TableKey::Next, window, cx) {
+                    cx.stop_propagation();
+                } else if this.link_editor.is_some() {
                 } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
                     cx.stop_propagation();
@@ -2657,23 +2850,37 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
-                if this.link_editor.is_none() && this.indent(true, window, cx) {
+                if this.table_key(TableKey::Previous, window, cx)
+                    || (this.link_editor.is_none() && this.indent(true, window, cx))
+                {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Backspace, window, cx| {
                 if this.link_editor.is_none()
-                    && (this.undo_conversion(window, cx) || this.backspace_at_start(window, cx))
+                    && !this.cell_has_focus(window, cx)
+                    && (this.undo_conversion(window, cx)
+                        || this.backspace_at_start(window, cx)
+                        || this.enter_table_beside(true, window, cx))
                 {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Delete, window, cx| {
-                if this.link_editor.is_none() && this.delete_forward(window, cx) {
+                if this.link_editor.is_none()
+                    && !this.cell_has_focus(window, cx)
+                    && (this.enter_table_beside(false, window, cx)
+                        || this.delete_forward(window, cx))
+                {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.table_picker.take().is_some() {
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.schedule.is_some() {
                     this.close_schedule(window, cx);
                     cx.stop_propagation();
@@ -2715,8 +2922,10 @@ impl Render for Composer {
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
+                    .children(self.render_table_picker(cx))
                     .child(
                         v_flex()
+                            .debug_selector(|| COMPOSER_BOX_TAG.into())
                             .relative()
                             .w_full()
                             .rounded(px(12.))
@@ -2746,16 +2955,22 @@ impl Render for Composer {
                                             row.items_end()
                                         }
                                     })
-                                    .py(px(6.))
-                                    .pl(px(if can_attach { 6. } else { 12. }))
-                                    .pr(px(6.))
+                                    .py(px(COMPOSER_BUTTON_INSET))
+                                    .pl(px(if can_attach {
+                                        COMPOSER_BUTTON_INSET
+                                    } else {
+                                        12.
+                                    }))
+                                    .pr(px(COMPOSER_BUTTON_INSET))
                                     .when(can_attach, |row| {
                                         row.child(
                                             h_flex()
+                                                .debug_selector(|| COMPOSER_LEADING_TAG.into())
                                                 .flex_none()
-                                                .gap(px(6.))
+                                                .gap(px(COMPOSER_BUTTON_INSET))
                                                 .children(fun)
-                                                .children(attach),
+                                                .children(attach)
+                                                .children(table_button),
                                         )
                                     })
                                     .child(
@@ -2925,7 +3140,10 @@ mod tests {
         })
     }
 
-    fn outgoing_with(text: &str, images: Vec<crate::outgoing::OutgoingImage>) -> crate::outgoing::Outgoing {
+    fn outgoing_with(
+        text: &str,
+        images: Vec<crate::outgoing::OutgoingImage>,
+    ) -> crate::outgoing::Outgoing {
         crate::outgoing::Outgoing {
             draft: teams_core::Draft::plain(text),
             subject: None,
@@ -2983,7 +3201,10 @@ mod tests {
     #[test]
     fn a_sticker_carries_the_sticker_itemtype() {
         let sticker = super::RemoteImage::sticker(crate::stickers::popular()[0]);
-        let outgoing = outgoing_with("\u{FFFC}", vec![crate::outgoing::OutgoingImage::Remote(sticker)]);
+        let outgoing = outgoing_with(
+            "\u{FFFC}",
+            vec![crate::outgoing::OutgoingImage::Remote(sticker)],
+        );
         assert!(
             outgoing
                 .html()
@@ -3394,7 +3615,9 @@ mod tests {
                 excerpt: "question".into(),
             };
             typist.act(|_, cx| {
-                composer.update(cx, |composer, cx| composer.set_reply(Some(reply.clone()), cx));
+                composer.update(cx, |composer, cx| {
+                    composer.set_reply(Some(reply.clone()), cx)
+                });
             });
             load(&mut typist, &entry);
             let tokens = image_tokens(&mut typist);
@@ -3990,12 +4213,118 @@ mod tests {
         #[gpui_kit::test]
         fn quotes_continue_on_shift_enter_and_send_as_blockquote(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
-            typist.type_text("> quoted");
+            typist.type_text(">quoted");
             typist.press("shift-enter");
             typist.type_text("more");
             let outgoing = typist.outgoing();
             assert_eq!(outgoing.html(), "<blockquote>quoted<br>more</blockquote>");
             assert_eq!(outgoing.text(), "quoted\nmore");
+        }
+
+        #[gpui_kit::test]
+        fn enter_in_a_quote_adds_a_line_and_enter_on_the_empty_one_leaves_it(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.type_text(">quoted");
+            typist.press("enter");
+            typist.type_text("more");
+            typist.press("enter enter");
+            typist.type_text("after");
+            assert_eq!(typist.value(), "quoted\nmore\nafter");
+            assert_eq!(
+                typist.outgoing().html(),
+                "<blockquote>quoted<br>more</blockquote>after"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn down_at_the_end_of_a_quote_leaves_it(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text(">quoted");
+            typist.press("down");
+            typist.type_text("after");
+            assert_eq!(
+                typist.outgoing().html(),
+                "<blockquote>quoted</blockquote>after"
+            );
+        }
+
+        fn insert_table(typist: &mut Typist<'_>, rows: usize, columns: usize) {
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.insert_table(rows, columns, window, cx)
+                });
+                window.render_frame(cx);
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_table_takes_tab_grows_a_row_at_the_end_and_sends_as_teams_html(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.type_text("before");
+            insert_table(&mut typist, 1, 2);
+            typist.type_text("a");
+            typist.press("tab");
+            typist.type_text("b");
+            typist.press("tab");
+            typist.act(|window, cx| window.render_frame(cx));
+            typist.type_text("c");
+            typist.press("down");
+            typist.type_text("after");
+            assert_eq!(
+                typist.outgoing().html(),
+                "before<figure class=\"table\"><table class=\"copy-paste-table\"><tbody>\
+                 <tr><td>a</td><td>b</td></tr><tr><td>c</td><td>&nbsp;</td></tr>\
+                 </tbody></table></figure>after"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn deleting_the_last_column_deletes_the_table(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            insert_table(&mut typist, 1, 1);
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.edit_table(teams_core::TableEdit::DeleteColumn, window, cx)
+                });
+            });
+            assert!(typist.draft().lines().iter().all(|kind| !kind.is_table()));
+        }
+
+        #[gpui_kit::test]
+        fn a_pasted_markdown_table_becomes_a_table(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                    "| A | B |\n|---|---|\n| 1 | 2 |".to_owned(),
+                ));
+            typist.press("ctrl-v");
+            assert!(typist.draft().lines()[0].is_table());
+            assert_eq!(
+                typist.outgoing().html(),
+                "<figure class=\"table\"><table class=\"copy-paste-table\"><tbody>\
+                 <tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr>\
+                 </tbody></table></figure>"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_shift_v_pastes_markdown_as_plain_text(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist
+                .cx
+                .write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                    "**hi** there".to_owned(),
+                ));
+            typist.press("ctrl-shift-v");
+            assert_eq!(typist.value(), "**hi** there");
+            assert!(typist.draft().marks().is_empty());
         }
 
         #[gpui_kit::test]

@@ -143,6 +143,12 @@ pub struct AppShell {
 }
 
 impl AppShell {
+    #[cfg(test)]
+    pub(crate) fn set_update_status(&mut self, update: UpdateStatus, cx: &mut Context<Self>) {
+        self.update = update;
+        cx.notify();
+    }
+
     fn sync_call_chat(
         &mut self,
         thread: Option<String>,
