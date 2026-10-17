@@ -197,6 +197,7 @@ fn status_menu(
     let translation_app = context.app.clone();
     let general_app = context.app.clone();
     let call_app = context.app.clone();
+    let zoom_app = context.app.clone();
     let row_label = match &context.summary.until {
         Some(until) => format!("{} {until}", context.summary.label),
         None => context.summary.label.to_owned(),
@@ -265,7 +266,10 @@ fn status_menu(
                     general_app
                         .update(cx, |state, cx| state.open_settings(SettingsSection::General, cx));
                 }),
-        );
+        )
+        .item(PopupMenuItem::element(move |_, cx| {
+            super::window_zoom::menu_row(&zoom_app, cx)
+        }));
     if !demo {
         return popup;
     }

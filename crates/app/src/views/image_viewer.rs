@@ -10,6 +10,7 @@ use gpui_kit::*;
 use image::{Frame, ImageReader};
 
 use super::avatar::person_avatar;
+use super::shortcuts::{ZoomIn, ZoomOut, ZoomReset};
 use super::widgets::symbol;
 use crate::app_state::AppState;
 use crate::downloads;
@@ -985,6 +986,9 @@ impl Render for ImageViewer {
             .bg(rgba(BACKDROP))
             .occlude()
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| this.zoom_step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.zoom_step(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom_fit(cx)))
             .on_scroll_wheel(cx.listener(Self::on_wheel))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(

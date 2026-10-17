@@ -77,6 +77,7 @@ pub mod title_bar;
 pub mod toolbar_placement;
 pub mod transfer_picker;
 pub mod translation_line;
+pub mod window_zoom;
 
 pub use app_ui_kit::{
     card_chart, channel_tabs, draft_style, reaction_proposal_pill, scroll_edge, widgets,
