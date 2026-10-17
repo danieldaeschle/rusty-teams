@@ -118,6 +118,7 @@ mod tests {
             mentions_json: "[]".into(),
             subject: None,
             call_event_json: None,
+            importance: Default::default(),
         }
     }
 

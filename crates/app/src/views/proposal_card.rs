@@ -111,6 +111,7 @@ pub fn outgoing_for(entry: &ProposalEntry, reply: Option<ReplyPreview>) -> Outgo
         images,
         files: Vec::new(),
         link_preview: None,
+        importance: Default::default(),
     }
 }
 

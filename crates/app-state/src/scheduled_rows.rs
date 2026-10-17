@@ -35,6 +35,7 @@ pub fn scheduled_outgoing(html: &str) -> Outgoing {
         images: Vec::new(),
         files: Vec::new(),
         link_preview: None,
+        importance: Default::default(),
     }
 }
 

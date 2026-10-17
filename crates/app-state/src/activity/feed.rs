@@ -577,6 +577,7 @@ mod tests {
             signals: Default::default(),
             chat: Default::default(),
             created_at: at(9, minute),
+            importance: Default::default(),
         }
     }
 

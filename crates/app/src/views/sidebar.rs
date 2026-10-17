@@ -7,11 +7,12 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::{Icon, WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{
-    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
+    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, MessageImportance, SidebarTeam,
+    Store, TeamRecord,
 };
 use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 
@@ -21,7 +22,7 @@ use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::with_top_edge;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
-use super::widgets::{count_badge, icon, menu_icon, page_header, unread_marker};
+use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::channel_menu::{
@@ -69,6 +70,7 @@ const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
 const MENTION_ICON_SIZE: f32 = 15.;
+const IMPORTANCE_MARKER_SIZE: f32 = 16.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTab {
@@ -1157,6 +1159,7 @@ impl SidebarView {
                     .gap(px(8.))
                     .items_center()
                     .child(preview.unwrap_or_else(|| div().flex_1()))
+                    .children(importance_marker(item.importance))
                     .children(match proposal_agent {
                         Some(_) => Some(
                             div()
@@ -1827,6 +1830,16 @@ fn name_color(style: NameStyle) -> Hsla {
     } else {
         theme::text_muted()
     }
+}
+
+/// Teams chat list: red Important / AlertUrgent glyph while the last unread message is marked.
+fn importance_marker(importance: MessageImportance) -> Option<Icon> {
+    let name = match importance {
+        MessageImportance::Normal => return None,
+        MessageImportance::High => "fluent_important_filled",
+        MessageImportance::Urgent => "fluent_alert_urgent_filled",
+    };
+    Some(symbol(name, IMPORTANCE_MARKER_SIZE, theme::red()))
 }
 
 fn mention_badge(badge: MentionBadge) -> AnyElement {

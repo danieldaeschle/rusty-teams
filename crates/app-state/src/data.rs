@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{Image, ImageFormat};
-use store::{ChatRecord, Store, is_bot_id};
+use store::{ChatRecord, MessageImportance, Store, is_bot_id};
 
 use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange, is_notes_chat};
 use tokio::sync::oneshot;
@@ -131,6 +131,7 @@ pub struct Directory {
     pub section_settings: ChatSectionSettings,
     pub pinned_channels: Vec<String>,
     pub unread_counts: HashMap<String, u32>,
+    pub unread_importance: HashMap<String, MessageImportance>,
     pub avatars: HashMap<String, AvatarState>,
     pub presence: HashMap<String, (PresenceKind, Instant)>,
     pub activity: HashMap<String, Activity>,
@@ -588,6 +589,26 @@ pub fn unread_counts(engine: &Engine, chats: &[ChatRecord]) -> HashMap<String, u
         .iter()
         .filter(|chat| chat.unread)
         .map(|chat| (chat.id.clone(), engine.unread_count(&chat.id)))
+        .collect()
+}
+
+pub fn unread_importance_of(directory: &Directory, chat: &ChatRecord) -> MessageImportance {
+    directory
+        .unread_importance
+        .get(&chat.id)
+        .copied()
+        .unwrap_or_default()
+}
+
+pub fn unread_importance(
+    engine: &Engine,
+    chats: &[ChatRecord],
+) -> HashMap<String, MessageImportance> {
+    chats
+        .iter()
+        .filter(|chat| chat.unread)
+        .map(|chat| (chat.id.clone(), engine.unread_importance(&chat.id)))
+        .filter(|(_, importance)| importance.is_marked())
         .collect()
 }
 

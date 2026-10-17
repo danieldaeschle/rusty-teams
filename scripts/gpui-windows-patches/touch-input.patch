@@ -1,0 +1,177 @@
+diff -ruN a/src/events.rs b/src/events.rs
+--- a/src/events.rs
++++ b/src/events.rs
+@@ -10,7 +10,7 @@
+         UI::{
+             Controls::*,
+             HiDpi::*,
+-            Input::{Ime::*, KeyboardAndMouse::*},
++            Input::{Ime::*, KeyboardAndMouse::*, Pointer::GetPointerType},
+             WindowsAndMessaging::*,
+         },
+     },
+@@ -31,6 +31,7 @@
+ pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
+ 
+ const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
++const POINTER_MESSAGE_FLAG_CANCELED: u16 = 0x8000;
+ 
+ /// Coordinates window draws on the UI thread. Owned by the platform and
+ /// shared with every window (like `WindowsPlatformState::cursor_visible`),
+@@ -149,6 +150,10 @@
+             }
+             WM_MOUSEWHEEL => self.handle_mouse_wheel_msg(handle, wparam, lparam),
+             WM_MOUSEHWHEEL => self.handle_mouse_horizontal_wheel_msg(handle, wparam, lparam),
++            WM_POINTERDOWN => self.handle_touch_pointer_msg(handle, wparam, lparam, TouchPhase::Started),
++            WM_POINTERUPDATE => self.handle_touch_pointer_msg(handle, wparam, lparam, TouchPhase::Moved),
++            WM_POINTERUP => self.handle_touch_pointer_msg(handle, wparam, lparam, TouchPhase::Ended),
++            WM_POINTERCAPTURECHANGED => self.handle_touch_pointer_capture_changed_msg(wparam),
+             WM_SYSKEYUP => self.handle_syskeyup_msg(wparam, lparam),
+             WM_KEYUP => self.handle_keyup_msg(wparam, lparam),
+             WM_GPUI_KEYDOWN => self.handle_keydown_msg(wparam, lparam),
+@@ -647,6 +652,62 @@
+         if handled { Some(0) } else { Some(1) }
+     }
+ 
++    fn handle_touch_pointer_msg(
++        &self,
++        handle: HWND,
++        wparam: WPARAM,
++        lparam: LPARAM,
++        phase: TouchPhase,
++    ) -> Option<isize> {
++        let pointer_id = wparam.loword() as u32;
++        let mut pointer_type = POINTER_INPUT_TYPE::default();
++        unsafe { GetPointerType(pointer_id, &mut pointer_type) }.ok()?;
++        if pointer_type != PT_TOUCH {
++            return None;
++        }
++        let phase = if phase == TouchPhase::Ended
++            && wparam.hiword() & POINTER_MESSAGE_FLAG_CANCELED != 0
++        {
++            TouchPhase::Cancelled
++        } else {
++            phase
++        };
++        let mut cursor_point = POINT {
++            x: lparam.signed_loword().into(),
++            y: lparam.signed_hiword().into(),
++        };
++        unsafe { ScreenToClient(handle, &mut cursor_point).ok().log_err() };
++        let position = logical_point(
++            cursor_point.x as f32,
++            cursor_point.y as f32,
++            self.state.scale_factor.get(),
++        );
++        if let Some(touch_id) = self.state.touch_pointers.track(pointer_id, phase, position) {
++            self.dispatch_touch(touch_id, phase, position);
++        }
++        Some(0)
++    }
++
++    fn handle_touch_pointer_capture_changed_msg(&self, wparam: WPARAM) -> Option<isize> {
++        let (touch_id, position) = self.state.touch_pointers.cancel(wparam.loword() as u32)?;
++        self.dispatch_touch(touch_id, TouchPhase::Cancelled, position);
++        Some(0)
++    }
++
++    fn dispatch_touch(&self, touch_id: TouchId, phase: TouchPhase, position: Point<Pixels>) {
++        let Some(mut func) = self.state.callbacks.input.take() else {
++            return;
++        };
++        func(PlatformInput::Touch(TouchEvent {
++            id: touch_id,
++            phase,
++            position,
++            predicted_position: None,
++            force: None,
++        }));
++        self.state.callbacks.input.set(Some(func));
++    }
++
+     fn retrieve_caret_position(&self) -> Option<POINT> {
+         self.with_input_handler_and_scale_factor(|input_handler, scale_factor| {
+             let caret_range = input_handler.selected_text_range(false)?;
+diff -ruN a/src/gpui_windows.rs b/src/gpui_windows.rs
+--- a/src/gpui_windows.rs
++++ b/src/gpui_windows.rs
+@@ -15,6 +15,7 @@
+ mod platform;
+ mod system_notifications;
+ mod system_settings;
++mod touch;
+ mod util;
+ mod vsync;
+ mod window;
+@@ -33,6 +34,7 @@
+ pub(crate) use platform::*;
+ pub(crate) use system_notifications::*;
+ pub(crate) use system_settings::*;
++pub(crate) use touch::*;
+ pub(crate) use util::*;
+ pub(crate) use vsync::*;
+ pub(crate) use window::*;
+diff -ruN a/src/touch.rs b/src/touch.rs
+--- a/src/touch.rs
++++ b/src/touch.rs
+@@ -0,0 +1,41 @@
++use std::cell::{Cell, RefCell};
++use std::collections::HashMap;
++
++use gpui::{Pixels, Point, TouchId, TouchPhase};
++
++#[derive(Default)]
++pub(crate) struct TouchPointers {
++    next_touch_id: Cell<u64>,
++    active: RefCell<HashMap<u32, (TouchId, Point<Pixels>)>>,
++}
++
++impl TouchPointers {
++    pub(crate) fn track(
++        &self,
++        pointer_id: u32,
++        phase: TouchPhase,
++        position: Point<Pixels>,
++    ) -> Option<TouchId> {
++        let mut active = self.active.borrow_mut();
++        match phase {
++            TouchPhase::Started => {
++                let touch_id = TouchId(self.next_touch_id.get());
++                self.next_touch_id.set(self.next_touch_id.get() + 1);
++                active.insert(pointer_id, (touch_id, position));
++                Some(touch_id)
++            }
++            TouchPhase::Moved => {
++                let entry = active.get_mut(&pointer_id)?;
++                entry.1 = position;
++                Some(entry.0)
++            }
++            TouchPhase::Ended | TouchPhase::Cancelled => {
++                active.remove(&pointer_id).map(|(touch_id, _)| touch_id)
++            }
++        }
++    }
++
++    pub(crate) fn cancel(&self, pointer_id: u32) -> Option<(TouchId, Point<Pixels>)> {
++        self.active.borrow_mut().remove(&pointer_id)
++    }
++}
+diff -ruN a/src/window.rs b/src/window.rs
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -63,6 +63,7 @@
+     pub hovered: Cell<bool>,
+     pub last_visibility: Cell<Option<WindowVisibility>>,
+     pub direct_manipulation: DirectManipulationHandler,
++    pub touch_pointers: TouchPointers,
+ 
+     pub renderer: RefCell<DirectXRenderer>,
+     /// Set when the next `draw_window` call must be treated as a forced
+@@ -190,6 +191,7 @@
+             invalidate_devices,
+             draw_coordinator,
+             direct_manipulation,
++            touch_pointers: TouchPointers::default(),
+             a11y: RefCell::new(None),
+         })
+     }

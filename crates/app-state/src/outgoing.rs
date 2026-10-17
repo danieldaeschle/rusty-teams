@@ -8,6 +8,8 @@ use teams_core::{
     OBJECT_MARK, UploadedFile,
 };
 
+use store::MessageImportance;
+
 use crate::remote_image::RemoteImage;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +59,7 @@ pub struct Outgoing {
     pub images: Vec<OutgoingImage>,
     pub files: Vec<OutgoingFile>,
     pub link_preview: Option<LinkPreview>,
+    pub importance: MessageImportance,
 }
 
 impl Outgoing {
@@ -95,6 +98,7 @@ impl Outgoing {
 
     pub fn extras(&self) -> MessageExtras {
         MessageExtras {
+            importance: self.importance.stored(),
             kept: Vec::new(),
             images: self
                 .images
