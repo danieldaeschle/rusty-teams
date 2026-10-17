@@ -339,3 +339,17 @@ fn a_sent_table_edits_back_into_the_same_table() {
     assert!(received.rows[1][0].trim().is_empty());
     assert_eq!(received.to_html(), table.to_html());
 }
+
+#[test]
+fn a_table_as_chatsvc_stores_it_reads_back_into_the_sent_table() {
+    let table = table_of(&[&["a", "b"], &["1", "2"], &["line one\nline two", ""]]);
+    let stored = "<table>\n<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n<tr>\n<td>1</td>\n<td>2</td>\n</tr>\n<tr>\n<td>\n<p>line one</p>\n<p>line two</p>\n</td>\n<td>&nbsp;</td>\n</tr>\n</tbody>\n</table>";
+    let draft = Draft::from_spans(&html_to_spans(stored));
+    let LineKind::Table(received) = &draft.lines()[0] else {
+        panic!("{:?}", draft.lines());
+    };
+    assert_eq!(received.rows[..2], table.rows[..2]);
+    assert_eq!(received.rows[2][0], "line one\nline two");
+    assert!(received.rows[2][1].trim().is_empty());
+    assert_eq!(received.to_html(), table.to_html());
+}
