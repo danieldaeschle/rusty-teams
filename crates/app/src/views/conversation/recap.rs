@@ -155,6 +155,30 @@ impl ConversationView {
         .detach();
     }
 
+    /// Teams opens a meeting chat recording in the Recap tab at its occurrence and plays any
+    /// other recording (channel meetings) in the browser.
+    pub(super) fn open_recording(
+        &mut self,
+        message_id: &str,
+        url: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let occurrence = self
+            .occurrences()
+            .iter()
+            .position(|occurrence| occurrence.message_id == message_id);
+        match (occurrence, url) {
+            (Some(index), _) if self.is_meeting_chat(cx) => {
+                self.select_pane(ChannelPane::Recap, cx);
+                if self.recap.selected != index {
+                    self.select_occurrence(index, cx);
+                }
+            }
+            (_, Some(url)) => cx.open_url(url),
+            (_, None) => {}
+        }
+    }
+
     pub(super) fn open_recap_pane(&mut self, cx: &mut Context<Self>) {
         self.refresh_shared_items(cx);
         if matches!(self.recap.details, Load::Loading) {

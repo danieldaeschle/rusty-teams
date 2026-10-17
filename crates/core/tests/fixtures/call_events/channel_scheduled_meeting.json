@@ -1,0 +1,125 @@
+{
+ "id": "1600766477135",
+ "replyToId": null,
+ "messageType": "message",
+ "createdDateTime": "2020-09-22T09:21:17.135Z",
+ "lastModifiedDateTime": "2022-11-11T13:20:01.848Z",
+ "lastEditedDateTime": null,
+ "deletedDateTime": null,
+ "subject": null,
+ "eventDetail": null,
+ "from": {
+  "application": null,
+  "device": null,
+  "user": {
+   "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+   "id": "00000000-0000-4000-8000-000000000034",
+   "displayName": "Person 28",
+   "userIdentityType": "aadUser",
+   "tenantId": "00000000-0000-4000-8000-000000000003"
+  }
+ },
+ "body": {
+  "contentType": "html",
+  "content": "<p>Agenda for the meeting</p>"
+ },
+ "attachments": [
+  {
+   "id": "1668172801758",
+   "contentType": "meetingReference",
+   "contentUrl": null,
+   "content": "<p>Agenda for the meeting</p>",
+   "name": "Sprint retrospective",
+   "thumbnailUrl": null,
+   "teamsAppId": null
+  }
+ ],
+ "mentions": [],
+ "reactions": [],
+ "replies@odata.count": 127,
+ "replies": [
+  {
+   "id": "1743082988885",
+   "replyToId": "1600766477135",
+   "messageType": "systemEventMessage",
+   "createdDateTime": "2025-03-27T13:43:08.885Z",
+   "lastModifiedDateTime": "2025-03-27T13:43:08.885Z",
+   "lastEditedDateTime": null,
+   "deletedDateTime": null,
+   "subject": null,
+   "from": null,
+   "body": {
+    "contentType": "html",
+    "content": "<systemEventMessage/>"
+   },
+   "attachments": [],
+   "mentions": [],
+   "reactions": [],
+   "eventDetail": {
+    "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+    "callId": "00000000-0000-4000-8000-000000000035",
+    "callDuration": "PT48S",
+    "callEventType": "meeting",
+    "callParticipants": [
+     {
+      "participant": {
+       "application": null,
+       "device": null,
+       "user": {
+        "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+        "id": "00000000-0000-4000-8000-000000000036",
+        "displayName": "Person 29",
+        "userIdentityType": "aadUser"
+       }
+      }
+     }
+    ],
+    "initiator": {
+     "application": null,
+     "device": null,
+     "user": {
+      "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+      "id": "00000000-0000-4000-8000-000000000034",
+      "displayName": null,
+      "userIdentityType": "aadUser",
+      "tenantId": "00000000-0000-4000-8000-000000000003"
+     }
+    }
+   }
+  },
+  {
+   "id": "1743082945914",
+   "replyToId": "1600766477135",
+   "messageType": "systemEventMessage",
+   "createdDateTime": "2025-03-27T13:42:25.914Z",
+   "lastModifiedDateTime": "2025-03-27T13:42:25.914Z",
+   "lastEditedDateTime": null,
+   "deletedDateTime": null,
+   "subject": null,
+   "from": null,
+   "body": {
+    "contentType": "html",
+    "content": "<systemEventMessage/>"
+   },
+   "attachments": [],
+   "mentions": [],
+   "reactions": [],
+   "eventDetail": {
+    "@odata.type": "#microsoft.graph.callStartedEventMessageDetail",
+    "callId": "00000000-0000-4000-8000-000000000035",
+    "callEventType": "meeting",
+    "initiator": {
+     "application": null,
+     "device": null,
+     "user": {
+      "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+      "id": "00000000-0000-4000-8000-000000000034",
+      "displayName": null,
+      "userIdentityType": "aadUser",
+      "tenantId": "00000000-0000-4000-8000-000000000003"
+     }
+    }
+   }
+  }
+ ]
+}

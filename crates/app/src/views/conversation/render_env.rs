@@ -14,7 +14,7 @@ use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
 use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
-use crate::rows::{Delivery, MessageRow, PostRow};
+use crate::rows::{Delivery, MessageRow, PostRow, RecordingCard};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
@@ -68,6 +68,12 @@ impl RenderEnv {
             .iter()
             .cloned()
             .chain(message.link_preview.as_ref().and_then(LinkPreview::image))
+            .chain(
+                message
+                    .call
+                    .as_ref()
+                    .and_then(|call| call.recording.as_ref()?.thumbnail.clone()),
+            )
             .filter(|image| self.app.read(cx).directory.image(&image.url).is_none())
             .collect();
         if !missing_images.is_empty() {
@@ -303,10 +309,7 @@ impl RenderEnv {
 
     fn call_actions(&self, message: &MessageRow, cx: &App) -> CallActions {
         let Some(call) = &message.call else {
-            return CallActions {
-                call_back: None,
-                join: None,
-            };
+            return CallActions::none();
         };
         let app = self.app.clone();
         let conversation_id = message.conversation_id.clone();
@@ -324,7 +327,25 @@ impl RenderEnv {
                 });
             })
         });
-        CallActions { call_back, join }
+        let open = |recording: &RecordingCard| {
+            let (view, message_id, url) = (
+                self.view.clone(),
+                recording.message_id.clone(),
+                recording.url.clone(),
+            );
+            boxed(move |cx| {
+                view.update(cx, |this, cx| {
+                    this.open_recording(&message_id, url.as_deref(), cx)
+                })
+                .ok();
+            })
+        };
+        CallActions {
+            call_back,
+            join,
+            open_recording: call.recording.as_ref().map(open),
+            open_transcript: call.recording.as_ref().map(open),
+        }
     }
 
     fn translation_actions(&self, message: &MessageRow) -> Option<TranslationActions> {

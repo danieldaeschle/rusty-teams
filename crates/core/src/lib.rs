@@ -65,7 +65,8 @@ pub use adaptive_card::{
 };
 pub use avatars::Avatar;
 pub use call_event::{
-    CallEvent, CallPhase, CallType, call_event, format_duration, parse_duration_seconds,
+    CallEvent, CallPhase, CallType, Recording, call_event, format_duration,
+    parse_duration_seconds,
 };
 pub use card_actions::{CardActionOutcome, DialogIdentity, TaskDialog, TaskDialogKind};
 pub use card_chart::{
