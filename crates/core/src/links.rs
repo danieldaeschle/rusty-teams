@@ -289,6 +289,7 @@ mod tests {
             links_json: "[]".to_owned(),
             subject: None,
             call_event_json: None,
+            importance: Default::default(),
         }
     }
 

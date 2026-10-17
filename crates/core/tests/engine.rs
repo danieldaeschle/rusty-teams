@@ -2333,6 +2333,7 @@ async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
             bytes: Arc::new(vec![9]),
         }],
         files: Vec::new(),
+        importance: None,
     };
 
     let sent = engine
@@ -2406,6 +2407,7 @@ async fn send_with_extras_hands_images_and_files_to_the_remote() {
             bytes: Arc::new(vec![9]),
         }],
         files: Vec::new(),
+        importance: None,
     };
 
     engine
@@ -2436,6 +2438,7 @@ async fn a_sent_image_is_cached_under_the_server_url_without_a_download() {
             bytes: Arc::new(vec![9, 8, 7]),
         }],
         files: Vec::new(),
+        importance: None,
     };
     let mut events = engine.subscribe();
 

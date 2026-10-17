@@ -26,6 +26,7 @@ pub mod read_horizon;
 pub mod realtime;
 pub mod recap;
 pub mod receipts;
+pub mod messaging_policy;
 pub mod recording_policy;
 pub mod saved;
 pub mod settings;

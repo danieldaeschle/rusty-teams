@@ -22,6 +22,7 @@ use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, run_chip};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
+use crate::importance::importance_label;
 use crate::render::Block;
 use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
@@ -46,6 +47,7 @@ pub const BUBBLE_TAGS: [&str; 12] = [
     "message-bubble/10",
     "message-bubble/11",
 ];
+pub const IMPORTANCE_LABEL_TAG: &str = "message-importance-label";
 pub(super) const AVATAR_SIZE: f32 = 28.;
 pub(super) const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
@@ -62,6 +64,10 @@ const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
+const IMPORTANCE_LABEL_SIZE: f32 = 12.;
+const IMPORTANCE_LINE_HEIGHT: f32 = 16.;
+const COMPACT_IMPORTANCE_LINE_HEIGHT: f32 = 14.;
+pub(super) const BUBBLE_PADDING_X: f32 = 12.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
@@ -211,7 +217,7 @@ fn bubble(
                 .rounded_tr(px(corners.top_right))
                 .rounded_br(px(corners.bottom_right))
                 .rounded_bl(px(corners.bottom_left))
-                .px(px(12.))
+                .px(px(BUBBLE_PADDING_X))
                 .py(px(bubble_padding_y(extras.compact)))
         })
         .text_size(px(BODY_SIZE))
@@ -248,6 +254,7 @@ fn bubble(
     let has_reactions = !row.reactions.is_empty();
     let saved = extras.saved;
     let mut content = v_flex().gap(px(6.));
+    content = content.children(importance_header(row, extras.compact));
     if row.forwarded {
         content = content.child(forwarded_header());
     }
@@ -375,6 +382,24 @@ struct BubbleExtras {
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
     run.map(|run| div().py(px(2.)).child(run_chip(&run, theme::row_hover())))
+}
+
+/// Teams: bold "Important!" / "Urgent!" in capitals above the message text.
+pub(super) fn importance_header(row: &MessageRow, compact: bool) -> Option<Div> {
+    let label = importance_label(row.importance)?;
+    Some(
+        div()
+            .debug_selector(|| IMPORTANCE_LABEL_TAG.into())
+            .text_size(px(IMPORTANCE_LABEL_SIZE))
+            .line_height(px(if compact {
+                COMPACT_IMPORTANCE_LINE_HEIGHT
+            } else {
+                IMPORTANCE_LINE_HEIGHT
+            }))
+            .font_weight(FontWeight::BOLD)
+            .text_color(theme::red())
+            .child(label),
+    )
 }
 
 pub(super) fn forwarded_header() -> Div {

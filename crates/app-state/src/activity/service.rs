@@ -6,6 +6,7 @@ use gpui_kit::*;
 use super::feed::{Actor, Entry, Feed, RETENTION_DAYS, ReactedMessage, start_time};
 use super::preview_label;
 use super::reactions::reacted_messages;
+use crate::agent_api;
 use crate::app_state::{AppEvent, AppState};
 use crate::call::MissedCall;
 use crate::demo;
@@ -22,6 +23,7 @@ pub struct ActivityCenter {
     tracker: IncomingTracker,
     cutoff: DateTime<Utc>,
     _subscription: Subscription,
+    _proposal_observation: Option<Subscription>,
 }
 
 impl ActivityCenter {
@@ -40,6 +42,8 @@ impl ActivityCenter {
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
         });
+        let proposal_observation =
+            agent_api::handle(cx).map(|api| cx.observe(&api, |this, _, cx| this.on_proposals(cx)));
         let mut center = ActivityCenter {
             app,
             main_window: window.window_handle(),
@@ -47,6 +51,7 @@ impl ActivityCenter {
             tracker: IncomingTracker::new(cutoff),
             cutoff,
             _subscription: subscription,
+            _proposal_observation: proposal_observation,
         };
         center.flush(cx);
         center
@@ -63,6 +68,7 @@ impl ActivityCenter {
     }
 
     pub fn mark_all_read(&mut self, cx: &mut Context<Self>) {
+        agent_api::mark_all_proposals_seen(cx);
         if self.feed.mark_all_read() {
             self.flush(cx);
         }
@@ -103,11 +109,28 @@ impl ActivityCenter {
             .selection
             .as_ref()
             .map(|selection| selection.conversation_id().to_owned());
-        if let Some(conversation_id) = selected
-            && self.feed.mark_conversation_read(&conversation_id)
-        {
+        let Some(conversation_id) = selected else {
+            return;
+        };
+        agent_api::mark_conversation_proposals_seen(&conversation_id, cx);
+        if self.feed.mark_conversation_read(&conversation_id) {
             self.flush(cx);
         }
+    }
+
+    fn on_proposals(&mut self, cx: &mut Context<Self>) {
+        let selected = self
+            .app
+            .read(cx)
+            .selection
+            .as_ref()
+            .map(|selection| selection.conversation_id().to_owned());
+        if let Some(conversation_id) = selected
+            && self.in_foreground(&conversation_id, cx)
+        {
+            agent_api::mark_conversation_proposals_seen(&conversation_id, cx);
+        }
+        cx.notify();
     }
 
     fn on_sidebar(&mut self, cx: &mut Context<Self>) {

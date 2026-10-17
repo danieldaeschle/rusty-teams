@@ -9,7 +9,7 @@ use crate::notify::Preview;
 
 const IMAGE_LABEL: &str = "Image";
 
-fn preview_label(preview: &Preview) -> String {
+pub(crate) fn preview_label(preview: &Preview) -> String {
     match preview {
         Preview::Text(text) => text.clone(),
         Preview::Image => IMAGE_LABEL.to_owned(),

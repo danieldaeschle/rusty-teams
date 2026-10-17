@@ -174,6 +174,7 @@ pub fn build_incoming(
         signals,
         chat,
         created_at: record.created_at,
+        importance: record.importance,
     })
 }
 
@@ -396,6 +397,7 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
             call_event_json: None,
+            importance: Default::default(),
         }
     }
 

@@ -5,7 +5,7 @@ use gpui_kit::*;
 
 use super::center::NotificationCenter;
 use super::layout::{PREVIEW_MAX_LINES, PREVIEW_SIZE};
-use super::stack::AgentToast;
+use super::stack::{AgentToast, AgentToastKind};
 use crate::theme;
 use crate::views::widgets::{icon, symbol};
 
@@ -45,12 +45,16 @@ pub(super) fn agent_toast_content(
 ) -> Div {
     let (open_chat_center, follow_up_center, close_center) =
         (center.clone(), center.clone(), center.clone());
-    let follow_up_label = if agent.failed {
-        "Retry"
-    } else {
-        "Open session"
+    let follow_up_label = match agent.kind {
+        AgentToastKind::Run { failed: true, .. } => Some("Retry"),
+        AgentToastKind::Run { .. } => Some("Open session"),
+        AgentToastKind::Proposal { .. } => None,
     };
-    let tint = if agent.failed {
+    let open_label = match agent.kind {
+        AgentToastKind::Run { .. } => "Open chat",
+        AgentToastKind::Proposal { .. } => "Review",
+    };
+    let tint = if agent.failed() {
         theme::red_soft()
     } else {
         theme::accent_text()
@@ -118,20 +122,18 @@ pub(super) fn agent_toast_content(
         .child(
             h_flex()
                 .gap(px(6.))
-                .child(button("agent-toast-open-chat", "Open chat", true).on_click(
+                .child(button("agent-toast-open-chat", open_label, true).on_click(
                     move |_, _, cx| {
                         cx.stop_propagation();
                         open_chat_center.update(cx, |center, cx| center.activate(id, cx));
                     },
                 ))
-                .child(
-                    button("agent-toast-follow-up", follow_up_label, false).on_click(
-                        move |_, _, cx| {
-                            cx.stop_propagation();
-                            follow_up_center
-                                .update(cx, |center, cx| center.agent_toast_follow_up(id, cx));
-                        },
-                    ),
-                ),
+                .children(follow_up_label.map(|label| {
+                    button("agent-toast-follow-up", label, false).on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        follow_up_center
+                            .update(cx, |center, cx| center.agent_toast_follow_up(id, cx));
+                    })
+                })),
         )
 }

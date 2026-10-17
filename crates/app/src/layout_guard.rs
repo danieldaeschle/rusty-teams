@@ -177,6 +177,10 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::composer::delivery::{
+        COMPOSER_DELIVERY_TAG, COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG,
+        DELIVERY_MENU_TAG,
+    };
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
@@ -189,8 +193,9 @@ mod frames {
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
     };
-    use crate::views::message_row::BUBBLE_TAGS;
+    use crate::views::message_row::{BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y};
     use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
+    use crate::views::activity_panel::ACTIVITY_PROPOSALS_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
@@ -287,6 +292,8 @@ mod frames {
     const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
     const PROPOSAL_CHAT: &str = "demo-chat-release";
     const REACTION_CHAT: &str = "demo-chat-mara";
+    const IMPORTANCE_CHATS: [&str; 2] = ["demo-chat-priya", "demo-chat-atlas"];
+    const IMPORTANCE_LABEL_INSET_X: f32 = 12.;
     const AGENT_TAGS: [&str; 4] = [
         PROPOSAL_CARD,
         PROPOSAL_THUMBNAILS,
@@ -596,6 +603,7 @@ mod frames {
             .chain(SHARE_GUARDED)
             .chain(CONSULT_GUARDED)
             .chain([
+                &ACTIVITY_PROPOSALS_TAG,
                 &AGENTS_LIST,
                 &CALL_TRANSCRIPT,
                 &MENU,
@@ -2061,6 +2069,154 @@ mod frames {
                 "bar {bar:?} over the buttons {leading:?}"
             );
             assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
+        }
+    }
+
+    #[gpui_kit::test]
+    fn agent_proposals_in_activity_stay_inside_the_sidebar(cx: &mut TestAppContext) {
+        let (handle, _) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.dispatch_action(OpenActivity);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            let tags = collect(&mut visual, Some(ACTIVITY_PROPOSALS_TAG));
+            let mut expected = GUARDED.to_vec();
+            expected.push(ACTIVITY_PROPOSALS_TAG);
+            let found: Vec<String> = violations(&tags, window, &expected)
+                .into_iter()
+                .map(|(key, message)| format!("{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    #[gpui_kit::test]
+    fn delivery_options_label_and_banner_line_up_with_the_composer(cx: &mut TestAppContext) {
+        const DELIVERY_TAGS: [&str; 5] = [
+            COMPOSER_BOX_TAG,
+            COMPOSER_LEADING_TAG,
+            COMPOSER_DELIVERY_TAG,
+            COMPOSER_IMPORTANCE_LABEL_TAG,
+            COMPOSER_URGENT_BANNER_TAG,
+        ];
+        const URGENT_OPTION: &str = "urgent-delivery-option";
+        const BUTTON_ICON_INSET: f32 = 6.;
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            collect(&mut visual, Some(COMPOSER_DELIVERY_TAG));
+            let button = visual
+                .debug_bounds(COMPOSER_DELIVERY_TAG)
+                .expect("delivery button");
+            visual.simulate_click(button.center(), Default::default());
+            collect(&mut visual, Some(URGENT_OPTION));
+            let menu = visual.debug_bounds(DELIVERY_MENU_TAG).expect("menu");
+            assert!(
+                contains(window, menu),
+                "menu {} leaves the window",
+                describe(menu)
+            );
+            let urgent = visual.debug_bounds(URGENT_OPTION).expect("urgent option");
+            visual.simulate_click(urgent.center(), Default::default());
+            collect(&mut visual, Some(COMPOSER_URGENT_BANNER_TAG));
+            assert!(visual.debug_bounds(DELIVERY_MENU_TAG).is_none());
+            let tags: Vec<Tag> = DELIVERY_TAGS
+                .iter()
+                .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
+                .collect();
+            let found: Vec<String> = violations(&tags, window, &DELIVERY_TAGS)
+                .into_iter()
+                .map(|(key, message)| format!("delivery@{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+            let composer = visual.debug_bounds(COMPOSER_BOX_TAG).expect("composer");
+            let banner = visual
+                .debug_bounds(COMPOSER_URGENT_BANNER_TAG)
+                .expect("banner");
+            let label = visual
+                .debug_bounds(COMPOSER_IMPORTANCE_LABEL_TAG)
+                .expect("label");
+            let leading = visual.debug_bounds(COMPOSER_LEADING_TAG).expect("leading");
+            assert!(
+                (f32::from(banner.left() - composer.left())).abs() <= TOLERANCE
+                    && (f32::from(banner.right() - composer.right())).abs() <= TOLERANCE,
+                "banner {} not on the composer edges {}",
+                describe(banner),
+                describe(composer)
+            );
+            assert!(
+                banner.bottom() <= composer.top(),
+                "banner {} over the composer {}",
+                describe(banner),
+                describe(composer)
+            );
+            assert!(
+                (inset(composer, label, Edge::Left)
+                    - inset(composer, leading, Edge::Left)
+                    - BUTTON_ICON_INSET)
+                    .abs()
+                    <= TOLERANCE,
+                "label {} not on the icon edge of {}",
+                describe(label),
+                describe(leading)
+            );
+            let close = visual
+                .debug_bounds(COMPOSER_URGENT_BANNER_TAG)
+                .map(|banner| point(banner.right() - px(18.), banner.center().y))
+                .expect("banner");
+            visual.simulate_click(close, Default::default());
+            collect(&mut visual, None);
+            assert!(visual.debug_bounds(COMPOSER_URGENT_BANNER_TAG).is_none());
+            assert!(visual.debug_bounds(COMPOSER_IMPORTANCE_LABEL_TAG).is_none());
+        }
+    }
+
+    #[gpui_kit::test]
+    fn importance_label_sits_inside_its_bubble_on_the_text_edge(cx: &mut TestAppContext) {
+        let (handle, state) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            for chat in IMPORTANCE_CHATS {
+                visual.update(|_, cx| {
+                    state.update(cx, |state, cx| {
+                        state.select(Selection::Chat(chat.to_owned()), cx)
+                    })
+                });
+                collect(&mut visual, Some(TIMELINE_TAG));
+                let timeline = visual.debug_bounds(TIMELINE_TAG).expect("timeline");
+                visual.simulate_event(ScrollWheelEvent {
+                    position: timeline.center(),
+                    delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+                    ..Default::default()
+                });
+                collect(&mut visual, Some(IMPORTANCE_LABEL_TAG));
+                let label = visual.debug_bounds(IMPORTANCE_LABEL_TAG).expect("label");
+                let bubble = BUBBLE_TAGS
+                    .iter()
+                    .filter_map(|tag| visual.debug_bounds(tag))
+                    .find(|bubble| contains(*bubble, label))
+                    .unwrap_or_else(|| {
+                        panic!("{chat}@{width}x{height}: label {label:?} outside every bubble")
+                    });
+                let left = inset(bubble, label, Edge::Left);
+                let top = inset(bubble, label, Edge::Top);
+                assert!(
+                    (left - IMPORTANCE_LABEL_INSET_X).abs() <= TOLERANCE
+                        && (top - bubble_padding_y(false)).abs() <= TOLERANCE,
+                    "{chat}@{width}x{height}: label inset left {left} top {top} in {}",
+                    describe(bubble)
+                );
+            }
         }
     }
 

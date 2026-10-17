@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
-use store::MessageRecord;
+use store::{MessageImportance, MessageRecord};
 use teams_core::roster_event::{RosterEvent, roster_event};
 use teams_core::{
     JumboEmoji, jumbo_emoji,
@@ -140,6 +140,7 @@ pub struct MessageRow {
     pub meeting_link: Option<String>,
     pub adaptive_cards: Vec<AdaptiveCard>,
     pub subject: Option<String>,
+    pub importance: MessageImportance,
     pub new_marker: bool,
     pub reply_root: Option<String>,
     pub delivery: Delivery,
@@ -711,6 +712,7 @@ fn event_row(
         meeting_link: None,
         adaptive_cards: Vec::new(),
         subject: None,
+        importance: MessageImportance::Normal,
         new_marker: false,
         reply_root: None,
         delivery: Delivery::Delivered,
@@ -845,6 +847,11 @@ fn message_row_with(
             _ => adaptive_cards(record),
         },
         subject: record.subject.clone(),
+        importance: if record.deleted {
+            MessageImportance::Normal
+        } else {
+            record.importance
+        },
         new_marker: false,
         reply_root: record.reply_to_id.clone(),
         delivery: Delivery::Delivered,
@@ -1177,6 +1184,7 @@ mod tests {
             mentions_json: "[]".into(),
             subject: None,
             call_event_json: None,
+            importance: Default::default(),
         }
     }
 

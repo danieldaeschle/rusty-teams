@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use chatsvc::{ChatApp, ConversationState, TrouterEndpoint};
 use chrono::{DateTime, Duration, Utc};
 use graph::{DriveFolder, Graph, MESSAGE_PAGE_SIZE, Message};
-use store::{ImageFileCache, MessageRecord, Sidebar, Store, SyncState};
+use store::{ImageFileCache, MessageImportance, MessageRecord, Sidebar, Store, SyncState};
 use tokio::sync::{OnceCell, broadcast};
 
 use crate::chat_paging::ChatPaging;
@@ -296,6 +296,19 @@ impl<R: Remote> SyncEngine<R> {
             Ok(cached.max(1))
         };
         unread_count().map_or(0, |count| u32::try_from(count).unwrap_or(u32::MAX))
+    }
+
+    pub fn unread_importance(&self, conversation_id: &str) -> MessageImportance {
+        let importance = || -> Result<MessageImportance> {
+            let Some(chat) = self.store.chat(conversation_id)?.filter(|chat| chat.unread) else {
+                return Ok(MessageImportance::Normal);
+            };
+            let my_user_id = self.store.meta(META_USER_ID)?.unwrap_or_default();
+            self.store
+                .unread_last_message_importance(conversation_id, chat.last_read_at, &my_user_id)
+                .map_err(Into::into)
+        };
+        importance().unwrap_or_default()
     }
 
     pub(crate) async fn my_user_id(&self) -> Result<String> {

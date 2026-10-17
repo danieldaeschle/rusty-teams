@@ -27,6 +27,7 @@ use crate::error::{Error, Result};
 use crate::profile::PersonProfile;
 
 pub const CHATSVC_CHAT_WRITES: bool = false;
+const URGENT_ACK_EMOTION: &str = "acks";
 
 #[derive(Debug, Clone)]
 pub struct RemotePage {
@@ -473,6 +474,14 @@ pub trait Remote {
         Err(Error::Unsupported("recording policy"))
     }
 
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Err(Error::Unsupported("messaging policy"))
+    }
+
+    async fn ack_urgent_message(&self, _chat_id: &str, _message_id: &str) -> Result<()> {
+        Err(Error::Unsupported("urgent message acknowledgement"))
+    }
+
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Err(Error::Unsupported("sound settings"))
     }
@@ -799,6 +808,17 @@ impl Remote for Graph {
     async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
         Ok(Messages::new(self.session())
             .send_typing(conversation, active)
+            .await?)
+    }
+
+    /// Teams `ackUrgentMessage`: the emotion `acks` on the message stops the urgent repeat notifications.
+    async fn ack_urgent_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_emotion(
+                &ConversationRef::chat(chat_id),
+                message_id,
+                URGENT_ACK_EMOTION,
+            )
             .await?)
     }
 
@@ -1247,6 +1267,12 @@ impl Remote for Graph {
     async fn recording_policy(&self) -> Result<RecordingPolicy> {
         Ok(LanguageSettingsClient::new(self.session())
             .read_recording_policy()
+            .await?)
+    }
+
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .read_allow_priority_messages()
             .await?)
     }
 
