@@ -21,7 +21,7 @@ use crate::call::{
     ActiveCall, CallModel, OptionsDialog, PeopleSections, PersonRow, people_sections,
 };
 use crate::notice::truncated;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 use calling::MeetingOptions;
 
 const HEADER_HEIGHT: f32 = 48.;
@@ -652,11 +652,8 @@ pub fn options_dialog(app: &Entity<AppState>, call: &ActiveCall) -> Option<AnyEl
                     .p(px(16.))
                     .gap(px(12.))
                     .rounded(px(12.))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .dialog_surface()
                     .text_color(theme::text())
-                    .shadow(theme::dialog_shadow())
                     .occlude()
                     .child(
                         div()

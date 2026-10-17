@@ -14,7 +14,7 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::TransferCandidate;
 use crate::fuzzy;
-use crate::theme;
+use crate::theme::{self, ElevatedSurface as _};
 
 const MAX_RESULTS: usize = 6;
 const CARD_WIDTH: f32 = 440.;
@@ -267,11 +267,8 @@ impl Render for TransferPicker {
                     .p(px(CARD_PADDING))
                     .gap(px(SECTION_GAP))
                     .rounded(px(CARD_RADIUS))
-                    .bg(theme::background())
-                    .border_1()
-                    .border_color(theme::border_strong())
+                    .dialog_surface()
                     .text_color(theme::text())
-                    .shadow(theme::dialog_shadow())
                     .occlude()
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(

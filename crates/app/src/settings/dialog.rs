@@ -177,6 +177,7 @@ impl SettingsDialog {
             .child(
                 div()
                     .id("settings-close")
+                    .debug_selector(|| "settings/main/header/close".into())
                     .size(px(CLOSE_SIZE))
                     .flex_none()
                     .flex()
@@ -226,6 +227,7 @@ impl Render for SettingsDialog {
             .pb(px(metrics.padding))
             .child(
                 div()
+                    .debug_selector(|| "settings/main/body/content".into())
                     .w_full()
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .child(self.content(cx)),

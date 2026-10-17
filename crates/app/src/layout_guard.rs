@@ -158,8 +158,8 @@ mod frames {
 
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{
-        AppContext as _, Bounds, Pixels, TestAppContext, VisualTestContext, WindowOptions, point,
-        px, size,
+        AppContext as _, Bounds, Pixels, ScrollDelta, ScrollWheelEvent, TestAppContext,
+        VisualTestContext, WindowOptions, point, px, size,
     };
     use store::Store;
 
@@ -169,19 +169,24 @@ mod frames {
     use gpui_kit::Entity;
 
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
-    use crate::settings::metrics;
-    use crate::settings_section::SettingsSection;
     use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
+    use crate::settings::metrics;
+    use crate::settings_section::SettingsSection;
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::conversation::MEMBERS_BUTTON;
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
-    use crate::views::shell::{AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call};
-    use crate::views::shortcuts::{OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved};
+    use crate::views::shell::{
+        AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call,
+    };
+    use crate::views::shortcuts::{
+        OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
+    };
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -249,10 +254,41 @@ mod frames {
     const SETTINGS_TAGS: &[&str] = &[
         "settings",
         "settings/nav",
+        "settings/nav/divider",
+        "settings/nav/about",
         "settings/main",
         "settings/main/header",
+        "settings/main/header/close",
         "settings/main/body",
     ];
+    const SETTINGS_BODY: &str = "settings/main/body";
+    const SETTINGS_CONTENT: &str = "settings/main/body/content";
+    const MEMBERS_TAGS: &[&str] = &["chat-members-popup", "chat-members-popup/divider"];
+    const MEMBERS_CHAT: &str = "demo-chat-release";
+    const DIVIDER_SEGMENT: &str = "divider";
+    const DIVIDER_THICKNESS: f32 = 1.;
+    const INSET_TOLERANCE: f32 = 1.;
+    const INSET_RULES: &[InsetRule] = &[
+        InsetRule {
+            panel: "settings/nav",
+            content: "settings/nav/about",
+            edges: &[Edge::Left, Edge::Right, Edge::Bottom],
+        },
+        InsetRule {
+            panel: "settings/main",
+            content: "settings/main/header/close",
+            edges: &[Edge::Top, Edge::Right],
+        },
+    ];
+    const SCROLLED_INSET_RULE: InsetRule = InsetRule {
+        panel: SETTINGS_BODY,
+        content: SETTINGS_CONTENT,
+        edges: &[Edge::Left, Edge::Bottom],
+    };
+    const SCROLLED_INSET_ALLOWLIST: &[(SettingsSection, &str)] = &[(
+        SettingsSection::Agents,
+        "Agents pages carry their own PAGE_PADDING side inset, the body narrows its side padding to keep the text edge",
+    )];
     const SETTINGS_SECTIONS: [SettingsSection; 8] = [
         SettingsSection::General,
         SettingsSection::Notifications,
@@ -268,6 +304,108 @@ mod frames {
     const KNOWN_VIOLATIONS: &[&str] = &[];
 
     type Tag = (&'static str, Bounds<Pixels>);
+
+    #[derive(Clone, Copy, Debug)]
+    enum Edge {
+        Top,
+        Right,
+        Bottom,
+        Left,
+    }
+
+    struct InsetRule {
+        panel: &'static str,
+        content: &'static str,
+        edges: &'static [Edge],
+    }
+
+    fn inset(panel: Bounds<Pixels>, content: Bounds<Pixels>, edge: Edge) -> f32 {
+        f32::from(match edge {
+            Edge::Top => content.top() - panel.top(),
+            Edge::Right => panel.right() - content.right(),
+            Edge::Bottom => panel.bottom() - content.bottom(),
+            Edge::Left => content.left() - panel.left(),
+        })
+    }
+
+    fn inset_violation(
+        rule: &InsetRule,
+        panel: Bounds<Pixels>,
+        content: Bounds<Pixels>,
+    ) -> Option<(String, String)> {
+        let insets: Vec<(Edge, f32)> = rule
+            .edges
+            .iter()
+            .map(|edge| (*edge, inset(panel, content, *edge)))
+            .collect();
+        let values = insets.iter().map(|(_, value)| *value);
+        let spread = values.clone().fold(f32::MIN, f32::max) - values.fold(f32::MAX, f32::min);
+        (spread > INSET_TOLERANCE).then(|| {
+            (
+                format!("{}:uneven-inset", rule.panel),
+                format!(
+                    "{} insets {} by {insets:?}, they must match",
+                    rule.panel, rule.content
+                ),
+            )
+        })
+    }
+
+    fn inset_violations(tags: &[Tag], rules: &[InsetRule]) -> Vec<(String, String)> {
+        let bounds_of = |path: &str| {
+            tags.iter()
+                .find(|(tag, _)| *tag == path)
+                .map(|(_, bounds)| *bounds)
+        };
+        rules
+            .iter()
+            .filter_map(
+                |rule| match (bounds_of(rule.panel), bounds_of(rule.content)) {
+                    (Some(panel), Some(content)) => inset_violation(rule, panel, content),
+                    _ => None,
+                },
+            )
+            .collect()
+    }
+
+    fn divider_violations(tags: &[Tag]) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        for (path, bounds) in tags {
+            let Some((parent, segment)) = path.rsplit_once('/') else {
+                continue;
+            };
+            if !segment.starts_with(DIVIDER_SEGMENT) {
+                continue;
+            }
+            let Some((_, panel)) = tags.iter().find(|(tag, _)| *tag == parent) else {
+                found.push((
+                    format!("{path}:no-panel"),
+                    format!("{path} needs its panel {parent} tagged"),
+                ));
+                continue;
+            };
+            let thin = |length: Pixels| f32::from(length) <= DIVIDER_THICKNESS + TOLERANCE;
+            let near = |first: Pixels, second: Pixels| f32::from(first - second).abs() <= TOLERANCE;
+            let spans = if thin(bounds.size.height) {
+                near(bounds.left(), panel.left()) && near(bounds.right(), panel.right())
+            } else if thin(bounds.size.width) {
+                near(bounds.top(), panel.top()) && near(bounds.bottom(), panel.bottom())
+            } else {
+                false
+            };
+            if !spans {
+                found.push((
+                    format!("{path}:short-divider"),
+                    format!(
+                        "{path} {} must be a {DIVIDER_THICKNESS} px line from edge to edge of {parent} {}",
+                        describe(*bounds),
+                        describe(*panel)
+                    ),
+                ));
+            }
+        }
+        found
+    }
 
     enum Screen {
         Tab(&'static str, Option<fn(&mut VisualTestContext)>),
@@ -376,6 +514,7 @@ mod frames {
                 }
             }
         }
+        found.extend(divider_violations(tags));
         found
     }
 
@@ -412,13 +551,15 @@ mod frames {
             ])
             .chain(&AGENT_TAGS)
             .chain(SETTINGS_TAGS)
+            .chain(MEMBERS_TAGS)
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
 
     fn sharing_call() -> ActiveCall {
         let mut call = gallery_call();
-        call.model.apply(CallUpdate::ScreenShare(Some("8:orgid:guard-1".to_owned())));
+        call.model
+            .apply(CallUpdate::ScreenShare(Some("8:orgid:guard-1".to_owned())));
         call.share_stage.view.step_in((800., 450.));
         call
     }
@@ -460,7 +601,10 @@ mod frames {
         let held = connected(1, "Christopher Montgomery-Lindqvist", "8:orgid:guard-held");
         let mut consult = connected(2, "Jonas Ortega", "8:orgid:guard-consult");
         consult.consult = Some(ConsultCall::new(
-            ("8:orgid:guard-consult".to_owned(), "Jonas Ortega".to_owned()),
+            (
+                "8:orgid:guard-consult".to_owned(),
+                "Jonas Ortega".to_owned(),
+            ),
             held.model.peer_name.clone(),
         ));
         (consult, held)
@@ -528,6 +672,37 @@ mod frames {
             .into_iter()
             .map(|(key, _)| key)
             .collect();
+        let line_tags: Vec<Tag> = vec![
+            ("panel", rectangle(0., 0., 100., 100.)),
+            ("panel/divider", rectangle(0., 50., 100., 1.)),
+            ("panel/divider-inset", rectangle(12., 60., 76., 1.)),
+            ("panel/divider-side", rectangle(40., 0., 1., 100.)),
+            ("panel/about", rectangle(12., 76., 76., 12.)),
+            ("panel/footer", rectangle(12., 64., 76., 12.)),
+        ];
+        let line_keys: Vec<String> = divider_violations(&line_tags)
+            .into_iter()
+            .chain(inset_violations(
+                &line_tags,
+                &[
+                    InsetRule {
+                        panel: "panel",
+                        content: "panel/about",
+                        edges: &[Edge::Left, Edge::Right, Edge::Bottom],
+                    },
+                    InsetRule {
+                        panel: "panel",
+                        content: "panel/footer",
+                        edges: &[Edge::Left, Edge::Bottom],
+                    },
+                ],
+            ))
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(
+            line_keys,
+            ["panel/divider-inset:short-divider", "panel:uneven-inset"]
+        );
         assert_eq!(
             keys,
             [
@@ -840,17 +1015,28 @@ mod frames {
             };
             let inset = metrics(width, height).inset;
             for section in SETTINGS_SECTIONS {
-                visual.update(|_, cx| {
-                    state.update(cx, |state, cx| state.open_settings(section, cx))
-                });
+                visual
+                    .update(|_, cx| state.update(cx, |state, cx| state.open_settings(section, cx)));
                 let tags = collect(&mut visual, Some(SETTINGS_TAGS[0]));
-                let found: Vec<String> = violations(&tags, window, SETTINGS_TAGS)
+                let mut found: Vec<(String, String)> = violations(&tags, window, SETTINGS_TAGS)
                     .into_iter()
                     .filter(|(key, _)| key.starts_with("settings"))
+                    .chain(inset_violations(&tags, INSET_RULES))
+                    .collect();
+                let scrolled_exempt = SCROLLED_INSET_ALLOWLIST
+                    .iter()
+                    .any(|(exempt, _)| *exempt == section);
+                if !scrolled_exempt {
+                    found.extend(scrolled_inset_violation(&mut visual));
+                }
+                let found: Vec<String> = found
+                    .into_iter()
                     .map(|(key, message)| format!("{section:?}@{width}x{height}:{key}: {message}"))
                     .collect();
                 assert!(found.is_empty(), "{}", found.join("\n"));
-                let dialog = visual.debug_bounds(SETTINGS_TAGS[0]).expect("settings dialog");
+                let dialog = visual
+                    .debug_bounds(SETTINGS_TAGS[0])
+                    .expect("settings dialog");
                 let edges = [
                     f32::from(dialog.left()),
                     f32::from(dialog.top()),
@@ -862,6 +1048,55 @@ mod frames {
                     "{section:?}@{width}x{height}: dialog edges {edges:?}, expected {inset}"
                 );
             }
+        }
+    }
+
+    fn scrolled_inset_violation(visual: &mut VisualTestContext) -> Option<(String, String)> {
+        let body = visual.debug_bounds(SETTINGS_BODY)?;
+        let content = visual.debug_bounds(SETTINGS_CONTENT)?;
+        if content.bottom() <= body.bottom() {
+            return None;
+        }
+        visual.simulate_event(ScrollWheelEvent {
+            position: body.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+            ..Default::default()
+        });
+        collect(visual, None);
+        let body = visual.debug_bounds(SETTINGS_BODY)?;
+        let content = visual.debug_bounds(SETTINGS_CONTENT)?;
+        inset_violation(&SCROLLED_INSET_RULE, body, content)
+    }
+
+    #[gpui_kit::test]
+    fn members_popup_lines_reach_the_edges(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.select(Selection::Chat(MEMBERS_CHAT.to_owned()), cx)
+                })
+            });
+            collect(&mut visual, Some(MEMBERS_BUTTON));
+            let button = visual
+                .debug_bounds(MEMBERS_BUTTON)
+                .expect("members button rendered");
+            visual.simulate_click(button.center(), Default::default());
+            let tags = collect(&mut visual, Some(MEMBERS_TAGS[0]));
+            let found: Vec<String> = violations(&tags, window, MEMBERS_TAGS)
+                .into_iter()
+                .filter(|(key, _)| key.starts_with("chat-members"))
+                .map(|(key, message)| format!("members@{width}x{height}:{key}: {message}"))
+                .collect();
+            visual.simulate_keystrokes("escape");
+            visual.run_until_parked();
+            assert!(found.is_empty(), "{}", found.join("\n"));
         }
     }
 
@@ -926,4 +1161,245 @@ fn lines_are_solid() {
         })
         .collect();
     assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+const STATE_RING_COLORS: &[&str] = &[
+    "if focused",
+    "if selected",
+    "if speaking",
+    "if current",
+    "if open",
+    "if state.failed",
+];
+const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
+    (
+        "notify/ring_view.rs",
+        "theme::green()",
+        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
+    ),
+    (
+        "notify/meeting_view.rs",
+        "theme::accent()",
+        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
+    ),
+    (
+        "notify/meeting_view.rs",
+        "theme::border_strong()",
+        "outlined button, not a surface",
+    ),
+    (
+        "notify/toast.rs",
+        "border)",
+        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
+    ),
+    (
+        "notify/toast.rs",
+        "theme::border_strong()",
+        "OS toast window: no compositor shadow, the edge separates it from the desktop; accent = Teams state",
+    ),
+    (
+        "settings/mcp.rs",
+        "theme::border_strong()",
+        "outlined button, not a surface",
+    ),
+    (
+        "settings/rows.rs",
+        "theme::border_strong()",
+        "outlined button, not a surface",
+    ),
+    (
+        "views/card_widgets.rs",
+        "border)",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "views/card_widgets.rs",
+        "theme::border_strong()",
+        "message content drawn as Teams renders it",
+    ),
+    ("views/shared_tab.rs", "theme::accent()", "input field"),
+    ("views/card_input.rs", "if error.is_some()", "input field"),
+    ("views/format_toolbar.rs", "if refused", "input field"),
+    (
+        "views/card_code_block.rs",
+        "theme::code_header_border()",
+        "message content drawn as Teams renders it",
+    ),
+    ("views/call_transcript.rs", "theme::border()", "input field"),
+    (
+        "views/conversation.rs",
+        "theme::accent()",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/attachment_tray.rs",
+        "theme::accent()",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/card_carousel.rs",
+        "theme::border_strong()",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "views/card_table.rs",
+        "grid_color",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "views/activity_panel.rs",
+        "theme::surface()",
+        "cutout ring in the background color, invisible against its surface",
+    ),
+    (
+        "views/avatar.rs",
+        "theme::surface()",
+        "cutout ring in the background color, invisible against its surface",
+    ),
+    (
+        "views/avatar.rs",
+        "theme::text_muted()",
+        "offline presence glyph, Teams icon",
+    ),
+    (
+        "views/message_row.rs",
+        "theme::border_strong()",
+        "deleted message placeholder, Teams look",
+    ),
+    (
+        "views/message_row.rs",
+        "theme::red()",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/message_row.rs",
+        "if row.delivery",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/new_meeting_dialog.rs",
+        "theme::border()",
+        "input field",
+    ),
+    (
+        "views/call_mini_window.rs",
+        "theme::border_strong()",
+        "self view over live video, needs an edge on any picture",
+    ),
+    ("views/transfer_picker.rs", "theme::border()", "input field"),
+    (
+        "views/call_notice.rs",
+        "theme::border_strong()",
+        "outlined button, not a surface",
+    ),
+    (
+        "views/composer/schedule.rs",
+        "theme::accent()",
+        "input field",
+    ),
+    (
+        "views/call_mini.rs",
+        "border)",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/sidebar.rs",
+        "theme::accent()",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    (
+        "views/adaptive_card.rs",
+        "theme::border()",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "views/adaptive_card.rs",
+        "border)",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "views/share_bar.rs",
+        "theme::red()",
+        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
+    ),
+    ("settings_controls.rs", "if invalid", "input field"),
+];
+
+fn outlines(source: &str) -> Vec<(usize, String)> {
+    let pattern = Regex::new(r"\.border(_1\(\)|_2\(\)|\(px)").expect("pattern");
+    pattern
+        .find_iter(source)
+        .map(|found| {
+            let line_number = source[..found.start()].matches('\n').count() + 1;
+            let after = &source[found.end()..];
+            let color = after
+                .find(".border_color(")
+                .filter(|position| *position < 120)
+                .map(|position| {
+                    let start = &after[position + ".border_color(".len()..];
+                    start
+                        .lines()
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+                .unwrap_or_default();
+            (line_number, color)
+        })
+        .collect()
+}
+
+#[test]
+fn outline_matcher_reads_the_border_color() {
+    let source = "div()\n    .border_1()\n    .border_color(theme::amber())\n    .border_t_1()\n";
+    assert_eq!(outlines(source), [(2, "theme::amber())".to_owned())]);
+}
+
+#[test]
+fn surfaces_are_soft() {
+    let mut matched_allowlist = HashSet::new();
+    let mut violations = Vec::new();
+    for root in source_roots() {
+        let mut files = Vec::new();
+        source_files(&root, &mut files);
+        for file in files {
+            let relative = file
+                .strip_prefix(&root)
+                .expect("inside src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative == "layout_guard.rs" {
+                continue;
+            }
+            let source = fs::read_to_string(&file).expect("read source file");
+            for (line_number, color) in outlines(&source) {
+                if STATE_RING_COLORS
+                    .iter()
+                    .any(|prefix| color.starts_with(prefix))
+                {
+                    continue;
+                }
+                match OUTLINE_ALLOWLIST.iter().position(|(allowed_file, prefix, _)| {
+                    *allowed_file == relative && color.starts_with(prefix)
+                }) {
+                    Some(position) => {
+                        matched_allowlist.insert(position);
+                    }
+                    None => violations.push(format!(
+                        "{relative}:{line_number}: hard outline on a surface, use a soft fill or shadow (border_color {color})"
+                    )),
+                }
+            }
+        }
+    }
+    let stale = OUTLINE_ALLOWLIST
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !matched_allowlist.contains(position))
+        .map(|(_, (file, prefix, _))| {
+            format!("stale outline allowlist entry, remove it: {file} {prefix}")
+        });
+    let report: Vec<String> = violations.into_iter().chain(stale).collect();
+    assert!(report.is_empty(), "{}", report.join("\n"));
 }

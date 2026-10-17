@@ -77,19 +77,26 @@ pub fn render_nav(
         .filter(|section| agents_available || *section != SettingsSection::Agents)
         .map(item)
         .collect();
+    let group = |items: Vec<Stateful<Div>>| {
+        v_flex()
+            .w_full()
+            .px(px(NAV_PADDING_X))
+            .gap(px(ITEM_GAP))
+            .children(items)
+    };
     v_flex()
         .debug_selector(|| "settings/nav".into())
         .w(px(layout.width))
         .h_full()
         .flex_none()
-        .px(px(NAV_PADDING_X))
-        .py(px(layout.padding_y))
+        .pt(px(layout.padding_y))
+        .pb(px(NAV_PADDING_X))
         .gap(px(ITEM_GAP))
         .rounded_l(px(super::dialog::PANEL_RADIUS))
         .bg(theme::surface_raised())
         .child(
             div()
-                .mx(px(12.))
+                .mx(px(2. * NAV_PADDING_X))
                 .mb(px(18.))
                 .text_size(px(20.))
                 .line_height(px(26.))
@@ -97,23 +104,34 @@ pub fn render_nav(
                 .text_color(theme::text())
                 .child("Settings"),
         )
-        .children(TEAMS_GROUP.map(item))
+        .child(group(TEAMS_GROUP.into_iter().map(item).collect()))
         .child(
             div()
+                .debug_selector(|| "settings/nav/divider".into())
+                .w_full()
+                .h(px(1.))
+                .flex_none()
                 .mt(px(10.))
-                .px(px(12.))
+                .bg(theme::border_strong()),
+        )
+        .child(
+            div()
+                .px(px(2. * NAV_PADDING_X))
                 .pt(px(12.))
                 .pb(px(6.))
-                .border_t_1()
-                .border_color(theme::border_strong())
                 .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_muted())
                 .child("RUSTY TEAMS"),
         )
-        .children(rusty)
+        .child(group(rusty))
         .child(div().flex_1().min_h(px(0.)))
-        .child(item(SettingsSection::About))
+        .child(
+            div()
+                .w_full()
+                .px(px(NAV_PADDING_X))
+                .child(item(SettingsSection::About).debug_selector(|| "settings/nav/about".into())),
+        )
 }
 
 fn nav_item(

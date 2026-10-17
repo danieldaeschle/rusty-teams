@@ -95,8 +95,6 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
         .gap(px(8.))
         .items_center()
         .rounded(px(8.))
-        .border_1()
-        .border_color(theme::border())
         .bg(theme::row_hover())
         .shadow(theme::toast_shadow())
         .cursor_pointer()

@@ -27,8 +27,6 @@ pub fn render_connection_banner(
         .gap(px(8.))
         .items_center()
         .rounded(px(8.))
-        .border_1()
-        .border_color(theme::amber().opacity(0.45))
         .bg(theme::amber().opacity(0.14))
         .text_size(px(BANNER_TEXT_SIZE))
         .text_color(theme::text())

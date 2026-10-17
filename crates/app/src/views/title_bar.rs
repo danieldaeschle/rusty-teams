@@ -32,8 +32,6 @@ fn mode_pill(label: &'static str) -> Div {
         .flex()
         .items_center()
         .rounded_full()
-        .border_1()
-        .border_color(theme::amber().opacity(0.5))
         .bg(theme::amber().opacity(0.14))
         .text_size(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
