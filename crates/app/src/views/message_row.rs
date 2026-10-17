@@ -50,7 +50,8 @@ const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const NARROW_BUBBLE_WIDTH: f32 = 300.;
-const REACTION_FOOTER_HEIGHT: f32 = 24.;
+const BUBBLE_PADDING_Y: f32 = 8.;
+const META_BOTTOM_INSET: f32 = 4.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const SAVED_MARK_SIZE: f32 = 12.;
@@ -157,7 +158,7 @@ fn bubble(
                 .rounded_br(px(corners.bottom_right))
                 .rounded_bl(px(corners.bottom_left))
                 .px(px(12.))
-                .py(px(8.))
+                .py(px(BUBBLE_PADDING_Y))
         })
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
@@ -268,9 +269,8 @@ fn bubble(
                 )
                 .child(
                     h_flex()
-                        .h(px(REACTION_FOOTER_HEIGHT))
                         .flex_none()
-                        .items_center()
+                        .mb(px(META_BOTTOM_INSET - BUBBLE_PADDING_Y))
                         .child(bubble_meta(row, own, saved)),
                 ),
         );
@@ -283,7 +283,7 @@ fn bubble(
             div()
                 .absolute()
                 .right(px(8.))
-                .bottom(px(4.))
+                .bottom(px(META_BOTTOM_INSET))
                 .child(bubble_meta(row, own, saved)),
         );
     }
