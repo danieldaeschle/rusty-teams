@@ -118,6 +118,14 @@ impl<T: MessageTransport> Conversations<T> {
     }
 }
 
+/// One conversation with its thread properties, as Teams reads a meeting or 1:1 thread.
+pub fn thread_url(region: &str, thread_id: &str) -> String {
+    format!(
+        "https://teams.cloud.microsoft/api/chatsvc/{region}/v1/users/ME/conversations/{}?view=msnp24Equivalent",
+        thread_id.replace(':', "%3A").replace('@', "%40")
+    )
+}
+
 fn backward_link(body: &Value) -> Option<String> {
     body.pointer("/_metadata/backwardLink")
         .and_then(Value::as_str)
@@ -207,6 +215,14 @@ mod tests {
     }
 
     const BASE: &str = "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations";
+
+    #[test]
+    fn thread_url_escapes_the_thread_id() {
+        assert_eq!(
+            thread_url("emea", "19:meeting_a@thread.v2"),
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations/19%3Ameeting_a%40thread.v2?view=msnp24Equivalent"
+        );
+    }
 
     #[tokio::test]
     async fn mute_states_pair_every_conversation_with_its_flag() {

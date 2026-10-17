@@ -1062,10 +1062,7 @@ pub async fn find_echo_bot_thread(session: &Session, self_object_id: &str) -> Re
         format!("19:{self_object_id}_{bot_id}@unq.gbl.spaces"),
         format!("19:{bot_id}_{self_object_id}@unq.gbl.spaces"),
     ] {
-        let url = format!(
-            "https://teams.cloud.microsoft/api/chatsvc/{CHATSVC_REGION}/v1/users/ME/conversations/{}?view=msnp24Equivalent",
-            thread_id.replace(':', "%3A").replace('@', "%40")
-        );
+        let url = chatsvc::conversations::thread_url(CHATSVC_REGION, &thread_id);
         let response = session.batch(&[Request::get(url)], &ic3_scope()).await?.remove(0);
         if response.is_success() {
             return Ok(Some(thread_id));
