@@ -5,7 +5,12 @@ use gpui_kit::*;
 use store::MessageRecord;
 
 use super::ConversationView;
-use crate::app_state::Selection;
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::DialogFooter;
+
+use crate::app_state::{AppState, Selection};
+use crate::channel_menu::post_pin_dialog;
 use crate::rows::reply_excerpt;
 use crate::runtime;
 use crate::views::message_actions::Action;
@@ -23,6 +28,40 @@ impl PinPreview {
             text: reply_excerpt(record),
         }
     }
+}
+
+fn confirm_post_pin(
+    state: &Entity<AppState>,
+    channel_id: &str,
+    message_id: &str,
+    pin: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let dialog = post_pin_dialog(pin);
+    let (state, channel_id, message_id) =
+        (state.clone(), channel_id.to_owned(), message_id.to_owned());
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let (state, channel_id, message_id) =
+            (state.clone(), channel_id.clone(), message_id.clone());
+        let cancel = Button::new("post-pin-cancel")
+            .label("Cancel")
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let confirm = Button::new("post-pin-confirm")
+            .label(dialog.confirm)
+            .primary()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |state, cx| {
+                    state.set_pinned(&channel_id, &message_id, pin, cx)
+                });
+                window.close_dialog(cx);
+            });
+        alert
+            .title(dialog.title)
+            .description(dialog.body)
+            .footer(DialogFooter::new().child(cancel).child(confirm))
+            .on_ok(|_, _, _| false)
+    });
 }
 
 impl ConversationView {
@@ -222,12 +261,23 @@ impl ConversationView {
         }
     }
 
-    pub(super) fn toggle_pinned(&mut self, message_id: &str, cx: &mut Context<Self>) {
-        if let Some(conversation_id) = self.pin_conversation_id() {
+    pub(super) fn toggle_pinned(
+        &mut self,
+        message_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conversation_id) = self.pin_conversation_id() else {
+            return;
+        };
+        if self.chat_id().is_some() {
             self.app.update(cx, |state, cx| {
                 state.toggle_pinned(&conversation_id, message_id, cx)
             });
+            return;
         }
+        let pin = !self.app.read(cx).is_pinned(&conversation_id, message_id);
+        confirm_post_pin(&self.app, &conversation_id, message_id, pin, window, cx);
     }
 
     pub(super) fn mark_unread_from(&mut self, message_id: &str, cx: &mut Context<Self>) {

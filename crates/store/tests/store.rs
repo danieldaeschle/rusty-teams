@@ -1630,3 +1630,44 @@ fn setting_read_horizons_replaces_the_conversation_only() {
     assert_eq!(store.read_horizons("c").unwrap(), second);
     assert_eq!(store.read_horizons("other").unwrap().len(), 1);
 }
+
+#[test]
+fn local_show_hide_and_channel_pin_writes_reach_the_sidebar() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_teams(&[TeamRecord {
+            id: "t1".to_owned(),
+            name: "Alpha".to_owned(),
+        }])
+        .unwrap();
+    let channel = |id: &str, name: &str| ChannelRecord {
+        id: id.to_owned(),
+        team_id: "t1".to_owned(),
+        name: name.to_owned(),
+        membership_type: None,
+        last_message_at: None,
+        unread: false,
+    };
+    store
+        .upsert_channels(&[channel("c1", "General"), channel("c2", "Random")])
+        .unwrap();
+    let team = || store.sidebar().unwrap().teams.remove(0);
+
+    store.set_channel_hidden("c2", true).unwrap();
+    store.set_team_hidden("t1", true).unwrap();
+    let hidden = team();
+    assert_eq!(hidden.hidden_channel_ids, vec!["c2".to_owned()]);
+    assert!(hidden.hidden);
+    assert_eq!(hidden.channels[0].name, "General");
+
+    store.set_channel_hidden("c2", false).unwrap();
+    store.set_team_hidden("t1", false).unwrap();
+    let shown = team();
+    assert!(shown.hidden_channel_ids.is_empty());
+    assert!(!shown.hidden);
+
+    store
+        .replace_pinned_channels(&["c2".to_owned(), "c1".to_owned()])
+        .unwrap();
+    assert_eq!(store.pinned_channel_ids().unwrap(), vec!["c2", "c1"]);
+}

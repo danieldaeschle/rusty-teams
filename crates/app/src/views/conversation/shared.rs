@@ -77,6 +77,9 @@ impl ConversationView {
             generation: self.shared.generation + 1,
             ..SharedState::default()
         };
+        if self.channel_details_open {
+            self.refresh_shared_items(cx);
+        }
         self.reload_channel_tabs(cx);
     }
 

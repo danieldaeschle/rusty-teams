@@ -6,6 +6,7 @@ pub mod cards;
 pub mod channel_notifications;
 pub mod chat_notifications;
 pub mod chat_settings;
+pub mod channel_visibility;
 pub mod conversations;
 pub mod drafts;
 pub mod emotions;
@@ -53,6 +54,7 @@ pub use chat_settings::{
     ChatSettingsDocument, EnterKeyBehavior, MeetingChatNotifications, MessageDensity,
     NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
 };
+pub use channel_visibility::{ChannelKind, ChannelMembership, ChannelTarget, ChannelVisibility};
 pub use conversations::{ConversationState, Conversations};
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, user_id_from_mri};
@@ -65,7 +67,10 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
-pub use members::{HistoryShare, MAX_HISTORY_DAYS, ThreadMembers};
+pub use members::{
+    HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
+    TopicProblem, topic_problem,
+};
 pub use messages::{ConversationRef, Messages};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,

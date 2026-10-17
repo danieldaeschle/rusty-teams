@@ -112,6 +112,12 @@ pub(crate) fn resolve_hidden(
             return false;
         }
     }
+    let cleared_until_ms = states
+        .get(&chat.id)
+        .and_then(|state| state.history_cleared_ms);
+    if history_cleared(chat, cleared_until_ms) {
+        return true;
+    }
     if reported == Some(true) {
         locally.hidden_after.remove(&chat.id);
         return true;
@@ -127,6 +133,19 @@ pub(crate) fn resolve_hidden(
         return true;
     }
     reported.unwrap_or_else(|| graph_hidden(chat))
+}
+
+/// Teams stores the last message time plus one millisecond, or now when the chat has no message.
+pub(crate) fn cleared_until_ms(last_message_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> i64 {
+    last_message_at.map_or(now.timestamp_millis(), |last| last.timestamp_millis() + 1)
+}
+
+/// Teams hides a chat whose history was removed until a newer message arrives.
+pub(crate) fn history_cleared(chat: &Chat, cleared_until_ms: Option<i64>) -> bool {
+    cleared_until_ms.is_some_and(|cleared_until_ms| {
+        chat.last_message_time()
+            .is_none_or(|newest| newest.timestamp_millis() <= cleared_until_ms)
+    })
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -174,8 +193,45 @@ mod tests {
                 hidden,
                 read: chatsvc::ReadHorizon::default(),
                 notification_settings: None,
+                history_cleared_ms: None,
             },
         )])
+    }
+
+    #[test]
+    fn removed_history_ends_one_millisecond_after_the_last_message() {
+        let last = at("2026-10-01T10:00:00Z");
+        assert_eq!(
+            cleared_until_ms(Some(last), now()),
+            last.timestamp_millis() + 1
+        );
+        assert_eq!(cleared_until_ms(None, now()), now().timestamp_millis());
+    }
+
+    #[test]
+    fn removed_history_hides_the_chat_until_a_newer_message() {
+        let mut locally = LocallyHidden::default();
+        let cleared_ms = at("2026-10-01T10:00:00Z").timestamp_millis() + 1;
+        let mut cleared = states(Some(false));
+        cleared.get_mut("19:a").unwrap().history_cleared_ms = Some(cleared_ms);
+        assert!(resolve_hidden(
+            &chat(Some("2026-10-01T10:00:00Z"), false),
+            &cleared,
+            &mut locally,
+            now()
+        ));
+        assert!(resolve_hidden(
+            &chat(None, false),
+            &cleared,
+            &mut locally,
+            now()
+        ));
+        assert!(!resolve_hidden(
+            &chat(Some("2026-10-02T08:00:00Z"), false),
+            &cleared,
+            &mut locally,
+            now()
+        ));
     }
 
     fn hidden_after(text: &str) -> LocallyHidden {

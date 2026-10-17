@@ -13,6 +13,7 @@ use crate::read_horizon::{self, ReadHorizon};
 const PAGE_SIZE: usize = 200;
 const MAX_PAGES: usize = 100;
 const ALERTS_OFF: &str = "false";
+const CLEAR_HISTORY_PROPERTY: &str = "clearHistoryTime";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConversationState {
@@ -20,6 +21,7 @@ pub struct ConversationState {
     pub muted: bool,
     pub hidden: Option<bool>,
     pub read: ReadHorizon,
+    pub history_cleared_ms: Option<i64>,
     pub notification_settings: Option<String>,
 }
 
@@ -119,6 +121,19 @@ impl<T: MessageTransport> Conversations<T> {
         Ok(write)
     }
 
+    /// Teams' "Remove chat history": everything up to this time disappears for the current user only.
+    pub async fn clear_history(&self, conversation_id: &str, cleared_until_ms: i64) -> Result<()> {
+        let answer = self
+            .transport
+            .send(clear_history_request(
+                &self.base_url,
+                conversation_id,
+                cleared_until_ms,
+            ))
+            .await?;
+        ensure_success(&answer)
+    }
+
     pub async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
         let url = format!(
             "{}/{}/properties?name={}",
@@ -151,6 +166,29 @@ impl<T: MessageTransport> Conversations<T> {
             .await?;
         ensure_success(&answer)
     }
+}
+
+pub fn clear_history_request(
+    base_url: &str,
+    conversation_id: &str,
+    cleared_until_ms: i64,
+) -> Request {
+    Request::with_body(
+        Method::Put,
+        format!(
+            "{base_url}/{}/properties?name={CLEAR_HISTORY_PROPERTY}",
+            encode(conversation_id)
+        ),
+        json!({ CLEAR_HISTORY_PROPERTY: cleared_until_ms }),
+    )
+}
+
+fn history_cleared_ms(conversation: &Value) -> Option<i64> {
+    let value = &conversation["properties"][CLEAR_HISTORY_PROPERTY];
+    value
+        .as_i64()
+        .or_else(|| value.as_str()?.parse().ok())
+        .filter(|millis| *millis > 0)
 }
 
 /// One conversation with its thread properties, as Teams reads a meeting or 1:1 thread.
@@ -206,6 +244,7 @@ fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
                     [chat_notifications::PROPERTY_NAME]
                     .as_str()
                     .map(str::to_owned),
+                history_cleared_ms: history_cleared_ms(conversation),
             })
         })
         .collect())
@@ -419,6 +458,52 @@ mod tests {
         assert_eq!(states[0].read.consumed_until_ms, 5);
         assert_eq!(states[0].read.last_message_ms, 9);
         assert!(states[0].read.is_unread("8:orgid:me"));
+    }
+
+    #[tokio::test]
+    async fn clear_history_puts_the_time_as_a_number() {
+        let transport = canned(vec![(200, Value::Null)]);
+        Conversations::with_transport(&transport, "emea")
+            .clear_history("19:a_b@unq.gbl.spaces", 1_792_200_000_001)
+            .await
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[0].method, Method::Put);
+        assert_eq!(
+            requests[0].url,
+            format!("{BASE}/19%3Aa_b%40unq.gbl.spaces/properties?name=clearHistoryTime")
+        );
+        assert_eq!(
+            requests[0].body,
+            Some(json!({"clearHistoryTime": 1_792_200_000_001_i64}))
+        );
+    }
+
+    #[tokio::test]
+    async fn states_carry_the_clear_history_time_as_text_or_number() {
+        let transport = canned(vec![(
+            200,
+            json!({
+                "conversations": [
+                    {"id": "19:a", "properties": {"clearHistoryTime": "1792200000001"}},
+                    {"id": "19:b", "properties": {"clearHistoryTime": 1_792_200_000_002_i64}},
+                    {"id": "19:c", "properties": {"clearHistoryTime": "0"}},
+                    {"id": "19:d"},
+                ],
+            }),
+        )]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_states()
+            .await
+            .unwrap();
+        let cleared: Vec<Option<i64>> = states
+            .iter()
+            .map(|state| state.history_cleared_ms)
+            .collect();
+        assert_eq!(
+            cleared,
+            [Some(1_792_200_000_001), Some(1_792_200_000_002), None, None]
+        );
     }
 
     #[tokio::test]

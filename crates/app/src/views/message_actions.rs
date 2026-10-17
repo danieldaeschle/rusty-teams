@@ -23,7 +23,6 @@ const BAR_PADDING: f32 = 3.;
 const BAR_ICON: f32 = 16.;
 const DELEGATE_ITEM_WIDTH: f32 = 188.;
 const DELEGATE_AGENT_SIZE: f32 = 11.;
-pub const QUICK_REACTION_COUNT: usize = 4;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;

@@ -180,8 +180,14 @@ mod frames {
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
     };
-    use crate::views::conversation::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
+    use crate::views::conversation::{
+        CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+        CHANNEL_DETAILS_TAG,
+    };
     use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
+    use crate::views::find_panel::{
+        FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
+    };
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::pin_banner::PIN_BANNER_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
@@ -191,9 +197,13 @@ mod frames {
         AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call,
     };
     use crate::views::shortcuts::{
-        OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
+        ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCallsTab,
+        OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
+    use crate::views::sidebar::chat_filter_bar::{
+        FILTER_EMPTY_TAG, FILTER_INPUT_TAG, FILTER_PILLS_TAG, FILTER_TAG,
+    };
     use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
 
     const GUARDED: &[&str] = &[
@@ -216,6 +226,14 @@ mod frames {
         "shell/islands/main/call-controls/leave",
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
+    const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
+    const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
+    const FIND_TAGS: &[&str] = &[
+        FIND_PANEL_TAG,
+        FIND_DIVIDER_TAG,
+        FIND_INPUT_TAG,
+        FIND_RESULTS_TAG,
+    ];
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/sidebar/calls-actions",
         "shell/islands/sidebar/calls-actions/meet-now",
@@ -556,6 +574,9 @@ mod frames {
             .iter()
             .chain(CALL_GUARDED)
             .chain(CALLS_TAGS)
+            .chain(CHAT_FILTER_TAGS)
+            .chain(CHAT_FILTER_OPEN_TAGS)
+            .chain(FIND_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
             .chain(CONSULT_GUARDED)
@@ -766,7 +787,26 @@ mod frames {
                 size: size(px(width), px(height)),
             };
             let screens = [
-                Screen::Tab("chats", None),
+                Screen::Tab("chats", Some(|visual| visual.dispatch_action(OpenChatsTab))),
+                Screen::Tab(
+                    "chat-filter",
+                    Some(|visual| {
+                        visual.dispatch_action(OpenChatsTab);
+                        visual.dispatch_action(OpenChatFilter);
+                        visual.dispatch_action(FilterMutedChats);
+                        visual.run_until_parked();
+                        visual.simulate_input("zzz");
+                    }),
+                ),
+                Screen::Tab(
+                    "find",
+                    Some(|visual| {
+                        visual.dispatch_action(OpenChatsTab);
+                        visual.dispatch_action(FindInChat);
+                        visual.run_until_parked();
+                        visual.simulate_input("access");
+                    }),
+                ),
                 Screen::Tab(
                     "activity",
                     Some(|visual| visual.dispatch_action(OpenActivity)),
@@ -899,6 +939,12 @@ mod frames {
                     expected.push(MENU);
                 }
                 match screen_name {
+                    "chats" => expected.extend(CHAT_FILTER_TAGS),
+                    "chat-filter" => {
+                        expected.extend(CHAT_FILTER_TAGS);
+                        expected.extend(CHAT_FILTER_OPEN_TAGS);
+                    }
+                    "find" => expected.extend(FIND_TAGS),
                     "calls" => expected.extend(CALLS_TAGS),
                     "agents" => expected.push(AGENTS_LIST),
                     "prejoin" => expected.extend(PREJOIN_TAGS),
@@ -937,6 +983,15 @@ mod frames {
                             cx.notify();
                         })
                     });
+                }
+                if screen_name == "find" {
+                    visual.dispatch_action(gpui_kit::component::input::Escape);
+                    visual.run_until_parked();
+                }
+                if screen_name == "chat-filter" {
+                    visual.dispatch_action(ClearChatFilters);
+                    visual.dispatch_action(OpenChatFilter);
+                    visual.run_until_parked();
                 }
                 if screen_name == "prejoin" {
                     let state = visual.update(|_, cx| cx.global::<AppHandle>().0.clone());
@@ -1507,6 +1562,45 @@ mod frames {
             (f32::from(pane.top() - divider.bottom())).abs() < INSET_TOLERANCE,
             "pane {pane:?} must start under the header divider {divider:?}"
         );
+    }
+
+    #[gpui_kit::test]
+    fn the_channel_details_sections_follow_teams_order_with_equal_insets(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(CHANNEL_DETAILS_BUTTON));
+        let button = visual
+            .debug_bounds(CHANNEL_DETAILS_BUTTON)
+            .expect("channel details button");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some(CHANNEL_DETAILS_SHARED_TAG));
+        let pane = visual
+            .debug_bounds(CHANNEL_DETAILS_TAG)
+            .expect("details pane");
+        let pinned = visual
+            .debug_bounds(CHANNEL_DETAILS_PINNED_TAG)
+            .expect("pinned section");
+        let shared = visual
+            .debug_bounds(CHANNEL_DETAILS_SHARED_TAG)
+            .expect("shared section");
+        assert!(
+            pinned.bottom() <= shared.top(),
+            "pinned {pinned:?} must come before shared {shared:?}"
+        );
+        for (name, section) in [("pinned", pinned), ("shared", shared)] {
+            let left = f32::from(section.left() - pane.left());
+            let right = f32::from(pane.right() - section.right());
+            assert!(
+                (left - right).abs() < INSET_TOLERANCE && left > 0.,
+                "{name} section insets left {left} right {right} must match"
+            );
+        }
     }
 
     fn composer_button_insets(visual: &mut VisualTestContext) -> [f32; 6] {
