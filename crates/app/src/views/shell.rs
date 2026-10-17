@@ -29,11 +29,12 @@ use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::SidebarView;
 use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
-use super::status_bar::render_status_bar;
+use super::connection_banner::render_connection_banner;
+use super::notice_toast::NoticeToasts;
 use super::status_menu::own_status_button;
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
-use super::title_bar::render_title_bar;
+use super::title_bar::{mode_label, render_title_bar, update_button};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, selection_for};
@@ -105,6 +106,8 @@ fn jump_to_quoted(message_id: String, cx: &mut App) {
     });
 }
 
+const DEMO_UPDATE_VARIABLE: &str = "TEAMS_DEMO_UPDATE";
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -127,6 +130,7 @@ pub struct AppShell {
     window_was_fullscreen: bool,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
+    toasts: NoticeToasts,
     user_input: Arc<UserInput>,
     _subscription: Subscription,
     call_mini: Entity<CallMiniView>,
@@ -310,6 +314,7 @@ impl AppShell {
             window_was_fullscreen: false,
             open_target,
             update: UpdateStatus::UpToDate,
+            toasts: NoticeToasts::default(),
             user_input,
             _subscription: subscription,
             call_mini,
@@ -321,6 +326,12 @@ impl AppShell {
             _activation_observation: activation_observation,
         };
         shell.apply_open_target(cx);
+        shell
+            .state
+            .update(cx, |state, cx| state.refresh_connection_banner(cx));
+        if shell.state.read(cx).mode.demo && std::env::var_os(DEMO_UPDATE_VARIABLE).is_some() {
+            shell.update = UpdateStatus::Ready;
+        }
         let Startup {
             switcher_query,
             composer_text,
@@ -829,6 +840,13 @@ impl Render for AppShell {
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         self.sync_prejoin(window, cx);
+        let notice = self.state.read(cx).notice.clone();
+        self.toasts.sync(&self.state, notice.as_ref(), window, cx);
+        let update_failure = match &self.update {
+            UpdateStatus::Failed(message) => Some(message.clone()),
+            _ => None,
+        };
+        self.toasts.update_failed(update_failure.as_deref(), window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
@@ -858,16 +876,20 @@ impl Render for AppShell {
             .is_some_and(|call| !call.viewing)
             .then(|| self.call_mini.clone());
         let stage_overlay = render_stage_overlay(&self.state, state);
-        let status = render_status_bar(
-            state,
-            &self.update,
-            cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
-            cx.listener(|this, _, _, cx| {
-                this.state
-                    .update(cx, |state, cx| state.run_notice_action(cx))
-            }),
-        );
+        let banner = state.connection_banner_text().map(|banner| {
+            render_connection_banner(
+                banner,
+                cx.listener(|this, _, _, cx| {
+                    this.state.update(cx, |state, _| state.retry_live())
+                }),
+            )
+        });
         let title_bar = render_title_bar(
+            mode_label(state.mode),
+            update_button(
+                &self.update,
+                cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
+            ),
             own_status_button(&self.state, state),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
         );
@@ -1015,8 +1037,8 @@ impl Render for AppShell {
                     .debug_selector(|| "shell".into())
                     .size_full()
                     .child(title_bar)
-                    .child(self.islands(call_view, show_sidebar))
-                    .child(status),
+                    .children(banner)
+                    .child(self.islands(call_view, show_sidebar)),
             )
             .children(call_mini)
             .children(call_overlay)

@@ -26,6 +26,7 @@ mod feed;
 mod pins;
 mod proposal;
 mod recap;
+mod receipt_fade;
 mod render_env;
 mod scheduled;
 mod shared;
@@ -219,6 +220,7 @@ pub struct ConversationView {
     agent_layouts: HashMap<String, (usize, bool)>,
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
+    receipt_fade: receipt_fade::ReceiptFade,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -546,6 +548,7 @@ impl ConversationView {
             agent_layouts: HashMap::new(),
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
             reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
+            receipt_fade: receipt_fade::ReceiptFade::default(),
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -1538,7 +1541,10 @@ impl ConversationView {
         } else {
             rows.extend(local.into_iter().map(|row| Row::Message(Box::new(row))));
         }
-        let receipts = self.receipts(&records, cx);
+        let mut receipts = self.receipts(&records, cx);
+        if self.track_receipt_fades(&mut receipts) {
+            self.schedule_fade_end(cx);
+        }
         for row in rows.iter_mut() {
             if let Row::Message(message) = row
                 && message.own
@@ -1830,18 +1836,12 @@ impl ConversationView {
 
     fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
         let state = self.app.read(cx);
-        let receipts_syncing = self
-            .current
-            .as_ref()
-            .is_some_and(|current| current.sync.receipts);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
             return records
                 .iter()
                 .map(|record| {
-                    let receipt = if receipts_syncing {
-                        Receipt::Pending
-                    } else if read_ids.contains(&record.message_id) {
+                    let receipt = if read_ids.contains(&record.message_id) {
                         Receipt::Read
                     } else {
                         Receipt::Sent
@@ -1853,22 +1853,37 @@ impl ConversationView {
         let Some(engine) = state.engine.as_ref() else {
             return HashMap::new();
         };
-        let unknown = if receipts_syncing {
-            Receipt::Pending
-        } else {
-            Receipt::Hidden
-        };
         records
             .iter()
             .map(|record| {
                 let receipt = match engine.receipt_state_for(record) {
                     teams_core::ReceiptState::Read { .. } => Receipt::Read,
                     teams_core::ReceiptState::Sent => Receipt::Sent,
-                    teams_core::ReceiptState::Unknown => unknown,
+                    teams_core::ReceiptState::Unknown => Receipt::Hidden,
                 };
                 (record.message_id.clone(), receipt)
             })
             .collect()
+    }
+
+    fn track_receipt_fades(&mut self, receipts: &mut HashMap<String, Receipt>) -> bool {
+        let Some(current) = self.current.as_ref() else {
+            return false;
+        };
+        let settled = !current.sync.receipts;
+        let conversation_id = current.selection.conversation_id().to_owned();
+        self.receipt_fade
+            .apply(&conversation_id, settled, receipts, Instant::now())
+    }
+
+    fn schedule_fade_end(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(receipt_fade::RECEIPT_FADE)
+                .await;
+            this.update(cx, |this, cx| this.rebuild(false, cx)).ok();
+        })
+        .detach();
     }
 
     fn refresh_receipts(&mut self, generation: u64, cx: &mut Context<Self>) {

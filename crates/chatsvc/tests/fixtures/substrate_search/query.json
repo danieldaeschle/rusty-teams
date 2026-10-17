@@ -1,0 +1,27 @@
+{
+  "ApiVersion": "v2",
+  "EntitySets": [
+    {"EntityType": "People", "ResultSets": [{"Total": 1, "MoreResultsAvailable": false, "Results": [
+      {"Id": "r1", "ReferenceId": "q.1", "Rank": 1, "Type": "People", "Source": {
+        "DisplayName": "Erika Mustermann", "EmailAddresses": ["erika.mustermann@contoso.example"], "JobTitle": "Engineer",
+        "OfficeLocation": "Building 1", "MRI": "8:orgid:11111111-2222-3333-4444-555555555555",
+        "ExternalDirectoryObjectId": "11111111-2222-3333-4444-555555555555", "PeopleSubtype": "OrganizationUser"}}]}]},
+    {"EntityType": "Chat", "ResultSets": [{"Total": 3, "MoreResultsAvailable": true, "Results": [
+      {"ReferenceId": "q.2", "Source": {"ThreadId": "19:group01@thread.v2", "ThreadType": "Chat", "Name": "Release crew",
+        "TotalChatMembersCount": 3, "LastMessageTime": "2026-10-16T07:34:41Z", "ChatMembers": [], "MatchingMembers": []}}]}]},
+    {"EntityType": "Message", "ResultSets": [{"Total": 22770, "MoreResultsAvailable": true, "Results": [
+      {"ReferenceId": "q.3", "HitHighlightedSummary": "Ask <c0>Erika</c0> about the release", "ContentSource": "Teams", "Type": "Message", "Source": {
+        "ClientThreadId": "19:channel01@thread.tacv2", "ClientConversationId": "19:channel01@thread.tacv2;messageid=1760500000000",
+        "InternetMessageId": "1760600000000", "DateTimeSent": "2026-10-16T05:00:00Z", "Preview": "Ask Erika about the release",
+        "HasAttachments": true, "MentionsPreview": {"IsMentioned": true},
+        "Sender": {"EmailAddress": {"Name": "Max Muster", "Address": "max.muster@contoso.example"}},
+        "Extensions": {"SkypeSpaces_ConversationPost_Extension_FromSkypeInternalId": "8:orgid:aaaa",
+                       "SkypeSpaces_ConversationPost_Extension_ParentMessageId": "1760500000000",
+                       "SkypeSpaces_ConversationPost_Extension_ThreadType": "topic"}}}]}]},
+    {"EntityType": "File", "ResultSets": [{"Total": 393, "MoreResultsAvailable": true, "Results": [
+      {"ReferenceId": "q.4", "Source": {"Filename": "Notes", "FileExtension": "txt", "Size": 12, "Path": "https://contoso.example/Notes.txt",
+        "Author": "Max Muster", "LastModifiedTime": "2026-10-01T08:00:00Z"}}]}]}
+  ],
+  "SearchTerms": ["erika"],
+  "Instrumentation": {"TraceId": "trace"}
+}

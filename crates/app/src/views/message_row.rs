@@ -50,13 +50,15 @@ const SERIES_START_GAP: f32 = 8.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const NARROW_BUBBLE_WIDTH: f32 = 300.;
-const REACTION_FOOTER_HEIGHT: f32 = 24.;
+const BUBBLE_PADDING_Y: f32 = 8.;
+const META_BOTTOM_INSET: f32 = 4.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
+const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 
 pub struct DeliveryActions {
@@ -156,7 +158,7 @@ fn bubble(
                 .rounded_br(px(corners.bottom_right))
                 .rounded_bl(px(corners.bottom_left))
                 .px(px(12.))
-                .py(px(8.))
+                .py(px(BUBBLE_PADDING_Y))
         })
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
@@ -267,9 +269,8 @@ fn bubble(
                 )
                 .child(
                     h_flex()
-                        .h(px(REACTION_FOOTER_HEIGHT))
                         .flex_none()
-                        .items_center()
+                        .mb(px(META_BOTTOM_INSET - BUBBLE_PADDING_Y))
                         .child(bubble_meta(row, own, saved)),
                 ),
         );
@@ -282,7 +283,7 @@ fn bubble(
             div()
                 .absolute()
                 .right(px(8.))
-                .bottom(px(4.))
+                .bottom(px(META_BOTTOM_INSET))
                 .child(bubble_meta(row, own, saved)),
         );
     }
@@ -365,13 +366,16 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
             own && row.delivery == Delivery::Delivered,
             |meta| match row.receipt {
                 Receipt::Hidden => meta,
-                Receipt::Pending => meta.child(receipt_slot(tint).relative().top(px(1.))),
                 Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
                 Receipt::Read => meta.child(on_baseline(symbol(
                     "done_all",
                     META_CHECK_SIZE,
                     theme::own_read(),
                 ))),
+                Receipt::ReadLive => meta.child(receipt_fade_in(
+                    &row.key,
+                    on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                )),
             },
         )
 }
@@ -390,20 +394,12 @@ fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> Ani
     )
 }
 
-fn receipt_slot(tint: Hsla) -> Div {
-    h_flex()
-        .size(px(META_CHECK_SIZE))
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .child(pulse(
-            "receipt-slot",
-            div()
-                .w(px(13.))
-                .h(px(4.))
-                .rounded(px(2.))
-                .bg(tint.opacity(0.5)),
-        ))
+fn receipt_fade_in(message_key: &str, check: Div) -> AnimationElement<Div> {
+    check.with_animation(
+        SharedString::from(format!("receipt-fade/{message_key}")),
+        Animation::new(RECEIPT_FADE_PERIOD).with_easing(ease_in_out),
+        |check, delta| check.opacity(0.25 + 0.75 * delta),
+    )
 }
 
 pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {

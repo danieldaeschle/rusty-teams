@@ -196,15 +196,23 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn fetch_newer(&self, conversation_id: &str) -> Result<Delta> {
-        let mut delta = match self.resolve(conversation_id).await? {
-            Conversation::Chat => self.fetch_newer_chat(conversation_id).await?,
-            Conversation::Channel { team_id } => {
-                self.fetch_newer_channel(&team_id, conversation_id).await?
+        let heal = async {
+            if self.heal_forwards(conversation_id).await {
+                self.announce(conversation_id, true);
             }
         };
+        let fetch = async {
+            Ok::<_, Error>(match self.resolve(conversation_id).await? {
+                Conversation::Chat => self.fetch_newer_chat(conversation_id).await?,
+                Conversation::Channel { team_id } => {
+                    self.fetch_newer_channel(&team_id, conversation_id).await?
+                }
+            })
+        };
+        let (fetched, ()) = tokio::join!(fetch, heal);
+        let mut delta = fetched?;
         let cache_changed = self.attach_delta_links(conversation_id, &mut delta).await
-            | self.backfill_links(conversation_id).await
-            | self.heal_forwards(conversation_id).await;
+            | self.backfill_links(conversation_id).await;
         self.announce(conversation_id, !delta.is_empty() || cache_changed);
         Ok(delta)
     }
@@ -337,6 +345,24 @@ impl<R: Remote> SyncEngine<R> {
             })
             .await?;
         Ok(tenant.clone())
+    }
+
+    pub(crate) async fn my_tenant_id_from_any_chat(&self) -> Result<String> {
+        if let Some(tenant) = self.my_tenant_id.get() {
+            return Ok(tenant.clone());
+        }
+        if let Some(cached) = self.store.meta(META_TENANT_ID)? {
+            return Ok(cached);
+        }
+        let any_chat_id = self
+            .store
+            .sidebar()?
+            .chats
+            .into_iter()
+            .next()
+            .map(|chat| chat.id)
+            .ok_or(Error::Unsupported("a tenant id without a known chat"))?;
+        self.my_tenant_id(&any_chat_id).await
     }
 
     pub(crate) async fn resolve(&self, conversation_id: &str) -> Result<Conversation> {

@@ -11,13 +11,24 @@ use crate::stored::{AttachmentInfo, attachments, push_plain};
 
 pub const FORWARDED_CONTENT_TYPE: &str = "forwardedMessageReference";
 pub(crate) const FORWARD_ITEMTYPE: &str = "schema.skype.com/Forward";
+pub const FORWARD_LOADING_TEXT: &str = "Loading forwarded message";
+pub const FORWARD_UNAVAILABLE_TEXT: &str = "Original message not available";
 
 static MENTION_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<at\b[^>]*>").expect("mention tag pattern"));
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardState {
+    Ready,
+    /// Cached without its original; the heal fetches it.
+    Loading,
+    Unavailable,
+}
+
 /// The original message carried by a Graph `forwardedMessageReference` attachment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForwardInfo {
+    pub state: ForwardState,
     pub attachment_id: Option<String>,
     pub message_id: String,
     pub conversation_id: Option<String>,
@@ -43,9 +54,13 @@ impl ForwardInfo {
         if attachment.content_type.as_deref() != Some(FORWARDED_CONTENT_TYPE) {
             return None;
         }
-        let content: ForwardContent = serde_json::from_str(attachment.content.as_deref()?).ok()?;
+        let Some(raw) = attachment.content.as_deref() else {
+            return Some(ForwardInfo::without_content(attachment));
+        };
+        let content: ForwardContent = serde_json::from_str(raw).ok()?;
         let sender = content.original_message_sender.as_ref();
         Some(ForwardInfo {
+            state: ForwardState::Ready,
             message_id: content
                 .original_message_id
                 .or_else(|| attachment.id.clone())?,
@@ -60,6 +75,23 @@ impl ForwardInfo {
             sent_at: content.original_sent_date_time,
             content_html: content.original_message_content,
         })
+    }
+
+    fn without_content(attachment: &AttachmentInfo) -> ForwardInfo {
+        ForwardInfo {
+            state: if attachment.unavailable {
+                ForwardState::Unavailable
+            } else {
+                ForwardState::Loading
+            },
+            attachment_id: attachment.id.clone(),
+            message_id: attachment.id.clone().unwrap_or_default(),
+            conversation_id: None,
+            sender_id: None,
+            sender_name: None,
+            sent_at: None,
+            content_html: String::new(),
+        }
     }
 
     pub fn text(&self) -> String {
@@ -80,7 +112,13 @@ impl ForwardInfo {
             .as_deref()
             .map(|time| format!(" <span>{}</span>", escape_html(time)))
             .unwrap_or_default();
-        let content = MENTION_ID.replace_all(&self.content_html, "<at>");
+        let content = match self.state {
+            ForwardState::Ready => MENTION_ID.replace_all(&self.content_html, "<at>"),
+            ForwardState::Loading => format!("<p><em>{FORWARD_LOADING_TEXT}</em></p>").into(),
+            ForwardState::Unavailable => {
+                format!("<p><em>{FORWARD_UNAVAILABLE_TEXT}</em></p>").into()
+            }
+        };
         format!(
             "<blockquote itemscope=\"\" itemtype=\"http://{FORWARD_ITEMTYPE}\" itemid=\"{}\">{sender}{time}{content}</blockquote>",
             escape_html(&self.message_id),
@@ -117,11 +155,29 @@ pub fn is_forwarded(record: &MessageRecord) -> bool {
     !record.deleted && (record.body_html.contains(FORWARD_ITEMTYPE) || !forwards(record).is_empty())
 }
 
-/// A forward attachment cached before its content was kept.
+fn is_stale_forward(attachment: &AttachmentInfo) -> bool {
+    attachment.content_type.as_deref() == Some(FORWARDED_CONTENT_TYPE)
+        && attachment.content.is_none()
+        && !attachment.unavailable
+}
+
+/// A forward attachment cached before its content was kept, and not given up on.
 pub(crate) fn lacks_forward_content(record: &MessageRecord) -> bool {
-    attachments(record).iter().any(|attachment| {
-        attachment.content_type.as_deref() == Some(FORWARDED_CONTENT_TYPE)
-            && attachment.content.is_none()
+    attachments(record).iter().any(is_stale_forward)
+}
+
+/// `record` with each stale forward marked as unavailable, so it is not fetched again.
+pub(crate) fn mark_forwards_unavailable(record: &MessageRecord) -> Option<MessageRecord> {
+    let mut stored = attachments(record);
+    let mut changed = false;
+    for attachment in stored.iter_mut().filter(|attachment| is_stale_forward(attachment)) {
+        attachment.unavailable = true;
+        changed = true;
+    }
+    let attachments_json = serde_json::to_string(&stored).ok()?;
+    changed.then(|| MessageRecord {
+        attachments_json,
+        ..record.clone()
     })
 }
 
@@ -272,7 +328,33 @@ mod tests {
         assert!(!lacks_forward_content(&record));
         record.attachments_json = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"1792149081221","content":null}]"#.to_owned();
         assert!(lacks_forward_content(&record));
-        assert!(forwards(&record).is_empty());
+        let found = forwards(&record);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].state, ForwardState::Loading);
+        assert!(forwarded_texts(&record).is_empty());
+    }
+
+    fn quote_text(record: &MessageRecord) -> String {
+        let spans = linked_message_spans_with(record, &|_| None, &no_forward_header);
+        let [Span::BlockQuote(children)] = spans.as_slice() else {
+            panic!("expected one forward blockquote, got {spans:?}");
+        };
+        plain(children)
+    }
+
+    #[test]
+    fn a_forward_without_content_shows_a_loading_line_until_it_is_given_up() {
+        let mut record = forwarded_record();
+        record.attachments_json = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"1792149081221","content":null}]"#.to_owned();
+        assert!(is_forwarded(&record));
+        assert_eq!(quote_text(&record).trim(), FORWARD_LOADING_TEXT);
+
+        let given_up = mark_forwards_unavailable(&record).unwrap();
+        assert!(!lacks_forward_content(&given_up));
+        assert_eq!(forwards(&given_up)[0].state, ForwardState::Unavailable);
+        assert_eq!(quote_text(&given_up).trim(), FORWARD_UNAVAILABLE_TEXT);
+        assert!(mark_forwards_unavailable(&given_up).is_none());
+        assert!(edit_preserved(&given_up).kept.is_empty());
     }
 
     #[test]

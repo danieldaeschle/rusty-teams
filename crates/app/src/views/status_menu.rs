@@ -83,6 +83,7 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
             .flex_none()
             .child(
                 Button::new("title-own-status")
+                    .tooltip(version_tooltip())
                     .ghost()
                     .p_0()
                     .size(px(OWN_STATUS_BUTTON_SIZE))
@@ -102,6 +103,15 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
                     }),
             )
             .into_any_element(),
+    )
+}
+
+fn version_tooltip() -> String {
+    let build_id = crate::updater::running_version();
+    format!(
+        "{} {}\nBuild {build_id}",
+        app_base::APP_NAME,
+        crate::format::short_version(build_id, env!("CARGO_PKG_VERSION")),
     )
 }
 

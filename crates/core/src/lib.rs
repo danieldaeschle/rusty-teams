@@ -50,6 +50,7 @@ mod remote;
 mod scheduled;
 mod skin_tone;
 mod search;
+mod server_search;
 mod sidebar_sync;
 mod spans;
 mod stored;
@@ -97,6 +98,7 @@ pub use chatsvc::{
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
+pub use chatsvc::substrate_search;
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
@@ -143,7 +145,8 @@ pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
 pub use scheduled::NOTES_CHAT_ID;
 pub use skin_tone::{skin_tone, store_account_skin_tone};
 pub use forwarded::{
-    FORWARDED_CONTENT_TYPE, ForwardHeader, ForwardInfo, forwarded_texts, forwards, is_forwarded,
+    FORWARD_LOADING_TEXT, FORWARD_UNAVAILABLE_TEXT, FORWARDED_CONTENT_TYPE, ForwardHeader,
+    ForwardInfo, ForwardState, forwarded_texts, forwards, is_forwarded,
 };
 pub use spans::{FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};

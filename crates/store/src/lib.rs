@@ -14,6 +14,7 @@ mod models;
 mod outbox;
 mod presence;
 mod proposals;
+mod read_horizons;
 mod search;
 mod sidebar;
 mod store;
@@ -29,8 +30,8 @@ pub use models::{
     AttachmentImage, AvatarRecord, BOT_MRI_PREFIX, ChannelLayoutRecord, ChannelNotificationLevel,
     ChannelNotifications, ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord,
     ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord, MessageRecord,
-    OutboxRecord, OutboxState, OutboxTarget, RecentScope, SearchHit, Sidebar, SidebarTeam,
-    SyncState, TeamLayoutRecord, TeamRecord, UNKNOWN_USER_NAME, is_bot_id,
+    OutboxRecord, OutboxState, OutboxTarget, ReadHorizonRecord, RecentScope, SearchHit, Sidebar,
+    SidebarTeam, SyncState, TeamLayoutRecord, TeamRecord, UNKNOWN_USER_NAME, is_bot_id,
 };
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};
 pub use store::{DATA_DIR_NAME, Store, default_database_path};
