@@ -14,6 +14,7 @@ use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
 use crate::remote::Remote;
+use crate::scheduled::NOTES_CHAT_ID;
 
 impl<R: Remote> SyncEngine<R> {
     pub async fn send_message(
@@ -295,6 +296,9 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     async fn other_member_ids(&self, chat_id: &str) -> Result<Vec<String>> {
+        if chat_id == NOTES_CHAT_ID {
+            return Ok(Vec::new());
+        }
         let my_user_id = self.my_user_id().await?;
         let members = self
             .store

@@ -14,7 +14,7 @@ use store::{
 use teams_core::{
     Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
     DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
-    MentionTarget, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
+    MentionTarget, NOTES_CHAT_ID, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
     substrate_search,
 };
 
@@ -231,6 +231,13 @@ impl Remote for Handle {
 
     async fn chat(&self, chat_id: &str) -> Result<Chat> {
         *self.single_chat_calls.lock().unwrap() += 1;
+        if chat_id == NOTES_CHAT_ID {
+            return Err(Error::Graph(graph::Error::Session(session::Error::api(
+                400,
+                chat_id,
+                json!({"error": {"code": "BadRequest", "message": "Resource is not a ChatThread"}}),
+            ))));
+        }
         let found = self
             .fetchable_chats
             .lock()
@@ -2209,6 +2216,79 @@ async fn upload_to_an_unknown_conversation_fails() {
             .upload_attachment("unknown", "a.pdf", &[1], |_| {})
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let extras = MessageExtras {
+        kept: Vec::new(),
+        images: vec![HostedImage {
+            content_type: "image/png".into(),
+            bytes: Arc::new(vec![9]),
+        }],
+        files: Vec::new(),
+    };
+
+    let sent = engine
+        .send_message_with_extras(NOTES_CHAT_ID, "note to self", None, &[], &extras)
+        .await
+        .unwrap();
+    fake.set_chat_messages(vec![message(9000, 500, "<p>note to self</p>")]);
+    engine
+        .reply_to_with_extras(
+            NOTES_CHAT_ID,
+            &sent.message_id,
+            "again",
+            &[],
+            &MessageExtras::default(),
+        )
+        .await
+        .unwrap();
+    engine
+        .edit_message_html(NOTES_CHAT_ID, &sent.message_id, "edited", &[])
+        .await
+        .unwrap();
+    engine
+        .set_reaction(NOTES_CHAT_ID, &sent.message_id, "\u{1f44d}")
+        .await
+        .unwrap();
+    engine
+        .unset_reaction(NOTES_CHAT_ID, &sent.message_id, "\u{1f44d}")
+        .await
+        .unwrap();
+    engine
+        .upload_attachment(NOTES_CHAT_ID, "plan.txt", b"plan", |_| {})
+        .await
+        .unwrap();
+    engine
+        .soft_delete_message(NOTES_CHAT_ID, &sent.message_id)
+        .await
+        .unwrap();
+
+    assert_eq!(*fake.single_chat_calls.lock().unwrap(), 0);
+    assert_eq!(fake.sent.lock().unwrap().as_slice(), ["note to self"]);
+    let calls = fake.calls();
+    for expected in [
+        "quote_reply 48:notes m9000 again",
+        "edit m9000 edited",
+        "set_reaction m9000 \u{1f44d}",
+        "unset_reaction m9000 \u{1f44d}",
+        "upload chat-files plan.txt 4",
+        "soft_delete user-me m9000",
+    ] {
+        assert!(
+            calls.iter().any(|call| call == expected),
+            "{expected} in {calls:?}"
+        );
+    }
+    assert!(
+        calls
+            .iter()
+            .any(|call| call.starts_with("share ") && call.ends_with(' ')),
+        "{calls:?}"
     );
 }
 
@@ -4815,7 +4895,11 @@ fn forwarded_message_without_original(id: &str, minute: i64) -> Message {
     message
 }
 
-fn forward_state(store: &Store, conversation_id: &str, message_id: &str) -> teams_core::ForwardState {
+fn forward_state(
+    store: &Store,
+    conversation_id: &str,
+    message_id: &str,
+) -> teams_core::ForwardState {
     let record = store
         .messages_by_id(conversation_id, &[message_id.to_owned()])
         .unwrap()
@@ -4834,12 +4918,20 @@ async fn a_forward_graph_returns_without_its_original_is_not_read_again() {
     let mut messages = numbered(11);
     messages.push(forwarded_message_without_original("m0000", 0));
     fake.set_chat_messages(messages);
-    store.upsert_messages(&[stale_forward(CHAT, "m0000", 0)]).unwrap();
-    assert_eq!(forward_state(&store, CHAT, "m0000"), teams_core::ForwardState::Loading);
+    store
+        .upsert_messages(&[stale_forward(CHAT, "m0000", 0)])
+        .unwrap();
+    assert_eq!(
+        forward_state(&store, CHAT, "m0000"),
+        teams_core::ForwardState::Loading
+    );
 
     engine.fetch_newer(CHAT).await.unwrap();
 
-    assert_eq!(forward_state(&store, CHAT, "m0000"), teams_core::ForwardState::Unavailable);
+    assert_eq!(
+        forward_state(&store, CHAT, "m0000"),
+        teams_core::ForwardState::Unavailable
+    );
     let next_session = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
     next_session.fetch_newer(CHAT).await.unwrap();
     let reads = fake
@@ -4885,7 +4977,10 @@ async fn the_background_heal_reads_the_newest_chat_first_and_skips_healthy_chats
         .filter(|call| call.starts_with("chat_message "))
         .collect();
     assert_eq!(reads, ["chat_message f-newer", "chat_message f-older"]);
-    assert_eq!(forward_state(&store, OLDER, "f-older"), teams_core::ForwardState::Ready);
+    assert_eq!(
+        forward_state(&store, OLDER, "f-older"),
+        teams_core::ForwardState::Ready
+    );
     let mut changed = Vec::new();
     while let Ok(event) = events.try_recv() {
         if let CoreEvent::MessagesChanged { conversation_id } = event {

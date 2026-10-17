@@ -19,6 +19,7 @@ use crate::presence::Presence;
 use crate::preview::OwnedPreview;
 use crate::receipts::ReceiptCache;
 use crate::remote::{Remote, RemotePage};
+use crate::scheduled::NOTES_CHAT_ID;
 
 const EVENT_CAPACITY: usize = 64;
 pub(crate) const META_USER_ID: &str = "me_user_id";
@@ -393,6 +394,9 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub(crate) fn resolve_stored(&self, conversation_id: &str) -> Result<Conversation> {
+        if conversation_id == NOTES_CHAT_ID {
+            return Ok(Conversation::Chat);
+        }
         if let Some(channel) = self.store.channel(conversation_id)? {
             return Ok(Conversation::Channel {
                 team_id: channel.team_id,
