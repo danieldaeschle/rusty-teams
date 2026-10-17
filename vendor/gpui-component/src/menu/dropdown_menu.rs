@@ -1,12 +1,15 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, FocusHandle,
     Focusable, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, LayoutId,
-    RenderOnce, SharedString, Styled, Window, prelude::FluentBuilder,
+    Pixels, RenderOnce, SharedString, Styled, Window, prelude::FluentBuilder,
 };
 
-use crate::{Selectable, button::Button, menu::PopupMenu, popover::Popover};
+use crate::{
+    Selectable, button::Button, fluent::DROPDOWN_OFFSET, menu::PopupMenu, popover::Popover,
+};
 
 /// A dropdown menu trait for buttons and other interactive elements
 pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement + 'static {
@@ -40,6 +43,7 @@ pub struct DropdownMenuPopover<T: Selectable + IntoElement + 'static> {
     builder: Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>,
     on_open_change: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
     open: Option<bool>,
+    listbox: bool,
 }
 
 impl<T> DropdownMenuPopover<T>
@@ -59,12 +63,20 @@ where
             builder: Rc::new(builder),
             on_open_change: None,
             open: None,
+            listbox: false,
         }
     }
 
     /// Control the open state from outside; pair it with `on_open_change`.
     pub fn open(mut self, open: bool) -> Self {
         self.open = Some(open);
+        self
+    }
+
+    /// Open the menu as a Fluent `Listbox`: left aligned under the trigger,
+    /// 2 px below it and at least as wide, with a check column.
+    pub fn listbox(mut self) -> Self {
+        self.listbox = true;
         self
     }
 
@@ -91,15 +103,28 @@ struct DropdownMenuState {
     menu: Option<Entity<PopupMenu>>,
 }
 
+#[derive(Default)]
+struct TriggerWidth(Rc<Cell<Pixels>>);
+
 impl<T> RenderOnce for DropdownMenuPopover<T>
 where
     T: Selectable + IntoElement + 'static,
 {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        TriggerFocus::new(self.id.clone(), move |trigger_focus, window, cx| {
-            self.render_popover(trigger_focus, window, cx)
-                .into_any_element()
-        })
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let width_key = SharedString::from(format!("{}:trigger-width", self.id));
+        let trigger_width = window
+            .use_keyed_state(width_key, cx, |_, _| TriggerWidth::default())
+            .read(cx)
+            .0
+            .clone();
+        TriggerFocus::new(
+            self.id.clone(),
+            trigger_width.clone(),
+            move |trigger_focus, window, cx| {
+                self.render_popover(trigger_focus, trigger_width, window, cx)
+                    .into_any_element()
+            },
+        )
     }
 }
 
@@ -110,10 +135,12 @@ where
     fn render_popover(
         self,
         trigger_focus: FocusHandle,
+        trigger_width: Rc<Cell<Pixels>>,
         window: &mut Window,
         cx: &mut App,
     ) -> Popover {
         let builder = self.builder.clone();
+        let listbox = self.listbox;
         let menu_state =
             window.use_keyed_state(self.id.clone(), cx, |_, _| DropdownMenuState::default());
 
@@ -122,6 +149,7 @@ where
             .overlay_closable(false)
             .trigger(self.trigger)
             .anchor(self.anchor)
+            .when(listbox, |this| this.offset(DROPDOWN_OFFSET))
             .when_some(self.open, |this, open| this.open(open))
             .when_some(self.on_open_change, |this, callback| {
                 this.on_open_change(move |open, window, cx| callback(open, window, cx))
@@ -137,7 +165,9 @@ where
                     Some(menu) => menu,
                     None => {
                         let builder = builder.clone();
+                        let width = trigger_width.get();
                         let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+                            let menu = if listbox { menu.listbox(width) } else { menu };
                             builder(menu, window, cx)
                         });
                         menu.update(cx, |menu, cx| {
@@ -191,6 +221,7 @@ type TriggerFocusBuild = Box<dyn FnOnce(FocusHandle, &mut Window, &mut App) -> A
 /// the menu was not yet.
 struct TriggerFocus {
     id: ElementId,
+    width: Rc<Cell<Pixels>>,
     build: Option<TriggerFocusBuild>,
 }
 
@@ -207,10 +238,12 @@ struct TriggerFocusFrame {
 impl TriggerFocus {
     fn new(
         id: ElementId,
+        width: Rc<Cell<Pixels>>,
         build: impl FnOnce(FocusHandle, &mut Window, &mut App) -> AnyElement + 'static,
     ) -> Self {
         Self {
             id,
+            width,
             build: Some(Box::new(build)),
         }
     }
@@ -269,11 +302,12 @@ impl Element for TriggerFocus {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: gpui::Bounds<gpui::Pixels>,
+        bounds: gpui::Bounds<gpui::Pixels>,
         frame: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) {
+        self.width.set(bounds.size.width);
         window.set_focus_handle(&frame.focus_handle, cx);
         frame.child.prepaint(window, cx);
     }

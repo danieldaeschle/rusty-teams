@@ -37,6 +37,9 @@ text = re.sub(r'fn main\(\) \{.*?\n\}\n', 'fn main() {\n    #[cfg(not(debug_asse
 text = re.sub(r'(pub fn find_latest_windows_sdk_binary\(.*?\) -> Result<[^{]*\{).*?(\n    /// You can set)', r'\1\n        let _ = binary;\n        Ok(None)\n    }\n\2', text, count=1, flags=re.S)
 open(path, 'w').write(text)
 PY
+for patchFile in "$repoRoot"/scripts/gpui-windows-patches/*.patch; do
+  patch --directory="$stagingDir" --strip=1 --forward --batch --no-backup-if-mismatch --quiet < "$patchFile"
+done
 # A fresh copy gets new mtimes, and Cargo then rebuilds gpui and everything above it.
 if ! diff -rq "$stagingDir" "$patchedDir" >/dev/null 2>&1; then
   rm -rf "$patchedDir"; mkdir -p "$(dirname "$patchedDir")"; cp -rp "$stagingDir" "$patchedDir"

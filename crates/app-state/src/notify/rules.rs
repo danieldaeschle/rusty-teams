@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 use calling::Progress;
 use chrono::{DateTime, Utc};
 use store::{ChannelNotificationLevel, ChannelNotifications, MessageImportance};
+use teams_core::{
+    DesktopNotifications, MeetingChatNotifications, NotificationAccountSettings, NotificationPreset,
+};
 
 use super::sound_settings::SoundSettings;
 use super::sounds::Ringtone;
@@ -69,8 +72,7 @@ impl Corner {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    pub mentions_only: bool,
-    pub preview: bool,
+    pub account: NotificationAccountSettings,
     pub corner: Corner,
     pub flash: bool,
     pub close_to_tray: bool,
@@ -82,8 +84,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            mentions_only: false,
-            preview: true,
+            account: NotificationAccountSettings::default(),
             corner: Corner::BottomRight,
             flash: true,
             close_to_tray: true,
@@ -116,6 +117,13 @@ pub struct ChannelSignals {
     pub notifications: ChannelNotifications,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChatSignals {
+    pub meeting: bool,
+    pub participated: bool,
+    pub desktop: DesktopNotifications,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Incoming {
     pub conversation_id: String,
@@ -128,6 +136,7 @@ pub struct Incoming {
     pub mentions_me: bool,
     pub muted: bool,
     pub signals: ChannelSignals,
+    pub chat: ChatSignals,
     pub created_at: DateTime<Utc>,
     pub importance: MessageImportance,
 }
@@ -207,6 +216,36 @@ fn channel_toasts(incoming: &Incoming) -> bool {
         || signals.notifications.level == ChannelNotificationLevel::BannerAndFeed
 }
 
+fn account_toasts(account: &NotificationAccountSettings, incoming: &Incoming) -> bool {
+    if matches!(incoming.kind, ChatKind::Channel { .. }) {
+        return if incoming.mentions_me {
+            account.personal_mentions.shows_banner()
+        } else {
+            account.preset != NotificationPreset::MentionsAndReplies
+                || incoming.signals.in_my_thread
+        };
+    }
+    let chat = incoming.chat;
+    if chat.desktop == DesktopNotifications::Off {
+        return false;
+    }
+    if incoming.mentions_me {
+        return account.personal_mentions.shows_banner();
+    }
+    let meeting_muted = chat.meeting
+        && match account.meeting_chats {
+            MeetingChatNotifications::Mute => true,
+            MeetingChatNotifications::MuteUntilJoin => !chat.participated,
+            MeetingChatNotifications::Unmute => false,
+        };
+    !meeting_muted
+        && (chat.desktop == DesktopNotifications::On || account.chat_messages.shows_banner())
+}
+
+pub fn shows_preview(settings: &Settings) -> bool {
+    settings.account.show_preview
+}
+
 const SILENT: Decision = Decision {
     toast: false,
     sound: false,
@@ -223,7 +262,7 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
         || (environment.own_do_not_disturb && !urgent)
         || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call)
-        || (settings.mentions_only && !incoming.mentions_me && !incoming.is_direct() && !urgent);
+        || (!urgent && !account_toasts(&settings.account, incoming));
     if suppressed {
         return SILENT;
     }
@@ -278,6 +317,7 @@ pub fn should_flash(settings: &Settings, toast_shown: bool, window_active: bool)
 #[cfg(test)]
 mod tests {
     use calling::{CallState, EndReason};
+    use teams_core::ActivityAlert;
 
     use super::*;
 
@@ -293,6 +333,7 @@ mod tests {
             mentions_me: false,
             muted: false,
             signals: ChannelSignals::default(),
+            chat: ChatSignals::default(),
             created_at: Utc::now(),
             importance: Default::default(),
         }
@@ -360,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn urgent_passes_do_not_disturb_and_mentions_only_with_the_urgent_sound() {
+    fn urgent_passes_do_not_disturb_and_the_account_rules_with_the_urgent_sound() {
         let dnd = Environment {
             own_do_not_disturb: true,
             ..Default::default()
@@ -373,11 +414,9 @@ mod tests {
                 urgent_sound: true,
             }
         );
-        let mentions_only = Settings {
-            mentions_only: true,
-            ..Default::default()
-        };
-        assert!(decide(&mentions_only, &urgent(), Environment::default()).toast);
+        let mut chat_off = urgent();
+        chat_off.chat.desktop = DesktopNotifications::Off;
+        assert!(decide(&Settings::default(), &chat_off, Environment::default()).toast);
         let foreground = Environment {
             chat_in_foreground: true,
             ..Default::default()
@@ -553,24 +592,84 @@ mod tests {
         assert!(decide(&Settings::default(), &muted, Environment::default()).toast);
     }
 
+    fn with_account(change: impl FnOnce(&mut NotificationAccountSettings)) -> Settings {
+        let mut settings = Settings::default();
+        change(&mut settings.account);
+        settings
+    }
+
+    fn toasts(settings: &Settings, incoming: &Incoming) -> bool {
+        decide(settings, incoming, Environment::default()).toast
+    }
+
+    fn mention(mut incoming: Incoming) -> Incoming {
+        incoming.mentions_me = true;
+        incoming
+    }
+
     #[test]
-    fn mentions_only_keeps_direct_and_mentions() {
-        let settings = Settings {
-            mentions_only: true,
-            ..Default::default()
-        };
-        assert_eq!(decide(&settings, &group(), Environment::default()), SILENT);
-        assert!(
-            decide(
-                &settings,
-                &incoming(ChatKind::Direct),
-                Environment::default()
-            )
-            .toast
-        );
-        let mut mention = group();
-        mention.mentions_me = true;
-        assert!(decide(&settings, &mention, Environment::default()).toast);
+    fn chat_message_notifications_off_keeps_personal_mentions() {
+        let settings = with_account(|account| account.chat_messages = ActivityAlert::Off);
+        assert!(!toasts(&settings, &group()));
+        assert!(!toasts(&settings, &incoming(ChatKind::Direct)));
+        assert!(toasts(&settings, &mention(group())));
+    }
+
+    #[test]
+    fn personal_mentions_only_in_activity_give_no_banner() {
+        let settings = with_account(|account| account.personal_mentions = ActivityAlert::OnlyFeed);
+        assert!(!toasts(&settings, &mention(group())));
+        assert!(!toasts(&settings, &mention(channel())));
+        assert!(toasts(&settings, &group()));
+    }
+
+    #[test]
+    fn mentions_and_replies_preset_drops_plain_channel_posts() {
+        let settings =
+            with_account(|account| account.preset = NotificationPreset::MentionsAndReplies);
+        let mut post = channel_with(ChannelNotificationLevel::BannerAndFeed, true);
+        assert!(!toasts(&settings, &post));
+        post.signals.in_my_thread = true;
+        assert!(toasts(&settings, &post));
+        assert!(toasts(&settings, &mention(channel())));
+        assert!(toasts(&settings, &group()));
+    }
+
+    fn meeting_chat(participated: bool) -> Incoming {
+        let mut message = group();
+        message.chat.meeting = true;
+        message.chat.participated = participated;
+        message
+    }
+
+    #[test]
+    fn meeting_chats_stay_quiet_until_i_take_part() {
+        let settings = Settings::default();
+        assert!(!toasts(&settings, &meeting_chat(false)));
+        assert!(toasts(&settings, &meeting_chat(true)));
+        assert!(toasts(&settings, &mention(meeting_chat(false))));
+    }
+
+    #[test]
+    fn meeting_chat_mute_and_unmute() {
+        let muted = with_account(|account| account.meeting_chats = MeetingChatNotifications::Mute);
+        assert!(!toasts(&muted, &meeting_chat(true)));
+        assert!(toasts(&muted, &mention(meeting_chat(true))));
+        let unmuted =
+            with_account(|account| account.meeting_chats = MeetingChatNotifications::Unmute);
+        assert!(toasts(&unmuted, &meeting_chat(false)));
+    }
+
+    #[test]
+    fn per_chat_desktop_preference_overrides_the_account() {
+        let mut silenced = group();
+        silenced.chat.desktop = DesktopNotifications::Off;
+        assert!(!toasts(&Settings::default(), &silenced));
+        assert!(!toasts(&Settings::default(), &mention(silenced)));
+        let settings = with_account(|account| account.chat_messages = ActivityAlert::Off);
+        let mut selected = group();
+        selected.chat.desktop = DesktopNotifications::On;
+        assert!(toasts(&settings, &selected));
     }
 
     fn channel_with(level: ChannelNotificationLevel, include_replies: bool) -> Incoming {

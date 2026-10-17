@@ -120,11 +120,33 @@ impl AppState {
     }
 
     pub fn open_chat_with(&mut self, user_id: &str, cx: &mut Context<Self>) {
+        self.with_one_on_one(user_id, cx, |state, chat_id, cx| {
+            state.select(Selection::Chat(chat_id.to_owned()), cx)
+        });
+    }
+
+    /// Teams starts a 1:1 call from the profile card; the 1:1 chat is the call thread.
+    pub fn call_person(&mut self, user_id: &str, with_video: bool, cx: &mut Context<Self>) {
+        self.with_one_on_one(user_id, cx, move |state, chat_id, cx| {
+            if with_video {
+                state.start_chat_video_call(chat_id, cx);
+            } else {
+                state.start_chat_call(chat_id, cx);
+            }
+        });
+    }
+
+    fn with_one_on_one(
+        &mut self,
+        user_id: &str,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &str, &mut Context<Self>) + 'static,
+    ) {
         let existing =
             existing_one_on_one(&self.sidebar.chats, self.directory.me.as_ref(), user_id)
                 .map(|chat| chat.id.clone());
         if let Some(chat_id) = existing {
-            self.select(Selection::Chat(chat_id), cx);
+            then(self, &chat_id, cx);
             return;
         }
         if self.mode.read_only {
@@ -149,7 +171,7 @@ impl AppState {
             this.update(cx, |state, cx| match outcome {
                 Ok(chat_id) => {
                     state.reload_sidebar(cx);
-                    state.select(Selection::Chat(chat_id), cx);
+                    then(state, &chat_id, cx);
                 }
                 Err(reason) => {
                     state.raise_notice(format!("Chat could not be opened: {reason}"), None, cx)

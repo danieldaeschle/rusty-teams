@@ -9,6 +9,8 @@ use gpui_kit::*;
 use teams_core::{OrgPerson, PROFILE_LINK_PREFIX, PersonProfile, WorkLocationKind};
 
 use super::avatar::{person_avatar, with_presence};
+use super::new_chat::Pick;
+use super::new_meeting_dialog::open_new_meeting_with;
 use super::widgets::icon;
 use crate::app_state::{AppHandle, AppState};
 use crate::data::{Presence, PresenceKind, presence_kind_of};
@@ -31,6 +33,9 @@ const STATUS_LINES: usize = 3;
 const REPORTS_MAX_HEIGHT: f32 = 168.;
 const ACTION_HEIGHT: f32 = 30.;
 const SKELETON_HEIGHT: f32 = 10.;
+const SCHEDULE_MEETING: &str = "Schedule meeting";
+const EMAIL: &str = "Email";
+const COPY_EMAIL: &str = "Copy email";
 
 pub enum ProfileCardEvent {
     Close,
@@ -255,25 +260,76 @@ impl ProfileCard {
             .me
             .as_ref()
             .is_some_and(|me| me.user_id == self.user_id);
+        let profile = self
+            .app
+            .read(cx)
+            .profiles
+            .get(&self.user_id)
+            .and_then(|entry| entry.profile.clone());
+        let name = self.display_name(profile.as_deref(), cx);
         let user_id = self.user_id.clone();
         let (mail_email, copy_email) = (email.clone(), email.clone());
+        let invitee = Pick {
+            user_id: user_id.clone(),
+            name: name.clone(),
+            mail: email,
+        };
+        let chat_id = user_id.clone();
+        let (video_id, audio_id) = (user_id.clone(), user_id.clone());
         h_flex()
             .gap(px(8.))
             .when(!is_me, |row| {
                 row.child(
                     action_button("profile-chat", "Chat", IconName::MessageSquare, true).on_click(
                         cx.listener(move |this, _, _, cx| {
-                            let user_id = user_id.clone();
+                            let user_id = chat_id.clone();
                             this.app
                                 .update(cx, |state, cx| state.open_chat_with(&user_id, cx));
                             cx.emit(ProfileCardEvent::Close);
                         }),
                     ),
                 )
+                .child(
+                    icon_action(
+                        "profile-video-call",
+                        IconName::Video,
+                        video_call_tooltip(&name),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let user_id = video_id.clone();
+                        this.app
+                            .update(cx, |state, cx| state.call_person(&user_id, true, cx));
+                        cx.emit(ProfileCardEvent::Close);
+                    })),
+                )
+                .child(
+                    icon_action(
+                        "profile-audio-call",
+                        IconName::Phone,
+                        audio_call_tooltip(&name),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let user_id = audio_id.clone();
+                        this.app
+                            .update(cx, |state, cx| state.call_person(&user_id, false, cx));
+                        cx.emit(ProfileCardEvent::Close);
+                    })),
+                )
+                .child(
+                    icon_action(
+                        "profile-schedule-meeting",
+                        IconName::Calendar,
+                        SCHEDULE_MEETING.to_owned(),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        open_new_meeting_with(this.app.clone(), vec![invitee.clone()], window, cx);
+                        cx.emit(ProfileCardEvent::Close);
+                    })),
+                )
             })
             .when_some(mail_email, |row, address| {
                 row.child(
-                    action_button("profile-email", "Email", IconName::Mail, false).on_click(
+                    icon_action("profile-email", IconName::Mail, EMAIL.to_owned()).on_click(
                         cx.listener(move |_, _, _, cx| {
                             cx.open_url(&mailto_url(&address));
                             cx.emit(ProfileCardEvent::Close);
@@ -283,7 +339,7 @@ impl ProfileCard {
             })
             .when_some(copy_email, |row, address| {
                 row.child(
-                    action_button("profile-copy-email", "Copy email", IconName::Copy, false)
+                    icon_action("profile-copy-email", IconName::Copy, COPY_EMAIL.to_owned())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.app
                                 .update(cx, |state, cx| state.copy_profile_email(&address, cx));
@@ -557,6 +613,30 @@ fn contact_row(row: ContactRow) -> Div {
         )
 }
 
+pub fn video_call_tooltip(name: &str) -> String {
+    format!("Start a video call with {name}")
+}
+
+pub fn audio_call_tooltip(name: &str) -> String {
+    format!("Start an audio call with {name}")
+}
+
+fn icon_action(id: &'static str, glyph: IconName, tooltip: String) -> Stateful<Div> {
+    div()
+        .id(id)
+        .size(px(ACTION_HEIGHT))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .bg(theme::popup_hover())
+        .hover(|button| button.opacity(0.9))
+        .child(icon(glyph, 14., theme::text_soft()))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+}
+
 fn action_button(
     id: &'static str,
     label: &'static str,
@@ -662,5 +742,16 @@ impl Render for ProfileCard {
                 )
                 .with_priority(2),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{audio_call_tooltip, video_call_tooltip};
+
+    #[test]
+    fn call_tooltips_use_the_teams_wording() {
+        assert_eq!(video_call_tooltip("Ann"), "Start a video call with Ann");
+        assert_eq!(audio_call_tooltip("Ann"), "Start an audio call with Ann");
     }
 }

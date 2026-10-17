@@ -105,6 +105,7 @@ mod tests {
             mentions_me: false,
             muted: false,
             signals: Default::default(),
+            chat: Default::default(),
             created_at: sent_at(),
             importance,
         }

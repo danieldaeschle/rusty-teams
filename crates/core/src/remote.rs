@@ -3,8 +3,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, AppConsumptionHorizon, MentionActivity, UserSettings,
-    parse_app_consumption_horizon,
+    ActivityFeed, AppConsumptionHorizon, ChatNotificationMode, ChatNotificationWrite,
+    ChatSettingChange, ChatSettingsClient, ChatSettingsDocument, DesktopNotifications,
+    MentionActivity, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -139,6 +140,12 @@ pub trait Remote {
         share: HistoryShare,
     ) -> Result<()>;
     async fn chat_states(&self) -> Result<Vec<ConversationState>>;
+    async fn clear_chat_history(&self, _chat_id: &str, _cleared_until_ms: i64) -> Result<()> {
+        Err(Error::Unsupported("removing chat history"))
+    }
+    async fn set_chat_topic(&self, _chat_id: &str, _topic: &str) -> Result<()> {
+        Err(Error::Unsupported("renaming a chat"))
+    }
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
     async fn set_channel_notifications(
@@ -479,6 +486,24 @@ pub trait Remote {
         Err(Error::Unsupported("sound settings"))
     }
 
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn save_chat_setting(&self, _change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        _chat_id: &str,
+        _current_settings: Option<&str>,
+        _mode: ChatNotificationMode,
+        _desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Err(Error::Unsupported("chat notifications"))
+    }
+
     async fn save_sound_settings(
         &self,
         _user_mri: &str,
@@ -740,6 +765,18 @@ impl Remote for Graph {
     async fn chat_states(&self) -> Result<Vec<ConversationState>> {
         Ok(Conversations::new(self.session())
             .conversation_states()
+            .await?)
+    }
+
+    async fn clear_chat_history(&self, chat_id: &str, cleared_until_ms: i64) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .clear_history(chat_id, cleared_until_ms)
+            .await?)
+    }
+
+    async fn set_chat_topic(&self, chat_id: &str, topic: &str) -> Result<()> {
+        Ok(ThreadMembers::new(self.session())
+            .set_topic(chat_id, topic)
             .await?)
     }
 
@@ -1247,6 +1284,26 @@ impl Remote for Graph {
 
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Ok(SoundSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn save_chat_setting(&self, change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).write(change).await?)
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        chat_id: &str,
+        current_settings: Option<&str>,
+        mode: ChatNotificationMode,
+        desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Ok(Conversations::new(self.session())
+            .set_chat_notifications(chat_id, current_settings, mode, desktop)
+            .await?)
     }
 
     async fn save_sound_settings(

@@ -8,6 +8,9 @@ use crate::pins::DEFAULT_REGION;
 const ORGID_PREFIX: &str = "8:orgid:";
 const MEMBER_ROLE: &str = "Admin";
 const DAY_MS: i64 = 86_400_000;
+const TOPIC_PROPERTY: &str = "topic";
+pub const MAX_TOPIC_LENGTH: usize = 250;
+pub const INVALID_TOPIC_CHARACTER: char = ':';
 pub const MAX_HISTORY_DAYS: u32 = 999;
 
 /// How much chat history new members see, as the Teams add-people dialog offers it.
@@ -80,6 +83,35 @@ pub fn remove_member_request(region: &str, thread_id: &str, user_id: &str) -> Re
     ))
 }
 
+/// Teams renames a group chat by setting the thread property `topic`; an empty topic removes the name.
+pub fn topic_request(region: &str, thread_id: &str, topic: &str) -> Request {
+    Request::with_body(
+        Method::Put,
+        format!(
+            "{}/{}/properties?name={TOPIC_PROPERTY}",
+            threads_url(region),
+            encode(thread_id)
+        ),
+        json!({ TOPIC_PROPERTY: topic }),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopicProblem {
+    TooLong,
+    InvalidCharacter,
+}
+
+pub fn topic_problem(topic: &str) -> Option<TopicProblem> {
+    if topic.chars().count() > MAX_TOPIC_LENGTH {
+        Some(TopicProblem::TooLong)
+    } else if topic.contains(INVALID_TOPIC_CHARACTER) {
+        Some(TopicProblem::InvalidCharacter)
+    } else {
+        None
+    }
+}
+
 pub struct ThreadMembers<T: MessageTransport = SessionMessageTransport> {
     transport: T,
     region: String,
@@ -114,6 +146,11 @@ impl<T: MessageTransport> ThreadMembers<T> {
         let request = remove_member_request(&self.region, thread_id, user_id);
         ensure_success(&self.transport.send(request).await?)
     }
+
+    pub async fn set_topic(&self, thread_id: &str, topic: &str) -> Result<()> {
+        let request = topic_request(&self.region, thread_id, topic);
+        ensure_success(&self.transport.send(request).await?)
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +160,35 @@ mod tests {
     use session::ApiResponse;
 
     use super::*;
+
+    #[test]
+    fn topic_is_put_as_the_thread_property() {
+        let request = topic_request("emea", THREAD, "Release crew");
+        assert_eq!(request.method, Method::Put);
+        assert_eq!(
+            request.url,
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/threads/19%3Aabc%40thread.v2/properties?name=topic"
+        );
+        assert_eq!(request.body, Some(json!({"topic": "Release crew"})));
+        assert_eq!(
+            topic_request("emea", THREAD, "").body,
+            Some(json!({"topic": ""}))
+        );
+    }
+
+    #[test]
+    fn topic_rules_follow_teams() {
+        assert_eq!(topic_problem("Release crew"), None);
+        assert_eq!(topic_problem(&"a".repeat(MAX_TOPIC_LENGTH)), None);
+        assert_eq!(
+            topic_problem(&"a".repeat(MAX_TOPIC_LENGTH + 1)),
+            Some(TopicProblem::TooLong)
+        );
+        assert_eq!(
+            topic_problem("Team: ops"),
+            Some(TopicProblem::InvalidCharacter)
+        );
+    }
 
     const NOW: i64 = 1_792_200_000_000;
     const THREAD: &str = "19:abc@thread.v2";

@@ -314,6 +314,8 @@ impl RenderEnv {
             call: self.call_actions(message, cx),
             reaction_proposal,
             undo_delete: self.undo_delete_action(message, is_real, view, cx),
+            compact: self.app.read(cx).account_chat_settings().message_density
+                == teams_core::MessageDensity::Compact,
         }
     }
 

@@ -22,7 +22,10 @@ use teams_core::{
 };
 
 mod channel_details;
-pub use channel_details::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
+pub use channel_details::{
+    CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+    CHANNEL_DETAILS_TAG,
+};
 mod deletes;
 mod detached;
 mod feed;
@@ -35,16 +38,18 @@ mod render_env;
 mod scheduled;
 mod shared;
 
+use super::add_people_dialog::open_add_people;
 use super::attachments::FileActions;
 use super::avatar::{
     bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
-use super::add_people_dialog::open_add_people;
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
-use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
+use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
+use super::group_name::group_name_button;
+use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
@@ -60,6 +65,7 @@ use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_t
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
+use crate::chat_settings_actions::shown_receipt;
 use crate::data::{existing_one_on_one, is_one_on_one, one_on_one_bot, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
@@ -100,6 +106,7 @@ const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
 const HEADER_LEAD_SIZE: f32 = 36.;
 const TABS_INLINE_MIN_WIDTH: f32 = 560.;
+const FIND_MIN_TIMELINE_WIDTH: f32 = 360.;
 const TABS_ROW_HEIGHT: f32 = 36.;
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
@@ -239,6 +246,8 @@ pub struct ConversationView {
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     receipt_fade: receipt_fade::ReceiptFade,
+    find_panel: Option<Entity<FindPanel>>,
+    find_subscription: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -570,6 +579,8 @@ impl ConversationView {
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
             reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
             receipt_fade: receipt_fade::ReceiptFade::default(),
+            find_panel: None,
+            find_subscription: None,
             _subscriptions: subscriptions,
         };
         if let Some(selection) = pinned.or_else(|| view.app.read(cx).selection.clone()) {
@@ -639,7 +650,7 @@ impl ConversationView {
                     .as_ref()
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
-                    if self.shared_active() || self.recap_active() {
+                    if self.shared_active() || self.recap_active() || self.channel_details_open {
                         self.refresh_shared_items(cx);
                     }
                     self.rebuild(false, cx);
@@ -679,7 +690,7 @@ impl ConversationView {
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
-            AppEvent::Translation => self.rebuild(false, cx),
+            AppEvent::Translation | AppEvent::ChatSettings => self.rebuild(false, cx),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
             AppEvent::Scheduled => self.rebuild(false, cx),
@@ -729,6 +740,7 @@ impl ConversationView {
                 self.schedule((**outgoing).clone(), *send_at, window, cx)
             }
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
+            ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
         }
     }
@@ -845,6 +857,14 @@ impl ConversationView {
     }
 
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .find_panel
+            .as_ref()
+            .is_some_and(|panel| panel.read(cx).selection() != &selection)
+        {
+            self.find_panel = None;
+            self.find_subscription = None;
+        }
         self.stop_typing(cx);
         self.stop_reply_typing(cx);
         self.new_post_open = false;
@@ -1874,6 +1894,15 @@ impl ConversationView {
     }
 
     fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+        let settings = self.app.read(cx).account_chat_settings();
+        let mut receipts = self.raw_receipts(records, cx);
+        for receipt in receipts.values_mut() {
+            *receipt = shown_receipt(&settings, *receipt);
+        }
+        receipts
+    }
+
+    fn raw_receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
         let state = self.app.read(cx);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
@@ -3026,6 +3055,7 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
+        let quick = state.quick_reactions();
         let in_chat = chat_id.is_some();
         let pin_conversation_id = self.pin_conversation_id();
         let pinned = pin_conversation_id
@@ -3051,7 +3081,8 @@ impl ConversationView {
             translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
-            toggle_pinned: pinnable.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            toggle_pinned: pinnable
+                .then(|| action(|this, key, window, cx| this.toggle_pinned(key, window, cx))),
             pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
@@ -3063,7 +3094,7 @@ impl ConversationView {
             pin,
             hover,
             picker: self.picker.clone(),
-            quick: self.recent.read(cx).most_used(QUICK_REACTION_COUNT),
+            quick,
             mine,
             done: action(|this, key, _, cx| this.suppress_toolbar(key, cx)),
         }
@@ -3230,6 +3261,51 @@ impl ConversationView {
         )
     }
 
+    pub fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pinned || self.draft_active {
+            return;
+        }
+        let Some(selection) = self
+            .current
+            .as_ref()
+            .map(|current| current.selection.clone())
+        else {
+            return;
+        };
+        self.channel_details_open = false;
+        if let Some(panel) = &self.find_panel {
+            panel.update(cx, |panel, cx| panel.focus(window, cx));
+            return;
+        }
+        let app = self.app.clone();
+        let panel = cx.new(|cx| FindPanel::new(app, selection.clone(), window, cx));
+        let subscription = cx.subscribe_in(
+            &panel,
+            window,
+            move |this, _, event: &FindPanelEvent, window, cx| match event {
+                FindPanelEvent::Close => this.close_find(window, cx),
+                FindPanelEvent::Jump(message_id) => {
+                    let (selection, message_id) = (selection.clone(), message_id.clone());
+                    this.app.update(cx, |state, cx| {
+                        state.jump_to_message(selection, message_id, cx)
+                    });
+                }
+            },
+        );
+        panel.update(cx, |panel, cx| panel.focus(window, cx));
+        self.find_panel = Some(panel);
+        self.find_subscription = Some(subscription);
+        cx.notify();
+    }
+
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find_panel = None;
+        self.find_subscription = None;
+        self.composer
+            .update(cx, |composer, cx| composer.focus(window, cx));
+        cx.notify();
+    }
+
     fn header_width(&self, window: &Window) -> f32 {
         match self.header_width.get() {
             width if width > 0. => width,
@@ -3258,6 +3334,7 @@ impl ConversationView {
         let mut lead: Option<AnyElement> = None;
         let mut subline = String::new();
         let mut stack: Option<AnyElement> = None;
+        let mut rename: Option<AnyElement> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3293,6 +3370,15 @@ impl ConversationView {
                             stack = Some(add_people_button(&self.app, chat_id));
                         }
                     } else {
+                        if chat.kind == GROUP_KIND
+                            && me.is_some_and(|me| {
+                                chat.members
+                                    .iter()
+                                    .any(|member| member.user_id.as_deref() == Some(&me.user_id))
+                            })
+                        {
+                            rename = Some(group_name_button(&self.app, chat_id, &chat.title));
+                        }
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
                         subline = format!("{} participants", chat.members.len());
@@ -3395,12 +3481,19 @@ impl ConversationView {
                     .overflow_hidden()
                     .gap(px(1.))
                     .child(
-                        div()
-                            .truncate()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text())
-                            .child(current.title.clone()),
+                        h_flex()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text())
+                                    .child(current.title.clone()),
+                            )
+                            .children(rename),
                     )
                     .when(!subline.is_empty(), |column| {
                         column.child(
@@ -3417,6 +3510,8 @@ impl ConversationView {
             .children(self.channel_details_button(cx))
     }
 }
+
+const GROUP_KIND: &str = "group";
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3650,6 +3745,8 @@ impl Render for ConversationView {
             scroller.into_any_element()
         };
         let channel_details = self.render_channel_details(cx);
+        let find_panel = self.find_panel.clone().filter(|_| !drafting);
+        let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
         let content = v_flex()
             .relative()
             .flex_1()
@@ -3677,12 +3774,24 @@ impl Render for ConversationView {
             .child(self.render_drop_overlay(cx));
         root.child(
             h_flex()
+                .relative()
                 .flex_1()
                 .min_h_0()
                 .w_full()
                 .items_stretch()
                 .child(content)
-                .children(channel_details),
+                .children(channel_details)
+                .children(find_panel.map(|panel| {
+                    div()
+                        .h_full()
+                        .w(px(FIND_PANEL_WIDTH))
+                        .min_w_0()
+                        .flex_shrink(1.)
+                        .when(find_overlays, |slot| {
+                            slot.absolute().top_0().right_0().bottom_0().max_w_full()
+                        })
+                        .child(panel)
+                })),
         )
         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
             if this.reaction_details.is_some() {

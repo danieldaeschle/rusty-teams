@@ -426,6 +426,7 @@ mod tests {
             mentions_me: mention,
             muted: false,
             signals: Default::default(),
+            chat: Default::default(),
             created_at: chrono::Utc::now(),
             importance: Default::default(),
         }

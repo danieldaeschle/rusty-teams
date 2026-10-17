@@ -132,6 +132,7 @@ pub fn dropdown(id: &'static str, label: String, entries: Vec<MenuEntry>) -> imp
                 )
             })
         })
+        .listbox()
 }
 
 pub fn link_dropdown(

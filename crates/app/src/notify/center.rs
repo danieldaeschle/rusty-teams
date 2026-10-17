@@ -13,7 +13,7 @@ use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::ring_view::RingView;
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide, in_call,
-    meeting_start_sound, ringtone_for, should_flash, should_ringback,
+    meeting_start_sound, ringtone_for, should_flash, should_ringback, shows_preview,
 };
 use super::settings;
 use super::sound_cache::{self, SoundHandle};
@@ -108,7 +108,8 @@ impl NotificationCenter {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let settings = settings::load(&app.read(cx).store);
+        let mut settings = settings::load(&app.read(cx).store);
+        settings.account = app.read(cx).account_chat_settings().notifications;
         let app_icon = active_appearance::current(cx).app_icon;
         let tray = if app.read(cx).mode.demo {
             None
@@ -275,10 +276,16 @@ impl NotificationCenter {
         self.sync_tray();
         if self.settings.sounds != previous {
             let updated = self.settings.sounds.clone();
-            self.app
-                .update(cx, |state, cx| state.save_sound_settings(previous, updated, cx));
+            self.app.update(cx, |state, cx| {
+                state.save_sound_settings(previous, updated, cx)
+            });
             self.prefetch_sounds(cx);
         }
+        cx.notify();
+    }
+
+    fn on_account_notifications(&mut self, cx: &mut Context<Self>) {
+        self.settings.account = self.app.read(cx).account_chat_settings().notifications;
         cx.notify();
     }
 
@@ -336,6 +343,7 @@ impl NotificationCenter {
             AppEvent::CallTone(tone) => self.on_call_tone(*tone, cx),
             AppEvent::Call => self.sync_call_sounds(cx),
             AppEvent::SoundSettings => self.on_account_sounds(cx),
+            AppEvent::ChatSettings => self.on_account_notifications(cx),
             _ => {}
         }
     }
@@ -399,7 +407,11 @@ impl NotificationCenter {
             .unwrap_or(false)
     }
 
-    pub fn handle_incoming(&mut self, incoming: Incoming, cx: &mut Context<Self>) {
+    pub fn handle_incoming(&mut self, mut incoming: Incoming, cx: &mut Context<Self>) {
+        incoming.chat.desktop = self
+            .app
+            .read(cx)
+            .chat_desktop_notifications(&incoming.conversation_id);
         let bubble_text = match &incoming.preview {
             Preview::Text(text) => text.replace('\n', " "),
             Preview::Image => "Sent a picture".to_owned(),
@@ -576,7 +588,9 @@ impl NotificationCenter {
             .map(|toast| {
                 let lines = match &toast.agent {
                     Some(agent) => wrapped_lines(&agent.body, layout::AGENT_BODY_WIDTH, cx),
-                    None => preview_lines(&describe(toast, self.settings.preview).preview, cx),
+                    None => {
+                        preview_lines(&describe(toast, shows_preview(&self.settings)).preview, cx)
+                    }
                 };
                 layout::toast_height(toast, lines)
             })
@@ -726,7 +740,12 @@ impl NotificationCenter {
         let reconnecting =
             model.is_some_and(|model| model.is_reconnecting() && !model.lobby) && !self.demo_mode;
         sync_loop(&mut self.ringback, ringback, CallTone::OutgoingRinging, cx);
-        sync_loop(&mut self.reconnecting, reconnecting, CallTone::Reconnecting, cx);
+        sync_loop(
+            &mut self.reconnecting,
+            reconnecting,
+            CallTone::Reconnecting,
+            cx,
+        );
     }
 
     fn slide_offset(&self, opened: Instant, area: WorkArea) -> i32 {
@@ -1166,6 +1185,7 @@ impl NotificationCenter {
             mentions_me: false,
             muted: false,
             signals: Default::default(),
+            chat: Default::default(),
             created_at: Utc::now(),
             importance: Default::default(),
         };
@@ -1338,6 +1358,7 @@ fn demo_incoming() -> Vec<Incoming> {
         mentions_me: mention,
         muted: false,
         signals: Default::default(),
+        chat: Default::default(),
         created_at: Utc::now(),
         importance: Default::default(),
     };
@@ -1415,7 +1436,10 @@ mod tests {
             scale: 1.,
         };
         let options = popup_options(slot, area);
-        assert_eq!(options.window_background, WindowBackgroundAppearance::Transparent);
+        assert_eq!(
+            options.window_background,
+            WindowBackgroundAppearance::Transparent
+        );
         assert_eq!(options.kind, WindowKind::PopUp);
     }
 

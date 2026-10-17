@@ -1,3 +1,7 @@
+use gpui_kit::component::fluent::{
+    MENU_ICON_LABEL_GAP, MENU_ICON_SLOT, MENU_ITEM_GAP, MENU_ITEM_HEIGHT, MENU_ITEM_PADDING_X,
+    MENU_LIST_PADDING, OPTION_CHECK_SIZE,
+};
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -17,10 +21,8 @@ pub const COMPOSER_IMPORTANCE_LABEL_TAG: &str = "composer/importance-label";
 pub const COMPOSER_URGENT_BANNER_TAG: &str = "composer-urgent-banner";
 pub const DELIVERY_MENU_TAG: &str = "delivery-menu";
 const MENU_WIDTH: f32 = 320.;
-const MENU_PADDING: f32 = 4.;
-const ROW_PADDING: f32 = 10.;
 const OPTION_ICON_SIZE: f32 = 20.;
-const CHECK_SIZE: f32 = 16.;
+const BANNER_ICON_SIZE: f32 = 16.;
 const DISABLED_OPACITY: f32 = 0.4;
 const LABEL_SIZE: f32 = 12.;
 const LABEL_LINE_HEIGHT: f32 = 16.;
@@ -124,7 +126,8 @@ impl Composer {
                 .mb(px(6.))
                 .w(px(MENU_WIDTH))
                 .max_w(relative(1.))
-                .p(px(MENU_PADDING))
+                .p(MENU_LIST_PADDING)
+                .gap(MENU_ITEM_GAP)
                 .rounded(px(10.))
                 .flyout_surface()
                 .occlude()
@@ -153,11 +156,21 @@ impl Composer {
             .id(option.tag)
             .debug_selector(|| option.tag.into())
             .w_full()
-            .p(px(ROW_PADDING))
-            .gap(px(ROW_PADDING))
+            .min_h(MENU_ITEM_HEIGHT)
+            .px(MENU_ITEM_PADDING_X)
+            .py(MENU_ITEM_PADDING_X)
+            .gap(MENU_ICON_LABEL_GAP)
             .items_center()
             .rounded(px(6.))
-            .child(symbol(option.symbol, OPTION_ICON_SIZE, accent))
+            .child(
+                div()
+                    .size(MENU_ICON_SLOT)
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(symbol(option.symbol, OPTION_ICON_SIZE, accent)),
+            )
             .child(
                 v_flex()
                     .flex_1()
@@ -176,7 +189,9 @@ impl Composer {
                             .child(option.content),
                     ),
             )
-            .children(selected.then(|| symbol("done", CHECK_SIZE, theme::text())));
+            .children(
+                selected.then(|| symbol("done", f32::from(OPTION_CHECK_SIZE), theme::text())),
+            );
         if !enabled {
             return row
                 .opacity(DISABLED_OPACITY)
@@ -238,7 +253,11 @@ impl Composer {
                 .bg(theme::red().opacity(BANNER_TINT))
                 .text_size(px(12.))
                 .text_color(theme::red_tint())
-                .child(symbol("fluent_alert_urgent", CHECK_SIZE, theme::red_tint()))
+                .child(symbol(
+                    "fluent_alert_urgent",
+                    BANNER_ICON_SIZE,
+                    theme::red_tint(),
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -258,7 +277,7 @@ impl Composer {
                         .cursor_pointer()
                         .hover(|button| button.bg(theme::red().opacity(BANNER_TINT)))
                         .tooltip(|window, cx| Tooltip::new("Send as standard").build(window, cx))
-                        .child(symbol("close", CHECK_SIZE, theme::red_tint()))
+                        .child(symbol("close", BANNER_ICON_SIZE, theme::red_tint()))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.choose_importance(MessageImportance::Normal, window, cx)
                         })),

@@ -1,7 +1,7 @@
 use store::Store;
 
-use super::sounds::{AlertSound, Ringtone, RingtoneAssignments, RingtoneCallType};
 use super::rules::{Corner, Settings};
+use super::sounds::{AlertSound, Ringtone, RingtoneAssignments, RingtoneCallType};
 
 const META_KEY: &str = "notifications.settings";
 const RINGTONE_PREFIX: &str = "ringtone.";
@@ -29,18 +29,37 @@ fn serialize(settings: &Settings) -> String {
     });
     [
         ("sound".to_owned(), sounds.notification_sound.to_string()),
-        ("sound_type".to_owned(), sounds.notification_sound_type.name().to_owned()),
+        (
+            "sound_type".to_owned(),
+            sounds.notification_sound_type.name().to_owned(),
+        ),
         ("urgent_sound".to_owned(), sounds.urgent_sound.to_string()),
-        ("urgent_sound_type".to_owned(), sounds.urgent_sound_type.name().to_owned()),
-        ("call_sound".to_owned(), sounds.call_and_meeting_sound.to_string()),
-        ("sound_when_busy".to_owned(), sounds.sound_when_busy.to_string()),
-        ("mentions_only".to_owned(), settings.mentions_only.to_string()),
-        ("preview".to_owned(), settings.preview.to_string()),
+        (
+            "urgent_sound_type".to_owned(),
+            sounds.urgent_sound_type.name().to_owned(),
+        ),
+        (
+            "call_sound".to_owned(),
+            sounds.call_and_meeting_sound.to_string(),
+        ),
+        (
+            "sound_when_busy".to_owned(),
+            sounds.sound_when_busy.to_string(),
+        ),
         ("corner".to_owned(), settings.corner.key().to_owned()),
         ("taskbar_flash".to_owned(), settings.flash.to_string()),
-        ("close_to_tray".to_owned(), settings.close_to_tray.to_string()),
-        ("do_not_disturb".to_owned(), settings.do_not_disturb.to_string()),
-        ("mute_in_calls".to_owned(), settings.mute_in_calls.to_string()),
+        (
+            "close_to_tray".to_owned(),
+            settings.close_to_tray.to_string(),
+        ),
+        (
+            "do_not_disturb".to_owned(),
+            settings.do_not_disturb.to_string(),
+        ),
+        (
+            "mute_in_calls".to_owned(),
+            settings.mute_in_calls.to_string(),
+        ),
     ]
     .into_iter()
     .chain(ringtones)
@@ -64,8 +83,6 @@ fn parse(text: &str) -> Settings {
             "urgent_sound_type" => set_alert_sound(&mut sounds.urgent_sound_type, value),
             "call_sound" => sounds.call_and_meeting_sound = flag,
             "sound_when_busy" => sounds.sound_when_busy = flag,
-            "mentions_only" => settings.mentions_only = flag,
-            "preview" => settings.preview = flag,
             "corner" => settings.corner = Corner::from_key(value).unwrap_or_default(),
             "taskbar_flash" => settings.flash = flag,
             "close_to_tray" => settings.close_to_tray = flag,
@@ -100,8 +117,7 @@ mod tests {
     #[test]
     fn round_trips_every_field() {
         let settings = Settings {
-            mentions_only: true,
-            preview: false,
+            account: Default::default(),
             corner: Corner::TopLeft,
             flash: false,
             close_to_tray: false,
@@ -133,6 +149,10 @@ mod tests {
     #[test]
     fn the_old_synthesized_ringtone_key_is_ignored() {
         assert_eq!(parse("ringtone=chime"), Settings::default());
+        assert_eq!(
+            parse("mentions_only=true\npreview=false"),
+            Settings::default()
+        );
     }
 
     #[test]

@@ -234,6 +234,26 @@ impl Store {
         )?;
         Ok(())
     }
+
+    pub fn set_channel_hidden(&self, channel_id: &str, hidden: bool) -> Result<()> {
+        self.lock()?.execute(
+            "INSERT INTO channel_layout (channel_id, general, hidden)
+             SELECT id, name = ?2, ?3 FROM channels WHERE id = ?1
+             ON CONFLICT (channel_id) DO UPDATE SET hidden = excluded.hidden",
+            params![channel_id, GENERAL_FALLBACK_NAME, hidden],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_team_hidden(&self, team_id: &str, hidden: bool) -> Result<()> {
+        self.lock()?.execute(
+            "INSERT INTO team_layout (team_id, position, hidden)
+             SELECT ?1, COALESCE(MAX(position) + 1, 0), ?2 FROM team_layout WHERE true
+             ON CONFLICT (team_id) DO UPDATE SET hidden = excluded.hidden",
+            params![team_id, hidden],
+        )?;
+        Ok(())
+    }
 }
 
 impl Store {

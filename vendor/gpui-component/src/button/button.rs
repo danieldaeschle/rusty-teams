@@ -745,9 +745,8 @@ impl RenderOnce for Button {
             .justify_center()
             .button_text_size(self.size)
             .map(|this| match self.size {
-                Size::XSmall => this.gap_1(),
-                Size::Small => this.gap_1(),
-                _ => this.gap_2(),
+                Size::XSmall | Size::Small => this.gap(crate::fluent::BUTTON_ICON_GAP_SMALL),
+                _ => this.gap(crate::fluent::BUTTON_ICON_GAP),
             })
             .refine_style(&self.content_style)
             .when_some(self.icon, |this, icon| {

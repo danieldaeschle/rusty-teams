@@ -13,7 +13,10 @@ mod card_widgets;
 mod card_width;
 mod channel_mentions;
 mod channel_sync;
+mod chat_settings_sync;
+mod channel_visibility;
 mod chat_paging;
+mod default_reactions;
 mod download;
 mod draft;
 mod emoticon_tags;
@@ -101,11 +104,21 @@ pub use chatsvc::{
     ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
+pub use chat_settings_sync::{store_chat_settings, stored_chat_settings};
+pub use chatsvc::{
+    ActivityAlert, ChatAccountSettings, ChatNotificationMode, ChatSettingChange,
+    ChatSettingsDocument, DesktopNotifications, EnterKeyBehavior, MeetingChatNotifications,
+    MessageDensity, NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
+};
 pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
     parse_language_settings, target_patch,
+};
+pub use default_reactions::{
+    DEFAULT_REACTION_SLOTS, TEAMS_DEFAULT_REACTIONS, default_reactions,
+    store_account_default_reactions,
 };
 pub use download::LibraryFile;
 pub use draft::{
@@ -140,7 +153,8 @@ pub use meeting_join::{
 };
 pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
-    ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
+    ChannelAddress, ChannelLinkInput, channel_link, channel_message_link, channel_tab_link,
+    chat_message_link, team_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use notes_chat::{is_notes_chat, notes_chat_title};

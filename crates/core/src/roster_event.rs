@@ -6,6 +6,7 @@ use store::{MemberRecord, MessageRecord};
 const MEMBERS_ADDED_TYPE: &str = "#microsoft.graph.membersAddedEventMessageDetail";
 const MEMBERS_DELETED_TYPE: &str = "#microsoft.graph.membersDeletedEventMessageDetail";
 const MEMBERS_LEFT_TYPE: &str = "#microsoft.graph.membersLeftEventMessageDetail";
+const CHAT_RENAMED_TYPE: &str = "#microsoft.graph.chatRenamedEventMessageDetail";
 const UNRESOLVED_NAME_PREFIX: &str = "orgid:";
 const DAY_SECONDS: i64 = 86_400;
 
@@ -14,6 +15,7 @@ pub enum RosterChange {
     Added,
     Removed,
     Left,
+    Renamed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -33,6 +35,8 @@ pub struct RosterEvent {
     pub member_names: Vec<Option<String>>,
     #[serde(default)]
     pub history: SharedHistory,
+    #[serde(default)]
+    pub topic: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,6 +71,7 @@ impl RosterEvent {
             MEMBERS_LEFT_TYPE => RosterChange::Left,
             MEMBERS_DELETED_TYPE if only_initiator => RosterChange::Left,
             MEMBERS_DELETED_TYPE => RosterChange::Removed,
+            CHAT_RENAMED_TYPE => RosterChange::Renamed,
             _ => return None,
         };
         let history = match change {
@@ -86,6 +91,12 @@ impl RosterEvent {
             member_ids,
             member_names,
             history,
+            topic: (change == RosterChange::Renamed)
+                .then(|| detail.get("chatDisplayName").and_then(Value::as_str))
+                .flatten()
+                .map(str::trim)
+                .filter(|topic| !topic.is_empty())
+                .map(str::to_owned),
         })
     }
 
@@ -114,6 +125,10 @@ impl RosterEvent {
         let targets = join_targets(&targets);
         match self.change {
             RosterChange::Left => format!("{initiator} left the chat."),
+            RosterChange::Renamed => match &self.topic {
+                Some(topic) => format!("{initiator} changed the group name to {topic}."),
+                None => format!("{initiator} removed the group name for this conversation."),
+            },
             RosterChange::Removed => format!("{initiator} removed {targets} from the chat."),
             RosterChange::Added => match self.history {
                 SharedHistory::None => format!("{initiator} added {targets} to the chat."),
@@ -208,6 +223,32 @@ mod tests {
 
     fn plain_names(user_id: Option<&str>, name: Option<&str>) -> String {
         name.or(user_id).unwrap_or("Unknown").to_owned()
+    }
+
+    #[test]
+    fn a_rename_reads_like_teams() {
+        let renamed = |name: Value| {
+            RosterEvent::from_graph(
+                &json!({
+                    "@odata.type": CHAT_RENAMED_TYPE,
+                    "chatDisplayName": name,
+                    "initiator": {"user": {"id": "me", "displayName": "Daniel"}},
+                }),
+                created(),
+            )
+            .unwrap()
+        };
+        let event = renamed(json!("Release crew"));
+        assert_eq!(event.change, RosterChange::Renamed);
+        assert_eq!(
+            event.text(plain_names),
+            "Daniel changed the group name to Release crew."
+        );
+        assert_eq!(RosterEvent::from_json(&event.to_json()).unwrap(), event);
+        assert_eq!(
+            renamed(json!(null)).text(plain_names),
+            "Daniel removed the group name for this conversation."
+        );
     }
 
     #[test]

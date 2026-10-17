@@ -1,8 +1,8 @@
 use std::future::Future;
 
+use chatsvc::HistoryShare;
 use chrono::{DateTime, Duration, Local, Offset, Utc};
 use gpui_kit::*;
-use chatsvc::HistoryShare;
 use store::{ChannelNotifications, ChatRecord, MemberRecord};
 use teams_core::roster_event::{RosterChange, RosterEvent, SharedHistory, merge_members};
 
@@ -255,9 +255,7 @@ impl AppState {
         };
         let mut with_members = chat.clone();
         merge_members(&mut with_members.members, &people);
-        let _ = self
-            .store
-            .upsert_chats(std::slice::from_ref(&with_members));
+        let _ = self.store.upsert_chats(std::slice::from_ref(&with_members));
         self.reload_sidebar(cx);
         let Some(engine) = engine_or_demo else {
             self.add_demo_roster_line(chat_id, &people, share, cx);
@@ -302,17 +300,88 @@ impl AppState {
                 HistoryShare::Days(days) => SharedHistory::Days(days),
                 HistoryShare::All => SharedHistory::All,
             },
+            topic: None,
         };
+        self.store_demo_roster_line(chat_id, &event, cx);
+    }
+
+    fn store_demo_roster_line(
+        &mut self,
+        chat_id: &str,
+        event: &RosterEvent,
+        cx: &mut Context<Self>,
+    ) {
         let now = Utc::now();
         let record = crate::demo::roster_record(
             chat_id,
             &format!("demo-roster-{}", now.timestamp_millis()),
             now,
-            &event,
+            event,
         );
         let _ = self.store.upsert_messages(std::slice::from_ref(&record));
         cx.emit(crate::app_state::AppEvent::Messages(chat_id.to_owned()));
         cx.notify();
+    }
+
+    /// Teams' "Remove chat history": hidden for me only until a newer message arrives.
+    pub fn remove_chat_history(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        let Some(chat) = self.chat_record(chat_id) else {
+            return;
+        };
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        self.remove_chat_locally(chat_id, cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        let owned_id = chat_id.to_owned();
+        self.run_chat_action(
+            "Remove chat history",
+            async move { engine.remove_chat_history(&owned_id).await },
+            move |state, cx| state.restore_chat_locally(&chat, cx),
+            |_, _| {},
+            cx,
+        );
+    }
+
+    pub fn rename_chat(&mut self, chat_id: &str, topic: &str, cx: &mut Context<Self>) {
+        let Some(chat) = self.chat_record(chat_id) else {
+            return;
+        };
+        let topic = topic.trim().to_owned();
+        if topic == chat.title.trim() || chatsvc::topic_problem(&topic).is_some() {
+            return;
+        }
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let mut renamed = chat.clone();
+        renamed.title = topic.clone();
+        let _ = self.store.upsert_chats(std::slice::from_ref(&renamed));
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            let me = self.directory.me.as_ref();
+            let event = RosterEvent {
+                change: RosterChange::Renamed,
+                initiator_id: me.map(|person| person.user_id.clone()),
+                initiator_name: me.map(|person| person.display_name.clone()),
+                member_ids: Vec::new(),
+                member_names: Vec::new(),
+                history: SharedHistory::None,
+                topic: (!topic.is_empty()).then(|| topic.clone()),
+            };
+            self.store_demo_roster_line(chat_id, &event, cx);
+            return;
+        };
+        let owned_id = chat_id.to_owned();
+        self.run_chat_action(
+            "Rename group chat",
+            async move { engine.rename_chat(&owned_id, &topic).await },
+            move |state, cx| state.restore_chat_locally(&chat, cx),
+            |_, _| {},
+            cx,
+        );
     }
 
     /// Teams turns adding people to a 1:1 into a new group chat draft with everyone.
@@ -321,7 +390,7 @@ impl AppState {
         self.start_new_chat(cx);
     }
 
-    fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
+    pub(crate) fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
         self.sidebar
             .chats
             .iter()
