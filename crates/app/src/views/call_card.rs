@@ -54,6 +54,7 @@ fn icon_circle(call: &CallCard, own: bool) -> Div {
             theme::accent_text(),
         ),
         CallIcon::RecordStop => (circle_fill(own), "fluent_record_stop", theme::text()),
+        CallIcon::Roster => (circle_fill(own), "group", theme::text()),
     };
     h_flex()
         .size(px(ICON_CIRCLE))

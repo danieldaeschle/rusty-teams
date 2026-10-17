@@ -1060,6 +1060,25 @@ fn message(
     }
 }
 
+pub fn roster_record(
+    conversation: &str,
+    id: &str,
+    time: DateTime<Utc>,
+    event: &teams_core::roster_event::RosterEvent,
+) -> MessageRecord {
+    MessageRecord {
+        conversation_id: conversation.to_owned(),
+        message_id: id.to_owned(),
+        created_at: time,
+        links_json: "[]".to_owned(),
+        attachments_json: "[]".to_owned(),
+        reactions_json: "[]".to_owned(),
+        mentions_json: "[]".to_owned(),
+        call_event_json: Some(event.to_json()),
+        ..MessageRecord::default()
+    }
+}
+
 fn call_record(
     conversation: &str,
     id: &str,

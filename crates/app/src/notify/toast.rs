@@ -367,12 +367,12 @@ impl ToastView {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .child(symbol("keyboard_return", 20., white()))
+            .child(symbol("keyboard_return", 20., theme::text()))
             .when(empty, |button| button.opacity(0.4))
             .when(!empty, |button| {
                 button
                     .cursor_pointer()
-                    .hover(|button| button.bg(white().opacity(0.1)))
+                    .hover(|button| button.bg(theme::popup_hover()))
                     .on_click(cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
                         this.submit(window, cx);

@@ -37,11 +37,12 @@ use super::avatar::{
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
+use super::add_people_dialog::open_add_people;
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
-use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder};
+use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
 use super::post_card::render_post;
 use super::profile_card::opens_profile;
@@ -927,6 +928,23 @@ impl ConversationView {
             });
             self.on_draft_changed(window, cx);
             self.rebuild(true, cx);
+        }
+        let people = self
+            .app
+            .update(cx, |state, _| std::mem::take(&mut state.new_chat_people));
+        if !people.is_empty() {
+            let chips = people
+                .into_iter()
+                .filter_map(|person| {
+                    Some(Pick {
+                        user_id: person.user_id?,
+                        name: person.display_name,
+                        mail: None,
+                    })
+                })
+                .collect();
+            self.draft
+                .update(cx, |draft, cx| draft.set_chips(chips, cx));
         }
         self.draft
             .update(cx, |draft, cx| draft.focus_query(window, cx));
@@ -3295,6 +3313,9 @@ impl ConversationView {
                             }
                             _ => String::new(),
                         };
+                        if is_one_on_one(chat) {
+                            stack = Some(add_people_button(&self.app, chat_id));
+                        }
                     } else {
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
@@ -3754,6 +3775,17 @@ fn progress_bar() -> impl IntoElement {
                     },
                 ),
         )
+}
+
+fn add_people_button(app: &Entity<AppState>, chat_id: &str) -> AnyElement {
+    let (app, chat_id) = (app.clone(), chat_id.to_owned());
+    Button::new("chat-add-people")
+        .ghost()
+        .compact()
+        .icon(IconName::UserPlus)
+        .tooltip("Add people")
+        .on_click(move |_, window, cx| open_add_people(&app, &chat_id, true, window, cx))
+        .into_any_element()
 }
 
 #[cfg(test)]

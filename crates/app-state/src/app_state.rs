@@ -90,6 +90,7 @@ pub struct AppState {
     pub selection: Option<Selection>,
     pub late_arrivals: LateArrivals,
     pub new_chat: bool,
+    pub new_chat_people: Vec<store::MemberRecord>,
     pub connection: ConnectionState,
     pub live: LiveState,
     pub last_sync: Option<DateTime<Utc>>,
@@ -237,6 +238,7 @@ impl AppState {
             selection: None,
             late_arrivals: LateArrivals::default(),
             new_chat: false,
+            new_chat_people: Vec::new(),
             connection: if mode.demo {
                 ConnectionState::Online
             } else {

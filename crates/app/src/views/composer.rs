@@ -2667,7 +2667,7 @@ impl Render for Composer {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .child(symbol("keyboard_return", 20., white()))
+            .child(symbol("keyboard_return", 20., theme::text()))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| this.open_schedule_menu(cx)),
@@ -2676,7 +2676,7 @@ impl Render for Composer {
             .when(can_send, |button| {
                 button
                     .cursor_pointer()
-                    .hover(|button| button.bg(white().opacity(0.1)))
+                    .hover(|button| button.bg(theme::popup_hover()))
                     .on_click(cx.listener(|this, _, window, cx| this.submit_current(window, cx)))
             });
         let fun = can_attach.then(|| {

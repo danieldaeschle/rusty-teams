@@ -4,12 +4,13 @@ use chatsvc::substrate_search::{
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
-    ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest,
-    InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon,
-    MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins,
-    PresenceLookup, PresenceService, PresenceStatus, Receipts, RecordingPolicy, SavedMessage,
-    ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest, Translation, TranslationTrigger,
-    Translator, WindowDirection, WorkLocationKind,
+    ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, HistoryShare,
+    InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo,
+    MemberHorizon, MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages,
+    PinnedMessage, Pins, PresenceLookup, PresenceService, PresenceStatus, Receipts,
+    RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, ThreadMembers,
+    TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
+    WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -126,6 +127,12 @@ pub trait Remote {
     async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()>;
+    async fn add_chat_members(
+        &self,
+        chat_id: &str,
+        user_ids: &[String],
+        share: HistoryShare,
+    ) -> Result<()>;
     async fn chat_states(&self) -> Result<Vec<ConversationState>>;
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
@@ -670,7 +677,20 @@ impl Remote for Graph {
     }
 
     async fn remove_chat_member(&self, chat_id: &str, user_id: &str) -> Result<()> {
-        Ok(Graph::remove_chat_member(self, chat_id, user_id).await?)
+        Ok(ThreadMembers::new(self.session())
+            .remove(chat_id, user_id)
+            .await?)
+    }
+
+    async fn add_chat_members(
+        &self,
+        chat_id: &str,
+        user_ids: &[String],
+        share: HistoryShare,
+    ) -> Result<()> {
+        Ok(ThreadMembers::new(self.session())
+            .add(chat_id, user_ids, share, Utc::now().timestamp_millis())
+            .await?)
     }
 
     async fn chat_states(&self) -> Result<Vec<ConversationState>> {

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod activity_panel;
 pub mod adaptive_card;
+pub mod add_people_dialog;
 pub mod attachment_tray;
 pub mod attachments;
 pub mod avatar;
@@ -77,6 +78,7 @@ pub mod title_bar;
 pub mod toolbar_placement;
 pub mod transfer_picker;
 pub mod translation_line;
+pub mod window_zoom;
 
 pub use app_ui_kit::{
     card_chart, channel_tabs, draft_style, reaction_proposal_pill, scroll_edge, widgets,
