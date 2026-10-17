@@ -1040,6 +1040,26 @@ mod tests {
     }
 
     #[test]
+    fn the_notes_chat_shows_my_face_and_my_presence() {
+        let directory = Directory {
+            me: Some(me()),
+            ..Default::default()
+        };
+        let collapsed = HashSet::new();
+        let mut notes = chat(teams_core::NOTES_CHAT_ID, "oneOnOne", false);
+        notes.title = "Me Myself (You)".into();
+        notes.members.retain(|member| member.user_id.as_deref() == Some("me"));
+        let chats = vec![notes];
+        let context = input(&chats, &directory, &collapsed);
+        let item = chat_item(&chats[0], &context, None);
+        assert_eq!(item.title, "Me Myself (You)");
+        assert_eq!(item.presence_user.as_deref(), Some("me"));
+        assert!(
+            matches!(item.avatar, AvatarSpec::Single(ref face) if face.user_id.as_deref() == Some("me"))
+        );
+    }
+
+    #[test]
     fn a_one_on_one_with_a_bot_shows_the_bot_tile_and_no_presence() {
         let directory = Directory {
             me: Some(me()),

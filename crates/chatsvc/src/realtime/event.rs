@@ -7,6 +7,8 @@ use crate::error::{Error, Result};
 const MAX_FIELD_LENGTH: usize = 256;
 const ORGID_PREFIX: &str = "8:orgid:";
 const HTTPS_PREFIX: &str = "https://";
+const NOTES_STREAM_PREFIX: &str = "19:teamsstream_notes_";
+const NOTES_CONVERSATION_ID: &str = "48:notes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,6 +147,7 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
                 .ok_or_else(|| Error::Decode("receivedAt out of range".into()))?;
             let conversation_id = conversation_id
                 .map(bounded)
+                .map(notes_alias)
                 .filter(|value| !value.is_empty());
             if event_kind == EventKind::Typing
                 && let Some(event) = typing_event(
@@ -209,6 +212,14 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
     }
 }
 
+fn notes_alias(conversation_id: String) -> String {
+    if conversation_id.starts_with(NOTES_STREAM_PREFIX) {
+        NOTES_CONVERSATION_ID.to_owned()
+    } else {
+        conversation_id
+    }
+}
+
 fn typing_event(
     conversation_id: Option<String>,
     signal: Option<&str>,
@@ -265,6 +276,16 @@ mod tests {
         assert_eq!(event.conversation_id.as_deref(), Some("19:abc@thread.v2"));
         assert_eq!(event.message_id.as_deref(), Some("1791368146075"));
         assert_eq!(event.received_at.timestamp_millis(), 1791368146999);
+    }
+
+    #[test]
+    fn the_notes_stream_thread_is_reported_as_the_notes_chat() {
+        let payload = r#"{"channel":"event","resourceType":"NewMessage","eventKind":"new_message",
+            "conversationId":"19:teamsstream_notes_f74e@thread.v2","messageId":"1","receivedAt":1}"#;
+        let RealtimeEvent::Message(event) = decode_payload(payload).unwrap() else {
+            panic!("expected message")
+        };
+        assert_eq!(event.conversation_id.as_deref(), Some("48:notes"));
     }
 
     #[test]

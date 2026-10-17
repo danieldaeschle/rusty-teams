@@ -40,6 +40,7 @@ mod mentions;
 mod message_actions;
 mod message_link;
 mod message_window;
+mod notes_chat;
 mod people;
 mod presence;
 mod preview;
@@ -92,13 +93,13 @@ pub use card_widgets::{
     LabelPosition, RingSize,
 };
 pub use card_width::{TargetWidth, WidthClass};
+pub use chatsvc::substrate_search;
 pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
     ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
-pub use chatsvc::substrate_search;
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
@@ -140,6 +141,7 @@ pub use message_link::{
     ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
+pub use notes_chat::{is_notes_chat, notes_chat_title};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
 pub use presence::{Activity, Availability, Presence};
 pub use preview::{is_event_preview, preview_text};
