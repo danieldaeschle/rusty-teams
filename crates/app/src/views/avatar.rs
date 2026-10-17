@@ -1,10 +1,12 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
 
+use crate::avatar_image::{AvatarPhoto, device_span};
 use crate::card_state::BotIdentity;
 use crate::data::{AvatarState, Directory, Presence, PresenceKind};
 use crate::format;
@@ -55,27 +57,50 @@ fn face_circle(directory: &Directory, face: &Face, size: f32, text_ratio: f32) -
         .as_deref()
         .and_then(|user_id| directory.avatar(user_id));
     match state {
-        Some(AvatarState::Ready(image)) => {
-            let texture_size = size / crate::avatar_image::visible_fraction();
-            let offset = (size - texture_size) / 2.;
-            div()
-                .relative()
-                .size(px(size))
-                .flex_none()
-                .child(
-                    img(ImageSource::Image(image.clone()))
-                        .absolute()
-                        .left(px(offset))
-                        .top(px(offset))
-                        .size(px(texture_size)),
-                )
-                .into_any_element()
-        }
+        Some(AvatarState::Ready(photo)) => photo_disc(photo, size, size / 2.),
+        Some(AvatarState::Icon(image)) => img(ImageSource::Image(image.clone()))
+            .size(px(size))
+            .flex_none()
+            .rounded_full()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element(),
         Some(AvatarState::Pending) => {
             initials_circle(&face.name, key, size, true, text_ratio).into_any_element()
         }
         _ => initials_circle(&face.name, key, size, false, text_ratio).into_any_element(),
     }
+}
+
+fn photo_disc(photo: &Arc<AvatarPhoto>, size: f32, radius: f32) -> AnyElement {
+    let photo = photo.clone();
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let scale_factor = window.scale_factor();
+            let side = device_span(
+                f32::from(bounds.left()),
+                f32::from(bounds.right()),
+                scale_factor,
+            );
+            let Some(texture) = photo.texture(side) else {
+                return;
+            };
+            if let Some(evicted) = texture.evicted {
+                cx.drop_image(evicted, Some(window));
+            }
+            let _ = window.paint_image(
+                bounds,
+                bounds,
+                Corners::all(px(radius)),
+                texture.image,
+                0,
+                false,
+            );
+        },
+    )
+    .size(px(size))
+    .flex_none()
+    .into_any_element()
 }
 
 pub fn person_avatar(
@@ -105,6 +130,7 @@ pub fn bot_avatar(identity: &BotIdentity, size: f32) -> AnyElement {
             .child(
                 img(url.clone())
                     .size_full()
+                    .rounded_full()
                     .object_fit(ObjectFit::Cover)
                     .with_loading(initials.clone())
                     .with_fallback(initials),
@@ -122,7 +148,10 @@ pub fn bot_tile(directory: &Directory, face: &Face, size: f32) -> AnyElement {
         .and_then(|user_id| directory.avatar(user_id));
     let tile = div().size(px(size)).flex_none().rounded(px(radius));
     match image {
-        Some(AvatarState::Ready(image)) => tile
+        Some(AvatarState::Ready(photo)) => tile
+            .child(photo_disc(photo, size, radius))
+            .into_any_element(),
+        Some(AvatarState::Icon(image)) => tile
             .child(
                 img(ImageSource::Image(image.clone()))
                     .size_full()
@@ -143,8 +172,7 @@ pub fn presence_size(avatar_size: f32) -> f32 {
         .clamp(PRESENCE_MIN, PRESENCE_MAX)
 }
 
-pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<Div> {
-    let outer = presence_size(avatar_size);
+fn presence_badge(kind: PresenceKind, ring: Hsla, outer: f32) -> Option<Div> {
     let inner = outer - 2. * PRESENCE_RING;
     let fill = match kind {
         PresenceKind::Available => theme::green(),
@@ -166,7 +194,9 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
             center.child(div().w(px(inner - 4.)).h(px(2.)).rounded(px(1.)).bg(ring))
         }
         PresenceKind::Offline => center.border(px(1.5)).border_color(theme::text_muted()),
-        PresenceKind::OutOfOffice => center.child(icon(IconName::ArrowLeft, inner - 2., theme::white())),
+        PresenceKind::OutOfOffice => {
+            center.child(icon(IconName::ArrowLeft, inner - 2., theme::white()))
+        }
         _ => center,
     };
     Some(
@@ -181,8 +211,7 @@ pub fn presence_dot(kind: PresenceKind, ring: Hsla, avatar_size: f32) -> Option<
     )
 }
 
-fn presence_spinner(ring: Hsla, avatar_size: f32) -> Div {
-    let outer = presence_size(avatar_size);
+fn presence_spinner(ring: Hsla, outer: f32) -> Div {
     let spinner = icon(IconName::Loader, outer - PRESENCE_RING, theme::text_muted())
         .with_animation(
             "presence-spinner",
@@ -200,12 +229,22 @@ fn presence_spinner(ring: Hsla, avatar_size: f32) -> Div {
 }
 
 pub fn with_presence(avatar: AnyElement, presence: Presence, size: f32, ring: Hsla) -> Div {
+    with_presence_badge(avatar, presence, size, presence_size(size), ring)
+}
+
+pub fn with_presence_badge(
+    avatar: AnyElement,
+    presence: Presence,
+    size: f32,
+    badge: f32,
+    ring: Hsla,
+) -> Div {
     let wrapper = div().relative().size(px(size)).flex_none().child(avatar);
     match presence {
-        Presence::Loading => wrapper.child(presence_spinner(ring, size)),
-        Presence::Live(kind) => wrapper.children(presence_dot(kind, ring, size)),
+        Presence::Loading => wrapper.child(presence_spinner(ring, badge)),
+        Presence::Live(kind) => wrapper.children(presence_badge(kind, ring, badge)),
         Presence::Cached(kind) => wrapper.children(
-            presence_dot(kind, ring, size).map(|dot| dot.opacity(CACHED_PRESENCE_OPACITY)),
+            presence_badge(kind, ring, badge).map(|dot| dot.opacity(CACHED_PRESENCE_OPACITY)),
         ),
     }
 }
@@ -222,7 +261,11 @@ pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hs
             .flex()
             .items_center()
             .justify_center()
-            .child(icon(IconName::Calendar, (size * MEETING_ICON_RATIO).round(), theme::white()))
+            .child(icon(
+                IconName::Calendar,
+                (size * MEETING_ICON_RATIO).round(),
+                theme::white(),
+            ))
             .into_any_element(),
         AvatarSpec::Muted => div()
             .size(px(size))
@@ -232,7 +275,11 @@ pub fn spec_avatar(directory: &Directory, spec: &AvatarSpec, size: f32, ring: Hs
             .flex()
             .items_center()
             .justify_center()
-            .child(icon(IconName::BellOff, (size * MEETING_ICON_RATIO).round(), theme::text_muted()))
+            .child(icon(
+                IconName::BellOff,
+                (size * MEETING_ICON_RATIO).round(),
+                theme::text_muted(),
+            ))
             .into_any_element(),
         AvatarSpec::Pair(first, second) => {
             let small = (size * PAIR_RATIO).round();

@@ -10,23 +10,26 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
-use super::avatar::{person_avatar, with_presence};
+use super::avatar::{person_avatar, with_presence, with_presence_badge};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
-use crate::settings_section::SettingsSection;
 use crate::own_status::{
     STATUS_CHOICES, STATUS_DURATIONS, StateSummary, StatusDuration, choice_label, duration_target,
     presence_kind_for, state_summary, work_location_label,
 };
+use crate::settings_section::SettingsSection;
 use crate::theme;
 
 pub const MENU_WIDTH: f32 = 250.;
-const TITLE_AVATAR_SIZE: f32 = 26.;
+pub(crate) const TITLE_AVATAR_SIZE: f32 = 28.;
+pub(crate) const OWN_AVATAR_DISC: &str = "shell/title-bar/own-status/avatar/disc";
+const TITLE_PRESENCE_SIZE: f32 = 14.;
 const HEADER_AVATAR_SIZE: f32 = 40.;
-const RING_WIDTH: f32 = 2.;
 const PRESENCE_OVERHANG: f32 = 2.;
-const OWN_STATUS_BUTTON_SIZE: f32 = TITLE_AVATAR_SIZE + 2. * (1. + RING_WIDTH + PRESENCE_OVERHANG);
+const TITLE_BUTTON_INSET: f32 = 2.;
+const OWN_STATUS_BUTTON_SIZE: f32 =
+    TITLE_AVATAR_SIZE + 2. * (PRESENCE_OVERHANG + TITLE_BUTTON_INSET);
 const MENU_ICON_SIZE: f32 = 14.;
 const ICON_COLUMN: f32 = 16.;
 const HEADER_INSET: f32 = 24.;
@@ -44,7 +47,6 @@ struct MenuContext {
 pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<AnyElement> {
     let person = state.directory.me.clone()?;
     let presence = state.directory.presence_of(&person.user_id);
-    let open = state.status_menu_open;
     let summary = state_summary(&state.own_status, state.own_presence_kind(), &Local::now());
     let context = MenuContext {
         app: app.clone(),
@@ -54,28 +56,19 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
         summary,
         person: person.clone(),
     };
-    let ringed = div()
-        .p(px(1.))
-        .rounded_full()
-        .border(px(RING_WIDTH))
-        .border_color(if open {
-            theme::accent()
-        } else {
-            transparent_black()
-        })
-        .child(person_avatar(
+    let avatar = with_presence_badge(
+        person_avatar(
             &state.directory,
             Some(&person.user_id),
             &person.display_name,
             TITLE_AVATAR_SIZE,
-        ))
-        .into_any_element();
-    let ringed = with_presence(
-        ringed,
+        ),
         presence,
-        TITLE_AVATAR_SIZE + 2. * (1. + RING_WIDTH),
+        TITLE_AVATAR_SIZE,
+        TITLE_PRESENCE_SIZE,
         theme::background(),
-    );
+    )
+    .debug_selector(|| OWN_AVATAR_DISC.into());
     let toggle = app.clone();
     Some(
         div()
@@ -92,7 +85,7 @@ pub fn own_status_button(app: &Entity<AppState>, state: &AppState) -> Option<Any
                         div()
                             .debug_selector(|| "shell/title-bar/own-status/avatar".into())
                             .p(px(PRESENCE_OVERHANG))
-                            .child(ringed),
+                            .child(avatar),
                     )
                     .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
                         status_menu(popup, window, cx, &context)
@@ -230,16 +223,18 @@ fn status_menu(
             PopupMenuItem::new("Chat list")
                 .icon(menu_icon(IconName::LayoutList))
                 .on_click(move |_, _, cx| {
-                    chat_list_app
-                        .update(cx, |state, cx| state.open_settings(SettingsSection::Chats, cx));
+                    chat_list_app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::Chats, cx)
+                    });
                 }),
         )
         .item(
             PopupMenuItem::new("Translation")
                 .icon(menu_icon(IconName::Languages))
                 .on_click(move |_, _, cx| {
-                    translation_app
-                        .update(cx, |state, cx| state.open_settings(SettingsSection::General, cx));
+                    translation_app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::General, cx)
+                    });
                 }),
         )
         .item(
@@ -262,8 +257,9 @@ fn status_menu(
             PopupMenuItem::new("Settings")
                 .icon(menu_icon(IconName::Settings))
                 .on_click(move |_, _, cx| {
-                    general_app
-                        .update(cx, |state, cx| state.open_settings(SettingsSection::General, cx));
+                    general_app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::General, cx)
+                    });
                 }),
         );
     if !demo {
