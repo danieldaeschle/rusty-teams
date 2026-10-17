@@ -20,7 +20,7 @@ use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
 };
@@ -900,6 +900,9 @@ impl Render for AppShell {
                     this.state
                         .update(cx, |state, cx| state.release_push_to_talk(cx));
                 }
+            }))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.open_settings(SettingsSection::General, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowShortcuts, window, cx| {
                 this.toggle_shortcuts_dialog(window, cx);

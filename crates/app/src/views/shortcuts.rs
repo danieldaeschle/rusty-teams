@@ -37,7 +37,8 @@ actions!(
         ZoomShareIn,
         ZoomShareOut,
         ZoomShareReset,
-        ShowShortcuts
+        ShowShortcuts,
+        OpenSettings
     ]
 );
 
@@ -103,6 +104,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(General, OutsideComposer, "Search and switch chats", "ctrl-k", Some("cmd-k"), OpenSwitcher),
     shortcut!(General, Global, "New chat", "ctrl-n", Some("cmd-n"), NewChat),
     shortcut!(General, GlobalOverTextFields, "Keyboard shortcuts", "ctrl-.", Some("cmd-."), ShowShortcuts),
+    shortcut!(General, GlobalOverTextFields, "Settings", "ctrl-,", Some("cmd-,"), OpenSettings),
     shortcut!(Navigation, GlobalOverTextFields, "Open Activity", "ctrl-1", Some("cmd-1"), OpenActivity),
     shortcut!(Navigation, GlobalOverTextFields, "Show Chats", "ctrl-2", Some("cmd-2"), OpenChatsTab),
     shortcut!(Navigation, GlobalOverTextFields, "Show Channels", "ctrl-3", Some("cmd-3"), OpenChannelsTab),

@@ -185,6 +185,7 @@ fn status_menu(
     let settings_app = context.app.clone();
     let chat_list_app = context.app.clone();
     let translation_app = context.app.clone();
+    let general_app = context.app.clone();
     let call_app = context.app.clone();
     let row_label = match &context.summary.until {
         Some(until) => format!("{} {until}", context.summary.label),
@@ -240,11 +241,19 @@ fn status_menu(
         )
         .item(
             PopupMenuItem::new("Notification settings")
-                .icon(menu_icon(IconName::Settings))
+                .icon(menu_icon(IconName::Bell))
                 .on_click(move |_, _, cx| {
                     settings_app.update(cx, |state, cx| {
                         state.open_settings(SettingsSection::Notifications, cx)
                     });
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Settings")
+                .icon(menu_icon(IconName::Settings))
+                .on_click(move |_, _, cx| {
+                    general_app
+                        .update(cx, |state, cx| state.open_settings(SettingsSection::General, cx));
                 }),
         );
     if !demo {
