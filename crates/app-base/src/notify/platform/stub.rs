@@ -34,6 +34,8 @@ pub fn show_window_inactive(_handle: NativeHandle) {}
 
 pub fn exclude_from_capture(_handle: NativeHandle) {}
 
+pub fn include_in_capture(_handle: NativeHandle) {}
+
 #[cfg(target_os = "linux")]
 pub fn make_window_click_through(window: &Window) {
     super::x11_input::make_input_transparent(window);

@@ -3,9 +3,11 @@ use std::time::Instant;
 use calling::VideoKey;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
+use super::call_share_gallery::{SHOW_MORE_PEOPLE, view_switch_button};
 use super::call_view::{camera_button, leave_button, mute_button, round_control, status_line};
 use super::widgets::icon;
 use crate::app_state::AppState;
@@ -234,6 +236,7 @@ impl Render for MiniWindowView {
         let now = Instant::now();
         let (status, _) = status_line(model, now);
         let windows = self.windows.clone();
+        let sharing = self.windows.read(cx).sharing();
         let speaking = speaker_speaking(model);
         let speaker_name = speaker_name_chip(state, model, now);
         div()
@@ -274,17 +277,30 @@ impl Render for MiniWindowView {
                     }))
                     .children(self_view(state, model, now)),
             )
-            .child(controls_row(
-                &self.app,
-                model,
-                ControlIds {
-                    mute: "call-mini-window-mute",
-                    back: "call-mini-window-back",
-                    leave: "call-mini-window-leave",
-                },
-                "call-mini-window",
-                move |cx| windows.update(cx, |windows, cx| windows.return_to_call(cx)),
-            ))
+            .child(
+                controls_row(
+                    &self.app,
+                    model,
+                    ControlIds {
+                        mute: "call-mini-window-mute",
+                        back: "call-mini-window-back",
+                        leave: "call-mini-window-leave",
+                    },
+                    "call-mini-window",
+                    move |cx| windows.update(cx, |windows, cx| windows.return_to_call(cx)),
+                )
+                .when(sharing, |row| {
+                    row.child(
+                        view_switch_button(
+                            &self.windows,
+                            "call-mini-window-more-people",
+                            IconName::Users,
+                            SHOW_MORE_PEOPLE,
+                        )
+                        .size(px(CONTROL_SIZE)),
+                    )
+                }),
+            )
             .into_any_element()
     }
 }

@@ -104,6 +104,8 @@ pub enum DemoScene {
     Mini,
     MiniOff,
     MiniShare,
+    GalleryShare,
+    WindowShare,
     Blocked,
     Removed,
     Dropped,
@@ -126,6 +128,8 @@ impl DemoScene {
             "mini" => DemoScene::Mini,
             "mini-off" => DemoScene::MiniOff,
             "mini-share" => DemoScene::MiniShare,
+            "gallery-share" => DemoScene::GalleryShare,
+            "window-share" => DemoScene::WindowShare,
             "blocked" => DemoScene::Blocked,
             "removed" => DemoScene::Removed,
             "dropped" => DemoScene::Dropped,
@@ -163,7 +167,9 @@ impl DemoScene {
     pub fn guests(self) -> Option<usize> {
         match self {
             DemoScene::Gallery => Some(DEMO_GALLERY_GUESTS),
-            DemoScene::Sharing => Some(DEMO_SHARING_GUESTS),
+            DemoScene::Sharing | DemoScene::GalleryShare | DemoScene::WindowShare => {
+                Some(DEMO_SHARING_GUESTS)
+            }
             _ => None,
         }
     }
@@ -186,6 +192,7 @@ impl DemoScene {
 
 pub const DEMO_GALLERY_GUESTS: usize = 12;
 const DEMO_SHARING_GUESTS: usize = 9;
+const DEMO_SHARED_WINDOW: &str = "Standup board";
 const BREAKOUT_AT_TICKS: u32 = 20;
 const WHITEBOARD_AT_TICKS: u32 = 5;
 const DEMO_BOARD_URL: &str = "https://app.whiteboard.microsoft.com/me/whiteboards/demo";
@@ -269,7 +276,7 @@ fn demo_share_sources() -> Vec<ShareSource> {
             title: String::new(),
         },
         window(2, "Release notes - Docs"),
-        window(3, "Standup board"),
+        window(3, DEMO_SHARED_WINDOW),
         window(4, "Terminal"),
     ]
 }
@@ -451,8 +458,11 @@ fn start_scene(control: &CallControl, scene: DemoScene) {
         DemoScene::Hold => control.send(CallUpdate::Hold(HoldState::Local)),
         DemoScene::Held => control.send(CallUpdate::Hold(HoldState::Remote)),
         DemoScene::Network => control.send(CallUpdate::Health(poor_network_health())),
-        DemoScene::MiniShare => {
+        DemoScene::MiniShare | DemoScene::GalleryShare => {
             control.send(CallUpdate::LocalShare(Some("Entire screen".to_owned())))
+        }
+        DemoScene::WindowShare => {
+            control.send(CallUpdate::LocalShare(Some(DEMO_SHARED_WINDOW.to_owned())))
         }
         DemoScene::Call
         | DemoScene::Mini

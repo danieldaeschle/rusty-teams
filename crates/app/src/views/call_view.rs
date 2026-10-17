@@ -964,6 +964,17 @@ pub(super) fn person_tile(
     size: TileSize,
     now: Instant,
 ) -> AnyElement {
+    let element = plain_person_tile(state, model, remote, size, now);
+    with_tile_menu(app, model, &remote.mri, &remote.name, false, element)
+}
+
+pub(super) fn plain_person_tile(
+    state: &AppState,
+    model: &CallModel,
+    remote: &Tile,
+    size: TileSize,
+    now: Instant,
+) -> AnyElement {
     let extras = TileExtras {
         hand: remote.hand.map(|rank| model.hand_position(rank)),
         own: false,
@@ -973,8 +984,7 @@ pub(super) fn person_tile(
         spotlight: remote.spotlight.is_some(),
         pinned: model.is_pinned(&remote.mri),
     };
-    let element = person_tile_body(state, model, remote, size, now, &extras);
-    with_tile_menu(app, model, &remote.mri, &remote.name, false, element)
+    person_tile_body(state, model, remote, size, now, &extras)
 }
 
 fn person_tile_body(
@@ -1042,18 +1052,28 @@ pub(super) fn own_tile(
     now: Instant,
 ) -> AnyElement {
     let own_mri = model.own_mri.clone().unwrap_or_default();
+    let element = plain_own_tile(state, model, size, now);
+    if own_mri.is_empty() {
+        return element;
+    }
+    with_tile_menu(app, model, &own_mri, "You", true, element)
+}
+
+pub(super) fn plain_own_tile(
+    state: &AppState,
+    model: &CallModel,
+    size: TileSize,
+    now: Instant,
+) -> AnyElement {
+    let own_mri = model.own_mri.as_deref().unwrap_or_default();
     let extras = TileExtras {
         hand: model.own_hand.map(|rank| model.hand_position(rank)),
         own: true,
         reaction: model.own_chip(now).map(|chip| (chip.reaction, chip.serial)),
         spotlight: model.own_spotlight.is_some(),
-        pinned: model.is_pinned(&own_mri),
+        pinned: model.is_pinned(own_mri),
     };
-    let element = own_tile_body(state, model, size, now, &extras);
-    if own_mri.is_empty() {
-        return element;
-    }
-    with_tile_menu(app, model, &own_mri, "You", true, element)
+    own_tile_body(state, model, size, now, &extras)
 }
 
 fn own_tile_body(
