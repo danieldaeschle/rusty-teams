@@ -3,7 +3,8 @@ use rusqlite::Connection;
 use store::{
     AvatarRecord, ChannelLayoutRecord, ChannelNotificationLevel, ChannelNotifications,
     ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord, MemberRecord,
-    MessageRecord, RecentScope, Store, SyncState, TeamLayoutRecord, TeamRecord,
+    MessageRecord, ReadHorizonRecord, RecentScope, Store, SyncState, TeamLayoutRecord,
+    TeamRecord,
 };
 
 #[test]
@@ -545,11 +546,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 21);
+        assert_eq!(store.schema_version().unwrap(), 22);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 21);
+    assert_eq!(reopened.schema_version().unwrap(), 22);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -581,7 +582,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 22);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -647,7 +648,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 22);
 }
 
 #[test]
@@ -1413,7 +1414,7 @@ fn migration_to_v20_adds_the_call_event_column() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 22);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
@@ -1457,8 +1458,51 @@ fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 21);
+    assert_eq!(store.schema_version().unwrap(), 22);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_none());
     assert!(store.sync_state("other").unwrap().is_some());
+}
+
+fn horizon(member_id: &str, read_minute: u32, at_minute: Option<u32>) -> ReadHorizonRecord {
+    ReadHorizonRecord {
+        member_id: member_id.to_owned(),
+        read_until: at(read_minute),
+        read_at: at_minute.map(at),
+    }
+}
+
+#[test]
+fn migration_to_v22_adds_read_horizons_that_survive_a_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        store.upsert_chats(&[chat("c", "Chat", Some(at(1)))]).unwrap();
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("DROP TABLE read_horizons; PRAGMA user_version = 21")
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 22);
+    assert!(store.read_horizons("c").unwrap().is_empty());
+    let horizons = [horizon("8:orgid:ada", 3, Some(4)), horizon("8:orgid:bob", 2, None)];
+    store.set_read_horizons("c", &horizons).unwrap();
+    drop(store);
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(reopened.read_horizons("c").unwrap(), horizons);
+}
+
+#[test]
+fn setting_read_horizons_replaces_the_conversation_only() {
+    let store = Store::open_in_memory().unwrap();
+    let first = [horizon("8:orgid:ada", 3, None), horizon("8:orgid:bob", 2, None)];
+    store.set_read_horizons("c", &first).unwrap();
+    store.set_read_horizons("other", &[horizon("8:orgid:cy", 1, None)]).unwrap();
+    let second = [horizon("8:orgid:ada", 5, Some(6))];
+    store.set_read_horizons("c", &second).unwrap();
+    assert_eq!(store.read_horizons("c").unwrap(), second);
+    assert_eq!(store.read_horizons("other").unwrap().len(), 1);
 }

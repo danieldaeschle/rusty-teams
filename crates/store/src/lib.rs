@@ -14,6 +14,7 @@ mod models;
 mod outbox;
 mod presence;
 mod proposals;
+mod read_horizons;
 mod search;
 mod sidebar;
 mod store;
@@ -29,7 +30,7 @@ pub use models::{
     AttachmentImage, AvatarRecord, ChannelLayoutRecord, ChannelNotificationLevel,
     ChannelNotifications, ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord,
     ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord, MessageRecord,
-    OutboxRecord, OutboxState, OutboxTarget, RecentScope, SearchHit, Sidebar, SidebarTeam,
+    OutboxRecord, OutboxState, OutboxTarget, ReadHorizonRecord, RecentScope, SearchHit, Sidebar, SidebarTeam,
     SyncState, TeamLayoutRecord, TeamRecord,
 };
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};

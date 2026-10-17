@@ -3857,6 +3857,27 @@ async fn one_on_one_read_up_to_horizon() {
 }
 
 #[tokio::test]
+async fn stored_horizons_show_receipts_after_a_restart_before_any_refresh() {
+    let fake = Arc::new(Fake::default());
+    let engine = receipt_engine(&fake, vec![one_on_one()]).await;
+    *fake.horizons.lock().unwrap() =
+        vec![horizon_of("user-me", 3, 3), horizon_of("user-ada", 2, 9)];
+    engine.refresh_receipts(CHAT).await.unwrap();
+    let restarted =
+        SyncEngine::with_config(Handle(fake.clone()), engine.store().clone(), small_pages());
+    fake.horizons.lock().unwrap().clear();
+
+    assert!(matches!(
+        restarted.receipt_state(CHAT, "m0001"),
+        teams_core::ReceiptState::Read { .. }
+    ));
+    assert_eq!(
+        restarted.receipt_state(CHAT, "m0003"),
+        teams_core::ReceiptState::Sent
+    );
+}
+
+#[tokio::test]
 async fn horizon_equal_to_creation_time_counts_as_read() {
     let fake = Arc::new(Fake::default());
     let engine = receipt_engine(&fake, vec![one_on_one()]).await;
