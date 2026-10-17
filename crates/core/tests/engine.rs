@@ -3857,6 +3857,27 @@ async fn one_on_one_read_up_to_horizon() {
 }
 
 #[tokio::test]
+async fn stored_horizons_show_receipts_after_a_restart_before_any_refresh() {
+    let fake = Arc::new(Fake::default());
+    let engine = receipt_engine(&fake, vec![one_on_one()]).await;
+    *fake.horizons.lock().unwrap() =
+        vec![horizon_of("user-me", 3, 3), horizon_of("user-ada", 2, 9)];
+    engine.refresh_receipts(CHAT).await.unwrap();
+    let restarted =
+        SyncEngine::with_config(Handle(fake.clone()), engine.store().clone(), small_pages());
+    fake.horizons.lock().unwrap().clear();
+
+    assert!(matches!(
+        restarted.receipt_state(CHAT, "m0001"),
+        teams_core::ReceiptState::Read { .. }
+    ));
+    assert_eq!(
+        restarted.receipt_state(CHAT, "m0003"),
+        teams_core::ReceiptState::Sent
+    );
+}
+
+#[tokio::test]
 async fn horizon_equal_to_creation_time_counts_as_read() {
     let fake = Arc::new(Fake::default());
     let engine = receipt_engine(&fake, vec![one_on_one()]).await;
@@ -4739,4 +4760,100 @@ async fn a_forward_cached_without_its_content_is_read_again_once() {
     assert_eq!(reads(&fake), 1);
     engine.fetch_newer(CHAT).await.unwrap();
     assert_eq!(reads(&fake), 1);
+}
+
+const STALE_FORWARD: &str = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"orig-1","content":null}]"#;
+
+fn stale_forward(conversation_id: &str, message_id: &str, minute: i64) -> store::MessageRecord {
+    let mut stale =
+        teams_core::message_record(conversation_id, &forwarded_message(message_id, minute))
+            .unwrap();
+    stale.attachments_json = STALE_FORWARD.to_owned();
+    stale
+}
+
+fn forwarded_message_without_original(id: &str, minute: i64) -> Message {
+    let mut message = forwarded_message(id, minute);
+    message.attachments[0].content = None;
+    message
+}
+
+fn forward_state(store: &Store, conversation_id: &str, message_id: &str) -> teams_core::ForwardState {
+    let record = store
+        .messages_by_id(conversation_id, &[message_id.to_owned()])
+        .unwrap()
+        .remove(message_id)
+        .unwrap();
+    teams_core::forwards(&record)[0].state
+}
+
+#[tokio::test]
+async fn a_forward_graph_returns_without_its_original_is_not_read_again() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    let mut messages = numbered(11);
+    messages.push(forwarded_message_without_original("m0000", 0));
+    fake.set_chat_messages(messages);
+    store.upsert_messages(&[stale_forward(CHAT, "m0000", 0)]).unwrap();
+    assert_eq!(forward_state(&store, CHAT, "m0000"), teams_core::ForwardState::Loading);
+
+    engine.fetch_newer(CHAT).await.unwrap();
+
+    assert_eq!(forward_state(&store, CHAT, "m0000"), teams_core::ForwardState::Unavailable);
+    let next_session = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+    next_session.fetch_newer(CHAT).await.unwrap();
+    let reads = fake
+        .calls()
+        .iter()
+        .filter(|call| *call == "chat_message m0000")
+        .count();
+    assert_eq!(reads, 1);
+}
+
+#[tokio::test]
+async fn the_background_heal_reads_the_newest_chat_first_and_skips_healthy_chats() {
+    const OLDER: &str = "19:older@thread.v2";
+    const HEALTHY: &str = "19:healthy@thread.v2";
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![
+        chat(OLDER, Some("Older"), 2, 2, ME, false),
+        chat(CHAT, Some("Newer"), 9, 9, ME, false),
+        chat(HEALTHY, Some("Healthy"), 12, 12, ME, false),
+    ];
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = SyncEngine::with_config(Handle(fake.clone()), store.clone(), small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    fake.set_chat_messages(vec![
+        forwarded_message("f-older", 1),
+        forwarded_message("f-newer", 8),
+    ]);
+    let healthy = teams_core::message_record(HEALTHY, &forwarded_message("f-healthy", 11)).unwrap();
+    store
+        .upsert_messages(&[
+            stale_forward(OLDER, "f-older", 1),
+            stale_forward(CHAT, "f-newer", 8),
+            healthy,
+        ])
+        .unwrap();
+    let mut events = engine.subscribe();
+
+    engine.heal_all_forwards(std::time::Duration::ZERO).await;
+
+    let reads: Vec<String> = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("chat_message "))
+        .collect();
+    assert_eq!(reads, ["chat_message f-newer", "chat_message f-older"]);
+    assert_eq!(forward_state(&store, OLDER, "f-older"), teams_core::ForwardState::Ready);
+    let mut changed = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let CoreEvent::MessagesChanged { conversation_id } = event {
+            changed.push(conversation_id);
+        }
+    }
+    assert_eq!(changed, [CHAT, OLDER]);
 }

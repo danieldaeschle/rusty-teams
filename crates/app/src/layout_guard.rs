@@ -193,7 +193,6 @@ mod frames {
         "shell/islands/rail",
         "shell/islands/sidebar",
         "shell/islands/main",
-        "shell/status-bar",
     ];
     const CALL_GUARDED: &[&str] = &[
         "shell/islands/main/call-header",

@@ -110,6 +110,14 @@ pub struct RecentScope {
     pub after: DateTime<Utc>,
 }
 
+/// The last read position of one conversation member, as chatsvc reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadHorizonRecord {
+    pub member_id: String,
+    pub read_until: DateTime<Utc>,
+    pub read_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncState {
     pub newest_seen: Option<DateTime<Utc>>,

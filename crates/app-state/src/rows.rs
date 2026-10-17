@@ -89,9 +89,9 @@ pub fn bubble_corners(own: bool, series: Series) -> Corners {
 pub enum Receipt {
     #[default]
     Hidden,
-    Pending,
     Sent,
     Read,
+    ReadLive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

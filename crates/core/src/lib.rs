@@ -117,7 +117,8 @@ pub use folders::{
     store_section_settings, stored_section_settings,
 };
 pub use forwarded::{
-    FORWARDED_CONTENT_TYPE, ForwardHeader, ForwardInfo, forwarded_texts, forwards, is_forwarded,
+    FORWARD_LOADING_TEXT, FORWARD_UNAVAILABLE_TEXT, FORWARDED_CONTENT_TYPE, ForwardHeader,
+    ForwardInfo, ForwardState, forwarded_texts, forwards, is_forwarded,
 };
 pub use graph::{
     DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,

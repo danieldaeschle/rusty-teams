@@ -1639,6 +1639,16 @@ fn release_messages() -> Vec<MessageRecord> {
         ),
         message(
             chat,
+            "m5e",
+            None,
+            jonas,
+            at(0, 12, 40),
+            "<p>Context from the old planning chat.</p><attachment id=\"1789000000000\"></attachment>",
+            r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"id":"1789000000000","content":null,"unavailable":true}]"#,
+            false,
+        ),
+        message(
+            chat,
             "m6",
             None,
             me,
