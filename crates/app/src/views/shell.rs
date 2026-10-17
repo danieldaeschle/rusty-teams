@@ -893,11 +893,15 @@ impl Render for AppShell {
         let title_bar = render_title_bar(
             crate::active_appearance::current(cx).app_icon,
             mode_label(state.mode),
-            update_button(
-                &self.update,
-                cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
-            ),
-            own_status_button(&self.state, state),
+            [
+                update_button(
+                    &self.update,
+                    cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
+                ),
+                own_status_button(&self.state, state),
+            ]
+            .into_iter()
+            .flatten(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
         );
         div()

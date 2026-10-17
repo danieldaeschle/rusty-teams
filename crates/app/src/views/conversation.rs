@@ -42,8 +42,8 @@ use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPrevi
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder};
-use super::post_card::render_post;
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
+use super::post_card::render_post;
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
@@ -71,10 +71,9 @@ use crate::read_state::{ReadTrigger, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
-    forward_sender_ids,
-    has_own_reaction, message_draft, message_text, own_reaction_glyph, place_local_rows,
-    placeholder_rows,
-    reaction_glyph, reply_excerpt, set_own_reaction, thread_list_rows, thread_rows,
+    forward_sender_ids, has_own_reaction, message_draft, message_text, own_reaction_glyph,
+    place_local_rows, placeholder_rows, reaction_glyph, reply_excerpt, set_own_reaction,
+    thread_list_rows, thread_rows,
 };
 use crate::runtime;
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
@@ -3465,6 +3464,7 @@ impl Render for ConversationView {
         let pin_banner = self
             .render_pin_banner(cx)
             .filter(|_| !drafting && !self.shared_active() && !self.recap_active());
+        let timeline_top_inset = pin_banner_inset(pin_banner.is_some());
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
@@ -3568,7 +3568,7 @@ impl Render for ConversationView {
             })
         })
         .with_bottom_fade(background)
-        .with_top_inset(pin_banner_inset(pin_banner.is_some()));
+        .with_top_inset(timeline_top_inset);
 
         root = match self.current.as_ref().filter(|_| !drafting) {
             Some(current) => {
@@ -3653,7 +3653,7 @@ impl Render for ConversationView {
                         .relative()
                         .flex_1()
                         .min_h_0()
-                        .child(record_bounds(&self.timeline_bounds))
+                        .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
                         .on_scroll_wheel(
                             cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
                         )

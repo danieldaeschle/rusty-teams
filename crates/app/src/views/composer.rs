@@ -35,9 +35,10 @@ mod table;
 
 use super::actions::{
     COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLink,
-    InsertTableColumnLeft, InsertTableColumnRight, InsertTableRowAbove, InsertTableRowBelow,
-    OpenSwitcher, PastePlainText, ScheduleSend, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike,
-    ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+    InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
+    InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend, ToggleBold,
+    ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript, ToggleSuperscript,
+    ToggleUnderline,
 };
 use super::attachment_tray::{
     AttachmentTray, DoneFile, JobKind, LoadedFile, MAX_ATTACHMENTS, PasteAction, UploadJob,
@@ -47,7 +48,7 @@ use super::attachment_tray::{
 use super::avatar::{person_avatar, square_avatar};
 use super::draft_style::draft_style;
 use super::emoji_popup::{self, EmojiPopup};
-use super::format_toolbar::{self, FormatButton};
+use super::format_toolbar::{self, ButtonState, FormatButton};
 use super::fun_picker::{FunPicker, FunPickerEvent};
 use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::widgets::{icon, symbol};
@@ -59,7 +60,7 @@ use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
-use table::{TableKey, TablePicker, TableViews, is_table_token};
+use table::{TableKey, TableLineMenu, TableMenu, TablePicker, TableViews, is_table_token};
 
 const MIN_ROWS: usize = 1;
 const MAX_ROWS: usize = 8;
@@ -77,6 +78,9 @@ const COMPOSER_BUTTON_INSET: f32 = 6.;
 pub const COMPOSER_BOX_TAG: &str = "composer";
 pub const COMPOSER_LEADING_TAG: &str = "composer/leading";
 pub const COMPOSER_SEND_TAG: &str = "composer/send";
+pub const COMPOSER_FORMAT_TAG: &str = "composer/leading/format";
+pub const COMPOSER_FORMAT_BAR_TAG: &str = "composer/format-bar";
+pub const COMPOSER_FORMAT_DIVIDER_TAG: &str = "composer/format-bar/divider";
 /// gpui-kit draws a `Size::Size` button's icon at this fraction of the button size.
 const BUTTON_ICON_SCALE: f32 = 0.75;
 const DEMO_UPLOAD_STEP: Duration = Duration::from_millis(120);
@@ -216,6 +220,8 @@ pub struct Composer {
     tables: TableViews,
     table_counter: usize,
     table_picker: Option<TablePicker>,
+    table_menu: Option<TableMenu>,
+    format_bar: HashSet<String>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
     caret_text: String,
@@ -425,6 +431,8 @@ impl Composer {
             tables: TableViews::default(),
             table_counter: 0,
             table_picker: None,
+            table_menu: None,
+            format_bar: HashSet::new(),
             active_cell: None,
             caret_before_table: 0,
             caret_text: String::new(),
@@ -948,14 +956,62 @@ impl Composer {
             FormatButton::Numbered => self.toggle_lines(LineKind::Numbered(0), window, cx),
             FormatButton::Quote => self.toggle_lines(LineKind::Quote, window, cx),
             FormatButton::Table => {
+                self.table_menu = None;
                 self.toolbar_dismissed = Some(self.selection(cx));
                 self.open_table_picker(cx);
             }
+            FormatButton::TableInsertLine => {
+                self.open_table_menu(TableLineMenu::Insert, window, cx);
+            }
+            FormatButton::TableRemoveLine => {
+                self.open_table_menu(TableLineMenu::Remove, window, cx);
+            }
+        }
+    }
+
+    fn typing_state(&self, cursor: usize, kind: &MarkKind) -> FormatState {
+        let style = self.draft.style_at(cursor);
+        let style = match self.pending_style.as_ref() {
+            Some(pending) if pending.at == cursor => pending.apply(style),
+            _ => style,
+        };
+        if style.iter().any(|active| active.same_format(kind)) {
+            FormatState::On
+        } else {
+            FormatState::Off
         }
     }
 
     fn format_state(&self, button: FormatButton, selection: &Range<usize>) -> FormatState {
         let range = selection.clone();
+        let mark = match button {
+            FormatButton::Bold => Some(MarkKind::Bold),
+            FormatButton::Italic => Some(MarkKind::Italic),
+            FormatButton::Underline => Some(MarkKind::Underline),
+            FormatButton::Strike => Some(MarkKind::Strike),
+            FormatButton::Superscript => Some(MarkKind::Superscript),
+            FormatButton::Subscript => Some(MarkKind::Subscript),
+            FormatButton::SizeSmall => Some(MarkKind::Size(SizeStep::Small)),
+            FormatButton::SizeLarge => Some(MarkKind::Size(SizeStep::Large)),
+            FormatButton::Code => Some(MarkKind::Code),
+            FormatButton::Link => Some(MarkKind::Link(String::new())),
+            _ => None,
+        };
+        if range.is_empty() {
+            if let Some(kind) = &mark {
+                return self.typing_state(range.start, kind);
+            }
+            if button == FormatButton::SizeNormal {
+                let sized = [SizeStep::Small, SizeStep::Large].into_iter().any(|step| {
+                    self.typing_state(range.start, &MarkKind::Size(step)) == FormatState::On
+                });
+                return if sized {
+                    FormatState::Off
+                } else {
+                    FormatState::On
+                };
+            }
+        }
         match button {
             FormatButton::Bold => self.draft.state(range, &MarkKind::Bold),
             FormatButton::Italic => self.draft.state(range, &MarkKind::Italic),
@@ -972,7 +1028,67 @@ impl Composer {
             FormatButton::Numbered => self.draft.line_state(range, &LineKind::Numbered(0)),
             FormatButton::Quote => self.draft.line_state(range, &LineKind::Quote),
             FormatButton::Table if self.table_picker.is_some() => FormatState::On,
-            FormatButton::Table => FormatState::Off,
+            FormatButton::TableInsertLine
+                if self
+                    .table_menu
+                    .is_some_and(|menu| menu.kind == TableLineMenu::Insert) =>
+            {
+                FormatState::On
+            }
+            FormatButton::TableRemoveLine
+                if self
+                    .table_menu
+                    .is_some_and(|menu| menu.kind == TableLineMenu::Remove) =>
+            {
+                FormatState::On
+            }
+            FormatButton::Table | FormatButton::TableInsertLine | FormatButton::TableRemoveLine => {
+                FormatState::Off
+            }
+        }
+    }
+
+    /// Text formats do not apply inside a table cell; the row and column menus only there.
+    fn button_state(
+        &self,
+        button: FormatButton,
+        selection: &Range<usize>,
+        in_table: bool,
+    ) -> ButtonState {
+        let enabled = match button {
+            FormatButton::TableInsertLine | FormatButton::TableRemoveLine => in_table,
+            FormatButton::Table => true,
+            _ => !in_table,
+        };
+        if enabled {
+            ButtonState::enabled(self.format_state(button, selection))
+        } else {
+            ButtonState::disabled()
+        }
+    }
+
+    pub(super) fn format_bar_open(&self) -> bool {
+        self.format_bar
+            .contains(self.conversation_id.as_deref().unwrap_or_default())
+    }
+
+    pub(super) fn set_format_bar(&mut self, open: bool, cx: &mut Context<Self>) {
+        let key = self.conversation_id.clone().unwrap_or_default();
+        if open {
+            self.format_bar.insert(key);
+        } else {
+            self.format_bar.remove(&key);
+            self.table_picker = None;
+            self.table_menu = None;
+        }
+        cx.notify();
+    }
+
+    fn toggle_format_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let open = !self.format_bar_open();
+        self.set_format_bar(open, cx);
+        if !self.cell_has_focus(window, cx) {
+            self.focus(window, cx);
         }
     }
 
@@ -1519,6 +1635,8 @@ impl Composer {
             self.mention_inputs.clear();
             self.close_popup();
             self.schedule = None;
+            self.table_picker = None;
+            self.table_menu = None;
             if !carry {
                 self.load_stored_draft(conversation_id, window, cx);
             }
@@ -2308,7 +2426,8 @@ impl Composer {
 
     fn render_toolbar(&self, focused: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let composer = cx.entity().downgrade();
-        if self.link_editor.is_none() && !(focused && self.toolbar_requested(cx)) {
+        let floating = focused && self.toolbar_requested(cx) && !self.format_bar_open();
+        if self.link_editor.is_none() && !floating {
             return None;
         }
         let state = self.input.read(cx);
@@ -2349,7 +2468,7 @@ impl Composer {
                 },
             ),
             None => {
-                let state_of = |button| self.format_state(button, &range);
+                let state_of = |button| ButtonState::enabled(self.format_state(button, &range));
                 format_toolbar::render(
                     placement,
                     format_toolbar::Mode::Bar {
@@ -2364,6 +2483,37 @@ impl Composer {
             }
         };
         Some(element)
+    }
+
+    fn render_format_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let selection = self.selection(cx);
+        let in_table = self.in_table(window, cx);
+        let state_of = |button| self.button_state(button, &selection, in_table);
+        let composer = cx.weak_entity();
+        let on_press: format_toolbar::PressHandler = Rc::new(move |button, window, cx| {
+            composer
+                .update(cx, |this, cx| this.press_format(button, window, cx))
+                .ok();
+        });
+        let mut overlay = |button| match button {
+            FormatButton::Table => self.render_table_picker(cx),
+            FormatButton::TableInsertLine => self.render_table_menu(TableLineMenu::Insert, cx),
+            FormatButton::TableRemoveLine => self.render_table_menu(TableLineMenu::Remove, cx),
+            _ => None,
+        };
+        let row = format_toolbar::render_format_bar(&state_of, on_press, &mut overlay);
+        v_flex()
+            .debug_selector(|| COMPOSER_FORMAT_BAR_TAG.into())
+            .w_full()
+            .child(row.w_full().p(px(COMPOSER_BUTTON_INSET)))
+            .child(
+                div()
+                    .debug_selector(|| COMPOSER_FORMAT_DIVIDER_TAG.into())
+                    .w_full()
+                    .h(px(1.))
+                    .bg(theme::border()),
+            )
+            .into_any_element()
     }
 
     fn render_paste_hint(&self) -> Option<Div> {
@@ -2579,6 +2729,37 @@ impl Render for Composer {
                 ))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
+        let format_open = self.format_bar_open();
+        let format_toggle = div()
+            .id("composer-format")
+            .debug_selector(|| COMPOSER_FORMAT_TAG.into())
+            .size(px(COMPOSER_BUTTON_SIZE))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(8.))
+            .cursor_pointer()
+            .when(format_open, |button| button.bg(theme::popup_hover()))
+            .hover(|button| button.bg(theme::popup_hover()))
+            .tooltip(move |window, cx| {
+                Tooltip::new(format_toolbar::toggle_tooltip(format_open)).build(window, cx)
+            })
+            .child(symbol(
+                format_toolbar::toggle_symbol(format_open),
+                COMPOSER_ICON_SIZE,
+                if format_open {
+                    theme::accent_soft()
+                } else {
+                    theme::text_muted()
+                },
+            ))
+            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+            })
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_format_bar(window, cx)));
+        let format_bar = format_open.then(|| self.render_format_bar(window, cx));
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
@@ -2594,8 +2775,11 @@ impl Render for Composer {
                 if context.is_block() && is_table_token(context.token()) {
                     let token_id = context.token().id().to_string();
                     let width = context.available_width();
+                    let selected = context.is_selected();
                     if let Some(table) = tokens_composer
-                        .read_with(cx, |this, _| this.render_table_token(&token_id, width))
+                        .read_with(cx, |this, _| {
+                            this.render_table_token(&token_id, width, selected)
+                        })
                         .ok()
                         .flatten()
                     {
@@ -2740,6 +2924,15 @@ impl Render for Composer {
                 this.edit_table(TableEdit::DeleteTable, window, cx)
             }))
             .on_action(cx.listener(|this, _: &ScheduleSend, _, cx| this.open_schedule_picker(cx)))
+            .on_action(cx.listener(|this, _: &ToggleFormatBar, window, cx| {
+                this.toggle_format_bar(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &InsertTableLine, window, cx| {
+                this.open_table_menu(TableLineMenu::Insert, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &RemoveTableLine, window, cx| {
+                this.open_table_menu(TableLineMenu::Remove, window, cx);
+            }))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
                 if this.link_editor.is_none() {
                     this.step_history(true, window, cx);
@@ -2771,7 +2964,11 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
-                if this.cell_has_focus(window, cx) {
+                if let Some(menu) = this.table_menu.as_mut() {
+                    menu.step(-1);
+                    cx.notify();
+                    cx.stop_propagation();
+                } else if this.cell_has_focus(window, cx) {
                     if this.table_key(TableKey::Up, window, cx) {
                         cx.stop_propagation();
                     }
@@ -2788,7 +2985,11 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
-                if this.cell_has_focus(window, cx) {
+                if let Some(menu) = this.table_menu.as_mut() {
+                    menu.step(1);
+                    cx.notify();
+                    cx.stop_propagation();
+                } else if this.cell_has_focus(window, cx) {
                     if this.table_key(TableKey::Down, window, cx) {
                         cx.stop_propagation();
                     }
@@ -2812,7 +3013,10 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, action: &Enter, window, cx| {
-                if this.cell_has_focus(window, cx) {
+                if this.table_menu.is_some() {
+                    this.accept_table_menu(None, window, cx);
+                    cx.stop_propagation();
+                } else if this.cell_has_focus(window, cx) {
                 } else if this.link_editor.is_some() {
                     this.apply_link(window, cx);
                     cx.stop_propagation();
@@ -2864,7 +3068,7 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this.table_picker.take().is_some() {
+                if this.table_picker.take().is_some() || this.table_menu.take().is_some() {
                     cx.notify();
                     cx.stop_propagation();
                     return;
@@ -2879,7 +3083,7 @@ impl Render for Composer {
                     cx.stop_propagation();
                     return;
                 }
-                if this.toolbar_requested(cx) {
+                if this.toolbar_requested(cx) && !this.format_bar_open() {
                     this.toolbar_dismissed = Some(this.selection(cx));
                     cx.notify();
                     cx.stop_propagation();
@@ -2910,7 +3114,6 @@ impl Render for Composer {
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
-                    .children(self.render_table_picker(cx))
                     .child(
                         v_flex()
                             .debug_selector(|| COMPOSER_BOX_TAG.into())
@@ -2932,6 +3135,7 @@ impl Render for Composer {
                                 .absolute()
                                 .size_full(),
                             )
+                            .children(format_bar)
                             .children(tray)
                             .child(
                                 h_flex()
@@ -2944,22 +3148,16 @@ impl Render for Composer {
                                         }
                                     })
                                     .py(px(COMPOSER_BUTTON_INSET))
-                                    .pl(px(if can_attach {
-                                        COMPOSER_BUTTON_INSET
-                                    } else {
-                                        12.
-                                    }))
-                                    .pr(px(COMPOSER_BUTTON_INSET))
-                                    .when(can_attach, |row| {
-                                        row.child(
-                                            h_flex()
-                                                .debug_selector(|| COMPOSER_LEADING_TAG.into())
-                                                .flex_none()
-                                                .gap(px(COMPOSER_BUTTON_INSET))
-                                                .children(fun)
-                                                .children(attach),
-                                        )
-                                    })
+                                    .px(px(COMPOSER_BUTTON_INSET))
+                                    .child(
+                                        h_flex()
+                                            .debug_selector(|| COMPOSER_LEADING_TAG.into())
+                                            .flex_none()
+                                            .gap(px(COMPOSER_BUTTON_INSET))
+                                            .child(format_toggle)
+                                            .children(fun)
+                                            .children(attach),
+                                    )
                                     .child(
                                         div()
                                             .flex_1()
@@ -4268,6 +4466,148 @@ mod tests {
                  <tr><td>a</td><td>b</td></tr><tr><td>c</td><td>&nbsp;</td></tr>\
                  </tbody></table></figure>after"
             );
+        }
+
+        fn format_bar_open(typist: &mut Typist<'_>) -> bool {
+            let composer = typist.composer.clone();
+            typist.cx.update(|cx| composer.read(cx).format_bar_open())
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_shift_x_opens_the_format_bar_per_conversation(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            let open_chat = |typist: &mut Typist<'_>, id: &'static str| {
+                let composer = composer.clone();
+                typist.act(|window, cx| {
+                    composer.update(cx, |composer, cx| {
+                        composer.set_conversation(id, "", window, cx);
+                        composer.focus(window, cx);
+                    })
+                });
+            };
+            open_chat(&mut typist, "chat-one");
+            assert!(!format_bar_open(&mut typist));
+            typist.press("ctrl-shift-x");
+            assert!(format_bar_open(&mut typist));
+            open_chat(&mut typist, "chat-two");
+            assert!(!format_bar_open(&mut typist));
+            open_chat(&mut typist, "chat-one");
+            assert!(format_bar_open(&mut typist));
+            typist.press("ctrl-shift-x");
+            assert!(!format_bar_open(&mut typist));
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_alt_x_strikes_through_now_that_ctrl_shift_x_is_format(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("gone");
+            typist.press("ctrl-a ctrl-alt-x");
+            assert_eq!(typist.outgoing().html(), "<s>gone</s>");
+            assert!(!format_bar_open(&mut typist));
+        }
+
+        #[gpui_kit::test]
+        fn the_format_bar_shows_the_style_at_the_caret_without_a_selection(
+            cx: &mut TestAppContext,
+        ) {
+            use teams_core::FormatState;
+
+            use super::super::FormatButton;
+
+            let mut typist = typist(cx);
+            typist.press("ctrl-shift-x ctrl-b");
+            let composer = typist.composer.clone();
+            let bold = |typist: &mut Typist<'_>| {
+                let composer = composer.clone();
+                typist.cx.update(|cx| {
+                    let composer = composer.read(cx);
+                    let caret = composer.selection(cx);
+                    composer.button_state(FormatButton::Bold, &caret, false)
+                })
+            };
+            assert_eq!(bold(&mut typist).format, FormatState::On);
+            typist.type_text("x");
+            assert_eq!(bold(&mut typist).format, FormatState::On);
+            typist.press("ctrl-b");
+            assert_eq!(bold(&mut typist).format, FormatState::Off);
+            assert!(bold(&mut typist).enabled);
+        }
+
+        #[gpui_kit::test]
+        fn the_format_bar_inserts_a_table_without_a_selection(cx: &mut TestAppContext) {
+            use super::super::FormatButton;
+
+            let mut typist = typist(cx);
+            typist.press("ctrl-shift-x");
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.press_format(FormatButton::Table, window, cx)
+                })
+            });
+            let picker_open = typist
+                .cx
+                .update(|cx| composer.read(cx).table_picker.is_some());
+            assert!(picker_open);
+            insert_table(&mut typist, 2, 2);
+            assert!(typist.draft().lines()[0].is_table());
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_alt_plus_and_minus_open_the_teams_row_and_column_menus(cx: &mut TestAppContext) {
+            use super::super::table::TableLineMenu;
+
+            let mut typist = typist(cx);
+            let composer = typist.composer.clone();
+            let menu = |typist: &mut Typist<'_>| {
+                let composer = composer.clone();
+                typist
+                    .cx
+                    .update(|cx| composer.read(cx).table_menu.map(|menu| menu.kind))
+            };
+            typist.press("ctrl-alt-=");
+            assert_eq!(menu(&mut typist), None);
+            insert_table(&mut typist, 1, 1);
+            typist.type_text("a");
+            typist.press("ctrl-alt-=");
+            assert_eq!(menu(&mut typist), Some(TableLineMenu::Insert));
+            assert!(format_bar_open(&mut typist));
+            typist.press("enter");
+            assert_eq!(menu(&mut typist), None);
+            let shape = |typist: &mut Typist<'_>| {
+                let draft = typist.draft();
+                let table = draft.table(0).expect("table").clone();
+                (table.row_count(), table.column_count())
+            };
+            assert_eq!(shape(&mut typist), (1, 2));
+            typist.press("ctrl-alt-- enter");
+            assert_eq!(shape(&mut typist), (1, 1));
+            typist.press("ctrl-alt-- escape");
+            assert_eq!(menu(&mut typist), None);
+            assert_eq!(shape(&mut typist), (1, 1));
+        }
+
+        #[gpui_kit::test]
+        fn ctrl_a_highlights_a_table_like_selected_text(cx: &mut TestAppContext) {
+            use gpui_kit::VisualTestContext;
+
+            use super::super::table::SELECTED_TABLE_TAG;
+
+            let mut typist = typist(cx);
+            typist.type_text("before");
+            insert_table(&mut typist, 1, 2);
+            typist.type_text("a");
+            typist.press("down");
+            typist.type_text("after");
+            let handle = typist.handle;
+            let mut visual = VisualTestContext::from_window(handle, typist.cx);
+            visual.update(|window, cx| window.render_frame(cx));
+            assert!(visual.debug_bounds(SELECTED_TABLE_TAG).is_none());
+            visual.simulate_keystrokes("ctrl-a");
+            visual.run_until_parked();
+            visual.update(|window, cx| window.render_frame(cx));
+            assert!(visual.debug_bounds(SELECTED_TABLE_TAG).is_some());
         }
 
         #[gpui_kit::test]

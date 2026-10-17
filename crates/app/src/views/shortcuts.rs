@@ -1,15 +1,17 @@
 use gpui_kit::*;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, NewChat, OpenSwitcher, PastePlainText,
-    ReplyToHovered, ScheduleSend, ToggleBold, ToggleCallMute, ToggleCode, ToggleItalic,
-    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
+    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, InsertTableLine, NewChat, OpenSwitcher,
+    PastePlainText, RemoveTableLine, ReplyToHovered, ScheduleSend, ToggleBold, ToggleCallMute,
+    ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript, ToggleSuperscript,
+    ToggleUnderline,
 };
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";
 const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input";
-const ALTERNATE_KEYS: &[(&str, &str)] = &[("alt-shift-=", "alt-shift-+")];
+const ALTERNATE_KEYS: &[(&str, &str)] =
+    &[("alt-shift-=", "alt-shift-+"), ("ctrl-alt-=", "ctrl-alt-+")];
 
 actions!(
     teams,
@@ -117,13 +119,16 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Composer, Composer, "Bold", "ctrl-b", Some("cmd-b"), ToggleBold),
     shortcut!(Composer, Composer, "Italic", "ctrl-i", Some("cmd-i"), ToggleItalic),
     shortcut!(Composer, Composer, "Underline", "ctrl-u", Some("cmd-u"), ToggleUnderline),
-    shortcut!(Composer, Composer, "Strikethrough", "ctrl-shift-x", None, ToggleStrike),
+    shortcut!(Composer, Composer, "Format", "ctrl-shift-x", Some("cmd-shift-x"), ToggleFormatBar),
+    shortcut!(Composer, Composer, "Strikethrough", "ctrl-alt-x", None, ToggleStrike),
     shortcut!(Composer, Composer, "Superscript", "ctrl-shift-=", None, ToggleSuperscript),
     shortcut!(Composer, Composer, "Subscript", "ctrl-=", None, ToggleSubscript),
     shortcut!(Composer, Composer, "Code", "ctrl-shift-c", None, ToggleCode),
     shortcut!(Composer, Composer, "Insert link", "ctrl-k", Some("cmd-k"), EditLink),
     shortcut!(Composer, Composer, "Paste as plain text", "ctrl-shift-v", Some("cmd-shift-v"), PastePlainText),
     shortcut!(Composer, Composer, "Schedule send", "ctrl-shift-enter", None, ScheduleSend),
+    shortcut!(Composer, Composer, "Insert column or row", "ctrl-alt-=", None, InsertTableLine),
+    shortcut!(Composer, Composer, "Delete column, row, or table", "ctrl-alt--", None, RemoveTableLine),
     shortcut!(Calls, GlobalOverTextFields, "Accept incoming call", "ctrl-shift-a", Some("cmd-shift-a"), AcceptCall),
     shortcut!(Calls, GlobalOverTextFields, "Decline incoming call", "ctrl-shift-d", Some("cmd-shift-d"), DeclineCall),
     shortcut!(Calls, GlobalOverTextFields, "Join the meeting from its reminder", "ctrl-shift-j", Some("cmd-shift-j"), JoinMeetingFromToast),
@@ -348,5 +353,33 @@ mod tests {
         assert_eq!(display_keys("alt-shift-="), "Alt+Shift+Plus");
         assert_eq!(display_keys("alt-shift--"), "Alt+Shift+Minus");
         assert_eq!(display_keys("alt-shift-0"), "Alt+Shift+0");
+        assert_eq!(display_keys("ctrl-alt--"), "Ctrl+Alt+Minus");
+    }
+
+    #[gpui_kit::test]
+    fn composer_format_and_table_keys_match_teams(cx: &mut TestAppContext) {
+        registered(cx);
+        let typing = ["AppShell", "Composer", "Input"];
+        let action_of = |label: &str| {
+            action_name(
+                SHORTCUTS
+                    .iter()
+                    .find(|shortcut| shortcut.label == label)
+                    .unwrap(),
+            )
+        };
+        for (keys, label) in [
+            ("ctrl-shift-x", "Format"),
+            ("ctrl-alt-x", "Strikethrough"),
+            ("ctrl-alt-=", "Insert column or row"),
+            ("ctrl-alt-+", "Insert column or row"),
+            ("ctrl-alt--", "Delete column, row, or table"),
+        ] {
+            assert_eq!(
+                bound_action(cx, keys, &typing),
+                Some(action_of(label)),
+                "{keys}"
+            );
+        }
     }
 }
