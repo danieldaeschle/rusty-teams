@@ -189,9 +189,13 @@ mod frames {
         AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call,
     };
     use crate::views::shortcuts::{
-        OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
+        ClearChatFilters, FilterMutedChats, OpenActivity, OpenAgents, OpenCallsTab,
+        OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
+    use crate::views::sidebar::chat_filter_bar::{
+        FILTER_EMPTY_TAG, FILTER_INPUT_TAG, FILTER_PILLS_TAG, FILTER_TAG,
+    };
     use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
 
     const GUARDED: &[&str] = &[
@@ -214,6 +218,8 @@ mod frames {
         "shell/islands/main/call-controls/leave",
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
+    const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
+    const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/sidebar/calls-actions",
         "shell/islands/sidebar/calls-actions/meet-now",
@@ -554,6 +560,8 @@ mod frames {
             .iter()
             .chain(CALL_GUARDED)
             .chain(CALLS_TAGS)
+            .chain(CHAT_FILTER_TAGS)
+            .chain(CHAT_FILTER_OPEN_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
             .chain(CONSULT_GUARDED)
@@ -764,7 +772,17 @@ mod frames {
                 size: size(px(width), px(height)),
             };
             let screens = [
-                Screen::Tab("chats", None),
+                Screen::Tab("chats", Some(|visual| visual.dispatch_action(OpenChatsTab))),
+                Screen::Tab(
+                    "chat-filter",
+                    Some(|visual| {
+                        visual.dispatch_action(OpenChatsTab);
+                        visual.dispatch_action(OpenChatFilter);
+                        visual.dispatch_action(FilterMutedChats);
+                        visual.run_until_parked();
+                        visual.simulate_input("zzz");
+                    }),
+                ),
                 Screen::Tab(
                     "activity",
                     Some(|visual| visual.dispatch_action(OpenActivity)),
@@ -897,6 +915,11 @@ mod frames {
                     expected.push(MENU);
                 }
                 match screen_name {
+                    "chats" => expected.extend(CHAT_FILTER_TAGS),
+                    "chat-filter" => {
+                        expected.extend(CHAT_FILTER_TAGS);
+                        expected.extend(CHAT_FILTER_OPEN_TAGS);
+                    }
                     "calls" => expected.extend(CALLS_TAGS),
                     "agents" => expected.push(AGENTS_LIST),
                     "prejoin" => expected.extend(PREJOIN_TAGS),
@@ -935,6 +958,11 @@ mod frames {
                             cx.notify();
                         })
                     });
+                }
+                if screen_name == "chat-filter" {
+                    visual.dispatch_action(ClearChatFilters);
+                    visual.dispatch_action(OpenChatFilter);
+                    visual.run_until_parked();
                 }
                 if screen_name == "prejoin" {
                     let state = visual.update(|_, cx| cx.global::<AppHandle>().0.clone());

@@ -25,6 +25,7 @@ use super::widgets::{count_badge, icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::chat_actions::TITLE_LIMIT;
+use crate::chat_filter::{ChatFilter, filtered_sections, has_no_matches};
 use crate::data::{Directory, is_pending_folder};
 use crate::format;
 use crate::local_previews::LocalPreview;
@@ -37,6 +38,9 @@ use crate::sidebar_model::{
 };
 use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
+use gpui_kit::component::input::InputState;
+
+pub(crate) mod chat_filter_bar;
 
 pub const SIDEBAR_SCROLL_DIVIDER: &str = "shell/islands/sidebar/divider-scroll";
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
@@ -473,6 +477,12 @@ pub(crate) fn confirm_leave(
     });
 }
 
+pub enum SidebarEvent {
+    RestoreFocus,
+}
+
+impl EventEmitter<SidebarEvent> for SidebarView {}
+
 pub struct SidebarView {
     state: Entity<AppState>,
     tab: SidebarTab,
@@ -487,6 +497,12 @@ pub struct SidebarView {
     older_chats_seen: Cell<(bool, bool)>,
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
+    chat_filter: ChatFilter,
+    filter_box_open: bool,
+    more_filters_open: bool,
+    filter_input: Option<Entity<InputState>>,
+    filter_subscription: Option<Subscription>,
+    _activity_observation: Subscription,
     _subscription: Subscription,
     _state_observation: Subscription,
     _agent_observation: Option<Subscription>,
@@ -577,6 +593,15 @@ impl SidebarView {
             SidebarTab::Chats
         };
         let collapsed_teams = load_collapsed_teams(&state.read(cx).store);
+        let activity = activity_panel.read(cx).activity();
+        let activity_observation = cx.observe(&activity, |view, _, cx| {
+            if view
+                .chat_filter
+                .has(crate::chat_filter::ChatFilterPill::Mentions)
+            {
+                cx.notify();
+            }
+        });
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(CALLS_REFRESH).await;
@@ -605,6 +630,12 @@ impl SidebarView {
             older_chats_seen: Cell::new((false, false)),
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
+            chat_filter: ChatFilter::default(),
+            filter_box_open: false,
+            more_filters_open: false,
+            filter_input: None,
+            filter_subscription: None,
+            _activity_observation: activity_observation,
             _subscription: subscription,
             _state_observation: state_observation,
             _agent_observation: agent_observation,
@@ -1069,7 +1100,18 @@ impl SidebarView {
                 now,
                 offset,
             };
-            let sections = build_sections(&input);
+            let sections = if self.chat_filter.is_active() {
+                let mentioned = self.mentioned_chats(cx);
+                let selected_id = self.selected_chat_id(cx);
+                filtered_sections(
+                    &input,
+                    &self.chat_filter,
+                    &mentioned,
+                    selected_id.as_deref(),
+                )
+            } else {
+                build_sections(&input)
+            };
             let menu = MenuContext {
                 state: self.state.clone(),
                 folders: state.directory.move_targets(),
@@ -1193,6 +1235,10 @@ impl SidebarView {
                     .text_color(theme::text_faint())
                     .child(LOADING_OLDER_LABEL),
             );
+        }
+        let selected_chat_id = self.selected_chat_id(cx);
+        if self.chat_filter.is_active() && has_no_matches(&sections, selected_chat_id.as_deref()) {
+            list = list.child(self.filter_empty_state(cx));
         }
         list = with_spacer(list, &mut skipped_height);
         self.request_lazy_data(faces, presence_users, cx);
@@ -1772,12 +1818,18 @@ impl Render for SidebarView {
         };
         let header = match self.tab {
             SidebarTab::Chats => Some(
-                page_header(self.tab.title())
-                    .child(self.chat_list_menu_button(cx))
-                    .child(self.new_chat_button(cx)),
+                v_flex()
+                    .flex_none()
+                    .child(
+                        page_header(self.tab.title())
+                            .child(self.chat_list_menu_button(cx))
+                            .child(self.filter_toggle_button(cx))
+                            .child(self.new_chat_button(cx)),
+                    )
+                    .child(self.filter_bar(cx)),
             ),
             SidebarTab::Channels | SidebarTab::Calls | SidebarTab::Agents => {
-                Some(page_header(self.tab.title()))
+                Some(v_flex().child(page_header(self.tab.title())))
             }
             SidebarTab::Activity | SidebarTab::Saved => None,
         };
