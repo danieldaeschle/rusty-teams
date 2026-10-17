@@ -19,7 +19,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, NextConversation, OpenActivity,
+    AcceptCall, DeclineCall, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
     OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
@@ -1030,6 +1030,14 @@ impl Render for AppShell {
             .on_action(zoom_listener::<ZoomShareIn>(&self.state, ZoomStep::In))
             .on_action(zoom_listener::<ZoomShareOut>(&self.state, ZoomStep::Out))
             .on_action(zoom_listener::<ZoomShareReset>(&self.state, ZoomStep::Reset))
+            .on_action(cx.listener(|this, _: &JumpToLastReadOrNewest, _, cx| {
+                if this.image_viewer.is_some() || this.state.read(cx).viewing_call() {
+                    cx.propagate();
+                    return;
+                }
+                this.conversation
+                    .update(cx, |conversation, cx| conversation.jump_to_last_read_or_newest(cx));
+            }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.conversation.update(cx, |conversation, cx| {

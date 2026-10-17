@@ -24,6 +24,7 @@ use teams_core::{
 mod detached;
 mod feed;
 mod pins;
+mod jump;
 mod proposal;
 mod recap;
 mod receipt_fade;
@@ -3517,6 +3518,15 @@ impl Render for ConversationView {
                             .child(icon(IconName::Loader, 12., theme::text_muted()))
                             .child("Loading newer messages")
                             .into_any_element()
+        .with_jump_button_label(jump::JUMP_TO_NEWEST_LABEL)
+        .with_jump_button_renderer(|button| {
+            button
+                .label(jump::JUMP_TO_NEWEST_LABEL)
+                .tooltip(jump::jump_to_newest_tooltip())
+                .border_0()
+                .bg(theme::accent())
+                .text_color(theme::on_accent())
+        })
                     }
                     Some(Row::Start(start)) => {
                         let state = env.app.read(cx);
