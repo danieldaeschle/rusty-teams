@@ -6,7 +6,6 @@ use gpui_kit::component::input::{
 };
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};
 
@@ -502,13 +501,11 @@ impl Composer {
                             .id(ElementId::Name(format!("table-size-{row}-{column}").into()))
                             .size(px(PICKER_SQUARE))
                             .rounded(px(2.))
-                            .border_1()
-                            .border_color(if covered {
-                                theme::accent()
+                            .bg(if covered {
+                                theme::accent().opacity(0.6)
                             } else {
                                 theme::border_strong()
                             })
-                            .when(covered, |square| square.bg(theme::accent().opacity(0.25)))
                             .cursor_pointer()
                             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                                 if *hovered && let Some(picker) = this.table_picker.as_mut() {
