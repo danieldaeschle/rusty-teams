@@ -89,10 +89,15 @@ mod tests {
         let sharp = self_view(0, false);
         let blurred = self_view(0, true);
         assert!(roughness(&blurred, 30, 20) * 3 < roughness(&sharp, 30, 20));
+        let mut person_only = scene(0);
+        let everyone = Mask::from_fn(256, 144, |_, _| 1.);
+        compose(&mut person_only, SCENE_WIDTH, SCENE_HEIGHT, &everyone);
         let center = (SCENE_HEIGHT / 2 * SCENE_WIDTH + SCENE_WIDTH / 2) * 4;
-        assert_eq!(
-            blurred.bgra[center..center + 3],
-            sharp.bgra[center..center + 3]
-        );
+        let person_bgra = [
+            person_only[center + 2],
+            person_only[center + 1],
+            person_only[center],
+        ];
+        assert_eq!(blurred.bgra[center..center + 3], person_bgra);
     }
 }
