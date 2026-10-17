@@ -1,15 +1,15 @@
-use chatsvc::{
-    BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef, ConversationState,
-    Conversations,
-    ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest, InvokeResponse, Language,
-    LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon, MessageLanguage,
-    MessageEmotions, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins, PresenceService, PresenceStatus,
-    Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
-    Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
-};
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
+};
+use chatsvc::{
+    BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
+    ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, InvokeRequest,
+    InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo, MemberHorizon,
+    MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages, PinnedMessage, Pins,
+    PresenceLookup, PresenceService, PresenceStatus, Receipts, RecordingPolicy, SavedMessage,
+    ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest, Translation, TranslationTrigger,
+    Translator, WindowDirection, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
@@ -875,7 +875,17 @@ impl Remote for Graph {
     }
 
     async fn presences(&self, user_ids: &[String]) -> Result<Vec<Presence>> {
-        Ok(Graph::presences(self, user_ids).await?)
+        let found = PresenceLookup::new(self.session())
+            .presences(user_ids)
+            .await?;
+        Ok(found
+            .into_iter()
+            .map(|presence| Presence {
+                user_id: presence.user_id,
+                availability: presence.availability,
+                activity: presence.activity,
+            })
+            .collect())
     }
 
     async fn person_profile(&self, user_id: &str) -> Result<PersonProfile> {
@@ -893,7 +903,9 @@ impl Remote for Graph {
         user_ids: &[String],
         purge: bool,
     ) -> Result<()> {
-        Ok(Graph::subscribe_presence(self, endpoint_id, trouter_uri, user_ids, purge).await?)
+        Ok(PresenceLookup::new(self.session())
+            .subscribe(endpoint_id, trouter_uri, user_ids, purge)
+            .await?)
     }
 
     async fn own_status(&self, user_id: &str) -> Result<PresenceStatus> {
@@ -1032,7 +1044,11 @@ impl Remote for Graph {
         page_size: usize,
     ) -> Result<Vec<MessageEmotions>> {
         Ok(Messages::new(self.session())
-            .message_emotions(&conversation.conversation_id(), newest_message_id, page_size)
+            .message_emotions(
+                &conversation.conversation_id(),
+                newest_message_id,
+                page_size,
+            )
             .await?)
     }
 

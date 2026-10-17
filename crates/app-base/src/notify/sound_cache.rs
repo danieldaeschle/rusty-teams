@@ -8,8 +8,7 @@ use gpui_kit::App;
 
 use super::platform;
 
-pub const TEAMS_SOUND_BASE_URL: &str =
-    "https://statics.teams.cdn.office.net/evergreen-assets/audio/";
+pub const TEAMS_SOUND_BASE_URL: &str = chatsvc::teams_cdn::SOUND_BASE_URL;
 const SOUND_DIRECTORY: &str = "sounds";
 const PARTIAL_SUFFIX: &str = ".partial";
 

@@ -69,22 +69,6 @@ async fn main() {
         }
         Err(error) => println!("photos failed: {}", status_of(&error)),
     }
-
-    let started = Instant::now();
-    match graph.presences(&user_ids).await {
-        Ok(found) => {
-            let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-            for presence in &found {
-                *counts.entry(presence.availability.clone()).or_default() += 1;
-            }
-            println!(
-                "teams presence ok {} {counts:?} in {} ms",
-                found.len(),
-                started.elapsed().as_millis()
-            );
-        }
-        Err(error) => println!("teams presence failed: {}", status_of(&error)),
-    }
 }
 
 fn status_of(error: &graph::Error) -> String {
