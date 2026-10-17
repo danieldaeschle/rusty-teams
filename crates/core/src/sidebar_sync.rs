@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
-use chatsvc::ConversationState;
+use chatsvc::{ConversationState, MentionActivity};
 use chrono::{DateTime, Duration, Utc};
 use store::{ChatRecord, Store};
 
 use crate::bot_partners::BotPartners;
+use crate::channel_mentions::channel_mentions;
 use crate::chat_paging::ChatPaging;
 use crate::engine::{SidebarSummary, SyncEngine};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::hidden_chats::{LocallyHidden, resolve_hidden};
 use crate::mapping::{channel_record, team_record};
@@ -69,7 +70,11 @@ impl<R: Remote> SyncEngine<R> {
         let mut hidden_ids = Vec::new();
         let mut complete = false;
         let mut continuation = None;
-        let states = self.refresh_chat_states().await;
+        let (states, app_horizon_ms, mentions) = tokio::join!(
+            self.refresh_chat_states(),
+            self.refresh_app_channel_horizon(),
+            self.remote.mention_activities()
+        );
         self.drop_chats_hidden_by_chatsvc(states.as_deref())?;
         let mut page = self.remote.chats_page(self.config.chat_page_size).await?;
         loop {
@@ -98,7 +103,8 @@ impl<R: Remote> SyncEngine<R> {
             self.refresh_notes_chat(states.as_deref(), &my_user_id)
                 .await,
         );
-        self.apply_channel_read_states(states.as_deref(), &my_user_id);
+        self.apply_channel_read_states(states.as_deref(), &my_user_id, app_horizon_ms);
+        self.apply_channel_mentions(states.as_deref(), mentions, &my_user_id, app_horizon_ms);
         self.apply_muted_chats(states);
         if full {
             if complete {
@@ -145,7 +151,49 @@ impl<R: Remote> SyncEngine<R> {
         Ok(())
     }
 
-    fn apply_channel_read_states(&self, states: Option<&[ConversationState]>, my_user_id: &str) {
+    async fn refresh_app_channel_horizon(&self) -> i64 {
+        match self.remote.app_consumption_horizon().await {
+            Ok(horizon) => {
+                let mut known = self.app_channel_horizon_ms.lock().unwrap();
+                *known = horizon.channel_ms.max(*known);
+                *known
+            }
+            Err(error) => {
+                self.report(format!("cannot read the mark all as read horizon: {error}"));
+                *self.app_channel_horizon_ms.lock().unwrap()
+            }
+        }
+    }
+
+    fn apply_channel_mentions(
+        &self,
+        states: Option<&[ConversationState]>,
+        mentions: Result<Vec<MentionActivity>>,
+        my_user_id: &str,
+        app_horizon_ms: i64,
+    ) {
+        let (Some(states), Ok(mentions)) = (
+            states,
+            mentions.inspect_err(|error| {
+                if !matches!(error, Error::Unsupported(_)) {
+                    self.report(format!("cannot refresh channel mentions: {error}"));
+                }
+            }),
+        ) else {
+            return;
+        };
+        let counts = channel_mentions(&mentions, states, my_user_id, app_horizon_ms);
+        if let Err(error) = self.store.replace_channel_mentions(&counts) {
+            self.report(format!("cannot store channel mentions: {error}"));
+        }
+    }
+
+    fn apply_channel_read_states(
+        &self,
+        states: Option<&[ConversationState]>,
+        my_user_id: &str,
+        app_horizon_ms: i64,
+    ) {
         let Some(states) = states else {
             return;
         };
@@ -154,7 +202,7 @@ impl<R: Remote> SyncEngine<R> {
             .map(|state| {
                 (
                     state.id.clone(),
-                    state.read.is_unread(my_user_id),
+                    state.read.is_unread_after(my_user_id, app_horizon_ms),
                     state.read.last_message_at(),
                 )
             })

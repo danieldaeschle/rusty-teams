@@ -3,12 +3,15 @@ use gpui_kit::component::{h_flex, tooltip::Tooltip};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use app_ui_kit::layout::ROW_PADDING;
+
 use super::message_actions::Action;
 use super::widgets::icon;
 use crate::theme;
 
 const BANNER_HEIGHT: f32 = 40.;
-const BANNER_MARGIN: f32 = 20.;
+const BANNER_INSET: f32 = ROW_PADDING;
+pub const PIN_BANNER_TAG: &str = "shell/islands/main/pin-banner";
 const BANNER_GAP: f32 = 8.;
 const BANNER_PADDING: f32 = 12.;
 const BUTTON_SIZE: f32 = 28.;
@@ -29,15 +32,19 @@ pub struct PinBannerActions {
 }
 
 pub fn pin_banner_inset(shown: bool) -> Pixels {
-    px(if shown { BANNER_HEIGHT + BANNER_GAP } else { 0. })
+    px(if shown {
+        BANNER_INSET + BANNER_HEIGHT + BANNER_GAP
+    } else {
+        0.
+    })
 }
 
 pub fn pin_banner_overlay(banner: AnyElement) -> AnyElement {
     div()
         .absolute()
-        .top_0()
-        .left(px(BANNER_MARGIN))
-        .right(px(BANNER_MARGIN))
+        .top(px(BANNER_INSET))
+        .left(px(BANNER_INSET))
+        .right(px(BANNER_INSET))
         .child(banner)
         .into_any_element()
 }
@@ -86,6 +93,7 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
     } = actions;
     h_flex()
         .id("pin-banner")
+        .debug_selector(|| PIN_BANNER_TAG.into())
         .group("pin-banner")
         .occlude()
         .w_full()

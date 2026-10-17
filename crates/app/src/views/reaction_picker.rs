@@ -10,7 +10,12 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use gpui_kit::assets::IconName;
+use gpui_kit::component::tooltip::Tooltip;
+
+use super::customize_reactions::{CUSTOMIZE_TOOLTIP, open_customize_reactions};
 use super::skin_tone_choices::{tone_badge, tone_choices};
+use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::emoji;
 use crate::emoticons;
@@ -67,6 +72,7 @@ pub struct ReactionPicker {
     target: Option<PickTarget>,
     skin_tone: u8,
     tone_menu: Option<(String, Point<Pixels>)>,
+    customizing: bool,
     _subscription: Subscription,
 }
 
@@ -88,8 +94,14 @@ impl ReactionPicker {
             target: None,
             skin_tone: 0,
             tone_menu: None,
+            customizing: false,
             _subscription: subscription,
         }
+    }
+
+    pub fn for_customizing(mut self) -> Self {
+        self.customizing = true;
+        self
     }
 
     pub fn set_target(
@@ -195,8 +207,41 @@ impl ReactionPicker {
 
     fn pick_tone(&mut self, glyph: &str, tone: u8, window: &mut Window, cx: &mut Context<Self>) {
         self.skin_tone = tone;
-        self.app.update(cx, |state, cx| state.set_skin_tone(tone, cx));
+        if !self.customizing {
+            self.app
+                .update(cx, |state, cx| state.set_skin_tone(tone, cx));
+        }
         self.pick(&emoticons::with_tone(glyph, tone), false, window, cx);
+    }
+
+    fn open_customize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(target) = self.target.take() {
+            target
+                .popover
+                .update(cx, |state, cx| state.dismiss(window, cx))
+                .ok();
+            (target.on_done)(window, cx);
+        }
+        open_customize_reactions(self.app.clone(), window, cx);
+    }
+
+    fn customize_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        (!self.customizing).then(|| {
+            div()
+                .id("customize-reactions-trigger")
+                .size(px(CELL_SIZE))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(8.))
+                .cursor_pointer()
+                .hover(|button| button.bg(theme::popup_hover()))
+                .child(icon(IconName::Settings, 16., theme::text_soft()))
+                .tooltip(|window, cx| Tooltip::new(CUSTOMIZE_TOOLTIP).build(window, cx))
+                .on_click(cx.listener(|this, _, window, cx| this.open_customize(window, cx)))
+                .into_any_element()
+        })
     }
 
     fn tone_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -303,14 +348,21 @@ impl Render for ReactionPicker {
             .p(px(8.))
             .child(h_flex().gap(px(2.)).children(quick))
             .child(
-                div()
-                    .h(px(32.))
-                    .px(px(8.))
-                    .flex()
+                h_flex()
+                    .gap(px(4.))
                     .items_center()
-                    .rounded(px(8.))
-                    .bg(theme::popup_hover())
-                    .child(Input::new(&self.input).appearance(false).bordered(false)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .h(px(32.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(8.))
+                            .bg(theme::popup_hover())
+                            .child(Input::new(&self.input).appearance(false).bordered(false)),
+                    )
+                    .children(self.customize_button(cx)),
             )
             .child(
                 div()

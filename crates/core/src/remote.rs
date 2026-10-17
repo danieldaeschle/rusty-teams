@@ -3,6 +3,10 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
+    ActivityFeed, AppConsumptionHorizon, MentionActivity, UserSettings,
+    parse_app_consumption_horizon,
+};
+use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
     ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, HistoryShare,
     InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo,
@@ -134,6 +138,12 @@ pub trait Remote {
         share: HistoryShare,
     ) -> Result<()>;
     async fn chat_states(&self) -> Result<Vec<ConversationState>>;
+    async fn clear_chat_history(&self, _chat_id: &str, _cleared_until_ms: i64) -> Result<()> {
+        Err(Error::Unsupported("removing chat history"))
+    }
+    async fn set_chat_topic(&self, _chat_id: &str, _topic: &str) -> Result<()> {
+        Err(Error::Unsupported("renaming a chat"))
+    }
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
     async fn set_channel_notifications(
@@ -351,6 +361,36 @@ pub trait Remote {
         _parent_id: Option<&str>,
     ) -> Result<()> {
         Err(Error::Unsupported("pinning messages"))
+    }
+
+    async fn channel_pinned_posts(
+        &self,
+        _team_thread_id: &str,
+        _channel_id: &str,
+    ) -> Result<Vec<PinnedMessage>> {
+        Err(Error::Unsupported("pinned channel posts"))
+    }
+
+    async fn set_post_pinned(
+        &self,
+        _team_thread_id: &str,
+        _channel_id: &str,
+        _post_id: &str,
+        _pinned: bool,
+    ) -> Result<()> {
+        Err(Error::Unsupported("pinning channel posts"))
+    }
+
+    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
+        Err(Error::Unsupported("the activity feed"))
+    }
+
+    async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
+        Ok(AppConsumptionHorizon::default())
+    }
+
+    async fn mark_all_channels_read(&self, _now_ms: i64) -> Result<AppConsumptionHorizon> {
+        Err(Error::Unsupported("marking all channels as read"))
     }
 
     async fn chat_apps(&self, _chat_id: &str) -> Result<Vec<ChatApp>> {
@@ -700,6 +740,18 @@ impl Remote for Graph {
             .await?)
     }
 
+    async fn clear_chat_history(&self, chat_id: &str, cleared_until_ms: i64) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .clear_history(chat_id, cleared_until_ms)
+            .await?)
+    }
+
+    async fn set_chat_topic(&self, chat_id: &str, topic: &str) -> Result<()> {
+        Ok(ThreadMembers::new(self.session())
+            .set_topic(chat_id, topic)
+            .await?)
+    }
+
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
         Ok(Conversations::new(self.session())
             .set_alerts(chat_id, !muted)
@@ -1046,6 +1098,43 @@ impl Remote for Graph {
     ) -> Result<()> {
         Ok(Pins::new(self.session())
             .unpin_message(chat_id, message_id, parent_id)
+            .await?)
+    }
+
+    async fn channel_pinned_posts(
+        &self,
+        team_thread_id: &str,
+        channel_id: &str,
+    ) -> Result<Vec<PinnedMessage>> {
+        Ok(Pins::with_skype_token(self.session())
+            .channel_pinned_posts(team_thread_id, channel_id)
+            .await?)
+    }
+
+    async fn set_post_pinned(
+        &self,
+        team_thread_id: &str,
+        channel_id: &str,
+        post_id: &str,
+        pinned: bool,
+    ) -> Result<()> {
+        Ok(Pins::with_skype_token(self.session())
+            .set_post_pinned(team_thread_id, channel_id, post_id, pinned)
+            .await?)
+    }
+
+    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
+        Ok(ActivityFeed::new(self.session()).mentions().await?)
+    }
+
+    async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
+        let properties = UserSettings::new(self.session()).properties().await?;
+        Ok(parse_app_consumption_horizon(&properties))
+    }
+
+    async fn mark_all_channels_read(&self, now_ms: i64) -> Result<AppConsumptionHorizon> {
+        Ok(UserSettings::new(self.session())
+            .mark_all_channels_read(now_ms)
             .await?)
     }
 

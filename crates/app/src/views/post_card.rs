@@ -31,6 +31,7 @@ const AVATAR_GAP: f32 = 10.;
 const CARD_PADDING: f32 = 12.;
 const CARD_RADIUS: f32 = 10.;
 const CARD_GAP: f32 = 12.;
+const PINNED_LABEL: &str = "Pinned";
 const SLOTS_PER_POST: usize = 64;
 const TOOLBAR_RIGHT_INSET: f32 = 8.;
 const SUBJECT_SIZE: f32 = 14.;
@@ -61,6 +62,16 @@ fn edited_marker() -> Div {
         .italic()
         .text_color(theme::text_muted())
         .child("Edited")
+}
+
+fn pinned_marker() -> Div {
+    h_flex()
+        .gap(px(3.))
+        .items_center()
+        .text_size(px(11.))
+        .text_color(theme::text_muted())
+        .child(icon(IconName::Pin, 11., theme::text_muted()))
+        .child(PINNED_LABEL)
 }
 
 fn message_content(
@@ -145,6 +156,7 @@ fn message_header(
     author: String,
     profile_user: Option<&str>,
     saved: bool,
+    pinned: bool,
 ) -> Div {
     h_flex()
         .gap(px(6.))
@@ -166,6 +178,7 @@ fn message_header(
                 .child(row.time.clone()),
         )
         .when(row.edited, |line| line.child(edited_marker()))
+        .when(pinned, |line| line.child(pinned_marker()))
         .when(saved, |line| {
             line.child(icon(IconName::Bookmark, 12., theme::accent_text()))
         })
@@ -218,6 +231,7 @@ fn message_block(
         None => message_content(row, index, directory, &actions, cx),
     };
     let saved = actions.saved;
+    let pinned = actions.pinned && role == Role::Root;
     let RowActions {
         delivery,
         reply,
@@ -237,7 +251,14 @@ fn message_block(
         .flex_1()
         .min_w_0()
         .gap(px(6.))
-        .child(message_header(row, index, author, profile_user, saved))
+        .child(message_header(
+            row,
+            index,
+            author,
+            profile_user,
+            saved,
+            pinned,
+        ))
         .when_some(
             row.subject.clone().filter(|_| role == Role::Root),
             |column, subject| {

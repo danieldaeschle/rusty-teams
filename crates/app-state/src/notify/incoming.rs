@@ -347,6 +347,7 @@ mod tests {
                 .map(|id| (*id).to_owned())
                 .collect(),
             notifications: HashMap::new(),
+            mentions: Default::default(),
         }
     }
 

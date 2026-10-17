@@ -147,6 +147,7 @@ pub struct SidebarTeam {
     pub hidden: bool,
     pub hidden_channel_ids: Vec<String>,
     pub notifications: HashMap<String, ChannelNotifications>,
+    pub mentions: HashMap<String, ChannelMentions>,
 }
 
 impl SidebarTeam {
@@ -155,6 +156,24 @@ impl SidebarTeam {
             .get(channel_id)
             .copied()
             .unwrap_or_default()
+    }
+
+    pub fn channel_mentions(&self, channel_id: &str) -> ChannelMentions {
+        self.mentions.get(channel_id).copied().unwrap_or_default()
+    }
+}
+
+/// Unread @mentions of one channel: personal (person or tag), @channel, @team.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChannelMentions {
+    pub personal: u32,
+    pub channel: u32,
+    pub team: u32,
+}
+
+impl ChannelMentions {
+    pub fn is_empty(&self) -> bool {
+        *self == ChannelMentions::default()
     }
 }
 

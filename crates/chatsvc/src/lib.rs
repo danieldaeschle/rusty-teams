@@ -1,8 +1,10 @@
+pub mod activity_mentions;
 pub mod bot_profiles;
 pub mod calendar;
 pub mod calllog;
 pub mod cards;
 pub mod channel_notifications;
+pub mod channel_visibility;
 pub mod conversations;
 pub mod drafts;
 pub mod emotions;
@@ -33,6 +35,7 @@ pub mod transcripts;
 pub mod translate;
 pub mod window;
 
+pub use activity_mentions::{ActivityFeed, MentionActivity, MentionKind};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Reminder, Repeat, Reply,
@@ -43,6 +46,7 @@ pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
 pub use channel_notifications::{ChannelNotificationLevel, ChannelNotifications, ChannelSettings};
+pub use channel_visibility::{ChannelKind, ChannelMembership, ChannelTarget, ChannelVisibility};
 pub use conversations::{ConversationState, Conversations};
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
 pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, user_id_from_mri};
@@ -55,7 +59,10 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
-pub use members::{HistoryShare, MAX_HISTORY_DAYS, ThreadMembers};
+pub use members::{
+    HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
+    TopicProblem, topic_problem,
+};
 pub use messages::{ConversationRef, Messages};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,
@@ -83,7 +90,10 @@ pub use recap::{
 pub use receipts::{MemberHorizon, Receipts};
 pub use recording_policy::{RecordingPolicy, parse_recording_policy};
 pub use saved::SavedMessage;
-pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use settings::{
+    AppConsumptionHorizon, ChatSection, ChatSectionSettings, UserSettings,
+    parse_app_consumption_horizon,
+};
 pub use substrate_search::{
     QueryRequest, QueryResults, QueryScope, SearchIdentity, SearchSession, SubstrateSearch,
     Suggestions,

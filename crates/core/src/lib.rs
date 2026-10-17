@@ -11,8 +11,11 @@ mod card_layout;
 mod card_table;
 mod card_widgets;
 mod card_width;
+mod channel_mentions;
 mod channel_sync;
+mod channel_visibility;
 mod chat_paging;
+mod default_reactions;
 mod download;
 mod draft;
 mod emoticon_tags;
@@ -106,6 +109,10 @@ pub use chatsvc::{
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
     parse_language_settings, target_patch,
 };
+pub use default_reactions::{
+    DEFAULT_REACTION_SLOTS, TEAMS_DEFAULT_REACTIONS, default_reactions,
+    store_account_default_reactions,
+};
 pub use download::LibraryFile;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
@@ -139,7 +146,8 @@ pub use meeting_join::{
 };
 pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
-    ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
+    ChannelAddress, ChannelLinkInput, channel_link, channel_message_link, channel_tab_link,
+    chat_message_link, team_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use notes_chat::{is_notes_chat, notes_chat_title};

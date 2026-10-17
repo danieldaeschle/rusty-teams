@@ -21,6 +21,11 @@ use teams_core::{
     ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
 };
 
+mod channel_details;
+pub use channel_details::{
+    CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+    CHANNEL_DETAILS_TAG,
+};
 mod deletes;
 mod detached;
 mod feed;
@@ -43,7 +48,8 @@ use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
-use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
+use super::group_name::group_name_button;
+use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
@@ -93,6 +99,7 @@ use shared::SharedState;
 
 pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
+pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -215,6 +222,8 @@ pub struct ConversationView {
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     pin_index: usize,
+    channel_details_open: bool,
+    pinned_posts_expanded: bool,
     pin_previews: HashMap<String, pins::PinPreview>,
     pin_fetches: HashSet<String>,
     notice: Option<String>,
@@ -546,6 +555,8 @@ impl ConversationView {
             reaction_details: None,
             highlighted_message: None,
             pin_index: 0,
+            channel_details_open: false,
+            pinned_posts_expanded: false,
             pin_previews: HashMap::new(),
             pin_fetches: HashSet::new(),
             notice: None,
@@ -638,7 +649,7 @@ impl ConversationView {
                     .as_ref()
                     .is_some_and(|current| current.selection.conversation_id() == conversation_id);
                 if is_current {
-                    if self.shared_active() || self.recap_active() {
+                    if self.shared_active() || self.recap_active() || self.channel_details_open {
                         self.refresh_shared_items(cx);
                     }
                     self.rebuild(false, cx);
@@ -898,9 +909,10 @@ impl ConversationView {
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
         self.refresh_pin_previews(cx);
-        if let Some(chat_id) = self.chat_id() {
+        self.pinned_posts_expanded = false;
+        if let Some(conversation_id) = self.pin_conversation_id() {
             self.app
-                .update(cx, |state, cx| state.refresh_pins(&chat_id, cx));
+                .update(cx, |state, cx| state.refresh_pins(&conversation_id, cx));
         }
         let target = self
             .current
@@ -3028,10 +3040,18 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
-        let pinned = chat_id
-            .as_deref()
-            .is_some_and(|chat_id| state.is_pinned(chat_id, key));
+        let quick = state.quick_reactions();
         let in_chat = chat_id.is_some();
+        let pin_conversation_id = self.pin_conversation_id();
+        let pinned = pin_conversation_id
+            .as_deref()
+            .is_some_and(|conversation_id| state.is_pinned(conversation_id, key));
+        let pinnable = in_chat
+            || pin_conversation_id.as_deref().is_some_and(|channel_id| {
+                state
+                    .message_record(channel_id, key)
+                    .is_some_and(|record| record.reply_to_id.is_none())
+            });
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
         MessageMenu {
             key: key.to_owned(),
@@ -3046,7 +3066,8 @@ impl ConversationView {
             translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
-            toggle_pinned: in_chat.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            toggle_pinned: pinnable
+                .then(|| action(|this, key, window, cx| this.toggle_pinned(key, window, cx))),
             pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
@@ -3058,7 +3079,7 @@ impl ConversationView {
             pin,
             hover,
             picker: self.picker.clone(),
-            quick: self.recent.read(cx).most_used(QUICK_REACTION_COUNT),
+            quick,
             mine,
             done: action(|this, key, _, cx| this.suppress_toolbar(key, cx)),
         }
@@ -3236,6 +3257,7 @@ impl ConversationView {
         else {
             return;
         };
+        self.channel_details_open = false;
         if let Some(panel) = &self.find_panel {
             panel.update(cx, |panel, cx| panel.focus(window, cx));
             return;
@@ -3297,6 +3319,7 @@ impl ConversationView {
         let mut lead: Option<AnyElement> = None;
         let mut subline = String::new();
         let mut stack: Option<AnyElement> = None;
+        let mut rename: Option<AnyElement> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3332,6 +3355,15 @@ impl ConversationView {
                             stack = Some(add_people_button(&self.app, chat_id));
                         }
                     } else {
+                        if chat.kind == GROUP_KIND
+                            && me.is_some_and(|me| {
+                                chat.members
+                                    .iter()
+                                    .any(|member| member.user_id.as_deref() == Some(&me.user_id))
+                            })
+                        {
+                            rename = Some(group_name_button(&self.app, chat_id, &chat.title));
+                        }
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
                         subline = format!("{} participants", chat.members.len());
@@ -3434,12 +3466,19 @@ impl ConversationView {
                     .overflow_hidden()
                     .gap(px(1.))
                     .child(
-                        div()
-                            .truncate()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text())
-                            .child(current.title.clone()),
+                        h_flex()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text())
+                                    .child(current.title.clone()),
+                            )
+                            .children(rename),
                     )
                     .when(!subline.is_empty(), |column| {
                         column.child(
@@ -3453,8 +3492,11 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.channel_details_button(cx))
     }
 }
+
+const GROUP_KIND: &str = "group";
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3687,9 +3729,10 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
+        let channel_details = self.render_channel_details(cx);
         let find_panel = self.find_panel.clone().filter(|_| !drafting);
         let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
-        let body_column = v_flex()
+        let content = v_flex()
             .relative()
             .flex_1()
             .min_w_0()
@@ -3697,6 +3740,7 @@ impl Render for ConversationView {
             .children(new_post)
             .child(
                 div()
+                    .debug_selector(|| TIMELINE_TAG.into())
                     .relative()
                     .flex_1()
                     .min_h_0()
@@ -3714,13 +3758,14 @@ impl Render for ConversationView {
             })
             .child(self.render_drop_overlay(cx));
         root.child(
-            div()
+            h_flex()
                 .relative()
-                .flex()
-                .flex_row()
                 .flex_1()
                 .min_h_0()
-                .child(body_column)
+                .w_full()
+                .items_stretch()
+                .child(content)
+                .children(channel_details)
                 .children(find_panel.map(|panel| {
                     div()
                         .h_full()

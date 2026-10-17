@@ -9,6 +9,7 @@ use store::MessageRecord;
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::{Error, Result};
 use crate::external_image::external_image_url;
+use crate::hidden_chats::cleared_until_ms;
 use crate::links::LinkPreview;
 use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
@@ -391,6 +392,18 @@ impl<R: Remote> SyncEngine<R> {
             )
             .await?;
         self.store.mark_channel_read(channel_id)?;
+        self.store.clear_channel_mentions(channel_id)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn mark_all_channels_read(&self) -> Result<()> {
+        let horizon = self
+            .remote
+            .mark_all_channels_read(Utc::now().timestamp_millis())
+            .await?;
+        *self.app_channel_horizon_ms.lock().unwrap() = horizon.channel_ms;
+        self.store.mark_all_channels_read()?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }
@@ -467,6 +480,34 @@ impl<R: Remote> SyncEngine<R> {
         let now = Utc::now();
         self.with_locally_hidden(|locally| locally.unhide(chat_id, now))?;
         self.refresh_sidebar_full().await?;
+        Ok(())
+    }
+
+    /// Teams' "Remove chat history": the chat stays hidden until a message newer than the last one.
+    pub async fn remove_chat_history(&self, chat_id: &str) -> Result<()> {
+        let last_message_at = self
+            .store
+            .chat(chat_id)?
+            .and_then(|chat| chat.last_message_at);
+        let cleared_until_ms = cleared_until_ms(last_message_at, Utc::now());
+        self.remote
+            .clear_chat_history(chat_id, cleared_until_ms)
+            .await?;
+        self.with_locally_hidden(|locally| {
+            locally.hide(chat_id, last_message_at.unwrap_or_else(Utc::now))
+        })?;
+        self.store.remove_chats(&[chat_id.to_owned()])?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn rename_chat(&self, chat_id: &str, topic: &str) -> Result<()> {
+        self.remote.set_chat_topic(chat_id, topic).await?;
+        if let Some(mut chat) = self.store.chat(chat_id)? {
+            chat.title = topic.to_owned();
+            self.store.upsert_chats(std::slice::from_ref(&chat))?;
+        }
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }
 

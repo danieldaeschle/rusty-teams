@@ -180,11 +180,16 @@ mod frames {
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
     };
-    use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON};
+    use crate::views::conversation::{
+        CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
+        CHANNEL_DETAILS_TAG,
+    };
+    use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
     };
     use crate::views::message_row::BUBBLE_TAGS;
+    use crate::views::pin_banner::PIN_BANNER_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
@@ -1473,6 +1478,128 @@ mod frames {
             visual.simulate_keystrokes("escape");
             visual.run_until_parked();
             assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    const PINNED_CHAT: &str = "demo-chat-release";
+    const PINNED_CHANNEL: &str = "demo-channel-1-1";
+
+    #[gpui_kit::test]
+    fn the_pin_banner_top_gap_matches_its_side_gaps(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        let mut found = Vec::new();
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.select(Selection::Chat(PINNED_CHAT.to_owned()), cx)
+                })
+            });
+            collect(&mut visual, Some(PIN_BANNER_TAG));
+            let banner = visual.debug_bounds(PIN_BANNER_TAG).expect("pin banner");
+            let timeline = visual.debug_bounds(TIMELINE_TAG).expect("timeline");
+            let divider = visual.debug_bounds(HEADER_DIVIDER).expect("header divider");
+            let gaps = [
+                ("top", f32::from(banner.top() - timeline.top())),
+                ("left", f32::from(banner.left() - timeline.left())),
+                ("right", f32::from(timeline.right() - banner.right())),
+                ("below divider", f32::from(banner.top() - divider.bottom())),
+            ];
+            let side = gaps[1].1;
+            if gaps
+                .iter()
+                .any(|(_, gap)| (gap - side).abs() > INSET_TOLERANCE)
+            {
+                found.push(format!(
+                    "pin banner@{width}x{height}: gaps {gaps:?} must match"
+                ));
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
+    #[gpui_kit::test]
+    fn channels_show_no_pin_banner_like_teams(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(TIMELINE_TAG));
+        assert!(visual.debug_bounds(PIN_BANNER_TAG).is_none());
+    }
+
+    #[gpui_kit::test]
+    fn the_channel_details_pane_lists_pinned_posts_inside_the_main_island(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(CHANNEL_DETAILS_BUTTON));
+        let button = visual
+            .debug_bounds(CHANNEL_DETAILS_BUTTON)
+            .expect("channel details button");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some(CHANNEL_DETAILS_TAG));
+        let pane = visual
+            .debug_bounds(CHANNEL_DETAILS_TAG)
+            .expect("details pane");
+        let main = visual.debug_bounds(MAIN).expect("main island");
+        let divider = visual.debug_bounds(HEADER_DIVIDER).expect("header divider");
+        assert!(
+            (f32::from(main.right() - pane.right())).abs() < INSET_TOLERANCE,
+            "pane {pane:?} must end at the main island edge {main:?}"
+        );
+        assert!(
+            (f32::from(pane.top() - divider.bottom())).abs() < INSET_TOLERANCE,
+            "pane {pane:?} must start under the header divider {divider:?}"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_channel_details_sections_follow_teams_order_with_equal_insets(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(CHANNEL_DETAILS_BUTTON));
+        let button = visual
+            .debug_bounds(CHANNEL_DETAILS_BUTTON)
+            .expect("channel details button");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some(CHANNEL_DETAILS_SHARED_TAG));
+        let pane = visual
+            .debug_bounds(CHANNEL_DETAILS_TAG)
+            .expect("details pane");
+        let pinned = visual
+            .debug_bounds(CHANNEL_DETAILS_PINNED_TAG)
+            .expect("pinned section");
+        let shared = visual
+            .debug_bounds(CHANNEL_DETAILS_SHARED_TAG)
+            .expect("shared section");
+        assert!(
+            pinned.bottom() <= shared.top(),
+            "pinned {pinned:?} must come before shared {shared:?}"
+        );
+        for (name, section) in [("pinned", pinned), ("shared", shared)] {
+            let left = f32::from(section.left() - pane.left());
+            let right = f32::from(pane.right() - section.right());
+            assert!(
+                (left - right).abs() < INSET_TOLERANCE && left > 0.,
+                "{name} section insets left {left} right {right} must match"
+            );
         }
     }
 

@@ -3,10 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use chatsvc::settings::{parse_chat_sections, parse_skin_tone, parse_teams_order};
+use chatsvc::settings::{
+    parse_chat_sections, parse_default_reactions, parse_skin_tone, parse_teams_order,
+};
 use chatsvc::{
-    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
-    ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
+    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
+    ChannelVisibility, ChatSection, ChatSectionSettings, Pins, UserSettings,
+    pins::SessionTransport,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -70,6 +73,15 @@ pub trait FolderSource: Send + Sync {
     fn set_skin_tone(&self, _tone: u8) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
+    fn default_reactions(&self) -> Option<Vec<String>> {
+        None
+    }
+    fn set_default_reactions<'a>(
+        &'a self,
+        _reaction_ids: &'a [String],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
     fn set_section_enabled(&self, section: ChatSection, enabled: bool)
     -> BoxFuture<'_, Result<()>>;
     fn set_folder_expanded<'a>(
@@ -89,14 +101,39 @@ pub trait FolderSource: Send + Sync {
         folder_id: &'a str,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>>;
     fn change_folders(&self, change: FolderChange) -> BoxFuture<'_, Result<Vec<ChatFolder>>>;
+    fn set_channel_pinned<'a>(
+        &'a self,
+        _channel_id: &'a str,
+        _pinned: bool,
+    ) -> BoxFuture<'a, Result<Vec<String>>> {
+        Box::pin(async { Err(Error::Unsupported("channel pins without chatsvc")) })
+    }
+    fn set_channel_shown<'a>(
+        &'a self,
+        _target: ChannelTarget<'a>,
+        _own_user_id: &'a str,
+        _shown: bool,
+        _now_ms: i64,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("channel visibility without chatsvc")) })
+    }
+    fn set_team_shown<'a>(
+        &'a self,
+        _team_thread_id: &'a str,
+        _shown: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("team visibility without chatsvc")) })
+    }
 }
 
 pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
+    visibility: ChannelVisibility,
     settings: UserSettings,
     channel_settings: ChannelSettings,
     properties: Mutex<Option<Value>>,
     skin_tone: Mutex<Option<u8>>,
+    default_reactions: Mutex<Option<Vec<String>>>,
     group_ids: Mutex<HashMap<String, String>>,
 }
 
@@ -104,10 +141,12 @@ impl ChatsvcFolderSource {
     pub fn new(session: &Session) -> Self {
         ChatsvcFolderSource {
             pins: Pins::new(session),
+            visibility: ChannelVisibility::new(session),
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
             properties: Mutex::new(None),
             skin_tone: Mutex::new(None),
+            default_reactions: Mutex::new(None),
             group_ids: Mutex::new(HashMap::new()),
         }
     }
@@ -120,6 +159,49 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>> {
         Box::pin(async { Ok(self.pins.pinned_channels().await?.channel_ids) })
+    }
+
+    fn set_channel_pinned<'a>(
+        &'a self,
+        channel_id: &'a str,
+        pinned: bool,
+    ) -> BoxFuture<'a, Result<Vec<String>>> {
+        Box::pin(async move {
+            let answer = if pinned {
+                self.pins.pin_channel(channel_id).await?
+            } else {
+                self.pins.unpin_channel(channel_id).await?
+            };
+            Ok(answer.channel_ids)
+        })
+    }
+
+    fn set_channel_shown<'a>(
+        &'a self,
+        target: ChannelTarget<'a>,
+        own_user_id: &'a str,
+        shown: bool,
+        now_ms: i64,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(self
+                .visibility
+                .set_channel_shown(&target, own_user_id, shown, now_ms)
+                .await?)
+        })
+    }
+
+    fn set_team_shown<'a>(
+        &'a self,
+        team_thread_id: &'a str,
+        shown: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(self
+                .visibility
+                .set_team_shown(team_thread_id, shown)
+                .await?)
+        })
     }
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
@@ -152,6 +234,7 @@ impl FolderSource for ChatsvcFolderSource {
             let properties = self.settings.properties().await?;
             let sections = parse_chat_sections(&properties);
             *self.skin_tone.lock().unwrap() = parse_skin_tone(&properties);
+            *self.default_reactions.lock().unwrap() = parse_default_reactions(&properties);
             *self.properties.lock().unwrap() = Some(properties);
             Ok(sections)
         })
@@ -163,6 +246,17 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn set_skin_tone(&self, tone: u8) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(self.settings.set_skin_tone(tone).await?) })
+    }
+
+    fn default_reactions(&self) -> Option<Vec<String>> {
+        self.default_reactions.lock().unwrap().clone()
+    }
+
+    fn set_default_reactions<'a>(
+        &'a self,
+        reaction_ids: &'a [String],
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { Ok(self.settings.set_default_reactions(reaction_ids).await?) })
     }
 
     fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
@@ -480,12 +574,18 @@ impl<R: Remote> SyncEngine<R> {
 
     async fn refresh_section_settings(&self, source: &Arc<dyn FolderSource>) {
         let outcome = match source.section_settings().await {
-            Ok(settings) => self.apply_section_settings(&settings).and_then(|()| {
-                match source.preferred_skin_tone() {
+            Ok(settings) => self
+                .apply_section_settings(&settings)
+                .and_then(|()| match source.preferred_skin_tone() {
                     Some(tone) => crate::skin_tone::store_account_skin_tone(&self.store, tone),
                     None => Ok(()),
-                }
-            }),
+                })
+                .and_then(|()| {
+                    crate::default_reactions::store_account_default_reactions(
+                        &self.store,
+                        source.default_reactions().as_deref(),
+                    )
+                }),
             Err(error) => Err(error),
         };
         if let Err(error) = outcome {
@@ -510,6 +610,13 @@ impl<R: Remote> SyncEngine<R> {
     pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
         self.folder_source()?.set_skin_tone(tone).await?;
         crate::skin_tone::store_account_skin_tone(&self.store, tone)
+    }
+
+    pub async fn set_default_reactions(&self, reaction_ids: &[String]) -> Result<()> {
+        self.folder_source()?
+            .set_default_reactions(reaction_ids)
+            .await?;
+        crate::default_reactions::store_account_default_reactions(&self.store, Some(reaction_ids))
     }
 
     pub async fn set_folder_expanded(&self, folder_id: &str, expanded: bool) -> Result<()> {
@@ -567,13 +674,17 @@ impl<R: Remote> SyncEngine<R> {
         self.store_folders(&folders, &self.store.pinned_channel_ids()?)
     }
 
-    fn folder_source(&self) -> Result<&Arc<dyn FolderSource>> {
+    pub(crate) fn folder_source(&self) -> Result<&Arc<dyn FolderSource>> {
         self.folder_source
             .as_ref()
             .ok_or(Error::Unsupported("chat folders without a folder source"))
     }
 
-    fn store_folders(&self, folders: &[ChatFolder], channel_ids: &[String]) -> Result<()> {
+    pub(crate) fn store_folders(
+        &self,
+        folders: &[ChatFolder],
+        channel_ids: &[String],
+    ) -> Result<()> {
         let previous = (self.chat_folders()?, self.store.pinned_channel_ids()?);
         let records: Vec<FolderRecord> = folders.iter().map(to_record).collect();
         self.store.replace_folders(&records, channel_ids)?;

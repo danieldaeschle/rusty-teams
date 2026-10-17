@@ -24,6 +24,9 @@ use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::channel_menu::{
+    ChannelMenuItem, MenuEntry, TeamMenuItem, channel_menu_entries, team_menu_entries,
+};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::chat_filter::{ChatFilter, filtered_sections, has_no_matches};
 use crate::data::{Directory, is_pending_folder};
@@ -31,9 +34,10 @@ use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
-    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_CHAT_PREVIEW, EMPTY_FOLDER_HINT, NameStyle,
-    NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
-    channel_name_style, older_chats_trigger_resets, step_id, team_name_style, visible_channel_ids,
+    AvatarSpec, ChannelOrderInput, ChatItem, DELETED_CHAT_PREVIEW, EMPTY_FOLDER_HINT, MentionBadge,
+    NameStyle, NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
+    channel_badge, channel_name_style, channel_shown, older_chats_trigger_resets, step_id,
+    team_badge, team_channel_rows, team_hoisted, team_name_style, visible_channel_ids,
     wants_older_chats,
 };
 use crate::theme;
@@ -58,12 +62,14 @@ const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
 const PINNED_LABEL: &str = "Pinned";
 const TEAMS_LABEL: &str = "Teams";
+const MARK_ALL_READ_LABEL: &str = "Mark all as read";
 const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
 const MENU_ICON_SIZE: f32 = 15.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
+const MENTION_ICON_SIZE: f32 = 15.;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTab {
@@ -233,6 +239,17 @@ fn chat_menu(
                     hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
                 }),
         );
+    if !target.is_group {
+        let remove_state = context.state.clone();
+        let remove_id = target.id.clone();
+        popup = popup.item(
+            PopupMenuItem::new(REMOVE_HISTORY_LABEL)
+                .icon(menu_icon(IconName::Trash))
+                .on_click(move |_, window, cx| {
+                    confirm_remove_history(&remove_state, &remove_id, window, cx);
+                }),
+        );
+    }
     if target.is_group {
         let leave_state = context.state.clone();
         let leave_id = target.id.clone();
@@ -442,6 +459,40 @@ fn leave_description(member_count: usize) -> String {
     };
     let verb = if member_count == 2 { "sees" } else { "see" };
     format!("{who} {verb} that you left. You can only come back if someone adds you.")
+}
+
+const REMOVE_HISTORY_LABEL: &str = "Remove chat history";
+const REMOVE_HISTORY_TITLE: &str = "Remove chat history?";
+const REMOVE_HISTORY_TEXT: &str =
+    "This will remove the chat from your list and search. It affects you only.";
+
+fn confirm_remove_history(
+    state: &Entity<AppState>,
+    chat_id: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let state = state.clone();
+    let chat_id = chat_id.to_owned();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let state = state.clone();
+        let chat_id = chat_id.clone();
+        let cancel = Button::new("remove-history-cancel")
+            .label("Cancel")
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let remove = Button::new("remove-history-confirm")
+            .label("Remove")
+            .primary()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |state, cx| state.remove_chat_history(&chat_id, cx));
+                window.close_dialog(cx);
+            });
+        alert
+            .title(REMOVE_HISTORY_TITLE)
+            .description(REMOVE_HISTORY_TEXT)
+            .footer(DialogFooter::new().child(cancel).child(remove))
+            .on_ok(|_, _, _| false)
+    });
 }
 
 pub(crate) fn confirm_leave(
@@ -776,6 +827,28 @@ impl SidebarView {
             .rounded(px(8.))
             .tooltip("More options")
             .dropdown_menu(move |menu, _, _| menu.item(new_section_item(&state, read_only)))
+    }
+
+    fn channel_list_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state.clone();
+        let read_only = self.state.read(cx).mode.read_only;
+        Button::new("channel-list-more")
+            .icon(IconName::Ellipsis)
+            .ghost()
+            .size(px(NEW_CHAT_BUTTON_SIZE))
+            .rounded(px(8.))
+            .tooltip("More options")
+            .dropdown_menu(move |menu, _, _| {
+                let state = state.clone();
+                menu.item(
+                    PopupMenuItem::new(MARK_ALL_READ_LABEL)
+                        .icon(menu_icon(IconName::CheckCheck))
+                        .disabled(read_only)
+                        .on_click(move |_, _, cx| {
+                            state.update(cx, |state, cx| state.mark_all_channels_read(cx));
+                        }),
+                )
+            })
     }
 
     fn draft_row(&self) -> impl IntoElement {
@@ -1277,6 +1350,7 @@ impl SidebarView {
         channel: &ChannelRecord,
         selected: bool,
         notifications: ChannelNotifications,
+        badge: Option<MentionBadge>,
     ) -> AnyElement {
         let unread = channel.unread;
         let name_style = channel_name_style(unread, true, selected);
@@ -1337,15 +1411,19 @@ impl SidebarView {
                             ),
                     )
                     .child(
-                        h_flex().gap(px(8.)).items_center().child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(12.))
-                                .text_color(theme::text_muted())
-                                .child(team.name.clone()),
-                        ),
+                        h_flex()
+                            .gap(px(8.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .text_color(theme::text_muted())
+                                    .child(team.name.clone()),
+                            )
+                            .children(badge.map(mention_badge)),
                     ),
             )
             .on_click(move |_, _, cx| {
@@ -1382,13 +1460,17 @@ impl SidebarView {
         &self,
         mut list: Div,
         entry: &SidebarTeam,
+        hoisted_only: bool,
         selected: Option<&Selection>,
         cx: &mut Context<Self>,
     ) -> Div {
         let team_id = entry.team.id.clone();
         let expanded = team_expanded(&team_id, &self.collapsed_teams);
         let name_style = team_name_style(entry, expanded);
+        let badge = team_badge(entry, expanded);
         let toggle_id = team_id.clone();
+        let (team_menu_state, team_menu_id, team_hidden) =
+            (self.state.clone(), team_id.clone(), entry.hidden);
         list = list.child(
             h_flex()
                 .id(SharedString::from(format!("team-{team_id}")))
@@ -1421,45 +1503,45 @@ impl SidebarView {
                         .text_color(name_color(name_style))
                         .child(entry.team.name.clone()),
                 )
+                .children(badge.map(mention_badge))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if !this.collapsed_teams.remove(&toggle_id) {
                         this.collapsed_teams.insert(toggle_id.clone());
                     }
                     save_collapsed_teams(&this.state.read(cx).store, &this.collapsed_teams);
                     cx.notify();
-                })),
+                }))
+                .context_menu(move |popup, _, _| {
+                    team_menu(popup, team_menu_state.clone(), &team_menu_id, team_hidden)
+                }),
         );
         if !expanded {
             return list;
         }
-        let is_hidden = |channel: &ChannelRecord| entry.hidden_channel_ids.contains(&channel.id);
         let is_selected =
             |channel: &ChannelRecord| selected == Some(&Selection::Channel(channel.id.clone()));
-        for channel in entry
-            .channels
-            .iter()
-            .filter(|channel| !is_hidden(channel) || is_selected(channel))
-        {
+        let revealed = self.revealed_channel_teams.contains(&team_id);
+        let rows = team_channel_rows(entry, hoisted_only, revealed, is_selected);
+        for channel in &rows.shown {
             list = list.child(self.team_channel_row(
                 channel,
                 is_selected(channel),
-                channel_name_style(channel.unread, !is_hidden(channel), is_selected(channel)),
+                channel_name_style(
+                    channel.unread,
+                    channel_shown(entry, &channel.id),
+                    is_selected(channel),
+                ),
                 entry.channel_notifications(&channel.id),
+                channel_badge(entry, &channel.id),
             ));
         }
-        let hidden: Vec<&ChannelRecord> = entry
-            .channels
-            .iter()
-            .filter(|channel| is_hidden(channel) && !is_selected(channel))
-            .collect();
-        if hidden.is_empty() {
+        if rows.hidden_count == 0 {
             return list;
         }
-        let revealed = self.revealed_channel_teams.contains(&team_id);
         let toggle_id = team_id.clone();
         list = list.child(self.reveal_row(
             SharedString::from(format!("hidden-channels-{team_id}")),
-            hidden_channels_label(hidden.len()),
+            hidden_channels_label(rows.hidden_count),
             revealed,
             40.,
             cx.listener(move |this, _, _, cx| {
@@ -1469,15 +1551,14 @@ impl SidebarView {
                 cx.notify();
             }),
         ));
-        if revealed {
-            for channel in hidden {
-                list = list.child(self.team_channel_row(
-                    channel,
-                    false,
-                    channel_name_style(channel.unread, false, false),
-                    entry.channel_notifications(&channel.id),
-                ));
-            }
+        for channel in rows.revealed {
+            list = list.child(self.team_channel_row(
+                channel,
+                false,
+                channel_name_style(channel.unread, false, false),
+                entry.channel_notifications(&channel.id),
+                channel_badge(entry, &channel.id),
+            ));
         }
         list
     }
@@ -1526,6 +1607,7 @@ impl SidebarView {
         is_selected: bool,
         name_style: NameStyle,
         notifications: ChannelNotifications,
+        badge: Option<MentionBadge>,
     ) -> impl IntoElement {
         let state = self.state.clone();
         let menu_state = self.state.clone();
@@ -1566,6 +1648,7 @@ impl SidebarView {
                     .child(channel.name.clone()),
             )
             .children(notification_badge(notifications.level))
+            .children(badge.map(mention_badge))
             .on_click(move |_, _, cx| {
                 let selection = selection.clone();
                 state.update(cx, |state, cx| state.select(selection, cx));
@@ -1614,14 +1697,19 @@ impl SidebarView {
                     channel,
                     is_selected,
                     entry.channel_notifications(&channel.id),
+                    channel_badge(entry, &channel.id),
                 ));
             }
         }
         list = list.child(self.plain_header(TEAMS_LABEL));
-        let (shown_teams, hidden_teams): (Vec<&SidebarTeam>, Vec<&SidebarTeam>) =
-            sidebar.teams.iter().partition(|entry| !entry.hidden);
-        for entry in shown_teams {
-            list = self.team_block(list, entry, selected.as_ref(), cx);
+        let hidden_teams: Vec<&SidebarTeam> =
+            sidebar.teams.iter().filter(|entry| entry.hidden).collect();
+        for entry in sidebar
+            .teams
+            .iter()
+            .filter(|entry| !entry.hidden || team_hoisted(entry))
+        {
+            list = self.team_block(list, entry, entry.hidden, selected.as_ref(), cx);
         }
         if !hidden_teams.is_empty() {
             let holds_selection = hidden_teams
@@ -1640,7 +1728,7 @@ impl SidebarView {
             ));
             if open {
                 for entry in hidden_teams {
-                    list = self.team_block(list, entry, selected.as_ref(), cx);
+                    list = self.team_block(list, entry, false, selected.as_ref(), cx);
                 }
             }
         }
@@ -1671,6 +1759,18 @@ fn name_color(style: NameStyle) -> Hsla {
     }
 }
 
+fn mention_badge(badge: MentionBadge) -> AnyElement {
+    match badge {
+        MentionBadge::Count(count) => count_badge(count, false).into_any_element(),
+        MentionBadge::Channel => {
+            icon(IconName::Hash, MENTION_ICON_SIZE, theme::accent_text()).into_any_element()
+        }
+        MentionBadge::Team => {
+            icon(IconName::Users, MENTION_ICON_SIZE, theme::accent_text()).into_any_element()
+        }
+    }
+}
+
 fn notification_badge(level: ChannelNotificationLevel) -> Option<impl IntoElement> {
     let name = match level {
         ChannelNotificationLevel::BannerAndFeed => IconName::Bell,
@@ -1688,7 +1788,87 @@ fn channel_menu(
     channel_id: &str,
     notifications: ChannelNotifications,
 ) -> PopupMenu {
-    let channel_id = channel_id.to_owned();
+    let menu_state = state.read(cx).channel_menu_state(channel_id);
+    let mut popup = popup;
+    for entry in channel_menu_entries(menu_state) {
+        let item = match entry {
+            MenuEntry::Separator => {
+                popup = popup.separator();
+                continue;
+            }
+            MenuEntry::Item(ChannelMenuItem::Notifications) => {
+                popup = notifications_submenu(popup, window, cx, &state, channel_id, notifications);
+                continue;
+            }
+            MenuEntry::Item(item) => item,
+        };
+        let (action_state, action_id) = (state.clone(), channel_id.to_owned());
+        popup = popup.item(
+            PopupMenuItem::new(item.label())
+                .icon(menu_icon(channel_menu_icon(item)))
+                .disabled(menu_state.disables(item))
+                .on_click(move |_, _, cx| {
+                    action_state.update(cx, |state, cx| match item {
+                        ChannelMenuItem::Pin => state.set_channel_pinned(&action_id, true, cx),
+                        ChannelMenuItem::Unpin => state.set_channel_pinned(&action_id, false, cx),
+                        ChannelMenuItem::Show => state.set_channel_shown(&action_id, true, cx),
+                        ChannelMenuItem::Hide => state.set_channel_shown(&action_id, false, cx),
+                        ChannelMenuItem::CopyLink => state.copy_channel_link(&action_id, cx),
+                        ChannelMenuItem::Notifications => {}
+                    });
+                }),
+        );
+    }
+    popup
+}
+
+fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
+    match item {
+        ChannelMenuItem::Notifications => IconName::Bell,
+        ChannelMenuItem::Pin => IconName::Pin,
+        ChannelMenuItem::Unpin => IconName::PinOff,
+        ChannelMenuItem::Show => IconName::Eye,
+        ChannelMenuItem::Hide => IconName::EyeOff,
+        ChannelMenuItem::CopyLink => IconName::Link,
+    }
+}
+
+fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: bool) -> PopupMenu {
+    let mut popup = popup;
+    for entry in team_menu_entries(hidden) {
+        let MenuEntry::Item(item) = entry else {
+            popup = popup.separator();
+            continue;
+        };
+        let (action_state, action_id) = (state.clone(), team_id.to_owned());
+        popup = popup.item(
+            PopupMenuItem::new(item.label())
+                .icon(menu_icon(match item {
+                    TeamMenuItem::Show => IconName::Eye,
+                    TeamMenuItem::Hide => IconName::EyeOff,
+                    TeamMenuItem::CopyLink => IconName::Link,
+                }))
+                .on_click(move |_, _, cx| {
+                    action_state.update(cx, |state, cx| match item {
+                        TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
+                        TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
+                        TeamMenuItem::CopyLink => state.copy_team_link(&action_id, cx),
+                    });
+                }),
+        );
+    }
+    popup
+}
+
+fn notifications_submenu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    state: &Entity<AppState>,
+    channel_id: &str,
+    notifications: ChannelNotifications,
+) -> PopupMenu {
+    let (state, channel_id) = (state.clone(), channel_id.to_owned());
     popup.submenu_with_icon(
         Some(menu_icon(IconName::Bell)),
         "Notifications",
@@ -1828,9 +2008,10 @@ impl Render for SidebarView {
                     )
                     .child(self.filter_bar(cx)),
             ),
-            SidebarTab::Channels | SidebarTab::Calls | SidebarTab::Agents => {
-                Some(v_flex().child(page_header(self.tab.title())))
+            SidebarTab::Channels => {
+                Some(page_header(self.tab.title()).child(self.channel_list_menu_button(cx)))
             }
+            SidebarTab::Calls | SidebarTab::Agents => Some(page_header(self.tab.title())),
             SidebarTab::Activity | SidebarTab::Saved => None,
         };
         v_flex()
