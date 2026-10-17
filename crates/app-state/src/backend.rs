@@ -69,6 +69,7 @@ pub enum BackendEvent {
     Typing(TypingEvent),
     Favorites(Vec<String>),
     Synced(DateTime<Utc>),
+    LiveRetry(Arc<Notify>),
 }
 
 type EventSender = mpsc::UnboundedSender<BackendEvent>;
@@ -167,6 +168,8 @@ async fn supervise(
     let (nudge, nudges) = mpsc::unbounded_channel();
     let resend = Arc::new(Notify::new());
     let link = presence_link::start(&session, activity.clone(), resend.clone());
+    let live_retry = Arc::new(Notify::new());
+    let _ = events.send(BackendEvent::LiveRetry(live_retry.clone()));
     tokio::spawn(realtime_loop(
         session.clone(),
         engine.clone(),
@@ -175,6 +178,7 @@ async fn supervise(
         activity,
         resend,
         link,
+        live_retry,
     ));
     tokio::spawn(calendar_loop(session.clone(), events.clone()));
     tokio::spawn(pins_loop(session, events.clone()));
@@ -244,6 +248,7 @@ async fn realtime_loop(
     mut activity: watch::Receiver<bool>,
     resend: Arc<Notify>,
     link: mpsc::UnboundedSender<LinkSignal>,
+    live_retry: Arc<Notify>,
 ) {
     loop {
         let _ = events.send(BackendEvent::Live(LiveState::Connecting));
@@ -320,7 +325,10 @@ async fn realtime_loop(
                 let _ = link.send(LinkSignal::Disconnected);
             }
         }
-        tokio::time::sleep(REALTIME_RETRY).await;
+        tokio::select! {
+            _ = tokio::time::sleep(REALTIME_RETRY) => {}
+            _ = live_retry.notified() => {}
+        }
     }
 }
 
