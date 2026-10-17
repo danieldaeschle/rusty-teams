@@ -13,6 +13,7 @@ mod json_id;
 pub mod language_settings;
 pub mod links;
 mod mask;
+pub mod members;
 pub mod messages;
 pub mod pins;
 pub mod presence;
@@ -54,6 +55,7 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
+pub use members::{HistoryShare, MAX_HISTORY_DAYS, ThreadMembers};
 pub use messages::{ConversationRef, Messages};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use store::MessageRecord;
+use teams_core::roster_event::RosterEvent;
 use teams_core::{CallEvent, CallPhase, CallType, ImageRef, format_duration};
 
 use crate::format;
@@ -12,6 +13,8 @@ const RECAP_DATE_FORMAT: &str = "%A, %-d %B %Y %H:%M";
 const RECAP_TIME_FORMAT: &str = "%H:%M";
 const AUTO_STOP_SECONDS: i64 = 5;
 const WEEKDAY_STAMP_DAYS: i64 = 6;
+const OWN_NAME: &str = "You";
+const UNKNOWN_USER: &str = "Unknown User";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallIcon {
@@ -21,6 +24,7 @@ pub enum CallIcon {
     Record,
     RecordStop,
     Saved,
+    Roster,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +98,38 @@ impl CallNames<'_> {
             .filter(|name| !name.is_empty())
             .map(str::to_owned)
             .or_else(|| self.names.get(user_id?).cloned())
+    }
+
+    fn roster_name(&self, user_id: Option<&str>, given: Option<&str>) -> String {
+        if user_id.is_some() && user_id == self.my_user_id {
+            return OWN_NAME.to_owned();
+        }
+        self.name(user_id, given)
+            .unwrap_or_else(|| UNKNOWN_USER.to_owned())
+    }
+}
+
+/// A member added, removed or leaving: one muted line with the people icon, like Teams.
+pub fn roster_card(
+    event: &RosterEvent,
+    created_at: DateTime<Utc>,
+    names: &CallNames,
+    clock: &CallClock,
+) -> CallCard {
+    CallCard {
+        title: String::new(),
+        detail: String::new(),
+        icon: CallIcon::Roster,
+        missed: false,
+        started: false,
+        participants: Vec::new(),
+        extra_participants: 0,
+        notice: Some(CallNotice {
+            stamp: notice_stamp(created_at, clock),
+            text: event.text(|user_id, given| names.roster_name(user_id, given)),
+            emphasis: None,
+        }),
+        recap: None,
     }
 }
 

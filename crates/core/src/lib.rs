@@ -48,6 +48,7 @@ mod profile;
 mod receipts;
 mod recording_rights;
 mod remote;
+pub mod roster_event;
 mod scheduled;
 mod search;
 mod server_search;

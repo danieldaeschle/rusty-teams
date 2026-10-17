@@ -556,6 +556,19 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn add_chat_members(
+        &self,
+        chat_id: &str,
+        user_ids: &[String],
+        share: chatsvc::HistoryShare,
+    ) -> Result<()> {
+        self.record(format!(
+            "add members {chat_id} {} {share:?}",
+            user_ids.join(",")
+        ));
+        Ok(())
+    }
+
     async fn chat_states(&self) -> Result<Vec<chatsvc::ConversationState>> {
         if *self.muted_fails.lock().unwrap() {
             return Err(Error::Unsupported("forced failure"));
@@ -1452,6 +1465,34 @@ async fn removing_a_member_drops_them_from_the_cached_chat() {
         .map(|member| member.user_id.as_deref())
         .collect();
     assert_eq!(member_ids, [Some(ME)]);
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+}
+
+#[tokio::test]
+async fn adding_members_writes_them_and_extends_the_cached_chat() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let mut events = engine.subscribe();
+    let people = [store::MemberRecord {
+        user_id: Some("user-bob".to_owned()),
+        display_name: "Bob".to_owned(),
+    }];
+
+    engine
+        .add_chat_members(CHAT, &people, chatsvc::HistoryShare::Days(7))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("add members {CHAT} user-bob Days(7)")
+    );
+    let chats = engine.sidebar().unwrap().chats;
+    assert!(
+        chats[0]
+            .members
+            .iter()
+            .any(|member| member.user_id.as_deref() == Some("user-bob"))
+    );
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
 }
 

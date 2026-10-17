@@ -5,6 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::MessageRecord;
+use teams_core::roster_event::{RosterEvent, roster_event};
 use teams_core::{
     JumboEmoji, jumbo_emoji,
     AdaptiveCard, CallEvent, CallPhase, Draft, FileCard, ForwardHeader, ForwardInfo,
@@ -18,7 +19,7 @@ pub use crate::call_rows::{
     CallCard, CallIcon, CallNotice, CallParticipant, MeetingInfo, MeetingSlot, RecapCard,
     RecordingCard,
 };
-use crate::call_rows::{CallClock, CallNames, CallSource, CallTimeline, call_card};
+use crate::call_rows::{CallClock, CallNames, CallSource, CallTimeline, call_card, roster_card};
 use crate::card_state::CardOverride;
 use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
@@ -602,14 +603,95 @@ fn call_row(
                 .and_then(|user_id| context.names.get(user_id).cloned())
         })
         .unwrap_or_else(|| UNKNOWN_AUTHOR.to_owned());
+    let card = call_card(
+        CallSource {
+            event,
+            message_id: &record.message_id,
+            created_at: record.created_at,
+            time: &time,
+        },
+        &names,
+        &CallClock {
+            offset: context.offset,
+            today: context.today,
+            meeting: &context.meeting,
+        },
+        timeline,
+    );
+    event_row(
+        record,
+        context,
+        EventAuthor {
+            sender_id: event.initiator_id.clone(),
+            name: author,
+            own: event.initiated_by(my_user_id),
+        },
+        card,
+        time,
+    )
+}
+
+fn roster_row(record: &MessageRecord, event: &RosterEvent, context: &RowContext) -> MessageRow {
+    let my_user_id = context.my_user_id.as_deref();
+    let names = CallNames {
+        my_user_id,
+        names: &context.names,
+    };
+    let card = roster_card(
+        event,
+        record.created_at,
+        &names,
+        &CallClock {
+            offset: context.offset,
+            today: context.today,
+            meeting: &context.meeting,
+        },
+    );
+    let author = event
+        .initiator_name
+        .clone()
+        .or_else(|| {
+            event
+                .initiator_id
+                .as_ref()
+                .and_then(|user_id| context.names.get(user_id).cloned())
+        })
+        .unwrap_or_else(|| UNKNOWN_AUTHOR.to_owned());
+    let own = my_user_id.is_some() && event.initiator_id.as_deref() == my_user_id;
+    event_row(
+        record,
+        context,
+        EventAuthor {
+            sender_id: event.initiator_id.clone(),
+            name: author,
+            own,
+        },
+        card,
+        clock_label(record.created_at, context.offset),
+    )
+}
+
+struct EventAuthor {
+    sender_id: Option<String>,
+    name: String,
+    own: bool,
+}
+
+fn event_row(
+    record: &MessageRecord,
+    context: &RowContext,
+    author: EventAuthor,
+    card: CallCard,
+    time: String,
+) -> MessageRow {
     MessageRow {
         key: record.message_id.clone(),
         conversation_id: record.conversation_id.clone(),
-        sender_id: event.initiator_id.clone(),
+        sender_id: author.sender_id,
         application_id: None,
         created_at: record.created_at,
         series: Series::default(),
-        author,
+        author: author.name,
         day_header: Some(format::day_label(
             record
                 .created_at
@@ -633,24 +715,10 @@ fn call_row(
         reply_root: None,
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
-        own: event.initiated_by(my_user_id),
+        own: author.own,
         forwarded: false,
         translation: None,
-        call: Some(call_card(
-            CallSource {
-                event,
-                message_id: &record.message_id,
-                created_at: record.created_at,
-                time: &time,
-            },
-            &names,
-            &CallClock {
-                offset: context.offset,
-                today: context.today,
-                meeting: &context.meeting,
-            },
-            timeline,
-        )),
+        call: Some(card),
         time,
     }
 }
@@ -720,6 +788,9 @@ fn message_row_with(
     if let Some(event) = call_event(record) {
         let events = [Some(event.clone())];
         return call_row(record, &event, context, &CallTimeline::new(&events));
+    }
+    if let Some(event) = roster_event(record) {
+        return roster_row(record, &event, context);
     }
     let local = record.created_at.with_timezone(&context.offset);
     let images = images(record);

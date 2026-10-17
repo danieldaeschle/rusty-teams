@@ -84,6 +84,13 @@ fn not_chosen(pick: &Pick, me: Option<&Person>, chosen: &[Pick]) -> bool {
         && chosen.iter().all(|chip| chip.user_id != pick.user_id)
 }
 
+fn without_excluded(picks: Vec<Pick>, excluded: &[String]) -> Vec<Pick> {
+    picks
+        .into_iter()
+        .filter(|pick| !excluded.contains(&pick.user_id))
+        .collect()
+}
+
 pub fn suggested_people(
     chats: &[ChatRecord],
     me: Option<&Person>,
@@ -158,6 +165,7 @@ pub struct NewChatDraft {
     query: Entity<InputState>,
     name: Entity<InputState>,
     chips: Vec<Pick>,
+    excluded: Vec<String>,
     form_field: bool,
     remote: Vec<Pick>,
     highlighted: usize,
@@ -184,6 +192,7 @@ impl NewChatDraft {
             query,
             name,
             chips: Vec::new(),
+            excluded: Vec::new(),
             form_field: false,
             remote: Vec::new(),
             highlighted: 0,
@@ -202,8 +211,20 @@ impl NewChatDraft {
         self
     }
 
+    pub fn excluding(mut self, user_ids: Vec<String>) -> Self {
+        self.excluded = user_ids;
+        self
+    }
+
     pub fn chips(&self) -> &[Pick] {
         &self.chips
+    }
+
+    pub fn set_chips(&mut self, chips: Vec<Pick>, cx: &mut Context<Self>) {
+        self.chips = chips;
+        self.highlighted = 0;
+        cx.emit(NewChatEvent::Changed);
+        cx.notify();
     }
 
     pub fn group_name(&self, cx: &App) -> String {
@@ -246,11 +267,19 @@ impl NewChatDraft {
         let me = state.directory.me.as_ref();
         let query = self.query_text(cx);
         if query.is_empty() {
-            return suggested_people(&state.sidebar.chats, me, &self.chips, SUGGESTED_LIMIT);
+            let suggested = suggested_people(
+                &state.sidebar.chats,
+                me,
+                &self.chips,
+                SUGGESTED_LIMIT + self.excluded.len(),
+            );
+            let mut suggested = without_excluded(suggested, &self.excluded);
+            suggested.truncate(SUGGESTED_LIMIT);
+            return suggested;
         }
         search_results(
-            people_in(&state.sidebar.chats, me, false),
-            self.remote.clone(),
+            without_excluded(people_in(&state.sidebar.chats, me, false), &self.excluded),
+            without_excluded(self.remote.clone(), &self.excluded),
             &query,
             me,
             &self.chips,
@@ -879,6 +908,13 @@ mod tests {
         assert_eq!(composer_placeholder(&one, "ignored"), "Message Ann");
         assert_eq!(composer_placeholder(&two, " "), "Type a message");
         assert_eq!(composer_placeholder(&two, " Crew "), "Message Crew");
+    }
+
+    #[test]
+    fn excluded_people_are_filtered_out() {
+        let picks = vec![pick("ann", "Ann", None), pick("bob", "Bob", None)];
+        let kept = super::without_excluded(picks, &["ann".to_owned()]);
+        assert_eq!(kept, [pick("bob", "Bob", None)]);
     }
 
     #[test]

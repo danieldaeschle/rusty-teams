@@ -8,6 +8,7 @@ use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::links::EMPTY_LINKS;
 use crate::markdown::plain_text_to_html;
 use crate::preview::OwnedPreview;
+use crate::roster_event::RosterEvent;
 use crate::stored::{AttachmentInfo, MentionInfo, QuoteInfo, ReactionInfo};
 
 pub fn graph_hidden(chat: &Chat) -> bool {
@@ -117,7 +118,12 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
         .as_ref()
         .and_then(CallEvent::from_graph)
         .filter(|_| is_system);
-    if is_system && call_event.is_none() {
+    let roster_event = message
+        .event_detail
+        .as_ref()
+        .and_then(|detail| RosterEvent::from_graph(detail, message.created_date_time))
+        .filter(|event| is_system && !event.member_ids.is_empty());
+    if is_system && call_event.is_none() && roster_event.is_none() {
         return None;
     }
     let created_at = message.created_date_time?;
@@ -139,7 +145,7 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
         created_at,
         edited_at: message.last_edited_date_time,
         deleted,
-        body_html: if deleted || call_event.is_some() {
+        body_html: if deleted || call_event.is_some() || roster_event.is_some() {
             String::new()
         } else {
             body_html(message)
@@ -172,7 +178,10 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
             .map(str::trim)
             .filter(|subject| !subject.is_empty())
             .map(str::to_owned),
-        call_event_json: call_event.as_ref().map(CallEvent::to_json),
+        call_event_json: call_event
+            .as_ref()
+            .map(CallEvent::to_json)
+            .or_else(|| roster_event.as_ref().map(RosterEvent::to_json)),
     })
 }
 
@@ -525,6 +534,20 @@ mod tests {
         });
         assert!(call_record("unknownFutureValue", detail).is_none());
         assert!(call_record("systemEventMessage", json!(null)).is_none());
+    }
+
+    #[test]
+    fn member_changes_are_kept_as_roster_events() {
+        let detail = json!({
+            "@odata.type": "#microsoft.graph.membersAddedEventMessageDetail",
+            "members": [{"id": "user-ann", "displayName": "Ann"}],
+            "initiator": {"user": {"id": "me", "displayName": "Daniel"}},
+        });
+        let record = call_record("systemEventMessage", detail).unwrap();
+        assert!(record.body_html.is_empty());
+        let event = crate::roster_event::roster_event(&record).unwrap();
+        assert_eq!(event.member_ids, ["user-ann"]);
+        assert!(crate::call_event(&record).is_none());
     }
 
     #[test]

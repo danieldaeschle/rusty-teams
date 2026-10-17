@@ -50,6 +50,7 @@ fn notice_icon(icon: CallIcon) -> (&'static str, Hsla) {
         CallIcon::Record => ("fluent_record", theme::accent_text()),
         CallIcon::RecordStop => ("fluent_record_stop", theme::text_muted()),
         CallIcon::Saved => ("fluent_cloud_arrow_up", theme::text_muted()),
+        CallIcon::Roster => ("group", theme::text_muted()),
         CallIcon::Video | CallIcon::Call | CallIcon::Missed => {
             ("fluent_video", theme::text_muted())
         }

@@ -2,7 +2,9 @@ use std::future::Future;
 
 use chrono::{DateTime, Duration, Local, Offset, Utc};
 use gpui_kit::*;
-use store::{ChannelNotifications, ChatRecord};
+use chatsvc::HistoryShare;
+use store::{ChannelNotifications, ChatRecord, MemberRecord};
+use teams_core::roster_event::{RosterChange, RosterEvent, SharedHistory, merge_members};
 
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::notice::{NoticeAction, short_error, truncated};
@@ -236,6 +238,87 @@ impl AppState {
             |_, _| {},
             cx,
         );
+    }
+
+    pub fn add_chat_members(
+        &mut self,
+        chat_id: &str,
+        people: Vec<MemberRecord>,
+        share: HistoryShare,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat) = self.chat_record(chat_id) else {
+            return;
+        };
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let mut with_members = chat.clone();
+        merge_members(&mut with_members.members, &people);
+        let _ = self
+            .store
+            .upsert_chats(std::slice::from_ref(&with_members));
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            self.add_demo_roster_line(chat_id, &people, share, cx);
+            return;
+        };
+        let owned_chat_id = chat_id.to_owned();
+        self.run_chat_action(
+            "Add people",
+            async move {
+                engine
+                    .add_chat_members(&owned_chat_id, &people, share)
+                    .await
+            },
+            move |state, cx| state.restore_chat_locally(&chat, cx),
+            |_, _| {},
+            cx,
+        );
+    }
+
+    fn add_demo_roster_line(
+        &mut self,
+        chat_id: &str,
+        people: &[MemberRecord],
+        share: HistoryShare,
+        cx: &mut Context<Self>,
+    ) {
+        let me = self.directory.me.as_ref();
+        let event = RosterEvent {
+            change: RosterChange::Added,
+            initiator_id: me.map(|person| person.user_id.clone()),
+            initiator_name: me.map(|person| person.display_name.clone()),
+            member_ids: people
+                .iter()
+                .filter_map(|person| person.user_id.clone())
+                .collect(),
+            member_names: people
+                .iter()
+                .map(|person| Some(person.display_name.clone()))
+                .collect(),
+            history: match share {
+                HistoryShare::None => SharedHistory::None,
+                HistoryShare::Days(days) => SharedHistory::Days(days),
+                HistoryShare::All => SharedHistory::All,
+            },
+        };
+        let now = Utc::now();
+        let record = crate::demo::roster_record(
+            chat_id,
+            &format!("demo-roster-{}", now.timestamp_millis()),
+            now,
+            &event,
+        );
+        let _ = self.store.upsert_messages(std::slice::from_ref(&record));
+        cx.emit(crate::app_state::AppEvent::Messages(chat_id.to_owned()));
+        cx.notify();
+    }
+
+    /// Teams turns adding people to a 1:1 into a new group chat draft with everyone.
+    pub fn start_group_chat_with(&mut self, people: Vec<MemberRecord>, cx: &mut Context<Self>) {
+        self.new_chat_people = people;
+        self.start_new_chat(cx);
     }
 
     fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
