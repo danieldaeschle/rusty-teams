@@ -3,8 +3,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, AppConsumptionHorizon, MentionActivity, UserSettings,
-    parse_app_consumption_horizon,
+    ActivityFeed, AppConsumptionHorizon, ChatNotificationMode, ChatNotificationWrite,
+    ChatSettingChange, ChatSettingsClient, ChatSettingsDocument, DesktopNotifications,
+    MentionActivity, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -468,6 +469,24 @@ pub trait Remote {
 
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Err(Error::Unsupported("sound settings"))
+    }
+
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn save_chat_setting(&self, _change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        _chat_id: &str,
+        _current_settings: Option<&str>,
+        _mode: ChatNotificationMode,
+        _desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Err(Error::Unsupported("chat notifications"))
     }
 
     async fn save_sound_settings(
@@ -1221,6 +1240,26 @@ impl Remote for Graph {
 
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Ok(SoundSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn save_chat_setting(&self, change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).write(change).await?)
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        chat_id: &str,
+        current_settings: Option<&str>,
+        mode: ChatNotificationMode,
+        desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Ok(Conversations::new(self.session())
+            .set_chat_notifications(chat_id, current_settings, mode, desktop)
+            .await?)
     }
 
     async fn save_sound_settings(

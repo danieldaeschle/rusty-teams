@@ -584,6 +584,7 @@ impl Remote for Handle {
                 muted,
                 hidden: None,
                 read: chatsvc::ReadHorizon::default(),
+                notification_settings: None,
             })
             .collect();
         states.extend(
@@ -594,6 +595,7 @@ impl Remote for Handle {
                     muted: false,
                     hidden: Some(hidden),
                     read: chatsvc::ReadHorizon::default(),
+                    notification_settings: None,
                 }),
         );
         let read = self.read_states.lock().unwrap().clone();
@@ -604,6 +606,7 @@ impl Remote for Handle {
                     muted: false,
                     hidden: None,
                     read,
+                    notification_settings: None,
                 }),
         );
         Ok(states)

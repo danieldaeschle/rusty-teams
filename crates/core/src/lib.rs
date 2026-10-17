@@ -13,6 +13,7 @@ mod card_widgets;
 mod card_width;
 mod channel_mentions;
 mod channel_sync;
+mod chat_settings_sync;
 mod chat_paging;
 mod download;
 mod draft;
@@ -100,6 +101,12 @@ pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
     ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
+};
+pub use chat_settings_sync::{store_chat_settings, stored_chat_settings};
+pub use chatsvc::{
+    ActivityAlert, ChatAccountSettings, ChatNotificationMode, ChatSettingChange,
+    ChatSettingsDocument, DesktopNotifications, EnterKeyBehavior, MeetingChatNotifications,
+    MessageDensity, NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
 pub use chatsvc::{

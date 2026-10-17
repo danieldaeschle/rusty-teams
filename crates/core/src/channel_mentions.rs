@@ -62,6 +62,7 @@ mod tests {
                 last_message_from: Some("8:orgid:someone".to_owned()),
                 ..ReadHorizon::default()
             },
+            notification_settings: None,
         }
     }
 
