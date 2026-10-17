@@ -225,6 +225,34 @@ impl<T: MessageTransport> Messages<T> {
         }
     }
 
+    /// Answers with the new message id, which chatsvc returns as `OriginalArrivalTime`.
+    pub async fn post_message(
+        &self,
+        conversation: &ConversationRef,
+        html: &str,
+        display_name: &str,
+        properties: &Value,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/{}/messages",
+            self.base_url,
+            encode(&conversation.conversation_id())
+        );
+        let body = rich_text_body(html, display_name, properties);
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Post, &url, body))
+            .await?;
+        ensure_success(&answer)?;
+        match &answer.body["OriginalArrivalTime"] {
+            Value::Number(number) => Ok(number.to_string()),
+            Value::String(text) => Ok(text.clone()),
+            _ => Err(Error::UnexpectedAnswer(
+                "message post has no OriginalArrivalTime".into(),
+            )),
+        }
+    }
+
     pub async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
         let url = format!(
             "{}/{}/messages",
@@ -274,6 +302,17 @@ fn edit_body(message_id: &str, html: &str) -> Value {
         "messagetype": "RichText/Html",
         "contenttype": "text",
         "properties": {"edittime": Utc::now().timestamp_millis().to_string()},
+    })
+}
+
+fn rich_text_body(html: &str, display_name: &str, properties: &Value) -> Value {
+    json!({
+        "clientmessageid": Utc::now().timestamp_millis().to_string(),
+        "content": html,
+        "messagetype": "RichText/Html",
+        "contenttype": "text",
+        "imdisplayname": display_name,
+        "properties": properties,
     })
 }
 

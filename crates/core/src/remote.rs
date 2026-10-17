@@ -122,6 +122,13 @@ pub trait Remote {
         mentions: &[OutgoingMention],
         extras: &MessageExtras,
     ) -> Result<Message>;
+    async fn post_chatsvc_message(
+        &self,
+        conversation: &ConversationRef,
+        html: &str,
+        display_name: &str,
+        properties: &serde_json::Value,
+    ) -> Result<String>;
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn mark_chat_unread(
         &self,
@@ -721,6 +728,18 @@ impl Remote for Graph {
             self, team_id, channel_id, message_id, html, mentions, extras,
         )
         .await?)
+    }
+
+    async fn post_chatsvc_message(
+        &self,
+        conversation: &ConversationRef,
+        html: &str,
+        display_name: &str,
+        properties: &serde_json::Value,
+    ) -> Result<String> {
+        Ok(Messages::new(self.session())
+            .post_message(conversation, html, display_name, properties)
+            .await?)
     }
 
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {

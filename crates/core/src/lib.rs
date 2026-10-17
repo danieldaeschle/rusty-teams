@@ -61,6 +61,7 @@ mod skin_tone;
 mod spans;
 mod stored;
 mod table;
+mod teams_quote;
 mod time_zone;
 mod translate_sync;
 mod translation;

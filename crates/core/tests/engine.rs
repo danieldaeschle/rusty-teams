@@ -108,6 +108,7 @@ struct Fake {
     external_requests: Mutex<Vec<String>>,
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
     extras_sent: Mutex<Vec<MessageExtras>>,
+    chatsvc_posts: Mutex<Vec<(String, String, String, serde_json::Value)>>,
     send_answer_body: Mutex<Option<String>>,
     folder_requests: Mutex<usize>,
     directory_users: Mutex<Vec<User>>,
@@ -522,6 +523,24 @@ impl Remote for Handle {
         self.mentions_sent.lock().unwrap().push(mentions.to_vec());
         self.extras_sent.lock().unwrap().push(extras.clone());
         Ok(message(9002, 502, html))
+    }
+
+    async fn post_chatsvc_message(
+        &self,
+        conversation: &chatsvc::ConversationRef,
+        html: &str,
+        display_name: &str,
+        properties: &serde_json::Value,
+    ) -> Result<String> {
+        let conversation_id = conversation.conversation_id();
+        self.record(format!("chatsvc post {conversation_id}"));
+        self.chatsvc_posts.lock().unwrap().push((
+            conversation_id,
+            html.to_owned(),
+            display_name.to_owned(),
+            properties.clone(),
+        ));
+        Ok("1727203440000".to_owned())
     }
 
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
@@ -3834,7 +3853,11 @@ async fn chat_reply_quotes_and_channel_reply_uses_the_thread_root() {
     let channel = channel_engine(&channel_fake).await;
     channel.fetch_newer(CHANNEL).await.unwrap();
     channel.reply_to(CHANNEL, "m0030", "hi").await.unwrap();
-    assert!(channel_fake.calls().contains(&"reply to m0030".to_owned()));
+    assert!(
+        channel_fake
+            .calls()
+            .contains(&format!("chatsvc post {CHANNEL};messageid=m0030"))
+    );
     assert!(engine.reply_to("unknown", "m1", "x").await.is_err());
 }
 
@@ -5416,20 +5439,31 @@ async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
 }
 
 #[tokio::test]
-async fn a_quoted_channel_reply_carries_the_quote_as_a_message_reference() {
+async fn a_quoted_channel_reply_is_written_through_chatsvc_in_the_teams_quote_shape() {
     let fake = Arc::new(Fake::default());
     let engine = channel_engine(&fake).await;
     engine.fetch_newer(CHANNEL).await.unwrap();
-    engine
+    let sent = engine
         .reply_to_with_mentions(CHANNEL, "m0030", "answer", &[])
         .await
         .unwrap();
-    let extras = fake.extras_sent.lock().unwrap().last().cloned().unwrap();
-    let quote = &extras.kept[0];
-    assert_eq!(quote.id, "m0030");
-    assert_eq!(quote.content_type.as_deref(), Some("messageReference"));
-    let content: serde_json::Value =
-        serde_json::from_str(quote.content.as_deref().unwrap()).unwrap();
-    assert_eq!(content["messageId"], "m0030");
-    assert_eq!(content["messageSender"]["user"]["userIdentityType"], "aadUser");
+    assert!(!fake.calls().contains(&"reply to m0030".to_owned()));
+    let (conversation_id, html, display_name, properties) =
+        fake.chatsvc_posts.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(conversation_id, format!("{CHANNEL};messageid=m0030"));
+    assert_eq!(display_name, "Me Myself");
+    let time = (base() + Duration::minutes(30)).timestamp_millis();
+    let quote = format!(
+        "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"m0030\"><strong itemprop=\"mri\" itemid=\"8:orgid:user-ada\">Ada Example</strong><span itemprop=\"time\" itemid=\"{time}\"></span><p itemprop=\"preview\">root</p></blockquote>"
+    );
+    assert_eq!(html, format!("{quote}answer"));
+    let quoted: serde_json::Value =
+        serde_json::from_str(properties["qtdMsgs"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        quoted,
+        json!([{"messageId": "m0030", "sender": "8:orgid:user-ada", "time": time}])
+    );
+    assert_eq!(sent.message_id, "1727203440000");
+    assert_eq!(sent.reply_to_id.as_deref(), Some("m0030"));
+    assert!(sent.body_html.starts_with(&quote));
 }

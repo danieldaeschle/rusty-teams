@@ -1,7 +1,7 @@
 use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, Utc};
 use graph::{
-    FileReference, KeptAttachment, MessageExtras, MessageTarget, OutgoingMention,
+    FileReference, MessageExtras, MessageTarget, OutgoingMention,
     UploadDestination, UploadedFile, hosted_image_order,
 };
 use store::MessageRecord;
@@ -13,12 +13,10 @@ use crate::hidden_chats::cleared_until_ms;
 use crate::links::LinkPreview;
 use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
-use crate::preview::preview_text;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
 use crate::remote::Remote;
 use crate::scheduled::NOTES_CHAT_ID;
-
-const MESSAGE_REFERENCE: &str = "messageReference";
+use crate::teams_quote::{chatsvc_mention_html, quote_reply_properties, teams_quote};
 
 impl<R: Remote> SyncEngine<R> {
     pub async fn send_message(
@@ -144,9 +142,19 @@ impl<R: Remote> SyncEngine<R> {
                     .as_ref()
                     .and_then(|record| record.reply_to_id.clone())
                     .unwrap_or_else(|| message_id.to_owned());
-                let mut extras = extras.clone();
-                if let Some(quoted) = &quoted {
-                    extras.kept.insert(0, quote_reference(quoted));
+                if let Some(quoted) = &quoted
+                    && let Some((sent, html)) = self
+                        .quote_reply_via_chatsvc(
+                            conversation_id,
+                            &root_id,
+                            quoted,
+                            &html,
+                            &mentions,
+                            extras,
+                        )
+                        .await?
+                {
+                    return self.cache_sent(conversation_id, &sent, &html, extras);
                 }
                 let sent = self
                     .remote
@@ -156,10 +164,10 @@ impl<R: Remote> SyncEngine<R> {
                         &root_id,
                         &html,
                         &mentions,
-                        &extras,
+                        extras,
                     )
                     .await?;
-                (sent, extras)
+                (sent, extras.clone())
             }
         };
         self.cache_sent(conversation_id, &sent, &html, &extras)
@@ -742,6 +750,58 @@ impl<R: Remote> SyncEngine<R> {
         self.seed_images(&seeds)
     }
 
+    async fn quote_reply_via_chatsvc(
+        &self,
+        channel_id: &str,
+        root_id: &str,
+        quoted: &MessageRecord,
+        html: &str,
+        mentions: &[OutgoingMention],
+        extras: &MessageExtras,
+    ) -> Result<Option<(graph::Message, String)>> {
+        if !extras.images.is_empty() || !extras.files.is_empty() {
+            return Ok(None);
+        }
+        let Some(quote) = teams_quote(quoted) else {
+            return Ok(None);
+        };
+        let Some(properties) = quote_reply_properties(&quote, mentions, extras.importance) else {
+            return Ok(None);
+        };
+        self.ensure_display_name().await?;
+        let me = self
+            .me()
+            .ok_or(Error::Unsupported("a quote reply before sign-in"))?;
+        let content = format!("{}{}", quote.html, chatsvc_mention_html(html, mentions));
+        let message_id = self
+            .remote
+            .post_chatsvc_message(
+                &ConversationRef::channel_reply(channel_id, root_id),
+                &content,
+                &me.display_name,
+                &properties,
+            )
+            .await?;
+        let created_at = message_id
+            .parse::<i64>()
+            .ok()
+            .and_then(DateTime::from_timestamp_millis)
+            .unwrap_or_else(Utc::now);
+        let cached_html = format!("{}{html}", quote.html);
+        let sent = serde_json::from_value(serde_json::json!({
+            "id": message_id,
+            "messageType": "message",
+            "createdDateTime": created_at.to_rfc3339(),
+            "replyToId": root_id,
+            "importance": extras.importance,
+            "from": {"user": {"id": me.user_id, "displayName": me.display_name}},
+            "body": {"contentType": "html", "content": cached_html},
+            "mentions": mentions.iter().map(OutgoingMention::to_json).collect::<Vec<_>>(),
+        }))
+        .map_err(|_| Error::Unsupported("a chatsvc reply without a message shape"))?;
+        Ok(Some((sent, cached_html)))
+    }
+
     fn cache_sent(
         &self,
         conversation_id: &str,
@@ -802,33 +862,6 @@ fn outgoing(
         ensure_allowed_in_chat(mentions)?;
     }
     Ok(apply_mentions(html, mentions))
-}
-
-/// The `messageReference` attachment Graph's chat `replyWithQuote` produces; channels have no such action.
-fn quote_reference(record: &MessageRecord) -> KeptAttachment {
-    let sender = record.sender_id.as_ref().map(|user_id| {
-        serde_json::json!({
-            "application": null,
-            "device": null,
-            "user": {
-                "userIdentityType": "aadUser",
-                "id": user_id,
-                "displayName": record.sender_name,
-            },
-        })
-    });
-    let content = serde_json::json!({
-        "messageId": record.message_id,
-        "messagePreview": preview_text(&record.body_html).unwrap_or_default(),
-        "messageSender": sender,
-    });
-    KeptAttachment {
-        id: record.message_id.clone(),
-        content_type: Some(MESSAGE_REFERENCE.to_owned()),
-        content: Some(content.to_string()),
-        content_url: None,
-        name: None,
-    }
 }
 
 fn missing_attachment_id() -> Error {

@@ -386,3 +386,49 @@ async fn list_message_links_asks_for_the_msnp24_view() {
         format!("{BASE}/19%3Ac%40thread.tacv2/messages?view=msnp24Equivalent&pageSize=50")
     );
 }
+
+struct ArrivalMock {
+    requests: Mutex<Vec<Request>>,
+}
+
+impl chatsvc::messages::MessageTransport for &ArrivalMock {
+    async fn send(&self, request: Request) -> Result<ApiResponse> {
+        self.requests.lock().unwrap().push(request);
+        Ok(ApiResponse {
+            status: 201,
+            body: serde_json::json!({"OriginalArrivalTime": 1727203440000_i64}),
+            retry_after: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn post_message_sends_rich_text_to_the_reply_thread_and_returns_the_arrival_id() {
+    let mock = ArrivalMock {
+        requests: Mutex::new(Vec::new()),
+    };
+    let properties = serde_json::json!({"importance": "", "subject": "", "qtdMsgs": "[]"});
+    let message_id = Messages::with_transport(&mock, "emea")
+        .post_message(
+            &ConversationRef::channel_reply("19:c@thread.tacv2", "99"),
+            "<p>hi</p>",
+            "Daniel",
+            &properties,
+        )
+        .await
+        .unwrap();
+    assert_eq!(message_id, "1727203440000");
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(requests[0].method, Method::Post);
+    assert_eq!(
+        requests[0].url,
+        format!("{BASE}/19%3Ac%40thread.tacv2%3Bmessageid%3D99/messages")
+    );
+    let body = requests[0].body.as_ref().unwrap();
+    assert_eq!(body["messagetype"], "RichText/Html");
+    assert_eq!(body["contenttype"], "text");
+    assert_eq!(body["content"], "<p>hi</p>");
+    assert_eq!(body["imdisplayname"], "Daniel");
+    assert_eq!(body["properties"], properties);
+    assert!(body["clientmessageid"].is_string());
+}
