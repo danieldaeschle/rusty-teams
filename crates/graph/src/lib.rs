@@ -23,7 +23,7 @@ pub use files::{
 pub use library::DriveEntry;
 pub use models::{
     Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message, Photo,
-    Presence, Reaction, Sender, Team, User,
+    Presence, Reaction, Sender, Team, UNKNOWN_USER_NAME, User,
 };
 pub use outgoing::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, OutgoingMention,

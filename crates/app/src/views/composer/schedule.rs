@@ -57,6 +57,7 @@ fn menu_row(id: ElementId, highlighted: bool) -> Stateful<Div> {
     h_flex()
         .id(id)
         .h(px(ROW_HEIGHT))
+        .flex_none()
         .px(px(10.))
         .gap(px(10.))
         .items_center()
