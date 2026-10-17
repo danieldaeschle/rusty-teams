@@ -6,7 +6,7 @@ use gpui_kit::*;
 
 use super::center::NotificationCenter;
 use super::layout::{AVATAR_GAP, TOAST_PADDING};
-use super::ring_view::{RING_AVATAR, RING_BORDER, TOAST_RADIUS, answer_button};
+use super::ring_view::{RING_AVATAR, TOAST_RADIUS, answer_button};
 use crate::app_state::AppState;
 use crate::call::ReminderPhase;
 use crate::call::meeting_subtitle;
@@ -45,10 +45,7 @@ impl MeetingToastView {
 impl Render for MeetingToastView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(toast) = self.app.read(cx).meeting_toasts.get(self.toast_id).cloned() else {
-            return div()
-                .size_full()
-                .bg(theme::surface_raised())
-                .into_any_element();
+            return div().size_full().bg(theme::popup()).into_any_element();
         };
         window.set_window_title(&toast.subject);
         let subtitle = meeting_subtitle(&toast, Utc::now(), Local::now().offset().fix());
@@ -60,7 +57,7 @@ impl Render for MeetingToastView {
             "meeting-snooze",
             "Snooze",
             IconName::AlarmClock,
-            theme::surface_raised(),
+            theme::popup(),
         )
         .border_1()
         .border_color(theme::border_strong())
@@ -102,9 +99,7 @@ impl Render for MeetingToastView {
             .id(("meeting-toast", toast_id))
             .size_full()
             .rounded(px(TOAST_RADIUS))
-            .bg(theme::surface_raised())
-            .border(px(RING_BORDER))
-            .border_color(theme::accent())
+            .bg(theme::popup())
             .overflow_hidden()
             .child(
                 div().size_full().p(px(TOAST_PADDING)).child(

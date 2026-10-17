@@ -11,8 +11,8 @@ use gpui_kit::*;
 use super::agent_toast::agent_toast_content;
 use super::center::NotificationCenter;
 use super::layout::{
-    ACTION_BUTTON, AVATAR_GAP, AVATAR_SIZE, MENTION_BORDER, PREVIEW_MAX_LINES, PREVIEW_SIZE,
-    SEND_BUTTON, TOAST_PADDING,
+    ACTION_BUTTON, AVATAR_GAP, AVATAR_SIZE, PREVIEW_MAX_LINES, PREVIEW_SIZE, SEND_BUTTON,
+    TOAST_PADDING,
 };
 use super::platform;
 use super::rules::ChatKind;
@@ -488,10 +488,7 @@ impl Render for ToastView {
             (center.model(id).cloned(), center.settings().preview)
         };
         let Some(model) = model else {
-            return div()
-                .size_full()
-                .bg(theme::surface_raised())
-                .into_any_element();
+            return div().size_full().bg(theme::popup()).into_any_element();
         };
         let text = describe(&model, preview_on);
         let narration = model
@@ -506,14 +503,8 @@ impl Render for ToastView {
         let fill = if mention {
             theme::toast_mention_fill()
         } else {
-            theme::surface_raised()
+            theme::popup()
         };
-        let border = if mention {
-            theme::accent()
-        } else {
-            theme::border_strong()
-        };
-        let border_width = if mention { MENTION_BORDER } else { 1. };
         let hovered = model.hovered;
         let content = match model.reply {
             _ if model.agent.is_some() => {
@@ -554,8 +545,6 @@ impl Render for ToastView {
             .opacity(model.opacity(Instant::now()))
             .rounded(px(TOAST_RADIUS))
             .bg(fill)
-            .border(px(border_width))
-            .border_color(border)
             .overflow_hidden()
             .cursor_pointer()
             .on_hover(move |is_hovered, _, cx| {
@@ -611,11 +600,9 @@ impl Render for PillView {
             .justify_center()
             .opacity(opacity)
             .rounded(px(TOAST_RADIUS))
-            .bg(theme::surface_raised())
-            .border_1()
-            .border_color(theme::border_strong())
+            .bg(theme::popup())
             .cursor_pointer()
-            .hover(|bar| bar.bg(theme::border_strong()))
+            .hover(|bar| bar.bg(theme::popup_hover()))
             .text_size(px(12.5))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_soft())
@@ -640,9 +627,9 @@ mod tests {
 
     use gpui_kit::component::input::{Textarea, TextareaState};
     use gpui_kit::{
-        AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, Modifiers,
-        ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
-        Window, div, point, px,
+        AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
+        Modifiers, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+        TestAppContext, Window, div, point, px,
     };
 
     use super::keep_clicks_in_toast;
