@@ -40,6 +40,7 @@ use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, composer_placeholder};
 use super::post_card::render_post;
+use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
@@ -3400,6 +3401,9 @@ impl Render for ConversationView {
             agent_runs: self.agent_runs.clone(),
             reaction_proposals: self.reaction_proposals.clone(),
         };
+        let pin_banner = self
+            .render_pin_banner(cx)
+            .filter(|_| !drafting && !self.shared_active() && !self.recap_active());
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
@@ -3495,7 +3499,8 @@ impl Render for ConversationView {
                 view.update(cx, |this, cx| this.leave_detached(cx)).ok();
             })
         })
-        .with_bottom_fade(background);
+        .with_bottom_fade(background)
+        .with_top_inset(pin_banner_inset(pin_banner.is_some()));
 
         root = match self.current.as_ref().filter(|_| !drafting) {
             Some(current) => root.child(self.render_header(current, cx)),
@@ -3505,7 +3510,6 @@ impl Render for ConversationView {
             .render_tab_bar(window, cx)
             .or_else(|| self.render_meeting_tab_bar(cx));
         root = root.children(tab_bar.filter(|_| !drafting));
-        root = root.children(self.render_pin_banner(cx).filter(|_| !drafting));
         let sync_failed = self
             .current
             .as_ref()
@@ -3571,7 +3575,8 @@ impl Render for ConversationView {
                         .on_scroll_wheel(
                             cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
                         )
-                        .child(body),
+                        .child(body)
+                        .children(pin_banner.map(pin_banner_overlay)),
                 )
                 .children(self.render_draft_error(cx))
                 .when(!in_feed && !recap_active, |column| {
