@@ -12,6 +12,8 @@ use crate::spans::{Span, html_to_spans};
 
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
 const REPLY_ITEMTYPE: &str = "schema.skype.com/Reply";
+const LINK_UNFURL_APP_ID: &str = "4623DD0C-D55C-4C95-9290-AD31619B577A";
+const LINK_UNFURL_CARD_PREFIX: &str = "app-preview-card";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentInfo {
@@ -31,6 +33,8 @@ pub struct AttachmentInfo {
     /// A forward whose original Graph did not return; it is not fetched again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unavailable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teams_app_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +110,18 @@ impl AttachmentInfo {
         self.content_type
             .as_deref()
             .is_some_and(|content_type| content_type.contains("card"))
+    }
+
+    pub fn is_link_unfurl_card(&self) -> bool {
+        self.is_card()
+            && (self
+                .teams_app_id
+                .as_deref()
+                .is_some_and(|app_id| app_id.eq_ignore_ascii_case(LINK_UNFURL_APP_ID))
+                || self
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with(LINK_UNFURL_CARD_PREFIX)))
     }
 
     pub fn adaptive_card(&self) -> Option<AdaptiveCard> {
@@ -1052,6 +1068,7 @@ mod tests {
                 id: None,
                 content: None,
                 unavailable: false,
+                teams_app_id: None,
             }
             .file_kind()
         };
@@ -1106,6 +1123,7 @@ mod tests {
             content_type: Some("messageReference".to_owned()),
             content_url: None,
             name: None,
+            teams_app_id: None,
             content: Some(
                 r#"{"messageId":"1728","messagePreview":"Hello","messageSender":{"user":{"displayName":"Adele"}}}"#.to_owned(),
             ),

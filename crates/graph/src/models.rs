@@ -95,6 +95,7 @@ pub struct Attachment {
     pub content_url: Option<String>,
     pub name: Option<String>,
     pub content: Option<String>,
+    pub teams_app_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

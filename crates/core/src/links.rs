@@ -5,7 +5,7 @@ use scraper::{Html, Selector};
 use serde_json::{Value, json};
 use store::MessageRecord;
 
-use crate::stored::ImageRef;
+use crate::stored::{AttachmentInfo, ImageRef, attachments};
 
 pub const EMPTY_LINKS: &str = "[]";
 
@@ -90,7 +90,12 @@ impl LinkPreview {
     }
 
     fn is_showable(&self) -> bool {
-        self.title.is_some() || self.image_url.is_some()
+        let parts = [
+            self.image_url.is_some(),
+            self.title.is_some(),
+            self.description.is_some(),
+        ];
+        parts.into_iter().filter(|present| *present).count() >= 2
     }
 }
 
@@ -103,10 +108,11 @@ pub fn has_stored_links(links_json: &str) -> bool {
 }
 
 pub fn link_preview(record: &MessageRecord) -> Option<LinkPreview> {
-    if record.deleted {
+    if record.deleted || has_link_unfurl_card(record) {
         return None;
     }
-    select_preview(&record.links_json)
+    let first_link = first_link(&record.body_html)?;
+    select_preview(&record.links_json).filter(|preview| same_link(&preview.url, &first_link))
 }
 
 pub fn select_preview(links_json: &str) -> Option<LinkPreview> {
@@ -114,8 +120,27 @@ pub fn select_preview(links_json: &str) -> Option<LinkPreview> {
     entries.iter().find_map(entry_preview)
 }
 
+fn has_link_unfurl_card(record: &MessageRecord) -> bool {
+    attachments(record)
+        .iter()
+        .any(AttachmentInfo::is_link_unfurl_card)
+}
+
+fn first_link(html: &str) -> Option<String> {
+    let selector = Selector::parse("a[href]").ok()?;
+    Html::parse_fragment(html)
+        .select(&selector)
+        .find_map(|anchor| anchor.value().attr("href"))
+        .map(str::to_owned)
+}
+
+fn same_link(first: &str, second: &str) -> bool {
+    let normalize = |url: &str| url.trim().trim_end_matches('/').to_ascii_lowercase();
+    normalize(first) == normalize(second)
+}
+
 fn entry_preview(entry: &Value) -> Option<LinkPreview> {
-    if entry.get("previewenabled").and_then(Value::as_bool) == Some(false) {
+    if entry.get("previewenabled").and_then(Value::as_bool) != Some(true) {
         return None;
     }
     let url = entry.get("url")?.as_str()?;
@@ -268,12 +293,13 @@ mod tests {
     }
 
     #[test]
-    fn picks_the_first_public_link_with_a_title() {
+    fn picks_the_first_enabled_public_link_with_two_parts() {
         let preview = select_preview(&links(json!([
-            {"url": "https://contoso.sharepoint.com/f", "preview": {"title": "File"}, "previewenabled": true},
+            {"url": "https://contoso.sharepoint.com/f", "preview": {"title": "File", "description": "F"}, "previewenabled": true},
             {"url": "https://a.example/x", "preview": {}, "previewenabled": true},
-            {"url": "https://b.example/y", "preview": {"title": " B ", "description": "About B"}},
-            {"url": "https://c.example/z", "preview": {"title": "C"}, "previewenabled": true},
+            {"url": "https://n.example/x", "preview": {"title": "N", "description": "No flag"}},
+            {"url": "https://t.example/x", "preview": {"title": "Title only"}, "previewenabled": true},
+            {"url": "https://b.example/y", "preview": {"title": " B ", "description": "About B"}, "previewenabled": true},
         ])))
         .unwrap();
         assert_eq!(preview.url, "https://b.example/y");
@@ -283,9 +309,15 @@ mod tests {
     }
 
     #[test]
-    fn an_image_alone_is_enough() {
+    fn an_image_needs_a_title_or_description() {
+        assert_eq!(
+            select_preview(&links(json!([
+                {"url": "https://a.example", "preview": {"previewurl": THUMBNAIL}, "previewenabled": true},
+            ]))),
+            None
+        );
         let preview = select_preview(&links(json!([
-            {"url": "https://a.example", "preview": {"previewurl": THUMBNAIL, "previewmeta": {"height": 160, "width": 320}}, "previewenabled": null},
+            {"url": "https://a.example", "preview": {"description": "D", "previewurl": THUMBNAIL, "previewmeta": {"height": 160, "width": 320}}, "previewenabled": true},
         ])))
         .unwrap();
         assert_eq!(preview.title, None);
@@ -299,8 +331,7 @@ mod tests {
     #[test]
     fn reads_the_camel_case_meta_and_null_meta() {
         let preview = select_preview(&links(json!([
-            {"url": "https://a.example", "preview": {"title": "A", "previewurl": THUMBNAIL, "previewMetadata": {"height": 10, "width": 20}}},
-            {"url": "https://b.example", "preview": {"title": "B", "previewmeta": null}},
+            {"url": "https://a.example", "preview": {"title": "A", "previewurl": THUMBNAIL, "previewMetadata": {"height": 10, "width": 20}}, "previewenabled": true},
         ])))
         .unwrap();
         assert_eq!(
@@ -308,10 +339,97 @@ mod tests {
             (Some(20), Some(10))
         );
         let second = select_preview(&links(json!([
-            {"url": "https://b.example", "preview": {"title": "B", "previewmeta": null}},
+            {"url": "https://b.example", "preview": {"title": "B", "description": "D", "previewmeta": null}, "previewenabled": true},
         ])))
         .unwrap();
         assert_eq!(second.image_width, None);
+    }
+
+    fn linked_record(body_html: &str, links_json: Value, attachments_json: Value) -> MessageRecord {
+        MessageRecord {
+            body_html: body_html.to_owned(),
+            links_json: links(links_json),
+            attachments_json: attachments_json.to_string(),
+            ..demo_record()
+        }
+    }
+
+    fn video_link_entry(previewenabled: Value) -> Value {
+        json!([{
+            "@type": HYPERLINK_TYPE,
+            "itemid": "0",
+            "url": "https://www.youtube.com/watch?v=video_id_01",
+            "preview": {"title": "Sample video", "description": "1K views", "previewurl": THUMBNAIL},
+            "previewenabled": previewenabled,
+        }])
+    }
+
+    fn unfurl_card(id: &str, teams_app_id: Option<&str>) -> Value {
+        let content = json!({
+            "type": "AdaptiveCard",
+            "version": "1.5",
+            "body": [
+                {"type": "Media", "sources": [{"mimeType": "video/mp4", "url": "https://www.youtube.com/watch?v=video_id_01"}]},
+                {"type": "TextBlock", "text": "Sample video"},
+                {"type": "TextBlock", "text": "Sample channel"},
+            ],
+            "actions": [{"type": "Action.OpenUrl", "title": "Open", "url": "https://www.youtube.com/watch?v=video_id_01"}],
+        });
+        json!([{
+            "content_type": "application/vnd.microsoft.card.adaptive",
+            "name": null,
+            "url": null,
+            "text": null,
+            "id": id,
+            "content": content.to_string(),
+            "teams_app_id": teams_app_id,
+        }])
+    }
+
+    const VIDEO_BODY: &str = "<p><a href=\"https://www.youtube.com/watch?v=video_id_01\">https://www.youtube.com/watch?v=video_id_01</a></p>";
+
+    #[test]
+    fn a_video_link_with_its_unfurl_card_shows_only_the_card() {
+        let teams_sent = linked_record(
+            VIDEO_BODY,
+            video_link_entry(json!(false)),
+            unfurl_card("app-preview-card-1", None),
+        );
+        assert_eq!(link_preview(&teams_sent), None);
+        let flagged_on = linked_record(
+            VIDEO_BODY,
+            video_link_entry(json!(true)),
+            unfurl_card(
+                "74d20c7f34aa4a7f",
+                Some("4623dd0c-d55c-4c95-9290-ad31619b577a"),
+            ),
+        );
+        assert_eq!(link_preview(&flagged_on), None);
+        let by_card_id = linked_record(
+            VIDEO_BODY,
+            video_link_entry(json!(true)),
+            unfurl_card("app-preview-card-2", None),
+        );
+        assert_eq!(link_preview(&by_card_id), None);
+        let cards = crate::stored::adaptive_cards(&flagged_on);
+        assert_eq!(cards.len(), 1);
+    }
+
+    #[test]
+    fn a_video_link_without_a_card_keeps_its_preview() {
+        let record = linked_record(VIDEO_BODY, video_link_entry(json!(true)), json!([]));
+        let preview = link_preview(&record).unwrap();
+        assert_eq!(preview.domain(), "youtube.com");
+        let missing_flag = linked_record(VIDEO_BODY, video_link_entry(Value::Null), json!([]));
+        assert_eq!(link_preview(&missing_flag), None);
+    }
+
+    #[test]
+    fn only_the_first_link_of_the_message_gets_a_preview() {
+        let body = "<p><a href=\"https://other.example/\">other</a> <a href=\"https://www.youtube.com/watch?v=video_id_01\">video</a></p>";
+        let record = linked_record(body, video_link_entry(json!(true)), json!([]));
+        assert_eq!(link_preview(&record), None);
+        assert!(same_link("https://A.example/x/", "https://a.example/x"));
     }
 
     #[test]
@@ -417,7 +535,10 @@ mod tests {
     fn deleted_messages_show_no_preview() {
         let record = MessageRecord {
             deleted: true,
-            links_json: links(json!([{"url": "https://a.example", "preview": {"title": "A"}}])),
+            body_html: "<p><a href=\"https://a.example\">a</a></p>".to_owned(),
+            links_json: links(
+                json!([{"url": "https://a.example", "preview": {"title": "A", "description": "D"}, "previewenabled": true}]),
+            ),
             ..MessageRecord::default()
         };
         assert_eq!(link_preview(&record), None);

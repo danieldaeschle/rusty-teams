@@ -1775,7 +1775,7 @@ fn release_messages() -> Vec<MessageRecord> {
             LinkPreview {
                 url: "https://example.com/notes".to_owned(),
                 title: Some("Release notes 0.2".to_owned()),
-                description: None,
+                description: Some("What changed since 0.1".to_owned()),
                 image_url: None,
                 image_width: None,
                 image_height: None,

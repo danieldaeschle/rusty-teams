@@ -107,6 +107,7 @@ mod tests {
                 r#"<p><img src="https://graph.microsoft.com/v1.0/chats/19:c@thread.v2/messages/1728/hostedContents/aWQ9/$value" alt="a chart" width="300" height="120"></p>"#,
                 r#"<p><img src="https://media0.giphy.com/media/abc/giphy.gif"></p>"#,
                 r#"<attachment id="F1"></attachment>"#,
+                r#"<p><a href="https://news.example.com/story">https://news.example.com/story</a></p>"#,
             )
             .to_owned(),
             attachments_json: r#"[

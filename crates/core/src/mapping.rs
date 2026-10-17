@@ -239,6 +239,7 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
                     )
             }),
         unavailable: false,
+        teams_app_id: attachment.teams_app_id.clone(),
     }
 }
 
