@@ -89,4 +89,19 @@ impl Store {
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+
+    pub fn replace_pinned_channels(&self, channel_ids: &[String]) -> Result<()> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM pinned_channels", [])?;
+        {
+            let mut insert_channel = transaction.prepare_cached(
+                "INSERT INTO pinned_channels (position, channel_id) VALUES (?1, ?2)",
+            )?;
+            for (position, channel_id) in channel_ids.iter().enumerate() {
+                insert_channel.execute(params![position as i64, channel_id])?;
+            }
+        }
+        Ok(transaction.commit()?)
+    }
 }

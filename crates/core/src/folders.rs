@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use chatsvc::settings::{parse_chat_sections, parse_skin_tone, parse_teams_order};
 use chatsvc::{
-    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChatSection,
-    ChatSectionSettings, Pins, UserSettings, pins::SessionTransport,
+    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
+    ChannelVisibility, ChatSection, ChatSectionSettings, Pins, UserSettings,
+    pins::SessionTransport,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -89,10 +90,34 @@ pub trait FolderSource: Send + Sync {
         folder_id: &'a str,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>>;
     fn change_folders(&self, change: FolderChange) -> BoxFuture<'_, Result<Vec<ChatFolder>>>;
+    fn set_channel_pinned<'a>(
+        &'a self,
+        _channel_id: &'a str,
+        _pinned: bool,
+    ) -> BoxFuture<'a, Result<Vec<String>>> {
+        Box::pin(async { Err(Error::Unsupported("channel pins without chatsvc")) })
+    }
+    fn set_channel_shown<'a>(
+        &'a self,
+        _target: ChannelTarget<'a>,
+        _own_user_id: &'a str,
+        _shown: bool,
+        _now_ms: i64,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("channel visibility without chatsvc")) })
+    }
+    fn set_team_shown<'a>(
+        &'a self,
+        _team_thread_id: &'a str,
+        _shown: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("team visibility without chatsvc")) })
+    }
 }
 
 pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
+    visibility: ChannelVisibility,
     settings: UserSettings,
     channel_settings: ChannelSettings,
     properties: Mutex<Option<Value>>,
@@ -104,6 +129,7 @@ impl ChatsvcFolderSource {
     pub fn new(session: &Session) -> Self {
         ChatsvcFolderSource {
             pins: Pins::new(session),
+            visibility: ChannelVisibility::new(session),
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
             properties: Mutex::new(None),
@@ -120,6 +146,49 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn pinned_channels(&self) -> BoxFuture<'_, Result<Vec<String>>> {
         Box::pin(async { Ok(self.pins.pinned_channels().await?.channel_ids) })
+    }
+
+    fn set_channel_pinned<'a>(
+        &'a self,
+        channel_id: &'a str,
+        pinned: bool,
+    ) -> BoxFuture<'a, Result<Vec<String>>> {
+        Box::pin(async move {
+            let answer = if pinned {
+                self.pins.pin_channel(channel_id).await?
+            } else {
+                self.pins.unpin_channel(channel_id).await?
+            };
+            Ok(answer.channel_ids)
+        })
+    }
+
+    fn set_channel_shown<'a>(
+        &'a self,
+        target: ChannelTarget<'a>,
+        own_user_id: &'a str,
+        shown: bool,
+        now_ms: i64,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(self
+                .visibility
+                .set_channel_shown(&target, own_user_id, shown, now_ms)
+                .await?)
+        })
+    }
+
+    fn set_team_shown<'a>(
+        &'a self,
+        team_thread_id: &'a str,
+        shown: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(self
+                .visibility
+                .set_team_shown(team_thread_id, shown)
+                .await?)
+        })
     }
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
@@ -567,13 +636,17 @@ impl<R: Remote> SyncEngine<R> {
         self.store_folders(&folders, &self.store.pinned_channel_ids()?)
     }
 
-    fn folder_source(&self) -> Result<&Arc<dyn FolderSource>> {
+    pub(crate) fn folder_source(&self) -> Result<&Arc<dyn FolderSource>> {
         self.folder_source
             .as_ref()
             .ok_or(Error::Unsupported("chat folders without a folder source"))
     }
 
-    fn store_folders(&self, folders: &[ChatFolder], channel_ids: &[String]) -> Result<()> {
+    pub(crate) fn store_folders(
+        &self,
+        folders: &[ChatFolder],
+        channel_ids: &[String],
+    ) -> Result<()> {
         let previous = (self.chat_folders()?, self.store.pinned_channel_ids()?);
         let records: Vec<FolderRecord> = folders.iter().map(to_record).collect();
         self.store.replace_folders(&records, channel_ids)?;

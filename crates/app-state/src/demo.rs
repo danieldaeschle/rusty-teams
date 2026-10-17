@@ -1414,6 +1414,7 @@ fn settings_card() -> serde_json::Value {
     })
 }
 
+pub const DEMO_TENANT_ID: &str = "demo-tenant";
 const DEMO_MEETING_LINK: &str = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZGVtbw%40thread.v2/0?context=%7b%22Tid%22%3a%22demo-tenant%22%2c%22Oid%22%3a%22demo-mara%22%7d";
 
 fn meeting_link_messages() -> Vec<MessageRecord> {

@@ -24,6 +24,9 @@ use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::channel_menu::{
+    ChannelMenuItem, MenuEntry, TeamMenuItem, channel_menu_entries, team_menu_entries,
+};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::data::{Directory, is_pending_folder};
 use crate::format;
@@ -1375,6 +1378,8 @@ impl SidebarView {
         let name_style = team_name_style(entry, expanded);
         let badge = team_badge(entry, expanded);
         let toggle_id = team_id.clone();
+        let (team_menu_state, team_menu_id, team_hidden) =
+            (self.state.clone(), team_id.clone(), entry.hidden);
         list = list.child(
             h_flex()
                 .id(SharedString::from(format!("team-{team_id}")))
@@ -1414,7 +1419,10 @@ impl SidebarView {
                     }
                     save_collapsed_teams(&this.state.read(cx).store, &this.collapsed_teams);
                     cx.notify();
-                })),
+                }))
+                .context_menu(move |popup, _, _| {
+                    team_menu(popup, team_menu_state.clone(), &team_menu_id, team_hidden)
+                }),
         );
         if !expanded {
             return list;
@@ -1689,7 +1697,87 @@ fn channel_menu(
     channel_id: &str,
     notifications: ChannelNotifications,
 ) -> PopupMenu {
-    let channel_id = channel_id.to_owned();
+    let menu_state = state.read(cx).channel_menu_state(channel_id);
+    let mut popup = popup;
+    for entry in channel_menu_entries(menu_state) {
+        let item = match entry {
+            MenuEntry::Separator => {
+                popup = popup.separator();
+                continue;
+            }
+            MenuEntry::Item(ChannelMenuItem::Notifications) => {
+                popup = notifications_submenu(popup, window, cx, &state, channel_id, notifications);
+                continue;
+            }
+            MenuEntry::Item(item) => item,
+        };
+        let (action_state, action_id) = (state.clone(), channel_id.to_owned());
+        popup = popup.item(
+            PopupMenuItem::new(item.label())
+                .icon(menu_icon(channel_menu_icon(item)))
+                .disabled(menu_state.disables(item))
+                .on_click(move |_, _, cx| {
+                    action_state.update(cx, |state, cx| match item {
+                        ChannelMenuItem::Pin => state.set_channel_pinned(&action_id, true, cx),
+                        ChannelMenuItem::Unpin => state.set_channel_pinned(&action_id, false, cx),
+                        ChannelMenuItem::Show => state.set_channel_shown(&action_id, true, cx),
+                        ChannelMenuItem::Hide => state.set_channel_shown(&action_id, false, cx),
+                        ChannelMenuItem::CopyLink => state.copy_channel_link(&action_id, cx),
+                        ChannelMenuItem::Notifications => {}
+                    });
+                }),
+        );
+    }
+    popup
+}
+
+fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
+    match item {
+        ChannelMenuItem::Notifications => IconName::Bell,
+        ChannelMenuItem::Pin => IconName::Pin,
+        ChannelMenuItem::Unpin => IconName::PinOff,
+        ChannelMenuItem::Show => IconName::Eye,
+        ChannelMenuItem::Hide => IconName::EyeOff,
+        ChannelMenuItem::CopyLink => IconName::Link,
+    }
+}
+
+fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: bool) -> PopupMenu {
+    let mut popup = popup;
+    for entry in team_menu_entries(hidden) {
+        let MenuEntry::Item(item) = entry else {
+            popup = popup.separator();
+            continue;
+        };
+        let (action_state, action_id) = (state.clone(), team_id.to_owned());
+        popup = popup.item(
+            PopupMenuItem::new(item.label())
+                .icon(menu_icon(match item {
+                    TeamMenuItem::Show => IconName::Eye,
+                    TeamMenuItem::Hide => IconName::EyeOff,
+                    TeamMenuItem::CopyLink => IconName::Link,
+                }))
+                .on_click(move |_, _, cx| {
+                    action_state.update(cx, |state, cx| match item {
+                        TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
+                        TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
+                        TeamMenuItem::CopyLink => state.copy_team_link(&action_id, cx),
+                    });
+                }),
+        );
+    }
+    popup
+}
+
+fn notifications_submenu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    state: &Entity<AppState>,
+    channel_id: &str,
+    notifications: ChannelNotifications,
+) -> PopupMenu {
+    let (state, channel_id) = (state.clone(), channel_id.to_owned());
     popup.submenu_with_icon(
         Some(menu_icon(IconName::Bell)),
         "Notifications",

@@ -2,6 +2,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::json;
 
 const LINK_HOST: &str = "https://teams.microsoft.com";
+const DEEP_LINK_HOST: &str = "https://teams.cloud.microsoft";
 
 const ENCODE_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -68,6 +69,38 @@ pub fn channel_tab_link(channel_id: &str, tab_id: &str, label: &str) -> String {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelAddress {
+    pub tenant_id: String,
+    pub group_id: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub membership_type: Option<String>,
+}
+
+pub fn channel_link(address: &ChannelAddress) -> String {
+    let separate_roster = address.membership_type.as_deref().is_some_and(|kind| {
+        kind.eq_ignore_ascii_case("private") || kind.eq_ignore_ascii_case("shared")
+    });
+    format!(
+        "{DEEP_LINK_HOST}/l/channel/{}/{}?groupId={}&tenantId={}{}",
+        encode(&address.channel_id),
+        encode(&address.channel_name),
+        encode(&address.group_id),
+        encode(&address.tenant_id),
+        if separate_roster { "&ngc=true" } else { "" }
+    )
+}
+
+pub fn team_link(team_thread_id: &str, group_id: &str, tenant_id: &str) -> String {
+    format!(
+        "{DEEP_LINK_HOST}/l/team/{}/conversations?groupId={}&tenantId={}",
+        encode(team_thread_id),
+        encode(group_id),
+        encode(tenant_id)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +144,40 @@ mod tests {
         assert_eq!(
             channel_tab_link("19:chan@thread.tacv2", "a1-b2", "Sprint board"),
             "https://teams.microsoft.com/l/channel/19:chan@thread.tacv2/tab%3A%3Aa1-b2?label=Sprint%20board"
+        );
+    }
+
+    fn address(membership_type: Option<&str>) -> ChannelAddress {
+        ChannelAddress {
+            tenant_id: "tenant-1".into(),
+            group_id: "group-1".into(),
+            channel_id: "19:chan@thread.tacv2".into(),
+            channel_name: "R&D News".into(),
+            membership_type: membership_type.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn channel_link_encodes_the_id_and_name_like_teams() {
+        assert_eq!(
+            channel_link(&address(Some("standard"))),
+            "https://teams.cloud.microsoft/l/channel/19%3Achan%40thread.tacv2/R%26D%20News?groupId=group-1&tenantId=tenant-1"
+        );
+    }
+
+    #[test]
+    fn private_and_shared_channel_links_carry_ngc() {
+        for kind in ["private", "shared"] {
+            assert!(channel_link(&address(Some(kind))).ends_with("&tenantId=tenant-1&ngc=true"));
+        }
+        assert!(!channel_link(&address(None)).contains("ngc"));
+    }
+
+    #[test]
+    fn team_link_points_at_the_conversations_of_the_team_thread() {
+        assert_eq!(
+            team_link("19:general@thread.tacv2", "group-1", "tenant-1"),
+            "https://teams.cloud.microsoft/l/team/19%3Ageneral%40thread.tacv2/conversations?groupId=group-1&tenantId=tenant-1"
         );
     }
 }

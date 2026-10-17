@@ -3206,6 +3206,137 @@ impl FolderSource for FakeFolders {
             Ok(state.clone())
         })
     }
+
+    fn set_channel_pinned<'a>(
+        &'a self,
+        channel_id: &'a str,
+        pinned: bool,
+    ) -> BoxFuture<'a, Result<Vec<String>>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("pin channel {channel_id} {pinned}"));
+            let mut channel_ids = self.channels.clone();
+            channel_ids.retain(|id| id != channel_id);
+            if pinned {
+                channel_ids.push(channel_id.to_owned());
+            }
+            Ok(channel_ids)
+        })
+    }
+
+    fn set_channel_shown<'a>(
+        &'a self,
+        target: chatsvc::ChannelTarget<'a>,
+        own_user_id: &'a str,
+        shown: bool,
+        _now_ms: i64,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!(
+                "show channel {} general={} {:?} {own_user_id} {shown}",
+                target.channel_id, target.general, target.kind
+            ));
+            Ok(())
+        })
+    }
+
+    fn set_team_shown<'a>(
+        &'a self,
+        team_thread_id: &'a str,
+        shown: bool,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("show team {team_thread_id} {shown}"));
+            Ok(())
+        })
+    }
+}
+
+fn store_alpha_team(engine: &SyncEngine<Handle>) {
+    engine
+        .store()
+        .upsert_teams(&[TeamRecord {
+            id: "alpha".into(),
+            name: "Alpha".into(),
+        }])
+        .unwrap();
+    let channel = |id: &str, name: &str, membership_type: Option<&str>| ChannelRecord {
+        id: id.into(),
+        team_id: "alpha".into(),
+        name: name.into(),
+        membership_type: membership_type.map(str::to_owned),
+        last_message_at: None,
+        unread: false,
+    };
+    engine
+        .store()
+        .upsert_channels(&[
+            channel("19:general@thread.tacv2", "General", Some("standard")),
+            channel("19:secret@thread.tacv2", "Secret", Some("private")),
+        ])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn channel_pin_and_show_hide_go_through_the_source_and_cache() {
+    let fake = Arc::new(Fake::default());
+    let source = FakeFolders::new();
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    store_alpha_team(&engine);
+    let mut events = engine.subscribe();
+
+    engine.set_channel_pinned("ch3", true).await.unwrap();
+    assert_eq!(
+        engine.pinned_channels().unwrap(),
+        ids(&["ch1", "ch2", "ch3"])
+    );
+    assert_eq!(events.try_recv().unwrap(), CoreEvent::FoldersChanged);
+    engine.set_channel_pinned("ch1", false).await.unwrap();
+    assert_eq!(engine.pinned_channels().unwrap(), ids(&["ch2"]));
+
+    engine
+        .set_channel_shown("19:secret@thread.tacv2", false)
+        .await
+        .unwrap();
+    engine
+        .set_channel_shown("19:general@thread.tacv2", false)
+        .await
+        .unwrap();
+    engine.set_team_shown("alpha", false).await.unwrap();
+    let team = engine.store().sidebar().unwrap().teams.remove(0);
+    assert!(team.hidden);
+    assert_eq!(team.hidden_channel_ids.len(), 2);
+    let calls = source.calls.lock().unwrap().clone();
+    assert_eq!(
+        calls[2..],
+        [
+            format!("show channel 19:secret@thread.tacv2 general=false Private {ME} false"),
+            format!("show channel 19:general@thread.tacv2 general=true Standard {ME} false"),
+            "show team 19:general@thread.tacv2 false".to_owned(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn channel_and_team_links_use_the_cached_tenant() {
+    let fake = Arc::new(Fake::default());
+    let engine = engine_with(&fake, SyncConfig::default());
+    store_alpha_team(&engine);
+    engine.store().set_meta("me_tenant_id", "tenant-1").unwrap();
+
+    assert_eq!(
+        engine.channel_link("19:secret@thread.tacv2").await.unwrap(),
+        "https://teams.cloud.microsoft/l/channel/19%3Asecret%40thread.tacv2/Secret?groupId=alpha&tenantId=tenant-1&ngc=true"
+    );
+    assert_eq!(
+        engine.team_link("alpha").await.unwrap(),
+        "https://teams.cloud.microsoft/l/team/19%3Ageneral%40thread.tacv2/conversations?groupId=alpha&tenantId=tenant-1"
+    );
 }
 
 #[tokio::test]

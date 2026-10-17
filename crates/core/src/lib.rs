@@ -13,6 +13,7 @@ mod card_widgets;
 mod card_width;
 mod channel_mentions;
 mod channel_sync;
+mod channel_visibility;
 mod chat_paging;
 mod download;
 mod draft;
@@ -140,7 +141,8 @@ pub use meeting_join::{
 };
 pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
-    ChannelLinkInput, channel_message_link, channel_tab_link, chat_message_link,
+    ChannelAddress, ChannelLinkInput, channel_link, channel_message_link, channel_tab_link,
+    chat_message_link, team_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use notes_chat::{is_notes_chat, notes_chat_title};
