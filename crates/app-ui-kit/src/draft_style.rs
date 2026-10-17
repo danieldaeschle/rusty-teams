@@ -13,6 +13,7 @@ const QUOTE_BAR_WIDTH: f32 = 3.;
 const QUOTE_INDENT: f32 = 12.;
 const CODE_INDENT: f32 = 10.;
 const LIST_LEVEL_INDENT: f32 = 18.;
+const HEADING_SCALES: [f32; 3] = [1.6, 1.35, 1.15];
 
 /// How the composer paints a draft: text styles, fills and the list markers to hang under.
 pub struct DraftStyle {
@@ -24,7 +25,7 @@ pub struct DraftStyle {
 
 fn line_indent(kind: &LineKind) -> f32 {
     match kind {
-        LineKind::Text => 0.,
+        LineKind::Text | LineKind::Heading(_) | LineKind::Table(_) => 0.,
         LineKind::Quote => QUOTE_INDENT,
         LineKind::Code(_) => CODE_INDENT,
         LineKind::Bullet(depth) | LineKind::Numbered(depth) => {
@@ -81,6 +82,16 @@ fn size_flags(kind: &MarkKind) -> StyleFlags {
         _ => {}
     }
     flags
+}
+
+fn heading_decoration(content: Range<usize>, level: u8) -> TextDecoration {
+    let scale = HEADING_SCALES[usize::from(level.clamp(1, 3) - 1)];
+    let style = HighlightStyle {
+        font_weight: Some(FontWeight::BOLD),
+        color: Some(theme::text_strong()),
+        ..Default::default()
+    };
+    TextDecoration::new(content, style).with_font_scale(scale)
 }
 
 /// From the start of the first line of `lines` to the end of the last; Block and Bar cover
@@ -152,6 +163,7 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
                     TextDecoration::new(content, color(theme::text_strong()))
                         .with_font_family(mono.clone()),
                 ),
+                LineKind::Heading(level) => text.push(heading_decoration(content, *level)),
                 _ => {}
             }
         }
