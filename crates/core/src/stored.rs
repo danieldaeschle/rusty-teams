@@ -28,6 +28,9 @@ pub struct AttachmentInfo {
     /// Raw content, kept only for quotes and cards so an edit can send them back unchanged.
     #[serde(default)]
     pub content: Option<String>,
+    /// A forward whose original Graph did not return; it is not fetched again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unavailable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1048,6 +1051,7 @@ mod tests {
                 quote: None,
                 id: None,
                 content: None,
+                unavailable: false,
             }
             .file_kind()
         };

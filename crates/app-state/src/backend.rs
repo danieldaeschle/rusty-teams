@@ -18,6 +18,7 @@ use crate::presence_link::{self, LinkSignal};
 
 pub type Engine = SyncEngine<Graph>;
 
+const FORWARD_HEAL_PAUSE: Duration = Duration::from_secs(2);
 const CONNECT_RETRY: Duration = Duration::from_secs(8);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 const REFRESH_SETTLE: Duration = Duration::from_secs(2);
@@ -201,6 +202,7 @@ async fn refresh_loop(
     mut nudges: mpsc::UnboundedReceiver<()>,
 ) {
     let mut interval = tokio::time::interval(REFRESH_INTERVAL);
+    let mut forwards_healing = false;
     loop {
         tokio::select! {
             _ = interval.tick() => {}
@@ -214,6 +216,10 @@ async fn refresh_loop(
         }
         match engine.refresh_sidebar().await {
             Ok(_) => {
+                if !std::mem::replace(&mut forwards_healing, true) {
+                    let engine = engine.clone();
+                    tokio::spawn(async move { engine.heal_all_forwards(FORWARD_HEAL_PAUSE).await });
+                }
                 if let Err(error) = engine.refresh_folders().await {
                     crate::diagnostics::record(format!(
                         "sync: chat folders and channel layout not refreshed: {error}"

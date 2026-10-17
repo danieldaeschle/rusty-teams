@@ -239,6 +239,7 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
                         Some("messageReference" | FORWARDED_CONTENT_TYPE)
                     )
             }),
+        unavailable: false,
     }
 }
 
