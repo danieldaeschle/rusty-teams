@@ -8,6 +8,7 @@ pub mod call;
 #[cfg(test)]
 mod layout_guard;
 pub mod notify;
+mod settings;
 mod views;
 
 pub use state::*;

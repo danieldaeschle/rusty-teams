@@ -18,7 +18,6 @@ use super::rules::{
 use super::settings;
 use super::sound_cache::{self, SoundHandle};
 use super::sounds::{CallTone, Ringtone};
-use super::settings_view::{Section, SettingsView};
 use super::stack::{
     AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
 };
@@ -29,6 +28,7 @@ use crate::app_state::{AppEvent, AppState, selection_for};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
+use crate::settings_section::SettingsSection;
 use crate::single_instance;
 
 const TICK: Duration = Duration::from_millis(33);
@@ -83,8 +83,6 @@ pub struct NotificationCenter {
     pill: Option<OpenWindow>,
     pill_opening: bool,
     hover_hold: bool,
-    settings_window: Option<AnyWindowHandle>,
-    settings_opening: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
     shown_badge: Option<Badge>,
@@ -132,8 +130,6 @@ impl NotificationCenter {
             pill: None,
             pill_opening: false,
             hover_hold: false,
-            settings_window: None,
-            settings_opening: false,
             unread_mentions: HashSet::new(),
             tray,
             shown_badge: None,
@@ -865,7 +861,12 @@ impl NotificationCenter {
                 TrayCommand::ToggleDoNotDisturb => self.update_settings(cx, |settings| {
                     settings.do_not_disturb = !settings.do_not_disturb
                 }),
-                TrayCommand::Settings => self.open_settings(cx),
+                TrayCommand::Settings => {
+                    self.raise_main_window(cx);
+                    self.app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::General, cx)
+                    });
+                }
                 TrayCommand::Quit => cx.quit(),
             }
         }
@@ -1057,64 +1058,6 @@ impl NotificationCenter {
                 state.jump_to_message(selection, message_id, cx)
             });
         }
-    }
-
-    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
-        self.show_settings(Section::Notifications, false, cx);
-    }
-
-    pub fn open_agent_settings(&mut self, cx: &mut Context<Self>) {
-        self.show_settings(Section::Agents, true, cx);
-    }
-
-    fn show_settings(
-        &mut self,
-        section: Section,
-        switch_open_window: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(handle) = self.settings_window {
-            let shown = handle.update(cx, |view, window, cx| {
-                window.activate_window();
-                if switch_open_window && let Ok(view) = view.downcast::<SettingsView>() {
-                    view.update(cx, |view, cx| view.select_section(section, cx));
-                }
-            });
-            if shown.is_ok() {
-                return;
-            }
-            self.settings_window = None;
-        }
-        if self.settings_opening {
-            return;
-        }
-        self.settings_opening = true;
-        let center = cx.entity();
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(SettingsView::WIDTH), px(SettingsView::HEIGHT)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some("Settings".into()),
-                ..Default::default()
-            }),
-            is_resizable: false,
-            is_minimizable: false,
-            ..Default::default()
-        };
-        // open_window draws once right away, and SettingsView reads this entity while rendering.
-        cx.defer(move |cx| {
-            let view_center = center.clone();
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| SettingsView::new(view_center, section, window, cx))
-            });
-            center.update(cx, |this, _| {
-                this.settings_opening = false;
-                this.settings_window = opened.ok().map(|(handle, _)| handle);
-            });
-        });
     }
 
     pub fn send_test_notification(&mut self, cx: &mut Context<Self>) {

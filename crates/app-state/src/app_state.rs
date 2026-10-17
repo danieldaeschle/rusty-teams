@@ -63,7 +63,7 @@ pub enum AppEvent {
     Forward,
     ImageViewer,
     StatusMessage,
-    NotificationSettings,
+    Settings(crate::settings_section::SettingsSection),
     Profile,
     Call,
     Ring,

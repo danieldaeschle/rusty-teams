@@ -12,7 +12,7 @@ use gpui_kit::*;
 use mcp::install::{InstallReport, InstallState, Location, Target};
 use mcp::{Access, AgentPolicy};
 
-use super::settings_view::{control_row, switch, titled_with};
+use super::rows::{ROW_INSET, caption, control_row, toggle_row};
 use crate::agent_api::{self, ServerStatus};
 use crate::app_state::AppState;
 use crate::data::is_one_on_one;
@@ -23,7 +23,8 @@ use crate::views::widgets::icon;
 
 const COPIED_SHOWN: Duration = Duration::from_millis(1500);
 const PORT_WIDTH: f32 = 72.;
-const FIELD_HEIGHT: f32 = 36.;
+const FIELD_HEIGHT: f32 = 28.;
+const FIELD_LABEL_WIDTH: f32 = 60.;
 const SMALL_BUTTON_HEIGHT: f32 = 28.;
 const PICKER_ROW_HEIGHT: f32 = 30.;
 const PICKER_MAX_ROWS: usize = 6;
@@ -31,25 +32,6 @@ const PICKER_RESULTS: usize = 40;
 const TOKEN_TAIL: usize = 4;
 const CHIP_MAX_WIDTH: f32 = 180.;
 const WSL_WARNING: &str = "WSL agents cannot reach 127.0.0.1 on Windows. Add networkingMode=mirrored to .wslconfig and run wsl --shutdown.";
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum McpTab {
-    Server,
-    Access,
-    Install,
-}
-
-impl McpTab {
-    const ALL: [McpTab; 3] = [McpTab::Server, McpTab::Access, McpTab::Install];
-
-    fn label(self) -> &'static str {
-        match self {
-            McpTab::Server => "Server",
-            McpTab::Access => "Access",
-            McpTab::Install => "Install",
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
@@ -99,7 +81,6 @@ impl Scope {
 enum Copied {
     Url,
     Token,
-    Manual,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -215,7 +196,6 @@ fn wsl_warning() -> Div {
 
 pub struct McpView {
     app: Entity<AppState>,
-    tab: McpTab,
     picker: Option<Scope>,
     port_input: Entity<InputState>,
     port_invalid: bool,
@@ -249,7 +229,6 @@ impl McpView {
         }
         let mut view = McpView {
             app,
-            tab: McpTab::Server,
             picker: None,
             port_input,
             port_invalid: false,
@@ -262,6 +241,7 @@ impl McpView {
             _subscriptions: subscriptions,
         };
         view.refresh_wsl(cx);
+        view.refresh_installs(cx);
         view
     }
 
@@ -368,20 +348,6 @@ impl McpView {
         cx.notify();
     }
 
-    fn select_tab(&mut self, tab: McpTab, cx: &mut Context<Self>) {
-        self.tab = tab;
-        self.picker = None;
-        match tab {
-            McpTab::Install => {
-                self.refresh_installs(cx);
-                self.refresh_wsl(cx);
-            }
-            McpTab::Server => self.refresh_wsl(cx),
-            McpTab::Access => {}
-        }
-        cx.notify();
-    }
-
     fn copy(&mut self, target: Copied, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.copied = Some(target);
@@ -436,47 +402,16 @@ fn inert_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Sta
         .child(label.into())
 }
 
-fn caption(label: &'static str) -> Div {
-    div()
-        .px(px(20.))
-        .pt(px(16.))
-        .pb(px(4.))
-        .text_size(px(12.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::text_muted())
-        .child(label)
-}
-
-fn toggle_row(
-    id: &'static str,
-    title: &'static str,
-    detail: &'static str,
-    detail_color: Hsla,
-    on: bool,
-) -> Stateful<Div> {
-    h_flex()
-        .id(id)
-        .w_full()
-        .px(px(20.))
-        .py(px(10.))
-        .gap(px(12.))
-        .items_center()
-        .cursor_pointer()
-        .hover(|row| row.bg(theme::row_hover()))
-        .child(titled_with(title, detail, detail_color))
-        .child(switch(on))
-}
-
 fn note_box(content: impl IntoElement, margin_top: f32) -> Div {
     h_flex()
-        .mx(px(20.))
+        .mx(px(ROW_INSET))
         .mt(px(margin_top))
         .mb(px(12.))
         .px(px(12.))
         .py(px(10.))
         .gap(px(8.))
         .rounded(px(8.))
-        .bg(theme::row_hover())
+        .bg(theme::surface_raised())
         .text_size(px(12.))
         .text_color(theme::text_muted())
         .child(content)
@@ -511,51 +446,14 @@ fn chat_kind_label(state: &AppState, conversation_id: &str) -> Option<&'static s
 
 impl Render for McpView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
-        let tabs = h_flex()
-            .mx(px(20.))
-            .mt(px(12.))
-            .mb(px(4.))
-            .p(px(2.))
-            .rounded(px(8.))
-            .bg(theme::surface())
-            .children(McpTab::ALL.map(|tab| {
-                let active = tab == self.tab;
-                let view = view.clone();
-                div()
-                    .id(tab.label())
-                    .flex_1()
-                    .h(px(SMALL_BUTTON_HEIGHT))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(if active {
-                        theme::text()
-                    } else {
-                        theme::text_muted()
-                    })
-                    .when(active, |tab| tab.bg(theme::surface_raised()))
-                    .child(tab.label())
-                    .on_click(move |_, _, cx| view.update(cx, |view, cx| view.select_tab(tab, cx)))
-            }));
-        let body = match self.tab {
-            McpTab::Server => self.server_tab(cx).into_any_element(),
-            McpTab::Access => self.access_tab(cx).into_any_element(),
-            McpTab::Install => self.install_tab(cx).into_any_element(),
-        };
-        v_flex().w_full().flex_1().min_h_0().child(tabs).child(
-            div()
-                .id("mcp-body")
-                .w_full()
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(body),
-        )
+        v_flex()
+            .w_full()
+            .child(caption("SERVER"))
+            .child(self.server_tab(cx))
+            .child(caption("ACCESS"))
+            .child(self.access_tab(cx))
+            .child(caption("INSTALL"))
+            .child(self.install_tab(cx))
     }
 }
 
@@ -567,39 +465,36 @@ impl McpView {
         buttons: Vec<AnyElement>,
         cx: &App,
     ) -> Div {
-        v_flex()
+        h_flex()
             .w_full()
-            .px(px(20.))
-            .pb(px(8.))
-            .gap(px(4.))
+            .px(px(ROW_INSET))
+            .py(px(6.))
+            .gap(px(8.))
+            .items_center()
             .child(
                 div()
-                    .text_size(px(11.))
+                    .w(px(FIELD_LABEL_WIDTH))
+                    .flex_none()
+                    .text_size(px(12.))
                     .text_color(theme::text_faint())
                     .child(label),
             )
             .child(
-                h_flex()
-                    .w_full()
-                    .gap(px(8.))
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(FIELD_HEIGHT))
+                    .px(px(10.))
+                    .flex()
                     .items_center()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(FIELD_HEIGHT))
-                            .px(px(12.))
-                            .flex()
-                            .items_center()
-                            .rounded(px(8.))
-                            .bg(theme::surface())
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_size(px(12.))
-                            .text_color(theme::text_soft())
-                            .child(div().truncate().child(value)),
-                    )
-                    .children(buttons),
+                    .rounded(px(7.))
+                    .bg(theme::surface_raised())
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(px(12.))
+                    .text_color(theme::text_soft())
+                    .child(div().truncate().child(value)),
             )
+            .children(buttons)
     }
 
     fn copy_button(
@@ -692,7 +587,7 @@ impl McpView {
             .when(self.port_invalid, |tab| {
                 tab.child(
                     div()
-                        .px(px(20.))
+                        .px(px(ROW_INSET))
                         .pb(px(4.))
                         .text_size(px(12.))
                         .text_color(theme::red_soft())
@@ -702,7 +597,6 @@ impl McpView {
             .when(running && self.wsl_unreachable, |tab| {
                 tab.child(wsl_warning())
             })
-            .child(caption("CONNECTION"))
             .child(self.field_row(
                 "URL",
                 url.clone(),
@@ -849,7 +743,7 @@ impl McpView {
                     .w_full()
                     .flex_wrap()
                     .gap(px(6.))
-                    .px(px(20.))
+                    .px(px(ROW_INSET))
                     .pb(px(8.))
                     .children(chips)
                     .child(add),
@@ -934,7 +828,7 @@ impl McpView {
             })
             .collect();
         v_flex()
-            .mx(px(20.))
+            .mx(px(ROW_INSET))
             .mb(px(8.))
             .p(px(6.))
             .gap(px(4.))
@@ -1043,7 +937,7 @@ impl McpView {
             .child(
                 h_flex()
                     .w_full()
-                    .px(px(20.))
+                    .px(px(ROW_INSET))
                     .py(px(8.))
                     .gap(px(12.))
                     .items_center()
@@ -1077,7 +971,7 @@ impl McpView {
             )
             .children(self.install_errors.get(&target).map(|message| {
                 div()
-                    .px(px(20.))
+                    .px(px(ROW_INSET))
                     .pb(px(4.))
                     .pl(px(60.))
                     .text_size(px(12.))
@@ -1087,27 +981,11 @@ impl McpView {
     }
 
     fn install_tab(&self, cx: &mut Context<Self>) -> Div {
-        let url = agent_api::endpoint_url(agent_api::policy(cx).port);
-        let running = agent_api::handle(cx)
-            .is_some_and(|api| matches!(api.read(cx).status(), ServerStatus::Running(_)));
         let rows: Vec<Div> = Target::ALL
             .into_iter()
             .enumerate()
             .map(|(index, target)| self.install_row(index, target, cx))
             .collect();
-        v_flex()
-            .w_full()
-            .pt(px(8.))
-            .children(rows)
-            .child(caption("MANUAL"))
-            .child(self.field_row(
-                "URL",
-                url.clone(),
-                vec![self.copy_button("mcp-manual-copy", Copied::Manual, url, cx)],
-                cx,
-            ))
-            .when(running && self.wsl_unreachable, |tab| {
-                tab.child(wsl_warning())
-            })
+        v_flex().w_full().children(rows)
     }
 }

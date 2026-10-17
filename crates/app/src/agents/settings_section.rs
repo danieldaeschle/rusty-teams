@@ -518,7 +518,7 @@ fn list_row(
         .items_center()
         .rounded(px(8.))
         .cursor_pointer()
-        .hover(|row| row.bg(theme::row_hover()))
+        .hover(|row| row.bg(theme::popup_hover()))
         .children(leading)
         .child(
             v_flex()

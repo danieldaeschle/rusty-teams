@@ -7,17 +7,14 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
 };
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{
-    ChatSection, ForcedAvailability, ForcedKind, PresenceStatus, TranslationBehavior,
-    WorkLocationKind,
-};
+use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
 use super::avatar::{person_avatar, with_presence};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
+use crate::settings_section::SettingsSection;
 use crate::own_status::{
     STATUS_CHOICES, STATUS_DURATIONS, StateSummary, StatusDuration, choice_label, duration_target,
     presence_kind_for, state_summary, work_location_label,
@@ -33,12 +30,6 @@ const OWN_STATUS_BUTTON_SIZE: f32 = TITLE_AVATAR_SIZE + 2. * (1. + RING_WIDTH + 
 const MENU_ICON_SIZE: f32 = 14.;
 const ICON_COLUMN: f32 = 16.;
 const HEADER_INSET: f32 = 24.;
-const SWITCH_WIDTH: f32 = 28.;
-const SWITCH_HEIGHT: f32 = 16.;
-const SWITCH_THUMB: f32 = 12.;
-const SWITCH_PADDING: f32 = 2.;
-const TOGGLE_LABEL_WIDTH: f32 = 270.;
-const LANGUAGE_LIST_HEIGHT: f32 = 320.;
 
 #[derive(Clone)]
 struct MenuContext {
@@ -192,6 +183,8 @@ fn status_menu(
     let header_context = context.clone();
     let message_app = context.app.clone();
     let settings_app = context.app.clone();
+    let chat_list_app = context.app.clone();
+    let translation_app = context.app.clone();
     let call_app = context.app.clone();
     let row_label = match &context.summary.until {
         Some(until) => format!("{} {until}", context.summary.label),
@@ -222,8 +215,22 @@ fn status_menu(
                 }),
         )
         .separator()
-        .item(chat_list_item(context, window, cx))
-        .item(translation_item(context, window, cx))
+        .item(
+            PopupMenuItem::new("Chat list")
+                .icon(menu_icon(IconName::LayoutList))
+                .on_click(move |_, _, cx| {
+                    chat_list_app
+                        .update(cx, |state, cx| state.open_settings(SettingsSection::Chats, cx));
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Translation")
+                .icon(menu_icon(IconName::Languages))
+                .on_click(move |_, _, cx| {
+                    translation_app
+                        .update(cx, |state, cx| state.open_settings(SettingsSection::General, cx));
+                }),
+        )
         .item(
             PopupMenuItem::new("Make a test call")
                 .icon(menu_icon(IconName::Phone))
@@ -235,7 +242,9 @@ fn status_menu(
             PopupMenuItem::new("Notification settings")
                 .icon(menu_icon(IconName::Settings))
                 .on_click(move |_, _, cx| {
-                    settings_app.update(cx, |state, cx| state.open_notification_settings(cx));
+                    settings_app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::Notifications, cx)
+                    });
                 }),
         );
     if !demo {
@@ -248,167 +257,6 @@ fn status_menu(
                 ring_app.update(cx, |state, cx| state.demo_incoming_ring(cx));
             }),
     )
-}
-
-fn chat_list_item(
-    context: &MenuContext,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenuItem {
-    let app = context.app.clone();
-    let submenu = PopupMenu::build(window, cx, move |menu, _, cx| {
-        let settings = app.read(cx).directory.section_settings;
-        menu.item(section_toggle(
-            &app,
-            ChatSection::Muted,
-            "Show muted chats in own section",
-            settings.enabled(ChatSection::Muted),
-        ))
-    });
-    PopupMenuItem::submenu("Chat list", submenu).icon(menu_icon(IconName::LayoutList))
-}
-
-fn translation_item(
-    context: &MenuContext,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenuItem {
-    let app = context.app.clone();
-    let submenu = PopupMenu::build(window, cx, move |menu, window, cx| {
-        translation_menu(menu, window, cx, &app)
-    });
-    PopupMenuItem::submenu("Translation", submenu).icon(menu_icon(IconName::Languages))
-}
-
-fn translation_menu(
-    menu: PopupMenu,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-    app: &Entity<AppState>,
-) -> PopupMenu {
-    let state = app.read(cx);
-    if state.translation.settings.is_none() {
-        return menu.item(PopupMenuItem::label("Translation settings not loaded yet"));
-    }
-    let target = state.translation.target();
-    let behavior = state.translation.behavior();
-    let languages = state.translation.languages.clone();
-    let never: Vec<(String, String)> = state
-        .translation
-        .display_codes()
-        .into_iter()
-        .filter(|code| *code != target)
-        .map(|code| {
-            let name = state.translation.language_name(&code);
-            (code, name)
-        })
-        .collect();
-    let target_label = format!("Translate to {}", state.translation.language_name(&target));
-    let target_app = app.clone();
-    let mut menu = menu
-        .check_side(Side::Right)
-        .min_w(px(MENU_WIDTH))
-        .submenu_with_icon(None, target_label, window, cx, move |submenu, _, _| {
-            languages.iter().fold(
-                submenu
-                    .check_side(Side::Right)
-                    .max_h(px(LANGUAGE_LIST_HEIGHT))
-                    .scrollable(true),
-                |submenu, language| {
-                    let (app, code) = (target_app.clone(), language.code.clone());
-                    submenu.item(
-                        PopupMenuItem::new(language.name.clone())
-                            .checked(language.code == target)
-                            .on_click(move |_, _, cx| {
-                                app.update(cx, |state, cx| state.set_translation_target(&code, cx));
-                            }),
-                    )
-                },
-            )
-        });
-    menu = menu.separator();
-    for (label, choice) in [
-        ("Ask me before translating", TranslationBehavior::Ask),
-        ("Auto-translate all messages", TranslationBehavior::Auto),
-        ("Never translate", TranslationBehavior::Never),
-    ] {
-        let app = app.clone();
-        menu = menu.item(
-            PopupMenuItem::new(label)
-                .checked(behavior == choice)
-                .on_click(move |_, _, cx| {
-                    app.update(cx, |state, cx| state.set_translation_behavior(choice, cx));
-                }),
-        );
-    }
-    menu = menu
-        .separator()
-        .item(PopupMenuItem::label("Never translate messages in"));
-    if never.is_empty() {
-        return menu.item(PopupMenuItem::label("No languages"));
-    }
-    for (code, name) in never {
-        let app = app.clone();
-        menu = menu.item(
-            PopupMenuItem::element(move |_, _| {
-                h_flex()
-                    .w(px(TOGGLE_LABEL_WIDTH))
-                    .gap(px(12.))
-                    .items_center()
-                    .justify_between()
-                    .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-                    .child(menu_icon(IconName::X))
-            })
-            .on_click(move |_, _, cx| {
-                app.update(cx, |state, cx| state.allow_translating_language(&code, cx));
-            }),
-        );
-    }
-    menu
-}
-
-fn section_toggle(
-    app: &Entity<AppState>,
-    section: ChatSection,
-    label: &'static str,
-    enabled: bool,
-) -> PopupMenuItem {
-    let app = app.clone();
-    PopupMenuItem::element(move |_, _| {
-        h_flex()
-            .w(px(TOGGLE_LABEL_WIDTH))
-            .gap(px(12.))
-            .items_center()
-            .justify_between()
-            .child(div().flex_1().min_w_0().truncate().child(label))
-            .child(switch(enabled))
-    })
-    .on_click(move |_, _, cx| {
-        app.update(cx, |state, cx| {
-            state.set_chat_section(section, !enabled, cx)
-        });
-    })
-}
-
-fn switch(enabled: bool) -> Div {
-    let thumb = div()
-        .size(px(SWITCH_THUMB))
-        .rounded_full()
-        .bg(theme::text_strong());
-    h_flex()
-        .w(px(SWITCH_WIDTH))
-        .h(px(SWITCH_HEIGHT))
-        .flex_none()
-        .p(px(SWITCH_PADDING))
-        .items_center()
-        .rounded_full()
-        .bg(if enabled {
-            theme::accent()
-        } else {
-            theme::badge_muted()
-        })
-        .when(enabled, |track| track.justify_end())
-        .child(thumb)
 }
 
 fn work_location_icon(kind: Option<WorkLocationKind>) -> gpui_kit::component::Icon {

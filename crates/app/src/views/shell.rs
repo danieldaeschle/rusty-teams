@@ -40,6 +40,8 @@ use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 use crate::call::{CallMedia, CallWindows, ZoomStep};
 use crate::notice::NoticeAction;
 use crate::notify::NotificationCenter;
+use crate::settings::{SettingsDialog, SettingsDialogEvent};
+use crate::settings_section::SettingsSection;
 use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
@@ -118,6 +120,7 @@ pub struct AppShell {
     status_dialog: Option<Entity<StatusMessageDialog>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
     agent_dialog: Option<Entity<StartDialog>>,
+    settings_dialog: Option<Entity<SettingsDialog>>,
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     call_window_fullscreen: bool,
@@ -202,9 +205,9 @@ impl AppShell {
             cx.subscribe(
                 &activity_panel,
                 |this, _, event: &ActivityPanelEvent, cx| match event {
-                    ActivityPanelEvent::OpenSettings => this
-                        .notifications
-                        .update(cx, |center, cx| center.open_settings(cx)),
+                    ActivityPanelEvent::OpenSettings => this.state.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::Notifications, cx)
+                    }),
                     ActivityPanelEvent::Open {
                         conversation_id,
                         message_id,
@@ -227,9 +230,9 @@ impl AppShell {
                     AgentRunsEvent::StartRequested(request) => {
                         this.open_agent_dialog(request.clone(), window, cx)
                     }
-                    AgentRunsEvent::OpenSettings => this
-                        .notifications
-                        .update(cx, |center, cx| center.open_agent_settings(cx)),
+                    AgentRunsEvent::OpenSettings => {
+                        this.open_settings(SettingsSection::Agents, window, cx)
+                    }
                     AgentRunsEvent::Finished(_) => {}
                 },
             )
@@ -253,9 +256,8 @@ impl AppShell {
                 if matches!(event, AppEvent::StatusMessage) {
                     this.open_status_dialog(window, cx);
                 }
-                if matches!(event, AppEvent::NotificationSettings) {
-                    this.notifications
-                        .update(cx, |center, cx| center.open_settings(cx));
+                if let AppEvent::Settings(section) = event {
+                    this.open_settings(*section, window, cx);
                 }
                 if matches!(event, AppEvent::Profile) {
                     this.open_profile_card(window, cx);
@@ -300,6 +302,7 @@ impl AppShell {
             status_dialog: None,
             shortcuts_dialog: None,
             agent_dialog: None,
+            settings_dialog: None,
             profile_card: None,
             focus_handle,
             call_window_fullscreen: false,
@@ -559,6 +562,34 @@ impl AppShell {
         cx.notify();
     }
 
+    fn open_settings(
+        &mut self,
+        section: SettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = &self.settings_dialog {
+            dialog.update(cx, |dialog, cx| dialog.show(section, window, cx));
+            return;
+        }
+        self.close_image_viewer(window, cx);
+        self.switcher = None;
+        let (app, center) = (self.state.clone(), self.notifications.clone());
+        let dialog = cx.new(|cx| SettingsDialog::new(app, center, section, window, cx));
+        cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, _: &SettingsDialogEvent, window, cx| {
+                this.settings_dialog = None;
+                this.restore_focus(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.settings_dialog = Some(dialog);
+        cx.notify();
+    }
+
     fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.shortcuts_dialog.take().is_some() {
             self.restore_focus(window, cx);
@@ -768,6 +799,7 @@ impl Render for AppShell {
             self.status_dialog.is_some(),
             self.shortcuts_dialog.is_some(),
             self.agent_dialog.is_some(),
+            self.settings_dialog.is_some(),
         ]
         .into_iter()
         .filter(|open| *open)
@@ -992,6 +1024,7 @@ impl Render for AppShell {
             .children(self.status_dialog.clone())
             .children(self.shortcuts_dialog.clone())
             .children(self.agent_dialog.clone())
+            .children(self.settings_dialog.clone())
             .children(self.profile_card.clone())
             .child(crate::frame_log::probe("last"))
     }

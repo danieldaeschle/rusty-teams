@@ -641,7 +641,7 @@ impl ConversationView {
             | AppEvent::Forward
             | AppEvent::ImageViewer
             | AppEvent::StatusMessage
-            | AppEvent::NotificationSettings
+            | AppEvent::Settings(_)
             | AppEvent::Profile
             | AppEvent::CallHistory
             | AppEvent::Ring

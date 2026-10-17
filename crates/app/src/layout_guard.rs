@@ -169,6 +169,8 @@ mod frames {
     use gpui_kit::Entity;
 
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
+    use crate::settings::metrics;
+    use crate::settings_section::SettingsSection;
     use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
     use crate::user_activity::UserInput;
@@ -244,6 +246,23 @@ mod frames {
         PROPOSAL_THUMBNAILS,
         PROPOSAL_BUTTONS,
         REACTION_PILL,
+    ];
+    const SETTINGS_TAGS: &[&str] = &[
+        "settings",
+        "settings/nav",
+        "settings/main",
+        "settings/main/header",
+        "settings/main/body",
+    ];
+    const SETTINGS_SECTIONS: [SettingsSection; 8] = [
+        SettingsSection::General,
+        SettingsSection::Notifications,
+        SettingsSection::Chats,
+        SettingsSection::Calls,
+        SettingsSection::Devices,
+        SettingsSection::Agents,
+        SettingsSection::Mcp,
+        SettingsSection::About,
     ];
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
     const TOLERANCE: f32 = 0.5;
@@ -393,6 +412,7 @@ mod frames {
                 &PEOPLE_PANEL,
             ])
             .chain(&AGENT_TAGS)
+            .chain(SETTINGS_TAGS)
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -806,6 +826,43 @@ mod frames {
                 .map(|(key, message)| format!("recap@{width}x{height}:{key}: {message}"))
                 .collect();
             assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    #[gpui_kit::test]
+    fn settings_dialog_keeps_its_inset_at_every_size(cx: &mut TestAppContext) {
+        let (handle, state) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES.into_iter().chain([(960., 640.)]) {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            let inset = metrics(width, height).inset;
+            for section in SETTINGS_SECTIONS {
+                visual.update(|_, cx| {
+                    state.update(cx, |state, cx| state.open_settings(section, cx))
+                });
+                let tags = collect(&mut visual, Some(SETTINGS_TAGS[0]));
+                let found: Vec<String> = violations(&tags, window, SETTINGS_TAGS)
+                    .into_iter()
+                    .filter(|(key, _)| key.starts_with("settings"))
+                    .map(|(key, message)| format!("{section:?}@{width}x{height}:{key}: {message}"))
+                    .collect();
+                assert!(found.is_empty(), "{}", found.join("\n"));
+                let dialog = visual.debug_bounds(SETTINGS_TAGS[0]).expect("settings dialog");
+                let edges = [
+                    f32::from(dialog.left()),
+                    f32::from(dialog.top()),
+                    width - f32::from(dialog.right()),
+                    height - f32::from(dialog.bottom()),
+                ];
+                assert!(
+                    edges.iter().all(|edge| (edge - inset).abs() <= TOLERANCE),
+                    "{section:?}@{width}x{height}: dialog edges {edges:?}, expected {inset}"
+                );
+            }
         }
     }
 
