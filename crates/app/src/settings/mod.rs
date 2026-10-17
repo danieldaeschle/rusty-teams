@@ -1,4 +1,5 @@
 mod about;
+mod account;
 mod appearance;
 mod calls;
 mod chats;

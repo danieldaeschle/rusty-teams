@@ -1,7 +1,14 @@
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
+use teams_core::ChatSettingChange;
+
+use super::account::{
+    ACTIVITY_OR_OFF, CHAT_MESSAGES, MEETING_CHATS, MENTIONS, PRESETS, account_select,
+    meeting_chats_detail, preset_detail,
+};
 use super::rows::{Choice, caption, control_row, select, text_button, toggle_row};
+use crate::app_state::AppState;
 use crate::notify::NotificationCenter;
 use crate::notify::rules::{Corner, Settings};
 use crate::notify::sounds::AlertSound;
@@ -17,20 +24,12 @@ struct Toggle {
     field: Accessor,
 }
 
-const APPEARANCE: [Toggle; 2] = [
-    Toggle {
-        id: "settings-preview",
-        title: "Show message preview",
-        detail: "Off: only \"New message\"",
-        field: |settings| &mut settings.preview,
-    },
-    Toggle {
-        id: "settings-flash",
-        title: "Flash taskbar when notifications are received",
-        detail: "On new messages, until you open the window",
-        field: |settings| &mut settings.flash,
-    },
-];
+const FLASH: Toggle = Toggle {
+    id: "settings-flash",
+    title: "Flash taskbar when notifications are received",
+    detail: "On new messages, until you open the window",
+    field: |settings| &mut settings.flash,
+};
 
 const NOTIFICATION_SOUND: Toggle = Toggle {
     id: "settings-notification-sound",
@@ -61,13 +60,6 @@ const CALL_SOUNDS: [Toggle; 2] = [
     },
 ];
 
-const MENTIONS_ONLY: Toggle = Toggle {
-    id: "settings-mentions-only",
-    title: "Mentions only",
-    detail: "Direct messages and @mentions",
-    field: |settings| &mut settings.mentions_only,
-};
-
 const HIDE_IN_CALLS: Toggle = Toggle {
     id: "settings-hide-in-calls",
     title: "Hide notifications during calls and meetings",
@@ -75,7 +67,8 @@ const HIDE_IN_CALLS: Toggle = Toggle {
     field: |settings| &mut settings.mute_in_calls,
 };
 
-pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
+pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &App) -> Div {
+    let account = app.read(cx).account_chat_settings().notifications;
     let mut current = center.read(cx).settings().clone();
     let corner = current.corner;
     let sounds = current.sounds.clone();
@@ -83,17 +76,17 @@ pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
         let on = *(toggle.field)(&mut current);
         toggle_element(center, toggle, on)
     };
-    let appearance: Vec<Stateful<Div>> = APPEARANCE.iter().map(&mut toggle).collect();
+    let flash = toggle(&FLASH);
     let notification_sound = toggle(&NOTIFICATION_SOUND);
     let urgent_sound = toggle(&URGENT_SOUND);
     let call_sounds: Vec<Stateful<Div>> = CALL_SOUNDS.iter().map(&mut toggle).collect();
-    let mentions_only = toggle(&MENTIONS_ONLY);
     let hide_in_calls = toggle(&HIDE_IN_CALLS);
     let test_center = center.clone();
     v_flex()
         .w_full()
         .child(caption("APPEARANCE AND SOUND"))
-        .children(appearance)
+        .child(preview_toggle(app, account.show_preview))
+        .child(flash)
         .child(control_row(
             "Position on the screen",
             "Corner of the main screen",
@@ -141,10 +134,80 @@ pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
             |settings| &mut settings.sounds.urgent_sound_type,
         ))
         .children(call_sounds)
-        .child(caption("WHAT YOU GET NOTIFIED FOR"))
-        .child(mentions_only)
+        .child(caption("TEAMS AND CHANNELS"))
+        .child(account_select(
+            app,
+            (
+                "settings-notification-preset",
+                "Teams and channels",
+                preset_detail(account.preset),
+            ),
+            &PRESETS,
+            account.preset,
+            ChatSettingChange::Preset,
+        ))
+        .child(caption("CHAT"))
+        .child(account_select(
+            app,
+            ("settings-chat-messages", "Chat message notifications", ""),
+            &CHAT_MESSAGES,
+            account.chat_messages,
+            ChatSettingChange::ChatMessages,
+        ))
+        .child(account_select(
+            app,
+            ("settings-personal-mentions", "Personal @mentions", ""),
+            &MENTIONS,
+            account.personal_mentions,
+            ChatSettingChange::PersonalMentions,
+        ))
+        .child(account_select(
+            app,
+            (
+                "settings-everyone-mentions",
+                "Everyone in chat @mentions",
+                "",
+            ),
+            &ACTIVITY_OR_OFF,
+            account.everyone_mentions,
+            ChatSettingChange::EveryoneMentions,
+        ))
+        .child(account_select(
+            app,
+            ("settings-likes", "Likes and reactions", ""),
+            &ACTIVITY_OR_OFF,
+            account.likes,
+            ChatSettingChange::Likes,
+        ))
         .child(caption("MEETINGS AND CALLS"))
+        .child(account_select(
+            app,
+            (
+                "settings-meeting-chats",
+                "Meeting chat notifications",
+                meeting_chats_detail(account.meeting_chats),
+            ),
+            &MEETING_CHATS,
+            account.meeting_chats,
+            ChatSettingChange::MeetingChats,
+        ))
         .child(hide_in_calls)
+}
+
+fn preview_toggle(app: &Entity<AppState>, on: bool) -> Stateful<Div> {
+    let app = app.clone();
+    toggle_row(
+        "settings-preview",
+        "Show message preview",
+        "Off: only \"New message\"",
+        theme::text_muted(),
+        on,
+    )
+    .on_click(move |_, _, cx| {
+        app.update(cx, |state, cx| {
+            state.save_chat_setting(ChatSettingChange::ShowPreview(!on), cx)
+        })
+    })
 }
 
 fn toggle_element(center: &Entity<NotificationCenter>, toggle: &Toggle, on: bool) -> Stateful<Div> {
