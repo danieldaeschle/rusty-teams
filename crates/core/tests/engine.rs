@@ -15,6 +15,7 @@ use teams_core::{
     Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
     DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
     MentionTarget, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
+    substrate_search,
 };
 
 const ME: &str = "user-me";
@@ -132,6 +133,7 @@ struct Fake {
     note_puts: Mutex<Vec<Option<chatsvc::StatusNote>>>,
     window_answer: Mutex<Option<chatsvc::MessageWindow>>,
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
+    search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
 }
 
 impl Fake {
@@ -195,6 +197,20 @@ impl Fake {
 }
 
 impl Remote for Handle {
+    async fn server_suggestions(
+        &self,
+        identity: &substrate_search::SearchIdentity,
+        _search_session: &substrate_search::SearchSession,
+        text: &str,
+    ) -> Result<substrate_search::Suggestions> {
+        self.search_identities
+            .lock()
+            .unwrap()
+            .push(identity.clone());
+        self.record(format!("server_suggestions:{text}"));
+        Ok(substrate_search::Suggestions::default())
+    }
+
     async fn me(&self) -> Result<User> {
         Ok(serde_json::from_value(json!({"id": ME, "displayName": "Me Myself"})).unwrap())
     }
@@ -4760,6 +4776,27 @@ async fn a_forward_cached_without_its_content_is_read_again_once() {
     assert_eq!(reads(&fake), 1);
     engine.fetch_newer(CHAT).await.unwrap();
     assert_eq!(reads(&fake), 1);
+}
+
+#[tokio::test]
+async fn server_search_is_anchored_to_my_user_and_tenant() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, SyncConfig::default()).await;
+    let search_session = substrate_search::SearchSession::new();
+    engine
+        .server_suggestions(&search_session, "ada")
+        .await
+        .unwrap();
+    engine
+        .server_suggestions(&search_session, "adam")
+        .await
+        .unwrap();
+    let identities = fake.search_identities.lock().unwrap().clone();
+    let expected = substrate_search::SearchIdentity {
+        user_id: ME.to_owned(),
+        tenant_id: "tenant-1".to_owned(),
+    };
+    assert_eq!(identities, [expected.clone(), expected]);
 }
 
 const STALE_FORWARD: &str = r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"size":null,"quote":null,"id":"orig-1","content":null}]"#;

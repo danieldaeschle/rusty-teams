@@ -8,6 +8,9 @@ use chatsvc::{
     Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
+use chatsvc::substrate_search::{
+    QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
+};
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
@@ -436,6 +439,32 @@ pub trait Remote {
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
         Err(Error::Unsupported("GIF search"))
+    }
+
+    async fn server_search_init(
+        &self,
+        _identity: &SearchIdentity,
+        _search_session: &SearchSession,
+    ) -> Result<()> {
+        Err(Error::Unsupported("server search"))
+    }
+
+    async fn server_suggestions(
+        &self,
+        _identity: &SearchIdentity,
+        _search_session: &SearchSession,
+        _text: &str,
+    ) -> Result<Suggestions> {
+        Err(Error::Unsupported("server search"))
+    }
+
+    async fn server_query(
+        &self,
+        _identity: &SearchIdentity,
+        _search_session: &SearchSession,
+        _request: &QueryRequest,
+    ) -> Result<QueryResults> {
+        Err(Error::Unsupported("server search"))
     }
 
     async fn create_scheduled(
@@ -1090,6 +1119,38 @@ impl Remote for Graph {
 
     async fn search_gifs(&self, query: &str) -> Result<Vec<Gif>> {
         Ok(Gifs::new(self.session()).search(query).await?)
+    }
+
+    async fn server_search_init(
+        &self,
+        identity: &SearchIdentity,
+        search_session: &SearchSession,
+    ) -> Result<()> {
+        Ok(SubstrateSearch::new(self.session(), identity.clone())
+            .init(search_session)
+            .await?)
+    }
+
+    async fn server_suggestions(
+        &self,
+        identity: &SearchIdentity,
+        search_session: &SearchSession,
+        text: &str,
+    ) -> Result<Suggestions> {
+        Ok(SubstrateSearch::new(self.session(), identity.clone())
+            .suggestions(search_session, text)
+            .await?)
+    }
+
+    async fn server_query(
+        &self,
+        identity: &SearchIdentity,
+        search_session: &SearchSession,
+        request: &QueryRequest,
+    ) -> Result<QueryResults> {
+        Ok(SubstrateSearch::new(self.session(), identity.clone())
+            .query(search_session, request)
+            .await?)
     }
 
     async fn create_scheduled(

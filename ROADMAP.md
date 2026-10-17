@@ -15,7 +15,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
 | [Notifications](#notifications) | 89 % | 8 | 0 | 1 |
-| [Search and navigation](#search-and-navigation) | 100 % | 5 | 0 | 0 |
+| [Search and navigation](#search-and-navigation) | 92 % | 5 | 1 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
 | [Calls and meetings](#calls-and-meetings) | 62 % | 15 | 18 | 6 |
@@ -138,6 +138,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Ctrl+K switcher over chats, channels, people | Done |  |
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
+| Server search over the full history like Teams | Partial | Substrate search client in the engine (typeahead, results by tab, find in chat, KQL filters); palette and results page still use the local index |
 | Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
 | Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share menu, K raise hand, Y lobby, M mute, J join from a meeting reminder, Space held with Ctrl to talk while muted, F11 full screen, Alt+Shift+A / V start an audio / video call in the open chat; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
 
@@ -225,7 +226,6 @@ After parity. Not counted in the parity score.
 | Feature | Why |
 |---|---|
 | Personal apps in the app bar | Outside chat and channels |
-| Server-side search | The local index answers faster |
 | Copilot, intelligent recap, AI notes, Facilitator, Interpreter | Needs a Microsoft 365 Copilot licence; left out on purpose |
 | Teams Premium features (translated captions, watermark, E2EE meetings, templates, branding) | Needs a Teams Premium licence |
 | Phone system: dial pad, park, forwarding, voicemail, delegation, queues | Needs a Teams Phone licence; none on the test account |

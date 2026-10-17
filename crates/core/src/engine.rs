@@ -347,6 +347,24 @@ impl<R: Remote> SyncEngine<R> {
         Ok(tenant.clone())
     }
 
+    pub(crate) async fn my_tenant_id_from_any_chat(&self) -> Result<String> {
+        if let Some(tenant) = self.my_tenant_id.get() {
+            return Ok(tenant.clone());
+        }
+        if let Some(cached) = self.store.meta(META_TENANT_ID)? {
+            return Ok(cached);
+        }
+        let any_chat_id = self
+            .store
+            .sidebar()?
+            .chats
+            .into_iter()
+            .next()
+            .map(|chat| chat.id)
+            .ok_or(Error::Unsupported("a tenant id without a known chat"))?;
+        self.my_tenant_id(&any_chat_id).await
+    }
+
     pub(crate) async fn resolve(&self, conversation_id: &str) -> Result<Conversation> {
         match self.resolve_stored(conversation_id) {
             Err(Error::UnknownConversation(_)) => self.fetch_unknown_chat(conversation_id).await,

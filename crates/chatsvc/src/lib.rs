@@ -26,6 +26,7 @@ pub mod saved;
 pub mod settings;
 pub mod sound_settings;
 pub mod sounds;
+pub mod substrate_search;
 pub mod transcripts;
 pub mod translate;
 pub mod window;
@@ -79,6 +80,10 @@ pub use receipts::{MemberHorizon, Receipts};
 pub use recording_policy::{RecordingPolicy, parse_recording_policy};
 pub use saved::SavedMessage;
 pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use substrate_search::{
+    QueryRequest, QueryResults, QueryScope, SearchIdentity, SearchSession, SubstrateSearch,
+    Suggestions,
+};
 pub use transcripts::{MeetingTranscript, TranscriptError, TranscriptTurn, Transcripts};
 pub use translate::{
     Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,

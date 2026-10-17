@@ -49,6 +49,7 @@ mod recording_rights;
 mod remote;
 mod scheduled;
 mod search;
+mod server_search;
 mod sidebar_sync;
 mod skin_tone;
 mod spans;
@@ -97,6 +98,7 @@ pub use chatsvc::{
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
+pub use chatsvc::substrate_search;
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
