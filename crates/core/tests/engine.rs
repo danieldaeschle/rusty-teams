@@ -1041,6 +1041,7 @@ impl Remote for Handle {
         Ok(chatsvc::LinkInfo {
             url: url.to_owned(),
             title: Some("Example".into()),
+            description: Some("Example page".into()),
             ..chatsvc::LinkInfo::default()
         })
     }

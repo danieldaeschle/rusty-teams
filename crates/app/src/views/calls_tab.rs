@@ -11,7 +11,7 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
-use super::scroll_edge::with_top_edge;
+use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{icon, menu_icon};
 use crate::app_state::AppState;
@@ -411,7 +411,7 @@ pub fn calls_body(
         let rebuild_state = state.clone();
         cx.defer(move |cx| rebuild_state.update(cx, |state, cx| state.rebuild_calls_list(cx)));
     }
-    let top = -f32::from(scroll.offset().y);
+    let top = -f32::from(scroll_offset(scroll).y);
     let measured = f32::from(scroll.bounds().size.height);
     let height = if measured > 1. {
         measured

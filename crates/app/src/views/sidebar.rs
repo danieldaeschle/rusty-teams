@@ -20,7 +20,7 @@ use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
-use super::scroll_edge::with_top_edge;
+use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
@@ -1267,7 +1267,7 @@ impl SidebarView {
             (sections, section_menus, menu, state.local_previews.clone())
         };
 
-        let top = -f32::from(self.chats_scroll.offset().y);
+        let top = -f32::from(scroll_offset(&self.chats_scroll).y);
         let measured: f32 = f32::from(self.chats_scroll.bounds().size.height);
         let height = if measured > 1. {
             measured

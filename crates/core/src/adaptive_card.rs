@@ -1025,7 +1025,8 @@ fn parse_media(value: &Value) -> Option<CardMedia> {
     Some(CardMedia {
         poster_url: string_field(value, "poster")
             .filter(|url| url.starts_with(IMAGE_URL_SCHEME))
-            .map(str::to_owned),
+            .map(str::to_owned)
+            .or_else(|| crate::youtube::poster_url(source_url)),
         source_url: source_url.to_owned(),
         alt_text: string_field(value, "altText")
             .filter(|text| !text.trim().is_empty())

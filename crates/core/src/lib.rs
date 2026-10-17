@@ -65,6 +65,7 @@ mod teams_quote;
 mod time_zone;
 mod translate_sync;
 mod translation;
+mod youtube;
 
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,
@@ -146,6 +147,7 @@ pub use graph::{
 pub use images::StoredImage;
 pub use jumbo::{JumboEmoji, MAX_JUMBO_EMOJI, jumbo_emoji};
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
+pub use youtube::fallback_poster_url;
 pub use mapping::{chat_record, message_record};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
 pub use meeting_join::{

@@ -2,7 +2,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::CardMedia;
+use teams_core::{CardMedia, fallback_poster_url};
 
 use super::widgets::icon;
 use crate::theme;
@@ -19,13 +19,17 @@ pub fn media_view(media: &CardMedia, id: &str) -> AnyElement {
     let source_url = media.source_url.clone();
     let alt_text = media.alt_text.clone();
     let poster = match &media.poster_url {
-        Some(url) => img(url.clone())
-            .size_full()
-            .rounded(px(MEDIA_RADIUS))
-            .object_fit(ObjectFit::Cover)
-            .with_loading(placeholder)
-            .with_fallback(placeholder)
-            .into_any_element(),
+        Some(url) => {
+            let fallback_url = fallback_poster_url(url);
+            poster_image(url.clone())
+                .with_fallback(move || match fallback_url.clone() {
+                    Some(fallback_url) => poster_image(fallback_url)
+                        .with_fallback(placeholder)
+                        .into_any_element(),
+                    None => placeholder(),
+                })
+                .into_any_element()
+        }
         None => placeholder(),
     };
     div()
@@ -69,6 +73,14 @@ pub fn media_view(media: &CardMedia, id: &str) -> AnyElement {
                 ),
         )
         .into_any_element()
+}
+
+fn poster_image(url: String) -> Img {
+    img(url)
+        .size_full()
+        .rounded(px(MEDIA_RADIUS))
+        .object_fit(ObjectFit::Cover)
+        .with_loading(placeholder)
 }
 
 fn placeholder() -> AnyElement {
