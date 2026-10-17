@@ -24,9 +24,7 @@ pub(super) fn hierarchy_version(body: &Value) -> Result<i64> {
             number
                 .as_f64()
                 .filter(|float| float.is_finite() && float.fract() == 0.0)
-                .filter(|float| {
-                    *float >= i64::MIN as f64 && *float < i64::MAX as f64
-                })
+                .filter(|float| *float >= i64::MIN as f64 && *float < i64::MAX as f64)
                 .map(|float| float as i64)
         }),
         Value::String(text) => text.trim().parse::<i64>().ok(),

@@ -315,7 +315,10 @@ mod tests {
                 format!("{}.mp3", ringtone.name().to_lowercase())
             );
         }
-        assert_eq!(Ringtone::from_name("wishgranted"), Some(Ringtone::WishGranted));
+        assert_eq!(
+            Ringtone::from_name("wishgranted"),
+            Some(Ringtone::WishGranted)
+        );
         assert_eq!(Ringtone::from_name("Chime"), None);
         assert_eq!(Ringtone::Ring.label(), "Default");
     }

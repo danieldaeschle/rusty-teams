@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use chatsvc::{ActivityReporting, PresenceService, Realtime, RealtimeConfig, RealtimeEvent, StatusKind};
+use chatsvc::{
+    ActivityReporting, PresenceService, Realtime, RealtimeConfig, RealtimeEvent, StatusKind,
+};
 use session::{DEFAULT_ENDPOINT, Session};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -8,7 +10,9 @@ const SETTLE: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() {
-    let user_id = std::env::args().nth(1).expect("usage: presence_endpoint_probe <own user id GUID> [inactive wait seconds]");
+    let user_id = std::env::args()
+        .nth(1)
+        .expect("usage: presence_endpoint_probe <own user id GUID> [inactive wait seconds]");
     let inactive_wait = std::env::args()
         .nth(2)
         .and_then(|value| value.parse().ok())
@@ -21,11 +25,20 @@ async fn main() {
         initially_active: true,
         ..RealtimeConfig::default()
     };
-    let mut realtime = Realtime::start_with(&session, config).await.expect("realtime start");
+    let mut realtime = Realtime::start_with(&session, config)
+        .await
+        .expect("realtime start");
     let endpoint_id = wait_for_endpoint(&mut realtime).await;
     println!("# trouter connected");
 
-    println!("register: {}", outcome(presence.register_endpoint(&endpoint_id, ActivityReporting::Transport).await));
+    println!(
+        "register: {}",
+        outcome(
+            presence
+                .register_endpoint(&endpoint_id, ActivityReporting::Transport)
+                .await
+        )
+    );
     realtime.resend_activity();
     println!("# sent active");
     tokio::time::sleep(SETTLE).await;
@@ -36,8 +49,14 @@ async fn main() {
     tokio::time::sleep(inactive_wait).await;
     print_own_presence(&presence, &user_id).await;
 
-    println!("http report inactive: {}", outcome(presence.report_activity(&endpoint_id, false).await));
-    println!("unregister: {}", outcome(presence.unregister_endpoint(&endpoint_id).await));
+    println!(
+        "http report inactive: {}",
+        outcome(presence.report_activity(&endpoint_id, false).await)
+    );
+    println!(
+        "unregister: {}",
+        outcome(presence.unregister_endpoint(&endpoint_id).await)
+    );
     realtime.stop().await;
     println!("# stopped");
 }
@@ -49,7 +68,9 @@ async fn wait_for_endpoint(realtime: &mut Realtime) -> String {
         while let Some(event) = realtime.recv().await {
             match event {
                 RealtimeEvent::Endpoint(endpoint) => endpoint_id = Some(endpoint.endpoint_id),
-                RealtimeEvent::Status(status) if status.kind == StatusKind::Connected => connected = true,
+                RealtimeEvent::Status(status) if status.kind == StatusKind::Connected => {
+                    connected = true
+                }
                 _ => {}
             }
             if connected && let Some(endpoint_id) = endpoint_id.take() {
@@ -58,7 +79,9 @@ async fn wait_for_endpoint(realtime: &mut Realtime) -> String {
         }
         panic!("realtime closed before connecting");
     };
-    tokio::time::timeout(CONNECT_TIMEOUT, wait).await.expect("trouter did not connect")
+    tokio::time::timeout(CONNECT_TIMEOUT, wait)
+        .await
+        .expect("trouter did not connect")
 }
 
 async fn print_own_presence(presence: &PresenceService, user_id: &str) {

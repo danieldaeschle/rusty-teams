@@ -297,7 +297,11 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["Lunch Order Board \u{1F37D}\u{FE0F}", "100% done", "Bad%FFbytes"]
+            [
+                "Lunch Order Board \u{1F37D}\u{FE0F}",
+                "100% done",
+                "Bad%FFbytes"
+            ]
         );
     }
 

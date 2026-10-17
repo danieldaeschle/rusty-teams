@@ -148,7 +148,11 @@ pub fn merge_sound_settings(
         ));
     }
     if previous.urgent_sound != updated.urgent_sound {
-        changes.push((TOAST_SETTINGS, URGENT_SOUND, switch_value(updated.urgent_sound)));
+        changes.push((
+            TOAST_SETTINGS,
+            URGENT_SOUND,
+            switch_value(updated.urgent_sound),
+        ));
     }
     if previous.urgent_sound_type != updated.urgent_sound_type {
         changes.push((
@@ -200,8 +204,10 @@ pub fn aggregate_read_body() -> Value {
     json!({"voiceAdminSettings": true})
 }
 
-pub struct SoundSettingsClient<P: MessageTransport = SessionMessageTransport, M: CsaTransport = SessionTransport>
-{
+pub struct SoundSettingsClient<
+    P: MessageTransport = SessionMessageTransport,
+    M: CsaTransport = SessionTransport,
+> {
     properties: UserSettings<P>,
     middle_tier: M,
     middle_tier_url: String,
@@ -356,9 +362,12 @@ mod tests {
             sound_when_busy: false,
             ..previous.clone()
         };
-        let merged: Value =
-            serde_json::from_str(&merge_sound_settings(&properties(personal), &previous, &updated))
-                .unwrap();
+        let merged: Value = serde_json::from_str(&merge_sound_settings(
+            &properties(personal),
+            &previous,
+            &updated,
+        ))
+        .unwrap();
         assert_eq!(
             merged,
             json!({
