@@ -18,6 +18,7 @@ use crate::presence_link::{self, LinkSignal};
 
 pub type Engine = SyncEngine<Graph>;
 
+const FORWARD_HEAL_PAUSE: Duration = Duration::from_secs(2);
 const CONNECT_RETRY: Duration = Duration::from_secs(8);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 const REFRESH_SETTLE: Duration = Duration::from_secs(2);
@@ -68,6 +69,7 @@ pub enum BackendEvent {
     Typing(TypingEvent),
     Favorites(Vec<String>),
     Synced(DateTime<Utc>),
+    LiveRetry(Arc<Notify>),
 }
 
 type EventSender = mpsc::UnboundedSender<BackendEvent>;
@@ -166,6 +168,8 @@ async fn supervise(
     let (nudge, nudges) = mpsc::unbounded_channel();
     let resend = Arc::new(Notify::new());
     let link = presence_link::start(&session, activity.clone(), resend.clone());
+    let live_retry = Arc::new(Notify::new());
+    let _ = events.send(BackendEvent::LiveRetry(live_retry.clone()));
     tokio::spawn(realtime_loop(
         session.clone(),
         engine.clone(),
@@ -174,6 +178,7 @@ async fn supervise(
         activity,
         resend,
         link,
+        live_retry,
     ));
     tokio::spawn(calendar_loop(session.clone(), events.clone()));
     tokio::spawn(pins_loop(session, events.clone()));
@@ -201,6 +206,7 @@ async fn refresh_loop(
     mut nudges: mpsc::UnboundedReceiver<()>,
 ) {
     let mut interval = tokio::time::interval(REFRESH_INTERVAL);
+    let mut forwards_healing = false;
     loop {
         tokio::select! {
             _ = interval.tick() => {}
@@ -214,6 +220,10 @@ async fn refresh_loop(
         }
         match engine.refresh_sidebar().await {
             Ok(_) => {
+                if !std::mem::replace(&mut forwards_healing, true) {
+                    let engine = engine.clone();
+                    tokio::spawn(async move { engine.heal_all_forwards(FORWARD_HEAL_PAUSE).await });
+                }
                 if let Err(error) = engine.refresh_folders().await {
                     crate::diagnostics::record(format!(
                         "sync: chat folders and channel layout not refreshed: {error}"
@@ -238,6 +248,7 @@ async fn realtime_loop(
     mut activity: watch::Receiver<bool>,
     resend: Arc<Notify>,
     link: mpsc::UnboundedSender<LinkSignal>,
+    live_retry: Arc<Notify>,
 ) {
     loop {
         let _ = events.send(BackendEvent::Live(LiveState::Connecting));
@@ -314,7 +325,10 @@ async fn realtime_loop(
                 let _ = link.send(LinkSignal::Disconnected);
             }
         }
-        tokio::time::sleep(REALTIME_RETRY).await;
+        tokio::select! {
+            _ = tokio::time::sleep(REALTIME_RETRY) => {}
+            _ = live_retry.notified() => {}
+        }
     }
 }
 

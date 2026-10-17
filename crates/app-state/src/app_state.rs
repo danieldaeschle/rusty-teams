@@ -104,6 +104,8 @@ pub struct AppState {
     pub bot_apps: HashMap<String, Vec<ChatApp>>,
     pub bot_apps_pending: HashSet<String>,
     pub notice: Option<Notice>,
+    pub connection_banner: crate::connection_banner::BannerTiming,
+    pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
     pub keep_unread: Option<String>,
     pub typing: TypingState,
@@ -253,6 +255,8 @@ impl AppState {
             bot_apps: HashMap::new(),
             bot_apps_pending: HashSet::new(),
             notice: None,
+            connection_banner: Default::default(),
+            live_retry: None,
             notice_count: 0,
             keep_unread: None,
             typing: TypingState::default(),
@@ -898,8 +902,10 @@ impl AppState {
         match event {
             BackendEvent::Connection(connection) => {
                 self.connection = connection;
+                self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
             }
+            BackendEvent::LiveRetry(retry) => self.live_retry = Some(retry),
             BackendEvent::Calls(launcher) => {
                 launcher.set_default_camera(self.call_camera.clone());
                 self.call_launcher = Some(launcher);
@@ -976,6 +982,7 @@ impl AppState {
             BackendEvent::Typing(event) => self.apply_typing(event, cx),
             BackendEvent::Live(live) => {
                 self.live = live;
+                self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Favorites(ids) => {

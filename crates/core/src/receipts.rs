@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use chatsvc::{EventKind, MemberHorizon, MessageEvent, StatusEvent, StatusKind};
 use chrono::{DateTime, Utc};
-use store::MessageRecord;
+use store::{MessageRecord, ReadHorizonRecord};
 
-use crate::engine::{Conversation, SyncEngine};
+use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::Result;
 use crate::events::CoreEvent;
 use crate::remote::Remote;
@@ -46,6 +46,7 @@ struct ConversationReceipts {
 pub(crate) struct ReceiptCache {
     conversations: Mutex<HashMap<String, Option<ConversationReceipts>>>,
     pending: Mutex<HashSet<String>>,
+    read_from_store: Mutex<HashSet<String>>,
     pub(crate) debounce: Duration,
 }
 
@@ -54,6 +55,7 @@ impl Default for ReceiptCache {
         ReceiptCache {
             conversations: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashSet::new()),
+            read_from_store: Mutex::new(HashSet::new()),
             debounce: DEFAULT_RECEIPT_DEBOUNCE,
         }
     }
@@ -73,9 +75,17 @@ fn user_of(member_id: &str) -> &str {
     member_id.rsplit(':').next().unwrap_or(member_id)
 }
 
+fn stored_horizon(horizon: MemberHorizon) -> ReadHorizonRecord {
+    ReadHorizonRecord {
+        member_id: horizon.member_id,
+        read_until: horizon.read_until,
+        read_at: horizon.read_at,
+    }
+}
+
 fn build(
     my_user_id: &str,
-    horizons: &[MemberHorizon],
+    horizons: &[ReadHorizonRecord],
     members: &[store::MemberRecord],
 ) -> Option<ConversationReceipts> {
     let mut others: Vec<OtherMember> = horizons
@@ -169,13 +179,39 @@ impl<R: Remote> SyncEngine<R> {
         })
     }
 
-    /// Memory only, cheap enough to call per rendered message.
+    /// Memory first; the stored horizons of a chat are read once per session, so receipts show before the refresh.
     pub fn receipt_state_for(&self, record: &MessageRecord) -> ReceiptState {
+        self.load_stored_receipts(&record.conversation_id);
         let conversations = locked(&self.receipts.conversations);
         match conversations.get(&record.conversation_id) {
             Some(Some(receipts)) => state_of(receipts, record),
             _ => ReceiptState::Unknown,
         }
+    }
+
+    fn load_stored_receipts(&self, conversation_id: &str) {
+        if !locked(&self.receipts.read_from_store).insert(conversation_id.to_owned()) {
+            return;
+        }
+        if locked(&self.receipts.conversations).contains_key(conversation_id) {
+            return;
+        }
+        let Some(cached) = self.stored_receipts(conversation_id) else {
+            return;
+        };
+        locked(&self.receipts.conversations)
+            .entry(conversation_id.to_owned())
+            .or_insert(Some(cached));
+    }
+
+    fn stored_receipts(&self, conversation_id: &str) -> Option<ConversationReceipts> {
+        let horizons = self.store.read_horizons(conversation_id).ok()?;
+        if horizons.is_empty() {
+            return None;
+        }
+        let my_user_id = self.store.meta(META_USER_ID).ok()??;
+        let members = self.store.chat(conversation_id).ok()??.members;
+        build(&my_user_id, &horizons, &members)
     }
 
     /// Call when a chat opens. Channels are skipped.
@@ -187,7 +223,15 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(());
         }
         let my_user_id = self.my_user_id().await?;
-        let horizons = self.remote.consumption_horizons(conversation_id).await?;
+        let horizons: Vec<ReadHorizonRecord> = self
+            .remote
+            .consumption_horizons(conversation_id)
+            .await?
+            .into_iter()
+            .map(stored_horizon)
+            .collect();
+        self.store.set_read_horizons(conversation_id, &horizons)?;
+        locked(&self.receipts.read_from_store).insert(conversation_id.to_owned());
         let members = self
             .store
             .chat(conversation_id)?

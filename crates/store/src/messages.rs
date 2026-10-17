@@ -269,6 +269,28 @@ impl Store {
         Ok(messages)
     }
 
+    /// Chats, newest first, holding an attachment of `content_type` without content that is not marked unavailable.
+    pub fn conversations_with_stale_attachments(&self, content_type: &str) -> Result<Vec<String>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached(
+            "SELECT chats.id FROM chats
+             WHERE EXISTS (
+                SELECT 1 FROM messages, json_each(messages.attachments_json) AS attachment
+                WHERE messages.conversation_id = chats.id
+                  AND instr(messages.attachments_json, ?1) > 0
+                  AND json_extract(attachment.value, '$.content_type') = ?2
+                  AND json_extract(attachment.value, '$.content') IS NULL
+                  AND NOT coalesce(json_extract(attachment.value, '$.unavailable'), 0)
+             )
+             ORDER BY chats.last_message_at DESC",
+        )?;
+        let needle = format!("\"content_type\":\"{content_type}\"");
+        let conversation_ids = statement
+            .query_map(params![needle, content_type], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(conversation_ids)
+    }
+
     pub fn messages_by_id(
         &self,
         conversation_id: &str,
