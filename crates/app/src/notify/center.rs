@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::Sidebar;
 
@@ -12,20 +12,23 @@ use super::meeting_view::MeetingToastView;
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
 use super::ring_view::RingView;
 use super::rules::{
-    ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide, in_call,
-    meeting_start_sound, ringtone_for, should_flash, should_ringback, shows_preview,
+    ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide,
+    decide_proposal, in_call, meeting_start_sound, ringtone_for, should_flash, should_ringback,
+    shows_preview,
 };
 use super::settings;
 use super::sound_cache::{self, SoundHandle};
 use super::sounds::{CallTone, Ringtone};
 use super::stack::{
-    AgentToast, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE, ToastModel, ToastStack,
+    AgentToast, AgentToastKind, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE,
+    ToastModel, ToastStack,
 };
 use super::taskbar::taskbar_badge_count;
 use super::text::describe;
 use super::toast::{PillView, ToastView};
 use crate::active_appearance::{self, ActiveAppearance};
 use crate::activity::ActivityCenter;
+use crate::agent_api::{self, pending::PendingProposal};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
 use crate::appearance::AppIcon;
@@ -97,6 +100,9 @@ pub struct NotificationCenter {
     _activity_observation: Subscription,
     _appearance_observation: Subscription,
     _agent_subscription: Option<Subscription>,
+    started_at: DateTime<Utc>,
+    known_proposals: HashSet<String>,
+    _proposal_observation: Option<Subscription>,
 }
 
 impl NotificationCenter {
@@ -135,7 +141,12 @@ impl NotificationCenter {
                 }
             })
         });
+        let proposal_observation =
+            agent_api::handle(cx).map(|api| cx.observe(&api, |this, _, cx| this.on_proposals(cx)));
         let center = NotificationCenter {
+            started_at: Utc::now(),
+            known_proposals: HashSet::new(),
+            _proposal_observation: proposal_observation,
             main_window: window.window_handle(),
             main_native: platform::native_handle(window),
             settings,
@@ -460,8 +471,11 @@ impl NotificationCenter {
             first_lines(&run.final_text, AGENT_BODY_LINES)
         };
         let toast = AgentToast {
-            run_id: run.id,
-            session_id: run.session_id.clone(),
+            kind: AgentToastKind::Run {
+                run_id: run.id,
+                session_id: run.session_id.clone(),
+                failed,
+            },
             header: format!(
                 "{} - {} - {}",
                 run.action_label,
@@ -477,7 +491,6 @@ impl NotificationCenter {
             } else {
                 body
             },
-            failed,
         };
         let now = Instant::now();
         let id = self
@@ -498,11 +511,90 @@ impl NotificationCenter {
             return;
         };
         self.drop_toast(id, cx);
-        if agent.failed {
-            crate::agents::retry_run(agent.run_id, cx);
-        } else {
-            crate::agents::open_session(&agent.session_id, cx);
+        match agent.kind {
+            AgentToastKind::Run {
+                run_id,
+                failed: true,
+                ..
+            } => crate::agents::retry_run(run_id, cx),
+            AgentToastKind::Run { session_id, .. } => crate::agents::open_session(&session_id, cx),
+            AgentToastKind::Proposal { .. } => {}
         }
+    }
+
+    fn on_proposals(&mut self, cx: &mut Context<Self>) {
+        let pending = agent_api::pending_proposals(cx);
+        let unseen: HashSet<&str> = pending
+            .iter()
+            .filter(|proposal| !proposal.seen)
+            .map(|proposal| proposal.id.as_str())
+            .collect();
+        let resolved: Vec<u64> = self
+            .stack
+            .ids()
+            .into_iter()
+            .filter(|id| {
+                self.stack
+                    .get(*id)
+                    .and_then(|toast| toast.agent.as_ref()?.proposal_id())
+                    .is_some_and(|proposal_id| !unseen.contains(proposal_id))
+            })
+            .collect();
+        for id in resolved {
+            self.drop_toast(id, cx);
+        }
+        let arrived: Vec<PendingProposal> = pending
+            .iter()
+            .filter(|proposal| {
+                !self.known_proposals.contains(&proposal.id)
+                    && !proposal.seen
+                    && proposal.created_at >= self.started_at
+            })
+            .cloned()
+            .collect();
+        self.known_proposals = pending.into_iter().map(|proposal| proposal.id).collect();
+        for proposal in arrived {
+            self.present_proposal(&proposal, cx);
+        }
+        self.refresh_badge(cx);
+    }
+
+    fn present_proposal(&mut self, proposal: &PendingProposal, cx: &mut Context<Self>) {
+        let state = self.app.read(cx);
+        let desktop = state.chat_desktop_notifications(&proposal.conversation_id);
+        let conversation =
+            agent_api::pending::conversation_label(&state.sidebar, &proposal.conversation_id);
+        let environment = self.environment(&proposal.conversation_id, cx);
+        let decision = decide_proposal(&self.settings, desktop, environment);
+        if !decision.toast {
+            return;
+        }
+        let toast = AgentToast {
+            kind: AgentToastKind::Proposal {
+                proposal_id: proposal.id.clone(),
+            },
+            header: conversation.unwrap_or_else(|| proposal.agent.to_owned()),
+            title: proposal.title(),
+            body: proposal.detail(),
+        };
+        let id = self.stack.push_agent(
+            toast,
+            &proposal.conversation_id,
+            proposal.jump_message_id(),
+            Instant::now(),
+        );
+        if let Some(model) = self.stack.get_mut(id) {
+            model.time = chrono::Local::now().format("%H:%M").to_string();
+        }
+        if decision.sound && !self.demo_mode {
+            self.play_notification_sound(cx);
+        }
+        if should_flash(&self.settings, decision.toast, self.main_window_active(cx))
+            && let Some(native) = self.main_native
+        {
+            platform::flash(native);
+        }
+        self.sync_windows(cx);
     }
 
     fn visible_ids(&self) -> Vec<u64> {
@@ -967,7 +1059,7 @@ impl NotificationCenter {
             &state.sidebar,
             self.activity.read(cx).feed(),
             state.directory.section_settings.adaptive_rail(),
-        );
+        ) + crate::agent_api::unseen_proposal_count(cx);
         let still_unread = unread_conversation_ids(&state.sidebar);
         self.unread_mentions
             .retain(|conversation_id| still_unread.contains(conversation_id.as_str()));
@@ -1108,19 +1200,31 @@ impl NotificationCenter {
         if self.is_dismissed(id) {
             return;
         }
-        let Some((conversation_id, message_id)) = self
-            .stack
-            .get(id)
-            .map(|toast| (toast.conversation_id.clone(), toast.message_id.clone()))
-        else {
+        let Some((conversation_id, message_id, proposal_id)) = self.stack.get(id).map(|toast| {
+            (
+                toast.conversation_id.clone(),
+                toast.message_id.clone(),
+                toast
+                    .agent
+                    .as_ref()
+                    .and_then(|agent| agent.proposal_id().map(str::to_owned)),
+            )
+        }) else {
             return;
         };
         self.drop_toast(id, cx);
+        if let Some(proposal_id) = proposal_id {
+            agent_api::mark_proposal_seen(&proposal_id, cx);
+        }
         self.raise_main_window(cx);
         let selection = selection_for(&self.app.read(cx).sidebar, &conversation_id);
         if let Some(selection) = selection {
             self.app.update(cx, |state, cx| {
-                state.jump_to_message(selection, message_id, cx)
+                if message_id.is_empty() {
+                    state.select(selection, cx)
+                } else {
+                    state.jump_to_message(selection, message_id, cx)
+                }
             });
         }
     }

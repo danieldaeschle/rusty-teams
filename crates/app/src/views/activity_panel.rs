@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use chrono::{DateTime, Local, NaiveDate, Offset};
 use gpui_kit::assets::IconName;
@@ -12,6 +13,10 @@ use super::scroll_edge::with_top_edge;
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{Corner, corner_badge, dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
+use crate::agent_api::{
+    self,
+    pending::{PendingKind, PendingProposal, conversation_label as proposal_conversation_label},
+};
 use crate::app_state::{AppState, chat_title};
 use crate::data::is_one_on_one;
 use crate::format;
@@ -23,6 +28,8 @@ const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
 const FILTER_KEY: &str = "activity_filter";
+const PROPOSALS_LABEL: &str = "Agent proposals";
+pub const ACTIVITY_PROPOSALS_TAG: &str = "shell/islands/sidebar/activity-proposals";
 
 pub enum ActivityPanelEvent {
     OpenSettings,
@@ -185,92 +192,181 @@ impl ActivityPanel {
     ) -> AnyElement {
         let activity = self.activity.clone();
         let id = entry.id;
-        let resolved_names = &self.resolved_names;
-        let unread = !entry.read;
         let actor = entry.latest_actor();
         let avatar = person_avatar(
             directory,
             actor.and_then(|actor| actor.user_id.as_deref()),
-            actor.map_or("", |actor| actor.display_name(resolved_names)),
+            actor.map_or("", |actor| actor.display_name(&self.resolved_names)),
             AVATAR_SIZE,
         );
         let group = SharedString::from(format!("activity-row-group-{id}"));
-        h_flex()
-            .id(ElementId::Name(format!("activity-row-{id}").into()))
-            .debug_selector(|| format!("activity-row-{id}"))
-            .group(group.clone())
-            .mx(px(6.))
-            .px(px(10.))
-            .py(px(8.))
-            .gap(px(12.))
-            .items_start()
-            .rounded(px(8.))
-            .cursor_pointer()
-            .hover(|row| row.bg(theme::row_hover()))
-            .child(
-                div()
-                    .relative()
-                    .flex_none()
-                    .size(px(AVATAR_SIZE))
-                    .child(avatar)
-                    .child(kind_marker(entry, group.clone())),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(13.))
-                            .font_weight(if unread {
-                                FontWeight::SEMIBOLD
-                            } else {
-                                FontWeight::NORMAL
-                            })
-                            .text_color(if unread {
-                                theme::text()
-                            } else {
-                                theme::text_soft()
-                            })
-                            .child(headline(entry, sidebar, resolved_names)),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(12.))
-                            .text_color(if unread {
-                                theme::text_soft()
-                            } else {
-                                theme::text_muted()
-                            })
-                            .child(detail(entry)),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .flex_none()
-                    .items_end()
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(theme::text_muted())
-                            .child(format::list_time_label(entry.updated_at, today, offset)),
-                    )
-                    .child(status_slot(id, unread, group, activity)),
-            )
-            .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open(id, cx)))
-            .into_any_element()
+        row_frame(RowParts {
+            element_id: format!("activity-row-{id}"),
+            avatar: avatar.into_any_element(),
+            marker: kind_marker(entry, group.clone()),
+            group,
+            headline: headline(entry, sidebar, &self.resolved_names),
+            detail: detail(entry),
+            unread: !entry.read,
+            time: format::list_time_label(entry.updated_at, today, offset),
+            mark_read: Rc::new(move |cx: &mut App| {
+                activity.update(cx, |activity, cx| activity.mark_read(id, cx))
+            }),
+        })
+        .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open(id, cx)))
+        .into_any_element()
+    }
+
+    fn proposal_row(
+        &self,
+        pending: &PendingProposal,
+        sidebar: &Sidebar,
+        today: NaiveDate,
+        offset: chrono::FixedOffset,
+        panel: Entity<ActivityPanel>,
+    ) -> AnyElement {
+        let group = SharedString::from(format!("activity-proposal-group-{}", pending.id));
+        let label = proposal_conversation_label(sidebar, &pending.conversation_id);
+        let proposal_id = pending.id.clone();
+        let opened = pending.clone();
+        row_frame(RowParts {
+            element_id: format!("activity-proposal-{}", pending.id),
+            avatar: agent_avatar().into_any_element(),
+            marker: proposal_marker(pending, group.clone()),
+            group,
+            headline: pending.headline(label.as_deref()),
+            detail: pending.detail(),
+            unread: !pending.seen,
+            time: format::list_time_label(pending.created_at, today, offset),
+            mark_read: Rc::new(move |cx: &mut App| agent_api::mark_proposal_seen(&proposal_id, cx)),
+        })
+        .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open_proposal(&opened, cx)))
+        .into_any_element()
+    }
+
+    fn open_proposal(&mut self, pending: &PendingProposal, cx: &mut Context<Self>) {
+        agent_api::mark_proposal_seen(&pending.id, cx);
+        cx.emit(ActivityPanelEvent::Open {
+            conversation_id: pending.conversation_id.clone(),
+            message_id: pending.jump_message_id().to_owned(),
+        });
     }
 }
 
-fn status_slot(
-    id: i64,
-    unread: bool,
+struct RowParts {
+    element_id: String,
     group: SharedString,
-    activity: Entity<ActivityCenter>,
-) -> Div {
+    avatar: AnyElement,
+    marker: Div,
+    headline: String,
+    detail: String,
+    unread: bool,
+    time: String,
+    mark_read: MarkRead,
+}
+
+type MarkRead = Rc<dyn Fn(&mut App)>;
+
+fn row_frame(parts: RowParts) -> Stateful<Div> {
+    let RowParts {
+        element_id,
+        group,
+        avatar,
+        marker,
+        headline,
+        detail,
+        unread,
+        time,
+        mark_read,
+    } = parts;
+    let selector = element_id.clone();
+    h_flex()
+        .id(ElementId::Name(element_id.clone().into()))
+        .debug_selector(move || selector)
+        .group(group.clone())
+        .mx(px(6.))
+        .px(px(10.))
+        .py(px(8.))
+        .gap(px(12.))
+        .items_start()
+        .rounded(px(8.))
+        .cursor_pointer()
+        .hover(|row| row.bg(theme::row_hover()))
+        .child(
+            div()
+                .relative()
+                .flex_none()
+                .size(px(AVATAR_SIZE))
+                .child(avatar)
+                .child(marker),
+        )
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(13.))
+                        .font_weight(if unread {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(if unread {
+                            theme::text()
+                        } else {
+                            theme::text_soft()
+                        })
+                        .child(headline),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(12.))
+                        .text_color(if unread {
+                            theme::text_soft()
+                        } else {
+                            theme::text_muted()
+                        })
+                        .child(detail),
+                ),
+        )
+        .child(
+            v_flex()
+                .flex_none()
+                .items_end()
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme::text_muted())
+                        .child(time),
+                )
+                .child(status_slot(element_id, unread, group, mark_read)),
+        )
+}
+
+fn agent_avatar() -> Div {
+    div()
+        .size(px(AVATAR_SIZE))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(theme::accent_soft())
+        .child(icon(IconName::Bot, 16., theme::accent_text()))
+}
+
+fn admits_proposal(filter: Filter, pending: &PendingProposal) -> bool {
+    match filter {
+        Filter::All => true,
+        Filter::Mentions => false,
+        Filter::Unread => !pending.seen,
+    }
+}
+
+fn status_slot(element_id: String, unread: bool, group: SharedString, mark_read: MarkRead) -> Div {
     let slot = div()
         .h(px(MARK_READ_SIZE))
         .flex()
@@ -292,7 +388,7 @@ fn status_slot(
         )
         .child(
             div()
-                .id(ElementId::Name(format!("activity-mark-read-{id}").into()))
+                .id(ElementId::Name(format!("{element_id}-mark-read").into()))
                 .absolute()
                 .top_0()
                 .right_0()
@@ -309,13 +405,13 @@ fn status_slot(
                 .tooltip(|window, cx| Tooltip::new("Mark as read").build(window, cx))
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
-                    activity.update(cx, |activity, cx| activity.mark_read(id, cx));
+                    mark_read(cx);
                 }),
         )
 }
 
-fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
-    let marker = corner_badge(Corner::BottomRight, 4.)
+fn marker_frame(row_group: SharedString) -> Div {
+    corner_badge(Corner::BottomRight, 4.)
         .size(px(KIND_MARKER_SIZE))
         .flex()
         .items_center()
@@ -325,7 +421,21 @@ fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
         .border_color(theme::surface())
         .group_hover(row_group, |marker| marker.border_color(theme::row_hover()))
         .bg(theme::surface_raised())
-        .text_size(px(10.));
+        .text_size(px(10.))
+}
+
+fn proposal_marker(pending: &PendingProposal, row_group: SharedString) -> Div {
+    let marker = marker_frame(row_group);
+    match &pending.kind {
+        PendingKind::Reply { .. } => {
+            marker.child(icon(IconName::MessageCircle, 10., theme::text_muted()))
+        }
+        PendingKind::Reaction { glyph, .. } => marker.child(glyph.clone()),
+    }
+}
+
+fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
+    let marker = marker_frame(row_group);
     match entry.kind {
         Kind::Messages => marker.child(icon(IconName::MessageCircle, 10., theme::text_muted())),
         Kind::Mention => marker
@@ -374,7 +484,7 @@ fn conversation_label(sidebar: &Sidebar, conversation_id: &str) -> Option<String
     })
 }
 
-fn date_header(label: &'static str) -> AnyElement {
+fn group_header(label: &'static str) -> Div {
     div()
         .h(px(26.))
         .mt(px(4.))
@@ -386,7 +496,6 @@ fn date_header(label: &'static str) -> AnyElement {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(label)
-        .into_any_element()
 }
 
 impl Render for ActivityPanel {
@@ -414,8 +523,22 @@ impl Render for ActivityPanel {
                 .extend(resolve_names(state, &unresolved));
         }
         let mut rows: Vec<AnyElement> = Vec::new();
+        let proposal_rows: Vec<AnyElement> = agent_api::pending_proposals(cx)
+            .iter()
+            .filter(|pending| admits_proposal(self.filter, pending))
+            .map(|pending| self.proposal_row(pending, &state.sidebar, today, offset, panel.clone()))
+            .collect();
+        if !proposal_rows.is_empty() {
+            rows.push(
+                v_flex()
+                    .debug_selector(|| ACTIVITY_PROPOSALS_TAG.into())
+                    .child(group_header(PROPOSALS_LABEL))
+                    .children(proposal_rows)
+                    .into_any_element(),
+            );
+        }
         for section in sections {
-            rows.push(date_header(section.bucket.label()));
+            rows.push(group_header(section.bucket.label()).into_any_element());
             for entry in section.entries {
                 rows.push(self.row(
                     entry,

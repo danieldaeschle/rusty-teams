@@ -264,6 +264,27 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
     }
 }
 
+pub fn decide_proposal(
+    settings: &Settings,
+    desktop: DesktopNotifications,
+    environment: Environment,
+) -> Decision {
+    let suppressed = desktop == DesktopNotifications::Off
+        || environment.chat_in_foreground
+        || environment.system_quiet
+        || environment.own_do_not_disturb
+        || settings.do_not_disturb
+        || (settings.mute_in_calls && environment.in_call);
+    if suppressed {
+        return SILENT;
+    }
+    Decision {
+        toast: true,
+        sound: settings.sounds.notification_sound
+            && (settings.sounds.sound_when_busy || !environment.busy()),
+    }
+}
+
 fn busy_allows_sound(settings: &Settings, busy: bool) -> bool {
     !busy || settings.sounds.sound_when_busy
 }
@@ -347,6 +368,52 @@ mod tests {
                 toast: true,
                 sound: true
             }
+        );
+    }
+
+    #[test]
+    fn proposals_toast_like_messages_but_ignore_chat_mute() {
+        let settings = Settings::default();
+        let shown = decide_proposal(
+            &settings,
+            DesktopNotifications::default(),
+            Environment::default(),
+        );
+        assert!(shown.toast && shown.sound);
+        for environment in [
+            Environment {
+                chat_in_foreground: true,
+                ..Default::default()
+            },
+            Environment {
+                own_do_not_disturb: true,
+                ..Default::default()
+            },
+            Environment {
+                system_quiet: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                decide_proposal(&settings, DesktopNotifications::default(), environment),
+                SILENT
+            );
+        }
+        assert_eq!(
+            decide_proposal(&settings, DesktopNotifications::Off, Environment::default()),
+            SILENT
+        );
+        let quiet = Settings {
+            do_not_disturb: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            decide_proposal(
+                &quiet,
+                DesktopNotifications::default(),
+                Environment::default()
+            ),
+            SILENT
         );
     }
 

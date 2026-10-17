@@ -207,12 +207,12 @@ mod tests {
         assert_eq!(toast_height(&model("Hi"), 0), 112.);
         let mut agent = model("Hi");
         agent.agent = Some(super::super::stack::AgentToast {
-            run_id: 1,
-            session_id: String::new(),
+            kind: super::super::stack::AgentToastKind::Proposal {
+                proposal_id: "p".into(),
+            },
             header: String::new(),
             title: String::new(),
             body: "Hi".into(),
-            failed: false,
         });
         assert_eq!(toast_height(&agent, 1), 134.);
         assert_eq!(toast_height(&agent, 2), 152.);

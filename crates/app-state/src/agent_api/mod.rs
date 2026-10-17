@@ -1,8 +1,9 @@
 pub mod bridge;
 pub mod body;
+pub mod pending;
 pub mod source;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
@@ -17,6 +18,7 @@ use app_base::agent_api::{extras, image_scale};
 
 use crate::backend::Engine;
 use crate::runtime;
+use pending::PendingProposal;
 use source::AppSource;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +66,8 @@ pub struct AgentApi {
     token: String,
     proposals: HashMap<String, ProposalEntry>,
     reactions: HashMap<(String, String), ReactionProposal>,
+    reaction_excerpts: HashMap<String, String>,
+    seen_proposals: HashSet<String>,
     server: Option<ServerHandle>,
     status: ServerStatus,
     generation: u64,
@@ -76,6 +80,7 @@ struct AgentApiHandle(Entity<AgentApi>);
 impl Global for AgentApiHandle {}
 
 const DEMO_PORT_ENV: &str = "RUSTY_TEAMS_MCP_PORT";
+const SEEN_PROPOSALS_KEY: &str = "activity_seen_proposals";
 
 pub fn endpoint_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/mcp")
@@ -128,6 +133,7 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
     let hub = AgentHub::new(store.clone(), policy, ui);
     let token = mcp::load_or_create_token(&store).unwrap_or_default();
     let source = Arc::new(AppSource::new(store.clone()));
+    let seen_proposals = pending::decode_seen(store.meta(SEEN_PROPOSALS_KEY).ok().flatten());
     let api = cx.new(|_| AgentApi {
         hub,
         source,
@@ -135,6 +141,8 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
         token,
         proposals: HashMap::new(),
         reactions: HashMap::new(),
+        reaction_excerpts: HashMap::new(),
+        seen_proposals,
         server: None,
         status: ServerStatus::Off,
         generation: 0,
@@ -280,6 +288,46 @@ pub fn pending_agents(cx: &App) -> HashMap<String, &'static str> {
         .collect()
 }
 
+pub fn pending_proposals(cx: &App) -> Vec<PendingProposal> {
+    handle(cx).map_or_else(Vec::new, |api| api.read(cx).pending_proposals())
+}
+
+pub fn unseen_proposal_count(cx: &App) -> usize {
+    pending_proposals(cx)
+        .iter()
+        .filter(|pending| !pending.seen)
+        .count()
+}
+
+pub fn mark_proposal_seen(proposal_id: &str, cx: &mut App) {
+    mark_proposals_seen(cx, |pending| pending.id == proposal_id);
+}
+
+pub fn mark_conversation_proposals_seen(conversation_id: &str, cx: &mut App) {
+    mark_proposals_seen(cx, |pending| pending.conversation_id == conversation_id);
+}
+
+pub fn mark_all_proposals_seen(cx: &mut App) {
+    mark_proposals_seen(cx, |_| true);
+}
+
+fn mark_proposals_seen(cx: &mut App, matches: impl Fn(&PendingProposal) -> bool) {
+    let Some(api) = handle(cx) else {
+        return;
+    };
+    let fresh: Vec<String> = api
+        .read(cx)
+        .pending_proposals()
+        .into_iter()
+        .filter(|pending| !pending.seen && matches(pending))
+        .map(|pending| pending.id)
+        .collect();
+    if fresh.is_empty() {
+        return;
+    }
+    api.update(cx, |api, cx| api.mark_seen(fresh, cx));
+}
+
 pub fn resolve_proposal(conversation_id: &str, outcome: Outcome, cx: &mut App) {
     if let Some(api) = handle(cx) {
         api.update(cx, |api, cx| api.resolve(conversation_id, outcome, cx));
@@ -346,6 +394,30 @@ impl AgentApi {
         }
     }
 
+    pub fn pending_proposals(&self) -> Vec<PendingProposal> {
+        pending::collect(
+            &self.proposals,
+            &self.reactions,
+            &self.reaction_excerpts,
+            &self.seen_proposals,
+        )
+    }
+
+    fn mark_seen(&mut self, proposal_ids: Vec<String>, cx: &mut Context<Self>) {
+        self.seen_proposals.extend(proposal_ids);
+        let pending: HashSet<String> = self
+            .pending_proposals()
+            .into_iter()
+            .map(|pending| pending.id)
+            .collect();
+        self.seen_proposals.retain(|id| pending.contains(id));
+        let _ = self.store.set_meta(
+            SEEN_PROPOSALS_KEY,
+            &pending::encode_seen(&self.seen_proposals),
+        );
+        cx.notify();
+    }
+
     pub fn reinstall_note(&self) -> Option<&str> {
         self.reinstall_note.as_deref()
     }
@@ -394,6 +466,15 @@ impl AgentApi {
         pictures: Vec<ProposalPicture>,
         cx: &mut Context<Self>,
     ) {
+        if let mcp::UiEvent::ReactionProposalChanged(reaction) = &event
+            && let Some(excerpt) = pending::reacted_excerpt(
+                &self.store,
+                &reaction.conversation_id,
+                &reaction.message_id,
+            )
+        {
+            self.reaction_excerpts.insert(reaction.id.clone(), excerpt);
+        }
         bridge::apply(
             &mut self.proposals,
             &mut self.reactions,
@@ -401,6 +482,9 @@ impl AgentApi {
             pictures,
             &self.store,
         );
+        let reactions = &self.reactions;
+        self.reaction_excerpts
+            .retain(|id, _| reactions.values().any(|reaction| &reaction.id == id));
         cx.notify();
     }
 

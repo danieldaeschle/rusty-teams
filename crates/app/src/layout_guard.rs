@@ -191,6 +191,7 @@ mod frames {
     };
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
+    use crate::views::activity_panel::ACTIVITY_PROPOSALS_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
@@ -596,6 +597,7 @@ mod frames {
             .chain(SHARE_GUARDED)
             .chain(CONSULT_GUARDED)
             .chain([
+                &ACTIVITY_PROPOSALS_TAG,
                 &AGENTS_LIST,
                 &CALL_TRANSCRIPT,
                 &MENU,
@@ -2061,6 +2063,28 @@ mod frames {
                 "bar {bar:?} over the buttons {leading:?}"
             );
             assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
+        }
+    }
+
+    #[gpui_kit::test]
+    fn agent_proposals_in_activity_stay_inside_the_sidebar(cx: &mut TestAppContext) {
+        let (handle, _) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.dispatch_action(OpenActivity);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            let tags = collect(&mut visual, Some(ACTIVITY_PROPOSALS_TAG));
+            let mut expected = GUARDED.to_vec();
+            expected.push(ACTIVITY_PROPOSALS_TAG);
+            let found: Vec<String> = violations(&tags, window, &expected)
+                .into_iter()
+                .map(|(key, message)| format!("{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
         }
     }
 

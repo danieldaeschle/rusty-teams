@@ -219,7 +219,8 @@ fn badge(badge: RailBadge) -> Option<Div> {
 impl Render for RailView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.sidebar.read(cx).tab();
-        let activity_unread = self.activity.read(cx).feed().unread_count();
+        let activity_unread = self.activity.read(cx).feed().unread_count()
+            + crate::agent_api::unseen_proposal_count(cx);
         let (unread_chats, channel_dot) = {
             let state = self.state.read(cx);
             (
