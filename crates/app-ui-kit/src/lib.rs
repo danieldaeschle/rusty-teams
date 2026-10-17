@@ -2,6 +2,7 @@ pub mod card_chart;
 pub mod channel_tabs;
 pub mod draft_style;
 pub mod layout;
+pub mod long_press;
 pub mod reaction_proposal_pill;
 pub mod render;
 pub mod scroll_edge;
