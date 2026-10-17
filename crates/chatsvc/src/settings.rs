@@ -9,6 +9,7 @@ const SETTINGS_KEY: &str = "simpleCollabUserSettings";
 const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
 const TEAMS_ORDER_KEY: &str = "teamsOrder";
 const SKIN_TONE_KEY: &str = "preferredSkinToneIndex";
+const DEFAULT_REACTIONS_KEY: &str = "defaultMessageReactions";
 const APP_HORIZON_KEY: &str = "appConsumptionHorizon";
 const APP_HORIZON_APPS: [&str; 3] = ["chat", "channel", "engage_community"];
 const MAX_SKIN_TONE: u8 = 5;
@@ -100,6 +101,11 @@ impl<T: MessageTransport> UserSettings<T> {
             .await
     }
 
+    pub async fn set_default_reactions(&self, reaction_ids: &[String]) -> Result<()> {
+        self.set_property(DEFAULT_REACTIONS_KEY, default_reactions_value(reaction_ids))
+            .await
+    }
+
     /// Teams' "Mark all as read" for channels: one write, the channel entry of `appConsumptionHorizon` moves to now.
     pub async fn mark_all_channels_read(&self, now_ms: i64) -> Result<AppConsumptionHorizon> {
         let properties = self.properties().await?;
@@ -159,6 +165,25 @@ pub fn parse_skin_tone(properties: &Value) -> Option<u8> {
         other => u8::try_from(other.as_u64()?).ok()?,
     };
     (tone <= MAX_SKIN_TONE).then_some(tone)
+}
+
+pub fn parse_default_reactions(properties: &Value) -> Option<Vec<String>> {
+    let entries = match properties.get(DEFAULT_REACTIONS_KEY)? {
+        Value::String(text) => serde_json::from_str::<Value>(text).ok()?,
+        other => other.clone(),
+    };
+    entries.as_array().map(|entries| {
+        entries
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|reaction_id| !reaction_id.is_empty())
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
+pub fn default_reactions_value(reaction_ids: &[String]) -> Value {
+    Value::String(Value::from(reaction_ids.to_vec()).to_string())
 }
 
 pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
@@ -288,6 +313,53 @@ mod tests {
             None
         );
         assert_eq!(parse_skin_tone(&json!({})), None);
+    }
+
+    #[test]
+    fn default_reactions_are_read_from_the_json_string_or_an_array() {
+        assert_eq!(
+            parse_default_reactions(&json!({DEFAULT_REACTIONS_KEY: r#"["like","heart","fire"]"#})),
+            Some(vec![
+                "like".to_owned(),
+                "heart".to_owned(),
+                "fire".to_owned()
+            ])
+        );
+        assert_eq!(
+            parse_default_reactions(&json!({DEFAULT_REACTIONS_KEY: ["yes", "", 3]})),
+            Some(vec!["yes".to_owned()])
+        );
+        assert_eq!(
+            parse_default_reactions(&json!({DEFAULT_REACTIONS_KEY: "[]"})),
+            Some(Vec::new())
+        );
+        assert_eq!(parse_default_reactions(&json!({})), None);
+        assert_eq!(
+            parse_default_reactions(&json!({DEFAULT_REACTIONS_KEY: "not json"})),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn default_reactions_are_put_as_a_json_string() {
+        let transport = Canned {
+            answers: Mutex::new(vec![(200, Value::Null)].into()),
+            requests: Mutex::new(Vec::new()),
+        };
+        UserSettings::with_transport(&transport, "emea")
+            .set_default_reactions(&["like".to_owned(), "fire".to_owned()])
+            .await
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[0].method, Method::Put);
+        assert_eq!(
+            requests[0].url,
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/properties?name=defaultMessageReactions"
+        );
+        assert_eq!(
+            requests[0].body,
+            Some(json!({"defaultMessageReactions": r#"["like","fire"]"#}))
+        );
     }
 
     #[test]

@@ -38,16 +38,17 @@ mod render_env;
 mod scheduled;
 mod shared;
 
+use super::add_people_dialog::open_add_people;
 use super::attachments::FileActions;
 use super::avatar::{
     bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
-use super::add_people_dialog::open_add_people;
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
-use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
+use super::group_name::group_name_button;
+use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
@@ -3025,6 +3026,7 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
+        let quick = state.quick_reactions();
         let in_chat = chat_id.is_some();
         let pin_conversation_id = self.pin_conversation_id();
         let pinned = pin_conversation_id
@@ -3063,7 +3065,7 @@ impl ConversationView {
             pin,
             hover,
             picker: self.picker.clone(),
-            quick: self.recent.read(cx).most_used(QUICK_REACTION_COUNT),
+            quick,
             mine,
             done: action(|this, key, _, cx| this.suppress_toolbar(key, cx)),
         }
@@ -3258,6 +3260,7 @@ impl ConversationView {
         let mut lead: Option<AnyElement> = None;
         let mut subline = String::new();
         let mut stack: Option<AnyElement> = None;
+        let mut rename: Option<AnyElement> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3293,6 +3296,15 @@ impl ConversationView {
                             stack = Some(add_people_button(&self.app, chat_id));
                         }
                     } else {
+                        if chat.kind == GROUP_KIND
+                            && me.is_some_and(|me| {
+                                chat.members
+                                    .iter()
+                                    .any(|member| member.user_id.as_deref() == Some(&me.user_id))
+                            })
+                        {
+                            rename = Some(group_name_button(&self.app, chat_id, &chat.title));
+                        }
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
                         subline = format!("{} participants", chat.members.len());
@@ -3395,12 +3407,19 @@ impl ConversationView {
                     .overflow_hidden()
                     .gap(px(1.))
                     .child(
-                        div()
-                            .truncate()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text())
-                            .child(current.title.clone()),
+                        h_flex()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text())
+                                    .child(current.title.clone()),
+                            )
+                            .children(rename),
                     )
                     .when(!subline.is_empty(), |column| {
                         column.child(
@@ -3417,6 +3436,8 @@ impl ConversationView {
             .children(self.channel_details_button(cx))
     }
 }
+
+const GROUP_KIND: &str = "group";
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
