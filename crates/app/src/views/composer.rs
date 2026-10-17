@@ -29,6 +29,7 @@ use teams_core::{
     UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 
+pub(crate) mod delivery;
 mod drafts;
 mod schedule;
 mod table;
@@ -225,6 +226,8 @@ pub struct Composer {
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
     caret_text: String,
+    importance: store::MessageImportance,
+    delivery_menu: bool,
     _subscriptions: [Subscription; 4],
 }
 
@@ -436,6 +439,8 @@ impl Composer {
             active_cell: None,
             caret_before_table: 0,
             caret_text: String::new(),
+            importance: store::MessageImportance::Normal,
+            delivery_menu: false,
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
         }
     }
@@ -1637,6 +1642,7 @@ impl Composer {
             self.schedule = None;
             self.table_picker = None;
             self.table_menu = None;
+            self.reset_importance();
             if !carry {
                 self.load_stored_draft(conversation_id, window, cx);
             }
@@ -1729,6 +1735,7 @@ impl Composer {
             } else {
                 Vec::new()
             },
+            importance: self.sendable_importance(cx),
         }
     }
 
@@ -2205,6 +2212,7 @@ impl Composer {
         self.editing = None;
         self.link.reset();
         self.close_popup();
+        self.reset_importance();
         cx.emit(ComposerEvent::Submit(Box::new(outgoing)));
         cx.notify();
     }
@@ -3104,6 +3112,7 @@ impl Render for Composer {
             .children(notice)
             .children(self.render_reply_strip(cx))
             .children(self.render_edit_strip(cx))
+            .children(self.render_urgent_banner(cx))
             .children(self.render_meeting_chip())
             .children(self.render_link_preview(cx))
             .child(
@@ -3114,6 +3123,7 @@ impl Render for Composer {
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
+                    .children(self.render_delivery_menu(cx))
                     .child(
                         v_flex()
                             .debug_selector(|| COMPOSER_BOX_TAG.into())
@@ -3136,6 +3146,7 @@ impl Render for Composer {
                                 .size_full(),
                             )
                             .children(format_bar)
+                            .children(self.render_importance_label(cx))
                             .children(tray)
                             .child(
                                 h_flex()
@@ -3155,6 +3166,7 @@ impl Render for Composer {
                                             .flex_none()
                                             .gap(px(COMPOSER_BUTTON_INSET))
                                             .child(format_toggle)
+                                            .children(self.render_delivery_button(cx))
                                             .children(fun)
                                             .children(attach),
                                     )
@@ -3295,6 +3307,7 @@ mod tests {
                     name: "plan.pdf".into(),
                 },
             }],
+            importance: Default::default(),
         };
         let extras = outgoing.extras();
         assert_eq!(extras.images[0].content_type, "image/png");
@@ -3338,6 +3351,7 @@ mod tests {
             edit: None,
             images,
             files: Vec::new(),
+            importance: Default::default(),
         }
     }
 
@@ -4797,6 +4811,7 @@ mod tests {
                         }),
                         images: Vec::new(),
                         files: Vec::new(),
+                        importance: Default::default(),
                     };
                     composer.begin_edit(draft, window, cx);
                 });

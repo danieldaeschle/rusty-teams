@@ -79,7 +79,7 @@ pub fn pending_row(
             })
             .collect(),
         subject: outgoing.subject.clone(),
-        importance: store::MessageImportance::Normal,
+        importance: outgoing.importance,
         new_marker: false,
         reply_root: None,
         delivery,
@@ -113,6 +113,7 @@ mod tests {
             images: Vec::new(),
             files: Vec::new(),
             link_preview: None,
+            importance: Default::default(),
         };
         let row = pending_row(
             "key".to_owned(),

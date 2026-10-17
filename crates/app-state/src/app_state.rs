@@ -140,6 +140,7 @@ pub struct AppState {
     pub call_count: u64,
     pub call_share_sound: bool,
     pub recording_policy: teams_core::RecordingPolicy,
+    pub allow_priority_messages: bool,
     pub account_sounds: Option<chatsvc::sound_settings::SoundSettings>,
     pub own_tenant: Option<String>,
     pub call_share_motion: bool,
@@ -294,6 +295,7 @@ impl AppState {
             call_count: 0,
             call_share_sound: false,
             recording_policy: teams_core::RecordingPolicy::default(),
+            allow_priority_messages: true,
             account_sounds: None,
             own_tenant: None,
             call_share_motion: false,
@@ -999,6 +1001,7 @@ impl AppState {
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);
                 self.refresh_recording_policy(cx);
+                self.refresh_messaging_policy(cx);
                 self.refresh_sound_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);

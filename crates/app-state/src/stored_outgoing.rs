@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui_kit::{Image, ImageFormat};
 use serde::{Deserialize, Serialize};
-use store::AttachmentImage;
+use store::{AttachmentImage, MessageImportance};
 use teams_core::{Draft, DraftLine, LinkPreview, MentionInput};
 
 use crate::remote_image::{RemoteImage, RemoteKind};
@@ -55,6 +55,8 @@ struct Payload {
     files: Vec<OutgoingFile>,
     objects: Vec<StoredObject>,
     preview: Option<StoredPreview>,
+    #[serde(default)]
+    importance: Option<String>,
 }
 
 pub struct StoredOutgoing {
@@ -106,6 +108,7 @@ pub fn encode(outgoing: &Outgoing) -> Option<StoredOutgoing> {
             image_width: preview.image_width,
             image_height: preview.image_height,
         }),
+        importance: outgoing.importance.stored().map(str::to_owned),
     })
     .ok()?;
     Some(StoredOutgoing { payload, images })
@@ -141,6 +144,7 @@ pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
         files,
         objects,
         preview,
+        importance,
     } = serde_json::from_str(payload).ok()?;
     let mut inline = images.iter();
     let images = objects
@@ -167,6 +171,7 @@ pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
             image_width: preview.image_width,
             image_height: preview.image_height,
         }),
+        importance: MessageImportance::from_stored(importance.as_deref()),
     })
 }
 
@@ -223,6 +228,7 @@ mod tests {
                 image_width: None,
                 image_height: None,
             }),
+            importance: Default::default(),
         }
     }
 
@@ -241,6 +247,24 @@ mod tests {
         assert_eq!(restored.files, original.files);
         assert_eq!(restored.link_preview, original.link_preview);
         assert_eq!(restored.edit, None);
+    }
+
+    #[test]
+    fn the_importance_survives_the_outbox_and_old_payloads_stay_standard() {
+        let original = Outgoing {
+            importance: MessageImportance::Urgent,
+            ..outgoing()
+        };
+        let stored = encode(&original).unwrap();
+        let decoded = decode(&stored.payload, &stored.images).unwrap();
+        assert_eq!(decoded.importance, MessageImportance::Urgent);
+        assert_eq!(decoded.extras().importance, Some("urgent"));
+        let plain = encode(&outgoing()).unwrap();
+        assert!(!plain.payload.contains("importance\":\""));
+        assert_eq!(
+            decode(&plain.payload, &plain.images).unwrap().importance,
+            MessageImportance::Normal
+        );
     }
 
     #[test]

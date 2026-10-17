@@ -2737,6 +2737,7 @@ impl ConversationView {
             images: Vec::new(),
             files: Vec::new(),
             link_preview: None,
+            importance: Default::default(),
         };
         self.show_main_composer(cx);
         self.composer

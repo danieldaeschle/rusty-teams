@@ -467,6 +467,10 @@ pub trait Remote {
         Err(Error::Unsupported("recording policy"))
     }
 
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Err(Error::Unsupported("messaging policy"))
+    }
+
     async fn ack_urgent_message(&self, _chat_id: &str, _message_id: &str) -> Result<()> {
         Err(Error::Unsupported("urgent message acknowledgement"))
     }
@@ -1226,6 +1230,12 @@ impl Remote for Graph {
     async fn recording_policy(&self) -> Result<RecordingPolicy> {
         Ok(LanguageSettingsClient::new(self.session())
             .read_recording_policy()
+            .await?)
+    }
+
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .read_allow_priority_messages()
             .await?)
     }
 

@@ -176,6 +176,10 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::composer::delivery::{
+        COMPOSER_DELIVERY_TAG, COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG,
+        DELIVERY_MENU_TAG,
+    };
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
@@ -1617,6 +1621,92 @@ mod frames {
                 "bar {bar:?} over the buttons {leading:?}"
             );
             assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
+        }
+    }
+
+    #[gpui_kit::test]
+    fn delivery_options_label_and_banner_line_up_with_the_composer(cx: &mut TestAppContext) {
+        const DELIVERY_TAGS: [&str; 5] = [
+            COMPOSER_BOX_TAG,
+            COMPOSER_LEADING_TAG,
+            COMPOSER_DELIVERY_TAG,
+            COMPOSER_IMPORTANCE_LABEL_TAG,
+            COMPOSER_URGENT_BANNER_TAG,
+        ];
+        const URGENT_OPTION: &str = "urgent-delivery-option";
+        const BUTTON_ICON_INSET: f32 = 6.;
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            collect(&mut visual, Some(COMPOSER_DELIVERY_TAG));
+            let button = visual
+                .debug_bounds(COMPOSER_DELIVERY_TAG)
+                .expect("delivery button");
+            visual.simulate_click(button.center(), Default::default());
+            collect(&mut visual, Some(URGENT_OPTION));
+            let menu = visual.debug_bounds(DELIVERY_MENU_TAG).expect("menu");
+            assert!(
+                contains(window, menu),
+                "menu {} leaves the window",
+                describe(menu)
+            );
+            let urgent = visual.debug_bounds(URGENT_OPTION).expect("urgent option");
+            visual.simulate_click(urgent.center(), Default::default());
+            collect(&mut visual, Some(COMPOSER_URGENT_BANNER_TAG));
+            assert!(visual.debug_bounds(DELIVERY_MENU_TAG).is_none());
+            let tags: Vec<Tag> = DELIVERY_TAGS
+                .iter()
+                .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
+                .collect();
+            let found: Vec<String> = violations(&tags, window, &DELIVERY_TAGS)
+                .into_iter()
+                .map(|(key, message)| format!("delivery@{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+            let composer = visual.debug_bounds(COMPOSER_BOX_TAG).expect("composer");
+            let banner = visual
+                .debug_bounds(COMPOSER_URGENT_BANNER_TAG)
+                .expect("banner");
+            let label = visual
+                .debug_bounds(COMPOSER_IMPORTANCE_LABEL_TAG)
+                .expect("label");
+            let leading = visual.debug_bounds(COMPOSER_LEADING_TAG).expect("leading");
+            assert!(
+                (f32::from(banner.left() - composer.left())).abs() <= TOLERANCE
+                    && (f32::from(banner.right() - composer.right())).abs() <= TOLERANCE,
+                "banner {} not on the composer edges {}",
+                describe(banner),
+                describe(composer)
+            );
+            assert!(
+                banner.bottom() <= composer.top(),
+                "banner {} over the composer {}",
+                describe(banner),
+                describe(composer)
+            );
+            assert!(
+                (inset(composer, label, Edge::Left)
+                    - inset(composer, leading, Edge::Left)
+                    - BUTTON_ICON_INSET)
+                    .abs()
+                    <= TOLERANCE,
+                "label {} not on the icon edge of {}",
+                describe(label),
+                describe(leading)
+            );
+            let close = visual
+                .debug_bounds(COMPOSER_URGENT_BANNER_TAG)
+                .map(|banner| point(banner.right() - px(18.), banner.center().y))
+                .expect("banner");
+            visual.simulate_click(close, Default::default());
+            collect(&mut visual, None);
+            assert!(visual.debug_bounds(COMPOSER_URGENT_BANNER_TAG).is_none());
+            assert!(visual.debug_bounds(COMPOSER_IMPORTANCE_LABEL_TAG).is_none());
         }
     }
 

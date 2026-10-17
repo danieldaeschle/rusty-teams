@@ -255,6 +255,7 @@ impl Composer {
         if self.scheduling.is_some() || self.schedule_blocker(cx).is_some() {
             return;
         }
+        self.importance = store::MessageImportance::Normal;
         let outgoing = self.compose(cx);
         self.scheduling = Some(outgoing.html());
         self.close_schedule(window, cx);
