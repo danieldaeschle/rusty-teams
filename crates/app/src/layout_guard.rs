@@ -182,7 +182,7 @@ mod frames {
     };
     use crate::views::conversation::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
     use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
-    use crate::views::message_row::BUBBLE_TAGS;
+    use crate::views::message_row::{BUBBLE_TAGS, IMPORTANCE_LABEL_TAG};
     use crate::views::pin_banner::PIN_BANNER_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -254,6 +254,9 @@ mod frames {
     const RECAP_MEETING_CHAT: &str = "demo-chat-meeting-standup";
     const PROPOSAL_CHAT: &str = "demo-chat-release";
     const REACTION_CHAT: &str = "demo-chat-mara";
+    const IMPORTANCE_CHATS: [&str; 2] = ["demo-chat-priya", "demo-chat-atlas"];
+    const IMPORTANCE_LABEL_INSET_X: f32 = 12.;
+    const IMPORTANCE_LABEL_INSET_TOP: f32 = 8.;
     const AGENT_TAGS: [&str; 4] = [
         PROPOSAL_CARD,
         PROPOSAL_THUMBNAILS,
@@ -1614,6 +1617,46 @@ mod frames {
                 "bar {bar:?} over the buttons {leading:?}"
             );
             assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
+        }
+    }
+
+    #[gpui_kit::test]
+    fn importance_label_sits_inside_its_bubble_on_the_text_edge(cx: &mut TestAppContext) {
+        let (handle, state) = mount_with(cx, true);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            for chat in IMPORTANCE_CHATS {
+                visual.update(|_, cx| {
+                    state.update(cx, |state, cx| {
+                        state.select(Selection::Chat(chat.to_owned()), cx)
+                    })
+                });
+                collect(&mut visual, Some(TIMELINE_TAG));
+                let timeline = visual.debug_bounds(TIMELINE_TAG).expect("timeline");
+                visual.simulate_event(ScrollWheelEvent {
+                    position: timeline.center(),
+                    delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+                    ..Default::default()
+                });
+                collect(&mut visual, Some(IMPORTANCE_LABEL_TAG));
+                let label = visual.debug_bounds(IMPORTANCE_LABEL_TAG).expect("label");
+                let bubble = BUBBLE_TAGS
+                    .iter()
+                    .filter_map(|tag| visual.debug_bounds(tag))
+                    .find(|bubble| contains(*bubble, label))
+                    .unwrap_or_else(|| {
+                        panic!("{chat}@{width}x{height}: label {label:?} outside every bubble")
+                    });
+                let left = inset(bubble, label, Edge::Left);
+                let top = inset(bubble, label, Edge::Top);
+                assert!(
+                    (left - IMPORTANCE_LABEL_INSET_X).abs() <= TOLERANCE
+                        && (top - IMPORTANCE_LABEL_INSET_TOP).abs() <= TOLERANCE,
+                    "{chat}@{width}x{height}: label inset left {left} top {top} in {}",
+                    describe(bubble)
+                );
+            }
         }
     }
 

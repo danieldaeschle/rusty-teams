@@ -89,6 +89,7 @@ pub struct AppState {
     pub favorite_ids: Vec<String>,
     pub selection: Option<Selection>,
     pub late_arrivals: LateArrivals,
+    pub acked_urgent: std::collections::HashSet<String>,
     pub new_chat: bool,
     pub new_chat_people: Vec<store::MemberRecord>,
     pub connection: ConnectionState,
@@ -238,6 +239,7 @@ impl AppState {
             favorite_ids: Vec::new(),
             selection: None,
             late_arrivals: LateArrivals::default(),
+            acked_urgent: Default::default(),
             new_chat: false,
             new_chat_people: Vec::new(),
             connection: if mode.demo {
@@ -532,6 +534,10 @@ impl AppState {
         self.sync_presence();
         self.directory.unread_counts = match &self.engine {
             Some(engine) => data::unread_counts(engine, &self.sidebar.chats),
+            None => Default::default(),
+        };
+        self.directory.unread_importance = match &self.engine {
+            Some(engine) => data::unread_importance(engine, &self.sidebar.chats),
             None => Default::default(),
         };
     }

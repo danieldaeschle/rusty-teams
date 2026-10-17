@@ -172,6 +172,7 @@ pub fn build_incoming(
         muted: is_muted_chat(sidebar, &record.conversation_id),
         signals,
         created_at: record.created_at,
+        importance: record.importance,
     })
 }
 
@@ -373,6 +374,7 @@ mod tests {
             reactions_json: "[]".into(),
             mentions_json: "[]".into(),
             call_event_json: None,
+            importance: Default::default(),
         }
     }
 

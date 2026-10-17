@@ -576,6 +576,7 @@ mod tests {
             muted: false,
             signals: Default::default(),
             created_at: at(9, minute),
+            importance: Default::default(),
         }
     }
 

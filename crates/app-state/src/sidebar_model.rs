@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use app_ui_kit::widgets::Unread;
 use chrono::{DateTime, FixedOffset, Utc};
-use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam, is_bot_id};
+use store::{ChannelRecord, ChatRecord, MessageImportance, Sidebar, SidebarTeam, is_bot_id};
 use teams_core::{ChatSection, is_event_preview};
 
 use crate::app_state::chat_title;
 use crate::data::{
     Directory, FolderKind, Person, face_members, is_one_on_one, one_on_one_bot, others,
-    unread_count,
+    unread_count, unread_importance_of,
 };
 use crate::format;
 use crate::typing::{TypingState, preview_label};
@@ -59,6 +59,7 @@ pub struct ChatItem {
     pub time_label: String,
     pub preview: Preview,
     pub unread: Unread,
+    pub importance: MessageImportance,
     pub muted: bool,
     pub is_group: bool,
     pub member_count: usize,
@@ -205,6 +206,11 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
             .unwrap_or_default(),
         preview,
         unread,
+        importance: if chat.unread {
+            unread_importance_of(input.directory, chat)
+        } else {
+            MessageImportance::Normal
+        },
         muted: chat.muted,
         is_group: chat.kind == GROUP_KIND,
         member_count: chat.members.len(),
@@ -1224,6 +1230,28 @@ mod tests {
         };
         let sections = build_sections(&input(&[], &directory, &HashSet::new()));
         assert_eq!(sections[0].name, FAVORITES_FALLBACK_NAME);
+    }
+
+    #[test]
+    fn the_importance_marker_shows_only_while_the_chat_is_unread() {
+        let chats = vec![chat("a", "group", true), chat("b", "group", false)];
+        let mut directory = Directory::default();
+        directory
+            .unread_importance
+            .insert("a".into(), MessageImportance::Urgent);
+        directory
+            .unread_importance
+            .insert("b".into(), MessageImportance::High);
+        let collapsed = HashSet::new();
+        let context = input(&chats, &directory, &collapsed);
+        assert_eq!(
+            chat_item(&chats[0], &context, None).importance,
+            MessageImportance::Urgent
+        );
+        assert_eq!(
+            chat_item(&chats[1], &context, None).importance,
+            MessageImportance::Normal
+        );
     }
 
     #[test]

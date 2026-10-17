@@ -1978,7 +1978,10 @@ impl ConversationView {
             return;
         };
         self.app.update(cx, |state, cx| match &selection {
-            Selection::Chat(chat_id) => state.mark_chat_read(chat_id, cx),
+            Selection::Chat(chat_id) => {
+                state.ack_urgent_messages(chat_id, cx);
+                state.mark_chat_read(chat_id, cx)
+            }
             Selection::Channel(channel_id) => state.mark_channel_read(channel_id, cx),
         });
         if plan.clear_divider

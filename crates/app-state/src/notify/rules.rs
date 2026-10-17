@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use calling::Progress;
 use chrono::{DateTime, Utc};
-use store::{ChannelNotificationLevel, ChannelNotifications};
+use store::{ChannelNotificationLevel, ChannelNotifications, MessageImportance};
 
 use super::sound_settings::SoundSettings;
 use super::sounds::Ringtone;
@@ -129,11 +129,16 @@ pub struct Incoming {
     pub muted: bool,
     pub signals: ChannelSignals,
     pub created_at: DateTime<Utc>,
+    pub importance: MessageImportance,
 }
 
 impl Incoming {
     pub fn is_direct(&self) -> bool {
         self.kind == ChatKind::Direct
+    }
+
+    pub fn is_urgent(&self) -> bool {
+        self.importance == MessageImportance::Urgent
     }
 }
 
@@ -169,6 +174,7 @@ pub fn should_ringback(native_call: Option<&CallModel>) -> bool {
 pub struct Decision {
     pub toast: bool,
     pub sound: bool,
+    pub urgent_sound: bool,
 }
 
 pub fn alerts(incoming: &Incoming) -> bool {
@@ -204,24 +210,29 @@ fn channel_toasts(incoming: &Incoming) -> bool {
 const SILENT: Decision = Decision {
     toast: false,
     sound: false,
+    urgent_sound: false,
 };
 
+/// Teams lets urgent messages through Do not disturb ("You'll only get notifications for urgent messages and from your priority contacts").
 pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment) -> Decision {
+    let urgent = incoming.is_urgent();
     let suppressed = !alerts(incoming)
         || !channel_toasts(incoming)
         || environment.chat_in_foreground
         || environment.system_quiet
-        || environment.own_do_not_disturb
+        || (environment.own_do_not_disturb && !urgent)
         || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call)
-        || (settings.mentions_only && !incoming.mentions_me && !incoming.is_direct());
+        || (settings.mentions_only && !incoming.mentions_me && !incoming.is_direct() && !urgent);
     if suppressed {
         return SILENT;
     }
+    let busy_allows = settings.sounds.sound_when_busy || !environment.busy();
+    let urgent_sound = urgent && settings.sounds.urgent_sound && busy_allows;
     Decision {
         toast: true,
-        sound: settings.sounds.notification_sound
-            && (settings.sounds.sound_when_busy || !environment.busy()),
+        sound: urgent_sound || (!urgent && settings.sounds.notification_sound && busy_allows),
+        urgent_sound,
     }
 }
 
@@ -283,6 +294,7 @@ mod tests {
             muted: false,
             signals: ChannelSignals::default(),
             created_at: Utc::now(),
+            importance: Default::default(),
         }
     }
 
@@ -304,7 +316,8 @@ mod tests {
             decision,
             Decision {
                 toast: true,
-                sound: true
+                sound: true,
+                urgent_sound: false,
             }
         );
     }
@@ -337,6 +350,56 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(decide(&settings, &group(), Environment::default()), SILENT);
+    }
+
+    fn urgent() -> Incoming {
+        Incoming {
+            importance: MessageImportance::Urgent,
+            ..group()
+        }
+    }
+
+    #[test]
+    fn urgent_passes_do_not_disturb_and_mentions_only_with_the_urgent_sound() {
+        let dnd = Environment {
+            own_do_not_disturb: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            decide(&Settings::default(), &urgent(), dnd),
+            Decision {
+                toast: true,
+                sound: true,
+                urgent_sound: true,
+            }
+        );
+        let mentions_only = Settings {
+            mentions_only: true,
+            ..Default::default()
+        };
+        assert!(decide(&mentions_only, &urgent(), Environment::default()).toast);
+        let foreground = Environment {
+            chat_in_foreground: true,
+            ..Default::default()
+        };
+        assert_eq!(decide(&Settings::default(), &urgent(), foreground), SILENT);
+    }
+
+    #[test]
+    fn urgent_sound_follows_its_own_setting() {
+        let mut settings = Settings::default();
+        settings.sounds.urgent_sound = false;
+        let decision = decide(&settings, &urgent(), Environment::default());
+        assert!(decision.toast && !decision.sound && !decision.urgent_sound);
+        settings.sounds.urgent_sound = true;
+        settings.sounds.notification_sound = false;
+        let decision = decide(&settings, &urgent(), Environment::default());
+        assert!(decision.sound && decision.urgent_sound);
+        let important = Incoming {
+            importance: MessageImportance::High,
+            ..group()
+        };
+        assert!(!decide(&settings, &important, Environment::default()).sound);
     }
 
     #[test]
@@ -431,7 +494,8 @@ mod tests {
                 decide(&quiet_when_busy, &group(), environment),
                 Decision {
                     toast: true,
-                    sound: false
+                    sound: false,
+                    urgent_sound: false,
                 }
             );
         }
@@ -627,7 +691,8 @@ mod tests {
             decision,
             Decision {
                 toast: true,
-                sound: false
+                sound: false,
+                urgent_sound: false,
             }
         );
     }

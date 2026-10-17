@@ -19,6 +19,7 @@ pub mod demo_profiles;
 pub mod emoji;
 pub mod gifs;
 pub mod image_view_gallery;
+pub mod importance;
 pub mod local_previews;
 pub mod message_actions;
 pub mod notice;
@@ -43,6 +44,7 @@ pub mod stored_outgoing;
 pub mod task_dialog;
 pub mod translation_actions;
 pub mod typing;
+pub mod urgent_ack;
 
 pub use app_ui_kit::render;
 pub use app_base::{

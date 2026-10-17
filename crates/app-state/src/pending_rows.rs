@@ -79,6 +79,7 @@ pub fn pending_row(
             })
             .collect(),
         subject: outgoing.subject.clone(),
+        importance: store::MessageImportance::Normal,
         new_marker: false,
         reply_root: None,
         delivery,

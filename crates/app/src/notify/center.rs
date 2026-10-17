@@ -24,6 +24,7 @@ use super::stack::{
 use super::taskbar::taskbar_badge_count;
 use super::text::describe;
 use super::toast::{PillView, ToastView};
+use super::urgent_repeat::UrgentRepeats;
 use crate::active_appearance::{self, ActiveAppearance};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
@@ -76,6 +77,7 @@ pub struct NotificationCenter {
     stack: ToastStack,
     tracker: IncomingTracker,
     throttle: SoundThrottle,
+    urgent_repeats: UrgentRepeats,
     windows: HashMap<u64, OpenWindow>,
     opening: HashSet<u64>,
     call_windows: HashMap<CallToast, OpenWindow>,
@@ -141,6 +143,7 @@ impl NotificationCenter {
             stack: ToastStack::default(),
             tracker: IncomingTracker::new(Utc::now()),
             throttle: SoundThrottle::default(),
+            urgent_repeats: UrgentRepeats::default(),
             windows: HashMap::new(),
             opening: HashSet::new(),
             call_windows: HashMap::new(),
@@ -317,6 +320,11 @@ impl NotificationCenter {
         sound_cache::play_or(file_name, platform::play_sound, cx);
     }
 
+    fn play_urgent_sound(&self, cx: &App) {
+        let file_name = self.settings.sounds.urgent_sound_type.file_name();
+        sound_cache::play_or(file_name, platform::play_sound, cx);
+    }
+
     fn on_app_event(&mut self, event: &AppEvent, cx: &mut Context<Self>) {
         match event {
             AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
@@ -342,6 +350,7 @@ impl NotificationCenter {
         if let Some(conversation_id) = selected {
             self.unread_mentions.remove(&conversation_id);
             self.stack.remove_conversation(&conversation_id);
+            self.urgent_repeats.stop_conversation(&conversation_id);
         }
         self.refresh_badge(cx);
     }
@@ -412,6 +421,9 @@ impl NotificationCenter {
         }
         let decision = decide(&self.settings, &incoming, environment);
         self.present(&incoming, decision, cx);
+        if !environment.chat_in_foreground {
+            self.urgent_repeats.track(&incoming, Utc::now());
+        }
         if should_flash(&self.settings, decision.toast, self.main_window_active(cx))
             && let Some(native) = self.main_native
         {
@@ -429,8 +441,14 @@ impl NotificationCenter {
             model.time = chrono::Local::now().format("%H:%M").to_string();
         }
         let throttle_allows = self.throttle.allow(&incoming.conversation_id, now);
-        if decision.sound && outcome.plays_sound(throttle_allows) && !self.app.read(cx).mode.demo {
-            self.play_notification_sound(cx);
+        let audible =
+            outcome.plays_sound(throttle_allows) || (decision.urgent_sound && throttle_allows);
+        if decision.sound && audible && !self.app.read(cx).mode.demo {
+            if decision.urgent_sound {
+                self.play_urgent_sound(cx);
+            } else {
+                self.play_notification_sound(cx);
+            }
         }
         if let Some(user_id) = incoming.sender_id.clone() {
             self.app
@@ -849,6 +867,9 @@ impl NotificationCenter {
         }
         self.stack.promote(now, fade_in);
         self.sync_hover_hold(now);
+        if !self.urgent_repeats.is_empty() {
+            self.repeat_urgent(cx);
+        }
         if !self.app.read(cx).rings.is_empty() {
             self.app.update(cx, |state, cx| state.tick_rings(cx));
         }
@@ -873,6 +894,33 @@ impl NotificationCenter {
         self.poll_tray(cx);
         if single_instance::take_activation() {
             self.raise_main_window(cx);
+        }
+    }
+
+    fn repeat_urgent(&mut self, cx: &mut Context<Self>) {
+        let sidebar = &self.app.read(cx).sidebar;
+        self.urgent_repeats.stop_read(|conversation_id| {
+            sidebar
+                .chats
+                .iter()
+                .find(|chat| chat.id == conversation_id)
+                .and_then(|chat| chat.last_read_at.filter(|_| !chat.unread))
+        });
+        for incoming in self.urgent_repeats.due(Utc::now()) {
+            let environment = self.environment(&incoming.conversation_id, cx);
+            if environment.chat_in_foreground {
+                self.urgent_repeats
+                    .stop_conversation(&incoming.conversation_id);
+                continue;
+            }
+            self.stack.remove_conversation(&incoming.conversation_id);
+            let decision = decide(&self.settings, &incoming, environment);
+            self.present(&incoming, decision, cx);
+            if should_flash(&self.settings, decision.toast, self.main_window_active(cx))
+                && let Some(native) = self.main_native
+            {
+                platform::flash(native);
+            }
         }
     }
 
@@ -1119,10 +1167,12 @@ impl NotificationCenter {
             muted: false,
             signals: Default::default(),
             created_at: Utc::now(),
+            importance: Default::default(),
         };
         let decision = Decision {
             toast: true,
             sound: self.settings.sounds.notification_sound,
+            urgent_sound: false,
         };
         self.throttle = SoundThrottle::default();
         self.present(&incoming, decision, cx);
@@ -1133,6 +1183,7 @@ impl NotificationCenter {
             let decision = Decision {
                 toast: true,
                 sound: false,
+                urgent_sound: false,
             };
             self.present(&incoming, decision, cx);
         }
@@ -1288,6 +1339,7 @@ fn demo_incoming() -> Vec<Incoming> {
         muted: false,
         signals: Default::default(),
         created_at: Utc::now(),
+        importance: Default::default(),
     };
     vec![
         item(

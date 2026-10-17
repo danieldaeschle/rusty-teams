@@ -125,6 +125,7 @@ pub struct Message {
     pub is_deleted: Option<bool>,
     pub reply_to_id: Option<String>,
     pub subject: Option<String>,
+    pub importance: Option<String>,
     pub from: Option<Sender>,
     pub body: Option<Body>,
     pub event_detail: Option<serde_json::Value>,

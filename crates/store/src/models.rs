@@ -103,6 +103,46 @@ pub struct MessageRecord {
     pub links_json: String,
     pub subject: Option<String>,
     pub call_event_json: Option<String>,
+    pub importance: MessageImportance,
+}
+
+/// Graph `chatMessage.importance`; chatsvc keeps the same value in the message property `importance`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum MessageImportance {
+    #[default]
+    Normal,
+    High,
+    Urgent,
+}
+
+impl MessageImportance {
+    pub fn from_graph(value: &str) -> MessageImportance {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "high" => MessageImportance::High,
+            "urgent" => MessageImportance::Urgent,
+            _ => MessageImportance::Normal,
+        }
+    }
+
+    pub fn graph_value(self) -> &'static str {
+        match self {
+            MessageImportance::Normal => "normal",
+            MessageImportance::High => "high",
+            MessageImportance::Urgent => "urgent",
+        }
+    }
+
+    pub fn stored(self) -> Option<&'static str> {
+        (self != MessageImportance::Normal).then(|| self.graph_value())
+    }
+
+    pub fn from_stored(value: Option<&str>) -> MessageImportance {
+        value.map_or(MessageImportance::Normal, MessageImportance::from_graph)
+    }
+
+    pub fn is_marked(self) -> bool {
+        self != MessageImportance::Normal
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

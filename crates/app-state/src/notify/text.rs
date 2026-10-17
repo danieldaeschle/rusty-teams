@@ -1,6 +1,7 @@
 use super::rules::{ChatKind, Preview};
 use super::stack::ToastModel;
 use crate::format;
+use crate::importance::urgent_toast_title;
 
 const PREVIEW_OFF: &str = "New message";
 const IMAGE_LABEL: &str = "Image";
@@ -26,14 +27,12 @@ pub fn describe(model: &ToastModel, preview_on: bool) -> ToastText {
     } else {
         model.sender_name.as_str()
     };
-    let (title, subtitle) = match &model.kind {
-        ChatKind::Direct => (sender.to_owned(), "Direct".to_owned()),
-        ChatKind::Group { member_count } => (
-            model.chat_title.clone(),
-            format!("Group, {member_count} people"),
-        ),
-        ChatKind::Channel { team, channel } => (sender.to_owned(), format!("{team} > {channel}")),
+    let title = match &model.kind {
+        _ if model.urgent => urgent_toast_title(sender),
+        ChatKind::Group { .. } => model.chat_title.clone(),
+        ChatKind::Direct | ChatKind::Channel { .. } => sender.to_owned(),
     };
+    let subtitle = subtitle_of(&model.kind);
     let body = match (&model.preview, preview_on) {
         (_, false) => PREVIEW_OFF.to_owned(),
         (Preview::Text(text), true) => text.clone(),
@@ -50,6 +49,14 @@ pub fn describe(model: &ToastModel, preview_on: bool) -> ToastText {
         subtitle,
         preview,
         image_only: preview_on && model.preview == Preview::Image,
+    }
+}
+
+fn subtitle_of(kind: &ChatKind) -> String {
+    match kind {
+        ChatKind::Direct => "Direct".to_owned(),
+        ChatKind::Group { member_count } => format!("Group, {member_count} people"),
+        ChatKind::Channel { team, channel } => format!("{team} > {channel}"),
     }
 }
 
@@ -99,6 +106,7 @@ mod tests {
             dismissed: false,
             fade: Fade::shown(Instant::now()),
             agent: None,
+            urgent: false,
         }
     }
 
@@ -111,6 +119,19 @@ mod tests {
         assert_eq!(text.title, "Priya Nair");
         assert_eq!(text.subtitle, "Direct");
         assert_eq!(text.preview, "Hello");
+    }
+
+    #[test]
+    fn urgent_names_the_sender_like_teams() {
+        let mut urgent = model(
+            ChatKind::Group { member_count: 5 },
+            Preview::Text("Server down".into()),
+        );
+        urgent.urgent = true;
+        let text = describe(&urgent, true);
+        assert_eq!(text.title, "Priya Nair sent an urgent message");
+        assert_eq!(text.subtitle, "Group, 5 people");
+        assert_eq!(text.preview, "Priya: Server down");
     }
 
     #[test]

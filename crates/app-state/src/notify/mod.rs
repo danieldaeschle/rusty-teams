@@ -5,6 +5,7 @@ pub mod settings;
 pub mod stack;
 pub mod taskbar;
 pub mod text;
+pub mod urgent_repeat;
 
 pub use app_base::notify::{badge, platform, sound_cache, sounds};
 pub use chatsvc::sound_settings;

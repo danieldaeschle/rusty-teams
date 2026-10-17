@@ -171,6 +171,7 @@ pub struct ToastModel {
     pub dismissed: bool,
     pub fade: Fade,
     pub agent: Option<AgentToast>,
+    pub urgent: bool,
 }
 
 impl ToastModel {
@@ -218,6 +219,7 @@ impl ToastStack {
             existing.sender_id = incoming.sender_id.clone();
             existing.sender_name = incoming.sender_name.clone();
             existing.preview = incoming.preview.clone();
+            existing.urgent = incoming.is_urgent();
             let mention = existing.mentions_me;
             existing.timer.restart(now, mention);
             return PushOutcome {
@@ -248,6 +250,7 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: None,
+            urgent: incoming.is_urgent(),
         });
         PushOutcome {
             id: self.next_id,
@@ -285,6 +288,7 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: Some(agent),
+            urgent: false,
         });
         self.next_id
     }
@@ -423,6 +427,7 @@ mod tests {
             muted: false,
             signals: Default::default(),
             created_at: chrono::Utc::now(),
+            importance: Default::default(),
         }
     }
 

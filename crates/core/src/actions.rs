@@ -538,6 +538,10 @@ impl<R: Remote> SyncEngine<R> {
         self.remote.send_typing(&conversation, active).await
     }
 
+    pub async fn ack_urgent_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        self.remote.ack_urgent_message(chat_id, message_id).await
+    }
+
     pub async fn set_reaction(
         &self,
         conversation_id: &str,
