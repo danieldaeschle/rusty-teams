@@ -57,6 +57,7 @@ const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
+const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 
 pub struct DeliveryActions {
@@ -365,13 +366,16 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
             own && row.delivery == Delivery::Delivered,
             |meta| match row.receipt {
                 Receipt::Hidden => meta,
-                Receipt::Pending => meta.child(receipt_slot(tint).relative().top(px(1.))),
                 Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
                 Receipt::Read => meta.child(on_baseline(symbol(
                     "done_all",
                     META_CHECK_SIZE,
                     theme::own_read(),
                 ))),
+                Receipt::ReadLive => meta.child(receipt_fade_in(
+                    &row.key,
+                    on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                )),
             },
         )
 }
@@ -390,20 +394,12 @@ fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> Ani
     )
 }
 
-fn receipt_slot(tint: Hsla) -> Div {
-    h_flex()
-        .size(px(META_CHECK_SIZE))
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .child(pulse(
-            "receipt-slot",
-            div()
-                .w(px(13.))
-                .h(px(4.))
-                .rounded(px(2.))
-                .bg(tint.opacity(0.5)),
-        ))
+fn receipt_fade_in(message_key: &str, check: Div) -> AnimationElement<Div> {
+    check.with_animation(
+        SharedString::from(format!("receipt-fade/{message_key}")),
+        Animation::new(RECEIPT_FADE_PERIOD).with_easing(ease_in_out),
+        |check, delta| check.opacity(0.25 + 0.75 * delta),
+    )
 }
 
 pub fn render_skeleton_row(skeleton: &Skeleton, index: usize) -> AnyElement {
