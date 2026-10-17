@@ -4,6 +4,7 @@ use chatsvc::{CalendarEvent, ResponseType};
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use gpui_kit::Context;
 
+use super::outlook_reminders::{OutlookReminders, ReminderWrite};
 use crate::app_state::{AppEvent, AppState};
 
 pub const LEAD_MINUTES: i64 = 5;
@@ -22,6 +23,7 @@ pub enum ReminderPhase {
 pub struct MeetingToast {
     pub id: u64,
     pub event_key: String,
+    pub event_id: String,
     pub phase: ReminderPhase,
     pub subject: String,
     pub start: DateTime<Utc>,
@@ -32,13 +34,16 @@ fn event_key(event: &CalendarEvent) -> String {
     format!("{}@{}", event.object_id, event.start.timestamp())
 }
 
-pub fn phase_at(event: &CalendarEvent, now: DateTime<Utc>, live: bool) -> Option<ReminderPhase> {
-    let eligible = event.online
+pub(super) fn is_eligible(event: &CalendarEvent) -> bool {
+    event.online
         && !event.cancelled
         && !event.all_day
         && event.join_url.is_some()
-        && event.response != ResponseType::Declined;
-    if !eligible {
+        && event.response != ResponseType::Declined
+}
+
+pub fn phase_at(event: &CalendarEvent, now: DateTime<Utc>, live: bool) -> Option<ReminderPhase> {
+    if !is_eligible(event) {
         return None;
     }
     let opens = event.start - Duration::minutes(LEAD_MINUTES);
@@ -93,6 +98,7 @@ pub struct MeetingToasts {
     next_id: u64,
     last_check: Option<DateTime<Utc>>,
     last_live_poll: Option<DateTime<Utc>>,
+    outlook: OutlookReminders,
 }
 
 impl MeetingToasts {
@@ -110,6 +116,10 @@ impl MeetingToasts {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub fn outlook_mut(&mut self) -> &mut OutlookReminders {
+        &mut self.outlook
     }
 
     pub fn dismiss(&mut self, id: u64) -> Option<MeetingToast> {
@@ -166,9 +176,11 @@ impl MeetingToasts {
     ) -> ReminderUpdate {
         self.last_check = Some(now);
         let before = self.entries.clone();
+        let outlook = &self.outlook;
         self.entries.retain(|toast| {
             events.iter().any(|event| {
                 event_key(event) == toast.event_key
+                    && outlook.allows(event, now)
                     && phase_at(event, now, is_live(event, live_threads)).is_some()
             })
         });
@@ -184,6 +196,10 @@ impl MeetingToasts {
             };
             let key = event_key(event);
             if self.dismissed.contains(&key) {
+                continue;
+            }
+            if !self.outlook.allows(event, now) {
+                self.fired.retain(|(fired_key, _)| *fired_key != key);
                 continue;
             }
             let chime_due = phase != ReminderPhase::Soon && !self.chimed.contains(&key);
@@ -224,6 +240,7 @@ impl MeetingToasts {
             self.entries.push(MeetingToast {
                 id: self.next_id,
                 event_key: key,
+                event_id: event.object_id.clone(),
                 phase,
                 subject,
                 start: event.start,
@@ -240,6 +257,7 @@ impl MeetingToasts {
 impl AppState {
     pub fn tick_meeting_reminders(&mut self, show: bool, cx: &mut Context<Self>) {
         let now = Utc::now();
+        self.poll_outlook_reminders(now, cx);
         let in_call = self.call.is_some();
         let show = show && !in_call && !self.mode.read_only;
         for thread_id in self
@@ -284,14 +302,16 @@ impl AppState {
     }
 
     pub fn snooze_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.meeting_toasts.snooze(id).is_some() {
+        if let Some(toast) = self.meeting_toasts.snooze(id) {
+            self.write_outlook_reminder(toast.event_id, ReminderWrite::Snooze(toast.start));
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
         }
     }
 
     pub fn dismiss_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
-        if self.meeting_toasts.dismiss(id).is_some() {
+        if let Some(toast) = self.meeting_toasts.dismiss(id) {
+            self.write_outlook_reminder(toast.event_id, ReminderWrite::Dismiss);
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
         }
@@ -613,6 +633,7 @@ mod tests {
         let toast = |phase| MeetingToast {
             id: 1,
             event_key: "a".into(),
+            event_id: "a".into(),
             phase,
             subject: "Planning".into(),
             start: at(9, 0, 0),
@@ -651,6 +672,66 @@ mod tests {
         assert!(toasts.clear());
         assert!(toasts.is_empty());
         assert!(!toasts.clear());
+    }
+
+    fn outlook_state(
+        toasts: &mut MeetingToasts,
+        now: DateTime<Utc>,
+        fire_times: &[(&str, DateTime<Utc>)],
+    ) {
+        let outlook = toasts.outlook_mut();
+        let (start, end) = outlook.poll_range(&[event("a")], now).unwrap();
+        let reminders = fire_times
+            .iter()
+            .map(|(event_id, fire_time)| chatsvc::Reminder {
+                event_id: (*event_id).into(),
+                fire_time: *fire_time,
+            })
+            .collect();
+        outlook.apply(start, end, Ok(reminders));
+    }
+
+    #[test]
+    fn a_reminder_dismissed_in_outlook_is_not_shown_and_closes_an_open_toast() {
+        let events = [event("a"), event("b")];
+        let mut toasts = MeetingToasts::default();
+        outlook_state(&mut toasts, at(8, 54, 0), &[("b", at(8, 45, 0))]);
+        tick(&mut toasts, &events, at(8, 56, 0), true);
+        assert_eq!(toasts.entries().len(), 1);
+        assert_eq!(toasts.entries()[0].event_id, "b");
+        outlook_state(&mut toasts, at(8, 57, 0), &[]);
+        assert!(tick(&mut toasts, &events, at(8, 57, 1), true).changed);
+        assert!(toasts.is_empty());
+    }
+
+    #[test]
+    fn a_reminder_snoozed_in_outlook_comes_back_at_its_fire_time() {
+        let events = [event("a")];
+        let mut toasts = MeetingToasts::default();
+        outlook_state(&mut toasts, at(8, 54, 0), &[("a", at(8, 45, 0))]);
+        tick(&mut toasts, &events, at(8, 56, 0), true);
+        assert_eq!(toasts.entries().len(), 1);
+        outlook_state(&mut toasts, at(8, 57, 0), &[("a", at(8, 59, 0))]);
+        tick(&mut toasts, &events, at(8, 57, 1), true);
+        assert!(toasts.is_empty());
+        tick(&mut toasts, &events, at(8, 58, 59), true);
+        assert!(toasts.is_empty());
+        tick(&mut toasts, &events, at(8, 59, 0), true);
+        assert_eq!(toasts.entries().len(), 1);
+    }
+
+    #[test]
+    fn snooze_and_dismiss_hand_back_the_event_for_the_outlook_write() {
+        let events = [event("a"), event("b")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 56, 0), true);
+        let snoozed = toasts.snooze(toasts.entries()[0].id).unwrap();
+        assert_eq!(
+            (snoozed.event_id.as_str(), snoozed.start),
+            ("a", at(9, 0, 0))
+        );
+        let dismissed = toasts.dismiss(toasts.entries()[0].id).unwrap();
+        assert_eq!(dismissed.event_id, "b");
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::cards::CardTransport;
 use crate::error::{Error, Result};
 use crate::messages::encode;
 
-const CALENDARS_SCOPE: &str = "Calendars.ReadWrite";
+pub(super) const CALENDARS_SCOPE: &str = "Calendars.ReadWrite";
 const GRAPH_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 const GRAPH_DATE_FORMAT: &str = "%Y-%m-%d";
 const TIME_ZONE: &str = "UTC";

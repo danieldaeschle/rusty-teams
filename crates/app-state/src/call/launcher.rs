@@ -225,6 +225,46 @@ impl CallLauncher {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn reminder_view(
+        &self,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<chatsvc::Reminder>, String> {
+        let session = self.engine().ok_or_else(|| NOT_READY.to_owned())?.session();
+        chatsvc::Calendar::new(&session)
+            .reminder_view(start, end)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn snooze_reminder(
+        &self,
+        event_id: &str,
+        until: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .snooze_reminder(event_id, until)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn dismiss_reminder(&self, event_id: &str) -> Result<(), String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .dismiss_reminder(event_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn live_meeting(&self, thread_id: &str) -> Option<LiveMeeting> {
         let session = self.engine()?.session();
         fetch_live_meeting(&session, thread_id).await.ok().flatten()
