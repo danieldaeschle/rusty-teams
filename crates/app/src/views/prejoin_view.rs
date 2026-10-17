@@ -58,7 +58,7 @@ struct DeviceSelect {
     enabled: bool,
 }
 
-fn demo_devices() -> DeviceLists {
+pub(crate) fn demo_devices() -> DeviceLists {
     let device = |index: u16, name: &str| AudioDevice {
         index,
         guid: format!("demo-{name}"),

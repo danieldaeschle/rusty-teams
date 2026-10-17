@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use chatsvc::{
     Attendance, Occurrence, Recap, RecordingDetails, TranscriptFormat, TranscriptTurn,
+    days_until_expiry,
 };
 use chrono::Utc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -14,7 +15,8 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use super::ConversationView;
-use crate::app_state::Selection;
+use crate::app_state::{AppState, Selection};
+use crate::rows::{MeetingInfo, MeetingSlot};
 use crate::channel_files::SharedContent;
 use crate::demo_recap;
 use crate::downloads::{self, DownloadState};
@@ -27,6 +29,7 @@ use crate::views::shared_tab::{SharedCommand, SharedRun};
 
 const SEARCH_PLACEHOLDER: &str = "Search transcript";
 const RECORDING_EXTENSION: &str = "mp4";
+const EXPIRY_OCCURRENCES: usize = 3;
 
 pub(super) fn search_input(
     window: &mut Window,
@@ -44,6 +47,7 @@ pub(super) struct RecapState {
     query: String,
     downloads: HashMap<RecapDownload, DownloadState>,
     generation: u64,
+    expiry_days: HashMap<String, i64>,
 }
 
 impl Default for RecapState {
@@ -57,6 +61,7 @@ impl Default for RecapState {
             query: String::new(),
             downloads: HashMap::new(),
             generation: 0,
+            expiry_days: HashMap::new(),
         }
     }
 }
@@ -119,7 +124,19 @@ impl ConversationView {
         let state = self.app.read(cx);
         let (demo, engine) = (state.mode.demo, state.engine.clone());
         if demo {
-            self.recap.listing = Load::Ready(demo_recap::occurrences(&conversation_id, Utc::now()));
+            let now = Utc::now();
+            let occurrences = demo_recap::occurrences(&conversation_id, now);
+            self.recap.expiry_days = occurrences
+                .iter()
+                .filter_map(|occurrence| {
+                    let expires_at = demo_recap::details(occurrence, now).expires_at?;
+                    Some((
+                        occurrence.message_id.clone(),
+                        days_until_expiry(expires_at, now),
+                    ))
+                })
+                .collect();
+            self.recap.listing = Load::Ready(occurrences);
             return;
         }
         let Some(engine) = engine else {
@@ -142,7 +159,10 @@ impl ConversationView {
                     return;
                 }
                 this.recap.listing = match outcome {
-                    Ok(occurrences) => Load::Ready(occurrences),
+                    Ok(occurrences) => {
+                        this.load_expiry(&occurrences, cx);
+                        Load::Ready(occurrences)
+                    }
                     Err(reason) => Load::Failed(reason),
                 };
                 if this.pane == ChannelPane::Recap {
@@ -153,6 +173,74 @@ impl ConversationView {
             .ok();
         })
         .detach();
+    }
+
+    /// The chat's recording lines and recap cards say when a recording expires; the value comes
+    /// from the same SharePoint list item the Recap tab reads.
+    fn load_expiry(&mut self, occurrences: &[Occurrence], cx: &mut Context<Self>) {
+        let (Some(engine), Some(conversation_id)) =
+            (self.app.read(cx).engine.clone(), self.conversation_id())
+        else {
+            return;
+        };
+        let newest: Vec<Occurrence> = occurrences
+            .iter()
+            .take(EXPIRY_OCCURRENCES)
+            .cloned()
+            .collect();
+        if newest.is_empty() {
+            return;
+        }
+        let receiver = runtime::spawn(async move {
+            let recap = Recap::new(engine.remote().session());
+            let mut found = Vec::new();
+            for occurrence in newest {
+                if let Ok(details) = recap.details(&occurrence).await {
+                    found.push((occurrence.message_id, details.expires_at));
+                }
+            }
+            found
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(found) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if this.conversation_id().as_deref() != Some(conversation_id.as_str()) {
+                    return;
+                }
+                let now = Utc::now();
+                this.recap.expiry_days = found
+                    .into_iter()
+                    .filter_map(|(message_id, expires_at)| {
+                        Some((message_id, days_until_expiry(expires_at?, now)))
+                    })
+                    .collect();
+                this.rebuild(false, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(super) fn meeting_info(&self, app: &AppState) -> MeetingInfo {
+        let Some(current) = self.current.as_ref() else {
+            return MeetingInfo::default();
+        };
+        let conversation_id = current.selection.conversation_id();
+        MeetingInfo {
+            title: Some(current.title.clone()),
+            slots: app
+                .calendar_events
+                .iter()
+                .filter(|event| event.thread_id.as_deref() == Some(conversation_id))
+                .map(|event| MeetingSlot {
+                    start: event.start,
+                    end: event.end,
+                })
+                .collect(),
+            expiry_days: self.recap.expiry_days.clone(),
+        }
     }
 
     /// Teams opens a meeting chat recording in the Recap tab at its occurrence and plays any

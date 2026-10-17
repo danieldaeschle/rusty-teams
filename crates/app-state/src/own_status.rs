@@ -298,10 +298,6 @@ impl AppState {
         std::mem::take(&mut self.status_message_request)
     }
 
-    pub fn open_notification_settings(&mut self, cx: &mut Context<Self>) {
-        cx.emit(AppEvent::NotificationSettings);
-    }
-
     pub fn refresh_own_status(&mut self, cx: &mut Context<Self>) {
         let Some(engine) = self.engine.clone().filter(|_| !self.mode.demo) else {
             return;

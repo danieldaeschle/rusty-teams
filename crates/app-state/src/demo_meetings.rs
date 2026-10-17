@@ -158,64 +158,63 @@ fn channel_meeting() -> Vec<MessageRecord> {
     ]
 }
 
+fn standup_line(id: &str, time: DateTime<Utc>, event: CallEvent) -> MessageRecord {
+    record(DEMO_RECAP_CHAT, id, None, time, event)
+}
+
 fn recorded_standup() -> Vec<MessageRecord> {
-    let start = at(1, 9, 0);
+    let start = at(2, 11, 45);
     let minutes = |count: i64| start + Duration::minutes(count);
-    let name = "Daily standup-1-Meeting Recording.mp4";
+    let name = "Daily standup-20261015_114602-Meeting Recording.mp4";
     let url = format!("{DEMO_RECORDING_URL}/standup-1.mp4");
     let people = [
         (JONAS_ID, "Jonas Ortega"),
         (DEMO_USER_ID, "Dana Demo"),
         (MARA_ID, "Mara Lindqvist"),
     ];
-    let line = |id: &str, offset: i64, event: CallEvent| {
-        record(DEMO_RECAP_CHAT, id, None, minutes(offset), event)
+    let saved_recording = |phase: CallPhase, seconds: Option<u64>, url: Option<&str>| {
+        recording(
+            event(phase, STANDUP_CALL, DEMO_USER_ID, seconds),
+            name,
+            url,
+            MARA_ID,
+        )
     };
     vec![
-        line(
+        standup_line(
             "standup-1-start",
-            0,
+            start,
             event(CallPhase::Started, STANDUP_CALL, JONAS_ID, None),
         ),
-        line(
+        standup_line(
             "standup-1-rec",
-            1,
-            recording(
-                event(CallPhase::RecordingStarted, STANDUP_CALL, JONAS_ID, Some(0)),
-                name,
-                None,
+            minutes(1),
+            saved_recording(CallPhase::RecordingStarted, Some(0), None),
+        ),
+        standup_line(
+            "standup-1-transcript",
+            minutes(1),
+            event(
+                CallPhase::TranscriptStarted,
+                STANDUP_CALL,
                 DEMO_USER_ID,
+                None,
             ),
         ),
-        line(
+        standup_line(
             "standup-1-stop",
-            17,
-            recording(
-                event(
-                    CallPhase::RecordingStopped,
-                    STANDUP_CALL,
-                    JONAS_ID,
-                    Some(985),
-                ),
-                name,
-                None,
-                DEMO_USER_ID,
-            ),
+            minutes(10),
+            saved_recording(CallPhase::RecordingStopped, Some(531), None),
         ),
-        line(
+        standup_line(
             "standup-1-end",
-            18,
-            ended(STANDUP_CALL, JONAS_ID, 1080, &people),
+            minutes(10) + Duration::seconds(40),
+            ended(STANDUP_CALL, JONAS_ID, 586, &people),
         ),
-        line(
-            "demo-recap-1",
-            19,
-            recording(
-                event(CallPhase::RecordingSaved, STANDUP_CALL, JONAS_ID, Some(985)),
-                name,
-                Some(&url),
-                DEMO_USER_ID,
-            ),
+        standup_line(
+            "demo-recap-0",
+            minutes(10) + Duration::seconds(55),
+            saved_recording(CallPhase::RecordingSaved, Some(531), Some(&url)),
         ),
     ]
 }

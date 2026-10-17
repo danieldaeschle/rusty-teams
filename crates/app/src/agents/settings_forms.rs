@@ -11,7 +11,7 @@ use super::settings_controls::{
 };
 use super::settings_problems::{agent_problem, command_problem, placeholder_problem};
 use super::settings_section::{AgentsSettings, Probe};
-use crate::notify::switch;
+use crate::settings::switch;
 use crate::theme;
 use crate::views::widgets::icon;
 

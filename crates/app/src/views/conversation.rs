@@ -643,7 +643,7 @@ impl ConversationView {
             | AppEvent::Forward
             | AppEvent::ImageViewer
             | AppEvent::StatusMessage
-            | AppEvent::NotificationSettings
+            | AppEvent::Settings(_)
             | AppEvent::Profile
             | AppEvent::CallHistory
             | AppEvent::Ring
@@ -1273,6 +1273,7 @@ impl ConversationView {
             card_overrides,
             translation,
             skin_tone: teams_core::skin_tone(&app.store),
+            meeting: self.meeting_info(app),
         }
     }
 
