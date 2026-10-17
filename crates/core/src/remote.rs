@@ -145,6 +145,7 @@ pub trait Remote {
         extras: &MessageExtras,
     ) -> Result<()>;
     async fn soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()>;
+    async fn undo_soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()>;
     async fn create_one_on_one(&self, my_user_id: &str, user_id: &str) -> Result<Chat>;
     async fn create_group(
         &self,
@@ -757,6 +758,15 @@ impl Remote for Graph {
                 .soft_delete_message(&conversation, target.message_id())
                 .await?),
             None => Ok(Graph::soft_delete_message(self, user_id, target).await?),
+        }
+    }
+
+    async fn undo_soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()> {
+        match chatsvc_conversation(target) {
+            Some(conversation) => Ok(Messages::new(self.session())
+                .undelete_message(&conversation, target.message_id())
+                .await?),
+            None => Ok(Graph::undo_soft_delete_message(self, user_id, target).await?),
         }
     }
 

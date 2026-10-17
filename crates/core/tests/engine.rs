@@ -661,6 +661,11 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn undo_soft_delete_message(&self, user_id: &str, target: &MessageTarget) -> Result<()> {
+        self.record(format!("undo_soft_delete {user_id} {}", describe(target)));
+        Ok(())
+    }
+
     async fn create_one_on_one(&self, my_user_id: &str, user_id: &str) -> Result<Chat> {
         self.record(format!("one_on_one {my_user_id} {user_id}"));
         Ok(chat("19:new@thread.v2", None, 40, 40, ME, false))
@@ -2519,12 +2524,17 @@ async fn chat_actions_call_graph_with_the_right_ids() {
         .await
         .unwrap();
     engine.soft_delete_message(CHAT, "m0003").await.unwrap();
+    engine
+        .undo_soft_delete_message(CHAT, "m0003")
+        .await
+        .unwrap();
     let calls = fake.calls();
     assert_eq!(calls[0], format!("mark_read {CHAT} {ME} tenant-1"));
     assert!(calls.contains(&"set_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"unset_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"edit m0002 new <b>text</b>".to_owned()));
     assert!(calls.contains(&format!("soft_delete {ME} m0003")));
+    assert!(calls.contains(&format!("undo_soft_delete {ME} m0003")));
     assert!(!engine.sidebar().unwrap().chats[0].unread);
 }
 
@@ -3027,6 +3037,7 @@ impl FolderSource for FakeFolders {
         &'a self,
         conversation_id: &'a str,
         target_folder_id: &'a str,
+        _index: Option<usize>,
     ) -> BoxFuture<'a, Result<Vec<ChatFolder>>> {
         Box::pin(async move {
             self.calls
@@ -3037,7 +3048,6 @@ impl FolderSource for FakeFolders {
             for folder in state
                 .iter_mut()
                 .filter(|folder| folder.kind == FolderKind::UserCreated)
-        _index: Option<usize>,
             {
                 folder.conversation_ids.retain(|id| id != conversation_id);
             }

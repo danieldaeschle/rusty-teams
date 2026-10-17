@@ -108,6 +108,7 @@ pub struct AppState {
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
     pub keep_unread: Option<String>,
+    pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
     typing_timer_running: bool,
     pub local_previews: HashMap<String, LocalPreview>,
@@ -259,6 +260,7 @@ impl AppState {
             live_retry: None,
             notice_count: 0,
             keep_unread: None,
+            restorable_deletes: Default::default(),
             typing: TypingState::default(),
             typing_timer_running: false,
             local_previews: HashMap::new(),
@@ -684,8 +686,6 @@ impl AppState {
         folder_id: Option<&str>,
         cx: &mut Context<Self>,
     ) {
-        if self.mode.read_only {
-    ) {
         self.place_chat(conversation_id, folder_id, None, cx);
     }
 
@@ -711,6 +711,8 @@ impl AppState {
         folder_id: Option<&str>,
         index: Option<usize>,
         cx: &mut Context<Self>,
+    ) {
+        if self.mode.read_only {
             return;
         }
         let previous_folder = self

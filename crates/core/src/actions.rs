@@ -591,6 +591,20 @@ impl<R: Remote> SyncEngine<R> {
         Ok(())
     }
 
+    pub async fn undo_soft_delete_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<()> {
+        let target = self.message_target(conversation_id, message_id)?;
+        let user_id = self.my_user_id().await?;
+        self.remote
+            .undo_soft_delete_message(&user_id, &target)
+            .await?;
+        self.refresh_message(conversation_id, message_id).await?;
+        Ok(())
+    }
+
     fn message_target(&self, conversation_id: &str, message_id: &str) -> Result<MessageTarget> {
         Ok(match self.resolve_stored(conversation_id)? {
             Conversation::Chat => MessageTarget::chat(conversation_id, message_id),

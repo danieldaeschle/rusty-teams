@@ -126,6 +126,26 @@ async fn delete_is_soft_without_a_body() {
 }
 
 #[tokio::test]
+async fn undelete_clears_the_delete_time_property_like_teams() {
+    let mock = Mock::new(&[200]);
+    messages(&mock)
+        .undelete_message(&ConversationRef::chat("19:a@thread.v2"), "m1")
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, Method::Delete);
+    assert_eq!(
+        requests[0].url,
+        format!("{BASE}/19%3Aa%40thread.v2/messages/m1/properties?name=deletetime")
+    );
+    assert_eq!(
+        requests[0].body,
+        Some(serde_json::json!({"deletetime": null}))
+    );
+}
+
+#[tokio::test]
 async fn edit_retries_once_on_404() {
     let mock = Mock::new(&[404, 200]);
     messages(&mock)

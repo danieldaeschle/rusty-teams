@@ -21,10 +21,11 @@ use teams_core::{
     ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
 };
 
+mod deletes;
 mod detached;
 mod feed;
-mod pins;
 mod jump;
+mod pins;
 mod proposal;
 mod recap;
 mod receipt_fade;
@@ -2790,31 +2791,6 @@ impl ConversationView {
         .detach();
     }
 
-    fn delete(&mut self, message_id: &str, cx: &mut Context<Self>) {
-        let Some(mut record) = self.own_record(message_id, cx) else {
-            return;
-        };
-        let state = self.app.read(cx);
-        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
-        if mode.demo {
-            record.deleted = true;
-            let _ = store.upsert_messages(std::slice::from_ref(&record));
-            self.rebuild(false, cx);
-            return;
-        }
-        let Some(engine) = engine.filter(|_| !mode.read_only) else {
-            self.show_notice("Read-only mode: message not deleted", cx);
-            return;
-        };
-        let conversation_id = record.conversation_id.clone();
-        let receiver = runtime::spawn(async move {
-            engine
-                .soft_delete_message(&conversation_id, &record.message_id)
-                .await
-        });
-        self.report_failure(receiver, "Delete failed", cx);
-    }
-
     fn copy_text(&self, message_id: &str, cx: &mut Context<Self>) {
         let Some(conversation_id) = self.conversation_id() else {
             return;
@@ -2860,26 +2836,6 @@ impl ConversationView {
         self.app.update(cx, |state, cx| {
             state.raise_notice(message.to_owned(), None, cx)
         });
-    }
-
-    fn report_failure(
-        &mut self,
-        receiver: tokio::sync::oneshot::Receiver<teams_core::Result<()>>,
-        label: &'static str,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            let error = match receiver.await {
-                Ok(Ok(())) => return,
-                Ok(Err(error)) => short_error(&error),
-                Err(_) => "cancelled".to_owned(),
-            };
-            this.update(cx, |this, cx| {
-                this.show_notice(&format!("{label}: {error}"), cx)
-            })
-            .ok();
-        })
-        .detach();
     }
 
     fn delegate_entries(&self, key: &str, cx: &App) -> (Vec<DelegateEntry>, Option<Action>) {
@@ -3518,15 +3474,6 @@ impl Render for ConversationView {
                             .child(icon(IconName::Loader, 12., theme::text_muted()))
                             .child("Loading newer messages")
                             .into_any_element()
-        .with_jump_button_label(jump::JUMP_TO_NEWEST_LABEL)
-        .with_jump_button_renderer(|button| {
-            button
-                .label(jump::JUMP_TO_NEWEST_LABEL)
-                .tooltip(jump::jump_to_newest_tooltip())
-                .border_0()
-                .bg(theme::accent())
-                .text_color(theme::on_accent())
-        })
                     }
                     Some(Row::Start(start)) => {
                         let state = env.app.read(cx);
@@ -3571,6 +3518,15 @@ impl Render for ConversationView {
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
         .jump_button(!in_feed)
         .force_jump_button(detached)
+        .with_jump_button_label(jump::JUMP_TO_NEWEST_LABEL)
+        .with_jump_button_renderer(|button| {
+            button
+                .label(jump::JUMP_TO_NEWEST_LABEL)
+                .tooltip(jump::jump_to_newest_tooltip())
+                .border_0()
+                .bg(theme::accent())
+                .text_color(theme::on_accent())
+        })
         .when(detached, |scroller| {
             let view = cx.weak_entity();
             scroller.on_jump(move |_, cx| {

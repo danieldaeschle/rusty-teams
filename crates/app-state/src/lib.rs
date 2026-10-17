@@ -31,6 +31,7 @@ pub mod people;
 pub mod profile_model;
 pub mod profile_state;
 pub mod reaction_model;
+pub mod restorable_deletes;
 pub mod rows;
 pub mod scheduled;
 pub mod scheduled_rows;

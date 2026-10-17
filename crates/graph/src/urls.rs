@@ -83,8 +83,21 @@ pub fn chat_message(chat_id: &str, message_id: &str) -> String {
 }
 
 pub fn soft_delete(user_id: &str, chat_id: &str, message_id: &str) -> String {
+    user_chat_message_action(user_id, chat_id, message_id, "softDelete")
+}
+
+pub fn undo_soft_delete(user_id: &str, chat_id: &str, message_id: &str) -> String {
+    user_chat_message_action(user_id, chat_id, message_id, "undoSoftDelete")
+}
+
+fn user_chat_message_action(
+    user_id: &str,
+    chat_id: &str,
+    message_id: &str,
+    action: &str,
+) -> String {
     format!(
-        "{GRAPH}/v1.0/users/{}/chats/{}/messages/{}/softDelete",
+        "{GRAPH}/v1.0/users/{}/chats/{}/messages/{}/{action}",
         segment(user_id),
         segment(chat_id),
         segment(message_id)

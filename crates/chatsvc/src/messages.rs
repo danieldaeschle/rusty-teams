@@ -164,6 +164,23 @@ impl<T: MessageTransport> Messages<T> {
         ensure_success(&answer)
     }
 
+    pub async fn undelete_message(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/properties?name=deletetime",
+            self.message_url(conversation, message_id)
+        );
+        let body = json!({"deletetime": null});
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Delete, &url, body))
+            .await?;
+        ensure_success(&answer)
+    }
+
     pub async fn set_emotion(
         &self,
         conversation: &ConversationRef,
