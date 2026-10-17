@@ -348,6 +348,7 @@ fn skeleton_rows() -> impl IntoElement {
             ))
             .w_full()
             .h(px(ROW_HEIGHT))
+            .flex_none()
             .px(px(SIDE_PADDING))
             .gap(px(12.))
             .items_center()

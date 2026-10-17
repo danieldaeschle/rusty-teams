@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+pub const UNKNOWN_USER_NAME: &str = "Unknown User";
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
@@ -20,6 +22,17 @@ pub struct Member {
     pub tenant_id: Option<String>,
     pub display_name: Option<String>,
     pub email: Option<String>,
+}
+
+impl Member {
+    pub fn name(&self) -> &str {
+        [&self.display_name, &self.email]
+            .into_iter()
+            .flatten()
+            .map(|name| name.trim())
+            .find(|name| !name.is_empty())
+            .unwrap_or(UNKNOWN_USER_NAME)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -160,13 +173,7 @@ impl Chat {
             .members
             .iter()
             .filter(|member| member.user_id.as_deref() != Some(my_user_id))
-            .map(|member| {
-                member
-                    .display_name
-                    .as_deref()
-                    .or(member.email.as_deref())
-                    .unwrap_or("?")
-            })
+            .map(Member::name)
             .collect();
         if names.is_empty() {
             self.preview_sender_name(my_user_id)
