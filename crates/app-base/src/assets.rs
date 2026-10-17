@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 50] = symbols![
+const SYMBOLS: [(&str, &[u8]); 53] = symbols![
     "done",
     "done_all",
     "keyboard_return",
@@ -55,10 +55,13 @@ const SYMBOLS: [(&str, &[u8]); 50] = symbols![
     "call",
     "call_missed",
     "videocam",
-    "radio_button_checked",
-    "stop_circle",
-    "play_arrow",
-    "description",
+    "fluent_video",
+    "fluent_record",
+    "fluent_record_stop",
+    "fluent_cloud_arrow_up",
+    "fluent_share",
+    "fluent_clock",
+    "fluent_document_text",
 ];
 
 pub struct AppAssets;

@@ -7,6 +7,7 @@ use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, post_call_card};
+use super::call_notice::notice_line;
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
@@ -199,6 +200,18 @@ fn message_block(
         Some(bot) => bot_avatar(bot, size),
         None => person_avatar(directory, row.sender_id.as_deref(), &row.author, size),
     };
+    if let (Role::Reply, Some(call)) = (role, &row.call)
+        && let Some(notice) = &call.notice
+    {
+        let recap = std::mem::replace(&mut actions.call, CallActions::none()).recap;
+        return div()
+            .id(ElementId::Name(format!("post-message-{index}").into()))
+            .w_full()
+            .px(px(CARD_PADDING))
+            .pb(px(CARD_PADDING))
+            .bg(theme::reply_surface())
+            .child(notice_line(call, notice, index, directory, recap));
+    }
     let profile_user = row.sender_id.as_deref().filter(|_| actions.bot.is_none());
     let content = match &row.call {
         Some(call) => v_flex().child(post_call_card(

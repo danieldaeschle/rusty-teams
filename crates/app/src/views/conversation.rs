@@ -1271,6 +1271,7 @@ impl ConversationView {
             card_overrides,
             translation,
             skin_tone: teams_core::skin_tone(&app.store),
+            meeting: self.meeting_info(app),
         }
     }
 

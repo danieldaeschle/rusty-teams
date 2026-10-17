@@ -14,8 +14,11 @@ use teams_core::{
     reactions, readable_text, translated_spans,
 };
 
-pub use crate::call_rows::{CallCard, CallIcon, CallParticipant, RecordingCard};
-use crate::call_rows::{CallNames, CallTimeline, call_card};
+pub use crate::call_rows::{
+    CallCard, CallIcon, CallNotice, CallParticipant, MeetingInfo, MeetingSlot, RecapCard,
+    RecordingCard,
+};
+use crate::call_rows::{CallClock, CallNames, CallSource, CallTimeline, call_card};
 use crate::card_state::CardOverride;
 use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
@@ -563,6 +566,7 @@ pub struct RowContext {
     pub card_overrides: HashMap<String, CardOverride>,
     pub translation: TranslationContext,
     pub skin_tone: u8,
+    pub meeting: MeetingInfo,
 }
 
 fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<ReactionInfo> {
@@ -580,7 +584,7 @@ fn call_row(
     record: &MessageRecord,
     event: &CallEvent,
     context: &RowContext,
-    transcript: bool,
+    timeline: &CallTimeline,
 ) -> MessageRow {
     let my_user_id = context.my_user_id.as_deref();
     let time = clock_label(record.created_at, context.offset);
@@ -633,11 +637,19 @@ fn call_row(
         forwarded: false,
         translation: None,
         call: Some(call_card(
-            event,
-            &record.message_id,
-            &time,
+            CallSource {
+                event,
+                message_id: &record.message_id,
+                created_at: record.created_at,
+                time: &time,
+            },
             &names,
-            transcript,
+            &CallClock {
+                offset: context.offset,
+                today: context.today,
+                meeting: &context.meeting,
+            },
+            timeline,
         )),
         time,
     }
@@ -706,7 +718,8 @@ fn message_row_with(
     quoted: &HashMap<String, String>,
 ) -> MessageRow {
     if let Some(event) = call_event(record) {
-        return call_row(record, &event, context, false);
+        let events = [Some(event.clone())];
+        return call_row(record, &event, context, &CallTimeline::new(&events));
     }
     let local = record.created_at.with_timezone(&context.offset);
     let images = images(record);
@@ -778,7 +791,7 @@ pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: boo
         rows.push(Row::LoadOlder);
     }
     let events: Vec<Option<CallEvent>> = records.iter().map(call_event).collect();
-    let timeline = CallTimeline::new(&events);
+    let timeline = CallTimeline::with_records(&events, &records.iter().collect::<Vec<_>>());
     let mut previous_day: Option<NaiveDate> = None;
     let quoted = quoted_texts(records);
     for (index, (record, event)) in records.iter().zip(&events).enumerate() {
@@ -786,12 +799,7 @@ pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: boo
             continue;
         }
         let mut row = match event {
-            Some(event) => call_row(
-                record,
-                event,
-                context,
-                timeline.has_transcript(&event.call_id),
-            ),
+            Some(event) => call_row(record, event, context, &timeline),
             None => message_row_with(record, context, &quoted),
         };
         if let Some(call) = row.call.as_mut() {
@@ -849,12 +857,7 @@ fn post_message_row(
     timeline: &CallTimeline,
 ) -> MessageRow {
     let mut row = match call_event(record) {
-        Some(event) => call_row(
-            record,
-            &event,
-            context,
-            timeline.has_transcript(&event.call_id),
-        ),
+        Some(event) => call_row(record, &event, context, timeline),
         None => message_row(record, context),
     };
     row.day_header = None;
@@ -885,7 +888,7 @@ fn meeting_root_row(
         ..ended_event
     };
     summary.call_type = started.call_type;
-    let mut row = call_row(ended_record, &summary, context, false);
+    let mut row = call_row(ended_record, &summary, context, timeline);
     row.key = root.message_id.clone();
     row.created_at = root.created_at;
     row.reply_root = None;
@@ -1291,6 +1294,7 @@ mod tests {
             card_overrides: HashMap::new(),
             translation: TranslationContext::default(),
             skin_tone: 0,
+            meeting: MeetingInfo::default(),
         }
     }
 
@@ -2116,13 +2120,12 @@ mod tests {
         let post = feed_post(&rows[0]);
         assert_eq!(post.replies.len(), 1);
         assert_eq!(post.hidden_reply_count, 0);
-        let recording = post.replies[0]
-            .call
-            .as_ref()
-            .and_then(|call| call.recording.as_ref())
-            .unwrap();
-        assert_eq!(recording.title, "Weekly team meeting");
-        assert!(recording.transcript);
+        let saved = post.replies[0].call.as_ref().unwrap();
+        assert_eq!(saved.icon, CallIcon::Saved);
+        assert_eq!(
+            saved.notice.as_ref().unwrap().text,
+            "Recording has been saved to OneDrive."
+        );
         let thread = thread_rows(&records, &root_id, &call_context());
         let calls = thread
             .iter()

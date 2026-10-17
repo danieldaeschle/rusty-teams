@@ -15,6 +15,7 @@ use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow, RecordingCard};
+use crate::views::call_notice::RecapActions;
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
@@ -72,7 +73,7 @@ impl RenderEnv {
                 message
                     .call
                     .as_ref()
-                    .and_then(|call| call.recording.as_ref()?.thumbnail.clone()),
+                    .and_then(|call| call.recap.as_ref()?.recording.thumbnail.clone()),
             )
             .filter(|image| self.app.read(cx).directory.image(&image.url).is_none())
             .collect();
@@ -340,11 +341,19 @@ impl RenderEnv {
                 .ok();
             })
         };
+        let recording = call.recap.as_ref().map(|recap| &recap.recording);
+        let share = recording.and_then(|recording| recording.url.clone()).map(|url| {
+            boxed(move |cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone())))
+        });
         CallActions {
             call_back,
             join,
-            open_recording: call.recording.as_ref().map(open),
-            open_transcript: call.recording.as_ref().map(open),
+            recap: RecapActions {
+                view_recap: recording.map(open),
+                open_recording: recording.map(open),
+                transcript: recording.map(open),
+                share,
+            },
         }
     }
 

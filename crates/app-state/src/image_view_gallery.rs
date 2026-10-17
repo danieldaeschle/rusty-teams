@@ -75,7 +75,7 @@ mod tests {
     use store::MessageRecord;
 
     use super::*;
-    use crate::rows::{RowContext, message_row};
+    use crate::rows::{MeetingInfo, RowContext, message_row};
     use crate::translation::TranslationContext;
 
     fn offset() -> FixedOffset {
@@ -96,6 +96,7 @@ mod tests {
             card_overrides: HashMap::new(),
             translation: TranslationContext::default(),
             skin_tone: 0,
+            meeting: MeetingInfo::default(),
         }
     }
 
