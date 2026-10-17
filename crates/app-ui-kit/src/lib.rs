@@ -8,3 +8,6 @@ pub mod scroll_edge;
 pub mod settings_controls;
 pub mod spinner;
 pub mod widgets;
+
+#[cfg(test)]
+mod touch_scroll;
