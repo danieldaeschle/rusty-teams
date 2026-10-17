@@ -6,6 +6,7 @@ use gpui_kit::component::input::{
 };
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};
 
@@ -23,6 +24,11 @@ const PICKER_GAP: f32 = 3.;
 const TABLE_MARGIN: f32 = 4.;
 const CELL_PADDING_X: f32 = 2.;
 const CELL_PADDING_Y: f32 = 3.;
+const MENU_WIDTH: f32 = 200.;
+const MENU_PADDING: f32 = 4.;
+const MENU_ROW_PADDING_X: f32 = 10.;
+const MENU_ROW_PADDING_Y: f32 = 6.;
+pub(super) const SELECTED_TABLE_TAG: &str = "composer/table-selected";
 
 pub(super) struct TableView {
     cells: Vec<Vec<Entity<TextareaState>>>,
@@ -39,6 +45,55 @@ impl TableView {
 pub(super) struct TablePicker {
     rows: usize,
     columns: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TableLineMenu {
+    Insert,
+    Remove,
+}
+
+impl TableLineMenu {
+    /// Teams' order: "Insert column or row" and "Delete column, row, or table".
+    pub(super) fn edits(self) -> &'static [TableEdit] {
+        match self {
+            TableLineMenu::Insert => &[
+                TableEdit::InsertColumnRight,
+                TableEdit::InsertColumnLeft,
+                TableEdit::InsertRowAbove,
+                TableEdit::InsertRowBelow,
+            ],
+            TableLineMenu::Remove => &[
+                TableEdit::DeleteColumn,
+                TableEdit::DeleteRow,
+                TableEdit::DeleteTable,
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TableMenu {
+    pub(super) kind: TableLineMenu,
+    pub(super) highlighted: usize,
+}
+
+impl TableMenu {
+    pub(super) fn new(kind: TableLineMenu) -> Self {
+        TableMenu {
+            kind,
+            highlighted: 0,
+        }
+    }
+
+    pub(super) fn step(&mut self, delta: isize) {
+        let count = self.kind.edits().len() as isize;
+        self.highlighted = (self.highlighted as isize + delta).rem_euclid(count) as usize;
+    }
+
+    pub(super) fn chosen(&self) -> TableEdit {
+        self.kind.edits()[self.highlighted]
+    }
 }
 
 pub(super) fn token(number: usize) -> InlineToken {
@@ -480,6 +535,87 @@ impl Composer {
         self.focus_cell(&token_id, Cell::new(row, 0), window, cx);
     }
 
+    pub(super) fn in_table(&self, window: &Window, cx: &App) -> bool {
+        self.focused_cell(window, cx).is_some()
+    }
+
+    /// Ctrl+Alt+= and Ctrl+Alt+- or the format bar buttons; only inside a table, like Teams.
+    pub(super) fn open_table_menu(
+        &mut self,
+        kind: TableLineMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.in_table(window, cx) {
+            return false;
+        }
+        self.table_picker = None;
+        self.table_menu = Some(TableMenu::new(kind));
+        if !self.format_bar_open() {
+            self.set_format_bar(true, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    pub(super) fn accept_table_menu(
+        &mut self,
+        edit: Option<TableEdit>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.table_menu.take() else {
+            return;
+        };
+        self.edit_table(edit.unwrap_or(menu.chosen()), window, cx);
+    }
+
+    pub(super) fn render_table_menu(
+        &self,
+        kind: TableLineMenu,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let menu = self.table_menu.filter(|menu| menu.kind == kind)?;
+        let rows = kind.edits().iter().enumerate().map(|(index, edit)| {
+            let edit = *edit;
+            div()
+                .id(ElementId::Name(format!("table-menu-{edit:?}").into()))
+                .px(px(MENU_ROW_PADDING_X))
+                .py(px(MENU_ROW_PADDING_Y))
+                .rounded(px(6.))
+                .text_size(px(13.))
+                .text_color(theme::text())
+                .cursor_pointer()
+                .when(index == menu.highlighted, |row| {
+                    row.bg(theme::popup_hover())
+                })
+                .hover(|row| row.bg(theme::popup_hover()))
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.accept_table_menu(Some(edit), window, cx)
+                }))
+                .child(edit.label())
+        });
+        Some(
+            v_flex()
+                .id("table-line-menu")
+                .min_w(px(MENU_WIDTH))
+                .p(px(MENU_PADDING))
+                .rounded(px(10.))
+                .flyout_surface()
+                .occlude()
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.table_menu = None;
+                    cx.notify();
+                }))
+                .children(rows)
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn open_table_picker(&mut self, cx: &mut Context<Self>) {
         self.table_picker = Some(TablePicker {
             rows: 1,
@@ -522,10 +658,6 @@ impl Composer {
         Some(
             v_flex()
                 .id("table-picker")
-                .absolute()
-                .bottom(relative(1.))
-                .left_0()
-                .mb(px(6.))
                 .p(px(10.))
                 .gap(px(8.))
                 .rounded(px(10.))
@@ -547,7 +679,14 @@ impl Composer {
     }
 
     /// The table token: a grid of cell inputs over the full width, solid lines like Teams.
-    pub(super) fn render_table_token(&self, token_id: &str, width: Pixels) -> Option<AnyElement> {
+    /// The editor leaves a selected token's highlight to the token, so a selection over the
+    /// table tints every cell in the text selection color.
+    pub(super) fn render_table_token(
+        &self,
+        token_id: &str,
+        width: Pixels,
+        selected: bool,
+    ) -> Option<AnyElement> {
         let view = self.tables.get(token_id)?;
         let rows = view.cells.iter().map(|inputs| {
             h_flex()
@@ -562,6 +701,7 @@ impl Composer {
                         .border_r_1()
                         .border_b_1()
                         .border_color(theme::border_strong())
+                        .when(selected, |cell| cell.bg(theme::selection()))
                         .child(
                             Textarea::new(input)
                                 .appearance(false)
@@ -574,6 +714,9 @@ impl Composer {
         Some(
             v_flex()
                 .id(ElementId::Name(format!("composer-{token_id}").into()))
+                .when(selected, |table| {
+                    table.debug_selector(|| SELECTED_TABLE_TAG.into())
+                })
                 .w(width)
                 .my(px(TABLE_MARGIN))
                 .border_t_1()
@@ -628,3 +771,42 @@ fn edit_action(edit: TableEdit) -> Box<dyn Action> {
 }
 
 pub(super) type TableViews = HashMap<String, TableView>;
+
+#[cfg(test)]
+mod tests {
+    use teams_core::TableEdit;
+
+    use super::{TableLineMenu, TableMenu};
+
+    #[test]
+    fn the_line_menus_list_teams_entries_in_teams_order() {
+        assert_eq!(
+            TableLineMenu::Insert.edits(),
+            &[
+                TableEdit::InsertColumnRight,
+                TableEdit::InsertColumnLeft,
+                TableEdit::InsertRowAbove,
+                TableEdit::InsertRowBelow
+            ]
+        );
+        assert_eq!(
+            TableLineMenu::Remove.edits(),
+            &[
+                TableEdit::DeleteColumn,
+                TableEdit::DeleteRow,
+                TableEdit::DeleteTable
+            ]
+        );
+    }
+
+    #[test]
+    fn the_menu_highlight_wraps_both_ways() {
+        let mut menu = TableMenu::new(TableLineMenu::Remove);
+        assert_eq!(menu.chosen(), TableEdit::DeleteColumn);
+        menu.step(-1);
+        assert_eq!(menu.chosen(), TableEdit::DeleteTable);
+        menu.step(1);
+        menu.step(1);
+        assert_eq!(menu.chosen(), TableEdit::DeleteRow);
+    }
+}

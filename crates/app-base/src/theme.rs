@@ -216,6 +216,10 @@ pub fn border() -> Hsla {
     color(scheme().border)
 }
 
+pub fn selection() -> Hsla {
+    color_with_alpha(scheme().selection)
+}
+
 pub fn border_strong() -> Hsla {
     color(scheme().border_strong)
 }

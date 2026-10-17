@@ -21,7 +21,10 @@ actions!(
         InsertTableColumnRight,
         DeleteTableRow,
         DeleteTableColumn,
-        DeleteTable
+        DeleteTable,
+        ToggleFormatBar,
+        InsertTableLine,
+        RemoveTableLine
     ]
 );
 

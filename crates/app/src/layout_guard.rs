@@ -176,7 +176,10 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
-    use crate::views::composer::{COMPOSER_BOX_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG};
+    use crate::views::composer::{
+        COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
+        COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
+    };
     use crate::views::conversation::MEMBERS_BUTTON;
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
@@ -1313,6 +1316,54 @@ mod frames {
                 (inset - left).abs() < TOLERANCE,
                 "three lines: insets left, top, bottom of the first button and right, top, bottom of send {three_lines:?}, expected {left}"
             );
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_format_bar_divider_runs_edge_to_edge_inside_the_composer(cx: &mut TestAppContext) {
+        const FORMAT_TAGS: [&str; 6] = [
+            COMPOSER_BOX_TAG,
+            COMPOSER_FORMAT_BAR_TAG,
+            COMPOSER_FORMAT_DIVIDER_TAG,
+            COMPOSER_LEADING_TAG,
+            COMPOSER_FORMAT_TAG,
+            COMPOSER_SEND_TAG,
+        ];
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            collect(&mut visual, Some(COMPOSER_FORMAT_TAG));
+            let toggle = visual
+                .debug_bounds(COMPOSER_FORMAT_TAG)
+                .expect("format button");
+            visual.simulate_click(toggle.center(), Default::default());
+            collect(&mut visual, Some(COMPOSER_FORMAT_DIVIDER_TAG));
+            let tags: Vec<Tag> = FORMAT_TAGS
+                .iter()
+                .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
+                .collect();
+            let found: Vec<String> = violations(&tags, window, &FORMAT_TAGS)
+                .into_iter()
+                .map(|(key, message)| format!("format@{width}x{height}:{key}: {message}"))
+                .collect();
+            let bar = visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).expect("bar");
+            let leading = visual.debug_bounds(COMPOSER_LEADING_TAG).expect("leading");
+            let toggle = visual
+                .debug_bounds(COMPOSER_FORMAT_TAG)
+                .expect("format button");
+            visual.simulate_click(toggle.center(), Default::default());
+            collect(&mut visual, None);
+            assert!(found.is_empty(), "{}", found.join("\n"));
+            assert!(
+                bar.bottom() <= leading.top(),
+                "bar {bar:?} over the buttons {leading:?}"
+            );
+            assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
         }
     }
 
