@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::markdown::escape_html;
 use crate::spans::{FontSize, Span};
+use crate::table::{TABLE_MARK, Table, markdown_table};
 
 pub const MAX_DEPTH: u8 = 2;
+pub const MAX_HEADING: u8 = 3;
 pub const OBJECT_MARK: char = '\u{FFFC}';
 const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
@@ -125,11 +127,17 @@ pub enum LineKind {
     Numbered(u8),
     Quote,
     Code(Option<String>),
+    Heading(u8),
+    Table(Table),
 }
 
 impl LineKind {
     pub fn is_list(&self) -> bool {
         matches!(self, LineKind::Bullet(_) | LineKind::Numbered(_))
+    }
+
+    pub fn is_table(&self) -> bool {
+        matches!(self, LineKind::Table(_))
     }
 
     pub fn depth(&self) -> u8 {
@@ -430,7 +438,10 @@ impl Draft {
     pub fn plain_text(&self) -> String {
         self.slice(0..self.text.len())
             .into_iter()
-            .map(|line| line.content)
+            .map(|line| match &line.kind {
+                LineKind::Table(table) => table.plain_text(),
+                _ => line.content,
+            })
             .collect::<Vec<_>>()
             .join("\n")
             .replace(&format!(" {OBJECT_MARK} "), " ")
@@ -762,7 +773,11 @@ impl Draft {
                 self.splice(content.clone(), "", &[]);
                 Some(self.set_line_kind(index, LineKind::Code(language), None, content.start))
             }
-            LineKind::Quote if !shift => None,
+            LineKind::Heading(_) | LineKind::Table(_) => None,
+            LineKind::Quote if content.is_empty() && !shift => {
+                self.lines[index] = LineKind::Text;
+                Some(cursor)
+            }
             LineKind::Quote => {
                 self.splice(cursor..cursor, "\n", &[]);
                 self.lines[index] = LineKind::Quote;
@@ -823,6 +838,9 @@ impl Draft {
         if cursor != line.end || index + 1 >= self.lines.len() {
             return None;
         }
+        if self.lines[index + 1].is_table() {
+            return Some(cursor);
+        }
         let next_marker = self.marker_range(index + 1);
         if next_marker.is_empty() {
             return None;
@@ -847,11 +865,22 @@ impl Draft {
                     cursor
                 })
             }
+            LineKind::Table(_) => None,
+            LineKind::Heading(_) => (cursor == line.start).then(|| {
+                self.lines[index] = LineKind::Text;
+                cursor
+            }),
             LineKind::Quote
                 if cursor == line.start && (index == 0 || self.lines[index - 1] != kind) =>
             {
-                self.lines[index] = LineKind::Text;
-                Some(cursor)
+                let joins_previous =
+                    index > 0 && !content.is_empty() && !self.lines[index - 1].is_table();
+                if !joins_previous {
+                    self.lines[index] = LineKind::Text;
+                    return Some(cursor);
+                }
+                self.splice(line.start - 1..line.start, "", &[]);
+                Some(self.repair(line.start - 1))
             }
             _ if cursor == line.start && index > 0 => {
                 self.splice(line.start - 1..content.start, "", &[]);
@@ -899,6 +928,9 @@ impl Draft {
             .all(|index| self.lines[index].same_format(&kind));
         for index in lines {
             let current = self.lines[index].clone();
+            if current.is_table() {
+                continue;
+            }
             let target = if all {
                 LineKind::Text
             } else if current.same_format(&kind) {
@@ -913,6 +945,120 @@ impl Draft {
             }
         }
         self.repair(0);
+    }
+
+    pub fn table(&self, index: usize) -> Option<&Table> {
+        match self.lines.get(index)? {
+            LineKind::Table(table) => Some(table),
+            _ => None,
+        }
+    }
+
+    /// Cell edits change no text, so the journal stays as it is.
+    pub fn set_table(&mut self, index: usize, table: Table) {
+        if let Some(kind @ LineKind::Table(_)) = self.lines.get_mut(index) {
+            *kind = LineKind::Table(table);
+        }
+    }
+
+    /// The table goes in place of an empty text line, otherwise below the cursor's line, and
+    /// a text line follows it. Returns the table's line.
+    pub fn insert_table(&mut self, cursor: usize, table: Table) -> usize {
+        self.journal = Journal::default();
+        let index = self.line_at(cursor);
+        let line = self.line_ranges()[index].clone();
+        let mark = TABLE_MARK.to_string();
+        let replaces_line = self.lines[index] == LineKind::Text && line.is_empty();
+        let table_index = if replaces_line {
+            self.splice(line, &mark, &[]);
+            index
+        } else {
+            self.splice(line.end..line.end, &format!("\n{mark}"), &[]);
+            index + 1
+        };
+        self.lines[table_index] = LineKind::Table(table);
+        if table_index + 1 == self.lines.len() {
+            let end = self.text.len();
+            self.splice(end..end, "\n", &[]);
+            self.lines[table_index + 1] = LineKind::Text;
+        }
+        table_index
+    }
+
+    /// Returns where the cursor goes: the start of the line that took the table's place.
+    pub fn remove_table(&mut self, index: usize) -> usize {
+        self.journal = Journal::default();
+        let ranges = self.line_ranges();
+        let line = ranges[index].clone();
+        if let Some(next) = ranges.get(index + 1) {
+            let next_kind = self.lines[index + 1].clone();
+            self.splice(line.start..next.start, "", &[]);
+            self.lines[index] = next_kind;
+            return self.repair(line.start);
+        }
+        if index > 0 {
+            let start = ranges[index - 1].end;
+            self.splice(start..line.end, "", &[]);
+            return self.repair(start);
+        }
+        self.splice(line, "", &[]);
+        self.lines[index] = LineKind::Text;
+        0
+    }
+
+    /// Where the cursor lands when it leaves table `index` downwards or upwards; a text line
+    /// is added when the table is the last or the first line.
+    pub fn line_beside_table(&mut self, index: usize, below: bool) -> usize {
+        self.journal = Journal::default();
+        let ranges = self.line_ranges();
+        if below {
+            if let Some(next) = ranges.get(index + 1) {
+                return next.start;
+            }
+            let end = self.text.len();
+            self.splice(end..end, "\n", &[]);
+            self.lines[index + 1] = LineKind::Text;
+            return end + 1;
+        }
+        if index > 0 {
+            return ranges[index - 1].end;
+        }
+        self.splice(0..0, "\n", &[]);
+        self.lines[0] = LineKind::Text;
+        0
+    }
+
+    pub fn table_at(&self, offset: usize) -> Option<usize> {
+        let index = self.line_at(offset);
+        self.lines[index].is_table().then_some(index)
+    }
+
+    /// The table right above, when `cursor` is at the start of its line.
+    pub fn table_before(&self, cursor: usize) -> Option<usize> {
+        let index = self.line_at(cursor);
+        let at_start = self.line_ranges()[index].start == cursor;
+        (at_start && index > 0 && self.lines[index - 1].is_table()).then(|| index - 1)
+    }
+
+    /// The table right below, when `cursor` is at the end of its line.
+    pub fn table_after(&self, cursor: usize) -> Option<usize> {
+        let index = self.line_at(cursor);
+        let at_end = self.line_ranges()[index].end == cursor;
+        (at_end && self.lines.get(index + 1).is_some_and(LineKind::is_table)).then_some(index + 1)
+    }
+
+    /// Down or Right at the very end of a quote that ends the draft: a text line below it,
+    /// like the empty paragraph Teams keeps after a quote.
+    pub fn leave_quote_at_end(&mut self, cursor: usize) -> Option<usize> {
+        self.journal = Journal::default();
+        let end = self.text.len();
+        let last = self.lines.len() - 1;
+        if cursor != end || self.lines[last] != LineKind::Quote {
+            return None;
+        }
+        self.splice(end..end, "\n", &[]);
+        self.lines[last + 1] = LineKind::Text;
+        Some(end + 1)
     }
 
     pub fn slice(&self, range: Range<usize>) -> Vec<DraftLine> {
@@ -981,6 +1127,13 @@ impl Draft {
         let line_was_empty = self.lines[index] == LineKind::Text
             && range.start == content.start
             && range.end >= tail_end;
+        let separated;
+        let lines = if !line_was_empty && lines.first().is_some_and(|line| line.kind.is_table()) {
+            separated = [&[DraftLine::text("")][..], lines].concat();
+            &separated[..]
+        } else {
+            lines
+        };
         let joined = lines
             .iter()
             .map(|line| line.content.as_str())
@@ -1056,6 +1209,23 @@ impl Draft {
                     html.push_str("<blockquote>");
                     html.push_str(&joined_inline(run));
                     html.push_str("</blockquote>");
+                }
+                LineKind::Heading(_) => {
+                    for line in run {
+                        let level = match line.kind {
+                            LineKind::Heading(level) => level.clamp(1, MAX_HEADING),
+                            _ => 1,
+                        };
+                        let inline = inline_html(&line.content, &line.marks);
+                        html.push_str(&format!("<h{level}>{inline}</h{level}>"));
+                    }
+                }
+                LineKind::Table(_) => {
+                    for line in run {
+                        if let LineKind::Table(table) = &line.kind {
+                            html.push_str(&table.to_html());
+                        }
+                    }
                 }
                 LineKind::Code(language) => {
                     match language {
@@ -1362,8 +1532,45 @@ impl Draft {
         }
     }
 
+    /// A table line holds its mark alone: text typed next to it moves to its own line, a mark
+    /// without its table is dropped and a table without its mark becomes text.
+    fn repair_tables(&mut self, mut cursor: usize) -> usize {
+        let mark_length = TABLE_MARK.len_utf8();
+        let mut index = 0;
+        while index < self.lines.len() {
+            let line = self.line_ranges()[index].clone();
+            let found = self.text[line.clone()].find(TABLE_MARK);
+            match (self.lines[index].clone(), found) {
+                (LineKind::Table(_), None) => self.lines[index] = LineKind::Text,
+                (LineKind::Table(table), Some(at)) if at > 0 => {
+                    let split = line.start + at;
+                    self.splice(split..split, "\n", &[]);
+                    self.lines[index] = LineKind::Text;
+                    self.lines[index + 1] = LineKind::Table(table);
+                    cursor += usize::from(cursor > split);
+                }
+                (LineKind::Table(_), Some(_)) if line.len() > mark_length => {
+                    let split = line.start + mark_length;
+                    self.splice(split..split, "\n", &[]);
+                    cursor += usize::from(cursor > split);
+                }
+                (LineKind::Table(_), Some(_)) => {}
+                (_, Some(at)) => {
+                    let mark = line.start + at..line.start + at + mark_length;
+                    self.splice(mark.clone(), "", &[]);
+                    cursor = map_offset(&[(mark, String::new())], cursor);
+                    continue;
+                }
+                (_, None) => {}
+            }
+            index += 1;
+        }
+        cursor
+    }
+
     /// List items whose marker was edited away become text; numbered items are renumbered.
-    fn repair(&mut self, mut cursor: usize) -> usize {
+    fn repair(&mut self, cursor: usize) -> usize {
+        let mut cursor = self.repair_tables(cursor);
         for index in 0..self.lines.len() {
             let kind = self.lines[index].clone();
             if !kind.is_list() {
@@ -1399,7 +1606,11 @@ fn marker_text(kind: &LineKind, number: u32) -> String {
     match kind {
         LineKind::Bullet(depth) => bullet_marker(*depth),
         LineKind::Numbered(_) => format!("{number}. "),
-        LineKind::Text | LineKind::Quote | LineKind::Code(_) => String::new(),
+        LineKind::Text
+        | LineKind::Quote
+        | LineKind::Code(_)
+        | LineKind::Heading(_)
+        | LineKind::Table(_) => String::new(),
     }
 }
 
@@ -1430,7 +1641,9 @@ fn numbered_marker(line: &str) -> Option<(usize, u32)> {
 fn line_shortcut(before: &str) -> Option<(LineKind, u32)> {
     match before {
         "- " | "* " => Some((LineKind::Bullet(0), 1)),
-        "> " => Some((LineKind::Quote, 1)),
+        ">" => Some((LineKind::Quote, 1)),
+        _ if before.starts_with('#') => heading_prefix(before)
+            .and_then(|(level, rest)| rest.is_empty().then_some((LineKind::Heading(level), 1))),
         _ => {
             let digits = before.strip_suffix(". ")?;
             let all_digits = !digits.is_empty()
@@ -1540,7 +1753,7 @@ fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> 
         let usable = !body[open + 1..].trim().is_empty() && !body[..open].ends_with('`');
         return usable.then(|| (open..open + 1, body.len()..end, MarkKind::Code));
     }
-    for marker in ['*', '_'] {
+    for (marker, kind) in [('*', MarkKind::Bold), ('_', MarkKind::Italic)] {
         if let Some(body) = before.strip_suffix(marker) {
             if body.ends_with(marker) {
                 return None;
@@ -1548,7 +1761,7 @@ fn typed_inline(before: &str) -> Option<(Range<usize>, Range<usize>, MarkKind)> 
             let open = body.rfind(marker)?;
             let opening_ok = !word_before(&body[..open]) && !body[..open].ends_with(marker);
             return (opening_ok && valid_inner(&body[open + 1..]))
-                .then(|| (open..open + 1, body.len()..end, MarkKind::Italic));
+                .then(|| (open..open + 1, body.len()..end, kind));
         }
     }
     None
@@ -1702,10 +1915,16 @@ pub fn has_markdown(text: &str) -> bool {
 }
 
 fn markdown_lines(text: &str) -> Vec<DraftLine> {
+    let sources: Vec<&str> = text
+        .split('\n')
+        .map(|raw| raw.strip_suffix('\r').unwrap_or(raw))
+        .collect();
     let mut lines = Vec::new();
     let mut code: Option<Option<String>> = None;
-    for raw in text.split('\n') {
-        let raw = raw.strip_suffix('\r').unwrap_or(raw);
+    let mut position = 0;
+    while position < sources.len() {
+        let raw = sources[position];
+        position += 1;
         let trimmed = raw.trim_start();
         if let Some(language) = &code {
             if trimmed.starts_with(FENCE) && trimmed.trim_end() == FENCE {
@@ -1727,12 +1946,23 @@ fn markdown_lines(text: &str) -> Vec<DraftLine> {
             code = Some(language);
             continue;
         }
+        if let Some((rows, consumed)) = markdown_table(&sources[position - 1..]) {
+            let rows = rows
+                .into_iter()
+                .map(|row| row.iter().map(|cell| parse_inline(cell).0).collect())
+                .collect();
+            lines.push(table_line(Table::from_rows(rows)));
+            position += consumed - 1;
+            continue;
+        }
         let indent: usize = raw[..raw.len() - trimmed.len()]
             .chars()
             .map(|character| if character == '\t' { 4 } else { 1 })
             .sum();
         let depth = ((indent / MARKDOWN_INDENT) as u8).min(MAX_DEPTH);
-        let (kind, number, content) = if let Some(rest) = PASTED_BULLETS
+        let (kind, number, content) = if let Some((level, rest)) = heading_prefix(trimmed) {
+            (LineKind::Heading(level), None, rest)
+        } else if let Some(rest) = PASTED_BULLETS
             .iter()
             .find_map(|bullet| trimmed.strip_prefix(bullet))
         {
@@ -1756,6 +1986,24 @@ fn markdown_lines(text: &str) -> Vec<DraftLine> {
         });
     }
     lines
+}
+
+fn table_line(table: Table) -> DraftLine {
+    DraftLine {
+        kind: LineKind::Table(table),
+        number: None,
+        content: TABLE_MARK.to_string(),
+        marks: Vec::new(),
+    }
+}
+
+/// `# ` to `###### `: the level, capped at the three Teams offers, and the rest of the line.
+fn heading_prefix(line: &str) -> Option<(u8, &str)> {
+    let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
+    let rest = line[hashes..].strip_prefix(' ')?;
+    (1..=6)
+        .contains(&hashes)
+        .then(|| ((hashes as u8).min(MAX_HEADING), rest))
 }
 
 fn parse_inline(source: &str) -> (String, Vec<Mark>) {
@@ -1849,6 +2097,17 @@ fn inline_at(rest: &str, previous: Option<char>) -> Option<(&str, usize, MarkKin
     None
 }
 
+fn cell_text(spans: &[Span]) -> String {
+    let mut builder = SpanLines::default();
+    builder.walk(spans, &LineKind::Text, &[]);
+    builder
+        .finish()
+        .into_iter()
+        .map(|line| line.content)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[derive(Default)]
 struct SpanLines {
     lines: Vec<DraftLine>,
@@ -1936,9 +2195,10 @@ impl SpanLines {
                     };
                     self.start_line(&continued, None);
                 }
-                Span::Heading { children, .. } => {
-                    self.start_line(&LineKind::Text, None);
-                    self.walk(children, &LineKind::Text, &with(MarkKind::Bold));
+                Span::Heading { level, children } => {
+                    let heading = LineKind::Heading((*level).clamp(1, MAX_HEADING));
+                    self.start_line(&heading, None);
+                    self.walk(children, &heading, marks);
                     self.open = false;
                 }
                 Span::CodeBlock { language, code } => {
@@ -1977,15 +2237,11 @@ impl SpanLines {
                     self.open = false;
                 }
                 Span::Table { rows, .. } => {
-                    for row in rows {
-                        self.start_line(&LineKind::Text, None);
-                        for (position, cell) in row.iter().enumerate() {
-                            if position > 0 {
-                                self.append(" | ", &LineKind::Text, &[]);
-                            }
-                            self.walk(cell, &LineKind::Text, marks);
-                        }
-                    }
+                    let rows = rows
+                        .iter()
+                        .map(|row| row.iter().map(|cell| cell_text(cell)).collect())
+                        .collect();
+                    self.lines.push(table_line(Table::from_rows(rows)));
                     self.open = false;
                 }
                 Span::Image { .. } | Span::Quote { .. } => {}
@@ -2081,7 +2337,7 @@ mod tests {
             draft.marks(),
             [
                 mark(2..6, MarkKind::Bold),
-                mark(11..13, MarkKind::Italic),
+                mark(11..13, MarkKind::Bold),
                 mark(17..19, MarkKind::Italic),
                 mark(20..24, MarkKind::Strike),
                 mark(25..29, MarkKind::Code),
@@ -2357,9 +2613,12 @@ mod tests {
         let numbered = typed_draft("1. one");
         assert_eq!(numbered.text(), "1. one");
         assert_eq!(numbered.lines(), [LineKind::Numbered(0)]);
-        let quote = typed_draft("> said");
+        let quote = typed_draft(">said");
         assert_eq!(quote.text(), "said");
         assert_eq!(quote.lines(), [LineKind::Quote]);
+        let spaced = typed_draft("> said");
+        assert_eq!(spaced.text(), " said");
+        assert_eq!(spaced.lines(), [LineKind::Quote]);
     }
 
     #[test]

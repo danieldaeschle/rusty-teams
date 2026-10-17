@@ -86,6 +86,7 @@ use mcp::ReactionProposal;
 use render_env::RenderEnv;
 use shared::SharedState;
 
+pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
 const GROWTH_HEADROOM: usize = 20;
@@ -3271,7 +3272,8 @@ impl ConversationView {
                         stack = Some(members_popover(
                             &self.app,
                             chat_id,
-                            member_stack(directory, &shown, shown.len(), false),
+                            member_stack(directory, &shown, shown.len(), false)
+                                .debug_selector(|| MEMBERS_BUTTON.into()),
                         ));
                     }
                 }

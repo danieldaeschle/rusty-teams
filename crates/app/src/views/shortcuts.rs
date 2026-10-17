@@ -1,9 +1,9 @@
 use gpui_kit::*;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, NewChat, OpenSwitcher, ReplyToHovered,
-    ScheduleSend, ToggleBold, ToggleCode, ToggleItalic, ToggleStrike, ToggleSubscript,
-    ToggleSuperscript, ToggleUnderline, ToggleCallMute,
+    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, NewChat, OpenSwitcher, PastePlainText,
+    ReplyToHovered, ScheduleSend, ToggleBold, ToggleCallMute, ToggleCode, ToggleItalic,
+    ToggleStrike, ToggleSubscript, ToggleSuperscript, ToggleUnderline,
 };
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
@@ -122,6 +122,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Composer, Composer, "Subscript", "ctrl-=", None, ToggleSubscript),
     shortcut!(Composer, Composer, "Code", "ctrl-shift-c", None, ToggleCode),
     shortcut!(Composer, Composer, "Insert link", "ctrl-k", Some("cmd-k"), EditLink),
+    shortcut!(Composer, Composer, "Paste as plain text", "ctrl-shift-v", Some("cmd-shift-v"), PastePlainText),
     shortcut!(Composer, Composer, "Schedule send", "ctrl-shift-enter", None, ScheduleSend),
     shortcut!(Calls, GlobalOverTextFields, "Accept incoming call", "ctrl-shift-a", Some("cmd-shift-a"), AcceptCall),
     shortcut!(Calls, GlobalOverTextFields, "Decline incoming call", "ctrl-shift-d", Some("cmd-shift-d"), DeclineCall),
@@ -162,7 +163,12 @@ impl Shortcut {
             Scope::Composer => &[Some(COMPOSER_CONTEXT)],
         };
         let mut keys = vec![self.keys];
-        keys.extend(ALTERNATE_KEYS.iter().filter(|(primary, _)| *primary == self.keys).map(|(_, alternate)| *alternate));
+        keys.extend(
+            ALTERNATE_KEYS
+                .iter()
+                .filter(|(primary, _)| *primary == self.keys)
+                .map(|(_, alternate)| *alternate),
+        );
         keys.extend(self.mac_keys.filter(|_| cfg!(target_os = "macos")));
         keys.iter()
             .flat_map(|keys| contexts.iter().map(|context| (self.bind)(keys, *context)))

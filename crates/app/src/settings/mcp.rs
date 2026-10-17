@@ -833,9 +833,7 @@ impl McpView {
             .p(px(6.))
             .gap(px(4.))
             .rounded(px(8.))
-            .bg(theme::popup())
-            .border_1()
-            .border_color(theme::border())
+            .bg(theme::surface_raised())
             .child(
                 h_flex()
                     .h(px(30.))

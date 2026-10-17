@@ -94,7 +94,13 @@ fn members_panel(
         .child(list)
         .when(is_member, |panel| {
             panel
-                .child(div().h(px(1.)).w_full().bg(theme::border()))
+                .child(
+                    div()
+                        .debug_selector(|| "chat-members-popup/divider".into())
+                        .h(px(1.))
+                        .w_full()
+                        .bg(theme::border()),
+                )
                 .child(
                     v_flex()
                         .py(px(4.))
