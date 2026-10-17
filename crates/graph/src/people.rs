@@ -18,14 +18,43 @@ struct BinaryBody {
 }
 
 impl Graph {
-    /// `Ok(None)` for users without a photo (404).
+    /// `Ok(None)` for users without a photo. A 404 on the sized rendition
+    /// also comes back for photos stored smaller in Entra ID, so those ask for the original.
     pub async fn user_photos(&self, user_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
+        let mut photos = self.photo_batch(user_ids, urls::user_photo).await?;
+        let missing: Vec<usize> = photos
+            .iter()
+            .enumerate()
+            .filter(|(_, photo)| matches!(photo, Ok(None)))
+            .map(|(index, _)| index)
+            .collect();
+        if missing.is_empty() {
+            return Ok(photos);
+        }
+        let missing_ids: Vec<String> = missing
+            .iter()
+            .map(|index| user_ids[*index].clone())
+            .collect();
+        let originals = self
+            .photo_batch(&missing_ids, urls::user_photo_original)
+            .await?;
+        for (index, original) in missing.into_iter().zip(originals) {
+            photos[index] = original;
+        }
+        Ok(photos)
+    }
+
+    async fn photo_batch(
+        &self,
+        user_ids: &[String],
+        url: fn(&str) -> String,
+    ) -> Result<Vec<Result<Option<Photo>>>> {
         let scope = Scope::graph(PHOTO_SCOPE);
         let mut photos = Vec::with_capacity(user_ids.len());
         for chunk in user_ids.chunks(BATCH_SIZE) {
             let requests: Vec<Request> = chunk
                 .iter()
-                .map(|user_id| Request::binary_get(urls::user_photo(user_id)))
+                .map(|user_id| Request::binary_get(url(user_id)))
                 .collect();
             let answers = self.session().batch(&requests, &scope).await?;
             photos.extend(

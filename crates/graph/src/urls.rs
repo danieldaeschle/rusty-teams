@@ -16,11 +16,17 @@ pub fn me() -> String {
     format!("{GRAPH}/v1.0/me?$select=id,displayName,mail,userPrincipalName")
 }
 
+const PHOTO_SIZE: &str = "240x240";
+
 pub fn user_photo(user_id: &str) -> String {
     format!(
-        "{GRAPH}/v1.0/users/{}/photos/48x48/$value",
+        "{GRAPH}/v1.0/users/{}/photos/{PHOTO_SIZE}/$value",
         segment(user_id)
     )
+}
+
+pub fn user_photo_original(user_id: &str) -> String {
+    format!("{GRAPH}/v1.0/users/{}/photo/$value", segment(user_id))
 }
 
 pub fn user_profile(user_id: &str) -> String {
@@ -214,10 +220,7 @@ pub fn drive_item(drive_id: &str, item_id: &str) -> String {
 }
 
 pub fn shared_drive_item(share_id: &str) -> String {
-    format!(
-        "{GRAPH}/v1.0/shares/{}/driveItem",
-        segment(share_id)
-    )
+    format!("{GRAPH}/v1.0/shares/{}/driveItem", segment(share_id))
 }
 
 pub fn drive_item_invite(drive_id: &str, item_id: &str) -> String {
@@ -354,6 +357,18 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn photos_ask_for_the_240_rendition_then_the_original() {
+        assert_eq!(
+            user_photo("a b"),
+            format!("{GRAPH}/v1.0/users/a%20b/photos/240x240/$value")
+        );
+        assert_eq!(
+            user_photo_original("a b"),
+            format!("{GRAPH}/v1.0/users/a%20b/photo/$value")
+        );
+    }
 
     #[test]
     fn chat_ids_are_path_encoded() {

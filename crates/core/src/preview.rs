@@ -5,6 +5,7 @@ use store::{ChatPreview, MessageRecord};
 use crate::call_event::{CallEvent, CallPhase, call_event};
 use crate::external_image::is_giphy_url;
 use crate::forwarded::FORWARDED_CONTENT_TYPE;
+use crate::roster_event::{RosterChange, roster_event};
 use crate::spans::{Span, html_to_spans};
 use crate::stored::{AttachmentInfo, attachments};
 
@@ -249,20 +250,23 @@ impl OwnedPreview {
 
     pub(crate) fn from_record(record: &MessageRecord) -> Self {
         let event = call_event(record);
+        let roster = roster_event(record);
         let text = if record.deleted {
             None
         } else if let Some(event) = &event {
             call_phase_preview(event.phase).map(str::to_owned)
+        } else if let Some(roster) = &roster {
+            (roster.change == RosterChange::Added).then(|| USER_ADDED_PREVIEW.to_owned())
         } else {
             message_preview(&record.body_html, &attachments(record))
         };
-        let sender = event.is_none();
+        let sender = event.is_none() && roster.is_none();
         OwnedPreview {
             text,
             sender_id: record.sender_id.clone().filter(|_| sender),
             sender_name: record.sender_name.clone().filter(|_| sender),
             deleted: record.deleted,
-            system: event.is_some(),
+            system: !sender,
             call: event.is_some_and(|event| event.phase.is_call()),
         }
     }

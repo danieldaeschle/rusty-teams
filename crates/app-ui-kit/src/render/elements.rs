@@ -7,8 +7,8 @@ use super::flow_text::{FlowSegment, FlowText};
 use super::hooks::jump_to_quoted;
 use super::selectable::{Pill, SelectableRichText};
 use super::syntax::{self, Token};
-use app_base::theme;
 use crate::widgets::symbol;
+use app_base::theme;
 
 const LIST_GAP: f32 = 2.;
 const MARKER_WIDTH: f32 = 18.;
@@ -449,14 +449,15 @@ fn readable(color: u32, own: bool) -> Hsla {
         theme::bubble_other()
     });
     let mut foreground = rgb(color);
+    let target = if luminance(background) > 0.5 { 0. } else { 1. };
     for _ in 0..10 {
         if contrast(foreground, background) >= MIN_CONTRAST {
             break;
         }
         foreground = Rgba {
-            r: foreground.r + (1. - foreground.r) * 0.2,
-            g: foreground.g + (1. - foreground.g) * 0.2,
-            b: foreground.b + (1. - foreground.b) * 0.2,
+            r: foreground.r + (target - foreground.r) * 0.2,
+            g: foreground.g + (target - foreground.g) * 0.2,
+            b: foreground.b + (target - foreground.b) * 0.2,
             a: 1.,
         };
     }
@@ -498,5 +499,15 @@ mod tests {
     #[test]
     fn light_text_color_stays_as_sent() {
         assert_eq!(Rgba::from(readable(0xffd700, false)), rgb(0xffd700));
+    }
+
+    #[test]
+    fn light_text_color_is_darkened_on_a_light_bubble() {
+        theme::set_thread_shade(Some(theme::Shade::Light));
+        let darkened = Rgba::from(readable(0xffd700, false));
+        let bubble = Rgba::from(theme::bubble_other());
+        theme::set_thread_shade(None);
+        assert!(contrast(darkened, bubble) >= MIN_CONTRAST);
+        assert!(darkened.r < 1.);
     }
 }

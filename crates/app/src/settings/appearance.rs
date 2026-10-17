@@ -2,11 +2,11 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::rows::{ROW_INSET, caption, titled};
+use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, titled};
 use crate::active_appearance;
 use crate::app_state::AppState;
-use crate::appearance::AppIcon;
-use crate::theme::{self, ColorScheme};
+use crate::appearance::{AppIcon, ThemeChoice};
+use crate::theme::{self, Palette};
 use crate::views::title_bar::app_icon_image;
 
 const TILE_WIDTH: f32 = 168.;
@@ -19,6 +19,9 @@ const PREVIEW_ICON_SIZE: f32 = 48.;
 const RADIO_SIZE: f32 = 16.;
 const RADIO_DOT_SIZE: f32 = 8.;
 const COLOR_SCHEME_DETAIL: &str = "The colors to use for Rusty Teams";
+const THEME_TITLE: &str = "Theme";
+const THEME_DETAIL: &str = "The theme to use for Teams";
+const THEME_SELECT_WIDTH: f32 = 240.;
 #[cfg(windows)]
 const APP_ICON_DETAIL: &str =
     "Shown in the title bar, taskbar and tray. Pinned shortcuts keep the icon of the .exe";
@@ -33,7 +36,7 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             SharedString::from(format!("settings-color-scheme-{}", scheme.id)),
             scheme.name,
             scheme.id == current.color_scheme.id,
-            scheme_preview(scheme),
+            scheme_preview(scheme.palette(theme::shade())),
         )
         .on_click(move |_, _, cx| {
             let store = app.read(cx).store.clone();
@@ -53,9 +56,30 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             active_appearance::set_app_icon(icon, &store, cx);
         })
     });
+    let theme_choices = ThemeChoice::ALL
+        .into_iter()
+        .map(|choice| {
+            let app = app.clone();
+            Choice::new(choice.label(), choice == current.theme, move |cx| {
+                let store = app.read(cx).store.clone();
+                active_appearance::set_theme(choice, &store, cx);
+            })
+        })
+        .collect();
     v_flex()
         .w_full()
         .child(caption("THEME"))
+        .child(control_row(
+            THEME_TITLE,
+            THEME_DETAIL,
+            select_with_width(
+                "settings-theme",
+                current.theme.label(),
+                THEME_SELECT_WIDTH,
+                false,
+                theme_choices,
+            ),
+        ))
         .child(choice_group(
             "Color scheme",
             COLOR_SCHEME_DETAIL,
@@ -148,10 +172,10 @@ fn preview_frame(background: Hsla) -> Div {
         .bg(background)
 }
 
-fn scheme_preview(scheme: &ColorScheme) -> Div {
+fn scheme_preview(palette: &Palette) -> Div {
     let fill = |hex: u32| theme::color(hex);
     let bubble = |hex: u32, width: f32| div().w(px(width)).h(px(12.)).rounded(px(6.)).bg(fill(hex));
-    preview_frame(fill(scheme.background)).child(
+    preview_frame(fill(palette.background)).child(
         h_flex()
             .size_full()
             .p(px(6.))
@@ -166,9 +190,9 @@ fn scheme_preview(scheme: &ColorScheme) -> Div {
                         div()
                             .size(px(10.))
                             .rounded(px(3.))
-                            .bg(fill(scheme.surface_raised)),
+                            .bg(fill(palette.surface_raised)),
                     )
-                    .child(div().size(px(10.)).rounded(px(3.)).bg(fill(scheme.accent))),
+                    .child(div().size(px(10.)).rounded(px(3.)).bg(fill(palette.accent))),
             )
             .child(
                 v_flex()
@@ -177,14 +201,14 @@ fn scheme_preview(scheme: &ColorScheme) -> Div {
                     .p(px(8.))
                     .gap(px(6.))
                     .rounded(px(6.))
-                    .bg(fill(scheme.surface))
-                    .child(h_flex().child(bubble(scheme.bubble_other, 64.)))
-                    .child(h_flex().justify_end().child(bubble(scheme.bubble_own, 52.)))
-                    .child(h_flex().child(bubble(scheme.bubble_other, 40.)))
+                    .bg(fill(palette.surface))
+                    .child(h_flex().child(bubble(palette.bubble_other, 64.)))
+                    .child(h_flex().justify_end().child(bubble(palette.bubble_own, 52.)))
+                    .child(h_flex().child(bubble(palette.bubble_other, 40.)))
                     .child(
                         h_flex()
                             .justify_end()
-                            .child(div().size(px(12.)).rounded_full().bg(fill(scheme.accent))),
+                            .child(div().size(px(12.)).rounded_full().bg(fill(palette.accent))),
                     ),
             ),
     )

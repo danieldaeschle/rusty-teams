@@ -1,45 +1,107 @@
 use std::io::Cursor;
+use std::sync::{Arc, Mutex};
 
+use gpui_kit::RenderImage;
 use image::imageops::FilterType;
-use image::{ImageFormat, Rgba, RgbaImage};
+use image::{Frame, ImageFormat, ImageReader, RgbaImage};
 
-const TEXTURE_SIZE: u32 = 100;
-const MARGIN: f32 = 2.;
+const MAX_TEXTURES: usize = 8;
+const SOURCE_SIDE: u32 = 240;
+const SOURCE_LIMIT: u32 = 2 * SOURCE_SIDE;
 
-pub fn circular_png(bytes: &[u8]) -> Option<Vec<u8>> {
-    let decoded = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let side = decoded.width().min(decoded.height());
-    let left = (decoded.width() - side) / 2;
-    let top = (decoded.height() - side) / 2;
-    let square = image::imageops::crop_imm(&decoded, left, top, side, side).to_image();
-    let mut resized =
-        image::imageops::resize(&square, TEXTURE_SIZE, TEXTURE_SIZE, FilterType::Lanczos3);
-    apply_circle_mask(&mut resized);
+pub struct AvatarPhoto {
+    bytes: Vec<u8>,
+    textures: Mutex<Vec<(u32, Arc<RenderImage>)>>,
+}
+
+pub struct Texture {
+    pub image: Arc<RenderImage>,
+    pub evicted: Option<Arc<RenderImage>>,
+}
+
+impl AvatarPhoto {
+    pub fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
+        let (width, height) = ImageReader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()?
+            .into_dimensions()
+            .ok()?;
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let bytes = if width.max(height) > SOURCE_LIMIT {
+            shrunk_source(&bytes)?
+        } else {
+            bytes
+        };
+        Some(Self {
+            bytes,
+            textures: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn texture(&self, side: u32) -> Option<Texture> {
+        let mut textures = self.textures.lock().ok()?;
+        if let Some(position) = textures.iter().position(|(cached, _)| *cached == side) {
+            let entry = textures.remove(position);
+            let image = entry.1.clone();
+            textures.push(entry);
+            return Some(Texture {
+                image,
+                evicted: None,
+            });
+        }
+        let pixels = square_texture(&self.bytes, side)?;
+        let image = Arc::new(RenderImage::new(vec![Frame::new(pixels)]));
+        let evicted = (textures.len() >= MAX_TEXTURES).then(|| textures.remove(0).1);
+        textures.push((side, image.clone()));
+        Some(Texture { image, evicted })
+    }
+}
+
+fn shrunk_source(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut source = square_texture(bytes, SOURCE_SIDE)?;
+    for pixel in source.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
     let mut encoded = Vec::new();
-    resized
+    source
         .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
         .ok()?;
     Some(encoded)
 }
 
-fn apply_circle_mask(texture: &mut RgbaImage) {
-    let center = TEXTURE_SIZE as f32 / 2.;
-    let radius = center - MARGIN;
-    for (x, y, pixel) in texture.enumerate_pixels_mut() {
-        let distance =
-            ((x as f32 + 0.5 - center).powi(2) + (y as f32 + 0.5 - center).powi(2)).sqrt();
-        let coverage = (radius + 0.5 - distance).clamp(0., 1.);
-        let Rgba([red, green, blue, alpha]) = *pixel;
-        *pixel = Rgba([red, green, blue, (alpha as f32 * coverage).round() as u8]);
-    }
+pub fn device_span(start: f32, end: f32, scale_factor: f32) -> u32 {
+    let snapped =
+        round_half_toward_zero(end * scale_factor) - round_half_toward_zero(start * scale_factor);
+    snapped.max(1.) as u32
 }
 
-pub fn visible_fraction() -> f32 {
-    (TEXTURE_SIZE as f32 - 2. * MARGIN) / TEXTURE_SIZE as f32
+fn round_half_toward_zero(value: f32) -> f32 {
+    value.signum() * (value.abs() - 0.5).ceil()
+}
+
+pub fn square_texture(bytes: &[u8], side: u32) -> Option<RgbaImage> {
+    let decoded = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let crop = decoded.width().min(decoded.height());
+    let left = (decoded.width() - crop) / 2;
+    let top = (decoded.height() - crop) / 2;
+    let square = image::imageops::crop_imm(&decoded, left, top, crop, crop).to_image();
+    let mut texture = if crop == side {
+        square
+    } else {
+        image::imageops::resize(&square, side, side, FilterType::Lanczos3)
+    };
+    for pixel in texture.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
+    Some(texture)
 }
 
 #[cfg(test)]
 mod tests {
+    use image::Rgba;
+
     use super::*;
 
     fn solid_jpeg(width: u32, height: u32) -> Vec<u8> {
@@ -53,35 +115,71 @@ mod tests {
     }
 
     #[test]
-    fn texture_edges_are_transparent_and_center_is_opaque() {
-        let masked = image::load_from_memory(&circular_png(&solid_jpeg(48, 48)).unwrap())
-            .unwrap()
-            .to_rgba8();
-        assert_eq!(masked.dimensions(), (TEXTURE_SIZE, TEXTURE_SIZE));
-        let middle = TEXTURE_SIZE / 2;
-        for (x, y) in [
-            (middle, 0),
-            (middle, TEXTURE_SIZE - 1),
-            (0, middle),
-            (TEXTURE_SIZE - 1, middle),
-            (0, 0),
-        ] {
-            assert_eq!(
-                masked.get_pixel(x, y)[3],
-                0,
-                "edge pixel {x},{y} must be transparent"
-            );
-        }
-        assert_eq!(masked.get_pixel(middle, middle)[3], 255);
+    fn texture_matches_the_device_pixels_and_is_bgra() {
+        let texture = square_texture(&solid_jpeg(240, 240), 39).unwrap();
+        assert_eq!(texture.dimensions(), (39, 39));
+        let Rgba([blue, _, red, alpha]) = *texture.get_pixel(19, 19);
+        assert!(
+            blue.abs_diff(50) <= 3 && red.abs_diff(200) <= 3,
+            "{blue} {red}"
+        );
+        assert_eq!(alpha, 255);
     }
 
     #[test]
     fn non_square_photos_are_center_cropped() {
-        assert!(circular_png(&solid_jpeg(64, 40)).is_some());
+        assert_eq!(
+            square_texture(&solid_jpeg(64, 40), 60)
+                .unwrap()
+                .dimensions(),
+            (60, 60)
+        );
+    }
+
+    #[test]
+    fn device_span_follows_the_snapped_bounds() {
+        assert_eq!(device_span(0., 26., 1.), 26);
+        assert_eq!(device_span(0., 28., 1.5), 42);
+        assert_eq!(device_span(10.5, 36.5, 1.5), 39);
+        assert_eq!(device_span(10.1, 36.1, 1.5), 39);
+        assert_eq!(device_span(0., 32., 1.25), 40);
+        assert_eq!(device_span(0., 0.1, 1.), 1);
+        assert_eq!(device_span(-3.5, 22.5, 1.), 25);
+    }
+
+    #[test]
+    fn textures_are_cached_per_side_and_evict_the_oldest() {
+        let photo = AvatarPhoto::from_bytes(solid_jpeg(48, 48)).unwrap();
+        let first = photo.texture(32).unwrap();
+        let again = photo.texture(32).unwrap();
+        assert_eq!(first.image.id, again.image.id);
+        assert!(again.evicted.is_none());
+        for side in 33..33 + MAX_TEXTURES as u32 - 1 {
+            assert!(photo.texture(side).unwrap().evicted.is_none());
+        }
+        let overflow = photo.texture(100).unwrap();
+        assert_eq!(overflow.evicted.map(|image| image.id), Some(first.image.id));
+    }
+
+    #[test]
+    fn large_originals_are_kept_at_the_source_side() {
+        let photo = AvatarPhoto::from_bytes(solid_jpeg(1200, 900)).unwrap();
+        let dimensions = image::load_from_memory(&photo.bytes)
+            .unwrap()
+            .to_rgba8()
+            .dimensions();
+        assert_eq!(dimensions, (SOURCE_SIDE, SOURCE_SIDE));
+        let texture = photo.texture(20).unwrap().image;
+        let raw = texture.as_bytes(0).unwrap().to_vec();
+        let Rgba([blue, _, red, _]) = *RgbaImage::from_raw(20, 20, raw).unwrap().get_pixel(10, 10);
+        assert!(
+            blue.abs_diff(50) <= 3 && red.abs_diff(200) <= 3,
+            "{blue} {red}"
+        );
     }
 
     #[test]
     fn garbage_bytes_fall_back() {
-        assert!(circular_png(b"not an image").is_none());
+        assert!(AvatarPhoto::from_bytes(b"not an image".to_vec()).is_none());
     }
 }

@@ -14,6 +14,7 @@ pub mod prejoin;
 pub mod record_load;
 pub mod reminder;
 pub mod share_actions;
+pub mod share_overlay;
 pub mod schedule;
 pub mod target;
 pub mod view_actions;
