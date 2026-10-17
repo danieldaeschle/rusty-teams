@@ -25,6 +25,12 @@ pub enum CallPhase {
     TranscriptStarted,
 }
 
+impl CallPhase {
+    pub fn is_call(self) -> bool {
+        matches!(self, CallPhase::Started | CallPhase::Ended)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CallType {
     Call,

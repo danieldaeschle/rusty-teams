@@ -1,13 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam};
-use teams_core::ChatSection;
+use store::{ChannelRecord, ChatRecord, Sidebar, SidebarTeam, is_bot_id};
+use teams_core::{ChatSection, is_event_preview};
 use app_ui_kit::widgets::Unread;
 
 use crate::app_state::chat_title;
 use crate::data::{
-    Directory, FolderKind, Person, face_members, is_one_on_one, others, unread_count,
+    Directory, FolderKind, Person, face_members, is_one_on_one, one_on_one_bot, others,
+    unread_count,
 };
 use crate::format;
 use crate::typing::{TypingState, preview_label};
@@ -28,6 +29,7 @@ const GROUP_KIND: &str = "group";
 pub enum Preview {
     Empty,
     Deleted,
+    Event(String),
     Typing(String),
     Text {
         prefix: Option<String>,
@@ -45,6 +47,7 @@ pub struct Face {
 pub enum AvatarSpec {
     Single(Face),
     Pair(Face, Face),
+    Bot(Face),
     Meeting,
     Muted,
 }
@@ -108,7 +111,14 @@ pub fn preview_for(chat: &ChatRecord, me: Option<&Person>) -> Preview {
     else {
         return Preview::Empty;
     };
-    let from_me = match (chat.last_message_sender_id.as_deref(), me) {
+    let sender_id = chat
+        .last_message_sender_id
+        .as_deref()
+        .filter(|sender_id| !sender_id.is_empty());
+    if sender_id.is_none() && is_event_preview(text) {
+        return Preview::Event(text.to_owned());
+    }
+    let from_me = match (sender_id, me) {
         (Some(sender), Some(me)) => sender == me.user_id,
         _ => false,
     };
@@ -134,6 +144,9 @@ pub fn avatar_for(chat: &ChatRecord, me: Option<&Person>) -> AvatarSpec {
     }
     let faces = face_members(chat, me);
     let face = |(user_id, name): (Option<String>, String)| Face { user_id, name };
+    if let Some(bot) = one_on_one_bot(chat, me) {
+        return AvatarSpec::Bot(face(bot));
+    }
     if is_one_on_one(chat) || faces.len() < 2 {
         return AvatarSpec::Single(match faces.into_iter().next() {
             Some(first) => face(first),
@@ -169,7 +182,8 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
                 .into_iter()
                 .find_map(|(user_id, _)| user_id)
         })
-        .flatten();
+        .flatten()
+        .filter(|user_id| !is_bot_id(user_id));
     let typing_names = input.typing.names(&chat.id);
     let preview = if typing_names.is_empty() {
         preview_for(chat, me)
@@ -1023,6 +1037,46 @@ mod tests {
         assert_eq!(group.presence_user, None);
         assert!(matches!(group.avatar, AvatarSpec::Pair(..)));
         assert_eq!(avatar_for(&meeting_chat("meeting-1"), None), AvatarSpec::Meeting);
+    }
+
+    #[test]
+    fn a_one_on_one_with_a_bot_shows_the_bot_tile_and_no_presence() {
+        let directory = Directory {
+            me: Some(me()),
+            ..Default::default()
+        };
+        let collapsed = HashSet::new();
+        let mut echo = chat("echo", "oneOnOne", false);
+        echo.title = "Echo".into();
+        echo.members.truncate(1);
+        echo.members.push(MemberRecord {
+            user_id: Some("28:bot-echo".into()),
+            display_name: "Echo".into(),
+        });
+        echo.last_message_preview = Some("Recording is ready".into());
+        let chats = vec![echo];
+        let context = input(&chats, &directory, &collapsed);
+        let item = chat_item(&chats[0], &context, None);
+        assert_eq!(item.title, "Echo");
+        assert_eq!(item.presence_user, None);
+        assert!(
+            matches!(item.avatar, AvatarSpec::Bot(ref face) if face.user_id.as_deref() == Some("28:bot-echo"))
+        );
+        assert_eq!(item.preview, Preview::Event("Recording is ready".into()));
+    }
+
+    #[test]
+    fn an_event_label_from_a_person_stays_plain_text() {
+        let mut direct = chat("d", "oneOnOne", false);
+        direct.last_message_preview = Some("Recording is ready".into());
+        direct.last_message_sender_id = Some("ada".into());
+        assert_eq!(
+            preview_for(&direct, Some(&me())),
+            Preview::Text {
+                prefix: None,
+                text: "Recording is ready".into()
+            }
+        );
     }
 
     #[test]

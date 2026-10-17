@@ -1,3 +1,4 @@
+pub mod bot_profiles;
 pub mod calendar;
 pub mod calllog;
 pub mod cards;
@@ -29,6 +30,7 @@ pub mod transcripts;
 pub mod translate;
 pub mod window;
 
+pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Reminder, Repeat, Reply,
     ResponseType, meet_now_join_url, new_event_body, parse_calendar_events, parse_created_event,

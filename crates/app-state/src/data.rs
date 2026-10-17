@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{Image, ImageFormat};
-use store::{ChatRecord, Store};
+use store::{ChatRecord, Store, is_bot_id};
 
 use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange};
 use tokio::sync::oneshot;
@@ -442,6 +442,18 @@ pub fn others(chat: &ChatRecord, me: Option<&Person>) -> Vec<(Option<String>, St
         .collect()
 }
 
+pub fn one_on_one_bot(chat: &ChatRecord, me: Option<&Person>) -> Option<(Option<String>, String)> {
+    if !is_one_on_one(chat) {
+        return None;
+    }
+    match others(chat, me).as_slice() {
+        [(Some(user_id), name)] if is_bot_id(user_id) => {
+            Some((Some(user_id.clone()), name.clone()))
+        }
+        _ => None,
+    }
+}
+
 pub fn existing_one_on_one<'chats>(
     chats: &'chats [ChatRecord],
     me: Option<&Person>,
@@ -521,11 +533,13 @@ pub fn pinned_channels(store: &Store) -> Vec<String> {
 
 pub fn cached_avatar(store: &Store, user_id: &str) -> Option<Option<Arc<Image>>> {
     let record = store.avatar(user_id).ok().flatten()?;
-    Some(
-        record
-            .bytes
-            .map(|bytes| avatar_image_from(&record.content_type, bytes)),
-    )
+    Some(record.bytes.map(|bytes| {
+        if is_bot_id(user_id) {
+            Arc::new(Image::from_bytes(image_format(&record.content_type), bytes))
+        } else {
+            avatar_image_from(&record.content_type, bytes)
+        }
+    }))
 }
 
 pub fn avatar_image_from(content_type: &str, bytes: Vec<u8>) -> Arc<Image> {

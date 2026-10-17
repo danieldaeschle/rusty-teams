@@ -1,5 +1,5 @@
 use calling::meeting::LiveMeeting;
-use store::ChatRecord;
+use store::{ChatRecord, is_bot_id};
 
 use crate::data::{Person, is_one_on_one, others};
 
@@ -17,6 +17,7 @@ pub fn plan_for_chat(chat: &ChatRecord, me: Option<&Person>) -> Option<CallPlan>
     }
     let callees: Vec<(String, String)> = others(chat, me)
         .into_iter()
+        .filter(|(user_id, _)| !user_id.as_deref().is_some_and(is_bot_id))
         .filter_map(|(user_id, name)| Some((format!("{ORGID_PREFIX}{}", user_id?), name)))
         .collect();
     let title = match callees.as_slice() {

@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use store::AvatarRecord;
+use store::{AvatarRecord, is_bot_id};
 
 use crate::engine::SyncEngine;
 use crate::error::Result;
@@ -37,9 +37,28 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     async fn fetch_claimed_avatars(&self, claimed: &[String]) -> Result<()> {
+        let (bots, people): (Vec<String>, Vec<String>) = claimed
+            .iter()
+            .cloned()
+            .partition(|user_id| is_bot_id(user_id));
         let mut first_error = None;
         let mut fetched_any = false;
-        for chunk in claimed.chunks(AVATAR_BATCH) {
+        if !bots.is_empty() {
+            match self.fetch_bot_icons(&bots).await {
+                Ok(changed) => {
+                    fetched_any = true;
+                    if !changed.is_empty() {
+                        let _ = self
+                            .events
+                            .send(CoreEvent::AvatarsChanged { user_ids: changed });
+                    }
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        for chunk in people.chunks(AVATAR_BATCH) {
             let photos = match self.remote.user_photos(chunk).await {
                 Ok(photos) => photos,
                 Err(error) => {

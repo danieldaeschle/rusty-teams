@@ -38,6 +38,8 @@ const LINK_IMAGE_SIZE: (u32, u32) = (320, 180);
 const PRIORITY_CHAT: &str = "demo-chat-priya";
 const BOT_CHAT: &str = "demo-chat-wiki-bot";
 const BOT_NAME: &str = "Wiki Bot";
+const ECHO_CHAT: &str = "demo-chat-echo";
+const ECHO_BOT_ID: &str = "28:demo-echo";
 const BOT_APP_NAME: &str = "Wiki Cloud";
 const BOT_ID: &str = "00000000-0000-0000-0000-00000000b07a";
 const CARD_ANSWER_DELAY: std::time::Duration = std::time::Duration::from_millis(700);
@@ -292,6 +294,16 @@ fn demo_chats() -> Vec<DemoChat> {
             time: at(0, 13, 12),
             unread: true,
             preview: Some((PRIYA_ID, "Priya Nair", "Who is taking the review?")),
+            deleted: false,
+        },
+        DemoChat {
+            id: ECHO_CHAT,
+            kind: "oneOnOne",
+            title: "Echo",
+            members: people(&[(ECHO_BOT_ID, "Echo")]),
+            time: at(0, 11, 20),
+            unread: false,
+            preview: Some(("", "", "Recording is ready")),
             deleted: false,
         },
         DemoChat {
