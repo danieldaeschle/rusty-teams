@@ -116,6 +116,7 @@ mod tests {
                 last_message_from: Some(format!("8:orgid:{from}")),
                 ..ReadHorizon::default()
             },
+            notification_settings: None,
             history_cleared_ms: None,
         }
     }

@@ -23,6 +23,10 @@ pub fn icon(name: IconName, size: f32, color: Hsla) -> Icon {
     Icon::new(name).size(px(size)).text_color(color)
 }
 
+pub fn menu_icon(name: IconName) -> Icon {
+    Icon::new(name)
+}
+
 pub fn symbol(name: &str, size: f32, color: Hsla) -> Icon {
     Icon::empty()
         .path(format!("symbols/{name}.svg"))
@@ -44,27 +48,113 @@ pub fn corner_badge(corner: Corner, overhang: f32) -> Div {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct BadgeMetrics {
+    pub height: f32,
+    pub padding_x: f32,
+    pub font_size: f32,
+}
+
+pub const COUNT_BADGE: BadgeMetrics = BadgeMetrics {
+    height: 18.,
+    padding_x: 5.,
+    font_size: 11.,
+};
+
+pub const RAIL_BADGE: BadgeMetrics = BadgeMetrics {
+    height: 16.,
+    padding_x: 4.,
+    font_size: 10.,
+};
+
+pub fn badge_selector(text: &str) -> String {
+    format!("count-badge/{text}")
+}
+
+pub fn badge_text_selector(text: &str) -> String {
+    format!("count-badge/{text}/text")
+}
+
+pub fn badge_pill(count: u32, metrics: BadgeMetrics, background: Hsla, foreground: Hsla) -> Div {
+    let text = format::badge_text(count);
+    div()
+        .debug_selector(|| badge_selector(&text))
+        .min_w(px(metrics.height))
+        .h(px(metrics.height))
+        .px(px(metrics.padding_x))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(metrics.height / 2.))
+        .bg(background)
+        .text_color(foreground)
+        .text_size(px(metrics.font_size))
+        .line_height(px(metrics.height))
+        .font_weight(FontWeight::BOLD)
+        .child(BadgeText {
+            text,
+            font_size: metrics.font_size,
+            line_height: metrics.height,
+        })
+}
+
+#[derive(IntoElement)]
+struct BadgeText {
+    text: String,
+    font_size: f32,
+    line_height: f32,
+}
+
+impl RenderOnce for BadgeText {
+    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        let (shift_x, shift_y) = badge_ink_offset(window, &self.text, self.font_size);
+        div()
+            .debug_selector(|| badge_text_selector(&self.text))
+            .relative()
+            .left(px(-shift_x))
+            .top(px(-shift_y))
+            .flex_none()
+            .h(px(self.line_height))
+            .child(self.text)
+    }
+}
+
+pub fn badge_ink_offset(window: &Window, text: &str, font_size: f32) -> (f32, f32) {
+    let mut font = window.text_style().font();
+    font.weight = FontWeight::BOLD;
+    let text_system = window.text_system();
+    let font_id = text_system.resolve_font(&font);
+    let size = px(font_size);
+    let ascent = f32::from(text_system.ascent(font_id, size));
+    let descent = f32::from(text_system.descent(font_id, size)).abs();
+    let cap_height = f32::from(text_system.cap_height(font_id, size));
+    let shift_y = (ascent - descent - cap_height) / 2.;
+    let mut pen = 0.;
+    let mut ink_left = None;
+    let mut ink_right = 0.;
+    for character in text.chars() {
+        let advance = text_system
+            .advance(font_id, size, character)
+            .map_or(0., |advance| f32::from(advance.width));
+        if let Ok(bounds) = text_system.typographic_bounds(font_id, size, character) {
+            let left = pen + f32::from(bounds.origin.x);
+            ink_left.get_or_insert(left);
+            ink_right = left + f32::from(bounds.size.width);
+        }
+        pen += advance;
+    }
+    let shift_x = ink_left.map_or(0., |left| (left + ink_right) / 2. - pen / 2.);
+    (shift_x, shift_y)
+}
+
 pub fn count_badge(count: u32, muted: bool) -> Div {
     let (background, foreground) = if muted {
         (theme::badge_muted(), theme::text_strong())
     } else {
         (theme::accent(), theme::on_accent())
     };
-    div()
-        .min_w(px(18.))
-        .h(px(18.))
-        .px(px(5.))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded(px(9.))
-        .bg(background)
-        .text_color(foreground)
-        .text_size(px(11.))
-        .line_height(px(18.))
-        .font_weight(FontWeight::BOLD)
-        .child(format::badge_text(count))
+    badge_pill(count, COUNT_BADGE, background, foreground)
 }
 
 pub fn page_header(title: &str) -> Div {

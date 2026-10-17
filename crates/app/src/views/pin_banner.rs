@@ -10,10 +10,10 @@ use super::widgets::icon;
 use crate::theme;
 
 const BANNER_HEIGHT: f32 = 40.;
-const BANNER_INSET: f32 = ROW_PADDING;
 pub const PIN_BANNER_TAG: &str = "shell/islands/main/pin-banner";
 const BANNER_GAP: f32 = 8.;
 const BANNER_PADDING: f32 = 12.;
+pub const BANNER_INSET: f32 = ROW_PADDING - BANNER_PADDING;
 const BUTTON_SIZE: f32 = 28.;
 const FALLBACK_PREVIEW: &str = "Pinned message";
 

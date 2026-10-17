@@ -2,6 +2,9 @@ use serde_json::{Value, json};
 use session::{Method, Request, Session};
 
 use crate::channel_notifications::{ChannelNotifications, PROPERTY_NAME};
+use crate::chat_notifications::{
+    self, ChatNotificationMode, ChatNotificationWrite, DesktopNotifications,
+};
 use crate::error::{Error, Result};
 use crate::messages::{MessageTransport, SessionMessageTransport, encode, ensure_success};
 use crate::pins::DEFAULT_REGION;
@@ -12,13 +15,20 @@ const MAX_PAGES: usize = 100;
 const ALERTS_OFF: &str = "false";
 const CLEAR_HISTORY_PROPERTY: &str = "clearHistoryTime";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConversationState {
     pub id: String,
     pub muted: bool,
     pub hidden: Option<bool>,
     pub read: ReadHorizon,
     pub history_cleared_ms: Option<i64>,
+    pub notification_settings: Option<String>,
+}
+
+impl ConversationState {
+    pub fn desktop_notifications(&self) -> DesktopNotifications {
+        chat_notifications::parse_desktop(self.notification_settings.as_deref())
+    }
 }
 
 pub struct Conversations<T: MessageTransport = SessionMessageTransport> {
@@ -84,6 +94,31 @@ impl<T: MessageTransport> Conversations<T> {
             ))
             .await?;
         ensure_success(&answer)
+    }
+
+    /// Teams writes the merged notification settings first, then `alerts`.
+    pub async fn set_chat_notifications(
+        &self,
+        conversation_id: &str,
+        current_settings: Option<&str>,
+        mode: ChatNotificationMode,
+        desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        let write = chat_notifications::chat_notification_write(current_settings, mode, desktop);
+        let url = format!(
+            "{}/{}/properties?name={}",
+            self.base_url,
+            encode(conversation_id),
+            chat_notifications::PROPERTY_NAME
+        );
+        let body = json!({ chat_notifications::PROPERTY_NAME: write.settings });
+        let answer = self
+            .transport
+            .send(Request::with_body(Method::Put, url, body))
+            .await?;
+        ensure_success(&answer)?;
+        self.set_alerts(conversation_id, write.alerts).await?;
+        Ok(write)
     }
 
     /// Teams' "Remove chat history": everything up to this time disappears for the current user only.
@@ -205,6 +240,10 @@ fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
                 muted,
                 hidden: hidden_flag(conversation),
                 read: ReadHorizon::from_conversation(conversation),
+                notification_settings: conversation["properties"]
+                    [chat_notifications::PROPERTY_NAME]
+                    .as_str()
+                    .map(str::to_owned),
                 history_cleared_ms: history_cleared_ms(conversation),
             })
         })
@@ -248,9 +287,7 @@ mod tests {
         ConversationState {
             id: id.to_owned(),
             muted,
-            hidden: None,
-            read: ReadHorizon::default(),
-            history_cleared_ms: None,
+            ..Default::default()
         }
     }
 
@@ -486,5 +523,50 @@ mod tests {
             requests[0].body,
             Some(json!({"consumptionhorizon": "9;10;0"}))
         );
+    }
+
+    #[tokio::test]
+    async fn chat_notifications_put_the_settings_then_alerts() {
+        let transport = canned(vec![(200, Value::Null), (200, Value::Null)]);
+        let write = Conversations::with_transport(&transport, "emea")
+            .set_chat_notifications(
+                "19:a@thread.v2",
+                Some(r#"{"everyone":"On"}"#),
+                ChatNotificationMode::Mute,
+                DesktopNotifications::MatchAllChats,
+            )
+            .await
+            .unwrap();
+        assert!(!write.alerts);
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(
+            requests[0].url,
+            format!("{BASE}/19%3Aa%40thread.v2/properties?name=conversationNotificationSettings")
+        );
+        let sent = requests[0].body.as_ref().unwrap()["conversationNotificationSettings"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(sent).unwrap(),
+            json!({"everyone": "Off", "dskNotif": null, "allNewPosts": "Off"})
+        );
+        assert_eq!(
+            requests[1].url,
+            format!("{BASE}/19%3Aa%40thread.v2/properties?name=alerts")
+        );
+        assert_eq!(requests[1].body, Some(json!({"alerts": "false"})));
+    }
+
+    #[tokio::test]
+    async fn states_carry_the_chat_notification_settings() {
+        let transport = canned(vec![(
+            200,
+            json!({"conversations": [{"id": "19:a", "properties": {"conversationNotificationSettings": "{\"dskNotif\":\"Off\"}"}}]}),
+        )]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_states()
+            .await
+            .unwrap();
+        assert_eq!(states[0].desktop_notifications(), DesktopNotifications::Off);
     }
 }

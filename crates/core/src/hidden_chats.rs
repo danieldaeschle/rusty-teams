@@ -192,6 +192,7 @@ mod tests {
                 muted: false,
                 hidden,
                 read: chatsvc::ReadHorizon::default(),
+                notification_settings: None,
                 history_cleared_ms: None,
             },
         )])

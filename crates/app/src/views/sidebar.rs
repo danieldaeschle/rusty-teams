@@ -13,7 +13,7 @@ use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
 };
-use teams_core::is_notes_chat;
+use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
@@ -21,7 +21,7 @@ use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::with_top_edge;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
-use super::widgets::{count_badge, icon, page_header, unread_marker};
+use super::widgets::{count_badge, icon, menu_icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::channel_menu::{
@@ -67,7 +67,6 @@ const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
-const MENU_ICON_SIZE: f32 = 15.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
 const MENTION_ICON_SIZE: f32 = 15.;
 
@@ -92,6 +91,10 @@ impl SidebarTab {
             SidebarTab::Agents => "Agents",
         }
     }
+}
+
+pub fn chat_row_selector(chat_id: &str) -> String {
+    format!("chat-row/{chat_id}")
 }
 
 #[derive(Clone)]
@@ -133,10 +136,6 @@ struct ChatMenuTarget {
 struct MenuContext {
     state: Entity<AppState>,
     folders: Vec<(String, String)>,
-}
-
-fn menu_icon(name: IconName) -> gpui_kit::component::Icon {
-    icon(name, MENU_ICON_SIZE, theme::text_muted())
 }
 
 fn chat_menu(
@@ -219,18 +218,18 @@ fn chat_menu(
     if notes {
         return popup;
     }
-    popup = popup
-        .item(
-            PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
-                .icon(menu_icon(if muted {
-                    IconName::Bell
-                } else {
-                    IconName::BellOff
-                }))
-                .on_click(move |_, _, cx| {
-                    mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
-                }),
-        )
+    popup = popup.item(
+        PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
+            .icon(menu_icon(if muted {
+                IconName::Bell
+            } else {
+                IconName::BellOff
+            }))
+            .on_click(move |_, _, cx| {
+                mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
+            }),
+    );
+    popup = chat_notifications_submenu(popup, window, cx, context, target)
         .separator()
         .item(
             PopupMenuItem::new("Hide")
@@ -259,13 +258,83 @@ fn chat_menu(
             PopupMenuItem::element(|_, _| {
                 div().text_color(theme::red_soft()).child("Leave chat...")
             })
-            .icon(icon(IconName::LogOut, MENU_ICON_SIZE, theme::red_soft()))
+            .icon(menu_icon(IconName::LogOut).text_color(theme::red_soft()))
             .on_click(move |_, window, cx| {
                 confirm_leave(&leave_state, &leave_id, &title, member_count, window, cx);
             }),
         );
     }
     popup
+}
+
+const CHAT_NOTIFICATION_MODES: [(&str, ChatNotificationMode); 2] = [
+    ("All new messages", ChatNotificationMode::AllNewMessages),
+    ("Mute", ChatNotificationMode::Mute),
+];
+
+const DESKTOP_NOTIFICATIONS: [(&str, DesktopNotifications); 2] = [
+    (
+        "Match settings used for all chats",
+        DesktopNotifications::MatchAllChats,
+    ),
+    ("Don't get desktop notifications", DesktopNotifications::Off),
+];
+
+fn chat_notifications_submenu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    context: &MenuContext,
+    target: &ChatMenuTarget,
+) -> PopupMenu {
+    let state = context.state.clone();
+    let chat_id = target.id.clone();
+    let mode = if target.muted {
+        ChatNotificationMode::Mute
+    } else {
+        ChatNotificationMode::AllNewMessages
+    };
+    let desktop = state.read(cx).chat_desktop_notifications(&chat_id);
+    popup.submenu_with_icon(
+        Some(menu_icon(IconName::Bell)),
+        "Manage notifications",
+        window,
+        cx,
+        move |submenu, _, _| {
+            let choose = |chosen_mode: ChatNotificationMode,
+                          chosen_desktop: DesktopNotifications| {
+                let (state, chat_id) = (state.clone(), chat_id.clone());
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    state.update(cx, |state, cx| {
+                        state.set_chat_notifications(&chat_id, chosen_mode, chosen_desktop, cx)
+                    });
+                }
+            };
+            let submenu = submenu.label("Chat notification mode");
+            let submenu =
+                CHAT_NOTIFICATION_MODES
+                    .iter()
+                    .fold(submenu, |submenu, (label, value)| {
+                        submenu.item(
+                            PopupMenuItem::new(*label)
+                                .checked(*value == mode)
+                                .on_click(choose(*value, desktop)),
+                        )
+                    });
+            let submenu = submenu
+                .separator()
+                .label("Set a desktop notification preference");
+            DESKTOP_NOTIFICATIONS
+                .iter()
+                .fold(submenu, |submenu, (label, value)| {
+                    submenu.item(
+                        PopupMenuItem::new(*label)
+                            .checked(*value == desktop)
+                            .on_click(choose(mode, *value)),
+                    )
+                })
+        },
+    )
 }
 
 #[derive(Clone)]
@@ -410,7 +479,7 @@ fn section_menu(
             PopupMenuItem::element(|_, _| {
                 div().text_color(theme::red_soft()).child("Delete section")
             })
-            .icon(icon(IconName::Trash, MENU_ICON_SIZE, theme::red_soft()))
+            .icon(menu_icon(IconName::Trash).text_color(theme::red_soft()))
             .disabled(target.read_only)
             .on_click(move |_, window, cx| {
                 confirm_delete_section(&delete_state, &folder_id, &name, window, cx);
@@ -1123,6 +1192,7 @@ impl SidebarView {
         };
         h_flex()
             .id(SharedString::from(format!("chat-{}", item.id)))
+            .debug_selector(|| chat_row_selector(&item.id))
             .mx(px(6.))
             .h(px(ROW_HEIGHT))
             .flex_none()

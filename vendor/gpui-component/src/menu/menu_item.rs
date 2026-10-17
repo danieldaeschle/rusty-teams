@@ -11,6 +11,7 @@ use smallvec::SmallVec;
 pub(crate) struct MenuItemElement {
     id: ElementId,
     aria_label: Option<SharedString>,
+    debug_selector: Option<Box<dyn FnOnce() -> String>>,
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
@@ -26,6 +27,7 @@ impl MenuItemElement {
         Self {
             id: id.clone(),
             aria_label: None,
+            debug_selector: None,
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
@@ -44,6 +46,11 @@ impl MenuItemElement {
     /// Set the accessible label for the menu item.
     pub(crate) fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.aria_label = Some(label.into());
+        self
+    }
+
+    pub(crate) fn debug_selector(mut self, selector: impl FnOnce() -> String + 'static) -> Self {
+        self.debug_selector = Some(Box::new(selector));
         self
     }
 
@@ -97,6 +104,9 @@ impl RenderOnce for MenuItemElement {
             .test_support()
             .role(Role::MenuItem)
             .when_some(self.aria_label, |this, label| this.aria_label(label))
+            .when_some(self.debug_selector, |this, selector| {
+                this.debug_selector(selector)
+            })
             .aria_selected(self.selected)
             .gap_x_1()
             .py_1()

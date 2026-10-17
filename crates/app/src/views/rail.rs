@@ -5,11 +5,10 @@ use gpui_kit::*;
 
 use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
-use super::widgets::icon;
+use super::widgets::{RAIL_BADGE, badge_pill, icon};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRuns, runs_handle};
 use crate::app_state::AppState;
-use crate::format;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
 use app_ui_kit::layout::{RAIL_ITEM_WIDTH, RAIL_WIDTH};
@@ -208,23 +207,12 @@ fn badge(badge: RailBadge) -> Option<Div> {
             .size(px(7.))
             .rounded_full()
             .bg(theme::accent()),
-        RailBadge::Count(count) => div()
-            .absolute()
-            .top(px(5.))
-            .left(px(28.))
-            .min_w(px(16.))
-            .h(px(16.))
-            .px(px(4.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(8.))
-            .bg(theme::accent())
-            .text_color(theme::on_accent())
-            .text_size(px(10.))
-            .line_height(px(16.))
-            .font_weight(FontWeight::BOLD)
-            .child(format::badge_text(count)),
+        RailBadge::Count(count) => {
+            badge_pill(count, RAIL_BADGE, theme::accent(), theme::on_accent())
+                .absolute()
+                .top(px(5.))
+                .left(px(28.))
+        }
     })
 }
 

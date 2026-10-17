@@ -206,7 +206,8 @@ impl StatusMessageDialog {
                                     }),
                             )
                         })
-                    }),
+                    })
+                    .listbox(),
             )
     }
 

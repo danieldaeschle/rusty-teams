@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use chrono::{DateTime, Utc};
 use store::{ChannelNotifications, MessageRecord, Sidebar, Store};
 
-use super::rules::{ChannelSignals, ChatKind, Incoming, Preview};
+use super::rules::{ChannelSignals, ChatKind, ChatSignals, Incoming, Preview};
 use crate::app_state::chat_title;
 
 const RECENT_WINDOW: usize = 20;
@@ -160,6 +160,7 @@ pub fn build_incoming(
         ChatKind::Channel { .. } => channel_signals(record, store, sidebar, my_user_id),
         _ => ChannelSignals::default(),
     };
+    let chat = chat_signals(store, sidebar, &record.conversation_id, my_user_id);
     Some(Incoming {
         conversation_id: record.conversation_id.clone(),
         message_id: record.message_id.clone(),
@@ -171,8 +172,30 @@ pub fn build_incoming(
         mentions_me: mentions_me(record, my_user_id),
         muted: is_muted_chat(sidebar, &record.conversation_id),
         signals,
+        chat,
         created_at: record.created_at,
     })
+}
+
+fn chat_signals(
+    store: &Store,
+    sidebar: &Sidebar,
+    conversation_id: &str,
+    my_user_id: Option<&str>,
+) -> ChatSignals {
+    let meeting = sidebar
+        .chats
+        .iter()
+        .any(|chat| chat.id == conversation_id && chat.kind.eq_ignore_ascii_case("meeting"));
+    let participated = meeting
+        && store
+            .messages(conversation_id, None, RECENT_WINDOW)
+            .is_ok_and(|records| records.iter().any(|record| is_own(record, my_user_id)));
+    ChatSignals {
+        meeting,
+        participated,
+        ..ChatSignals::default()
+    }
 }
 
 fn is_muted_chat(sidebar: &Sidebar, conversation_id: &str) -> bool {
@@ -386,6 +409,27 @@ mod tests {
             |sidebar: &Sidebar| build_incoming(&message, &store, sidebar, Some("me")).unwrap();
         assert!(build(&quiet).muted);
         assert!(!build(&sidebar()).muted);
+    }
+
+    #[test]
+    fn meeting_chats_know_whether_i_took_part() {
+        let mut with_meeting = sidebar();
+        with_meeting.chats[1].kind = "meeting".into();
+        let store = Store::open_in_memory().unwrap();
+        let message = record("group", "u1", Utc::now(), "hi");
+        let first = build_incoming(&message, &store, &with_meeting, Some("me")).unwrap();
+        assert!(first.chat.meeting);
+        assert!(!first.chat.participated);
+        let own = record("group", "me", Utc::now() - Duration::minutes(1), "hello");
+        store.upsert_messages(&[own]).unwrap();
+        let later = build_incoming(&message, &store, &with_meeting, Some("me")).unwrap();
+        assert!(later.chat.participated);
+        assert!(
+            !build_incoming(&message, &store, &sidebar(), Some("me"))
+                .unwrap()
+                .chat
+                .meeting
+        );
     }
 
     #[test]
