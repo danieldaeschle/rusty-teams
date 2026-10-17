@@ -1,0 +1,53 @@
+{
+  "Groups": [
+    {"Type": "People", "Suggestions": [
+      {"Id": "p1", "ReferenceId": "ref.4000.43", "DisplayName": "Erika Mustermann", "GivenName": "Erika", "Surname": "Mustermann",
+       "EmailAddresses": ["erika.mustermann@contoso.example"], "UserPrincipalName": "erika.mustermann@contoso.example",
+       "JobTitle": "Engineer", "Department": "R&D", "CompanyName": "Contoso", "MRI": "8:orgid:11111111-2222-3333-4444-555555555555",
+       "ExternalDirectoryObjectId": "11111111-2222-3333-4444-555555555555", "PeopleType": "Person", "PeopleSubtype": "OrganizationUser",
+       "PropertyHits": ["DisplayName"], "QueryText": "eri", "Text": "Erika Mustermann"}
+    ]},
+    {"Type": "Chat", "Suggestions": [
+      {"ReferenceId": "ref.4000.47", "EntityType": "Chat", "ThreadId": "19:group01@thread.v2", "ThreadType": "Chat", "Name": "",
+       "LastMessageTime": "2026-10-16T07:34:41Z", "TotalChatMembersCount": 3,
+       "ChatMembers": [{"DisplayName": "Erika Mustermann", "MRI": "8:orgid:11111111-2222-3333-4444-555555555555"}, {"DisplayName": "Max Muster", "MRI": "8:orgid:aaaa"}],
+       "MatchingMembers": [{"DisplayName": "Erika Mustermann", "GivenName": "Erika", "Surname": "Mustermann", "MRI": "8:orgid:11111111-2222-3333-4444-555555555555"}],
+       "PropertyHits": ["Members"], "Text": ""}
+    ]},
+    {"Type": "Channel", "Suggestions": [
+      {"ReferenceId": "ref.4000.51", "EntityType": "Channel", "ThreadId": "19:channel01@thread.tacv2", "Name": "General", "TeamName": "Platform",
+       "GroupId": "team-group-id", "ChannelType": "Standard", "PropertyHits": [], "Text": "General"}
+    ]},
+    {"Type": "Team", "Suggestions": [
+      {"ReferenceId": "ref.4000.52", "EntityType": "Team", "ThreadId": "19:team01@thread.tacv2", "GroupId": "team-group-id", "Name": "Platform", "Text": "Platform"}
+    ]},
+    {"Type": "Message", "Suggestions": [
+      {"ReferenceId": "ref.4000.60", "Id": "opaque", "ClientThreadId": "19:group01@thread.v2",
+       "ClientConversationId": "19:group01@thread.v2;messageid=1760600081000", "InternetMessageId": "1760600081000",
+       "ParentMessageId": "1760600081000", "DateTimeSent": "2026-10-16T07:34:41Z", "Preview": "Can Erika review the release?",
+       "From": {"EmailAddress": {"Name": "Max Muster", "Address": "max.muster@contoso.example"}, "MRI": "8:orgid:aaaa"},
+       "ThreadType": "Chat", "ThreadSubType": "NamedGroupChat", "Metadata": ["IsRead"], "RecipientsCount": 3, "ToPreview": [{"DisplayName": "Erika Mustermann"}]},
+      {"ReferenceId": "ref.4000.61", "Id": "opaque2", "ClientThreadId": "19:group01@thread.v2",
+       "ClientConversationId": "19:group01@thread.v2;messageid=1760600090000", "InternetMessageId": "1760600090000",
+       "DateTimeSent": "2026-10-16T07:40:00Z", "Preview": "unread one",
+       "From": {"EmailAddress": {"Name": "Max Muster", "Address": "max.muster@contoso.example"}, "MRI": "8:orgid:aaaa"},
+       "ThreadType": "Chat", "ThreadSubType": "NamedGroupChat", "Metadata": []}
+    ]},
+    {"Type": "File", "Suggestions": [
+      {"ReferenceId": "ref.4000.70", "FileName": "Roadmap.docx", "FileExtension": "docx", "FileSize": 2048,
+       "AccessUrl": "https://contoso.example/Roadmap.docx", "Author": "Erika Mustermann", "DateModified": "2026-10-10T10:00:00Z",
+       "SharedDateTime": "2026-10-11T10:00:00Z", "From": {"EmailAddress": {"Name": "Erika Mustermann"}}}
+    ]},
+    {"Type": "Event", "Suggestions": [
+      {"ReferenceId": "ref.4000.80", "Subject": "Release sync", "OrganizerName": "Erika Mustermann", "Start": "2026-10-20T09:00:00Z",
+       "End": "2026-10-20T09:30:00Z", "Location": "Microsoft Teams Meeting", "SkypeTeamsMeetingUrl": "https://teams.example/l/meetup-join/x",
+       "WebLink": "https://outlook.example/event", "Attendees": [], "ResponseStatus": {"Response": "Accepted", "Time": "2026-10-01T00:00:00Z"}}
+    ]},
+    {"Type": "Text", "Suggestions": [
+      {"ReferenceId": "ref.4000.90", "Text": "Messages from Erika Mustermann", "QueryText": "eri", "TextSuggestionType": "PeopleAsText"}
+    ]},
+    {"Type": "CatalogApp", "Suggestions": [{"Title": "ignored"}]}
+  ],
+  "LayoutHints": {"BestMatchSuggestions": [{"Group": "People", "ReferenceId": "ref.4000.43"}, {"Group": "Chat", "ReferenceId": "ref.4000.47"}]},
+  "Instrumentation": {"TraceId": "trace"}
+}
