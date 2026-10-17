@@ -261,7 +261,11 @@ impl Feed {
     }
 
     pub fn unread_count(&self) -> usize {
-        self.entries.iter().filter(|entry| !entry.read).count()
+        self.unread_entries().count()
+    }
+
+    pub fn unread_entries(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.iter().filter(|entry| !entry.read)
     }
 
     pub fn take_dirty(&mut self) -> Vec<Entry> {

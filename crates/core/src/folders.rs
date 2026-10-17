@@ -383,6 +383,7 @@ const KIND_MEETING: &str = "MeetingChats";
 const KIND_MUTED: &str = "MutedChats";
 const META_MUTED_SECTION: &str = "chat_section_muted";
 const META_MEETING_SECTION: &str = "chat_section_meeting";
+const META_ADAPTIVE_RAIL: &str = "adaptive_rail";
 
 fn to_record(folder: &ChatFolder) -> FolderRecord {
     FolderRecord {
@@ -428,6 +429,7 @@ pub fn stored_section_settings(store: &Store) -> ChatSectionSettings {
     ChatSectionSettings {
         muted: read(META_MUTED_SECTION),
         meeting: read(META_MEETING_SECTION),
+        adaptive_rail: read(META_ADAPTIVE_RAIL),
     }
 }
 
@@ -435,6 +437,7 @@ pub fn store_section_settings(store: &Store, settings: &ChatSectionSettings) -> 
     for (key, value) in [
         (META_MUTED_SECTION, settings.muted),
         (META_MEETING_SECTION, settings.meeting),
+        (META_ADAPTIVE_RAIL, settings.adaptive_rail),
     ] {
         let text = value.map(|enabled| enabled.to_string()).unwrap_or_default();
         store.set_meta(key, &text)?;
