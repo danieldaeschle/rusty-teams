@@ -1,5 +1,6 @@
 //! Scores the person matte against a portrait matting set with true alphas (PPM-100 layout: `<dir>/fg/*.jpg`, `<dir>/alpha/*.png`).
-//! Usage: matte_eval <out_dir> <set_dir>... [--model mediapipe-256x144|modnet-320x192|modnet-512x288] [--gpu] [--shots N] [--limit N]
+//! Usage: matte_eval <out_dir> <set_dir>... [--model mediapipe-256x144|modnet-320x192|modnet-512x288] [--gpu] [--shots N] [--limit N] [--motion]
+//! `--motion` moves the person over a room backdrop and scores a mask that arrives K frames late, stale and propagated.
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -10,16 +11,21 @@ use calling::segmentation::FixedSegmenter;
 use calling::segmentation::model::{MEDIAPIPE, MODNET_LARGE, MODNET_SMALL, ModelSpec};
 use calling::segmentation::runtime::Device;
 use calling::camera::i420_from_rgba;
+use calling::mask::Mask;
 use calling::matte::{Matte, Planes, RefineSettings, refine_with};
+use calling::motion::{LumaGrid, propagate_for_display};
 use image::imageops::FilterType;
 use libwebrtc::native::yuv_helper::i420_to_abgr;
-use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
+use libwebrtc::video_frame::I420Buffer;
 
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
 const EDGE_RADIUS: usize = 12;
 const JITTER_X: usize = 3;
 const JITTER_Y: usize = 2;
+const SPEEDS: [usize; 2] = [8, 16];
+const DELAYS: [usize; 4] = [0, 1, 2, 3];
+const METHODS: [&str; 5] = ["stale", "stale+guided", "propagated", "propagated+guided", "shipped"];
 
 struct Sample {
     name: String,
@@ -204,6 +210,111 @@ fn save_sheet(out: &Path, sample: &Sample, matte: &Matte) {
     image::imageops::resize(&sheet, WIDTH * 3 / 2, HEIGHT, FilterType::Triangle).save(out.join(format!("{}.png", sample.name))).expect("sheet written");
 }
 
+fn room(seed: usize) -> Vec<u8> {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+    let mut state = (seed as u64).wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+    let mut next = move |range: usize| {
+        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        ((state >> 33) as usize) % range.max(1)
+    };
+    let mut rgba: Vec<u8> = (0..width * height)
+        .flat_map(|index| {
+            let row = index / width;
+            let shade = (150 + row * 60 / height) as u8;
+            [shade, shade - 10, shade - 25, 255]
+        })
+        .collect();
+    for _ in 0..40 {
+        let (left, top, box_width, box_height) = (next(width), next(height), 20 + next(220), 10 + next(160));
+        let colour = [30 + next(200) as u8, 30 + next(200) as u8, 30 + next(200) as u8];
+        for row in top..(top + box_height).min(height) {
+            for column in left..(left + box_width).min(width) {
+                rgba[(row * width + column) * 4..][..3].copy_from_slice(&colour);
+            }
+        }
+    }
+    for (index, pixel) in rgba.chunks_exact_mut(4).enumerate() {
+        let noise = ((index * 7919 + index / width * 104_729) % 17) as i16 - 8;
+        for channel in pixel.iter_mut().take(3) {
+            *channel = (i16::from(*channel) + noise).clamp(0, 255) as u8;
+        }
+    }
+    rgba
+}
+
+fn moved(sample: &Sample, backdrop: &[u8], (across, down): (usize, usize)) -> (Vec<u8>, Vec<f32>) {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+    let mut rgba = backdrop.to_vec();
+    let mut truth = vec![0f32; width * height];
+    for row in down..height {
+        for column in across..width {
+            let source = (row - down) * width + column - across;
+            let alpha = sample.truth[source];
+            truth[row * width + column] = alpha;
+            for channel in 0..3 {
+                let target = &mut rgba[(row * width + column) * 4 + channel];
+                *target = (f32::from(sample.rgba[source * 4 + channel]) * alpha + f32::from(*target) * (1. - alpha) + 0.5) as u8;
+            }
+        }
+    }
+    (rgba, truth)
+}
+
+fn band_error(matte: &Matte, truth: &[f32], band: &[bool]) -> f64 {
+    let (mut squared, mut count) = (0f64, 0usize);
+    for ((&alpha, &truth), _) in matte.alpha.iter().zip(truth).zip(band).filter(|(_, edge)| **edge) {
+        let difference = f64::from(f32::from(alpha) / 255. - truth);
+        squared += difference * difference;
+        count += 1;
+    }
+    squared / count.max(1) as f64 * 1000.
+}
+
+fn guided(mask: &Mask) -> Mask {
+    Mask { matte: false, ..mask.clone() }
+}
+
+fn motion_eval(segmenter: &mut FixedSegmenter, spec: ModelSpec, all: &[Sample]) {
+    let rows = SPEEDS.len() * DELAYS.len();
+    let mut errors = vec![[0f64; METHODS.len()]; rows];
+    let mut propagate_ms = 0f64;
+    let mut propagations = 0usize;
+    for (index, sample) in all.iter().enumerate() {
+        let backdrop = room(index);
+        let (source_rgba, source_truth) = moved(sample, &backdrop, (0, 0));
+        let source = i420_from_rgba(&source_rgba, WIDTH, HEIGHT);
+        let mask = segmenter.infer(i420_from_rgba(&source_rgba, WIDTH, HEIGHT)).expect("mask");
+        let reference = LumaGrid::of(&source);
+        let source_band = edge_band(&source_truth);
+        for (speed_index, speed) in SPEEDS.into_iter().enumerate() {
+            for (delay_index, delay) in DELAYS.into_iter().enumerate() {
+                let (rgba, truth) = moved(sample, &backdrop, (speed * delay, speed * delay / 4));
+                let current = i420_from_rgba(&rgba, WIDTH, HEIGHT);
+                let band: Vec<bool> = edge_band(&truth).iter().zip(&source_band).map(|(now, before)| *now || *before).collect();
+                let started = Instant::now();
+                let (propagated, moved) = propagate_for_display(&mask, &reference, &LumaGrid::of(&current));
+                propagate_ms += started.elapsed().as_secs_f64() * 1000.;
+                propagations += 1;
+                let shipped = Mask { matte: propagated.matte && !moved, ..propagated.clone() };
+                let candidates = [mask.clone(), guided(&mask), propagated.clone(), guided(&propagated), shipped];
+                for (method, candidate) in candidates.iter().enumerate() {
+                    let matte = refine_with(candidate, Planes::of(&current), settings());
+                    errors[speed_index * DELAYS.len() + delay_index][method] += band_error(&matte, &truth, &band);
+                }
+            }
+        }
+    }
+    let count = all.len().max(1) as f64;
+    println!("{} {} images, motion edge_mse x1000 (band = old and new edge), propagate {:.2} ms", spec.name, all.len(), propagate_ms / propagations.max(1) as f64);
+    println!("| speed px/frame | late frames | {} |", METHODS.join(" | "));
+    for (speed_index, speed) in SPEEDS.into_iter().enumerate() {
+        for (delay_index, delay) in DELAYS.into_iter().enumerate() {
+            let row = &errors[speed_index * DELAYS.len() + delay_index];
+            println!("| {speed} | {delay} | {} |", row.iter().map(|error| format!("{:.1}", error / count)).collect::<Vec<_>>().join(" | "));
+        }
+    }
+}
+
 fn main() {
     let mut arguments: Vec<String> = std::env::args().skip(1).collect();
     let flag = |arguments: &mut Vec<String>, name: &str| -> Option<usize> {
@@ -219,6 +330,7 @@ fn main() {
     });
     let spec: ModelSpec = [MEDIAPIPE, MODNET_SMALL, MODNET_LARGE].into_iter().find(|spec| Some(spec.name) == model.as_deref()).unwrap_or(MEDIAPIPE);
     let gpu = arguments.iter().position(|argument| argument == "--gpu").map(|position| arguments.remove(position)).is_some();
+    let motion = arguments.iter().position(|argument| argument == "--motion").map(|position| arguments.remove(position)).is_some();
     let shots = flag(&mut arguments, "--shots").unwrap_or(6);
     let limit = flag(&mut arguments, "--limit").unwrap_or(usize::MAX);
     let out = PathBuf::from(arguments.first().expect("out dir"));
@@ -226,6 +338,10 @@ fn main() {
     std::fs::create_dir_all(&out).expect("out dir");
     let mut segmenter = FixedSegmenter::new(spec, if gpu { Device::Gpu } else { Device::Cpu { threads: 4 } }).expect("model");
     let all = samples(&sets);
+    if motion {
+        motion_eval(&mut segmenter, spec, &all[..all.len().min(limit)]);
+        return;
+    }
     let mut total = Score::default();
     let mut lines = vec!["name,mse,edge_mse,sad,flicker,infer_ms,refine_ms".to_owned()];
     let count = all.len().min(limit);

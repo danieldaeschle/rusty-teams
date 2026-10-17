@@ -1,10 +1,12 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use libwebrtc::video_frame::I420Buffer;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 
-use crate::effects::EffectsStage;
+use crate::blur::BlurSettings;
+use crate::effects::EffectsThread;
 use crate::video_send::LocalSink;
 
 pub const CAMERA_WIDTH: u32 = 640;
@@ -108,17 +110,20 @@ fn paint_screen(
     v_plane[..(stride_v * height / 2) as usize].fill(128);
 }
 
-pub fn spawn_pattern(mut sink: LocalSink, kind: PatternKind, mut effects: Option<EffectsStage>) -> JoinHandle<()> {
+pub fn spawn_pattern(mut sink: LocalSink, kind: PatternKind, effects: Option<Arc<BlurSettings>>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(1) / kind.fps());
         let mut tick = 0u32;
+        let mut deliver: Box<dyn FnMut(I420Buffer) + Send> = match effects {
+            Some(settings) => match EffectsThread::spawn(settings, move |frame| sink.push(frame)) {
+                Ok(effects) => Box::new(move |frame| effects.submit(frame)),
+                Err(_) => return,
+            },
+            None => Box::new(move |frame| sink.push(frame)),
+        };
         loop {
             ticker.tick().await;
-            let frame = pattern_frame(kind, tick);
-            sink.push(match effects.as_mut() {
-                Some(stage) => stage.apply_i420(frame),
-                None => frame,
-            });
+            deliver(pattern_frame(kind, tick));
             tick = tick.wrapping_add(1);
         }
     })

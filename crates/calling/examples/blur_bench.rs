@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use calling::camera::i420_from_rgba;
 use calling::background::BackgroundPicture;
-use calling::composite::PicturePlanes;
+use calling::composite::{Backdrop, PicturePlanes, composite};
+use calling::motion::{LumaGrid, propagate};
 use calling::blur::{BlurSettings, MaskInference, MaskSource, compose, compose_i420, compose_image};
 use calling::segmentation::FixedSegmenter;
 use calling::segmentation::model::MEDIAPIPE;
@@ -162,6 +163,19 @@ fn main() {
         std::hint::black_box(refine(&oval, Planes::of(&frame)));
     }
     println!("matte refinement {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));
+    let matte = refine(&oval, Planes::of(&frame));
+    let mut target = send_frame();
+    let started = Instant::now();
+    for _ in 0..FRAMES {
+        composite(&mut target, &matte, Backdrop::Blur);
+    }
+    println!("blur composite only {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));
+    let reference = LumaGrid::of(&frame);
+    let started = Instant::now();
+    for _ in 0..FRAMES {
+        std::hint::black_box(propagate(&oval, &reference, &LumaGrid::of(&target)));
+    }
+    println!("mask propagation (grid + block matching + warp) {SEND_WIDTH}x{SEND_HEIGHT}: {:.2} ms/frame", milliseconds_per_frame(started));
     let backdrop = PicturePlanes::new(&picture_backdrop().covering(SEND_WIDTH as usize, SEND_HEIGHT as usize), SEND_WIDTH as usize, SEND_HEIGHT as usize);
     let camera = rgba_of(&frame);
     let mut replaced = camera.clone();

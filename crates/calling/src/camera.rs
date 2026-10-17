@@ -9,7 +9,7 @@ use nokhwa::{Camera, query};
 use std::sync::atomic::Ordering;
 
 use crate::blur::BlurSettings;
-use crate::effects::EffectsStage;
+use crate::effects::EffectsThread;
 use crate::capture::Capture;
 use crate::devices::{DeviceChoice, DeviceEntry};
 use crate::error::{Error, Result};
@@ -238,7 +238,7 @@ fn direct_i420(frame_format: FrameFormat, data: &[u8], width: u32, height: u32) 
 pub fn start_camera(
     choice: &DeviceChoice,
     blur: Arc<BlurSettings>,
-    mut deliver: impl FnMut(I420Buffer) + Send + 'static,
+    deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
     let index = camera_index(choice);
@@ -247,7 +247,10 @@ pub fn start_camera(
             Ok(camera) => camera,
             Err(error) => return failed(error.to_string()),
         };
-        let mut stage = EffectsStage::new(blur);
+        let effects = match EffectsThread::spawn(blur, deliver) {
+            Ok(effects) => effects,
+            Err(error) => return failed(format!("effects thread: {error}")),
+        };
         let mut warned_undecodable = false;
         while !stop.load(Ordering::SeqCst) {
             let Ok(frame) = camera.frame() else {
@@ -271,7 +274,7 @@ pub fn start_camera(
                     i420_from_rgba(&decoded.into_raw(), width, height)
                 }
             };
-            deliver(stage.apply_i420(fit_widescreen(buffer)));
+            effects.submit(fit_widescreen(buffer));
         }
         let _ = camera.stop_stream();
     })

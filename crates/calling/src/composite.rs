@@ -64,34 +64,49 @@ fn blurred(values: &[f32], width: usize, height: usize, radius: usize, passes: u
 }
 
 fn dilated(values: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut across = vec![0f32; values.len()];
+    for (line, output) in values.chunks_exact(width).zip(across.chunks_exact_mut(width)) {
+        for (column, slot) in output.iter_mut().enumerate() {
+            *slot = line[column.saturating_sub(1)..(column + 2).min(width)].iter().copied().fold(0f32, f32::max);
+        }
+    }
     let mut output = vec![0f32; values.len()];
     for row in 0..height {
-        for column in 0..width {
-            let mut largest = 0f32;
-            for neighbour_row in row.saturating_sub(1)..(row + 2).min(height) {
-                for neighbour_column in column.saturating_sub(1)..(column + 2).min(width) {
-                    largest = largest.max(values[neighbour_row * width + neighbour_column]);
-                }
-            }
-            output[row * width + column] = largest;
+        let (first, last) = (row.saturating_sub(1), (row + 1).min(height - 1));
+        let target = &mut output[row * width..][..width];
+        for neighbour in first..=last {
+            target.iter_mut().zip(&across[neighbour * width..][..width]).for_each(|(slot, &value)| *slot = slot.max(value));
         }
     }
     output
 }
 
+/// The person on the small background grid, the same for luma and both chroma planes.
+struct PersonGrid {
+    width: usize,
+    height: usize,
+    weight: Vec<f32>,
+    blurred_weight: Vec<f32>,
+    wide: Option<Vec<f32>>,
+}
+
+impl PersonGrid {
+    fn new(matte: &Matte, (radius, passes): (usize, usize), wrap: bool) -> PersonGrid {
+        let (person, width, height) = cell_means(&matte.alpha, matte.width, matte.width, matte.height, BACKGROUND_SCALE);
+        let weight: Vec<f32> = dilated(&person, width, height).iter().map(|&alpha| (1. - alpha / 255.).powi(2)).collect();
+        let blurred_weight = blurred(&weight, width, height, radius, passes);
+        let wide = wrap.then(|| blurred(&person, width, height, WRAP_RADIUS, WRAP_PASSES).iter().map(|alpha| alpha / 255.).collect());
+        PersonGrid { width, height, weight, blurred_weight, wide }
+    }
+}
+
 /// Normalised convolution: only pixels the matte calls background count, so the person never bleeds into it.
-fn background_estimate(plane: &[u8], stride: usize, (width, height): (usize, usize), matte: &Matte, factor: usize, (radius, passes): (usize, usize)) -> (Vec<f32>, usize, usize) {
+fn background_estimate(plane: &[u8], stride: usize, (width, height): (usize, usize), factor: usize, person: &PersonGrid, (radius, passes): (usize, usize)) -> Vec<f32> {
     let (values, small_width, small_height) = cell_means(plane, stride, width, height, factor);
-    let (person, ..) = cell_means(&matte.alpha, matte.width, width, height, factor);
-    let weight: Vec<f32> = dilated(&person, small_width, small_height).iter().map(|&alpha| (1. - alpha / 255.).powi(2)).collect();
-    let weighted: Vec<f32> = values.iter().zip(&weight).map(|(value, weight)| value * weight).collect();
-    let (weighted, weight, plain) = (
-        blurred(&weighted, small_width, small_height, radius, passes),
-        blurred(&weight, small_width, small_height, radius, passes),
-        blurred(&values, small_width, small_height, radius, passes),
-    );
-    let estimate = weighted.iter().zip(&weight).zip(&plain).map(|((weighted, weight), plain)| (weighted + ESTIMATE_REGULARISER * plain) / (weight + ESTIMATE_REGULARISER)).collect();
-    (estimate, small_width, small_height)
+    debug_assert_eq!((small_width, small_height), (person.width, person.height));
+    let weighted: Vec<f32> = values.iter().zip(&person.weight).map(|(value, weight)| value * weight).collect();
+    let (weighted, plain) = (blurred(&weighted, small_width, small_height, radius, passes), blurred(&values, small_width, small_height, radius, passes));
+    weighted.iter().zip(&person.blurred_weight).zip(&plain).map(|((weighted, weight), plain)| (weighted + ESTIMATE_REGULARISER * plain) / (weight + ESTIMATE_REGULARISER)).collect()
 }
 
 pub struct PicturePlanes {
@@ -179,16 +194,14 @@ impl PlaneJob<'_> {
     }
 }
 
-fn plane_job<'a>(plane: &[u8], stride: usize, matte: &'a Matte, factor: usize, picture: Option<(&'a [u8], &(Vec<f32>, usize, usize))>) -> PlaneJob<'a> {
+fn plane_job<'a>(plane: &[u8], stride: usize, matte: &'a Matte, factor: usize, person: &PersonGrid, reach: (usize, usize), picture: Option<(&'a [u8], &(Vec<f32>, usize, usize))>) -> PlaneJob<'a> {
     let size = (matte.width, matte.height);
-    let reach = if picture.is_some() { (DEBLEED_RADIUS, 1) } else { (BLUR_RADIUS, BLUR_PASSES) };
-    let (estimate, small_width, small_height) = background_estimate(plane, stride, size, matte, factor, reach);
+    let estimate = background_estimate(plane, stride, size, factor, person, reach);
     let picture = picture.map(|(planar, (soft, soft_width, soft_height))| {
-        let (person, ..) = cell_means(&matte.alpha, matte.width, matte.width, matte.height, factor);
-        let wide: Vec<f32> = blurred(&person, small_width, small_height, WRAP_RADIUS, WRAP_PASSES).iter().map(|alpha| alpha / 255.).collect();
-        (planar, Grid::new(soft.clone(), (*soft_width, *soft_height), size), Grid::new(wide, (small_width, small_height), size))
+        let wide = person.wide.clone().unwrap_or_else(|| vec![0.; person.width * person.height]);
+        (planar, Grid::new(soft.clone(), (*soft_width, *soft_height), size), Grid::new(wide, (person.width, person.height), size))
     });
-    PlaneJob { matte, estimate: Grid::new(estimate, (small_width, small_height), size), picture }
+    PlaneJob { matte, estimate: Grid::new(estimate, (person.width, person.height), size), picture }
 }
 
 pub fn composite(buffer: &mut I420Buffer, matte: &Matte, backdrop: Backdrop) {
@@ -196,18 +209,26 @@ pub fn composite(buffer: &mut I420Buffer, matte: &Matte, backdrop: Backdrop) {
     let chroma_height = height.div_ceil(2);
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (stride_y, stride_u, stride_v) = (stride_y as usize, stride_u as usize, stride_v as usize);
-    let chroma_matte = matte.halved();
     let picture = match backdrop {
         Backdrop::Picture(picture) if picture.fits(width, height) => Some(picture),
         _ => None,
     };
+    let reach = if picture.is_some() { (DEBLEED_RADIUS, 1) } else { (BLUR_RADIUS, BLUR_PASSES) };
+    let (chroma_matte, person) = std::thread::scope(|scope| {
+        let halved = scope.spawn(|| matte.halved());
+        let person = PersonGrid::new(matte, reach, picture.is_some());
+        (halved.join().expect("chroma matte"), person)
+    });
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
     let layer = |index: usize| picture.map(|picture| (picture.planes[index].as_slice(), &picture.soft[index]));
-    let jobs = [
-        plane_job(plane_y, stride_y, matte, BACKGROUND_SCALE, layer(0)),
-        plane_job(plane_u, stride_u, &chroma_matte, BACKGROUND_SCALE / 2, layer(1)),
-        plane_job(plane_v, stride_v, &chroma_matte, BACKGROUND_SCALE / 2, layer(2)),
-    ];
+    let jobs = std::thread::scope(|scope| {
+        let (person, chroma_matte, layer) = (&person, &chroma_matte, &layer);
+        let (blue, red) = (&*plane_u, &*plane_v);
+        let blue = scope.spawn(move || plane_job(blue, stride_u, chroma_matte, BACKGROUND_SCALE / 2, person, reach, layer(1)));
+        let red = scope.spawn(move || plane_job(red, stride_v, chroma_matte, BACKGROUND_SCALE / 2, person, reach, layer(2)));
+        let luma = plane_job(plane_y, stride_y, matte, BACKGROUND_SCALE, person, reach, layer(0));
+        [luma, blue.join().expect("blue job"), red.join().expect("red job")]
+    });
     let bands = std::thread::available_parallelism().map_or(1, usize::from).min(MAX_BANDS);
     std::thread::scope(|scope| {
         for (job, plane, stride, rows) in [(&jobs[0], plane_y, stride_y, height), (&jobs[1], plane_u, stride_u, chroma_height), (&jobs[2], plane_v, stride_v, chroma_height)] {

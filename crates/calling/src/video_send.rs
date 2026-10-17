@@ -16,7 +16,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::background::BackgroundPicture;
 use crate::blur::BlurSettings;
-use crate::effects::{CameraEffects, EffectsStage};
+use crate::effects::CameraEffects;
 use crate::camera::start_camera;
 use crate::capture::Capture;
 use crate::control::CallUpdate;
@@ -376,7 +376,7 @@ impl LocalVideo {
         self.camera.capture = None;
         let mut sink = self.camera_sink();
         let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(EffectsStage::new(self.blur.clone())))),
+            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(self.blur.clone()))),
             _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
         };
         Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;

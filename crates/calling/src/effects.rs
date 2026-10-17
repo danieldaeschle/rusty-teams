@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
@@ -6,7 +7,10 @@ use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use crate::blur::{BlurSettings, BlurStage, MaskSource};
 use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
+use crate::latest::Latest;
+use crate::mask::Mask;
 use crate::matte::{Planes, refine};
+use crate::motion::{LumaGrid, propagate_for_display};
 use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
 
 pub const SOFT_FOCUS_DEFAULT: u8 = 50;
@@ -59,11 +63,12 @@ impl CameraEffects {
     }
 }
 
-/// Runs on the capture thread: brightness, soft focus, background and auto framing share one mask per frame.
+/// Runs on the effects thread: brightness, soft focus, background and auto framing share one mask per frame.
 pub struct EffectsStage {
     settings: Arc<BlurSettings>,
     blur: BlurStage,
     masks: Option<MaskSource>,
+    shown: Mask,
     unavailable: bool,
     subject: Option<Subject>,
     planner: CropPlanner,
@@ -79,6 +84,7 @@ impl EffectsStage {
             blur: BlurStage::new(settings.clone()),
             settings,
             masks: None,
+            shown: Mask::default(),
             unavailable: false,
             subject: None,
             planner: CropPlanner::default(),
@@ -143,26 +149,31 @@ impl EffectsStage {
     fn refresh_mask(&mut self, buffer: &I420Buffer, track_subject: bool) -> bool {
         let Some(masks) = self.masks.as_mut() else { return false };
         let fresh = masks.refresh(|| copy_frame(buffer));
+        let (shown, moved) = propagate_for_display(masks.mask(), masks.reference(), &LumaGrid::of(buffer));
+        self.shown = Mask { matte: shown.matte && !moved, ..shown };
         if track_subject && fresh {
-            self.subject = find_subject(&masks.mask().values, masks.mask().width, masks.mask().height);
+            self.subject = find_subject(&self.shown.values, self.shown.width, self.shown.height);
         }
         fresh
     }
 
     fn publish_cutout(&self, buffer: &mut I420Buffer) {
-        let Some(masks) = self.masks.as_ref() else { return };
-        self.settings.set_cutout(Cutout::from_camera(buffer, masks.mask()).map(Arc::new));
+        self.settings.set_cutout(Cutout::from_camera(buffer, &self.shown).map(Arc::new));
     }
 
     fn soften(&self, buffer: &mut I420Buffer, width: usize, height: usize, strength: u8) {
-        let Some(masks) = self.masks.as_ref().filter(|masks| !masks.mask().is_empty()) else { return };
+        if self.shown.is_empty() {
+            return;
+        }
         let stride = buffer.strides().0 as usize;
-        soften_luma(buffer.data_mut().0, stride, width, height, masks.mask(), strength);
+        soften_luma(buffer.data_mut().0, stride, width, height, &self.shown, strength);
     }
 
     fn compose_background(&mut self, mut buffer: I420Buffer) -> I420Buffer {
-        let Some(masks) = self.masks.as_ref().filter(|masks| !masks.mask().is_empty()) else { return buffer };
-        let matte = refine(masks.mask(), Planes::of(&buffer));
+        if self.shown.is_empty() {
+            return buffer;
+        }
+        let matte = refine(&self.shown, Planes::of(&buffer));
         self.blur.compose(&mut buffer, &matte);
         buffer
     }
@@ -182,6 +193,43 @@ impl EffectsStage {
         self.average_ms = if self.processed == 0 { elapsed } else { self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT };
         self.processed += 1;
         self.settings.set_average_ms(self.average_ms);
+    }
+}
+
+/// Runs the effects on a thread of its own, so capture never waits on them; a frame that arrives while one is still in work replaces the queued one.
+pub struct EffectsThread {
+    frames: Arc<Latest<I420Buffer>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl EffectsThread {
+    pub fn spawn(settings: Arc<BlurSettings>, mut deliver: impl FnMut(I420Buffer) + Send + 'static) -> std::io::Result<Self> {
+        let frames = Arc::new(Latest::default());
+        let worker_frames = frames.clone();
+        let worker = std::thread::Builder::new().name("camera effects".to_owned()).spawn(move || {
+            let mut stage = EffectsStage::new(settings);
+            while let Some(frame) = worker_frames.take() {
+                deliver(stage.apply_i420(frame));
+            }
+        })?;
+        Ok(EffectsThread { frames, worker: Some(worker) })
+    }
+
+    pub fn submit(&self, frame: I420Buffer) {
+        self.frames.put(frame);
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.frames.dropped()
+    }
+}
+
+impl Drop for EffectsThread {
+    fn drop(&mut self) {
+        self.frames.close();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -240,6 +288,31 @@ mod tests {
             brightened = stage.apply_i420(again);
         }
         assert!(brightened.data().0[0] > 30);
+    }
+
+    #[test]
+    fn the_effects_thread_never_holds_capture_back_and_delivers_the_newest_frame() {
+        let delivered = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = delivered.clone();
+        let effects = EffectsThread::spawn(Arc::new(BlurSettings::default()), move |frame: I420Buffer| {
+            std::thread::sleep(Duration::from_millis(40));
+            sink.lock().unwrap().push(frame.data().0[0]);
+        })
+        .expect("thread starts");
+        let started = Instant::now();
+        for marker in 1..=30u8 {
+            let mut frame = I420Buffer::new(4, 4);
+            frame.data_mut().0.fill(marker);
+            effects.submit(frame);
+        }
+        assert!(started.elapsed() < Duration::from_millis(30));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while delivered.lock().unwrap().last() != Some(&30) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let seen = delivered.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&30));
+        assert!(seen.len() < 30 && effects.dropped() > 0, "{seen:?}");
     }
 
     fn timed<T>(label: &str, mut work: impl FnMut() -> T) -> f64 {

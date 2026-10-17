@@ -1,4 +1,4 @@
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -11,7 +11,9 @@ use crate::effects::CameraEffects;
 use crate::error::Result;
 use crate::camera::i420_from_rgba;
 use crate::composite::{Backdrop, PicturePlanes, composite};
+use crate::latest::Latest;
 use crate::mask::Mask;
+use crate::motion::{LumaGrid, propagate};
 use crate::segmentation::LadderSegmenter;
 use crate::matte::{Matte, Planes, refine};
 use crate::standout::Cutout;
@@ -149,25 +151,25 @@ impl BlurStage {
 
 pub trait MaskInference: Send + 'static {
     fn infer(&mut self, frame: I420Buffer) -> Result<Mask>;
+
+    /// A model on the GPU takes no CPU from the frames, so it may segment every frame.
+    fn accelerated(&self) -> bool {
+        false
+    }
 }
 
 type Frame = I420Buffer;
 
 #[derive(Default)]
-struct Inbox {
-    newest: Option<Frame>,
-    closed: bool,
-}
-
-#[derive(Default)]
 struct Outbox {
     mask: Mask,
+    reference: LumaGrid,
+    source_frame: u64,
     version: u64,
 }
 
 struct WorkerShared {
-    inbox: Mutex<Inbox>,
-    wake: Condvar,
+    inbox: Latest<(u64, Frame)>,
     outbox: Mutex<Outbox>,
     stride: AtomicU64,
 }
@@ -196,25 +198,20 @@ fn smooth_into(current: &mut Mask, fresh: Mask) {
 
 fn run_worker(shared: &WorkerShared, inference: &mut dyn MaskInference) {
     let mut smoothed = Mask::default();
-    loop {
-        let frame = {
-            let mut inbox = shared.inbox.lock().expect("inbox lock");
-            loop {
-                if inbox.closed {
-                    return;
-                }
-                if let Some(frame) = inbox.newest.take() {
-                    break frame;
-                }
-                inbox = shared.wake.wait(inbox).expect("inbox lock");
-            }
-        };
+    let mut smoothed_reference = LumaGrid::default();
+    while let Some((source_frame, frame)) = shared.inbox.take() {
+        let reference = LumaGrid::of(&frame);
         let started = Instant::now();
         let Ok(fresh) = inference.infer(frame) else { continue };
-        shared.stride.store(stride_for(started.elapsed()), Ordering::Relaxed);
+        let stride = if inference.accelerated() { 1 } else { stride_for(started.elapsed()) };
+        shared.stride.store(stride, Ordering::Relaxed);
+        smoothed = propagate(&smoothed, &smoothed_reference, &reference);
         smooth_into(&mut smoothed, fresh);
+        smoothed_reference.clone_from(&reference);
         let mut outbox = shared.outbox.lock().expect("outbox lock");
         outbox.mask.clone_from(&smoothed);
+        outbox.reference = reference;
+        outbox.source_frame = source_frame;
         outbox.version += 1;
     }
 }
@@ -224,6 +221,8 @@ pub struct MaskSource {
     shared: Arc<WorkerShared>,
     worker: Option<JoinHandle<()>>,
     mask: Mask,
+    reference: LumaGrid,
+    source_frame: u64,
     seen_version: u64,
     frames: u64,
 }
@@ -239,7 +238,7 @@ impl MaskSource {
     }
 
     fn spawn<Inference: MaskInference>(create: impl FnOnce() -> Option<Inference> + Send + 'static) -> Self {
-        let shared = Arc::new(WorkerShared { inbox: Mutex::default(), wake: Condvar::new(), outbox: Mutex::default(), stride: AtomicU64::new(1) });
+        let shared = Arc::new(WorkerShared { inbox: Latest::default(), outbox: Mutex::default(), stride: AtomicU64::new(1) });
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("segmentation".to_owned())
@@ -249,7 +248,7 @@ impl MaskSource {
                 }
             })
             .expect("segmentation thread");
-        MaskSource { shared, worker: Some(worker), mask: Mask::default(), seen_version: 0, frames: 0 }
+        MaskSource { shared, worker: Some(worker), mask: Mask::default(), reference: LumaGrid::default(), source_frame: 0, seen_version: 0, frames: 0 }
     }
 
     pub fn due(&self) -> bool {
@@ -260,28 +259,37 @@ impl MaskSource {
         &self.mask
     }
 
+    /// The luma grid of the frame the mask was made from.
+    pub fn reference(&self) -> &LumaGrid {
+        &self.reference
+    }
+
+    /// Frames shown since the frame the current mask was made from.
+    pub fn age(&self) -> u64 {
+        self.frames.saturating_sub(self.source_frame + 1)
+    }
+
     /// Call once per frame; `frame` is only read when `due`. Answers whether a newer mask arrived.
     pub fn refresh(&mut self, frame: impl FnOnce() -> Frame) -> bool {
-        let due = self.due();
-        self.frames += 1;
-        if due {
-            self.shared.inbox.lock().expect("inbox lock").newest = Some(frame());
-            self.shared.wake.notify_one();
+        if self.due() {
+            self.shared.inbox.put((self.frames, frame()));
         }
+        self.frames += 1;
         let outbox = self.shared.outbox.lock().expect("outbox lock");
         if outbox.version == self.seen_version {
             return false;
         }
         self.seen_version = outbox.version;
         self.mask.clone_from(&outbox.mask);
+        self.reference.clone_from(&outbox.reference);
+        self.source_frame = outbox.source_frame;
         true
     }
 }
 
 impl Drop for MaskSource {
     fn drop(&mut self) {
-        self.shared.inbox.lock().expect("inbox lock").closed = true;
-        self.shared.wake.notify_one();
+        self.shared.inbox.close();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -512,6 +520,24 @@ mod tests {
             source.refresh(|| marked_frame(1));
         }
         assert!(started.elapsed() < Duration::from_millis(150));
+    }
+
+    #[test]
+    fn the_mask_age_counts_the_frames_shown_since_its_source_frame() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut source = MaskSource::with_inference(SlowSegmenter { delay: Duration::from_millis(60), seen });
+        assert!(!source.refresh(|| marked_frame(5)));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut shown = 1;
+        while !source.refresh(|| marked_frame(6)) && Instant::now() < deadline {
+            shown += 1;
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(shown >= 3, "the mask came back before the model was done");
+        assert_eq!(source.age(), shown - 1);
+        assert_eq!(source.reference().values.len(), 4);
+        assert!(!source.refresh(|| marked_frame(7)));
+        assert_eq!(source.age(), shown);
     }
 
     #[test]

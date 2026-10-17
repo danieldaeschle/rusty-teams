@@ -16,7 +16,8 @@ use model::{MEDIAPIPE, MODNET_LARGE, MODNET_SMALL, ModelSpec};
 use runtime::{Device, Runner};
 
 const BUDGET: Duration = Duration::from_millis(35);
-const BEHIND: Duration = Duration::from_millis(45);
+const GPU_BUDGET: Duration = Duration::from_millis(50);
+const BEHIND: Duration = Duration::from_millis(70);
 const PROBE_AFTER: u32 = 15;
 const PROBE_RUNS: usize = 5;
 const TIMING_WINDOW: usize = 20;
@@ -40,6 +41,13 @@ pub fn rungs(onnx_runtime: bool, gpu: bool, on_battery: bool) -> Vec<Rung> {
         rungs.push(Rung { spec: MODNET_SMALL, device: Device::Cpu { threads: MODNET_CPU_THREADS } });
     }
     rungs
+}
+
+fn budget(device: Device) -> Duration {
+    match device {
+        Device::Gpu => GPU_BUDGET,
+        Device::Cpu { .. } => BUDGET,
+    }
 }
 
 fn median(timings: impl Iterator<Item = Duration>) -> Duration {
@@ -113,7 +121,7 @@ impl LadderSegmenter {
     fn adopt_probe(&mut self) {
         let Some((rung, handle)) = self.probe.take_if(|(_, handle)| handle.is_finished()) else { return };
         match handle.join().ok().flatten() {
-            Some((runner, typical)) if typical <= BUDGET => {
+            Some((runner, typical)) if typical <= budget(self.rungs[rung].device) => {
                 self.runners[rung] = Some(runner);
                 self.active = rung;
                 self.timings.clear();
@@ -148,6 +156,10 @@ impl LadderSegmenter {
 }
 
 impl MaskInference for LadderSegmenter {
+    fn accelerated(&self) -> bool {
+        self.rungs[self.active].device == Device::Gpu
+    }
+
     fn infer(&mut self, mut frame: I420Buffer) -> Result<Mask> {
         self.adopt_probe();
         self.start_probe(&mut frame);
@@ -220,19 +232,36 @@ mod tests {
         assert!(ladder.runners[1].is_none());
     }
 
+    fn finished_probe(ladder: &mut LadderSegmenter, typical: Duration) {
+        ladder.runners[1] = None;
+        let handle = std::thread::spawn(move || Some((Box::new(Fixed(Duration::ZERO, MODNET_SMALL.width * MODNET_SMALL.height)) as Box<dyn Runner>, typical)));
+        while !handle.is_finished() {
+            std::thread::yield_now();
+        }
+        ladder.probe = Some((1, handle));
+    }
+
     #[test]
     fn a_probe_within_budget_takes_over_and_a_slow_one_ends_the_climb() {
         for (typical, climbs) in [(BUDGET / 2, true), (BUDGET * 2, false)] {
             let mut ladder = ladder([Duration::ZERO, Duration::ZERO]);
-            ladder.runners[1] = None;
-            let handle = std::thread::spawn(move || Some((Box::new(Fixed(Duration::ZERO, MODNET_SMALL.width * MODNET_SMALL.height)) as Box<dyn Runner>, typical)));
-            while !handle.is_finished() {
-                std::thread::yield_now();
-            }
-            ladder.probe = Some((1, handle));
+            finished_probe(&mut ladder, typical);
             let mask = ladder.infer(frame()).unwrap();
             assert_eq!(mask.width == MODNET_SMALL.width, climbs);
             assert_eq!(ladder.next_probe, 2);
+        }
+    }
+
+    #[test]
+    fn a_gpu_rung_gets_a_longer_budget_and_segments_every_frame() {
+        let typical = Duration::from_millis(45);
+        for (device, climbs) in [(Device::Gpu, true), (Device::Cpu { threads: 4 }, false)] {
+            let mut ladder = ladder([Duration::ZERO, Duration::ZERO]);
+            ladder.rungs[1].device = device;
+            finished_probe(&mut ladder, typical);
+            ladder.infer(frame()).unwrap();
+            assert_eq!(ladder.active() == MODNET_SMALL, climbs);
+            assert_eq!(ladder.accelerated(), climbs);
         }
     }
 
