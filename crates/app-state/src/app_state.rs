@@ -73,6 +73,7 @@ pub enum AppEvent {
     MeetingChime,
     CallTone(chatsvc::sounds::CallTone),
     SoundSettings,
+    ChatSettings,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -89,6 +90,7 @@ pub struct AppState {
     pub favorite_ids: Vec<String>,
     pub selection: Option<Selection>,
     pub late_arrivals: LateArrivals,
+    pub acked_urgent: std::collections::HashSet<String>,
     pub new_chat: bool,
     pub new_chat_people: Vec<store::MemberRecord>,
     pub connection: ConnectionState,
@@ -139,7 +141,11 @@ pub struct AppState {
     pub call_count: u64,
     pub call_share_sound: bool,
     pub recording_policy: teams_core::RecordingPolicy,
+    pub allow_priority_messages: bool,
     pub account_sounds: Option<chatsvc::sound_settings::SoundSettings>,
+    pub chat_settings: teams_core::ChatSettingsDocument,
+    pub markdown_mode: bool,
+    pub demo_chat_desktop: HashMap<String, teams_core::DesktopNotifications>,
     pub own_tenant: Option<String>,
     pub call_share_motion: bool,
     pub call_share_standout: bool,
@@ -231,6 +237,8 @@ pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
 impl AppState {
     pub fn new(store: Arc<Store>, mode: Mode) -> Self {
         let sidebar = store.sidebar().unwrap_or_default();
+        let chat_settings = teams_core::stored_chat_settings(&store);
+        let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
         let mut state = AppState {
             store,
             engine: None,
@@ -238,6 +246,7 @@ impl AppState {
             favorite_ids: Vec::new(),
             selection: None,
             late_arrivals: LateArrivals::default(),
+            acked_urgent: Default::default(),
             new_chat: false,
             new_chat_people: Vec::new(),
             connection: if mode.demo {
@@ -292,7 +301,11 @@ impl AppState {
             call_count: 0,
             call_share_sound: false,
             recording_policy: teams_core::RecordingPolicy::default(),
+            allow_priority_messages: true,
             account_sounds: None,
+            chat_settings,
+            markdown_mode,
+            demo_chat_desktop: HashMap::new(),
             own_tenant: None,
             call_share_motion: false,
             call_share_standout: false,
@@ -532,6 +545,10 @@ impl AppState {
         self.sync_presence();
         self.directory.unread_counts = match &self.engine {
             Some(engine) => data::unread_counts(engine, &self.sidebar.chats),
+            None => Default::default(),
+        };
+        self.directory.unread_importance = match &self.engine {
+            Some(engine) => data::unread_importance(engine, &self.sidebar.chats),
             None => Default::default(),
         };
     }
@@ -993,7 +1010,9 @@ impl AppState {
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);
                 self.refresh_recording_policy(cx);
+                self.refresh_messaging_policy(cx);
                 self.refresh_sound_settings(cx);
+                self.refresh_chat_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
                 self.refresh_own_status(cx);

@@ -575,7 +575,9 @@ mod tests {
             mentions_me: false,
             muted: false,
             signals: Default::default(),
+            chat: Default::default(),
             created_at: at(9, minute),
+            importance: Default::default(),
         }
     }
 

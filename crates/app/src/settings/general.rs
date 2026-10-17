@@ -6,8 +6,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::*;
-use teams_core::TranslationBehavior;
+use teams_core::{ChatSettingChange, TranslationBehavior};
 
+use super::account::{UP_ARROW, account_select};
 use super::rows::{Choice, caption, control_row, select, toggle_row};
 use crate::app_state::AppState;
 use crate::notify::NotificationCenter;
@@ -44,6 +45,18 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
                 })
             }),
         )
+        .child(caption("COMPOSE BOX"))
+        .child(account_select(
+            app,
+            (
+                "settings-up-arrow",
+                "Up arrow key behaviour in compose box",
+                "Choose what happens when you press Up arrow at the beginning of the compose box.",
+            ),
+            &UP_ARROW,
+            app.read(cx).account_chat_settings().up_arrow,
+            ChatSettingChange::UpArrow,
+        ))
         .child(caption("TRANSLATION"))
         .children(translation_rows(app, cx))
 }

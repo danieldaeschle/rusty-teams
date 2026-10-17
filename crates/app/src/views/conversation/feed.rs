@@ -190,7 +190,9 @@ impl ConversationView {
                 let root_id = self.reply_root.clone();
                 self.send_typing_in(root_id, *active, cx);
             }
-            ComposerEvent::Schedule { .. } | ComposerEvent::EditLast => {}
+            ComposerEvent::Schedule { .. }
+            | ComposerEvent::EditLast
+            | ComposerEvent::FocusMessages => {}
         }
     }
 

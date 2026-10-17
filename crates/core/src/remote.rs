@@ -3,8 +3,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, AppConsumptionHorizon, MentionActivity, UserSettings,
-    parse_app_consumption_horizon,
+    ActivityFeed, AppConsumptionHorizon, ChatNotificationMode, ChatNotificationWrite,
+    ChatSettingChange, ChatSettingsClient, ChatSettingsDocument, DesktopNotifications,
+    MentionActivity, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -26,6 +27,7 @@ use crate::error::{Error, Result};
 use crate::profile::PersonProfile;
 
 pub const CHATSVC_CHAT_WRITES: bool = false;
+const URGENT_ACK_EMOTION: &str = "acks";
 
 #[derive(Debug, Clone)]
 pub struct RemotePage {
@@ -472,8 +474,34 @@ pub trait Remote {
         Err(Error::Unsupported("recording policy"))
     }
 
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Err(Error::Unsupported("messaging policy"))
+    }
+
+    async fn ack_urgent_message(&self, _chat_id: &str, _message_id: &str) -> Result<()> {
+        Err(Error::Unsupported("urgent message acknowledgement"))
+    }
+
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Err(Error::Unsupported("sound settings"))
+    }
+
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn save_chat_setting(&self, _change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Err(Error::Unsupported("chat settings"))
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        _chat_id: &str,
+        _current_settings: Option<&str>,
+        _mode: ChatNotificationMode,
+        _desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Err(Error::Unsupported("chat notifications"))
     }
 
     async fn save_sound_settings(
@@ -780,6 +808,17 @@ impl Remote for Graph {
     async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {
         Ok(Messages::new(self.session())
             .send_typing(conversation, active)
+            .await?)
+    }
+
+    /// Teams `ackUrgentMessage`: the emotion `acks` on the message stops the urgent repeat notifications.
+    async fn ack_urgent_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_emotion(
+                &ConversationRef::chat(chat_id),
+                message_id,
+                URGENT_ACK_EMOTION,
+            )
             .await?)
     }
 
@@ -1231,6 +1270,12 @@ impl Remote for Graph {
             .await?)
     }
 
+    async fn allow_priority_messages(&self) -> Result<bool> {
+        Ok(LanguageSettingsClient::new(self.session())
+            .read_allow_priority_messages()
+            .await?)
+    }
+
     async fn patch_language_settings(&self, patch: serde_json::Value) -> Result<()> {
         Ok(LanguageSettingsClient::new(self.session())
             .patch(patch)
@@ -1239,6 +1284,26 @@ impl Remote for Graph {
 
     async fn sound_settings(&self) -> Result<SoundSettings> {
         Ok(SoundSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn chat_settings(&self) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn save_chat_setting(&self, change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+        Ok(ChatSettingsClient::new(self.session()).write(change).await?)
+    }
+
+    async fn set_chat_notifications(
+        &self,
+        chat_id: &str,
+        current_settings: Option<&str>,
+        mode: ChatNotificationMode,
+        desktop: DesktopNotifications,
+    ) -> Result<ChatNotificationWrite> {
+        Ok(Conversations::new(self.session())
+            .set_chat_notifications(chat_id, current_settings, mode, desktop)
+            .await?)
     }
 
     async fn save_sound_settings(

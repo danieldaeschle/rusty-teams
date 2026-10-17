@@ -14,7 +14,7 @@ use gpui_kit::*;
 use teams_core::{DriveEntry, FileKind};
 
 use super::attachments::file_badge;
-use super::widgets::icon;
+use super::widgets::{icon, menu_icon};
 use crate::channel_files::{
     LibraryPath, MessageFilter, SharedContent, SharedItem, grouped_items, size_label,
 };
@@ -30,7 +30,6 @@ const MODIFIED_BY_WIDTH: f32 = 160.;
 const SIZE_WIDTH: f32 = 90.;
 const SKELETON_ROWS: usize = 6;
 const NEW_FOLDER_WIDTH: f32 = 220.;
-const MENU_ICON_SIZE: f32 = 14.;
 
 pub const EMPTY_LIBRARY: &str = "No files yet. Upload or drop files here.";
 pub const EMPTY_MESSAGES: &str = "No files or links shared in this channel yet.";
@@ -252,10 +251,6 @@ fn modified_text(entry: &DriveEntry) -> String {
         let now = Local::now();
         format::list_time_label(time, now.date_naive(), now.offset().fix())
     })
-}
-
-fn menu_icon(glyph: IconName) -> gpui_kit::component::Icon {
-    icon(glyph, MENU_ICON_SIZE, theme::text_muted())
 }
 
 fn entry_row(

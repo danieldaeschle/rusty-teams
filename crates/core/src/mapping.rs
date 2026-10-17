@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use graph::{Attachment, Chat, Mention, Message, Reaction};
-use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, TeamRecord};
+use store::{
+    ChannelRecord, ChatRecord, MemberRecord, MessageImportance, MessageRecord, TeamRecord,
+};
 
 use crate::adaptive_card::card_content_text;
 use crate::call_event::CallEvent;
@@ -182,6 +184,10 @@ pub fn message_record(conversation_id: &str, message: &Message) -> Option<Messag
             .as_ref()
             .map(CallEvent::to_json)
             .or_else(|| roster_event.as_ref().map(RosterEvent::to_json)),
+        importance: message
+            .importance
+            .as_deref()
+            .map_or(MessageImportance::Normal, MessageImportance::from_graph),
     })
 }
 
@@ -380,6 +386,25 @@ mod tests {
         }))
         .unwrap();
         message_record("c", &message).unwrap().subject
+    }
+
+    #[test]
+    fn importance_is_read_from_graph() {
+        let importance = |value: serde_json::Value| {
+            let message: Message = serde_json::from_value(json!({
+                "id": "m1",
+                "messageType": "message",
+                "createdDateTime": "2026-10-17T10:00:00Z",
+                "importance": value,
+                "body": {"contentType": "html", "content": "<p>hi</p>"},
+            }))
+            .unwrap();
+            message_record("c", &message).unwrap().importance
+        };
+        assert_eq!(importance(json!("high")), MessageImportance::High);
+        assert_eq!(importance(json!("urgent")), MessageImportance::Urgent);
+        assert_eq!(importance(json!("normal")), MessageImportance::Normal);
+        assert_eq!(importance(json!(null)), MessageImportance::Normal);
     }
 
     #[test]

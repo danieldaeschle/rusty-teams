@@ -7,8 +7,8 @@ use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use gpui_kit::{App, Entity};
 use store::{
     ChannelLayoutRecord, ChannelMentions, ChannelNotificationLevel, ChannelNotifications,
-    ChannelRecord, ChannelTabRecord, ChatRecord, MemberRecord, MessageRecord, Store,
-    TeamLayoutRecord, TeamRecord,
+    ChannelRecord, ChannelTabRecord, ChatRecord, MemberRecord, MessageImportance, MessageRecord,
+    Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
     Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
@@ -974,6 +974,12 @@ pub fn seed_directory(state: &mut AppState) {
     directory
         .unread_counts
         .insert("demo-chat-allhands".to_owned(), 120);
+    directory
+        .unread_importance
+        .insert(UNREAD_CHAT.to_owned(), MessageImportance::Urgent);
+    directory
+        .unread_importance
+        .insert("demo-chat-customer-1".to_owned(), MessageImportance::High);
     directory.set_avatar(MARA_ID, photo(&MARA));
     directory.set_avatar(PRIYA_ID, photo(&PRIYA));
     directory.set_avatar(TOBIAS_ID, photo(&TOBIAS));
@@ -1106,6 +1112,7 @@ fn message(
         mentions_json: "[]".to_owned(),
         subject: None,
         call_event_json: None,
+        importance: Default::default(),
     }
 }
 
@@ -1207,6 +1214,11 @@ fn call_messages() -> Vec<MessageRecord> {
             },
         ),
     ]
+}
+
+fn with_importance(mut record: MessageRecord, importance: MessageImportance) -> MessageRecord {
+    record.importance = importance;
+    record
 }
 
 fn with_subject(mut record: MessageRecord, subject: &str) -> MessageRecord {
@@ -1539,6 +1551,12 @@ fn priority_messages() -> Vec<MessageRecord> {
             false,
         ),
     ]
+    .into_iter()
+    .map(|record| match record.message_id.as_str() {
+        "p2" => with_importance(record, MessageImportance::High),
+        _ => record,
+    })
+    .collect()
 }
 
 fn reaction(kind: &str, users: &[(&str, &str, DateTime<Utc>)]) -> Vec<serde_json::Value> {
@@ -1880,6 +1898,10 @@ fn unread_messages() -> Vec<MessageRecord> {
     rows.into_iter()
         .map(|(id, sender, time, html)| {
             message(UNREAD_CHAT, id, None, sender, time, html, "[]", false)
+        })
+        .map(|record| match record.message_id.as_str() {
+            "u5" => with_importance(record, MessageImportance::Urgent),
+            _ => record,
         })
         .collect()
 }
@@ -2306,6 +2328,28 @@ fn encode_rgb(width: usize, height: usize, pixel: impl Fn(usize, usize) -> [u8; 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_demo_has_one_important_and_one_urgent_message() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store);
+        let importance = |chat: &str, message_id: &str| {
+            store
+                .messages(chat, None, 50)
+                .unwrap()
+                .into_iter()
+                .find(|record| record.message_id == message_id)
+                .map(|record| record.importance)
+        };
+        assert_eq!(
+            importance(PRIORITY_CHAT, "p2"),
+            Some(MessageImportance::High)
+        );
+        assert_eq!(
+            importance(UNREAD_CHAT, "u5"),
+            Some(MessageImportance::Urgent)
+        );
+    }
 
     #[test]
     fn png_has_signature_and_ends_with_iend() {

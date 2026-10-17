@@ -13,7 +13,7 @@ use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
 use super::scroll_edge::with_top_edge;
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
-use super::widgets::icon;
+use super::widgets::{icon, menu_icon};
 use crate::app_state::AppState;
 use crate::call::{
     AGENDA_ROW_HEIGHT, AgendaRow, CALL_ROW_HEIGHT, CallRow, DAY_HEIGHT, EMPTY_HEIGHT, ListEntry,
@@ -25,7 +25,6 @@ const FALLBACK_VIEWPORT: f32 = 900.;
 const VIEWPORT_MARGIN: f32 = 300.;
 const TIME_COLUMN_WIDTH: f32 = 96.;
 const AVATAR_SIZE: f32 = 36.;
-const MENU_ICON_SIZE: f32 = 15.;
 
 fn meeting_avatar() -> Div {
     div()
@@ -122,7 +121,7 @@ fn call_row(
                 .when(can_call_back, |popup| {
                     popup.item(
                         PopupMenuItem::new("Call back")
-                            .icon(icon(IconName::Phone, MENU_ICON_SIZE, theme::text_muted()))
+                            .icon(menu_icon(IconName::Phone))
                             .on_click(move |_, _, cx| {
                                 call_state.update(cx, |state, cx| {
                                     state.call_back_from_history(&call_row, cx)
@@ -133,11 +132,7 @@ fn call_row(
                 .when(can_open_chat, |popup| {
                     popup.item(
                         PopupMenuItem::new("Open chat")
-                            .icon(icon(
-                                IconName::MessageSquare,
-                                MENU_ICON_SIZE,
-                                theme::text_muted(),
-                            ))
+                            .icon(menu_icon(IconName::MessageSquare))
                             .on_click(move |_, _, cx| {
                                 chat_state.update(cx, |state, cx| {
                                     state.open_chat_of_call_row(&chat_row, cx)

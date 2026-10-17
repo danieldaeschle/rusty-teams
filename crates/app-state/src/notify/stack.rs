@@ -141,13 +141,36 @@ pub enum ReplyState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentToastKind {
+    Run {
+        run_id: u64,
+        session_id: String,
+        failed: bool,
+    },
+    Proposal {
+        proposal_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentToast {
-    pub run_id: u64,
-    pub session_id: String,
+    pub kind: AgentToastKind,
     pub header: String,
     pub title: String,
     pub body: String,
-    pub failed: bool,
+}
+
+impl AgentToast {
+    pub fn failed(&self) -> bool {
+        matches!(self.kind, AgentToastKind::Run { failed: true, .. })
+    }
+
+    pub fn proposal_id(&self) -> Option<&str> {
+        match &self.kind {
+            AgentToastKind::Proposal { proposal_id } => Some(proposal_id),
+            AgentToastKind::Run { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +194,7 @@ pub struct ToastModel {
     pub dismissed: bool,
     pub fade: Fade,
     pub agent: Option<AgentToast>,
+    pub urgent: bool,
 }
 
 impl ToastModel {
@@ -218,6 +242,7 @@ impl ToastStack {
             existing.sender_id = incoming.sender_id.clone();
             existing.sender_name = incoming.sender_name.clone();
             existing.preview = incoming.preview.clone();
+            existing.urgent = incoming.is_urgent();
             let mention = existing.mentions_me;
             existing.timer.restart(now, mention);
             return PushOutcome {
@@ -248,6 +273,7 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: None,
+            urgent: incoming.is_urgent(),
         });
         PushOutcome {
             id: self.next_id,
@@ -285,6 +311,7 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: Some(agent),
+            urgent: false,
         });
         self.next_id
     }
@@ -422,7 +449,9 @@ mod tests {
             mentions_me: mention,
             muted: false,
             signals: Default::default(),
+            chat: Default::default(),
             created_at: chrono::Utc::now(),
+            importance: Default::default(),
         }
     }
 
@@ -618,12 +647,14 @@ mod tests {
 
     fn agent_toast() -> AgentToast {
         AgentToast {
-            run_id: 7,
-            session_id: "s".into(),
+            kind: AgentToastKind::Run {
+                run_id: 7,
+                session_id: "s".into(),
+                failed: false,
+            },
             header: "Answer this - Claude - 1:02".into(),
             title: "Claude finished: Answer this for Mara".into(),
             body: "Done".into(),
-            failed: false,
         }
     }
 

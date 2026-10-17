@@ -65,6 +65,7 @@ use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_t
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
+use crate::chat_settings_actions::shown_receipt;
 use crate::data::{existing_one_on_one, is_one_on_one, one_on_one_bot, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
@@ -694,7 +695,7 @@ impl ConversationView {
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
-            AppEvent::Translation => self.rebuild(false, cx),
+            AppEvent::Translation | AppEvent::ChatSettings => self.rebuild(false, cx),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
             AppEvent::Scheduled => self.rebuild(false, cx),
@@ -744,6 +745,7 @@ impl ConversationView {
                 self.schedule((**outgoing).clone(), *send_at, window, cx)
             }
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
+            ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
         }
     }
@@ -1913,6 +1915,15 @@ impl ConversationView {
     }
 
     fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+        let settings = self.app.read(cx).account_chat_settings();
+        let mut receipts = self.raw_receipts(records, cx);
+        for receipt in receipts.values_mut() {
+            *receipt = shown_receipt(&settings, *receipt);
+        }
+        receipts
+    }
+
+    fn raw_receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
         let state = self.app.read(cx);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
@@ -2017,7 +2028,10 @@ impl ConversationView {
             return;
         };
         self.app.update(cx, |state, cx| match &selection {
-            Selection::Chat(chat_id) => state.mark_chat_read(chat_id, cx),
+            Selection::Chat(chat_id) => {
+                state.ack_urgent_messages(chat_id, cx);
+                state.mark_chat_read(chat_id, cx)
+            }
             Selection::Channel(channel_id) => state.mark_channel_read(channel_id, cx),
         });
         if plan.clear_divider
@@ -2773,6 +2787,7 @@ impl ConversationView {
             images: Vec::new(),
             files: Vec::new(),
             link_preview: None,
+            importance: Default::default(),
         };
         self.show_main_composer(cx);
         self.composer

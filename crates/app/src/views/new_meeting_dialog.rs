@@ -176,7 +176,8 @@ impl Render for MeetingForm {
                             }),
                     )
                 })
-            });
+            })
+            .listbox();
         v_flex()
             .debug_selector(|| "new-meeting".into())
             .gap(px(FIELD_GAP))

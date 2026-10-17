@@ -4,13 +4,13 @@ use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use crate::error::Result;
-use crate::models::{MessageRecord, RecentScope, UNKNOWN_USER_NAME};
+use crate::models::{MessageImportance, MessageRecord, RecentScope, UNKNOWN_USER_NAME};
 use crate::search::index_message;
 use crate::store::Store;
 use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_millis};
 
 const MESSAGE_COLUMNS: &str = "conversation_id, message_id, reply_to_id, sender_id, sender_name, created_at, \
-     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json, subject, call_event_json";
+     edited_at, deleted, body_html, attachments_json, reactions_json, mentions_json, sender_application_id, links_json, subject, call_event_json, importance";
 
 impl Store {
     pub fn upsert_messages(&self, messages: &[MessageRecord]) -> Result<()> {
@@ -19,7 +19,7 @@ impl Store {
         {
             let mut upsert = transaction.prepare_cached(&format!(
                 "INSERT INTO messages ({MESSAGE_COLUMNS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
                  ON CONFLICT (conversation_id, message_id) DO UPDATE SET
                     reply_to_id = excluded.reply_to_id, sender_id = excluded.sender_id,
                     sender_name = excluded.sender_name, created_at = excluded.created_at,
@@ -28,6 +28,7 @@ impl Store {
                     mentions_json = excluded.mentions_json,
                     sender_application_id = excluded.sender_application_id,
                     subject = COALESCE(excluded.subject, messages.subject),
+                    importance = COALESCE(excluded.importance, messages.importance),
                     call_event_json = excluded.call_event_json,
                     links_json = CASE WHEN excluded.links_json IN ('', '[]')
                         THEN messages.links_json ELSE excluded.links_json END"
@@ -50,6 +51,7 @@ impl Store {
                     message.links_json,
                     message.subject,
                     message.call_event_json,
+                    message.importance.stored(),
                 ])?;
                 index_message(&transaction, message)?;
             }
@@ -92,6 +94,35 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(count as usize)
+    }
+
+    /// Teams marks a chat in the list by the importance of its last message while it is unread and from someone else.
+    pub fn unread_last_message_importance(
+        &self,
+        conversation_id: &str,
+        after: Option<DateTime<Utc>>,
+        not_from_user_id: &str,
+    ) -> Result<MessageImportance> {
+        let connection = self.lock()?;
+        let last: Option<(Option<String>, Option<String>, i64)> = connection
+            .query_row(
+                "SELECT importance, sender_id, created_at FROM messages
+                 WHERE conversation_id = ?1 AND deleted = 0 AND call_event_json IS NULL
+                 ORDER BY created_at DESC, message_id DESC LIMIT 1",
+                params![conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let Some((importance, sender_id, created_at)) = last else {
+            return Ok(MessageImportance::Normal);
+        };
+        let unread = created_at > optional_to_millis(after).unwrap_or(i64::MIN);
+        let from_others = sender_id.as_deref() != Some(not_from_user_id);
+        Ok(if unread && from_others {
+            MessageImportance::from_stored(importance.as_deref())
+        } else {
+            MessageImportance::Normal
+        })
     }
 
     pub fn first_message_after_from_others(
@@ -435,5 +466,6 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         links_json: row.get(13)?,
         subject: row.get(14)?,
         call_event_json: row.get(15)?,
+        importance: MessageImportance::from_stored(row.get::<_, Option<String>>(16)?.as_deref()),
     })
 }

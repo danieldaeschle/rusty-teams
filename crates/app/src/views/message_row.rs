@@ -22,6 +22,7 @@ use super::widgets::{icon, symbol};
 use crate::agents::{AgentRun, run_chip};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
+use crate::importance::importance_label;
 use crate::render::Block;
 use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
@@ -46,9 +47,14 @@ pub const BUBBLE_TAGS: [&str; 12] = [
     "message-bubble/10",
     "message-bubble/11",
 ];
+pub const IMPORTANCE_LABEL_TAG: &str = "message-importance-label";
 pub(super) const AVATAR_SIZE: f32 = 28.;
 pub(super) const AVATAR_GAP: f32 = 8.;
 const SERIES_START_GAP: f32 = 8.;
+const SERIES_GAP: f32 = 2.;
+const COMPACT_SERIES_START_GAP: f32 = 4.;
+const COMPACT_SERIES_GAP: f32 = 1.;
+const COMPACT_BUBBLE_PADDING_Y: f32 = 4.;
 pub(super) const BODY_SIZE: f32 = 13.5;
 const MAX_WIDTH_RATIO: f32 = 0.7;
 const NARROW_BUBBLE_WIDTH: f32 = 300.;
@@ -58,6 +64,10 @@ const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
+const IMPORTANCE_LABEL_SIZE: f32 = 12.;
+const IMPORTANCE_LINE_HEIGHT: f32 = 16.;
+const COMPACT_IMPORTANCE_LINE_HEIGHT: f32 = 14.;
+pub(super) const BUBBLE_PADDING_X: f32 = 12.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
@@ -90,6 +100,24 @@ pub struct RowActions {
     pub call: CallActions,
     pub reaction_proposal: Option<ReactionPill>,
     pub undo_delete: SharedRowAction,
+    pub compact: bool,
+}
+
+pub fn row_spacing(has_previous: bool, compact: bool) -> f32 {
+    match (has_previous, compact) {
+        (true, false) => SERIES_GAP,
+        (true, true) => COMPACT_SERIES_GAP,
+        (false, false) => SERIES_START_GAP,
+        (false, true) => COMPACT_SERIES_START_GAP,
+    }
+}
+
+pub fn bubble_padding_y(compact: bool) -> f32 {
+    if compact {
+        COMPACT_BUBBLE_PADDING_Y
+    } else {
+        BUBBLE_PADDING_Y
+    }
 }
 
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
@@ -190,8 +218,8 @@ fn bubble(
                 .rounded_tr(px(corners.top_right))
                 .rounded_br(px(corners.bottom_right))
                 .rounded_bl(px(corners.bottom_left))
-                .px(px(12.))
-                .py(px(BUBBLE_PADDING_Y))
+                .px(px(BUBBLE_PADDING_X))
+                .py(px(bubble_padding_y(extras.compact)))
         })
         .text_size(px(BODY_SIZE))
         .line_height(relative(1.45));
@@ -227,6 +255,7 @@ fn bubble(
     let has_reactions = !row.reactions.is_empty();
     let saved = extras.saved;
     let mut content = v_flex().gap(px(6.));
+    content = content.children(importance_header(row, extras.compact));
     if row.forwarded {
         content = content.child(forwarded_header());
     }
@@ -301,7 +330,7 @@ fn bubble(
                 .child(
                     h_flex()
                         .flex_none()
-                        .mb(px(META_BOTTOM_INSET - BUBBLE_PADDING_Y))
+                        .mb(px(META_BOTTOM_INSET - bubble_padding_y(extras.compact)))
                         .child(bubble_meta(row, own, saved)),
                 ),
         );
@@ -350,10 +379,29 @@ struct BubbleExtras {
     agent_run: Option<AgentRun>,
     reaction_proposal: Option<ReactionPill>,
     undo_delete: SharedRowAction,
+    compact: bool,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
     run.map(|run| div().py(px(2.)).child(run_chip(&run, theme::row_hover())))
+}
+
+/// Teams: bold "Important!" / "Urgent!" in capitals above the message text.
+pub(super) fn importance_header(row: &MessageRow, compact: bool) -> Option<Div> {
+    let label = importance_label(row.importance)?;
+    Some(
+        div()
+            .debug_selector(|| IMPORTANCE_LABEL_TAG.into())
+            .text_size(px(IMPORTANCE_LABEL_SIZE))
+            .line_height(px(if compact {
+                COMPACT_IMPORTANCE_LINE_HEIGHT
+            } else {
+                IMPORTANCE_LINE_HEIGHT
+            }))
+            .font_weight(FontWeight::BOLD)
+            .text_color(theme::red())
+            .child(label),
+    )
 }
 
 pub(super) fn forwarded_header() -> Div {
@@ -688,6 +736,7 @@ pub fn render_message_row(
         pinned: _,
         reaction_proposal,
         undo_delete,
+        compact,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -703,13 +752,10 @@ pub fn render_message_row(
         agent_run,
         reaction_proposal,
         undo_delete,
+        compact,
     };
     let own = row.own;
-    let spacing = if row.series.has_prev {
-        px(2.)
-    } else {
-        px(SERIES_START_GAP)
-    };
+    let spacing = px(row_spacing(row.series.has_prev, compact));
     let mut container = v_flex().w_full().px(px(ROW_PADDING));
     if let Some(day) = &row.day_header {
         container = container.child(day_separator(day));
@@ -742,4 +788,17 @@ pub fn render_message_row(
                 ),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::{META_BOTTOM_INSET, bubble_padding_y, row_spacing};
+
+    #[test]
+    fn compact_density_tightens_gaps_and_bubble_padding() {
+        assert!(row_spacing(false, true) < row_spacing(false, false));
+        assert!(row_spacing(true, true) < row_spacing(true, false));
+        assert!(bubble_padding_y(true) < bubble_padding_y(false));
+        assert!(META_BOTTOM_INSET - bubble_padding_y(true) >= 0.);
+    }
 }

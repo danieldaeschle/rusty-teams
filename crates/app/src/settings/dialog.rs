@@ -135,7 +135,7 @@ impl SettingsDialog {
                 general::render(&self.center, &self.app, cx).into_any_element()
             }
             SettingsSection::Notifications => {
-                notifications::render(&self.center, cx).into_any_element()
+                notifications::render(&self.center, &self.app, cx).into_any_element()
             }
             SettingsSection::Appearance => appearance::render(&self.app, cx).into_any_element(),
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),

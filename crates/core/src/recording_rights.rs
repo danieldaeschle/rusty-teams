@@ -9,6 +9,10 @@ impl<R: Remote> SyncEngine<R> {
         self.remote.recording_policy().await
     }
 
+    pub async fn allow_priority_messages(&self) -> Result<bool> {
+        self.remote.allow_priority_messages().await
+    }
+
     pub async fn own_tenant_id(&self, chat_id: &str) -> Result<String> {
         self.my_tenant_id(chat_id).await
     }

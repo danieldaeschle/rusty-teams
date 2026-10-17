@@ -164,6 +164,10 @@ impl Icon {
         Self::default()
     }
 
+    pub(crate) fn has_explicit_size(&self) -> bool {
+        self.size.is_some() || self.style.size.width.is_some() || self.style.size.height.is_some()
+    }
+
     /// Rotate the icon by the given angle
     ///
     /// Replaces any previous transformation or rotation.

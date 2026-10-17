@@ -66,6 +66,8 @@ pub struct MessageExtras {
     pub images: Vec<HostedImage>,
     pub files: Vec<FileReference>,
     pub kept: Vec<KeptAttachment>,
+    /// Graph `importance`: `"high"` or `"urgent"`, absent for a standard message.
+    pub importance: Option<&'static str>,
 }
 
 impl MessageExtras {
@@ -167,6 +169,9 @@ pub(crate) fn message_body(
         });
         body["attachments"] = Value::Array(kept.chain(files).collect());
     }
+    if let Some(importance) = extras.importance {
+        body["importance"] = json!(importance);
+    }
     body
 }
 
@@ -257,6 +262,23 @@ mod tests {
     }
 
     #[test]
+    fn importance_is_sent_like_teams() {
+        let extras = MessageExtras {
+            importance: Some("urgent"),
+            ..MessageExtras::default()
+        };
+        assert_eq!(
+            message_body("<p>x</p>", &[], &extras),
+            json!({"body": {"contentType": "html", "content": "<p>x</p>"}, "importance": "urgent"})
+        );
+        assert!(
+            message_body("<p>x</p>", &[], &MessageExtras::default())
+                .get("importance")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn plain_body_has_no_hosted_contents_or_attachments() {
         let body = message_body("<p>x</p>", &[], &MessageExtras::default());
         assert_eq!(
@@ -271,6 +293,7 @@ mod tests {
             kept: Vec::new(),
             images: vec![image("image/png", &[1, 2, 3]), image("image/jpeg", &[4])],
             files: Vec::new(),
+            importance: None,
         };
         let body = message_body("<p>hi</p>", &[], &extras);
         assert_eq!(
@@ -297,6 +320,7 @@ mod tests {
                 image("image/png", &[3]),
             ],
             files: Vec::new(),
+            importance: None,
         };
         let html = "a <img src=\"../hostedContents/3/$value\"> <img src=\"https://giphy.com/x.gif\"> <img src=\"../hostedContents/1/$value\">";
         assert_eq!(hosted_image_order(html, &extras), vec![2, 0, 1]);
@@ -309,6 +333,7 @@ mod tests {
             kept: Vec::new(),
             images: vec![image("image/png", &[1]), image("image/png", &[2])],
             files: Vec::new(),
+            importance: None,
         };
         let body = message_body("a <img src=\"../hostedContents/2/$value\"> b", &[], &extras);
         assert_eq!(
@@ -328,6 +353,7 @@ mod tests {
                 content_url: "https://x/a.pdf".into(),
                 name: "a.pdf".into(),
             }],
+            importance: None,
         };
         let original_image = "<img src=\"https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/9/$value\">";
         let body = message_body(&format!("<p>new</p>{original_image}"), &[], &extras);
@@ -351,6 +377,7 @@ mod tests {
                 content_url: None,
                 name: None,
             }],
+            importance: None,
         };
         let body = message_body("<p>new</p>", &[], &extras);
         assert_eq!(
@@ -371,6 +398,7 @@ mod tests {
                 content_url: "https://contoso.sharepoint.com/Plan.docx".into(),
                 name: "Plan.docx".into(),
             }],
+            importance: None,
         };
         let body = message_body("", &[], &extras);
         assert_eq!(

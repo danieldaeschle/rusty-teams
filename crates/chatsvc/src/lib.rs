@@ -4,6 +4,8 @@ pub mod calendar;
 pub mod calllog;
 pub mod cards;
 pub mod channel_notifications;
+pub mod chat_notifications;
+pub mod chat_settings;
 pub mod channel_visibility;
 pub mod conversations;
 pub mod drafts;
@@ -24,6 +26,7 @@ pub mod read_horizon;
 pub mod realtime;
 pub mod recap;
 pub mod receipts;
+pub mod messaging_policy;
 pub mod recording_policy;
 pub mod saved;
 pub mod settings;
@@ -46,6 +49,12 @@ pub use cards::{
     CardActions, ChatApp, InvokeRequest, InvokeResponse, TaskContent, TaskContinue, TaskResponse,
 };
 pub use channel_notifications::{ChannelNotificationLevel, ChannelNotifications, ChannelSettings};
+pub use chat_notifications::{ChatNotificationMode, ChatNotificationWrite, DesktopNotifications};
+pub use chat_settings::{
+    ActivityAlert, ChatAccountSettings, ChatSettingChange, ChatSettingsClient,
+    ChatSettingsDocument, EnterKeyBehavior, MeetingChatNotifications, MessageDensity,
+    NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
+};
 pub use channel_visibility::{ChannelKind, ChannelMembership, ChannelTarget, ChannelVisibility};
 pub use conversations::{ConversationState, Conversations};
 pub use drafts::{ScheduledDraft, ScheduledDrafts};
