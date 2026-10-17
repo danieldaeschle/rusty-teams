@@ -545,11 +545,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 20);
+    assert_eq!(reopened.schema_version().unwrap(), 21);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -581,7 +581,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 20);
+    assert_eq!(store.schema_version().unwrap(), 21);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -647,7 +647,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 20);
+    assert_eq!(store.schema_version().unwrap(), 21);
 }
 
 #[test]
@@ -675,7 +675,10 @@ fn migration_to_v13_clears_channel_delta_links_only() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.sync_state("ch").unwrap().unwrap().delta_link, None);
+    assert_eq!(
+        store.sync_state("ch").unwrap().and_then(|state| state.delta_link),
+        None
+    );
     assert_eq!(
         store
             .sync_state("chat")
@@ -1410,11 +1413,52 @@ fn migration_to_v20_adds_the_call_event_column() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 20);
+    assert_eq!(store.schema_version().unwrap(), 21);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_some());
     store.upsert_messages(&[call_message("call", 2)]).unwrap();
     assert!(store.messages("c", None, 10).unwrap()[1].call_event_json.is_some());
+}
+
+#[test]
+fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        store.upsert_chats(&[chat("c", "Chat", Some(at(1)))]).unwrap();
+        store
+            .upsert_teams(&[TeamRecord {
+                id: "team".to_owned(),
+                name: "Team".to_owned(),
+            }])
+            .unwrap();
+        store
+            .upsert_channels(&[ChannelRecord {
+                id: "channel".to_owned(),
+                team_id: "team".to_owned(),
+                name: "General".to_owned(),
+                membership_type: None,
+                last_message_at: None,
+                unread: false,
+            }])
+            .unwrap();
+        for conversation_id in ["c", "channel", "other"] {
+            store
+                .set_sync_state(conversation_id, &SyncState::default())
+                .unwrap();
+        }
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("PRAGMA user_version = 20")
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 21);
+    assert!(store.sync_state("c").unwrap().is_none());
+    assert!(store.sync_state("channel").unwrap().is_none());
+    assert!(store.sync_state("other").unwrap().is_some());
 }

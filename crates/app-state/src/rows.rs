@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -7,13 +7,15 @@ use gpui_kit::Image;
 use store::MessageRecord;
 use teams_core::{
     JumboEmoji, jumbo_emoji,
-    AdaptiveCard, CallEvent, CallPhase, CallType, Draft, FileCard, ForwardHeader, ForwardInfo,
+    AdaptiveCard, CallEvent, CallPhase, Draft, FileCard, ForwardHeader, ForwardInfo,
     ImageRef, LinkPreview, forwards,
-    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files, format_duration,
+    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files,
     forwarded_texts, images, is_forwarded, link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
     reactions, readable_text, translated_spans,
 };
 
+pub use crate::call_rows::{CallCard, CallIcon, CallParticipant, RecordingCard};
+use crate::call_rows::{CallNames, CallTimeline, call_card};
 use crate::card_state::CardOverride;
 use crate::format;
 use crate::reaction_model::{Reactor, UNKNOWN_REACTOR};
@@ -109,22 +111,6 @@ pub enum Delivery {
 pub struct LocalImage {
     pub image: Arc<Image>,
     pub size: Option<(u32, u32)>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallIcon {
-    Call,
-    Missed,
-    Video,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallCard {
-    pub title: &'static str,
-    pub detail: String,
-    pub icon: CallIcon,
-    pub missed: bool,
-    pub started: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -590,30 +576,18 @@ fn visible_reactions(record: &MessageRecord, context: &RowContext) -> Vec<Reacti
     visible
 }
 
-pub fn call_card(event: &CallEvent, time: &str, my_user_id: Option<&str>) -> CallCard {
-    let missed = event.missed(my_user_id);
-    let detail = match (event.phase, event.duration_seconds) {
-        (CallPhase::Ended, Some(seconds)) if !missed => {
-            format!("{} \u{b7} {time}", format_duration(seconds))
-        }
-        _ => time.to_owned(),
-    };
-    CallCard {
-        title: event.title(missed),
-        detail,
-        icon: match (missed, event.call_type) {
-            (true, _) => CallIcon::Missed,
-            (false, CallType::Meeting) => CallIcon::Video,
-            (false, CallType::Call) => CallIcon::Call,
-        },
-        missed,
-        started: event.phase == CallPhase::Started,
-    }
-}
-
-fn call_row(record: &MessageRecord, event: &CallEvent, context: &RowContext) -> MessageRow {
+fn call_row(
+    record: &MessageRecord,
+    event: &CallEvent,
+    context: &RowContext,
+    transcript: bool,
+) -> MessageRow {
     let my_user_id = context.my_user_id.as_deref();
     let time = clock_label(record.created_at, context.offset);
+    let names = CallNames {
+        my_user_id,
+        names: &context.names,
+    };
     let author = event
         .initiator_name
         .clone()
@@ -658,7 +632,13 @@ fn call_row(record: &MessageRecord, event: &CallEvent, context: &RowContext) -> 
         own: event.initiated_by(my_user_id),
         forwarded: false,
         translation: None,
-        call: Some(call_card(event, &time, my_user_id)),
+        call: Some(call_card(
+            event,
+            &record.message_id,
+            &time,
+            &names,
+            transcript,
+        )),
         time,
     }
 }
@@ -726,7 +706,7 @@ fn message_row_with(
     quoted: &HashMap<String, String>,
 ) -> MessageRow {
     if let Some(event) = call_event(record) {
-        return call_row(record, &event, context);
+        return call_row(record, &event, context, false);
     }
     let local = record.created_at.with_timezone(&context.offset);
     let images = images(record);
@@ -792,45 +772,30 @@ fn message_row_with(
     }
 }
 
-fn finished_call_ids(events: &[Option<CallEvent>]) -> HashSet<&str> {
-    events
-        .iter()
-        .flatten()
-        .filter(|event| event.phase == CallPhase::Ended)
-        .map(|event| event.call_id.as_str())
-        .collect()
-}
-
-fn is_open_start(event: &CallEvent, finished: &HashSet<&str>) -> bool {
-    event.phase == CallPhase::Started && !finished.contains(event.call_id.as_str())
-}
-
 pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: bool) -> Vec<Row> {
     let mut rows = Vec::with_capacity(records.len() + 1);
     if has_older {
         rows.push(Row::LoadOlder);
     }
     let events: Vec<Option<CallEvent>> = records.iter().map(call_event).collect();
-    let finished = finished_call_ids(&events);
-    let newest_open_start = events.iter().rposition(|event| {
-        event
-            .as_ref()
-            .is_some_and(|event| is_open_start(event, &finished))
-    });
+    let timeline = CallTimeline::new(&events);
     let mut previous_day: Option<NaiveDate> = None;
     let quoted = quoted_texts(records);
     for (index, (record, event)) in records.iter().zip(&events).enumerate() {
+        if timeline.hides(index) {
+            continue;
+        }
         let mut row = match event {
-            Some(event)
-                if event.phase == CallPhase::Started && !is_open_start(event, &finished) =>
-            {
-                continue;
-            }
-            Some(event) => call_row(record, event, context),
+            Some(event) => call_row(
+                record,
+                event,
+                context,
+                timeline.has_transcript(&event.call_id),
+            ),
             None => message_row_with(record, context, &quoted),
         };
         if let Some(call) = row.call.as_mut() {
-            call.started &= newest_open_start == Some(index);
+            call.started &= timeline.is_live_start(index);
         }
         let day = record
             .created_at
@@ -878,16 +843,60 @@ fn last_activity(thread: &Thread, by_id: &BTreeMap<&str, &MessageRecord>) -> Dat
         .unwrap_or_default()
 }
 
-fn post_message_row(record: &MessageRecord, context: &RowContext) -> MessageRow {
-    let mut row = message_row(record, context);
+fn post_message_row(
+    record: &MessageRecord,
+    context: &RowContext,
+    timeline: &CallTimeline,
+) -> MessageRow {
+    let mut row = match call_event(record) {
+        Some(event) => call_row(
+            record,
+            &event,
+            context,
+            timeline.has_transcript(&event.call_id),
+        ),
+        None => message_row(record, context),
+    };
     row.day_header = None;
     row.time = format::post_time_label(record.created_at, context.today, context.offset);
     row
 }
 
+fn meeting_root_row(
+    root: &MessageRecord,
+    started: &CallEvent,
+    ended: Option<(&MessageRecord, CallEvent)>,
+    context: &RowContext,
+    timeline: &CallTimeline,
+) -> MessageRow {
+    let Some((ended_record, ended_event)) = ended else {
+        let mut row = post_message_row(root, context, timeline);
+        if let Some(call) = row.call.as_mut() {
+            call.started = !timeline.finished(&started.call_id);
+        }
+        return row;
+    };
+    let mut summary = CallEvent {
+        initiator_id: started.initiator_id.clone(),
+        initiator_name: started
+            .initiator_name
+            .clone()
+            .or(ended_event.initiator_name.clone()),
+        ..ended_event
+    };
+    summary.call_type = started.call_type;
+    let mut row = call_row(ended_record, &summary, context, false);
+    row.key = root.message_id.clone();
+    row.created_at = root.created_at;
+    row.reply_root = None;
+    row.day_header = None;
+    row.time = format::post_time_label(root.created_at, context.today, context.offset);
+    row
+}
+
 fn distinct_names<'a>(records: impl Iterator<Item = &'a MessageRecord>) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    for record in records {
+    for record in records.filter(|record| record.call_event_json.is_none()) {
         let name = record
             .sender_name
             .clone()
@@ -900,20 +909,31 @@ fn distinct_names<'a>(records: impl Iterator<Item = &'a MessageRecord>) -> Vec<S
 }
 
 fn post_row(
-    root: &MessageRecord,
+    root: MessageRow,
     mut replies: Vec<&MessageRecord>,
     context: &RowContext,
+    timeline: &CallTimeline,
 ) -> PostRow {
     replies.sort_by_key(|reply| reply.created_at);
     let hidden = replies.len().saturating_sub(POST_VISIBLE_REPLIES);
     PostRow {
-        root: post_message_row(root, context),
+        root,
         hidden_reply_count: hidden,
         hidden_repliers: distinct_names(replies[..hidden].iter().copied()),
         replies: replies[hidden..]
             .iter()
-            .map(|reply| post_message_row(reply, context))
+            .map(|reply| post_message_row(reply, context, timeline))
             .collect(),
+    }
+}
+
+/// Channel feed: Teams shows a Meet now meeting as its own post and keeps the other call notices
+/// inside the thread; a saved recording stays visible as a reply.
+fn shows_in_feed(record: &MessageRecord, event: Option<&CallEvent>) -> bool {
+    match event {
+        None => true,
+        Some(event) if record.reply_to_id.is_none() => event.phase == CallPhase::Started,
+        Some(event) => event.phase == CallPhase::RecordingSaved,
     }
 }
 
@@ -922,23 +942,54 @@ pub fn thread_list_rows(
     context: &RowContext,
     has_older: bool,
 ) -> Vec<Row> {
-    let by_id: BTreeMap<&str, &MessageRecord> = records
+    let events: Vec<Option<CallEvent>> = records.iter().map(call_event).collect();
+    let timeline = CallTimeline::new(&events);
+    let ended: HashMap<&str, (&MessageRecord, &CallEvent)> = records
         .iter()
-        .filter(|record| record.call_event_json.is_none())
-        .map(|record| (record.message_id.as_str(), record))
+        .zip(&events)
+        .filter_map(|(record, event)| {
+            let event = event
+                .as_ref()
+                .filter(|event| event.phase == CallPhase::Ended)?;
+            Some((event.call_id.as_str(), (record, event)))
+        })
+        .collect();
+    let by_id: BTreeMap<&str, (&MessageRecord, Option<&CallEvent>)> = records
+        .iter()
+        .zip(&events)
+        .filter(|(record, event)| shows_in_feed(record, event.as_ref()))
+        .map(|(record, event)| (record.message_id.as_str(), (record, event.as_ref())))
+        .collect();
+    let records_by_id: BTreeMap<&str, &MessageRecord> = by_id
+        .iter()
+        .map(|(id, (record, _))| (*id, *record))
         .collect();
     let mut threads = group_threads(records);
-    threads.sort_by_key(|thread| std::cmp::Reverse(last_activity(thread, &by_id)));
+    threads.sort_by_key(|thread| std::cmp::Reverse(last_activity(thread, &records_by_id)));
     let mut rows: Vec<Row> = threads
         .iter()
         .filter_map(|thread| {
-            let root = by_id.get(thread.root_id.as_str())?;
+            let (root, root_event) = by_id.get(thread.root_id.as_str())?;
+            let root_row = match root_event {
+                Some(started) => meeting_root_row(
+                    root,
+                    started,
+                    ended
+                        .get(started.call_id.as_str())
+                        .map(|(record, event)| (*record, (*event).clone())),
+                    context,
+                    &timeline,
+                ),
+                None => post_message_row(root, context, &timeline),
+            };
             let replies = thread
                 .reply_ids
                 .iter()
-                .filter_map(|id| by_id.get(id.as_str()).copied())
+                .filter_map(|id| records_by_id.get(id.as_str()).copied())
                 .collect();
-            Some(Row::Post(Box::new(post_row(root, replies, context))))
+            Some(Row::Post(Box::new(post_row(
+                root_row, replies, context, &timeline,
+            ))))
         })
         .collect();
     if has_older {
@@ -1030,6 +1081,7 @@ pub fn changed_indices(old: &[Row], new: &[Row]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
+    use teams_core::CallType;
 
     use super::*;
 
@@ -1812,6 +1864,8 @@ mod tests {
             initiator_id: Some(initiator.into()),
             initiator_name: Some(format!("Name {initiator}")),
             participant_ids: participants.iter().map(|id| (*id).to_owned()).collect(),
+            participant_names: Vec::new(),
+            recording: None,
         }
     }
 
@@ -1970,6 +2024,111 @@ mod tests {
             })
             .collect();
         assert!(series.iter().all(|series| *series == Series::default()));
+    }
+
+    fn fixture_records(name: &str) -> Vec<MessageRecord> {
+        let path = format!(
+            "{}/../core/tests/fixtures/call_events/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let thread: graph::Message =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        std::iter::once(&thread)
+            .chain(&thread.replies)
+            .filter_map(|message| teams_core::message_record("channel", message))
+            .collect()
+    }
+
+    fn feed_post(row: &Row) -> &PostRow {
+        let Row::Post(post) = row else {
+            panic!("not a post")
+        };
+        post
+    }
+
+    #[test]
+    fn meet_now_root_is_a_post_with_the_ended_meeting_card() {
+        let records = fixture_records("channel_adhoc_meeting.json");
+        assert_eq!(records.len(), 2);
+        let rows = thread_list_rows(&records, &call_context(), false);
+        assert_eq!(rows.len(), 1);
+        let post = feed_post(&rows[0]);
+        assert_eq!(post.root.key, records[0].message_id);
+        assert!(post.replies.is_empty());
+        assert_eq!(post.hidden_reply_count, 0);
+        let card = post.root.call.as_ref().unwrap();
+        assert_eq!(card.title, "Meeting ended");
+        assert!(card.detail.starts_with("3h 19m 35s"));
+        assert!(!card.started);
+        assert_eq!(card.participants.len(), 3);
+        assert_eq!(card.extra_participants, 0);
+    }
+
+    #[test]
+    fn meet_now_root_without_an_end_can_be_joined() {
+        let mut records = fixture_records("channel_adhoc_meeting.json");
+        records.truncate(1);
+        let rows = thread_list_rows(&records, &call_context(), false);
+        let card = feed_post(&rows[0]).root.call.clone().unwrap();
+        assert_eq!(card.title, "Meeting started");
+        assert!(card.started);
+    }
+
+    #[test]
+    fn scheduled_meeting_post_keeps_call_notices_in_the_thread() {
+        let mut records = fixture_records("channel_scheduled_meeting.json");
+        records.sort_by_key(|record| record.created_at);
+        assert_eq!(records.len(), 3);
+        let rows = thread_list_rows(&records, &call_context(), false);
+        let post = feed_post(&rows[0]);
+        assert!(post.root.call.is_none());
+        assert!(post.replies.is_empty());
+        let thread = thread_rows(&records, &records[0].message_id, &call_context());
+        let titles: Vec<String> = thread
+            .iter()
+            .filter_map(|row| match row {
+                Row::Message(message) => message.call.as_ref().map(|call| call.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(titles, ["Meeting started", "Meeting ended"]);
+    }
+
+    #[test]
+    fn saved_recording_shows_in_the_channel_feed_as_a_reply() {
+        let mut records = fixture_records("channel_adhoc_meeting.json");
+        let root_id = records[0].message_id.clone();
+        let page: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(format!(
+                "{}/../core/tests/fixtures/call_events/meeting_chat_recording.json",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        for message in page["value"].as_array().unwrap() {
+            let message: graph::Message = serde_json::from_value(message.clone()).unwrap();
+            let mut record = teams_core::message_record("channel", &message).unwrap();
+            record.reply_to_id = Some(root_id.clone());
+            records.push(record);
+        }
+        let rows = thread_list_rows(&records, &call_context(), false);
+        let post = feed_post(&rows[0]);
+        assert_eq!(post.replies.len(), 1);
+        assert_eq!(post.hidden_reply_count, 0);
+        let recording = post.replies[0]
+            .call
+            .as_ref()
+            .and_then(|call| call.recording.as_ref())
+            .unwrap();
+        assert_eq!(recording.title, "Weekly team meeting");
+        assert!(recording.transcript);
+        let thread = thread_rows(&records, &root_id, &call_context());
+        let calls = thread
+            .iter()
+            .filter(|row| matches!(row, Row::Message(message) if message.call.is_some()))
+            .count();
+        assert_eq!(calls, 7);
     }
 
     #[test]

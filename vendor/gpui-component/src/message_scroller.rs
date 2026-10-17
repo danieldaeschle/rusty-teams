@@ -25,6 +25,8 @@ const BOTTOM_FADE_TRANSITION: Duration = Duration::from_millis(200);
 /// [`MessageScroller::new`].
 pub struct MessageScrollerState {
     list_state: ListState,
+    top_inset: gpui::Pixels,
+    inset_scroll_pending: bool,
 }
 
 impl MessageScrollerState {
@@ -46,7 +48,11 @@ impl MessageScrollerState {
             });
         });
 
-        Self { list_state }
+        Self {
+            list_state,
+            top_inset: px(0.),
+            inset_scroll_pending: false,
+        }
     }
 
     /// Return the current number of rows known by the virtual list.
@@ -135,7 +141,7 @@ impl MessageScrollerState {
         true
     }
 
-    /// Scroll to the row at `index`, if it exists.
+    /// Scroll to the row at `index`, if it exists, below the top inset.
     pub fn scroll_to_item(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
         if index >= self.list_state.item_count() {
             return false;
@@ -145,8 +151,28 @@ impl MessageScrollerState {
             item_ix: index,
             offset_in_item: px(0.),
         });
+        self.inset_scroll_pending = index > 0 && self.top_inset > px(0.);
         cx.notify();
         true
+    }
+
+    /// Return the space kept free above the first row.
+    pub fn top_inset(&self) -> gpui::Pixels {
+        self.top_inset
+    }
+
+    fn sync_top_inset(&mut self, inset: gpui::Pixels) {
+        if self.top_inset == inset {
+            return;
+        }
+        self.top_inset = inset;
+        if self.list_state.item_count() > 0 {
+            self.list_state.remeasure_items(0..1);
+        }
+    }
+
+    fn take_inset_scroll(&mut self) -> Option<gpui::Pixels> {
+        std::mem::take(&mut self.inset_scroll_pending).then_some(self.top_inset)
     }
 
     /// Stop following the tail until the next reset or `scroll_to_end`.
@@ -180,6 +206,7 @@ pub struct MessageScroller {
     jump_button_renderer: Option<Box<dyn FnOnce(Button) -> Button>>,
     jump_button_transition: Duration,
     bottom_fade: Option<Hsla>,
+    top_inset: gpui::Pixels,
     scrollbar: bool,
     jump_button: bool,
     force_jump_button: bool,
@@ -212,6 +239,7 @@ impl MessageScroller {
             jump_button_renderer: None,
             jump_button_transition: JUMP_BUTTON_TRANSITION,
             bottom_fade: None,
+            top_inset: px(0.),
             scrollbar: true,
             jump_button: true,
             force_jump_button: false,
@@ -306,6 +334,16 @@ impl MessageScroller {
         self.bottom_fade = Some(color.into());
         self
     }
+
+    /// Keep `inset` free above the first row for an overlay at the top.
+    ///
+    /// The rows scroll behind the overlay, and the inset scrolls with the
+    /// content, so the first row can still be scrolled out from under it.
+    /// [`MessageScrollerState::scroll_to_item`] lands rows below the inset.
+    pub fn with_top_inset(mut self, inset: gpui::Pixels) -> Self {
+        self.top_inset = inset;
+        self
+    }
 }
 
 impl Styled for MessageScroller {
@@ -346,6 +384,21 @@ impl RenderOnce for MessageScroller {
         } else {
             0.
         };
+        let top_inset = self.top_inset;
+        let inset_scroll = self.state.update(cx, |state, _| {
+            state.sync_top_inset(top_inset);
+            state.take_inset_scroll()
+        });
+        // The rows above the target are only measured by the layout of this
+        // frame, so the step back by the inset waits for the next one.
+        if let Some(inset) = inset_scroll {
+            let list_state = list_state.clone();
+            let state = self.state.clone();
+            window.on_next_frame(move |_, cx| {
+                list_state.scroll_by(-inset);
+                state.update(cx, |_, cx| cx.notify());
+            });
+        }
         let tokens = cx.theme().semantic_tokens();
         let row_style = self.row_style;
         let jump_button_style = self.jump_button_style;
@@ -374,6 +427,7 @@ impl RenderOnce for MessageScroller {
                 .when_some(row_inset_left, |this, left| this.pl(left))
                 .when_some(row_inset_right, |this, right| this.pr(right))
                 .refine_style(&row_style)
+                .when(index == 0 && top_inset > px(0.), |this| this.pt(top_inset))
                 .child(renderer(index, window, cx))
                 .into_any_element()
         })
@@ -495,6 +549,15 @@ mod tests {
                 assert!(state.remeasure_items(0..6, cx));
                 assert!(!state.remeasure_items(6..7, cx));
                 assert!(state.scroll_to_item(2, cx));
+                assert_eq!(state.take_inset_scroll(), None);
+                state.sync_top_inset(px(48.));
+                assert_eq!(state.top_inset(), px(48.));
+                assert!(state.scroll_to_item(2, cx));
+                assert_eq!(state.take_inset_scroll(), Some(px(48.)));
+                assert_eq!(state.take_inset_scroll(), None);
+                assert!(state.scroll_to_item(0, cx));
+                assert_eq!(state.take_inset_scroll(), None);
+                assert!(state.scroll_to_item(2, cx));
                 assert!(!state.is_scrolled_up());
                 assert!(!state.is_following_tail());
                 state.scroll_to_end(cx);
@@ -519,7 +582,8 @@ mod tests {
             .with_jump_button_style(StyleRefinement::default())
             .with_jump_button_renderer(|button| button.large())
             .with_jump_button_transition(Duration::from_millis(300))
-            .with_bottom_fade(gpui::white());
+            .with_bottom_fade(gpui::white())
+            .with_top_inset(px(48.));
 
         assert!(!scroller.scrollbar);
         assert!(!scroller.jump_button);
@@ -527,5 +591,6 @@ mod tests {
         assert!(scroller.jump_button_renderer.is_some());
         assert_eq!(scroller.jump_button_transition, Duration::from_millis(300));
         assert_eq!(scroller.bottom_fade, Some(gpui::white()));
+        assert_eq!(scroller.top_inset, px(48.));
     }
 }

@@ -8,6 +8,8 @@ use super::widgets::icon;
 use crate::theme;
 
 const BANNER_HEIGHT: f32 = 40.;
+const BANNER_MARGIN: f32 = 20.;
+const BANNER_GAP: f32 = 8.;
 const BANNER_PADDING: f32 = 12.;
 const BUTTON_SIZE: f32 = 28.;
 const FALLBACK_PREVIEW: &str = "Pinned message";
@@ -24,6 +26,20 @@ pub struct PinBannerActions {
     pub previous: Action,
     pub next: Action,
     pub unpin: Action,
+}
+
+pub fn pin_banner_inset(shown: bool) -> Pixels {
+    px(if shown { BANNER_HEIGHT + BANNER_GAP } else { 0. })
+}
+
+pub fn pin_banner_overlay(banner: AnyElement) -> AnyElement {
+    div()
+        .absolute()
+        .top_0()
+        .left(px(BANNER_MARGIN))
+        .right(px(BANNER_MARGIN))
+        .child(banner)
+        .into_any_element()
 }
 
 pub fn cycle_pin(index: usize, length: usize, delta: isize) -> usize {
@@ -71,16 +87,18 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
     h_flex()
         .id("pin-banner")
         .group("pin-banner")
+        .occlude()
+        .w_full()
         .h(px(BANNER_HEIGHT))
-        .flex_none()
-        .mx(px(20.))
-        .mb(px(8.))
         .pl(px(BANNER_PADDING))
         .pr(px(6.))
         .gap(px(8.))
         .items_center()
         .rounded(px(8.))
+        .border_1()
+        .border_color(theme::border())
         .bg(theme::row_hover())
+        .shadow(theme::toast_shadow())
         .cursor_pointer()
         .hover(|banner| banner.bg(theme::surface_raised()))
         .on_click(move |_, window, cx| open(window, cx))
@@ -134,7 +152,8 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
 
 #[cfg(test)]
 mod tests {
-    use super::{cycle_pin, position_label};
+    use super::{BANNER_HEIGHT, cycle_pin, pin_banner_inset, position_label};
+    use gpui_kit::px;
 
     #[test]
     fn cycling_wraps_around_both_ends() {
@@ -149,6 +168,12 @@ mod tests {
         assert_eq!(cycle_pin(0, 0, 1), 0);
         assert_eq!(cycle_pin(0, 1, 1), 0);
         assert_eq!(cycle_pin(0, 1, -1), 0);
+    }
+
+    #[test]
+    fn inset_clears_the_banner_only_while_it_shows() {
+        assert!(pin_banner_inset(true) > px(BANNER_HEIGHT));
+        assert_eq!(pin_banner_inset(false), px(0.));
     }
 
     #[test]

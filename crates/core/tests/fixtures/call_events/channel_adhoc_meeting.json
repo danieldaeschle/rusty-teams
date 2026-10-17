@@ -1,0 +1,111 @@
+{
+ "id": "1547209855775",
+ "replyToId": null,
+ "messageType": "systemEventMessage",
+ "createdDateTime": "2019-01-11T12:30:55.655Z",
+ "lastModifiedDateTime": "2019-01-11T12:30:56.931Z",
+ "lastEditedDateTime": null,
+ "deletedDateTime": null,
+ "subject": null,
+ "from": null,
+ "body": {
+  "contentType": "html",
+  "content": "<systemEventMessage/>"
+ },
+ "attachments": [],
+ "mentions": [],
+ "reactions": [],
+ "eventDetail": {
+  "@odata.type": "#microsoft.graph.callStartedEventMessageDetail",
+  "callId": "00000000-0000-4000-8000-000000000030",
+  "callEventType": "meeting",
+  "initiator": {
+   "application": null,
+   "device": null,
+   "user": {
+    "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+    "id": "00000000-0000-4000-8000-000000000031",
+    "displayName": null,
+    "userIdentityType": "aadUser",
+    "tenantId": "00000000-0000-4000-8000-000000000003"
+   }
+  }
+ },
+ "replies@odata.count": 1,
+ "replies": [
+  {
+   "id": "1547221831050",
+   "replyToId": "1547209855775",
+   "messageType": "systemEventMessage",
+   "createdDateTime": "2019-01-11T15:50:30.938Z",
+   "lastModifiedDateTime": "2019-01-11T15:50:31.05Z",
+   "lastEditedDateTime": null,
+   "deletedDateTime": null,
+   "subject": null,
+   "from": null,
+   "body": {
+    "contentType": "html",
+    "content": "<systemEventMessage/>"
+   },
+   "attachments": [],
+   "mentions": [],
+   "reactions": [],
+   "eventDetail": {
+    "@odata.type": "#microsoft.graph.callEndedEventMessageDetail",
+    "callId": "00000000-0000-4000-8000-000000000030",
+    "callDuration": "PT3H19M35S",
+    "callEventType": "meeting",
+    "callParticipants": [
+     {
+      "participant": {
+       "application": null,
+       "device": null,
+       "user": {
+        "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+        "id": "00000000-0000-4000-8000-000000000032",
+        "displayName": "Person 25",
+        "userIdentityType": "aadUser"
+       }
+      }
+     },
+     {
+      "participant": {
+       "application": null,
+       "device": null,
+       "user": {
+        "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+        "id": "00000000-0000-4000-8000-000000000033",
+        "displayName": "Person 26",
+        "userIdentityType": "aadUser"
+       }
+      }
+     },
+     {
+      "participant": {
+       "application": null,
+       "device": null,
+       "user": {
+        "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+        "id": "00000000-0000-4000-8000-000000000031",
+        "displayName": "Person 27",
+        "userIdentityType": "aadUser",
+        "tenantId": "00000000-0000-4000-8000-000000000003"
+       }
+      }
+     }
+    ],
+    "initiator": {
+     "application": null,
+     "device": null,
+     "user": {
+      "@odata.type": "#microsoft.graph.teamworkUserIdentity",
+      "id": "00000000-0000-4000-8000-000000000031",
+      "displayName": "orgid:00000000-0000-4000-8000-000000000031",
+      "userIdentityType": "aadUser",
+      "tenantId": "00000000-0000-4000-8000-000000000003"
+     }
+    }
+   }
+  }
+ ]
+}

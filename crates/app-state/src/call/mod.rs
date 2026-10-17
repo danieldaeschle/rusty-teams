@@ -7,6 +7,7 @@ pub mod history;
 pub mod join;
 pub mod launcher;
 pub mod list;
+pub mod outlook_reminders;
 pub mod overlay_layout;
 pub mod people_actions;
 pub mod prejoin;

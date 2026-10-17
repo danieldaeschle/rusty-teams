@@ -5,8 +5,10 @@ use session::{ApiResponse, Method, Request, Session};
 use crate::cards::{CardTransport, DEFAULT_MT_REGION, SessionCardTransport, spaces_scope};
 use crate::error::{Error, Result};
 
+mod reminders;
 mod schedule;
 
+pub use reminders::{Reminder, parse_reminders};
 pub use schedule::{
     Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, parse_created_event,
 };
