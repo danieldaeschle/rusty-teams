@@ -85,6 +85,7 @@ pub fn render_nav(
         .px(px(NAV_PADDING_X))
         .py(px(layout.padding_y))
         .gap(px(ITEM_GAP))
+        .rounded_l(px(super::dialog::PANEL_RADIUS))
         .bg(theme::surface_raised())
         .child(
             div()

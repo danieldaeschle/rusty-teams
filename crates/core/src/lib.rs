@@ -1,6 +1,7 @@
 mod actions;
 mod adaptive_card;
 mod avatars;
+mod bot_partners;
 mod call_event;
 mod card_actions;
 mod card_chart;
@@ -135,7 +136,7 @@ pub use message_link::{
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use people::{MentionCandidate, PersonCandidate, PersonSource};
 pub use presence::{Activity, Availability, Presence};
-pub use preview::preview_text;
+pub use preview::{is_event_preview, preview_text};
 pub use profile::{OrgPerson, PersonProfile};
 pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};

@@ -491,6 +491,7 @@ fn preview_text(preview: &Preview) -> Option<(String, bool)> {
     match preview {
         Preview::Empty => None,
         Preview::Deleted => Some((DELETED_CHAT_PREVIEW.to_owned(), true)),
+        Preview::Event(text) => Some((text.clone(), true)),
         Preview::Typing(text) => Some((text.clone(), true)),
         Preview::Text {
             prefix: Some(prefix),
@@ -1713,7 +1714,7 @@ fn hidden_channels_label(count: usize) -> String {
 
 fn collect_faces(spec: &AvatarSpec, faces: &mut Vec<String>) {
     match spec {
-        AvatarSpec::Single(face) => faces.extend(face.user_id.clone()),
+        AvatarSpec::Single(face) | AvatarSpec::Bot(face) => faces.extend(face.user_id.clone()),
         AvatarSpec::Pair(first, second) => {
             faces.extend(first.user_id.clone());
             faces.extend(second.user_id.clone());

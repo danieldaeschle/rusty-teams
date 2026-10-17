@@ -16,7 +16,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget};
+use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget, is_bot_id};
 use teams_core::{
     ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
 };
@@ -32,7 +32,9 @@ mod scheduled;
 mod shared;
 
 use super::attachments::FileActions;
-use super::avatar::{member_stack, person_avatar, spec_avatar, square_avatar, with_presence};
+use super::avatar::{
+    bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
+};
 use super::call_controls::header_call_controls;
 use super::channel_tabs::ChannelPane;
 use super::chat_members::members_popover;
@@ -52,7 +54,7 @@ use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_t
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
-use crate::data::{existing_one_on_one, is_one_on_one, others};
+use crate::data::{existing_one_on_one, is_one_on_one, one_on_one_bot, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
@@ -3236,7 +3238,9 @@ impl ConversationView {
                     let faces = others(chat, me);
                     let face = |(user_id, name): (Option<String>, String)| Face { user_id, name };
                     let first = faces.first().cloned().map(face);
-                    if is_one_on_one(chat) || faces.len() < 2 {
+                    if let Some(bot) = one_on_one_bot(chat, me) {
+                        lead = Some(bot_tile(directory, &face(bot), 36.));
+                    } else if is_one_on_one(chat) || faces.len() < 2 {
                         let name = first
                             .as_ref()
                             .map_or(current.title.as_str(), |face| face.name.as_str());
@@ -3482,12 +3486,19 @@ impl Render for ConversationView {
                             .gap(px(8.))
                             .pt(px(32.))
                             .pb(px(16.))
-                            .child(person_avatar(
-                                &state.directory,
-                                start.user_id.as_deref(),
-                                &start.title,
-                                56.,
-                            ))
+                            .child(match start.user_id.as_deref() {
+                                Some(user_id) if is_bot_id(user_id) => bot_tile(
+                                    &state.directory,
+                                    &Face {
+                                        user_id: Some(user_id.to_owned()),
+                                        name: start.title.clone(),
+                                    },
+                                    56.,
+                                ),
+                                user_id => {
+                                    person_avatar(&state.directory, user_id, &start.title, 56.)
+                                }
+                            })
                             .child(
                                 div()
                                     .text_size(px(16.))

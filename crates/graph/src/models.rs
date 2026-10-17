@@ -177,6 +177,29 @@ impl Chat {
         }
     }
 
+    /// The other side of a 1:1 chat that Graph lists without a member, such as a bot, read from the `19:{a}_{b}@unq.gbl.spaces` id.
+    pub fn memberless_partner_id(&self, my_user_id: &str) -> Option<&str> {
+        if !self.chat_type.eq_ignore_ascii_case("oneOnOne")
+            || self
+                .members
+                .iter()
+                .any(|member| member.user_id.as_deref() != Some(my_user_id))
+        {
+            return None;
+        }
+        let pair = self
+            .id
+            .strip_prefix("19:")?
+            .strip_suffix("@unq.gbl.spaces")?;
+        let (first, second) = pair.split_once('_')?;
+        match (first == my_user_id, second == my_user_id) {
+            (true, false) => Some(second),
+            (false, true) => Some(first),
+            _ => None,
+        }
+        .filter(|partner| !partner.is_empty())
+    }
+
     fn preview_sender_name(&self, my_user_id: &str) -> Option<&str> {
         let sender = self.last_message_preview.as_ref()?.from.as_ref()?;
         let application = sender

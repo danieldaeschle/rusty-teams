@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 use crate::events::CoreEvent;
 use crate::folders::FolderSource;
 use crate::links::{LinkPreview, has_stored_links};
-use crate::mapping::{chat_record, flatten_thread, message_record};
+use crate::mapping::{flatten_thread, message_record};
 use crate::people::DirectoryCache;
 use crate::presence::Presence;
 use crate::preview::OwnedPreview;
@@ -132,6 +132,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) chat_states: Mutex<HashMap<String, ConversationState>>,
     pub(crate) chat_paging: Mutex<ChatPaging>,
     pub(crate) locally_hidden_lock: Mutex<()>,
+    pub(crate) bot_partners: Mutex<crate::bot_partners::BotPartners>,
 }
 
 impl<R: Remote> SyncEngine<R> {
@@ -167,6 +168,7 @@ impl<R: Remote> SyncEngine<R> {
             chat_states: Mutex::new(HashMap::new()),
             chat_paging,
             locally_hidden_lock: Mutex::new(()),
+            bot_partners: Mutex::default(),
         }
     }
 
@@ -364,8 +366,10 @@ impl<R: Remote> SyncEngine<R> {
             Err(error) => return Err(error),
         };
         let my_user_id = self.my_user_id().await?;
+        self.resolve_bot_partners(std::slice::from_ref(&chat), &my_user_id)
+            .await;
         self.store
-            .upsert_chats(&[chat_record(&chat, &my_user_id)])?;
+            .upsert_chats(&[self.partner_chat_record(&chat, &my_user_id)])?;
         let _ = self.events.send(CoreEvent::SidebarChanged);
         Ok(Conversation::Chat)
     }
@@ -503,7 +507,7 @@ impl<R: Remote> SyncEngine<R> {
     pub(crate) fn update_chat_preview(&self, records: &[MessageRecord]) -> Result<()> {
         let Some(newest) = records
             .iter()
-            .filter(|record| record.call_event_json.is_none())
+            .filter(|record| !crate::preview::keeps_previous_line(record))
             .max_by_key(|record| record.created_at)
         else {
             return Ok(());

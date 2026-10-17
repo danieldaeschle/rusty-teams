@@ -2,7 +2,7 @@ use graph::Message;
 use serde_json::Value;
 use store::{ChatPreview, MessageRecord};
 
-use crate::call_event::CallEvent;
+use crate::call_event::{CallEvent, CallPhase, call_event};
 use crate::external_image::is_giphy_url;
 use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::spans::{Span, html_to_spans};
@@ -24,6 +24,14 @@ pub const RECORDING_READY_PREVIEW: &str = "Recording is ready";
 pub const TRANSCRIPT_PREVIEW: &str = "Transcript is available";
 pub const USER_ADDED_PREVIEW: &str = "User added";
 pub const USER_JOINED_PREVIEW: &str = "User joined";
+const EVENT_PREVIEWS: [&str; 6] = [
+    RECORDING_STARTED_PREVIEW,
+    RECORDING_STOPPED_PREVIEW,
+    RECORDING_READY_PREVIEW,
+    TRANSCRIPT_PREVIEW,
+    USER_ADDED_PREVIEW,
+    USER_JOINED_PREVIEW,
+];
 
 const AUDIO_CARD_TYPE: &str = "application/vnd.microsoft.card.audio";
 const LOOP_CARD_TYPE: &str = "application/vnd.microsoft.card.fluidEmbedCard";
@@ -45,6 +53,10 @@ pub fn preview_text(html: &str) -> Option<String> {
     let mut parts = BodyParts::default();
     collect(&html_to_spans(html), &mut parts);
     collapse(&parts.text)
+}
+
+pub fn is_event_preview(text: &str) -> bool {
+    EVENT_PREVIEWS.contains(&text)
 }
 
 /// The chat list line for a message, with the Teams labels for bodies without text.
@@ -159,6 +171,21 @@ fn system_event_preview(detail: &Value) -> Option<&'static str> {
     }
 }
 
+fn call_phase_preview(phase: CallPhase) -> Option<&'static str> {
+    match phase {
+        CallPhase::RecordingStarted => Some(RECORDING_STARTED_PREVIEW),
+        CallPhase::RecordingStopped => Some(RECORDING_STOPPED_PREVIEW),
+        CallPhase::RecordingSaved => Some(RECORDING_READY_PREVIEW),
+        CallPhase::TranscriptStarted => Some(TRANSCRIPT_PREVIEW),
+        CallPhase::Started | CallPhase::Ended => None,
+    }
+}
+
+/// Teams leaves call start and end out of the chat list line; recordings and transcripts stay in it.
+pub(crate) fn keeps_previous_line(record: &MessageRecord) -> bool {
+    call_event(record).is_some_and(|event| event.phase.is_call())
+}
+
 fn added_only_self(detail: &Value) -> bool {
     let Some(initiator) = detail.pointer("/initiator/user/id").and_then(Value::as_str) else {
         return false;
@@ -191,7 +218,9 @@ impl OwnedPreview {
             .is_none_or(|kind| kind == "message");
         let deleted = message.is_deleted();
         let detail = message.event_detail.as_ref().filter(|_| !regular);
-        let call = detail.and_then(CallEvent::from_graph).is_some();
+        let call = detail
+            .and_then(CallEvent::from_graph)
+            .is_some_and(|event| event.phase.is_call());
         let text = if deleted {
             None
         } else if regular {
@@ -219,17 +248,22 @@ impl OwnedPreview {
     }
 
     pub(crate) fn from_record(record: &MessageRecord) -> Self {
+        let event = call_event(record);
+        let text = if record.deleted {
+            None
+        } else if let Some(event) = &event {
+            call_phase_preview(event.phase).map(str::to_owned)
+        } else {
+            message_preview(&record.body_html, &attachments(record))
+        };
+        let sender = event.is_none();
         OwnedPreview {
-            text: if record.deleted {
-                None
-            } else {
-                message_preview(&record.body_html, &attachments(record))
-            },
-            sender_id: record.sender_id.clone(),
-            sender_name: record.sender_name.clone(),
+            text,
+            sender_id: record.sender_id.clone().filter(|_| sender),
+            sender_name: record.sender_name.clone().filter(|_| sender),
             deleted: record.deleted,
-            system: false,
-            call: record.call_event_json.is_some(),
+            system: event.is_some(),
+            call: event.is_some_and(|event| event.phase.is_call()),
         }
     }
 
@@ -383,6 +417,8 @@ mod tests {
         };
         let ready = event(serde_json::json!({
             "@odata.type": RECORDING_TYPE,
+            "callId": "a64b5e71",
+            "callRecordingDisplayName": "Call with Echo-20261015_120906-Meeting Recording.mp4",
             "callRecordingStatus": "success",
         }));
         assert_eq!(ready.text.as_deref(), Some(RECORDING_READY_PREVIEW));
@@ -459,5 +495,42 @@ mod tests {
         })));
         assert_eq!(preview.text.as_deref(), Some(IMAGE_PREVIEW));
         assert_eq!(preview.sender_name.as_deref(), Some("Lukas Berg"));
+    }
+
+    fn call_record(phase: &str) -> MessageRecord {
+        MessageRecord {
+            conversation_id: "19:chat".into(),
+            message_id: "1".into(),
+            sender_id: Some("u1".into()),
+            sender_name: Some("Ada Lovelace".into()),
+            call_event_json: Some(
+                serde_json::json!({
+                    "phase": phase,
+                    "call_type": "Call",
+                    "call_id": "c1",
+                    "duration_seconds": null,
+                    "initiator_id": null,
+                    "initiator_name": null,
+                    "participant_ids": [],
+                })
+                .to_string(),
+            ),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn stored_recordings_fill_the_line_and_calls_keep_the_previous_one() {
+        let saved = call_record("RecordingSaved");
+        assert!(!keeps_previous_line(&saved));
+        let preview = OwnedPreview::from_record(&saved);
+        assert_eq!(preview.text.as_deref(), Some(RECORDING_READY_PREVIEW));
+        assert_eq!(preview.sender_name, None);
+        assert!(!preview.call);
+        let transcript = OwnedPreview::from_record(&call_record("TranscriptStarted"));
+        assert_eq!(transcript.text.as_deref(), Some(TRANSCRIPT_PREVIEW));
+        let ended = call_record("Ended");
+        assert!(keeps_previous_line(&ended));
+        assert!(OwnedPreview::from_record(&ended).call);
     }
 }

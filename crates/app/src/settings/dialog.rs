@@ -16,7 +16,7 @@ use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::icon;
 
 const BACKDROP_OPACITY: f32 = 0.55;
-const PANEL_RADIUS: f32 = 10.;
+pub(super) const PANEL_RADIUS: f32 = 10.;
 const CONTENT_MAX_WIDTH: f32 = 744.;
 const CLOSE_SIZE: f32 = 32.;
 const COMPACT_BELOW_WIDTH: f32 = 1100.;

@@ -64,6 +64,35 @@ fn chat_with_only_me_stays_a_note_to_self_without_another_sender() {
 }
 
 #[test]
+fn memberless_partner_comes_from_the_one_on_one_chat_id() {
+    let chat = |id: &str, kind: &str, members: Value| -> Chat {
+        serde_json::from_value(serde_json::json!({"id": id, "chatType": kind, "members": members}))
+            .unwrap()
+    };
+    let only_me = serde_json::json!([{"userId": "user-me"}]);
+    let echo = chat(
+        "19:user-me_bot-echo@unq.gbl.spaces",
+        "oneOnOne",
+        only_me.clone(),
+    );
+    assert_eq!(echo.memberless_partner_id("user-me"), Some("bot-echo"));
+    let reversed = chat(
+        "19:bot-echo_user-me@unq.gbl.spaces",
+        "oneOnOne",
+        only_me.clone(),
+    );
+    assert_eq!(reversed.memberless_partner_id("user-me"), Some("bot-echo"));
+    let with_member = chat(
+        "19:user-me_user-ada@unq.gbl.spaces",
+        "oneOnOne",
+        serde_json::json!([{"userId": "user-me"}, {"userId": "user-ada"}]),
+    );
+    assert_eq!(with_member.memberless_partner_id("user-me"), None);
+    let group = chat("19:abc@thread.v2", "group", only_me);
+    assert_eq!(group.memberless_partner_id("user-me"), None);
+}
+
+#[test]
 fn chat_last_message_time_comes_from_preview() {
     let chats: Vec<Chat> = items("chats.json");
     assert_eq!(

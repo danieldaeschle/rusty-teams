@@ -10,7 +10,7 @@ use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::{Error, Result};
 use crate::external_image::external_image_url;
 use crate::links::LinkPreview;
-use crate::mapping::{chat_record, message_record};
+use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
 use crate::remote::Remote;
@@ -617,7 +617,8 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn store_new_chat(&self, chat: &graph::Chat, my_user_id: &str) -> Result<String> {
-        self.store.upsert_chats(&[chat_record(chat, my_user_id)])?;
+        self.store
+            .upsert_chats(&[self.partner_chat_record(chat, my_user_id)])?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(chat.id.clone())
     }
