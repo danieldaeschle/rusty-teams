@@ -11,6 +11,8 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
+use super::scroll_edge::with_top_edge;
+use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
@@ -456,7 +458,7 @@ pub fn calls_body(
         .flex_1()
         .min_h_0()
         .child(join_buttons(state, app.meet_now_pending))
-        .child(
+        .child(with_top_edge(
             div()
                 .id("calls-scroll")
                 .flex_1()
@@ -464,6 +466,8 @@ pub fn calls_body(
                 .overflow_y_scroll()
                 .track_scroll(scroll)
                 .child(list),
-        )
+            scroll,
+            SIDEBAR_SCROLL_DIVIDER,
+        ))
         .into_any_element()
 }

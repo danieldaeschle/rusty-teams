@@ -36,7 +36,7 @@ use super::avatar::{
     bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
-use super::channel_tabs::ChannelPane;
+use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
@@ -47,8 +47,10 @@ use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
 use super::profile_card::opens_profile;
 use super::reaction_picker::{PickHandler, ReactionPicker};
 use super::reaction_pills::{ReactionControls, ReactionPopover};
+use super::scroll_edge::edge_divider;
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_title};
 use crate::backend::Engine;
@@ -87,6 +89,13 @@ use render_env::RenderEnv;
 use shared::SharedState;
 
 pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
+pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
+const HEADER_HEIGHT: f32 = 60.;
+const HEADER_PADDING: f32 = 20.;
+const HEADER_GAP: f32 = 12.;
+const HEADER_LEAD_SIZE: f32 = 36.;
+const TABS_INLINE_MIN_WIDTH: f32 = 560.;
+const TABS_ROW_HEIGHT: f32 = 36.;
 const CHAT_OPEN_LIMIT: usize = 60;
 const CHANNEL_OPEN_LIMIT: usize = 300;
 const GROWTH_HEADROOM: usize = 20;
@@ -194,6 +203,7 @@ pub struct ConversationView {
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
     timeline_bounds: TimelineBounds,
+    header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
     toolbar_suppressed: Option<String>,
     recent: Entity<emoji::Recent>,
@@ -522,6 +532,7 @@ impl ConversationView {
             hovered_message: None,
             toolbar_hovered: None,
             timeline_bounds: TimelineBounds::default(),
+            header_width: Rc::default(),
             toolbar_pinned: None,
             toolbar_suppressed: None,
             recent,
@@ -3226,7 +3237,28 @@ impl ConversationView {
         )
     }
 
-    fn render_header(&self, current: &Current, cx: &mut Context<Self>) -> impl IntoElement {
+    fn header_width(&self, window: &Window) -> f32 {
+        match self.header_width.get() {
+            width if width > 0. => width,
+            _ => {
+                f32::from(window.viewport_size().width)
+                    - RAIL_WIDTH
+                    - SIDEBAR_WIDTH
+                    - 2. * ISLAND_GAP
+            }
+        }
+    }
+
+    fn tabs_below_title(&self, window: &Window) -> bool {
+        self.header_width(window) < TABS_INLINE_MIN_WIDTH
+    }
+
+    fn render_header(
+        &self,
+        current: &Current,
+        tabs: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let app = self.app.read(cx);
         let directory = &app.directory;
         let me = directory.me.as_ref();
@@ -3294,10 +3326,10 @@ impl ConversationView {
         }
         let mut header = h_flex()
             .w_full()
-            .h(px(60.))
+            .h(px(HEADER_HEIGHT))
             .flex_none()
-            .px(px(20.))
-            .gap(px(12.))
+            .px(px(HEADER_PADDING))
+            .gap(px(HEADER_GAP))
             .items_center();
         if matches!(current.mode, ViewMode::Thread(_)) {
             header = header.child(
@@ -3349,15 +3381,20 @@ impl ConversationView {
             }
             .to_owned();
         }
+        let inline_tabs = tabs.map(|tabs| h_flex().h_full().flex_1().child(tabs));
         header
             .relative()
+            .child(record_width(&self.header_width))
             .when(sync.shown_at.is_some() || loading_window, |header| {
                 header.child(progress_bar())
             })
             .children(lead)
             .child(
                 v_flex()
-                    .flex_1()
+                    .map(|column| match inline_tabs {
+                        Some(_) => column.flex_shrink(1.).max_w(px(HEADER_TITLE_MAX_WIDTH)),
+                        None => column.flex_1(),
+                    })
                     .min_w_0()
                     .overflow_hidden()
                     .gap(px(1.))
@@ -3378,6 +3415,7 @@ impl ConversationView {
                         )
                     }),
             )
+            .children(inline_tabs)
             .children(stack)
             .children(call_controls)
     }
@@ -3533,13 +3571,27 @@ impl Render for ConversationView {
         .with_top_inset(pin_banner_inset(pin_banner.is_some()));
 
         root = match self.current.as_ref().filter(|_| !drafting) {
-            Some(current) => root.child(self.render_header(current, cx)),
+            Some(current) => {
+                let tab_bar = self
+                    .render_tab_bar(window, cx)
+                    .or_else(|| self.render_meeting_tab_bar(cx));
+                let (inline_tabs, tabs_row) = match tab_bar {
+                    Some(tabs) if self.tabs_below_title(window) => (None, Some(tabs)),
+                    tabs => (tabs, None),
+                };
+                root.child(self.render_header(current, inline_tabs, cx))
+                    .children(tabs_row.map(|tabs| {
+                        h_flex()
+                            .w_full()
+                            .h(px(TABS_ROW_HEIGHT))
+                            .flex_none()
+                            .px(px(HEADER_PADDING))
+                            .child(tabs)
+                    }))
+                    .child(edge_divider(HEADER_DIVIDER))
+            }
             None => root.child(self.draft.clone()),
         };
-        let tab_bar = self
-            .render_tab_bar(window, cx)
-            .or_else(|| self.render_meeting_tab_bar(cx));
-        root = root.children(tab_bar.filter(|_| !drafting));
         let sync_failed = self
             .current
             .as_ref()
@@ -3655,6 +3707,23 @@ fn typing_dots() -> impl IntoElement {
                     },
                 )
         }))
+}
+
+fn record_width(width: &Rc<Cell<f32>>) -> impl IntoElement {
+    let width = width.clone();
+    canvas(
+        move |bounds, window, _| {
+            let measured = f32::from(bounds.size.width);
+            if (measured - width.replace(measured)).abs() > 0.5 {
+                window.request_animation_frame();
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 fn progress_bar() -> impl IntoElement {

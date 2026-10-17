@@ -18,13 +18,13 @@ use crate::notice::short_error;
 use crate::runtime;
 use crate::views::attachment_tray::{display_name, read_attachment};
 use crate::views::channel_tabs::{
-    ChannelPane, TabAction, TabBarActions, fallback_tab_link, render_tab_bar, tab_action,
+    ChannelPane, TabAction, TabBarActions, fallback_tab_link, header_title_width, render_tab_bar,
+    tab_action,
 };
 use crate::views::shared_tab::{
     LibraryView, Listing, MessagesView, SharedCommand, SharedRun, SharedScope, render_library,
     render_messages,
 };
-use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 
 const LIBRARY_KEY: &str = "library";
 const NEW_FOLDER_PLACEHOLDER: &str = "Folder name";
@@ -98,8 +98,16 @@ impl ConversationView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.channel_id().filter(|_| self.in_feed())?;
-        let available =
-            f32::from(window.viewport_size().width) - RAIL_WIDTH - SIDEBAR_WIDTH - 2. * ISLAND_GAP;
+        let title = self
+            .current
+            .as_ref()
+            .map_or("", |current| current.title.as_str());
+        let row = self.header_width(window) - 2. * super::HEADER_PADDING;
+        let available = if self.tabs_below_title(window) {
+            row
+        } else {
+            row - super::HEADER_LEAD_SIZE - 2. * super::HEADER_GAP - header_title_width(title)
+        };
         let view = cx.weak_entity();
         let select = Rc::new(move |pane, cx: &mut App| {
             view.update(cx, |this, cx| this.select_pane(pane, cx)).ok();

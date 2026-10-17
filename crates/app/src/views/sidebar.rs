@@ -19,6 +19,7 @@ use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
+use super::scroll_edge::with_top_edge;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
@@ -37,6 +38,7 @@ use crate::sidebar_model::{
 use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
 
+pub const SIDEBAR_SCROLL_DIVIDER: &str = "shell/islands/sidebar/divider-scroll";
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
 const ROW_HEIGHT: f32 = 54.;
 const PROPOSAL_DOT_SIZE: f32 = 8.;
@@ -1181,14 +1183,14 @@ impl SidebarView {
         }
         list = with_spacer(list, &mut skipped_height);
         self.request_lazy_data(faces, presence_users, cx);
-        div()
+        let scroll_area = div()
             .id("chats-scroll")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.chats_scroll)
-            .child(list)
-            .into_any_element()
+            .child(list);
+        with_top_edge(scroll_area, &self.chats_scroll, SIDEBAR_SCROLL_DIVIDER).into_any_element()
     }
 
     fn request_lazy_data(
@@ -1583,14 +1585,14 @@ impl SidebarView {
                 }
             }
         }
-        div()
+        let scroll_area = div()
             .id("channels-scroll")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.channels_scroll)
-            .child(list)
-            .into_any_element()
+            .child(list);
+        with_top_edge(scroll_area, &self.channels_scroll, SIDEBAR_SCROLL_DIVIDER).into_any_element()
     }
 }
 

@@ -5,6 +5,8 @@ use gpui_kit::*;
 use teams_core::SavedMessage;
 
 use super::avatar::person_avatar;
+use super::scroll_edge::with_top_edge;
+use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::icon;
 use crate::app_state::{AppState, selection_for, selection_title};
 use crate::format;
@@ -219,7 +221,7 @@ impl Render for SavedPanel {
             .flex_1()
             .min_h_0()
             .child(self.header(items.len()))
-            .child(
+            .child(with_top_edge(
                 v_flex()
                     .id("saved-list")
                     .flex_1()
@@ -228,7 +230,9 @@ impl Render for SavedPanel {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .children(rows),
-            )
+                &self.scroll,
+                SIDEBAR_SCROLL_DIVIDER,
+            ))
     }
 }
 

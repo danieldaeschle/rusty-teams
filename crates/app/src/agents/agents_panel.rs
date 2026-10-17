@@ -6,8 +6,10 @@ use gpui_kit::*;
 use super::runs::{AgentRun, AgentRuns, RunState};
 use super::spinner::spinner;
 use crate::theme;
+use crate::views::scroll_edge::with_top_edge;
 use crate::views::widgets::icon;
 
+const AGENTS_SCROLL_DIVIDER: &str = "shell/islands/sidebar/agents/divider-scroll";
 const DONE_LIMIT: usize = 50;
 const HISTORY_WINDOW: usize = 60;
 const EMPTY_TEXT: &str = "No agent runs yet. Hover a message and click the robot button.";
@@ -139,7 +141,7 @@ impl Render for AgentsPanel {
             finished.into_iter().cloned().collect(),
         );
         let empty = running.is_empty() && finished.is_empty();
-        v_flex()
+        let list = v_flex()
             .id("agents-list")
             .debug_selector(|| "shell/islands/sidebar/agents".into())
             .flex_1()
@@ -167,7 +169,8 @@ impl Render for AgentsPanel {
                         .text_color(theme::text_muted())
                         .child(EMPTY_TEXT),
                 )
-            })
+            });
+        with_top_edge(list, &self.scroll, AGENTS_SCROLL_DIVIDER)
     }
 }
 

@@ -177,7 +177,7 @@ mod frames {
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
     use crate::views::composer::{COMPOSER_BOX_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG};
-    use crate::views::conversation::MEMBERS_BUTTON;
+    use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON};
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -188,6 +188,7 @@ mod frames {
     use crate::views::shortcuts::{
         OpenActivity, OpenAgents, OpenCallsTab, OpenChannelsTab, OpenSaved,
     };
+    use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -270,6 +271,9 @@ mod frames {
     const SETTINGS_CONTENT: &str = "settings/main/body/content";
     const MEMBERS_TAGS: &[&str] = &["chat-members-popup", "chat-members-popup/divider"];
     const MEMBERS_CHAT: &str = "demo-chat-release";
+    const SIDEBAR: &str = "shell/islands/sidebar";
+    const MAIN: &str = "shell/islands/main";
+    const EDGE_DIVIDERS: &[&str] = &[SIDEBAR_SCROLL_DIVIDER, HEADER_DIVIDER];
     const DIVIDER_SEGMENT: &str = "divider";
     const DIVIDER_THICKNESS: f32 = 1.;
     const INSET_TOLERANCE: f32 = 1.;
@@ -558,6 +562,7 @@ mod frames {
             .chain(&AGENT_TAGS)
             .chain(SETTINGS_TAGS)
             .chain(MEMBERS_TAGS)
+            .chain(EDGE_DIVIDERS)
             .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
             .collect()
     }
@@ -1031,7 +1036,9 @@ mod frames {
             assert!(!bubbles.is_empty(), "no bubbles rendered in the call chat");
             let found: Vec<String> = bubbles
                 .into_iter()
-                .filter(|(_, bounds)| !contains(panel, *bounds))
+                .filter(|(_, bounds)| {
+                    !inside_horizontally(panel, *bounds) || !overlaps(panel, *bounds)
+                })
                 .map(|(index, bounds)| {
                     format!(
                         "call-chat@{width}x{height}: bubble {index} {} leaves the chat panel {}",
@@ -1046,6 +1053,100 @@ mod frames {
                     cx.notify();
                 })
             });
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    fn inside_horizontally(outer: Bounds<Pixels>, inner: Bounds<Pixels>) -> bool {
+        let tolerance = px(TOLERANCE);
+        inner.left() >= outer.left() - tolerance && inner.right() <= outer.right() + tolerance
+    }
+
+    fn scroll_sidebar(visual: &mut VisualTestContext, delta: f32) {
+        let sidebar = visual.debug_bounds(SIDEBAR).expect("sidebar rendered");
+        visual.simulate_event(ScrollWheelEvent {
+            position: sidebar.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
+            ..Default::default()
+        });
+    }
+
+    #[gpui_kit::test]
+    fn chat_list_line_shows_only_while_scrolled(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            collect(&mut visual, None);
+            scroll_sidebar(&mut visual, 100_000.);
+            let tags = collect(&mut visual, None);
+            assert!(
+                visual.debug_bounds(SIDEBAR_SCROLL_DIVIDER).is_none(),
+                "chat list at its top must not show the line at {width}x{height}"
+            );
+            scroll_sidebar(&mut visual, -120.);
+            let scrolled = collect(&mut visual, Some(SIDEBAR_SCROLL_DIVIDER));
+            let sidebar = visual.debug_bounds(SIDEBAR).expect("sidebar rendered");
+            let line = visual
+                .debug_bounds(SIDEBAR_SCROLL_DIVIDER)
+                .expect("scrolled chat list shows the line");
+            assert!(
+                line.top() > sidebar.top() + px(TOLERANCE),
+                "the line sits under the Chats header, not on the island edge: {} in {}",
+                describe(line),
+                describe(sidebar)
+            );
+            let found: Vec<String> = violations(&scrolled, window, &[SIDEBAR_SCROLL_DIVIDER])
+                .into_iter()
+                .chain(violations(&tags, window, &[]))
+                .map(|(key, message)| format!("chat-list@{width}x{height}:{key}: {message}"))
+                .collect();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+            scroll_sidebar(&mut visual, 100_000.);
+            collect(&mut visual, None);
+            assert!(
+                visual.debug_bounds(SIDEBAR_SCROLL_DIVIDER).is_none(),
+                "the line goes away once the chat list is back at its top"
+            );
+        }
+    }
+
+    #[gpui_kit::test]
+    fn header_tabs_sit_above_the_header_line(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.select(Selection::Chat(RECAP_MEETING_CHAT.to_owned()), cx)
+                })
+            });
+            let tags = collect(&mut visual, Some(RECAP_TAB));
+            let main = visual.debug_bounds(MAIN).expect("main island rendered");
+            let tab = visual.debug_bounds(RECAP_TAB).expect("recap tab rendered");
+            let line = visual
+                .debug_bounds(HEADER_DIVIDER)
+                .expect("the header line is always shown");
+            let near = |first: Pixels, second: Pixels| f32::from(first - second).abs() <= TOLERANCE;
+            assert!(
+                tab.top() >= main.top() && near(tab.bottom(), line.top()),
+                "tab {} must sit in the top bar above the line {}",
+                describe(tab),
+                describe(line)
+            );
+            let found: Vec<String> = violations(&tags, window, &[HEADER_DIVIDER, RECAP_TAB])
+                .into_iter()
+                .map(|(key, message)| format!("header@{width}x{height}:{key}: {message}"))
+                .collect();
             assert!(found.is_empty(), "{}", found.join("\n"));
         }
     }

@@ -8,6 +8,8 @@ use gpui_kit::*;
 use store::Sidebar;
 
 use super::avatar::person_avatar;
+use super::scroll_edge::with_top_edge;
+use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{Corner, corner_badge, dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
 use crate::app_state::{AppState, chat_title};
@@ -433,16 +435,19 @@ impl Render for ActivityPanel {
                     .into_any_element(),
             );
         }
-        v_flex().flex_1().min_h_0().child(self.header(cx)).child(
-            v_flex()
-                .id("activity-list")
-                .flex_1()
-                .min_h_0()
-                .pb(px(12.))
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .children(rows),
-        )
+        let list = v_flex()
+            .id("activity-list")
+            .flex_1()
+            .min_h_0()
+            .pb(px(12.))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
+            .children(rows);
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .child(self.header(cx))
+            .child(with_top_edge(list, &self.scroll, SIDEBAR_SCROLL_DIVIDER))
     }
 }
 

@@ -13,8 +13,10 @@ use crate::app_state::AppState;
 use crate::notify::NotificationCenter;
 use crate::settings_section::SettingsSection;
 use crate::theme::{self, ElevatedSurface as _};
+use crate::views::scroll_edge::with_top_edge;
 use crate::views::widgets::icon;
 
+pub const BODY_SCROLL_DIVIDER: &str = "settings/main/body/divider-scroll";
 const BACKDROP_OPACITY: f32 = 0.55;
 pub(super) const PANEL_RADIUS: f32 = 10.;
 const CONTENT_MAX_WIDTH: f32 = 744.;
@@ -59,6 +61,7 @@ pub struct SettingsDialog {
     devices: Option<Entity<DevicesView>>,
     mcp: Option<Entity<McpView>>,
     agents: Option<Entity<AgentsSettings>>,
+    body_scroll: ScrollHandle,
     focus_handle: FocusHandle,
     _subscriptions: [Subscription; 2],
 }
@@ -86,6 +89,7 @@ impl SettingsDialog {
             devices: None,
             mcp: None,
             agents: None,
+            body_scroll: ScrollHandle::new(),
             focus_handle,
             _subscriptions: subscriptions,
         };
@@ -95,6 +99,9 @@ impl SettingsDialog {
 
     pub fn show(&mut self, section: SettingsSection, window: &mut Window, cx: &mut Context<Self>) {
         let section = available(section, crate::agents::runs_handle(cx).is_some());
+        if section != self.section {
+            self.body_scroll = ScrollHandle::new();
+        }
         self.section = section;
         if section == SettingsSection::Devices {
             if self.devices.is_none() {
@@ -219,6 +226,7 @@ impl Render for SettingsDialog {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.body_scroll)
             .px(px(body_inset.max(0.)))
             .pb(px(metrics.padding))
             .child(
@@ -269,7 +277,7 @@ impl Render for SettingsDialog {
                             .min_w_0()
                             .h_full()
                             .child(self.header(metrics, cx))
-                            .child(body),
+                            .child(with_top_edge(body, &self.body_scroll, BODY_SCROLL_DIVIDER)),
                     ),
             )
     }

@@ -8,11 +8,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::call_view::side_panel;
+use super::scroll_edge::with_top_edge;
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::clock_label;
 use crate::theme;
 
+const TRANSCRIPT_SCROLL_DIVIDER: &str = "shell/islands/main/call-transcript/divider-scroll";
 const SEARCH_HEIGHT: f32 = 34.;
 const AT_BOTTOM_SLACK: f32 = 4.;
 const EMPTY_TEXT: &str = "Nothing said yet. Spoken words appear here.";
@@ -179,11 +181,7 @@ impl Render for TranscriptPanel {
             .gap(px(8.))
             .child(search)
             .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .child(list)
+                with_top_edge(list, &self.scroll, TRANSCRIPT_SCROLL_DIVIDER)
                     .when(!self.following, |area| area.child(self.jump_chip(cx))),
             );
         side_panel(

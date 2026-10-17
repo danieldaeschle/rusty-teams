@@ -12,16 +12,16 @@ use teams_core::channel_tab_link;
 
 use app_base::theme;
 
-const BAR_HEIGHT: f32 = 36.;
-const TAB_HEIGHT: f32 = 28.;
 const TAB_GAP: f32 = 4.;
-const TAB_PADDING: f32 = 12.;
-const TAB_TEXT_SIZE: f32 = 12.5;
-const BAR_PADDING: f32 = 20.;
-const CHAR_WIDTH: f32 = 6.5;
+const TAB_PADDING: f32 = 10.;
+const TAB_TEXT_SIZE: f32 = 14.;
+const INDICATOR_HEIGHT: f32 = 3.;
+const CHAR_WIDTH: f32 = 7.5;
 const ARROW_WIDTH: f32 = 14.;
 const OVERFLOW_WIDTH: f32 = 44.;
 const EXTERNAL_ARROW: &str = "\u{2197}";
+const TITLE_CHAR_WIDTH: f32 = 8.;
+pub const HEADER_TITLE_MAX_WIDTH: f32 = 240.;
 
 pub const POSTS_LABEL: &str = "Posts";
 pub const SHARED_LABEL: &str = "Shared";
@@ -68,6 +68,10 @@ fn label_width(label: &str, external: bool) -> f32 {
         + if external { ARROW_WIDTH } else { 0. }
 }
 
+pub fn header_title_width(title: &str) -> f32 {
+    (title.chars().count() as f32 * TITLE_CHAR_WIDTH).min(HEADER_TITLE_MAX_WIDTH)
+}
+
 pub fn visible_tab_count(tabs: &[ChannelTabRecord], available_width: f32) -> usize {
     let fixed = label_width(POSTS_LABEL, false) + TAB_GAP + label_width(SHARED_LABEL, false);
     let widths: Vec<f32> = tabs
@@ -102,14 +106,13 @@ fn tab_label(
     };
     h_flex()
         .id(id)
-        .h(px(TAB_HEIGHT))
+        .relative()
+        .h_full()
         .flex_none()
         .items_center()
         .gap(px(4.))
         .px(px(TAB_PADDING))
-        .rounded(px(7.))
         .cursor_pointer()
-        .when(active, |tab| tab.bg(theme::surface_raised()))
         .text_size(px(TAB_TEXT_SIZE))
         .font_weight(if active {
             FontWeight::SEMIBOLD
@@ -123,6 +126,22 @@ fn tab_label(
         .when(external, |tab| {
             tab.child(div().text_color(theme::text_faint()).child(EXTERNAL_ARROW))
         })
+        .when(active, |tab| tab.child(indicator()))
+}
+
+fn indicator() -> Div {
+    div()
+        .absolute()
+        .bottom_0()
+        .left(px(TAB_PADDING))
+        .right(px(TAB_PADDING))
+        .h(px(INDICATOR_HEIGHT))
+        .rounded_full()
+        .bg(theme::accent())
+}
+
+fn header_tab_row() -> Div {
+    h_flex().h_full().gap(px(TAB_GAP)).items_center()
 }
 
 fn overflow_button(hidden: &[(usize, String)], actions: &TabBarActions) -> impl IntoElement {
@@ -149,7 +168,7 @@ pub fn render_tab_bar(
     available_width: f32,
     actions: &TabBarActions,
 ) -> AnyElement {
-    let visible = visible_tab_count(tabs, available_width - 2. * BAR_PADDING);
+    let visible = visible_tab_count(tabs, available_width);
     let select = actions.select.clone();
     let posts = tab_label(
         "channel-tab-posts".into(),
@@ -184,13 +203,7 @@ pub fn render_tab_bar(
         .skip(visible)
         .map(|(index, tab)| (index, tab.name.clone()))
         .collect();
-    h_flex()
-        .w_full()
-        .h(px(BAR_HEIGHT))
-        .flex_none()
-        .px(px(BAR_PADDING))
-        .gap(px(TAB_GAP))
-        .items_center()
+    header_tab_row()
         .child(posts)
         .child(shared)
         .children(configured)
@@ -219,23 +232,17 @@ pub fn render_meeting_bar(pane: ChannelPane, select: SelectPane) -> AnyElement {
         move |_, cx| select(ChannelPane::Recap, cx),
     )
     .debug_selector(|| "shell/islands/main/recap-tab".into());
-    h_flex()
-        .w_full()
-        .h(px(BAR_HEIGHT))
-        .flex_none()
-        .px(px(BAR_PADDING))
-        .gap(px(TAB_GAP))
-        .items_center()
-        .child(chat)
-        .child(recap)
-        .into_any_element()
+    header_tab_row().child(chat).child(recap).into_any_element()
 }
 
 #[cfg(test)]
 mod tests {
     use store::ChannelTabRecord;
 
-    use super::{TabAction, fallback_tab_link, tab_action, visible_tab_count};
+    use super::{
+        HEADER_TITLE_MAX_WIDTH, TabAction, fallback_tab_link, header_title_width, tab_action,
+        visible_tab_count,
+    };
 
     fn tab(name: &str, open_url: Option<&str>) -> ChannelTabRecord {
         ChannelTabRecord {
@@ -286,6 +293,12 @@ mod tests {
             fallback_tab_link(&tab("Board", None), "19:c@thread.tacv2"),
             "https://teams.microsoft.com/l/channel/19:c@thread.tacv2/tab%3A%3Atab-1?label=Board"
         );
+    }
+
+    #[test]
+    fn long_header_titles_are_capped() {
+        assert_eq!(header_title_width("General"), 56.);
+        assert_eq!(header_title_width(&"x".repeat(80)), HEADER_TITLE_MAX_WIDTH);
     }
 
     #[test]
