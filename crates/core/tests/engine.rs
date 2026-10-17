@@ -134,6 +134,7 @@ struct Fake {
     window_answer: Mutex<Option<chatsvc::MessageWindow>>,
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
     search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
+    member_requests: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -254,7 +255,11 @@ impl Remote for Handle {
         })
     }
 
-    async fn chat_members(&self, _chat_id: &str) -> Result<Vec<Member>> {
+    async fn chat_members(&self, chat_id: &str) -> Result<Vec<Member>> {
+        self.member_requests
+            .lock()
+            .unwrap()
+            .push(chat_id.to_owned());
         Ok(vec![
             serde_json::from_value(
                 json!({"userId": ME, "tenantId": "tenant-1", "displayName": "Me Myself"}),
@@ -4988,4 +4993,114 @@ async fn the_background_heal_reads_the_newest_chat_first_and_skips_healthy_chats
         }
     }
     assert_eq!(changed, [CHAT, OLDER]);
+}
+
+fn own_note(id: u32, minute: i64, body: &str) -> Message {
+    serde_json::from_value(json!({
+        "id": format!("m{id:04}"),
+        "messageType": "message",
+        "createdDateTime": (base() + Duration::minutes(minute)).to_rfc3339(),
+        "from": {"user": {"id": ME, "displayName": "Me Myself"}},
+        "body": {"contentType": "html", "content": body},
+    }))
+    .unwrap()
+}
+
+fn list_notes_chat(fake: &Fake, last_minute: i64) {
+    let last_message_ms = (base() + Duration::minutes(last_minute)).timestamp_millis();
+    *fake.read_states.lock().unwrap() = vec![(
+        NOTES_CHAT_ID.to_owned(),
+        chatsvc::ReadHorizon {
+            consumed_until_ms: last_message_ms,
+            last_message_ms,
+            last_message_from: Some(format!("8:orgid:{ME}")),
+            ..chatsvc::ReadHorizon::default()
+        },
+    )];
+}
+
+#[tokio::test]
+async fn the_notes_chat_comes_from_chatsvc_with_its_newest_message_sorted_by_time() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![
+        chat("19:old@thread.v2", Some("Old"), 5, 5, "user-ada", false),
+        chat("19:new@thread.v2", Some("New"), 50, 50, "user-ada", false),
+    ];
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![
+        own_note(1, 10, "<p>first</p>"),
+        own_note(2, 20, "<p>plan</p>"),
+    ]);
+    let engine = engine_with(&fake, small_pages());
+
+    engine.refresh_sidebar().await.unwrap();
+
+    let sidebar = engine.sidebar().unwrap();
+    let order: Vec<&str> = sidebar.chats.iter().map(|chat| chat.id.as_str()).collect();
+    assert_eq!(
+        order,
+        ["19:new@thread.v2", NOTES_CHAT_ID, "19:old@thread.v2"]
+    );
+    let notes = &sidebar.chats[1];
+    assert_eq!(notes.title, "Me Myself (You)");
+    assert_eq!(notes.kind, "oneOnOne");
+    assert_eq!(notes.last_message_preview.as_deref(), Some("plan"));
+    assert_eq!(notes.last_message_sender_id.as_deref(), Some(ME));
+    assert!(!notes.unread);
+    assert_eq!(notes.members.len(), 1);
+    assert_eq!(notes.members[0].user_id.as_deref(), Some(ME));
+    assert_eq!(engine.open_conversation(NOTES_CHAT_ID).unwrap().len(), 2);
+    assert_eq!(*fake.single_chat_calls.lock().unwrap(), 0);
+
+    let message_reads = *fake.chat_calls.lock().unwrap();
+    engine.refresh_sidebar_full().await.unwrap();
+    let notes = engine.store().chat(NOTES_CHAT_ID).unwrap().unwrap();
+    assert_eq!(notes.last_message_preview.as_deref(), Some("plan"));
+    assert_eq!(*fake.chat_calls.lock().unwrap(), message_reads);
+}
+
+#[tokio::test]
+async fn a_new_note_refreshes_the_line_and_an_unlisted_notes_chat_leaves_the_sidebar() {
+    let fake = Arc::new(Fake::default());
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    list_notes_chat(&fake, 30);
+    fake.set_chat_messages(vec![
+        own_note(1, 20, "<p>plan</p>"),
+        own_note(2, 30, "<p>later</p>"),
+    ]);
+    engine.refresh_sidebar().await.unwrap();
+    let notes = engine.store().chat(NOTES_CHAT_ID).unwrap().unwrap();
+    assert_eq!(notes.last_message_preview.as_deref(), Some("later"));
+
+    fake.read_states.lock().unwrap().clear();
+    engine.refresh_sidebar().await.unwrap();
+    assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    engine.mark_read(NOTES_CHAT_ID).await.unwrap();
+
+    let calls = fake.calls();
+    assert!(
+        calls.contains(&format!("mark_read {NOTES_CHAT_ID} {ME} tenant-1")),
+        "{calls:?}"
+    );
+    let member_requests = fake.member_requests.lock().unwrap();
+    assert!(
+        !member_requests
+            .iter()
+            .any(|chat_id| chat_id == NOTES_CHAT_ID)
+    );
 }

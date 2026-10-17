@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::{Image, ImageFormat};
 use store::{ChatRecord, Store, is_bot_id};
 
-use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange};
+use teams_core::{Activity, Availability, ChatSectionSettings, FolderChange, is_notes_chat};
 use tokio::sync::oneshot;
 
 use crate::backend::Engine;
@@ -343,7 +343,11 @@ impl Directory {
     pub fn move_targets(&self) -> Vec<(String, String)> {
         let favorites = self.favorites().map(|folder| {
             let name = folder.name.trim();
-            let name = if name.is_empty() { crate::sidebar_model::FAVORITES_FALLBACK_NAME } else { name };
+            let name = if name.is_empty() {
+                crate::sidebar_model::FAVORITES_FALLBACK_NAME
+            } else {
+                name
+            };
             (folder.id.clone(), name.to_owned())
         });
         favorites
@@ -432,11 +436,15 @@ pub fn is_one_on_one(chat: &ChatRecord) -> bool {
 }
 
 pub fn others(chat: &ChatRecord, me: Option<&Person>) -> Vec<(Option<String>, String)> {
+    let notes = is_notes_chat(&chat.id);
     chat.members
         .iter()
-        .filter(|member| match (&member.user_id, me) {
-            (Some(user_id), Some(me)) => *user_id != me.user_id,
-            _ => true,
+        .filter(|member| {
+            notes
+                || match (&member.user_id, me) {
+                    (Some(user_id), Some(me)) => *user_id != me.user_id,
+                    _ => true,
+                }
         })
         .map(|member| (member.user_id.clone(), member.display_name.clone()))
         .collect()

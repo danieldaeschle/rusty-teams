@@ -13,6 +13,7 @@ use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
 };
+use teams_core::is_notes_chat;
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
@@ -181,29 +182,32 @@ fn chat_menu(
     let muted = target.muted;
     let hide_state = context.state.clone();
     let hide_id = target.id.clone();
+    let notes = is_notes_chat(&target.id);
+    popup = popup.separator().item(
+        PopupMenuItem::new(if unread {
+            "Mark as read"
+        } else {
+            "Mark as unread"
+        })
+        .icon(menu_icon(if unread {
+            IconName::MailOpen
+        } else {
+            IconName::Mail
+        }))
+        .on_click(move |_, _, cx| {
+            read_state.update(cx, |state, cx| {
+                if unread {
+                    state.mark_chat_read(&read_id, cx);
+                } else {
+                    state.mark_chat_unread(&read_id, cx);
+                }
+            });
+        }),
+    );
+    if notes {
+        return popup;
+    }
     popup = popup
-        .separator()
-        .item(
-            PopupMenuItem::new(if unread {
-                "Mark as read"
-            } else {
-                "Mark as unread"
-            })
-            .icon(menu_icon(if unread {
-                IconName::MailOpen
-            } else {
-                IconName::Mail
-            }))
-            .on_click(move |_, _, cx| {
-                read_state.update(cx, |state, cx| {
-                    if unread {
-                        state.mark_chat_read(&read_id, cx);
-                    } else {
-                        state.mark_chat_unread(&read_id, cx);
-                    }
-                });
-            }),
-        )
         .item(
             PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
                 .icon(menu_icon(if muted {

@@ -328,6 +328,13 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub(crate) async fn my_tenant_id(&self, chat_id: &str) -> Result<String> {
+        if chat_id == NOTES_CHAT_ID {
+            return self.my_tenant_id_from_any_chat().await;
+        }
+        self.my_tenant_id_from(chat_id).await
+    }
+
+    async fn my_tenant_id_from(&self, chat_id: &str) -> Result<String> {
         let tenant = self
             .my_tenant_id
             .get_or_try_init(|| async {
@@ -360,10 +367,10 @@ impl<R: Remote> SyncEngine<R> {
             .sidebar()?
             .chats
             .into_iter()
-            .next()
             .map(|chat| chat.id)
+            .find(|chat_id| chat_id != NOTES_CHAT_ID)
             .ok_or(Error::Unsupported("a tenant id without a known chat"))?;
-        self.my_tenant_id(&any_chat_id).await
+        self.my_tenant_id_from(&any_chat_id).await
     }
 
     pub(crate) async fn resolve(&self, conversation_id: &str) -> Result<Conversation> {

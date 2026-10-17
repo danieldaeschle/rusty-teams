@@ -1,5 +1,6 @@
 use calling::meeting::LiveMeeting;
 use store::{ChatRecord, is_bot_id};
+use teams_core::is_notes_chat;
 
 use crate::data::{Person, is_one_on_one, others};
 
@@ -12,7 +13,9 @@ pub struct CallPlan {
 }
 
 pub fn plan_for_chat(chat: &ChatRecord, me: Option<&Person>) -> Option<CallPlan> {
-    if !is_one_on_one(chat) && !chat.kind.eq_ignore_ascii_case(GROUP_KIND) {
+    if is_notes_chat(&chat.id)
+        || (!is_one_on_one(chat) && !chat.kind.eq_ignore_ascii_case(GROUP_KIND))
+    {
         return None;
     }
     let callees: Vec<(String, String)> = others(chat, me)
@@ -103,6 +106,13 @@ mod tests {
         assert!(plan_for_chat(&alone, Some(&me())).is_none());
         let unknown_ids = chat("group", "Guests", &[(None, "Guest")]);
         assert!(plan_for_chat(&unknown_ids, Some(&me())).is_none());
+    }
+
+    #[test]
+    fn the_notes_chat_has_no_call_button() {
+        let mut notes = chat("oneOnOne", "Me (You)", &[(Some("me-id"), "Me")]);
+        notes.id = teams_core::NOTES_CHAT_ID.into();
+        assert!(plan_for_chat(&notes, Some(&me())).is_none());
     }
 
     #[test]

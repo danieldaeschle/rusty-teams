@@ -11,8 +11,9 @@ use store::{
 };
 use teams_core::{
     Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
-    LanguageSettings, LinkPreview, MentionCandidate, PersonCandidate, PersonSource, PinnedMessage,
-    SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
+    LanguageSettings, LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource,
+    PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior,
+    TranslationStatus,
 };
 
 use crate::activity::{Actor, Entry, Kind};
@@ -304,6 +305,16 @@ fn demo_chats() -> Vec<DemoChat> {
             time: at(0, 11, 20),
             unread: false,
             preview: Some(("", "", "Recording is ready")),
+            deleted: false,
+        },
+        DemoChat {
+            id: NOTES_CHAT_ID,
+            kind: "oneOnOne",
+            title: "Dana Demo (You)",
+            members: people(&[]),
+            time: at(0, 8, 20),
+            unread: false,
+            preview: Some((DEMO_USER_ID, DEMO_USER_NAME, "Release notes draft")),
             deleted: false,
         },
         DemoChat {
@@ -794,6 +805,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&unread_messages());
     let _ = store.upsert_messages(&channel_messages());
     let _ = store.upsert_messages(&priority_messages());
+    let _ = store.upsert_messages(&notes_messages());
     let _ = store.upsert_messages(&meeting_link_messages());
     let _ = store.upsert_messages(&standup_messages());
     let _ = store.upsert_messages(&call_messages());
@@ -1415,6 +1427,19 @@ fn standup_messages() -> Vec<MessageRecord> {
             false,
         ),
     ]
+}
+
+fn notes_messages() -> Vec<MessageRecord> {
+    vec![message(
+        NOTES_CHAT_ID,
+        "n1",
+        None,
+        (DEMO_USER_ID, DEMO_USER_NAME),
+        at(0, 8, 20),
+        "<p>Release notes draft</p>",
+        "[]",
+        false,
+    )]
 }
 
 fn priority_messages() -> Vec<MessageRecord> {

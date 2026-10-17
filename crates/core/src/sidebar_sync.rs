@@ -94,6 +94,10 @@ impl<R: Remote> SyncEngine<R> {
             page = self.remote.chats_at(&link).await?;
         }
         self.store.remove_chats(&hidden_ids)?;
+        kept_ids.extend(
+            self.refresh_notes_chat(states.as_deref(), &my_user_id)
+                .await,
+        );
         self.apply_channel_read_states(states.as_deref(), &my_user_id);
         self.apply_muted_chats(states);
         if full {
