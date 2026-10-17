@@ -6,6 +6,7 @@ use gpui_kit::*;
 use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar};
+use super::call_card::{CallActions, post_call_card};
 use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::message_toolbar;
 use super::message_row::{BODY_SIZE, RowActions, delivery_note, forwarded_header, has_text};
@@ -181,7 +182,7 @@ fn message_block(
     row: &MessageRow,
     index: usize,
     role: Role,
-    actions: RowActions,
+    mut actions: RowActions,
     directory: &Directory,
     cx: &App,
 ) -> Stateful<Div> {
@@ -199,7 +200,15 @@ fn message_block(
         None => person_avatar(directory, row.sender_id.as_deref(), &row.author, size),
     };
     let profile_user = row.sender_id.as_deref().filter(|_| actions.bot.is_none());
-    let content = message_content(row, index, directory, &actions, cx);
+    let content = match &row.call {
+        Some(call) => v_flex().child(post_call_card(
+            call,
+            index,
+            std::mem::replace(&mut actions.call, CallActions::none()),
+            directory,
+        )),
+        None => message_content(row, index, directory, &actions, cx),
+    };
     let saved = actions.saved;
     let RowActions {
         delivery,

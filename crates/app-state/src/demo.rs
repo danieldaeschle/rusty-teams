@@ -785,6 +785,7 @@ pub fn seed(store: &Store) {
     let _ = store.upsert_messages(&meeting_link_messages());
     let _ = store.upsert_messages(&standup_messages());
     let _ = store.upsert_messages(&call_messages());
+    let _ = store.upsert_messages(&crate::demo_meetings::meeting_messages());
     let _ = store.upsert_messages(&bot_messages());
     seed_agent_access(store);
 }
@@ -1068,6 +1069,8 @@ fn call_event(
         initiator_id: Some(initiator.0.to_owned()),
         initiator_name: Some(initiator.1.to_owned()),
         participant_ids: participant_ids.iter().map(|id| (*id).to_owned()).collect(),
+        participant_names: Vec::new(),
+        recording: None,
     }
 }
 

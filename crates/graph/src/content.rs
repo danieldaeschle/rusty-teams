@@ -7,6 +7,8 @@ use crate::people::decode_binary;
 
 const CHAT_PATH: &str = "/v1.0/chats/";
 const CHANNEL_PATH: &str = "/v1.0/teams/";
+const SHARES_PATH: &str = "/v1.0/shares/";
+const SHARES_SCOPE: &str = "Files.ReadWrite.All";
 const EXTERNAL_IMAGE_SCOPE: &str = "Chat.Read";
 
 impl Graph {
@@ -40,6 +42,8 @@ pub fn hosted_content_scope(url: &str) -> Option<Scope> {
         Some(Scope::graph("Chat.Read"))
     } else if path.starts_with(CHANNEL_PATH) {
         Some(Scope::graph("ChannelMessage.Read.All"))
+    } else if path.starts_with(SHARES_PATH) {
+        Some(Scope::graph(SHARES_SCOPE))
     } else {
         None
     }
@@ -58,6 +62,12 @@ mod tests {
         assert_eq!(
             hosted_content_scope(channel).unwrap().name,
             "ChannelMessage.Read.All"
+        );
+        let thumbnail =
+            "https://graph.microsoft.com/v1.0/shares/u!aHR0cA/driveItem/thumbnails/0/large/content";
+        assert_eq!(
+            hosted_content_scope(thumbnail).unwrap().name,
+            "Files.ReadWrite.All"
         );
         assert!(hosted_content_scope("https://graph.microsoft.com/v1.0/me").is_none());
     }
