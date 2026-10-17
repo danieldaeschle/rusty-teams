@@ -5,7 +5,8 @@ use calling::Progress;
 use chrono::{DateTime, Utc};
 use store::{ChannelNotificationLevel, ChannelNotifications};
 
-use super::ring_tone::Ringtone;
+use super::sound_settings::SoundSettings;
+use super::sounds::Ringtone;
 use crate::call::{CallKind, CallModel};
 
 pub const SOUND_THROTTLE: Duration = Duration::from_secs(10);
@@ -68,7 +69,6 @@ impl Corner {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    pub sound: bool,
     pub mentions_only: bool,
     pub preview: bool,
     pub corner: Corner,
@@ -76,13 +76,12 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub do_not_disturb: bool,
     pub mute_in_calls: bool,
-    pub ringtone: Ringtone,
+    pub sounds: SoundSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            sound: true,
             mentions_only: false,
             preview: true,
             corner: Corner::BottomRight,
@@ -90,7 +89,7 @@ impl Default for Settings {
             close_to_tray: true,
             do_not_disturb: false,
             mute_in_calls: false,
-            ringtone: Ringtone::Default,
+            sounds: SoundSettings::default(),
         }
     }
 }
@@ -143,7 +142,14 @@ pub struct Environment {
     pub chat_in_foreground: bool,
     pub system_quiet: bool,
     pub own_do_not_disturb: bool,
+    pub own_busy: bool,
     pub in_call: bool,
+}
+
+impl Environment {
+    pub fn busy(&self) -> bool {
+        self.in_call || self.own_busy
+    }
 }
 
 pub fn in_call(server_in_call: bool, native_call: Option<&CallModel>) -> bool {
@@ -214,8 +220,26 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
     }
     Decision {
         toast: true,
-        sound: settings.sound && !environment.in_call,
+        sound: settings.sounds.notification_sound
+            && (settings.sounds.sound_when_busy || !environment.busy()),
     }
+}
+
+fn busy_allows_sound(settings: &Settings, busy: bool) -> bool {
+    !busy || settings.sounds.sound_when_busy
+}
+
+pub fn ringtone_for(settings: &Settings, in_call: bool, busy: bool) -> Option<Ringtone> {
+    let audible = settings.sounds.call_and_meeting_sound && busy_allows_sound(settings, busy);
+    audible.then_some(if in_call {
+        Ringtone::Beep
+    } else {
+        settings.sounds.ringtones.regular
+    })
+}
+
+pub fn meeting_start_sound(settings: &Settings, busy: bool) -> bool {
+    settings.sounds.call_and_meeting_sound && busy_allows_sound(settings, busy)
 }
 
 #[derive(Default)]
@@ -383,19 +407,58 @@ mod tests {
     }
 
     #[test]
-    fn call_keeps_toast_but_drops_sound() {
-        let environment = Environment {
-            in_call: true,
+    fn calls_and_busy_keep_the_sound_unless_the_busy_setting_is_off() {
+        let busy_environments = [
+            Environment {
+                in_call: true,
+                ..Default::default()
+            },
+            Environment {
+                own_busy: true,
+                ..Default::default()
+            },
+        ];
+        let quiet_when_busy = Settings {
+            sounds: SoundSettings {
+                sound_when_busy: false,
+                ..Default::default()
+            },
             ..Default::default()
         };
-        let decision = decide(&Settings::default(), &group(), environment);
-        assert_eq!(
-            decision,
-            Decision {
-                toast: true,
-                sound: false
-            }
-        );
+        for environment in busy_environments {
+            assert!(decide(&Settings::default(), &group(), environment).sound);
+            assert_eq!(
+                decide(&quiet_when_busy, &group(), environment),
+                Decision {
+                    toast: true,
+                    sound: false
+                }
+            );
+        }
+        assert!(decide(&quiet_when_busy, &group(), Environment::default()).sound);
+    }
+
+    #[test]
+    fn incoming_calls_ring_the_chosen_tone_and_beep_during_a_call() {
+        let mut settings = Settings::default();
+        settings.sounds.ringtones.regular = Ringtone::Bop;
+        assert_eq!(ringtone_for(&settings, false, false), Some(Ringtone::Bop));
+        assert_eq!(ringtone_for(&settings, true, true), Some(Ringtone::Beep));
+        settings.sounds.sound_when_busy = false;
+        assert_eq!(ringtone_for(&settings, false, true), None);
+        assert_eq!(ringtone_for(&settings, false, false), Some(Ringtone::Bop));
+        settings.sounds.call_and_meeting_sound = false;
+        assert_eq!(ringtone_for(&settings, false, false), None);
+        assert!(!meeting_start_sound(&settings, false));
+    }
+
+    #[test]
+    fn meeting_start_sound_follows_the_call_and_busy_settings() {
+        let mut settings = Settings::default();
+        assert!(meeting_start_sound(&settings, false));
+        assert!(meeting_start_sound(&settings, true));
+        settings.sounds.sound_when_busy = false;
+        assert!(!meeting_start_sound(&settings, true));
     }
 
     #[test]
@@ -553,7 +616,10 @@ mod tests {
     #[test]
     fn sound_setting_off_keeps_toast() {
         let settings = Settings {
-            sound: false,
+            sounds: SoundSettings {
+                notification_sound: false,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let decision = decide(&settings, &group(), Environment::default());

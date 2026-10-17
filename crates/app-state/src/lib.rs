@@ -33,6 +33,7 @@ pub mod scheduled;
 pub mod scheduled_rows;
 pub mod section_actions;
 pub mod sidebar_model;
+pub mod sound_actions;
 pub mod stored_outgoing;
 pub mod task_dialog;
 pub mod translation_actions;

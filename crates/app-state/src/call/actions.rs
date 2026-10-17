@@ -554,7 +554,7 @@ impl AppState {
             .take()
             .or_else(|| room_closed_move(call, &reason));
         if let Some(tone) = end_tone(call.model.kind, next_move.is_some()) {
-            cx.emit(AppEvent::CallEndTone(tone));
+            cx.emit(AppEvent::CallTone(tone));
         }
         let end_screen = (call.viewing && !back_to_held && next_move.is_none())
             .then(|| CallEndScreen::for_call(call, &reason))
@@ -1372,7 +1372,7 @@ mod tests {
     use crate::call::background::BackgroundPick;
     use crate::call::{CaptionPosition, CaptionSize, RecordAction, ViewSettings};
     use crate::call::demo::demo_ring;
-    use crate::call::end_screen::EndTone;
+    use chatsvc::sounds::CallTone;
     use crate::call::features::room_closed_move;
     use crate::call::model::BreakoutState;
     use crate::data::Person;
@@ -2364,7 +2364,7 @@ mod tests {
         let heard = tones.clone();
         cx.update(|cx| {
             cx.subscribe(&app, move |_, event: &AppEvent, _| {
-                if let AppEvent::CallEndTone(tone) = event {
+                if let AppEvent::CallTone(tone) = event {
                     heard.borrow_mut().push(*tone);
                 }
             })
@@ -2380,7 +2380,7 @@ mod tests {
                 assert!(state.call_end.is_none());
             })
         });
-        assert_eq!(*tones.borrow(), vec![EndTone::CallEnded]);
+        assert_eq!(*tones.borrow(), vec![CallTone::CallEnded]);
     }
 
     #[gpui_kit::test]

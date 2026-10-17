@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use session::{Method, Request, Session};
 
 use crate::error::{Error, Result};
@@ -84,21 +84,21 @@ impl<T: MessageTransport> UserSettings<T> {
     pub async fn set_chat_section(&self, section: ChatSection, enabled: bool) -> Result<()> {
         let properties = self.properties().await?;
         let merged = merge_chat_section(&properties, section, enabled);
-        let url = format!("{}?name={SETTINGS_KEY}", self.base_url);
-        let body = json!({ SETTINGS_KEY: merged });
-        let answer = self
-            .transport
-            .send(Request::with_body(Method::Put, url, body))
-            .await?;
-        ensure_success(&answer)
+        self.set_property(SETTINGS_KEY, Value::String(merged)).await
     }
 
     pub async fn set_skin_tone(&self, tone: u8) -> Result<()> {
-        let url = format!("{}?name={SKIN_TONE_KEY}", self.base_url);
-        let body = json!({ SKIN_TONE_KEY: tone.to_string() });
+        self.set_property(SKIN_TONE_KEY, Value::String(tone.to_string()))
+            .await
+    }
+
+    pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
+        let url = format!("{}?name={name}", self.base_url);
+        let mut body = Map::new();
+        body.insert(name.to_owned(), value);
         let answer = self
             .transport
-            .send(Request::with_body(Method::Put, url, body))
+            .send(Request::with_body(Method::Put, url, Value::Object(body)))
             .await?;
         ensure_success(&answer)
     }
@@ -182,6 +182,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
+    use serde_json::json;
     use session::ApiResponse;
 
     use super::*;

@@ -1,10 +1,12 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use gpui_kit::Window;
 
 use calling::ShareKind;
 
 use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::Badge;
-use crate::notify::ring_tone::Ringtone;
 
 pub fn native_handle(_window: &Window) -> Option<NativeHandle> {
     None
@@ -70,19 +72,7 @@ pub fn play_sound() {}
 
 pub fn play_mp3(_bytes: Vec<u8>) {}
 
-pub struct RingTone;
-
-pub fn start_ring(_ringtone: Ringtone) -> Option<RingTone> {
-    None
-}
-
-pub fn start_ringback() -> Option<RingTone> {
-    None
-}
-
-pub fn play_preview(_ringtone: Ringtone) {}
-
-pub fn play_meeting_chime() {}
+pub fn play_mp3_until(_bytes: Vec<u8>, _looped: bool, _stop: Arc<AtomicBool>) {}
 
 pub struct Tray;
 

@@ -2,8 +2,9 @@ use calling::{CallCommand, CallSpec, MeetingTarget, MuteCommand};
 use gpui_kit::Context;
 
 use super::demo::{DemoCall, demo_guests};
+use super::end_screen::join_tone;
 use super::model::CallModel;
-use crate::app_state::AppState;
+use crate::app_state::{AppEvent, AppState};
 
 const OPTIONS_META_KEY: &str = "prejoin_options";
 
@@ -157,6 +158,9 @@ impl AppState {
             return;
         };
         let model = CallModel::meeting(&join.title, join.organizer);
+        if let Some(tone) = join_tone(model.kind) {
+            cx.emit(AppEvent::CallTone(tone));
+        }
         self.begin_call(handle, model, join.conversation_id, cx);
         if let Some(call) = self.call.as_mut() {
             call.meeting_target = Some(join.target);

@@ -14,8 +14,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::center::NotificationCenter;
-use super::platform;
-use super::ring_tone::Ringtone;
+use super::sounds::{AlertSound, Ringtone, RingtoneCallType};
 use super::rules::Settings;
 use super::settings_mcp::McpView;
 use crate::agents::AgentsSettings;
@@ -25,6 +24,7 @@ use crate::theme;
 
 const FPS_TICK: Duration = Duration::from_millis(500);
 const SELECT_WIDTH: f32 = 170.;
+const SOUND_SELECT_WIDTH: f32 = 124.;
 const PREVIEW_WIDTH: f32 = 380.;
 const PREVIEW_HEIGHT: f32 = 214.;
 const PREVIEW_RADIUS: f32 = 10.;
@@ -38,14 +38,16 @@ fn camera_in_call(state: &AppState) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
     Notifications,
+    Calls,
     Devices,
     Agents,
     Mcp,
 }
 
 impl Section {
-    const ALL: [Section; 4] = [
+    const ALL: [Section; 5] = [
         Section::Notifications,
+        Section::Calls,
         Section::Devices,
         Section::Agents,
         Section::Mcp,
@@ -54,6 +56,7 @@ impl Section {
     fn label(self) -> &'static str {
         match self {
             Section::Notifications => "Notifications",
+            Section::Calls => "Calls",
             Section::Devices => "Devices",
             Section::Agents => "Agents",
             Section::Mcp => "MCP",
@@ -69,12 +72,7 @@ struct Row {
     field: Accessor,
 }
 
-const ROWS: [Row; 6] = [
-    Row {
-        title: "Sound",
-        detail: "Messages and mentions",
-        field: |settings| &mut settings.sound,
-    },
+const ROWS: [Row; 5] = [
     Row {
         title: "Mentions only",
         detail: "Direct messages and @mentions",
@@ -101,6 +99,33 @@ const ROWS: [Row; 6] = [
         field: |settings| &mut settings.close_to_tray,
     },
 ];
+
+const NOTIFICATION_SOUND_ROW: Row = Row {
+    title: "Play sounds with notifications",
+    detail: "",
+    field: |settings| &mut settings.sounds.notification_sound,
+};
+
+const URGENT_SOUND_ROW: Row = Row {
+    title: "Play sounds with urgent and priority contact notifications",
+    detail: "",
+    field: |settings| &mut settings.sounds.urgent_sound,
+};
+
+const CALL_SOUND_ROWS: [Row; 2] = [
+    Row {
+        title: "Play sounds with incoming calls, requests to join, and meeting start notifications",
+        detail: "",
+        field: |settings| &mut settings.sounds.call_and_meeting_sound,
+    },
+    Row {
+        title: "Play sounds when I'm busy or in a meeting",
+        detail: "",
+        field: |settings| &mut settings.sounds.sound_when_busy,
+    },
+];
+
+type SoundAccessor = fn(&mut Settings) -> &mut AlertSound;
 
 pub struct SettingsView {
     center: Entity<NotificationCenter>,
@@ -207,7 +232,9 @@ impl SettingsView {
                 self.preview_blocked = camera_in_call(self.center.read(cx).app().read(cx));
                 self.start_preview();
             }
-            Section::Notifications | Section::Agents | Section::Mcp => self.preview.stop(cx),
+            Section::Notifications | Section::Calls | Section::Agents | Section::Mcp => {
+                self.preview.stop(cx)
+            }
         }
         cx.notify();
     }
@@ -388,8 +415,12 @@ pub(crate) fn switch(on: bool) -> Div {
 }
 
 fn button(label: &'static str) -> Stateful<Div> {
+    button_with_id(label, label)
+}
+
+fn button_with_id(id: &'static str, label: &'static str) -> Stateful<Div> {
     div()
-        .id(label)
+        .id(id)
         .h(px(32.))
         .px(px(14.))
         .flex()
@@ -424,12 +455,18 @@ pub(super) fn titled_with(
                 .text_color(theme::text())
                 .child(title),
         )
-        .child(
-            div()
-                .text_size(px(12.))
-                .text_color(detail_color)
-                .child(detail.into()),
-        )
+        .map(|column| {
+            let detail = detail.into();
+            if detail.is_empty() {
+                return column;
+            }
+            column.child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(detail_color)
+                    .child(detail),
+            )
+        })
 }
 
 pub(super) fn control_row(
@@ -469,41 +506,162 @@ fn section_tab(section: Section, active: bool, view: Entity<SettingsView>) -> St
         .on_click(move |_, _, cx| view.update(cx, |view, cx| view.select_section(section, cx)))
 }
 
+fn heading(title: &'static str) -> Div {
+    div()
+        .w_full()
+        .px(px(20.))
+        .pt(px(16.))
+        .pb(px(4.))
+        .text_size(px(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::text_muted())
+        .child(title)
+}
+
+fn picker(
+    id: &'static str,
+    label: &'static str,
+    disabled: bool,
+    menu_items: impl Fn() -> Vec<(&'static str, bool, Box<dyn Fn(&mut App)>)> + 'static,
+) -> impl IntoElement {
+    Button::new(id)
+        .outline()
+        .w(px(SOUND_SELECT_WIDTH))
+        .label(label)
+        .icon(IconName::ChevronDown)
+        .disabled(disabled)
+        .dropdown_menu(move |menu, _, _| {
+            menu_items()
+                .into_iter()
+                .fold(menu, |menu, (label, checked, choose)| {
+                    menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(checked)
+                            .on_click(move |_, _, cx| choose(cx)),
+                    )
+                })
+        })
+}
+
 impl SettingsView {
-    fn ringtone_row(&self, current: Ringtone) -> Div {
+    fn switch_row(&self, row: &Row, on: bool) -> Stateful<Div> {
         let center = self.center.clone();
+        let field = row.field;
+        h_flex()
+            .id(row.title)
+            .w_full()
+            .px(px(20.))
+            .py(px(10.))
+            .gap(px(12.))
+            .items_center()
+            .cursor_pointer()
+            .hover(|row| row.bg(theme::row_hover()))
+            .on_click(move |_, _, cx| {
+                center.update(cx, |center, cx| {
+                    center.update_settings(cx, |settings| {
+                        let value = field(settings);
+                        *value = !*value;
+                    })
+                });
+            })
+            .child(titled(row.title, row.detail))
+            .child(switch(on))
+    }
+
+    fn alert_sound_row(
+        &self,
+        (id, preview_id): (&'static str, &'static str),
+        title: &'static str,
+        options: &'static [AlertSound],
+        current: AlertSound,
+        enabled: bool,
+        field: SoundAccessor,
+    ) -> Div {
+        let center = self.center.clone();
+        let preview_center = self.center.clone();
+        let choices = move || {
+            options
+                .iter()
+                .map(|sound| {
+                    let (center, sound) = (center.clone(), *sound);
+                    let choose: Box<dyn Fn(&mut App)> = Box::new(move |cx| {
+                        center.update(cx, |center, cx| {
+                            center.update_settings(cx, |settings| *field(settings) = sound);
+                            center.preview_sound(sound.file_name(), cx);
+                        })
+                    });
+                    (sound.label(), sound == current, choose)
+                })
+                .collect()
+        };
         control_row(
-            "Ringtone",
-            "Incoming calls",
+            title,
+            "",
             h_flex()
                 .gap(px(8.))
                 .items_center()
-                .child(
-                    Button::new("ringtone-select")
-                        .outline()
-                        .w(px(110.))
-                        .label(current.label())
-                        .icon(IconName::ChevronDown)
-                        .dropdown_menu(move |menu, _, _| {
-                            Ringtone::ALL.iter().fold(menu, |menu, ringtone| {
-                                let (center, ringtone) = (center.clone(), *ringtone);
-                                menu.item(
-                                    PopupMenuItem::new(ringtone.label())
-                                        .checked(ringtone == current)
-                                        .on_click(move |_, _, cx| {
-                                            center.update(cx, |center, cx| {
-                                                center.update_settings(cx, |settings| {
-                                                    settings.ringtone = ringtone
-                                                })
-                                            });
-                                            platform::play_preview(ringtone);
-                                        }),
-                                )
-                            })
-                        }),
-                )
-                .child(button("Play").on_click(move |_, _, _| platform::play_preview(current))),
+                .child(picker(id, current.label(), !enabled, choices))
+                .child(button_with_id(preview_id, "Preview").on_click(
+                    move |_, _, cx| {
+                        preview_center
+                            .update(cx, |center, cx| center.preview_sound(current.file_name(), cx))
+                    },
+                )),
         )
+    }
+
+    fn ringtone_row(&self, call_type: RingtoneCallType, current: Ringtone) -> Div {
+        let center = self.center.clone();
+        let preview_center = self.center.clone();
+        let choices = move || {
+            Ringtone::ALL
+                .iter()
+                .map(|ringtone| {
+                    let (center, ringtone) = (center.clone(), *ringtone);
+                    let choose: Box<dyn Fn(&mut App)> = Box::new(move |cx| {
+                        center.update(cx, |center, cx| {
+                            center.update_settings(cx, |settings| {
+                                settings.sounds.ringtones.set(call_type, ringtone)
+                            });
+                            center.preview_sound(ringtone.file_name(), cx);
+                        })
+                    });
+                    (ringtone.label(), ringtone == current, choose)
+                })
+                .collect()
+        };
+        let (id, preview_id) = ringtone_ids(call_type);
+        control_row(
+            call_type.label(),
+            "",
+            h_flex()
+                .gap(px(8.))
+                .items_center()
+                .child(picker(id, current.label(), false, choices))
+                .child(button_with_id(preview_id, "Preview").on_click(
+                    move |_, _, cx| {
+                        preview_center.update(cx, |center, cx| {
+                            center.preview_sound(current.file_name(), cx)
+                        })
+                    },
+                )),
+        )
+    }
+
+    fn calls_section(&self, cx: &App) -> Div {
+        let ringtones = self.center.read(cx).settings().sounds.ringtones;
+        let rows = RingtoneCallType::ALL
+            .into_iter()
+            .filter(|call_type| {
+                *call_type == RingtoneCallType::Regular
+                    || ringtones.get(*call_type) != Ringtone::Ring
+            })
+            .map(|call_type| self.ringtone_row(call_type, ringtones.get(call_type)));
+        v_flex()
+            .w_full()
+            .pt(px(8.))
+            .child(heading("Choose a ringtone"))
+            .children(rows)
     }
 
     fn devices_section(&self, cx: &mut Context<Self>) -> Div {
@@ -737,7 +895,14 @@ impl Render for SettingsView {
             Section::ALL.map(|section| section_tab(section, section == self.section, view.clone())),
         );
         let body = match self.section {
-            Section::Notifications => self.notifications_section(cx).into_any_element(),
+            Section::Notifications => div()
+                .id("notifications-scroll")
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .child(self.notifications_section(cx))
+                .into_any_element(),
+            Section::Calls => self.calls_section(cx).into_any_element(),
             Section::Devices => div()
                 .id("devices-scroll")
                 .flex_1()
@@ -767,54 +932,27 @@ impl SettingsView {
     fn notifications_section(&self, cx: &App) -> Div {
         let mut current = self.center.read(cx).settings().clone();
         let corner = current.corner;
-        let ringtone = current.ringtone;
-        let rows = ROWS.iter().enumerate().map(|(index, row)| {
-            let on = *(row.field)(&mut current);
-            let center = self.center.clone();
-            let field = row.field;
-            h_flex()
-                .id(("setting", index))
-                .w_full()
-                .px(px(20.))
-                .py(px(10.))
-                .gap(px(12.))
-                .items_center()
-                .cursor_pointer()
-                .hover(|row| row.bg(theme::row_hover()))
-                .on_click(move |_, _, cx| {
-                    center.update(cx, |center, cx| {
-                        center.update_settings(cx, |settings| {
-                            let value = field(settings);
-                            *value = !*value;
-                        })
-                    });
-                })
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .child(
-                            div()
-                                .text_size(px(14.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme::text())
-                                .child(row.title),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(theme::text_muted())
-                                .child(row.detail),
-                        ),
-                )
-                .child(switch(on))
-        });
+        let sounds = current.sounds.clone();
+        let rows: Vec<Stateful<Div>> = ROWS
+            .iter()
+            .map(|row| {
+                let on = *(row.field)(&mut current);
+                self.switch_row(row, on)
+            })
+            .collect();
+        let call_sound_rows: Vec<Stateful<Div>> = CALL_SOUND_ROWS
+            .iter()
+            .map(|row| {
+                let on = *(row.field)(&mut current);
+                self.switch_row(row, on)
+            })
+            .collect();
         let position_center = self.center.clone();
         let test_center = self.center.clone();
         v_flex()
             .w_full()
             .pt(px(8.))
             .children(rows)
-            .child(self.ringtone_row(ringtone))
             .child(control_row(
                 "Position",
                 "Corner of the main screen",
@@ -826,10 +964,39 @@ impl SettingsView {
                     });
                 }),
             ))
-            .child(h_flex().w_full().px(px(20.)).pt(px(12.)).child(
+            .child(heading("Sound"))
+            .child(self.switch_row(&NOTIFICATION_SOUND_ROW, sounds.notification_sound))
+            .child(self.alert_sound_row(
+                ("notification-sound", "notification-sound-preview"),
+                "Notification sound",
+                &AlertSound::NORMAL,
+                sounds.notification_sound_type,
+                sounds.notification_sound,
+                |settings| &mut settings.sounds.notification_sound_type,
+            ))
+            .child(self.switch_row(&URGENT_SOUND_ROW, sounds.urgent_sound))
+            .child(self.alert_sound_row(
+                ("urgent-sound", "urgent-sound-preview"),
+                "Urgent sound",
+                &AlertSound::URGENT,
+                sounds.urgent_sound_type,
+                sounds.urgent_sound,
+                |settings| &mut settings.sounds.urgent_sound_type,
+            ))
+            .children(call_sound_rows)
+            .child(h_flex().w_full().px(px(20.)).py(px(12.)).child(
                 button("Send test notification").on_click(move |_, _, cx| {
                     test_center.update(cx, |center, cx| center.send_test_notification(cx));
                 }),
             ))
+    }
+}
+
+fn ringtone_ids(call_type: RingtoneCallType) -> (&'static str, &'static str) {
+    match call_type {
+        RingtoneCallType::Regular => ("ringtone-regular", "ringtone-regular-preview"),
+        RingtoneCallType::CallGroup => ("ringtone-call-group", "ringtone-call-group-preview"),
+        RingtoneCallType::CallQueue => ("ringtone-call-queue", "ringtone-call-queue-preview"),
+        RingtoneCallType::Delegate => ("ringtone-delegate", "ringtone-delegate-preview"),
     }
 }

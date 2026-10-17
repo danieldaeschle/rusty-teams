@@ -71,7 +71,8 @@ pub enum AppEvent {
     MissedCall(MissedCall),
     MeetingReminder,
     MeetingChime,
-    CallEndTone(crate::call::end_screen::EndTone),
+    CallTone(chatsvc::sounds::CallTone),
+    SoundSettings,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -134,6 +135,7 @@ pub struct AppState {
     pub call_count: u64,
     pub call_share_sound: bool,
     pub recording_policy: teams_core::RecordingPolicy,
+    pub account_sounds: Option<chatsvc::sound_settings::SoundSettings>,
     pub own_tenant: Option<String>,
     pub call_share_motion: bool,
     pub call_share_standout: bool,
@@ -282,6 +284,7 @@ impl AppState {
             call_count: 0,
             call_share_sound: false,
             recording_policy: teams_core::RecordingPolicy::default(),
+            account_sounds: None,
             own_tenant: None,
             call_share_motion: false,
             call_share_standout: false,
@@ -915,6 +918,7 @@ impl AppState {
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);
                 self.refresh_recording_policy(cx);
+                self.refresh_sound_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
                 self.refresh_own_status(cx);

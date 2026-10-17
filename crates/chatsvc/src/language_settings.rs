@@ -214,7 +214,7 @@ impl<T: CsaTransport> LanguageSettingsClient<T> {
     }
 }
 
-fn with_headers(mut request: Request) -> Request {
+pub(crate) fn with_headers(mut request: Request) -> Request {
     request.headers = vec![
         ("x-ms-client-type".to_owned(), CLIENT_TYPE.to_owned()),
         ("x-ms-client-version".to_owned(), CLIENT_VERSION.to_owned()),

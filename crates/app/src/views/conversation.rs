@@ -647,7 +647,8 @@ impl ConversationView {
             | AppEvent::MissedCall(_)
             | AppEvent::MeetingReminder
             | AppEvent::MeetingChime
-            | AppEvent::CallEndTone(_)
+            | AppEvent::CallTone(_)
+            | AppEvent::SoundSettings
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),

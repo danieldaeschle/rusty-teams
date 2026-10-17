@@ -4,6 +4,7 @@ use chatsvc::{
     ConversationRef, Language, LanguageSettings, MAX_TRANSLATE_BATCH, MessageLanguage,
     TranslateRequest, Translation, TranslationTrigger,
 };
+use chatsvc::sound_settings::SoundSettings;
 use serde_json::Value;
 
 use crate::engine::{Conversation, SyncEngine};
@@ -124,5 +125,20 @@ impl<R: Remote> SyncEngine<R> {
 
     pub async fn patch_language_settings(&self, patch: Value) -> Result<()> {
         self.remote.patch_language_settings(patch).await
+    }
+
+    pub async fn sound_settings(&self) -> Result<SoundSettings> {
+        self.remote.sound_settings().await
+    }
+
+    pub async fn save_sound_settings(
+        &self,
+        user_mri: &str,
+        previous: &SoundSettings,
+        updated: &SoundSettings,
+    ) -> Result<()> {
+        self.remote
+            .save_sound_settings(user_mri, previous, updated)
+            .await
     }
 }

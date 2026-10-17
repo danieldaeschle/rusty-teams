@@ -1,35 +1,23 @@
 use calling::{EndKind, EndReason, MeetingTarget};
+use chatsvc::sounds::CallTone;
 
 use super::model::{ActiveCall, CallKind};
 
 const ORGID_PREFIX: &str = "8:orgid:";
 pub const DISMISS_LABEL: &str = "Dismiss";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EndTone {
-    CallEnded,
-    MeetingLeft,
-}
-
-impl EndTone {
-    pub const ALL: [EndTone; 2] = [EndTone::CallEnded, EndTone::MeetingLeft];
-
-    pub fn file_name(self) -> &'static str {
-        match self {
-            EndTone::CallEnded => "Teams_Call_Ended.mp3",
-            EndTone::MeetingLeft => "Teams_Meet_Up_Leave.mp3",
-        }
-    }
-}
-
-pub fn end_tone(kind: CallKind, moving_rooms: bool) -> Option<EndTone> {
+pub fn end_tone(kind: CallKind, moving_rooms: bool) -> Option<CallTone> {
     if moving_rooms {
         return None;
     }
     Some(match kind {
-        CallKind::Meeting => EndTone::MeetingLeft,
-        CallKind::Test | CallKind::Direct | CallKind::Group => EndTone::CallEnded,
+        CallKind::Meeting => CallTone::MeetingLeft,
+        CallKind::Test | CallKind::Direct | CallKind::Group => CallTone::CallEnded,
     })
+}
+
+pub fn join_tone(kind: CallKind) -> Option<CallTone> {
+    (kind == CallKind::Meeting).then_some(CallTone::MeetingJoined)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,12 +136,19 @@ mod tests {
     fn meetings_leave_with_the_meetup_tone_and_calls_with_the_call_tone() {
         assert_eq!(
             end_tone(CallKind::Meeting, false),
-            Some(EndTone::MeetingLeft)
+            Some(CallTone::MeetingLeft)
         );
-        assert_eq!(end_tone(CallKind::Direct, false), Some(EndTone::CallEnded));
-        assert_eq!(end_tone(CallKind::Group, false), Some(EndTone::CallEnded));
-        assert_eq!(end_tone(CallKind::Test, false), Some(EndTone::CallEnded));
+        assert_eq!(end_tone(CallKind::Direct, false), Some(CallTone::CallEnded));
+        assert_eq!(end_tone(CallKind::Group, false), Some(CallTone::CallEnded));
+        assert_eq!(end_tone(CallKind::Test, false), Some(CallTone::CallEnded));
         assert_eq!(end_tone(CallKind::Meeting, true), None);
+    }
+
+    #[test]
+    fn only_meetings_play_the_join_tone() {
+        assert_eq!(join_tone(CallKind::Meeting), Some(CallTone::MeetingJoined));
+        assert_eq!(join_tone(CallKind::Direct), None);
+        assert_eq!(join_tone(CallKind::Group), None);
     }
 
     #[test]

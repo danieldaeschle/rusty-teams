@@ -6,6 +6,7 @@ use chatsvc::{
     Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, TranslateRequest,
     Translation, TranslationTrigger, Translator, WindowDirection, WorkLocationKind,
 };
+use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
@@ -413,6 +414,19 @@ pub trait Remote {
 
     async fn recording_policy(&self) -> Result<RecordingPolicy> {
         Err(Error::Unsupported("recording policy"))
+    }
+
+    async fn sound_settings(&self) -> Result<SoundSettings> {
+        Err(Error::Unsupported("sound settings"))
+    }
+
+    async fn save_sound_settings(
+        &self,
+        _user_mri: &str,
+        _previous: &SoundSettings,
+        _updated: &SoundSettings,
+    ) -> Result<()> {
+        Err(Error::Unsupported("sound settings"))
     }
 
     async fn search_gifs(&self, _query: &str) -> Result<Vec<Gif>> {
@@ -1047,6 +1061,21 @@ impl Remote for Graph {
     async fn patch_language_settings(&self, patch: serde_json::Value) -> Result<()> {
         Ok(LanguageSettingsClient::new(self.session())
             .patch(patch)
+            .await?)
+    }
+
+    async fn sound_settings(&self) -> Result<SoundSettings> {
+        Ok(SoundSettingsClient::new(self.session()).read().await?)
+    }
+
+    async fn save_sound_settings(
+        &self,
+        user_mri: &str,
+        previous: &SoundSettings,
+        updated: &SoundSettings,
+    ) -> Result<()> {
+        Ok(SoundSettingsClient::new(self.session())
+            .write(user_mri, previous, updated)
             .await?)
     }
 

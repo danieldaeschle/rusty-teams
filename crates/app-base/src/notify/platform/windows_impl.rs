@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 use std::io::Cursor;
-use std::num::NonZero;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -43,7 +42,6 @@ use windows::core::{BOOL, PCWSTR, w};
 use super::stack_plan::{StackPlan, stack_plan};
 use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
 use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
-use crate::notify::ring_tone::{Ringtone, SAMPLE_RATE, meeting_chime, ringback_cycle};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../../app/assets/icon/teams-fast-256.png");
@@ -516,75 +514,28 @@ unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
     }
 }
 
-pub struct RingTone {
-    stop: Arc<AtomicBool>,
-}
-
-impl Drop for RingTone {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-    }
-}
-
-pub fn start_ring(ringtone: Ringtone) -> Option<RingTone> {
-    start_cycle(ringtone.cycle(SAMPLE_RATE))
-}
-
-pub fn start_ringback() -> Option<RingTone> {
-    start_cycle(ringback_cycle(SAMPLE_RATE))
-}
-
-pub fn play_preview(ringtone: Ringtone) {
-    play_once(ringtone.cycle(SAMPLE_RATE));
-}
-
-pub fn play_meeting_chime() {
-    play_once(meeting_chime(SAMPLE_RATE));
-}
-
-fn play_once(cycle: Vec<f32>) {
+pub fn play_mp3_until(bytes: Vec<u8>, looped: bool, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
             return;
         };
         sink.log_on_drop(false);
-        let (Some(channels), Some(rate)) = (NonZero::new(1u16), NonZero::new(SAMPLE_RATE)) else {
-            return;
-        };
-        let player = rodio::Player::connect_new(sink.mixer());
-        player.append(rodio::buffer::SamplesBuffer::new(channels, rate, cycle));
-        player.sleep_until_end();
-    });
-}
-
-fn start_cycle(cycle: Vec<f32>) -> Option<RingTone> {
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = stop.clone();
-    std::thread::spawn(move || {
-        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
-            return;
-        };
-        sink.log_on_drop(false);
-        let (Some(channels), Some(rate)) = (NonZero::new(1u16), NonZero::new(SAMPLE_RATE)) else {
-            return;
-        };
-        while !flag.load(Ordering::SeqCst) {
-            let player = rodio::Player::connect_new(sink.mixer());
-            player.append(rodio::buffer::SamplesBuffer::new(
-                channels,
-                rate,
-                cycle.clone(),
-            ));
+        loop {
+            let Ok(player) = rodio::play(sink.mixer(), Cursor::new(bytes.clone())) else {
+                return;
+            };
             while !player.empty() {
-                if flag.load(Ordering::SeqCst) {
+                if stop.load(Ordering::SeqCst) {
                     player.stop();
                     return;
                 }
                 std::thread::sleep(RING_POLL);
             }
+            if !looped || stop.load(Ordering::SeqCst) {
+                return;
+            }
         }
     });
-    Some(RingTone { stop })
 }
 
 pub fn play_mp3(bytes: Vec<u8>) {

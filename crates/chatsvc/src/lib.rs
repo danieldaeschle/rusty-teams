@@ -22,6 +22,8 @@ pub mod recording_policy;
 pub mod receipts;
 pub mod saved;
 pub mod settings;
+pub mod sound_settings;
+pub mod sounds;
 pub mod transcripts;
 pub mod translate;
 pub mod window;

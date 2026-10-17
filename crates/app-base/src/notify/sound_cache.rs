@@ -1,6 +1,8 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui_kit::App;
 
@@ -66,14 +68,45 @@ pub fn prefetch(file_names: &[&'static str], cx: &App) {
 }
 
 pub fn play(file_name: &'static str, cx: &App) {
+    play_or(file_name, || {}, cx);
+}
+
+pub fn play_or(file_name: &'static str, fallback: fn(), cx: &App) {
     let loading = load(file_name, cx);
     cx.background_executor()
         .spawn(async move {
-            if let Some(bytes) = loading.await {
-                platform::play_mp3(bytes);
+            match loading.await {
+                Some(bytes) => platform::play_mp3(bytes),
+                None => fallback(),
             }
         })
         .detach();
+}
+
+pub struct SoundHandle {
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for SoundHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+pub fn start(file_name: &'static str, looped: bool, cx: &App) -> SoundHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let loading = load(file_name, cx);
+    cx.background_executor()
+        .spawn(async move {
+            if let Some(bytes) = loading.await
+                && !flag.load(Ordering::SeqCst)
+            {
+                platform::play_mp3_until(bytes, looped, flag);
+            }
+        })
+        .detach();
+    SoundHandle { stop }
 }
 
 #[cfg(test)]
