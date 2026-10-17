@@ -491,7 +491,7 @@ pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
 }
 
 unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
-    unsafe { icon_from_bgra(&render_badge(badge), BADGE_SIZE) }
+    unsafe { icon_from_bgra(&render_badge(badge), BADGE_SIZE as u32) }
 }
 
 unsafe fn icon_from_bgra(pixels: &[u8], size: u32) -> Option<HICON> {
