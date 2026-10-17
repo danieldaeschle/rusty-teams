@@ -39,6 +39,7 @@ impl Render for ScrollContainer {
                     div()
                         .id(row_index)
                         .h(px(ROW_HEIGHT))
+                        .flex_none()
                         .w_full()
                         .on_click(move |_, _, _| left.set(left.get() + 1))
                         .on_mouse_down(MouseButton::Right, move |_, _, _| {
@@ -59,6 +60,7 @@ impl Render for VirtualList {
             div()
                 .id(row_index)
                 .h(px(ROW_HEIGHT))
+                .flex_none()
                 .w_full()
                 .into_any_element()
         })
