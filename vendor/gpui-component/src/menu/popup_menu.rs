@@ -1,7 +1,13 @@
 use crate::ThemeStyled as _;
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::actions::{SelectLeft, SelectRight};
+use crate::fluent::{
+    LISTBOX_MIN_WIDTH, MENU_DIVIDER_MARGIN_Y, MENU_ICON_GAP, MENU_ICON_GLYPH, MENU_ICON_SLOT,
+    MENU_ITEM_GAP, MENU_ITEM_HEIGHT, MENU_ITEM_PADDING_X, MENU_LABEL_INSET, MENU_LIST_PADDING,
+    OPTION_CHECK_GAP, OPTION_CHECK_INSET, OPTION_CHECK_SIZE, OPTION_PADDING_RIGHT,
+};
 use crate::menu::menu_item::MenuItemElement;
+use crate::menu::selectors::{ITEMS_SELECTOR, icon_selector, item_selector, label_selector};
 use crate::scroll::ScrollableElement;
 use crate::{ActiveTheme, ElementExt, Icon, IconName, Sizable as _, h_flex, v_flex};
 use crate::{Side, Size, kbd::Kbd};
@@ -300,6 +306,7 @@ pub struct PopupMenu {
     bounds: Bounds<Pixels>,
     size: Size,
     check_side: Side,
+    listbox: bool,
 
     /// The parent menu of this menu, if this is a submenu
     parent_menu: Option<WeakEntity<Self>>,
@@ -344,6 +351,7 @@ impl PopupMenu {
             max_width: None,
             max_height: None,
             check_side: Side::Left,
+            listbox: false,
             bounds: Bounds::default(),
             scrollable: false,
             scroll_handle: ScrollHandle::default(),
@@ -446,6 +454,15 @@ impl PopupMenu {
     /// Set the menu to be scrollable to show vertical scrollbar.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
+        self
+    }
+
+    /// Lay the menu out as a Fluent `Listbox` under a select trigger: a check
+    /// column on every row and at least the trigger's width.
+    pub fn listbox(mut self, trigger_width: Pixels) -> Self {
+        self.listbox = true;
+        self.check_side = Side::Left;
+        self.min_width = Some(trigger_width.max(LISTBOX_MIN_WIDTH));
         self
     }
 
@@ -1151,25 +1168,37 @@ impl PopupMenu {
     }
 
     fn render_icon(
+        index: usize,
         has_icon: bool,
         checked: bool,
         icon: Option<Icon>,
-        _: &mut Window,
-        _: &mut Context<Self>,
+        listbox: bool,
     ) -> Option<impl IntoElement> {
         if !has_icon {
             return None;
         }
 
-        let icon = if let Some(icon) = icon {
-            icon.clone()
-        } else if checked {
-            Icon::new(IconName::Check)
+        let (slot, glyph) = if listbox {
+            (OPTION_CHECK_SIZE, OPTION_CHECK_SIZE)
         } else {
-            Icon::empty()
+            (MENU_ICON_SLOT, MENU_ICON_GLYPH)
+        };
+        let icon = match icon {
+            Some(icon) if icon.has_explicit_size() => icon,
+            Some(icon) => icon.with_size(glyph),
+            None if checked => Icon::new(IconName::Check).with_size(glyph),
+            None => Icon::empty().with_size(glyph),
         };
 
-        Some(icon.xsmall())
+        Some(
+            h_flex()
+                .debug_selector(|| icon_selector(index))
+                .size(slot)
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .child(icon),
+        )
     }
 
     #[inline]
@@ -1203,7 +1232,7 @@ impl PopupMenu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> MenuItemElement {
-        let has_left_icon = options.has_left_icon;
+        let has_left_icon = options.has_left_icon || self.listbox;
         let is_left_check = options.check_side.is_left() && item.is_checked();
         let right_check_icon = if options.check_side.is_right() && item.is_checked() {
             Some(Icon::new(IconName::Check).xsmall())
@@ -1213,20 +1242,37 @@ impl PopupMenu {
 
         let selected = self.selected_index == Some(ix);
         const EDGE_PADDING: Pixels = px(4.);
-        const INNER_PADDING: Pixels = px(8.);
+        let listbox = self.listbox;
+        let (padding_left, padding_right, icon_gap, label_inset) = if listbox {
+            (
+                OPTION_CHECK_INSET,
+                OPTION_PADDING_RIGHT,
+                OPTION_CHECK_GAP,
+                px(0.),
+            )
+        } else {
+            (
+                MENU_ITEM_PADDING_X,
+                MENU_ITEM_PADDING_X,
+                MENU_ICON_GAP,
+                MENU_LABEL_INSET,
+            )
+        };
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
 
         let (item_height, radius) = match self.size {
             Size::Small => (px(20.), options.radius.half()),
-            _ => (px(26.), options.radius),
+            _ => (MENU_ITEM_HEIGHT, options.radius),
         };
 
         let this = MenuItemElement::new(ix)
+            .debug_selector(move || item_selector(ix))
             .relative()
             .text_sm()
             .py_0()
-            .px(INNER_PADDING)
+            .pl(padding_left)
+            .pr(padding_right)
             .rounded(radius)
             .items_center()
             .selected(selected)
@@ -1251,7 +1297,7 @@ impl PopupMenu {
             PopupMenuItem::Separator => this
                 .h_auto()
                 .p_0()
-                .my_0p5()
+                .my(MENU_DIVIDER_MARGIN_Y)
                 .mx_neg_1()
                 .border_b(px(1.))
                 .border_color(cx.theme().tokens.sidebar_accent)
@@ -1260,9 +1306,15 @@ impl PopupMenu {
                 h_flex()
                     .cursor_default()
                     .items_center()
-                    .gap_x_1()
-                    .children(Self::render_icon(has_left_icon, false, None, window, cx))
-                    .child(div().flex_1().child(label.clone())),
+                    .gap(icon_gap)
+                    .children(Self::render_icon(ix, has_left_icon, false, None, listbox))
+                    .child(
+                        div().flex_1().px(label_inset).child(
+                            div()
+                                .debug_selector(|| label_selector(ix))
+                                .child(label.clone()),
+                        ),
+                    ),
             ),
             PopupMenuItem::ElementItem {
                 render,
@@ -1281,15 +1333,21 @@ impl PopupMenu {
                         .flex_1()
                         .min_h(item_height)
                         .items_center()
-                        .gap_x_1()
+                        .gap(icon_gap)
                         .children(Self::render_icon(
+                            ix,
                             has_left_icon,
                             is_left_check,
                             icon.clone(),
-                            window,
-                            cx,
+                            listbox,
                         ))
-                        .child((render)(window, cx))
+                        .child(
+                            div().flex_1().min_w_0().px(label_inset).child(
+                                div()
+                                    .debug_selector(|| label_selector(ix))
+                                    .child((render)(window, cx)),
+                            ),
+                        )
                         .children(right_check_icon.map(|icon| icon.ml_3())),
                 ),
             PopupMenuItem::Item {
@@ -1311,21 +1369,28 @@ impl PopupMenu {
                 })
                 .disabled(*disabled)
                 .h(item_height)
-                .gap_x_1()
+                .gap(icon_gap)
                 .children(Self::render_icon(
+                    ix,
                     has_left_icon,
                     is_left_check,
                     icon.clone(),
-                    window,
-                    cx,
+                    listbox,
                 ))
                 .child(
                     h_flex()
                         .w_full()
+                        .px(label_inset)
                         .gap_3()
                         .items_center()
                         .justify_between()
-                        .when(!show_link_icon, |this| this.child(label.clone()))
+                        .when(!show_link_icon, |this| {
+                            this.child(
+                                div()
+                                    .debug_selector(|| label_selector(ix))
+                                    .child(label.clone()),
+                            )
+                        })
                         .children(right_check_icon)
                         .when(show_link_icon, |this| {
                             this.child(
@@ -1358,21 +1423,26 @@ impl PopupMenu {
                         .min_h(item_height)
                         .size_full()
                         .items_center()
-                        .gap_x_1()
+                        .gap(icon_gap)
                         .children(Self::render_icon(
+                            ix,
                             has_left_icon,
                             false,
                             icon.clone(),
-                            window,
-                            cx,
+                            listbox,
                         ))
                         .child(
                             h_flex()
                                 .flex_1()
+                                .px(label_inset)
                                 .gap_2()
                                 .items_center()
                                 .justify_between()
-                                .child(label.clone())
+                                .child(
+                                    div()
+                                        .debug_selector(|| label_selector(ix))
+                                        .child(label.clone()),
+                                )
                                 .child(
                                     Icon::new(IconName::ChevronRight)
                                         .xsmall()
@@ -1485,8 +1555,9 @@ impl Render for PopupMenu {
             .child(
                 v_flex()
                     .id("items")
-                    .p_1()
-                    .gap_y_0p5()
+                    .debug_selector(|| ITEMS_SELECTOR.into())
+                    .p(MENU_LIST_PADDING)
+                    .gap_y(MENU_ITEM_GAP)
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))
                     .max_w(max_width)

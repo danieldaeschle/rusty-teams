@@ -44,6 +44,7 @@ pub mod dialog;
 pub mod dock;
 pub mod elevation;
 pub mod empty;
+pub mod fluent;
 pub mod form;
 pub mod group_box;
 pub mod highlighter;

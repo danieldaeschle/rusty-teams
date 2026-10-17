@@ -21,7 +21,7 @@ use super::calls_tab::calls_body;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::with_top_edge;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
-use super::widgets::{count_badge, icon, page_header, unread_marker};
+use super::widgets::{count_badge, icon, menu_icon, page_header, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::channel_menu::{
@@ -67,7 +67,6 @@ const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 40.;
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
-const MENU_ICON_SIZE: f32 = 15.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
 const MENTION_ICON_SIZE: f32 = 15.;
 
@@ -92,6 +91,10 @@ impl SidebarTab {
             SidebarTab::Agents => "Agents",
         }
     }
+}
+
+pub fn chat_row_selector(chat_id: &str) -> String {
+    format!("chat-row/{chat_id}")
 }
 
 #[derive(Clone)]
@@ -133,10 +136,6 @@ struct ChatMenuTarget {
 struct MenuContext {
     state: Entity<AppState>,
     folders: Vec<(String, String)>,
-}
-
-fn menu_icon(name: IconName) -> gpui_kit::component::Icon {
-    icon(name, MENU_ICON_SIZE, theme::text_muted())
 }
 
 fn chat_menu(
@@ -259,7 +258,7 @@ fn chat_menu(
             PopupMenuItem::element(|_, _| {
                 div().text_color(theme::red_soft()).child("Leave chat...")
             })
-            .icon(icon(IconName::LogOut, MENU_ICON_SIZE, theme::red_soft()))
+            .icon(menu_icon(IconName::LogOut).text_color(theme::red_soft()))
             .on_click(move |_, window, cx| {
                 confirm_leave(&leave_state, &leave_id, &title, member_count, window, cx);
             }),
@@ -480,7 +479,7 @@ fn section_menu(
             PopupMenuItem::element(|_, _| {
                 div().text_color(theme::red_soft()).child("Delete section")
             })
-            .icon(icon(IconName::Trash, MENU_ICON_SIZE, theme::red_soft()))
+            .icon(menu_icon(IconName::Trash).text_color(theme::red_soft()))
             .disabled(target.read_only)
             .on_click(move |_, window, cx| {
                 confirm_delete_section(&delete_state, &folder_id, &name, window, cx);
@@ -1193,6 +1192,7 @@ impl SidebarView {
         };
         h_flex()
             .id(SharedString::from(format!("chat-{}", item.id)))
+            .debug_selector(|| chat_row_selector(&item.id))
             .mx(px(6.))
             .h(px(ROW_HEIGHT))
             .flex_none()
