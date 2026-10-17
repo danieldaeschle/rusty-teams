@@ -68,6 +68,7 @@ mod tests {
                 hidden: false,
                 hidden_channel_ids: vec!["channel-b".into()],
                 notifications: Default::default(),
+                mentions: Default::default(),
             }],
         }
     }

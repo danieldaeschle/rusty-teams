@@ -10,6 +10,8 @@ const SETTINGS_ID: &str = "simpleCollabUserSettingsId";
 const TEAMS_ORDER_KEY: &str = "teamsOrder";
 const SKIN_TONE_KEY: &str = "preferredSkinToneIndex";
 const DEFAULT_REACTIONS_KEY: &str = "defaultMessageReactions";
+const APP_HORIZON_KEY: &str = "appConsumptionHorizon";
+const APP_HORIZON_APPS: [&str; 3] = ["chat", "channel", "engage_community"];
 const MAX_SKIN_TONE: u8 = 5;
 const MUTED_FIELD: &str = "hasUserEnabledMutedChatSection";
 const MEETING_FIELD: &str = "hasUserEnabledMeetingChatSection";
@@ -102,6 +104,18 @@ impl<T: MessageTransport> UserSettings<T> {
     pub async fn set_default_reactions(&self, reaction_ids: &[String]) -> Result<()> {
         self.set_property(DEFAULT_REACTIONS_KEY, default_reactions_value(reaction_ids))
             .await
+    }
+
+    /// Teams' "Mark all as read" for channels: one write, the channel entry of `appConsumptionHorizon` moves to now.
+    pub async fn mark_all_channels_read(&self, now_ms: i64) -> Result<AppConsumptionHorizon> {
+        let properties = self.properties().await?;
+        let horizon = AppConsumptionHorizon {
+            channel_ms: now_ms,
+            ..parse_app_consumption_horizon(&properties)
+        };
+        self.set_property(APP_HORIZON_KEY, Value::String(horizon.property_value()))
+            .await?;
+        Ok(horizon)
     }
 
     pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
@@ -198,6 +212,54 @@ pub fn parse_teams_order(properties: &Value) -> Vec<(String, i64)> {
         .unwrap_or_default();
     order.sort_by_key(|(_, position)| *position);
     order
+}
+
+/// Per app "read everything before" times in ms; Teams treats a conversation of that app as read up to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AppConsumptionHorizon {
+    pub chat_ms: i64,
+    pub channel_ms: i64,
+    pub engage_community_ms: i64,
+}
+
+impl AppConsumptionHorizon {
+    pub fn property_value(&self) -> String {
+        let values = [self.chat_ms, self.channel_ms, self.engage_community_ms];
+        let mut fields = Map::new();
+        for (app, value) in APP_HORIZON_APPS.iter().zip(values) {
+            fields.insert((*app).to_owned(), Value::from(value));
+        }
+        Value::Object(fields).to_string()
+    }
+}
+
+pub fn parse_app_consumption_horizon(properties: &Value) -> AppConsumptionHorizon {
+    let parsed = match properties.get(APP_HORIZON_KEY) {
+        Some(Value::String(text)) => serde_json::from_str::<Value>(text).ok(),
+        Some(other) => Some(other.clone()),
+        None => None,
+    };
+    let Some(fields) = parsed.as_ref().and_then(Value::as_object) else {
+        return AppConsumptionHorizon::default();
+    };
+    let valid = (fields.contains_key("chat") || fields.contains_key("channel"))
+        && fields
+            .values()
+            .all(|value| value.as_f64().is_some_and(|number| number >= 0.0));
+    if !valid {
+        return AppConsumptionHorizon::default();
+    }
+    let read = |app: &str| {
+        fields
+            .get(app)
+            .and_then(Value::as_f64)
+            .map_or(0, |number| number as i64)
+    };
+    AppConsumptionHorizon {
+        chat_ms: read("chat"),
+        channel_ms: read("channel"),
+        engage_community_ms: read("engage_community"),
+    }
 }
 
 pub fn merge_chat_section(properties: &Value, section: ChatSection, enabled: bool) -> String {
@@ -405,5 +467,64 @@ mod tests {
         let value: Value = serde_json::from_str(sent).unwrap();
         assert_eq!(value["keep"], json!(1));
         assert_eq!(value["hasUserEnabledMutedChatSection"], json!(false));
+    }
+
+    #[test]
+    fn app_horizon_reads_the_string_and_ignores_invalid_values() {
+        let parsed = parse_app_consumption_horizon(&json!({
+            "appConsumptionHorizon": "{\"chat\":1791368000000,\"channel\":1791369000000,\"engage_community\":0}"
+        }));
+        assert_eq!(
+            parsed,
+            AppConsumptionHorizon {
+                chat_ms: 1791368000000,
+                channel_ms: 1791369000000,
+                engage_community_ms: 0,
+            }
+        );
+        let object = parse_app_consumption_horizon(&json!({"appConsumptionHorizon": {"channel": 5}}));
+        assert_eq!(object.channel_ms, 5);
+        for broken in [
+            json!({}),
+            json!({"appConsumptionHorizon": "not json"}),
+            json!({"appConsumptionHorizon": "{\"engage_community\":5}"}),
+            json!({"appConsumptionHorizon": "{\"channel\":-1}"}),
+            json!({"appConsumptionHorizon": "{\"channel\":\"5\"}"}),
+        ] {
+            assert_eq!(
+                parse_app_consumption_horizon(&broken),
+                AppConsumptionHorizon::default()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mark_all_channels_read_moves_only_the_channel_entry() {
+        let stored = json!({
+            "appConsumptionHorizon": "{\"chat\":100,\"channel\":200,\"engage_community\":300}"
+        });
+        let transport = Canned {
+            answers: Mutex::new(vec![(200, stored), (200, Value::Null)].into()),
+            requests: Mutex::new(Vec::new()),
+        };
+        let horizon = UserSettings::with_transport(&transport, "emea")
+            .mark_all_channels_read(1791368000000)
+            .await
+            .unwrap();
+        assert_eq!(horizon.channel_ms, 1791368000000);
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[1].method, Method::Put);
+        assert_eq!(
+            requests[1].url,
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/properties?name=appConsumptionHorizon"
+        );
+        let sent = requests[1].body.as_ref().unwrap()["appConsumptionHorizon"]
+            .as_str()
+            .unwrap();
+        let value: Value = serde_json::from_str(sent).unwrap();
+        assert_eq!(
+            value,
+            json!({"chat": 100, "channel": 1791368000000_i64, "engage_community": 300})
+        );
     }
 }

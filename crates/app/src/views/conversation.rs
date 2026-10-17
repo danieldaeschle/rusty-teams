@@ -21,8 +21,12 @@ use teams_core::{
     ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
 };
 
+mod channel_details;
+pub use channel_details::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
+mod deletes;
 mod detached;
 mod feed;
+mod jump;
 mod pins;
 mod proposal;
 mod recap;
@@ -91,6 +95,7 @@ use shared::SharedState;
 
 pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
+pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -212,6 +217,8 @@ pub struct ConversationView {
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     pin_index: usize,
+    channel_details_open: bool,
+    pinned_posts_expanded: bool,
     pin_previews: HashMap<String, pins::PinPreview>,
     pin_fetches: HashSet<String>,
     notice: Option<String>,
@@ -541,6 +548,8 @@ impl ConversationView {
             reaction_details: None,
             highlighted_message: None,
             pin_index: 0,
+            channel_details_open: false,
+            pinned_posts_expanded: false,
             pin_previews: HashMap::new(),
             pin_fetches: HashSet::new(),
             notice: None,
@@ -883,9 +892,10 @@ impl ConversationView {
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
         self.refresh_pin_previews(cx);
-        if let Some(chat_id) = self.chat_id() {
+        self.pinned_posts_expanded = false;
+        if let Some(conversation_id) = self.pin_conversation_id() {
             self.app
-                .update(cx, |state, cx| state.refresh_pins(&chat_id, cx));
+                .update(cx, |state, cx| state.refresh_pins(&conversation_id, cx));
         }
         let target = self
             .current
@@ -2808,31 +2818,6 @@ impl ConversationView {
         .detach();
     }
 
-    fn delete(&mut self, message_id: &str, cx: &mut Context<Self>) {
-        let Some(mut record) = self.own_record(message_id, cx) else {
-            return;
-        };
-        let state = self.app.read(cx);
-        let (mode, engine, store) = (state.mode, state.engine.clone(), state.store.clone());
-        if mode.demo {
-            record.deleted = true;
-            let _ = store.upsert_messages(std::slice::from_ref(&record));
-            self.rebuild(false, cx);
-            return;
-        }
-        let Some(engine) = engine.filter(|_| !mode.read_only) else {
-            self.show_notice("Read-only mode: message not deleted", cx);
-            return;
-        };
-        let conversation_id = record.conversation_id.clone();
-        let receiver = runtime::spawn(async move {
-            engine
-                .soft_delete_message(&conversation_id, &record.message_id)
-                .await
-        });
-        self.report_failure(receiver, "Delete failed", cx);
-    }
-
     fn copy_text(&self, message_id: &str, cx: &mut Context<Self>) {
         let Some(conversation_id) = self.conversation_id() else {
             return;
@@ -2878,26 +2863,6 @@ impl ConversationView {
         self.app.update(cx, |state, cx| {
             state.raise_notice(message.to_owned(), None, cx)
         });
-    }
-
-    fn report_failure(
-        &mut self,
-        receiver: tokio::sync::oneshot::Receiver<teams_core::Result<()>>,
-        label: &'static str,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            let error = match receiver.await {
-                Ok(Ok(())) => return,
-                Ok(Err(error)) => short_error(&error),
-                Err(_) => "cancelled".to_owned(),
-            };
-            this.update(cx, |this, cx| {
-                this.show_notice(&format!("{label}: {error}"), cx)
-            })
-            .ok();
-        })
-        .detach();
     }
 
     fn delegate_entries(&self, key: &str, cx: &App) -> (Vec<DelegateEntry>, Option<Action>) {
@@ -3058,11 +3023,18 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
-        let pinned = chat_id
-            .as_deref()
-            .is_some_and(|chat_id| state.is_pinned(chat_id, key));
         let quick = state.quick_reactions();
         let in_chat = chat_id.is_some();
+        let pin_conversation_id = self.pin_conversation_id();
+        let pinned = pin_conversation_id
+            .as_deref()
+            .is_some_and(|conversation_id| state.is_pinned(conversation_id, key));
+        let pinnable = in_chat
+            || pin_conversation_id.as_deref().is_some_and(|channel_id| {
+                state
+                    .message_record(channel_id, key)
+                    .is_some_and(|record| record.reply_to_id.is_none())
+            });
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
         MessageMenu {
             key: key.to_owned(),
@@ -3077,7 +3049,7 @@ impl ConversationView {
             translate_label,
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
-            toggle_pinned: in_chat.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
+            toggle_pinned: pinnable.then(|| action(|this, key, _, cx| this.toggle_pinned(key, cx))),
             pinned,
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
@@ -3457,6 +3429,7 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.channel_details_button(cx))
     }
 }
 
@@ -3603,6 +3576,15 @@ impl Render for ConversationView {
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
         .jump_button(!in_feed)
         .force_jump_button(detached)
+        .with_jump_button_label(jump::JUMP_TO_NEWEST_LABEL)
+        .with_jump_button_renderer(|button| {
+            button
+                .label(jump::JUMP_TO_NEWEST_LABEL)
+                .tooltip(jump::jump_to_newest_tooltip())
+                .border_0()
+                .bg(theme::accent())
+                .text_color(theme::on_accent())
+        })
         .when(detached, |scroller| {
             let view = cx.weak_entity();
             scroller.on_jump(move |_, cx| {
@@ -3684,32 +3666,40 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
+        let channel_details = self.render_channel_details(cx);
+        let content = v_flex()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .children(new_post)
+            .child(
+                div()
+                    .debug_selector(|| TIMELINE_TAG.into())
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
+                    .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_reaction_details(cx)))
+                    .child(body)
+                    .children(pin_banner.map(pin_banner_overlay)),
+            )
+            .children(self.render_draft_error(cx))
+            .when(!in_feed && !recap_active, |column| {
+                column
+                    .child(self.render_typing_line(cx))
+                    .children(self.render_proposal_card(cx))
+                    .child(self.composer.clone())
+            })
+            .child(self.render_drop_overlay(cx));
         root.child(
-            v_flex()
-                .relative()
+            h_flex()
                 .flex_1()
                 .min_h_0()
-                .children(new_post)
-                .child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
-                        .on_scroll_wheel(
-                            cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
-                        )
-                        .child(body)
-                        .children(pin_banner.map(pin_banner_overlay)),
-                )
-                .children(self.render_draft_error(cx))
-                .when(!in_feed && !recap_active, |column| {
-                    column
-                        .child(self.render_typing_line(cx))
-                        .children(self.render_proposal_card(cx))
-                        .child(self.composer.clone())
-                })
-                .child(self.render_drop_overlay(cx)),
+                .w_full()
+                .items_stretch()
+                .child(content)
+                .children(channel_details),
         )
         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
             if this.reaction_details.is_some() {

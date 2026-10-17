@@ -5,8 +5,8 @@ use rusqlite::params;
 
 use crate::error::Result;
 use crate::models::{
-    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, ChannelTabRecord, Sidebar,
-    SidebarTeam, TeamLayoutRecord, TeamRecord,
+    ChannelMentions, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
+    ChannelTabRecord, Sidebar, SidebarTeam, TeamLayoutRecord, TeamRecord,
 };
 use crate::store::Store;
 use crate::teams::channel_from_row;
@@ -83,6 +83,19 @@ impl Store {
                 .then_with(|| compare_names(&left.channel.name, &right.channel.name))
                 .then_with(|| left.channel.id.cmp(&right.channel.id))
         });
+        let mut mentions: HashMap<String, ChannelMentions> = connection
+            .prepare_cached("SELECT channel_id, personal, channel, team FROM channel_mentions")?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ChannelMentions {
+                        personal: row.get(1)?,
+                        channel: row.get(2)?,
+                        team: row.get(3)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
         let mut teams: Vec<SidebarTeam> = team_rows
             .into_iter()
             .map(|row| SidebarTeam {
@@ -91,6 +104,7 @@ impl Store {
                 hidden: row.hidden,
                 hidden_channel_ids: Vec::new(),
                 notifications: HashMap::new(),
+                mentions: HashMap::new(),
             })
             .collect();
         for row in channel_rows {
@@ -104,6 +118,9 @@ impl Store {
                 if row.notifications != ChannelNotifications::default() {
                     team.notifications
                         .insert(row.channel.id.clone(), row.notifications);
+                }
+                if let Some(found) = mentions.remove(&row.channel.id) {
+                    team.mentions.insert(row.channel.id.clone(), found);
                 }
                 team.channels.push(row.channel);
             }
@@ -154,6 +171,47 @@ impl Store {
             }
         }
         Ok(transaction.commit()?)
+    }
+
+    /// Replaces every stored mention count; channels left out have none.
+    pub fn replace_channel_mentions(&self, mentions: &[(String, ChannelMentions)]) -> Result<()> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM channel_mentions", [])?;
+        {
+            let mut insert = transaction.prepare_cached(
+                "INSERT OR REPLACE INTO channel_mentions (channel_id, personal, channel, team)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (channel_id, counts) in mentions.iter().filter(|(_, counts)| !counts.is_empty()) {
+                insert.execute(params![channel_id, counts.personal, counts.channel, counts.team])?;
+            }
+        }
+        Ok(transaction.commit()?)
+    }
+
+    pub fn clear_channel_mentions(&self, channel_id: &str) -> Result<()> {
+        self.lock()?.execute(
+            "DELETE FROM channel_mentions WHERE channel_id = ?1",
+            [channel_id],
+        )?;
+        Ok(())
+    }
+
+    /// The team's own thread id, which Teams' CSA routes take: the id of its General channel.
+    pub fn team_thread_id(&self, team_id: &str) -> Result<Option<String>> {
+        let connection = self.lock()?;
+        Ok(connection
+            .prepare_cached(
+                "SELECT channels.id FROM channels
+                 LEFT JOIN channel_layout ON channel_layout.channel_id = channels.id
+                 WHERE channels.team_id = ?1
+                   AND COALESCE(channel_layout.general, channels.name = ?2)
+                 ORDER BY channels.id LIMIT 1",
+            )?
+            .query_map(params![team_id, GENERAL_FALLBACK_NAME], |row| row.get(0))?
+            .next()
+            .transpose()?)
     }
 
     pub fn set_channel_notifications(

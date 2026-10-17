@@ -331,14 +331,32 @@ impl Directory {
     }
 
     pub fn assign(&mut self, conversation_id: &str, folder_id: Option<&str>) {
+        self.place(conversation_id, folder_id, None);
+    }
+
+    pub fn place(&mut self, conversation_id: &str, folder_id: Option<&str>, index: Option<usize>) {
         for folder in &mut self.folders {
             folder.conversation_ids.retain(|id| id != conversation_id);
         }
         if let Some(folder) =
             folder_id.and_then(|id| self.folders.iter_mut().find(|folder| folder.id == id))
         {
-            folder.conversation_ids.push(conversation_id.to_owned());
+            let position = index.map_or(folder.conversation_ids.len(), |index| {
+                index.min(folder.conversation_ids.len())
+            });
+            folder
+                .conversation_ids
+                .insert(position, conversation_id.to_owned());
         }
+    }
+
+    pub fn slot_of(&self, folder_id: &str, conversation_id: &str) -> Option<usize> {
+        self.folders
+            .iter()
+            .find(|folder| folder.id == folder_id)?
+            .conversation_ids
+            .iter()
+            .position(|id| id == conversation_id)
     }
 
     pub fn move_targets(&self) -> Vec<(String, String)> {
@@ -647,13 +665,22 @@ pub fn watch_presence(engine: &Arc<Engine>, user_ids: Vec<String>) -> Done {
     run(async move { engine.watch_presence(&user_ids).await })
 }
 
-pub fn move_to_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id: &str) -> Done {
+pub fn move_to_folder(
+    engine: &Arc<Engine>,
+    conversation_id: &str,
+    folder_id: &str,
+    index: Option<usize>,
+) -> Done {
     let (engine, conversation_id, folder_id) = (
         engine.clone(),
         conversation_id.to_owned(),
         folder_id.to_owned(),
     );
-    run(async move { engine.move_to_folder(&conversation_id, &folder_id).await })
+    run(async move {
+        engine
+            .move_to_folder(&conversation_id, &folder_id, index)
+            .await
+    })
 }
 
 pub fn remove_from_folder(engine: &Arc<Engine>, conversation_id: &str, folder_id: &str) -> Done {
@@ -717,6 +744,29 @@ mod tests {
             expanded: None,
             conversation_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
         }
+    }
+
+    #[test]
+    fn place_puts_a_chat_at_the_slot_inside_and_across_folders() {
+        let mut directory = Directory {
+            folders: vec![
+                folder("fav", FolderKind::Favorites, &["a", "b", "c"]),
+                folder("work", FolderKind::UserCreated, &["d"]),
+            ],
+            ..Default::default()
+        };
+        directory.place("a", Some("fav"), Some(2));
+        assert_eq!(directory.folders[0].conversation_ids, vec!["b", "c", "a"]);
+        directory.place("d", Some("fav"), Some(0));
+        assert_eq!(
+            directory.folders[0].conversation_ids,
+            vec!["d", "b", "c", "a"]
+        );
+        assert!(directory.folders[1].conversation_ids.is_empty());
+        directory.place("b", Some("work"), Some(9));
+        assert_eq!(directory.folders[1].conversation_ids, vec!["b"]);
+        assert_eq!(directory.slot_of("fav", "c"), Some(1));
+        assert_eq!(directory.slot_of("work", "c"), None);
     }
 
     #[test]

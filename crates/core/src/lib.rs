@@ -11,6 +11,7 @@ mod card_layout;
 mod card_table;
 mod card_widgets;
 mod card_width;
+mod channel_mentions;
 mod channel_sync;
 mod chat_paging;
 mod default_reactions;

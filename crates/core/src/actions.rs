@@ -392,6 +392,18 @@ impl<R: Remote> SyncEngine<R> {
             )
             .await?;
         self.store.mark_channel_read(channel_id)?;
+        self.store.clear_channel_mentions(channel_id)?;
+        let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+        Ok(())
+    }
+
+    pub async fn mark_all_channels_read(&self) -> Result<()> {
+        let horizon = self
+            .remote
+            .mark_all_channels_read(Utc::now().timestamp_millis())
+            .await?;
+        *self.app_channel_horizon_ms.lock().unwrap() = horizon.channel_ms;
+        self.store.mark_all_channels_read()?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }
@@ -637,6 +649,20 @@ impl<R: Remote> SyncEngine<R> {
         let target = self.message_target(conversation_id, message_id)?;
         let user_id = self.my_user_id().await?;
         self.remote.soft_delete_message(&user_id, &target).await?;
+        self.refresh_message(conversation_id, message_id).await?;
+        Ok(())
+    }
+
+    pub async fn undo_soft_delete_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<()> {
+        let target = self.message_target(conversation_id, message_id)?;
+        let user_id = self.my_user_id().await?;
+        self.remote
+            .undo_soft_delete_message(&user_id, &target)
+            .await?;
         self.refresh_message(conversation_id, message_id).await?;
         Ok(())
     }

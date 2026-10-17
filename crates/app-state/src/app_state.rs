@@ -109,6 +109,7 @@ pub struct AppState {
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
     pub keep_unread: Option<String>,
+    pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
     typing_timer_running: bool,
     pub local_previews: HashMap<String, LocalPreview>,
@@ -261,6 +262,7 @@ impl AppState {
             live_retry: None,
             notice_count: 0,
             keep_unread: None,
+            restorable_deletes: Default::default(),
             typing: TypingState::default(),
             typing_timer_running: false,
             local_previews: HashMap::new(),
@@ -686,6 +688,32 @@ impl AppState {
         folder_id: Option<&str>,
         cx: &mut Context<Self>,
     ) {
+        self.place_chat(conversation_id, folder_id, None, cx);
+    }
+
+    pub fn drop_chat_on(
+        &mut self,
+        conversation_id: &str,
+        target_conversation_id: &str,
+        folder_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if conversation_id == target_conversation_id {
+            return;
+        }
+        let Some(slot) = self.directory.slot_of(folder_id, target_conversation_id) else {
+            return;
+        };
+        self.place_chat(conversation_id, Some(folder_id), Some(slot), cx);
+    }
+
+    pub fn place_chat(
+        &mut self,
+        conversation_id: &str,
+        folder_id: Option<&str>,
+        index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
         if self.mode.read_only {
             return;
         }
@@ -693,13 +721,16 @@ impl AppState {
             .directory
             .folder_of(conversation_id)
             .map(|folder| folder.id.clone());
-        self.directory.assign(conversation_id, folder_id);
+        self.directory.place(conversation_id, folder_id, index);
         if let Some(engine) = self.engine.clone() {
             let previous = previous_folder.clone();
             let done = match (folder_id, previous.as_deref()) {
-                (Some(folder_id), _) => {
-                    Some(data::move_to_folder(&engine, conversation_id, folder_id))
-                }
+                (Some(folder_id), _) => Some(data::move_to_folder(
+                    &engine,
+                    conversation_id,
+                    folder_id,
+                    index,
+                )),
                 (None, Some(previous)) => {
                     Some(data::remove_from_folder(&engine, conversation_id, previous))
                 }
@@ -765,6 +796,42 @@ impl AppState {
                 engine.mark_read(&channel_id).await
             }));
         }
+    }
+
+    pub fn mark_all_channels_read(&mut self, cx: &mut Context<Self>) {
+        let Some(engine_or_demo) = self.chat_action_engine(cx) else {
+            return;
+        };
+        let previous_unread: Vec<(String, bool, Option<DateTime<Utc>>)> = self
+            .sidebar
+            .teams
+            .iter()
+            .flat_map(|team| team.channels.iter())
+            .map(|channel| (channel.id.clone(), channel.unread, None))
+            .collect();
+        let previous_mentions: Vec<(String, store::ChannelMentions)> = self
+            .sidebar
+            .teams
+            .iter()
+            .flat_map(|team| team.mentions.iter())
+            .map(|(channel_id, mentions)| (channel_id.clone(), *mentions))
+            .collect();
+        let _ = self.store.mark_all_channels_read();
+        self.reload_sidebar(cx);
+        let Some(engine) = engine_or_demo else {
+            return;
+        };
+        self.run_chat_action(
+            "Mark all as read",
+            async move { engine.mark_all_channels_read().await },
+            move |state, cx| {
+                let _ = state.store.apply_channel_read_states(&previous_unread);
+                let _ = state.store.replace_channel_mentions(&previous_mentions);
+                state.reload_sidebar(cx);
+            },
+            |_, _| {},
+            cx,
+        );
     }
 
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
@@ -1068,6 +1135,7 @@ mod tests {
                 hidden: false,
                 hidden_channel_ids: Vec::new(),
                 notifications: Default::default(),
+                mentions: Default::default(),
             }],
         }
     }

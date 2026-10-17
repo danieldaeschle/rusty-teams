@@ -1397,6 +1397,7 @@ mod tests {
                 hidden: false,
                 hidden_channel_ids: Vec::new(),
                 notifications: Default::default(),
+                mentions: Default::default(),
             }],
         }
     }

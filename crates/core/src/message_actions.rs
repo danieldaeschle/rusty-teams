@@ -68,30 +68,76 @@ impl<R: Remote> SyncEngine<R> {
         self.remote.list_call_logs().await
     }
 
-    pub async fn chat_pins(&self, chat_id: &str) -> Result<Vec<PinnedMessage>> {
-        self.ensure_chat(chat_id)?;
-        self.remote.chat_pins(chat_id).await
+    pub async fn chat_pins(&self, conversation_id: &str) -> Result<Vec<PinnedMessage>> {
+        match self.resolve_stored(conversation_id)? {
+            Conversation::Chat => self.remote.chat_pins(conversation_id).await,
+            Conversation::Channel { team_id } => {
+                let team_thread_id = self.team_thread_id(&team_id)?;
+                self.remote
+                    .channel_pinned_posts(&team_thread_id, conversation_id)
+                    .await
+            }
+        }
     }
 
-    pub async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
-        self.ensure_chat(chat_id)?;
-        self.remote.pin_message(chat_id, message_id).await?;
-        self.announce_pins(chat_id);
+    pub async fn pin_message(&self, conversation_id: &str, message_id: &str) -> Result<()> {
+        match self.resolve_stored(conversation_id)? {
+            Conversation::Chat => self.remote.pin_message(conversation_id, message_id).await?,
+            Conversation::Channel { team_id } => {
+                self.set_post_pinned(&team_id, conversation_id, message_id, true)
+                    .await?
+            }
+        }
+        self.announce_pins(conversation_id);
         Ok(())
     }
 
     pub async fn unpin_message(
         &self,
-        chat_id: &str,
+        conversation_id: &str,
         message_id: &str,
         parent_id: Option<&str>,
     ) -> Result<()> {
-        self.ensure_chat(chat_id)?;
-        self.remote
-            .unpin_message(chat_id, message_id, parent_id)
-            .await?;
-        self.announce_pins(chat_id);
+        match self.resolve_stored(conversation_id)? {
+            Conversation::Chat => {
+                self.remote
+                    .unpin_message(conversation_id, message_id, parent_id)
+                    .await?
+            }
+            Conversation::Channel { team_id } => {
+                self.set_post_pinned(&team_id, conversation_id, message_id, false)
+                    .await?
+            }
+        }
+        self.announce_pins(conversation_id);
         Ok(())
+    }
+
+    async fn set_post_pinned(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        post_id: &str,
+        pinned: bool,
+    ) -> Result<()> {
+        let is_reply = self
+            .store
+            .messages_by_id(channel_id, &[post_id.to_owned()])?
+            .get(post_id)
+            .is_some_and(|record| record.reply_to_id.is_some());
+        if is_reply {
+            return Err(Error::Unsupported("pinning a channel reply"));
+        }
+        let team_thread_id = self.team_thread_id(team_id)?;
+        self.remote
+            .set_post_pinned(&team_thread_id, channel_id, post_id, pinned)
+            .await
+    }
+
+    fn team_thread_id(&self, team_id: &str) -> Result<String> {
+        self.store
+            .team_thread_id(team_id)?
+            .ok_or_else(|| Error::UnknownConversation(team_id.to_owned()))
     }
 
     pub async fn message_link(&self, conversation_id: &str, message_id: &str) -> Result<String> {
@@ -150,13 +196,6 @@ impl<R: Remote> SyncEngine<R> {
         }
         if let Some(conversation_id) = event.conversation_id.as_deref() {
             self.announce_pins(conversation_id);
-        }
-    }
-
-    fn ensure_chat(&self, conversation_id: &str) -> Result<()> {
-        match self.resolve_stored(conversation_id)? {
-            Conversation::Chat => Ok(()),
-            Conversation::Channel { .. } => Err(Error::Unsupported("pinned messages in a channel")),
         }
     }
 

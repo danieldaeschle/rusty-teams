@@ -67,6 +67,11 @@ impl MessageScrollerState {
             && !self.list_state.is_scrolled_to_end().unwrap_or(false)
     }
 
+    /// Return the index of the row at the top of the viewport.
+    pub fn top_item(&self) -> usize {
+        self.list_state.logical_scroll_top().item_ix
+    }
+
     /// Return whether the list is actively following its tail.
     pub fn is_following_tail(&self) -> bool {
         self.list_state.is_following_tail()

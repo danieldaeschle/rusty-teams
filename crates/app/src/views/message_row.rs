@@ -23,12 +23,14 @@ use crate::agents::{AgentRun, run_chip};
 use crate::card_state::BotIdentity;
 use crate::data::Directory;
 use crate::render::Block;
+use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 use app_ui_kit::layout::ROW_PADDING;
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
+pub type SharedRowAction = Option<std::rc::Rc<dyn Fn(&mut App)>>;
 
 pub const BUBBLE_TAGS: [&str; 12] = [
     "message-bubble/0",
@@ -80,11 +82,13 @@ pub struct RowActions {
     pub open_image: Option<ImageActions>,
     pub highlighted: bool,
     pub saved: bool,
+    pub pinned: bool,
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
     pub agent_run: Option<AgentRun>,
     pub call: CallActions,
     pub reaction_proposal: Option<ReactionPill>,
+    pub undo_delete: SharedRowAction,
 }
 
 const TOOLBAR_RIGHT_INSET: f32 = 0.;
@@ -119,6 +123,34 @@ pub(super) fn new_marker() -> Div {
         theme::mention_background(false),
         theme::accent_text(),
     )
+}
+
+pub(super) fn deleted_tombstone(index: usize, undo_delete: SharedRowAction) -> Div {
+    let line =
+        h_flex()
+            .gap(px(8.))
+            .items_baseline()
+            .text_size(px(13.))
+            .child(div().italic().text_color(theme::text_muted()).child(
+                if undo_delete.is_some() {
+                    DELETED_TOMBSTONE
+                } else {
+                    DELETED_PREVIEW
+                },
+            ));
+    match undo_delete {
+        Some(undo) => line.child(
+            div()
+                .id(ElementId::Name(format!("undo-delete-{index}").into()))
+                .cursor_pointer()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::accent_text())
+                .hover(|link| link.underline())
+                .child(UNDO_DELETE_LABEL)
+                .on_click(move |_, _, cx| undo(cx)),
+        ),
+        None => line,
+    }
 }
 
 fn bubble_max_width(timeline: &TimelineBounds, reserved: f32) -> Length {
@@ -167,10 +199,7 @@ fn bubble(
             .border_1()
             .border_color(theme::border_strong())
             .py(px(6.))
-            .text_size(px(13.))
-            .italic()
-            .text_color(theme::text_muted())
-            .child(DELETED_PREVIEW);
+            .child(deleted_tombstone(index, extras.undo_delete));
     }
     let failed = matches!(row.delivery, Delivery::Failed(_));
     let scheduled = matches!(row.delivery, Delivery::Scheduled(_));
@@ -318,6 +347,7 @@ struct BubbleExtras {
     timeline: TimelineBounds,
     agent_run: Option<AgentRun>,
     reaction_proposal: Option<ReactionPill>,
+    undo_delete: SharedRowAction,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
@@ -609,15 +639,12 @@ fn own_row(
     let reaction_proposal = extras.reaction_proposal.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
-        h_flex()
-            .w_full()
-            .justify_end()
-            .child(
-                div()
-                    .min_w_0()
-                    .max_w(bubble_max_width(&extras.timeline, 0.))
-                    .child(bubble(row, index, true, directory, extras, cx)),
-            ),
+        h_flex().w_full().justify_end().child(
+            div()
+                .min_w_0()
+                .max_w(bubble_max_width(&extras.timeline, 0.))
+                .child(bubble(row, index, true, directory, extras, cx)),
+        ),
     );
     column = column.children(agent_chip(agent_run));
     column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
@@ -655,7 +682,9 @@ pub fn render_message_row(
         timeline,
         agent_run,
         call: _,
+        pinned: _,
         reaction_proposal,
+        undo_delete,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -670,6 +699,7 @@ pub fn render_message_row(
         timeline,
         agent_run,
         reaction_proposal,
+        undo_delete,
     };
     let own = row.own;
     let spacing = if row.series.has_prev {

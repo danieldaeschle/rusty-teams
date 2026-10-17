@@ -34,7 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetForegroundWindow,
     SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, SystemParametersInfoW, WDA_EXCLUDEFROMCAPTURE, WM_SETICON, WS_CAPTION,
+    ShowWindow, SystemParametersInfoW, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WM_SETICON, WS_CAPTION,
     WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
@@ -269,6 +269,12 @@ pub fn show_window_inactive(handle: NativeHandle) {
 pub fn exclude_from_capture(handle: NativeHandle) {
     unsafe {
         let _ = SetWindowDisplayAffinity(hwnd(handle), WDA_EXCLUDEFROMCAPTURE);
+    }
+}
+
+pub fn include_in_capture(handle: NativeHandle) {
+    unsafe {
+        let _ = SetWindowDisplayAffinity(hwnd(handle), WDA_NONE);
     }
 }
 

@@ -1,3 +1,4 @@
+pub mod activity_mentions;
 pub mod bot_profiles;
 pub mod calendar;
 pub mod calllog;
@@ -33,6 +34,7 @@ pub mod transcripts;
 pub mod translate;
 pub mod window;
 
+pub use activity_mentions::{ActivityFeed, MentionActivity, MentionKind};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Reminder, Repeat, Reply,
@@ -86,7 +88,10 @@ pub use recap::{
 pub use receipts::{MemberHorizon, Receipts};
 pub use recording_policy::{RecordingPolicy, parse_recording_policy};
 pub use saved::SavedMessage;
-pub use settings::{ChatSection, ChatSectionSettings, UserSettings};
+pub use settings::{
+    AppConsumptionHorizon, ChatSection, ChatSectionSettings, UserSettings,
+    parse_app_consumption_horizon,
+};
 pub use substrate_search::{
     QueryRequest, QueryResults, QueryScope, SearchIdentity, SearchSession, SubstrateSearch,
     Suggestions,
