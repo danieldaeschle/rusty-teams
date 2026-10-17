@@ -9,7 +9,7 @@ use teams_core::EmoticonTag;
 pub use strip::{StripImages, StripLoader, StripSource, split_strip};
 
 const CATALOG: &str = include_str!("../../../app/assets/emoticons.tsv");
-const ASSET_BASE: &str = "https://statics.teams.cdn.office.net/evergreen-assets/personal-expressions/v2/assets/emoticons";
+const ASSET_BASE: &str = chatsvc::teams_cdn::EMOTICON_BASE_URL;
 const ASSET_SIZE: u32 = 100;
 const FRAMES_PER_SECOND: u64 = 24;
 const VARIATION_SELECTOR: char = '\u{fe0f}';

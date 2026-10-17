@@ -1,9 +1,9 @@
 use url::Url;
 
 const PROXY_PATH: &str = "/urlp/v1/url/content";
-const PROXY_HOST_SUFFIX: &str = ".asyncgw.teams.microsoft.com";
+const PROXY_HOST_SUFFIX: &str = chatsvc::links::LINK_PROXY_HOST_SUFFIX;
 const GIPHY_HOST: &str = "giphy.com";
-const TEAMS_CDN_HOST: &str = "statics.teams.cdn.office.net";
+const TEAMS_CDN_HOST: &str = chatsvc::teams_cdn::HOST;
 
 /// The direct URL of a GIF or sticker image, `None` when `src` is not one of the known public hosts.
 pub fn external_image_url(src: &str) -> Option<String> {

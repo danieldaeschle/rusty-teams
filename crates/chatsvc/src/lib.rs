@@ -27,6 +27,7 @@ pub mod settings;
 pub mod sound_settings;
 pub mod sounds;
 pub mod substrate_search;
+pub mod teams_cdn;
 pub mod transcripts;
 pub mod translate;
 pub mod window;

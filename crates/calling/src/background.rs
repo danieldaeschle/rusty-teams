@@ -6,8 +6,8 @@ use session::{Request, Scope, Session};
 
 use crate::error::{Error, Result};
 
-pub const CATALOG_URL: &str = "https://statics.teams.cdn.office.net/evergreen-assets/backgroundimages/config.json?v=7";
-pub const CDN_ROOT: &str = "https://statics.teams.cdn.office.net";
+pub const CATALOG_URL: &str = chatsvc::teams_cdn::BACKGROUND_CATALOG_URL;
+pub const CDN_ROOT: &str = chatsvc::teams_cdn::ROOT;
 const FETCH_SCOPE: &str = "Chat.Read";
 const MAX_SIDE: u32 = 1920;
 const CATALOG_FILE: &str = "config.json";
