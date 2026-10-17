@@ -1058,7 +1058,7 @@ impl Remote for Graph {
         team_thread_id: &str,
         channel_id: &str,
     ) -> Result<Vec<PinnedMessage>> {
-        Ok(Pins::new(self.session())
+        Ok(Pins::with_skype_token(self.session())
             .channel_pinned_posts(team_thread_id, channel_id)
             .await?)
     }
@@ -1070,7 +1070,7 @@ impl Remote for Graph {
         post_id: &str,
         pinned: bool,
     ) -> Result<()> {
-        Ok(Pins::new(self.session())
+        Ok(Pins::with_skype_token(self.session())
             .set_post_pinned(team_thread_id, channel_id, post_id, pinned)
             .await?)
     }

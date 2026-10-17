@@ -140,7 +140,7 @@ impl ConversationView {
     }
 
     pub(super) fn render_pin_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let conversation_id = self.pin_conversation_id()?;
+        let conversation_id = self.chat_id()?;
         let pins = self.app.read(cx).pinned_messages(&conversation_id);
         let pin = pins.get(self.pin_index)?;
         let preview = self.pin_previews.get(&pin.message_id);

@@ -15,12 +15,12 @@ use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
 use crate::rows::{Delivery, MessageRow, PostRow, RecordingCard};
-use crate::views::call_notice::RecapActions;
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
 use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
+use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
 use crate::views::message_row::{DeliveryActions, RowActions};
 use crate::views::post_card::{PostAction, PostActions};
@@ -103,12 +103,16 @@ impl RenderEnv {
             emoji: proposal.emoji,
             accept: Rc::new(move |cx| {
                 accept_view
-                    .update(cx, |this, cx| this.accept_reaction(&accept_key, &accept_id, &emoji, cx))
+                    .update(cx, |this, cx| {
+                        this.accept_reaction(&accept_key, &accept_id, &emoji, cx)
+                    })
                     .ok();
             }),
             discard: Rc::new(move |cx| {
                 discard_view
-                    .update(cx, |this, cx| this.discard_reaction(&discard_key, &discard_id, cx))
+                    .update(cx, |this, cx| {
+                        this.discard_reaction(&discard_key, &discard_id, cx)
+                    })
                     .ok();
             }),
         })
@@ -300,6 +304,10 @@ impl RenderEnv {
                 .app
                 .read(cx)
                 .is_saved(&message.conversation_id, &message.key),
+            pinned: self
+                .app
+                .read(cx)
+                .is_pinned(&message.conversation_id, &message.key),
             translation,
             timeline: self.timeline.clone(),
             agent_run: actionable_run,
@@ -342,9 +350,11 @@ impl RenderEnv {
             })
         };
         let recording = call.recap.as_ref().map(|recap| &recap.recording);
-        let share = recording.and_then(|recording| recording.url.clone()).map(|url| {
-            boxed(move |cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone())))
-        });
+        let share = recording
+            .and_then(|recording| recording.url.clone())
+            .map(|url| {
+                boxed(move |cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone())))
+            });
         CallActions {
             call_back,
             join,

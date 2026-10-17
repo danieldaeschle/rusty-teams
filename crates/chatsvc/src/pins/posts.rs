@@ -122,8 +122,11 @@ impl<T: CsaTransport> Pins<T> {
         let mut pins = Vec::new();
         let mut continuation_token: Option<String> = None;
         for _ in 0..MAX_PINNED_POST_PAGES {
-            let request =
-                self.pinned_posts_request(team_thread_id, channel_id, continuation_token.as_deref());
+            let request = self.pinned_posts_request(
+                team_thread_id,
+                channel_id,
+                continuation_token.as_deref(),
+            );
             let answer = self.transport.send(request).await?;
             ensure_success(&answer)?;
             let page = parse_pinned_posts(&answer.body)?;
@@ -209,7 +212,11 @@ mod tests {
             "continuationToken": "next-page"
         });
         let page = parse_pinned_posts(&body).unwrap();
-        let ids: Vec<&str> = page.pins.iter().map(|pin| pin.message_id.as_str()).collect();
+        let ids: Vec<&str> = page
+            .pins
+            .iter()
+            .map(|pin| pin.message_id.as_str())
+            .collect();
         assert_eq!(ids, ["1791368000000", "1791367000000", "1791366000000"]);
         assert_eq!(
             page.pins[0].pinned_at.map(|time| time.timestamp_millis()),
@@ -268,8 +275,14 @@ mod tests {
     #[tokio::test]
     async fn a_repeated_continuation_stops_paging() {
         let pins = canned(vec![
-            (200, json!({"messages": [{"id": "2"}], "continuationToken": "same"})),
-            (200, json!({"messages": [{"id": "1"}], "continuationToken": "same"})),
+            (
+                200,
+                json!({"messages": [{"id": "2"}], "continuationToken": "same"}),
+            ),
+            (
+                200,
+                json!({"messages": [{"id": "1"}], "continuationToken": "same"}),
+            ),
         ]);
         let found = pins.channel_pinned_posts(TEAM, CHANNEL).await.unwrap();
         assert_eq!(found.len(), 2);
@@ -280,12 +293,18 @@ mod tests {
     async fn failures_are_errors() {
         let pins = canned(vec![(403, json!({})), (412, json!({}))]);
         assert!(pins.channel_pinned_posts(TEAM, CHANNEL).await.is_err());
-        assert!(pins.set_post_pinned(TEAM, CHANNEL, "1", true).await.is_err());
+        assert!(
+            pins.set_post_pinned(TEAM, CHANNEL, "1", true)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn unpin_accepts_no_content() {
         let pins = canned(vec![(204, Value::Null)]);
-        pins.set_post_pinned(TEAM, CHANNEL, "1", false).await.unwrap();
+        pins.set_post_pinned(TEAM, CHANNEL, "1", false)
+            .await
+            .unwrap();
     }
 }

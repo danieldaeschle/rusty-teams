@@ -21,6 +21,8 @@ use teams_core::{
     ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
 };
 
+mod channel_details;
+pub use channel_details::{CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_TAG};
 mod detached;
 mod feed;
 mod pins;
@@ -211,6 +213,8 @@ pub struct ConversationView {
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     pin_index: usize,
+    channel_details_open: bool,
+    pinned_posts_expanded: bool,
     pin_previews: HashMap<String, pins::PinPreview>,
     pin_fetches: HashSet<String>,
     notice: Option<String>,
@@ -540,6 +544,8 @@ impl ConversationView {
             reaction_details: None,
             highlighted_message: None,
             pin_index: 0,
+            channel_details_open: false,
+            pinned_posts_expanded: false,
             pin_previews: HashMap::new(),
             pin_fetches: HashSet::new(),
             notice: None,
@@ -882,6 +888,7 @@ impl ConversationView {
         self.start_fetch(cx);
         self.mark_read(ReadTrigger::Open, cx);
         self.refresh_pin_previews(cx);
+        self.pinned_posts_expanded = false;
         if let Some(conversation_id) = self.pin_conversation_id() {
             self.app
                 .update(cx, |state, cx| state.refresh_pins(&conversation_id, cx));
@@ -3425,6 +3432,7 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.channel_details_button(cx))
     }
 }
 
@@ -3650,33 +3658,40 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
+        let channel_details = self.render_channel_details(cx);
+        let content = v_flex()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .children(new_post)
+            .child(
+                div()
+                    .debug_selector(|| TIMELINE_TAG.into())
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
+                    .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_reaction_details(cx)))
+                    .child(body)
+                    .children(pin_banner.map(pin_banner_overlay)),
+            )
+            .children(self.render_draft_error(cx))
+            .when(!in_feed && !recap_active, |column| {
+                column
+                    .child(self.render_typing_line(cx))
+                    .children(self.render_proposal_card(cx))
+                    .child(self.composer.clone())
+            })
+            .child(self.render_drop_overlay(cx));
         root.child(
-            v_flex()
-                .relative()
+            h_flex()
                 .flex_1()
                 .min_h_0()
-                .children(new_post)
-                .child(
-                    div()
-                        .debug_selector(|| TIMELINE_TAG.into())
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
-                        .on_scroll_wheel(
-                            cx.listener(|this, _, _, cx| this.close_reaction_details(cx)),
-                        )
-                        .child(body)
-                        .children(pin_banner.map(pin_banner_overlay)),
-                )
-                .children(self.render_draft_error(cx))
-                .when(!in_feed && !recap_active, |column| {
-                    column
-                        .child(self.render_typing_line(cx))
-                        .children(self.render_proposal_card(cx))
-                        .child(self.composer.clone())
-                })
-                .child(self.render_drop_overlay(cx)),
+                .w_full()
+                .items_stretch()
+                .child(content)
+                .children(channel_details),
         )
         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
             if this.reaction_details.is_some() {

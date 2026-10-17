@@ -80,6 +80,7 @@ pub struct RowActions {
     pub open_image: Option<ImageActions>,
     pub highlighted: bool,
     pub saved: bool,
+    pub pinned: bool,
     pub translation: Option<TranslationActions>,
     pub timeline: TimelineBounds,
     pub agent_run: Option<AgentRun>,
@@ -609,15 +610,12 @@ fn own_row(
     let reaction_proposal = extras.reaction_proposal.take();
     let mut column = v_flex().w_full().items_end().gap(px(2.));
     column = column.child(
-        h_flex()
-            .w_full()
-            .justify_end()
-            .child(
-                div()
-                    .min_w_0()
-                    .max_w(bubble_max_width(&extras.timeline, 0.))
-                    .child(bubble(row, index, true, directory, extras, cx)),
-            ),
+        h_flex().w_full().justify_end().child(
+            div()
+                .min_w_0()
+                .max_w(bubble_max_width(&extras.timeline, 0.))
+                .child(bubble(row, index, true, directory, extras, cx)),
+        ),
     );
     column = column.children(agent_chip(agent_run));
     column = column.children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
@@ -655,6 +653,7 @@ pub fn render_message_row(
         timeline,
         agent_run,
         call: _,
+        pinned: _,
         reaction_proposal,
     } = actions;
     let extras = BubbleExtras {
