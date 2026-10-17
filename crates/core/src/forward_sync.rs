@@ -20,16 +20,21 @@ fn is_gone(error: &Error) -> bool {
 }
 
 impl<R: Remote> SyncEngine<R> {
-    /// Once per chat and session, for cached forwards stored before their original message was kept.
+    /// Once per conversation and session (again after a failed Graph read), for cached forwards stored before their original message was kept.
     pub(crate) async fn heal_forwards(&self, conversation_id: &str) -> bool {
         let first = self
             .forwards_healed
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(conversation_id.to_owned());
-        if !first || !matches!(self.resolve_stored(conversation_id), Ok(Conversation::Chat)) {
+        if !first {
             return false;
         }
+        let in_chat = match self.resolve_stored(conversation_id) {
+            Ok(Conversation::Chat) => true,
+            Ok(Conversation::Channel { .. }) => false,
+            Err(_) => return false,
+        };
         let Ok(cached) = self
             .store
             .messages_with_attachment_type(conversation_id, FORWARDED_CONTENT_TYPE)
@@ -44,30 +49,51 @@ impl<R: Remote> SyncEngine<R> {
         if stale_ids.is_empty() {
             return false;
         }
+        if !in_chat {
+            let given_up = self.given_up_forwards(conversation_id, &stale_ids);
+            return self
+                .ingest(conversation_id, given_up)
+                .is_ok_and(|delta| !delta.is_empty());
+        }
         let Ok(answers) = self
             .remote
             .chat_messages_by_id(conversation_id, &stale_ids)
             .await
         else {
+            self.retry_forward_heal(conversation_id);
             return false;
         };
         let mut healed = Vec::new();
         let mut given_up_ids = Vec::new();
+        let mut retry = false;
         for (message_id, answer) in stale_ids.iter().zip(answers) {
             let fresh = match answer {
                 Ok(message) => message_record(conversation_id, &message),
                 Err(error) if is_gone(&error) => None,
-                Err(_) => continue,
+                Err(_) => {
+                    retry = true;
+                    continue;
+                }
             };
             match fresh {
                 Some(record) if !lacks_forward_content(&record) => healed.push(record),
                 _ => given_up_ids.push(message_id.clone()),
             }
         }
+        if retry {
+            self.retry_forward_heal(conversation_id);
+        }
         self.apply_chat_emotions(conversation_id, &mut healed).await;
         healed.extend(self.given_up_forwards(conversation_id, &given_up_ids));
         self.ingest(conversation_id, healed)
             .is_ok_and(|delta| !delta.is_empty())
+    }
+
+    fn retry_forward_heal(&self, conversation_id: &str) {
+        self.forwards_healed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(conversation_id);
     }
 
     /// Read again, as the delta fetch running alongside may have stored a newer version meanwhile.
