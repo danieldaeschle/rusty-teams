@@ -304,7 +304,14 @@ mod tests {
         let hidden: Vec<Option<bool>> = states.iter().map(|state| state.hidden).collect();
         assert_eq!(
             hidden,
-            [Some(true), Some(false), Some(true), None, Some(true), Some(true)]
+            [
+                Some(true),
+                Some(false),
+                Some(true),
+                None,
+                Some(true),
+                Some(true)
+            ]
         );
     }
 

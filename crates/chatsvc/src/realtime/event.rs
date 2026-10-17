@@ -180,7 +180,10 @@ pub fn decode_payload(payload: &str) -> Result<RealtimeEvent> {
                         activity: if entry.out_of_office {
                             Some(OUT_OF_OFFICE_ACTIVITY.to_owned())
                         } else {
-                            entry.activity.map(bounded).filter(|value| !value.is_empty())
+                            entry
+                                .activity
+                                .map(bounded)
+                                .filter(|value| !value.is_empty())
                         },
                     })
                 })

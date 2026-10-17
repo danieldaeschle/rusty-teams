@@ -210,8 +210,14 @@ mod tests {
 
     #[test]
     fn skin_tone_is_read_from_the_string_property() {
-        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})), Some(2));
-        assert_eq!(parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})), None);
+        assert_eq!(
+            parse_skin_tone(&json!({"preferredSkinToneIndex": "2"})),
+            Some(2)
+        );
+        assert_eq!(
+            parse_skin_tone(&json!({"preferredSkinToneIndex": "9"})),
+            None
+        );
         assert_eq!(parse_skin_tone(&json!({})), None);
     }
 

@@ -38,11 +38,7 @@ fn is_user_message(message: &Value) -> bool {
 }
 
 fn message_id(message: &Value) -> Option<String> {
-    match message.get("id")? {
-        Value::String(text) if !text.is_empty() => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
+    crate::json_id::id_text(message.get("id")?)
 }
 
 fn cursor_of(body: &Value, link_key: &str) -> Option<String> {

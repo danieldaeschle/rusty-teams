@@ -57,11 +57,7 @@ pub fn parse_message_emotions(body: &Value) -> Vec<MessageEmotions> {
         .into_iter()
         .flatten()
         .filter_map(|message| {
-            let message_id = match message.get("id")? {
-                Value::String(text) if !text.is_empty() => text.clone(),
-                Value::Number(number) => number.to_string(),
-                _ => return None,
-            };
+            let message_id = crate::json_id::id_text(message.get("id")?)?;
             Some(MessageEmotions {
                 message_id,
                 reactions: reactions(message.pointer("/properties/emotions")),
