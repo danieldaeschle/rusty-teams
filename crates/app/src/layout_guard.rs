@@ -176,6 +176,7 @@ mod frames {
     use crate::user_activity::UserInput;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::composer::{COMPOSER_BOX_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG};
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -935,6 +936,66 @@ mod frames {
         }
     }
 
+    fn composer_button_insets(visual: &mut VisualTestContext) -> [f32; 6] {
+        collect(visual, Some(COMPOSER_SEND_TAG));
+        let mut bounds_of = |path: &'static str| {
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} rendered"))
+        };
+        let composer = bounds_of(COMPOSER_BOX_TAG);
+        let leading = bounds_of(COMPOSER_LEADING_TAG);
+        let send = bounds_of(COMPOSER_SEND_TAG);
+        [
+            f32::from(leading.left() - composer.left()),
+            f32::from(leading.top() - composer.top()),
+            f32::from(composer.bottom() - leading.bottom()),
+            f32::from(composer.right() - send.right()),
+            f32::from(send.top() - composer.top()),
+            f32::from(composer.bottom() - send.bottom()),
+        ]
+    }
+
+    #[gpui_kit::test]
+    fn composer_buttons_keep_equal_insets(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        let single_line = composer_button_insets(&mut visual);
+        let left = single_line[0];
+        assert!(
+            single_line
+                .iter()
+                .all(|inset| (inset - left).abs() < TOLERANCE),
+            "single line: insets left, top, bottom of the first button and right, top, bottom of send {single_line:?}"
+        );
+        let leading = visual
+            .debug_bounds(COMPOSER_LEADING_TAG)
+            .expect("leading buttons");
+        let send = visual.debug_bounds(COMPOSER_SEND_TAG).expect("send button");
+        visual.simulate_click(
+            point((leading.right() + send.left()) / 2., send.center().y),
+            Default::default(),
+        );
+        visual.simulate_keystrokes("o n e shift-enter t w o shift-enter t h r e e");
+        let three_lines = composer_button_insets(&mut visual);
+        assert!(
+            three_lines[1] > single_line[1] + 30.,
+            "three lines did not grow the composer: {three_lines:?}"
+        );
+        for inset in [
+            three_lines[0],
+            three_lines[2],
+            three_lines[3],
+            three_lines[5],
+        ] {
+            assert!(
+                (inset - left).abs() < TOLERANCE,
+                "three lines: insets left, top, bottom of the first button and right, top, bottom of send {three_lines:?}, expected {left}"
+            );
+        }
+    }
+
     #[gpui_kit::test]
     fn agent_proposals_stay_inside_the_main_island(cx: &mut TestAppContext) {
         let (handle, state) = mount_with(cx, true);
@@ -996,4 +1057,74 @@ fn lines_are_solid() {
         })
         .collect();
     assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+fn indentation(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+fn chain_lines<'a>(lines: &[&'a str], index: usize) -> Vec<&'a str> {
+    let indent = indentation(lines[index]);
+    let belongs = |line: &&str| line.trim().is_empty() || indentation(line) >= indent;
+    let start = lines[..index]
+        .iter()
+        .rposition(|line| !belongs(line))
+        .map_or(0, |position| position + 1);
+    let end = lines[index..]
+        .iter()
+        .position(|line| !belongs(line))
+        .map_or(lines.len(), |position| index + position);
+    lines[start..end]
+        .iter()
+        .filter(|line| indentation(line) == indent)
+        .copied()
+        .collect()
+}
+
+fn shrinking_rows(row_height: &Regex, source: &str) -> Vec<usize> {
+    let lines: Vec<&str> = source.lines().collect();
+    (0..lines.len())
+        .filter(|&index| row_height.is_match(lines[index]))
+        .filter(|&index| {
+            !chain_lines(&lines, index).iter().any(|line| {
+                let line = line.trim();
+                line.starts_with(".flex_none()") || line.starts_with(".flex_shrink_0()")
+            })
+        })
+        .map(|index| index + 1)
+        .collect()
+}
+
+fn row_height_pattern() -> Regex {
+    Regex::new(r"^\s*\.h\(px\(((\w+_)?(ROW|ENTRY)_HEIGHT|row_height)\)\)").expect("pattern")
+}
+
+#[test]
+fn matcher_finds_rows_without_flex_none() {
+    let source = "fn rows() {\n    h_flex()\n        .h(px(ROW_HEIGHT))\n        .child(\n            div()\n                .flex_none(),\n        );\n    div()\n        .id(1)\n        .h(px(OWN_ROW_HEIGHT))\n        .flex_none();\n}\n";
+    assert_eq!(shrinking_rows(&row_height_pattern(), source), [3]);
+}
+
+#[test]
+fn fixed_height_rows_never_shrink() {
+    let row_height = row_height_pattern();
+    let mut files = Vec::new();
+    for root in source_roots() {
+        source_files(&root, &mut files);
+    }
+    let violations: Vec<String> = files
+        .iter()
+        .filter(|file| !file.ends_with("layout_guard.rs"))
+        .flat_map(|file| {
+            let source = fs::read_to_string(file).expect("read source file");
+            shrinking_rows(&row_height, &source)
+                .into_iter()
+                .map(|line| format!("{}:{line}", file.display()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "a fixed-height row needs .flex_none(), or a max_h scroll list shrinks it to its content: {violations:?}"
+    );
 }

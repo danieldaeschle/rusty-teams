@@ -13,8 +13,19 @@ actions!(
         ToggleSubscript,
         ToggleCode,
         EditLink,
-        ScheduleSend
+        ScheduleSend,
+        PastePlainText,
+        InsertTableRowAbove,
+        InsertTableRowBelow,
+        InsertTableColumnLeft,
+        InsertTableColumnRight,
+        DeleteTableRow,
+        DeleteTableColumn,
+        DeleteTable
     ]
 );
 
-actions!(teams, [ReplyToHovered, OpenSwitcher, NewChat, ToggleCallMute]);
+actions!(
+    teams,
+    [ReplyToHovered, OpenSwitcher, NewChat, ToggleCallMute]
+);

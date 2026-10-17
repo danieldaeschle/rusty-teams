@@ -22,6 +22,7 @@ const LIST_MAX_HEIGHT: f32 = 300.;
 const POPUP_OFFSET: f32 = 16.;
 const SECTION_HEIGHT: f32 = 24.;
 const ROW_HEIGHT: f32 = 40.;
+const OWN_ROW_HEIGHT: f32 = 43.;
 const AVATAR_SIZE: f32 = 32.;
 const EDGE_PADDING: f32 = 12.;
 const ACTION_HEIGHT: f32 = 36.;
@@ -75,6 +76,7 @@ fn members_panel(
             .child(
                 div()
                     .h(px(SECTION_HEIGHT))
+                    .flex_none()
                     .px(px(EDGE_PADDING))
                     .flex()
                     .items_center()
@@ -148,10 +150,16 @@ fn member_row(
         None => avatar,
     };
     let opens_chat = user_id.filter(|_| !row.is_self).map(str::to_owned);
+    let row_height = if row.is_self {
+        OWN_ROW_HEIGHT
+    } else {
+        ROW_HEIGHT
+    };
     h_flex()
         .id(("chat-member", index))
         .group(group.clone())
-        .h(px(ROW_HEIGHT))
+        .h(px(row_height))
+        .flex_none()
         .px(px(EDGE_PADDING))
         .gap(px(8.))
         .items_center()

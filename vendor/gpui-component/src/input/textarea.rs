@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, DefiniteLength, Entity, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled,
-    Window, prelude::FluentBuilder as _,
+    App, DefiniteLength, Entity, IntoElement, Pixels, RenderOnce, SharedString, StyleRefinement,
+    Styled, Window, prelude::FluentBuilder as _,
 };
 
 use super::{Input, TextareaState};
@@ -19,6 +19,7 @@ pub struct Textarea {
     style: StyleRefinement,
     size: Size,
     height: Option<DefiniteLength>,
+    line_box_height: Option<Pixels>,
     appearance: bool,
     bordered: bool,
     disabled: bool,
@@ -73,6 +74,7 @@ impl Textarea {
             style: StyleRefinement::default(),
             size: Size::default(),
             height: None,
+            line_box_height: None,
             appearance: true,
             bordered: true,
             disabled: false,
@@ -91,6 +93,12 @@ impl Textarea {
 
     pub fn h(mut self, height: impl Into<DefiniteLength>) -> Self {
         self.height = Some(height.into());
+        self
+    }
+
+    /// See [`Input::line_box_height`].
+    pub fn line_box_height(mut self, height: Pixels) -> Self {
+        self.line_box_height = Some(height);
         self
     }
 
@@ -204,6 +212,9 @@ impl Textarea {
             .role(self.role)
             .with_size(self.size)
             .when_some(self.height, |this, height| this.h(height))
+            .when_some(self.line_box_height, |this, height| {
+                this.line_box_height(height)
+            })
             .when_some(self.accessibility_id, |this, id| this.accessibility_id(id))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .when_some(self.context_menu_builder, |this, build| {
