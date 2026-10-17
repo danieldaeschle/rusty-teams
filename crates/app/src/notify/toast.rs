@@ -485,7 +485,7 @@ impl Render for ToastView {
         let id = self.id;
         let (model, preview_on) = {
             let center = self.center.read(cx);
-            (center.model(id).cloned(), center.settings().preview)
+            (center.model(id).cloned(), center.settings().account.show_preview)
         };
         let Some(model) = model else {
             return div().size_full().bg(theme::popup()).into_any_element();

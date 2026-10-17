@@ -24,9 +24,10 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
-    Draft, DraftLine, Edit, FileReference, FormatState, LineKind, LinkPreview, MarkKind,
-    MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TABLE_MARK, TableEdit, TypingStyle,
-    UploadedFile, changed_span, has_markdown, link_url, map_offset, reverse_edits,
+    Draft, DraftLine, Edit, EnterKeyBehavior, FileReference, FormatState, LineKind, LinkPreview,
+    MarkKind, MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TABLE_MARK, TableEdit,
+    TypingStyle, UpArrowBehavior, UploadedFile, changed_span, has_markdown, link_url, map_offset,
+    reverse_edits,
 };
 
 mod drafts;
@@ -120,6 +121,7 @@ pub enum ComposerEvent {
         send_at: DateTime<Utc>,
     },
     EditLast,
+    FocusMessages,
     Typing(bool),
 }
 
@@ -229,6 +231,19 @@ pub struct Composer {
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
+
+/// With "Start a new line", plain Enter breaks the line and only Ctrl+Enter sends.
+pub fn enter_starts_line(behavior: EnterKeyBehavior, shift: bool, secondary: bool) -> bool {
+    behavior == EnterKeyBehavior::NewLine && !shift && !secondary
+}
+
+pub fn up_arrow_event(behavior: UpArrowBehavior) -> Option<ComposerEvent> {
+    match behavior {
+        UpArrowBehavior::EditLastMessage => Some(ComposerEvent::EditLast),
+        UpArrowBehavior::NavigateToMessages => Some(ComposerEvent::FocusMessages),
+        UpArrowBehavior::StayInCompose => None,
+    }
+}
 
 pub fn is_plain_enter(event: &InputEvent) -> bool {
     matches!(event, InputEvent::PressEnter { shift: false, .. })
@@ -536,7 +551,10 @@ impl Composer {
             return;
         }
         let typed = emoji::typed_char(&previous, self.draft.text(), cursor);
-        if typed.is_some() && self.convert_markdown(cursor, window, cx) {
+        if typed.is_some()
+            && !self.app.read(cx).markdown_mode
+            && self.convert_markdown(cursor, window, cx)
+        {
             return;
         }
         if matches!(typed, Some(' ' | '\n')) && self.convert_link(cursor, window, cx) {
@@ -1706,12 +1724,15 @@ impl Composer {
             draft.replace(range, glyph);
             draft.take_edits();
         }
-        let mentions = state
+        let mentions: Vec<MentionInput> = state
             .tokens()
             .iter()
             .filter_map(|span| self.mention_inputs.get(span.token().id().as_ref()))
             .cloned()
             .collect();
+        if self.app.read(cx).markdown_mode && mentions.is_empty() && image_ids.is_empty() {
+            draft = Draft::from_markdown(draft.text());
+        }
         Outgoing {
             draft,
             subject: None,
@@ -2426,7 +2447,10 @@ impl Composer {
 
     fn render_toolbar(&self, focused: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let composer = cx.entity().downgrade();
-        let floating = focused && self.toolbar_requested(cx) && !self.format_bar_open();
+        let floating = focused
+            && self.toolbar_requested(cx)
+            && !self.format_bar_open()
+            && !self.app.read(cx).markdown_mode;
         if self.link_editor.is_none() && !floating {
             return None;
         }
@@ -2729,36 +2753,39 @@ impl Render for Composer {
                 ))
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
-        let format_open = self.format_bar_open();
-        let format_toggle = div()
-            .id("composer-format")
-            .debug_selector(|| COMPOSER_FORMAT_TAG.into())
-            .size(px(COMPOSER_BUTTON_SIZE))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(8.))
-            .cursor_pointer()
-            .when(format_open, |button| button.bg(theme::popup_hover()))
-            .hover(|button| button.bg(theme::popup_hover()))
-            .tooltip(move |window, cx| {
-                Tooltip::new(format_toolbar::toggle_tooltip(format_open)).build(window, cx)
-            })
-            .child(symbol(
-                format_toolbar::toggle_symbol(format_open),
-                COMPOSER_ICON_SIZE,
-                if format_open {
-                    theme::accent_soft()
-                } else {
-                    theme::text_muted()
-                },
-            ))
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                window.prevent_default();
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_format_bar(window, cx)));
+        let markdown_mode = self.app.read(cx).markdown_mode;
+        let format_open = self.format_bar_open() && !markdown_mode;
+        let format_toggle = (!markdown_mode).then(|| {
+            div()
+                .id("composer-format")
+                .debug_selector(|| COMPOSER_FORMAT_TAG.into())
+                .size(px(COMPOSER_BUTTON_SIZE))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(8.))
+                .cursor_pointer()
+                .when(format_open, |button| button.bg(theme::popup_hover()))
+                .hover(|button| button.bg(theme::popup_hover()))
+                .tooltip(move |window, cx| {
+                    Tooltip::new(format_toolbar::toggle_tooltip(format_open)).build(window, cx)
+                })
+                .child(symbol(
+                    format_toolbar::toggle_symbol(format_open),
+                    COMPOSER_ICON_SIZE,
+                    if format_open {
+                        theme::accent_soft()
+                    } else {
+                        theme::text_muted()
+                    },
+                ))
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_click(cx.listener(|this, _, window, cx| this.toggle_format_bar(window, cx)))
+        });
         let format_bar = format_open.then(|| self.render_format_bar(window, cx));
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
@@ -2979,8 +3006,12 @@ impl Render for Composer {
                 } else if this.popup_is_open() {
                     this.move_highlight(-1, cx);
                     cx.stop_propagation();
-                } else if this.editing.is_none() && this.is_empty(cx) {
-                    cx.emit(ComposerEvent::EditLast);
+                } else if this.editing.is_none()
+                    && this.is_empty(cx)
+                    && let Some(event) =
+                        up_arrow_event(this.app.read(cx).account_chat_settings().up_arrow)
+                {
+                    cx.emit(event);
                     cx.stop_propagation();
                 }
             }))
@@ -3026,6 +3057,19 @@ impl Render for Composer {
                 } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
                     cx.stop_propagation();
+                } else if enter_starts_line(
+                    this.app.read(cx).account_chat_settings().enter_key,
+                    action.shift,
+                    action.secondary,
+                ) {
+                    cx.stop_propagation();
+                    window.dispatch_action(
+                        Box::new(Enter {
+                            secondary: false,
+                            shift: true,
+                        }),
+                        cx,
+                    );
                 } else if this.break_line(action.shift, window, cx) {
                     cx.stop_propagation();
                 }
@@ -3154,7 +3198,7 @@ impl Render for Composer {
                                             .debug_selector(|| COMPOSER_LEADING_TAG.into())
                                             .flex_none()
                                             .gap(px(COMPOSER_BUTTON_INSET))
-                                            .child(format_toggle)
+                                            .children(format_toggle)
                                             .children(fun)
                                             .children(attach),
                                     )
@@ -3194,7 +3238,31 @@ impl Render for Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::{active_mention, submitted_text};
+    use super::{
+        ComposerEvent, EnterKeyBehavior, UpArrowBehavior, active_mention, enter_starts_line,
+        submitted_text, up_arrow_event,
+    };
+
+    #[test]
+    fn new_line_mode_keeps_plain_enter_and_sends_on_ctrl_enter() {
+        assert!(enter_starts_line(EnterKeyBehavior::NewLine, false, false));
+        assert!(!enter_starts_line(EnterKeyBehavior::NewLine, false, true));
+        assert!(!enter_starts_line(EnterKeyBehavior::NewLine, true, false));
+        assert!(!enter_starts_line(EnterKeyBehavior::Send, false, false));
+    }
+
+    #[test]
+    fn up_arrow_follows_the_account_setting() {
+        assert!(matches!(
+            up_arrow_event(UpArrowBehavior::EditLastMessage),
+            Some(ComposerEvent::EditLast)
+        ));
+        assert!(matches!(
+            up_arrow_event(UpArrowBehavior::NavigateToMessages),
+            Some(ComposerEvent::FocusMessages)
+        ));
+        assert!(up_arrow_event(UpArrowBehavior::StayInCompose).is_none());
+    }
     use gpui_kit::component::input::InputEvent;
 
     fn press(shift: bool) -> InputEvent {

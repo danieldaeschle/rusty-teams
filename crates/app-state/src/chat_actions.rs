@@ -321,7 +321,7 @@ impl AppState {
         self.start_new_chat(cx);
     }
 
-    fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
+    pub(crate) fn chat_record(&self, chat_id: &str) -> Option<ChatRecord> {
         self.sidebar
             .chats
             .iter()

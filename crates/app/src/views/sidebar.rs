@@ -13,7 +13,7 @@ use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, SidebarTeam, Store, TeamRecord,
 };
-use teams_core::is_notes_chat;
+use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
@@ -212,18 +212,18 @@ fn chat_menu(
     if notes {
         return popup;
     }
-    popup = popup
-        .item(
-            PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
-                .icon(menu_icon(if muted {
-                    IconName::Bell
-                } else {
-                    IconName::BellOff
-                }))
-                .on_click(move |_, _, cx| {
-                    mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
-                }),
-        )
+    popup = popup.item(
+        PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
+            .icon(menu_icon(if muted {
+                IconName::Bell
+            } else {
+                IconName::BellOff
+            }))
+            .on_click(move |_, _, cx| {
+                mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
+            }),
+    );
+    popup = notifications_submenu(popup, window, cx, context, target)
         .separator()
         .item(
             PopupMenuItem::new("Hide")
@@ -248,6 +248,76 @@ fn chat_menu(
         );
     }
     popup
+}
+
+const CHAT_NOTIFICATION_MODES: [(&str, ChatNotificationMode); 2] = [
+    ("All new messages", ChatNotificationMode::AllNewMessages),
+    ("Mute", ChatNotificationMode::Mute),
+];
+
+const DESKTOP_NOTIFICATIONS: [(&str, DesktopNotifications); 2] = [
+    (
+        "Match settings used for all chats",
+        DesktopNotifications::MatchAllChats,
+    ),
+    ("Don't get desktop notifications", DesktopNotifications::Off),
+];
+
+fn notifications_submenu(
+    popup: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    context: &MenuContext,
+    target: &ChatMenuTarget,
+) -> PopupMenu {
+    let state = context.state.clone();
+    let chat_id = target.id.clone();
+    let mode = if target.muted {
+        ChatNotificationMode::Mute
+    } else {
+        ChatNotificationMode::AllNewMessages
+    };
+    let desktop = state.read(cx).chat_desktop_notifications(&chat_id);
+    popup.submenu_with_icon(
+        Some(menu_icon(IconName::Bell)),
+        "Manage notifications",
+        window,
+        cx,
+        move |submenu, _, _| {
+            let choose = |chosen_mode: ChatNotificationMode,
+                          chosen_desktop: DesktopNotifications| {
+                let (state, chat_id) = (state.clone(), chat_id.clone());
+                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                    state.update(cx, |state, cx| {
+                        state.set_chat_notifications(&chat_id, chosen_mode, chosen_desktop, cx)
+                    });
+                }
+            };
+            let submenu = submenu.label("Chat notification mode");
+            let submenu =
+                CHAT_NOTIFICATION_MODES
+                    .iter()
+                    .fold(submenu, |submenu, (label, value)| {
+                        submenu.item(
+                            PopupMenuItem::new(*label)
+                                .checked(*value == mode)
+                                .on_click(choose(*value, desktop)),
+                        )
+                    });
+            let submenu = submenu
+                .separator()
+                .label("Set a desktop notification preference");
+            DESKTOP_NOTIFICATIONS
+                .iter()
+                .fold(submenu, |submenu, (label, value)| {
+                    submenu.item(
+                        PopupMenuItem::new(*label)
+                            .checked(*value == desktop)
+                            .on_click(choose(mode, *value)),
+                    )
+                })
+        },
+    )
 }
 
 #[derive(Clone)]

@@ -35,13 +35,13 @@ mod render_env;
 mod scheduled;
 mod shared;
 
+use super::add_people_dialog::open_add_people;
 use super::attachments::FileActions;
 use super::avatar::{
     bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
-use super::add_people_dialog::open_add_people;
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
@@ -60,6 +60,7 @@ use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_t
 use crate::backend::Engine;
 use crate::card_state::CardScope;
 use crate::channel_files::DownloadSource;
+use crate::chat_settings_actions::shown_receipt;
 use crate::data::{existing_one_on_one, is_one_on_one, one_on_one_bot, others};
 use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
@@ -679,7 +680,7 @@ impl ConversationView {
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
-            AppEvent::Translation => self.rebuild(false, cx),
+            AppEvent::Translation | AppEvent::ChatSettings => self.rebuild(false, cx),
             AppEvent::Pins(conversation_id) => self.on_pins_changed(conversation_id, cx),
             AppEvent::Typing => cx.notify(),
             AppEvent::Scheduled => self.rebuild(false, cx),
@@ -729,6 +730,7 @@ impl ConversationView {
                 self.schedule((**outgoing).clone(), *send_at, window, cx)
             }
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
+            ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
         }
     }
@@ -1874,6 +1876,15 @@ impl ConversationView {
     }
 
     fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+        let settings = self.app.read(cx).account_chat_settings();
+        let mut receipts = self.raw_receipts(records, cx);
+        for receipt in receipts.values_mut() {
+            *receipt = shown_receipt(&settings, *receipt);
+        }
+        receipts
+    }
+
+    fn raw_receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
         let state = self.app.read(cx);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
