@@ -122,6 +122,18 @@ impl Inline {
         padded
     }
 
+    fn slice(&self, range: Range<usize>) -> Inline {
+        let mut part = Inline::default();
+        for segment in &self.segments {
+            let start = segment.range.start.max(range.start);
+            let end = segment.range.end.min(range.end);
+            if start < end {
+                part.push(&self.text[start..end], segment.style, segment.link.as_deref());
+            }
+        }
+        part
+    }
+
     pub fn is_blank(&self) -> bool {
         self.text.trim().is_empty()
     }
@@ -174,6 +186,9 @@ pub enum Block {
         language: Option<String>,
         code: String,
     },
+    CodeLine {
+        code: String,
+    },
     Reply {
         message_id: Option<String>,
         children: Vec<Block>,
@@ -206,6 +221,7 @@ impl Block {
         match self {
             Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.plain_text()),
             Block::Code { code, .. } => Some(format!("```\n{code}\n```")),
+            Block::CodeLine { code } => Some(format!("`{code}`")),
             Block::List {
                 ordered,
                 start,
@@ -240,7 +256,7 @@ impl Block {
     pub fn first_line(&self) -> Option<String> {
         match self {
             Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.plain_text()),
-            Block::Code { code, .. } => Some(code.clone()),
+            Block::Code { code, .. } | Block::CodeLine { code } => Some(code.clone()),
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
             Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
             Block::Quote(children) => children.iter().find_map(Block::first_line),
@@ -317,16 +333,20 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
 }
 
 pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
-    layout_blocks_with(spans, true)
+    layout_blocks_with(spans, true, true)
 }
 
-fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
+pub fn layout_card_blocks(spans: &[Span]) -> Vec<Block> {
+    layout_blocks_with(spans, true, false)
+}
+
+fn layout_blocks_with(spans: &[Span], split_images: bool, frame_code: bool) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut current = Inline::default();
     for span in spans {
         match span {
             Span::CodeBlock { language, code } => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 blocks.push(Block::Code {
                     language: language.clone(),
                     code: code.trim_end_matches('\n').to_owned(),
@@ -336,8 +356,8 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 message_id,
                 children,
             } => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
-                let mut inner = layout_blocks_with(children, false);
+                flush(&mut current, &mut blocks, frame_code);
+                let mut inner = layout_blocks_with(children, false, frame_code);
                 unlink(&mut inner);
                 if !inner.is_empty() {
                     blocks.push(Block::Reply {
@@ -347,8 +367,8 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 }
             }
             Span::BlockQuote(children) => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
-                let inner = layout_blocks_with(children, false);
+                flush(&mut current, &mut blocks, frame_code);
+                let inner = layout_blocks_with(children, false, frame_code);
                 if !inner.is_empty() {
                     blocks.push(Block::Quote(inner));
                 }
@@ -358,10 +378,10 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 start,
                 items,
             } => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 let items: Vec<Vec<Block>> = items
                     .iter()
-                    .map(|item| layout_blocks_with(item, false))
+                    .map(|item| layout_blocks_with(item, false, frame_code))
                     .filter(|item| !item.is_empty())
                     .collect();
                 if !items.is_empty() {
@@ -373,7 +393,7 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 }
             }
             Span::Table { header, rows } => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 let rows: Vec<Vec<Inline>> = rows
                     .iter()
                     .map(|row| row.iter().map(|cell| inline_of(cell)).collect())
@@ -386,7 +406,7 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 }
             }
             Span::Heading { level, children } => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 let inline = inline_of(children);
                 if !inline.is_blank() {
                     blocks.push(Block::Heading {
@@ -396,11 +416,11 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
                 }
             }
             Span::Rule => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 blocks.push(Block::Rule);
             }
             Span::Image { hosted_content_url } if split_images => {
-                flush(&mut current, &mut blocks, Block::Paragraph);
+                flush(&mut current, &mut blocks, frame_code);
                 blocks.push(Block::Image {
                     url: hosted_content_url.clone(),
                 });
@@ -413,7 +433,7 @@ fn layout_blocks_with(spans: &[Span], split_images: bool) -> Vec<Block> {
             ),
         }
     }
-    flush(&mut current, &mut blocks, Block::Paragraph);
+    flush(&mut current, &mut blocks, frame_code);
     blocks
 }
 
@@ -424,8 +444,7 @@ fn inline_of(spans: &[Span]) -> Inline {
     pad_code(inline)
 }
 
-fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Block) {
-    let mut inline = std::mem::take(current);
+fn trimmed(mut inline: Inline) -> Inline {
     inline.trim_end();
     let leading = inline.text.len() - inline.text.trim_start().len();
     if leading > 0 {
@@ -436,9 +455,62 @@ fn flush(current: &mut Inline, blocks: &mut Vec<Block>, make: fn(Inline) -> Bloc
             segment.range.start < segment.range.end
         });
     }
-    if !inline.is_blank() {
-        blocks.push(make(pad_code(inline)));
+    inline
+}
+
+fn flush(current: &mut Inline, blocks: &mut Vec<Block>, frame_code: bool) {
+    let inline = trimmed(std::mem::take(current));
+    if inline.is_blank() {
+        return;
     }
+    if !frame_code {
+        blocks.push(Block::Paragraph(pad_code(inline)));
+        return;
+    }
+    for piece in split_code_lines(inline) {
+        match piece {
+            LinePiece::Text(text) => {
+                let text = trimmed(text);
+                if !text.is_blank() {
+                    blocks.push(Block::Paragraph(pad_code(text)));
+                }
+            }
+            LinePiece::Code(code) => blocks.push(Block::CodeLine { code }),
+        }
+    }
+}
+
+fn is_own_line(text: &str, range: &Range<usize>) -> bool {
+    let before = &text[..range.start];
+    let after = &text[range.end..];
+    let line_start = before.rfind('\n').map_or(0, |position| position + 1);
+    let line_end = after.find('\n').unwrap_or(after.len());
+    before[line_start..].trim().is_empty() && after[..line_end].trim().is_empty()
+}
+
+enum LinePiece {
+    Text(Inline),
+    Code(String),
+}
+
+fn split_code_lines(inline: Inline) -> Vec<LinePiece> {
+    let mut pieces = Vec::new();
+    let mut cursor = 0;
+    for segment in &inline.segments {
+        let code = &inline.text[segment.range.clone()];
+        if !segment.style.code
+            || segment.link.is_some()
+            || code.trim().is_empty()
+            || !is_own_line(&inline.text, &segment.range)
+        {
+            continue;
+        }
+        pieces.push(LinePiece::Text(inline.slice(cursor..segment.range.start)));
+        pieces.push(LinePiece::Code(code.trim().to_owned()));
+        cursor = segment.range.end;
+    }
+    pieces.push(LinePiece::Text(inline.slice(cursor..inline.text.len())));
+    pieces
 }
 
 fn pad_code(inline: Inline) -> Inline {
@@ -959,6 +1031,28 @@ mod tests {
         assert!(inline.segments[1].style.underline);
         assert_eq!(inline.segments[2].style.color, Some(0xff0000));
         assert_eq!(inline.segments[2].style.background, Some(0xffff00));
+    }
+
+    #[test]
+    fn code_alone_on_its_line_is_one_framed_block() {
+        let blocks = layout_blocks(&[
+            text("error:"),
+            Span::LineBreak,
+            Span::Code("a long line".into()),
+        ]);
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Paragraph(Inline::plain("error:")),
+                Block::CodeLine {
+                    code: "a long line".into()
+                },
+            ]
+        );
+        assert!(matches!(
+            layout_card_blocks(&[Span::Code("mono".into())]).as_slice(),
+            [Block::Paragraph(_)]
+        ));
     }
 
     #[test]

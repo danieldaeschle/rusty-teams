@@ -20,7 +20,7 @@ use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::widgets::icon;
 
-const REPLY_PLACEHOLDER: &str = "Reply";
+const REPLY_PLACEHOLDER: &str = "Reply in thread";
 const SUBJECT_PLACEHOLDER: &str = "Add a subject";
 
 pub(super) struct FeedStash {

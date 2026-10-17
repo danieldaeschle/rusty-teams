@@ -18,6 +18,11 @@ const CODE_HEADER_MIN_LINES: usize = 3;
 const PLAIN_LANGUAGE: &str = "text";
 const MIN_CONTRAST: f32 = 4.5;
 const HIGHLIGHT_ALPHA: f32 = 0.3;
+const CODE_LINE_PADDING_X: f32 = 6.;
+const CODE_LINE_PADDING_Y: f32 = 4.;
+const CODE_LINE_RADIUS: f32 = 4.;
+pub const CODE_LINE_TAG: &str = "message/code-line";
+pub const CODE_BLOCK_TAG: &str = "message/code-block";
 
 pub fn render_blocks(blocks: &[Block], id: &str, own: bool, cx: &App) -> AnyElement {
     render_block_list(blocks, id, own, 0, cx)
@@ -47,6 +52,7 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .child(render_inline(inline, id, own, cx))
             .into_any_element(),
         Block::Code { language, code } => render_code(language.as_deref(), code, id, own, cx),
+        Block::CodeLine { code } => render_code_line(code, id, own, cx),
         Block::Reply {
             message_id,
             children,
@@ -125,9 +131,12 @@ fn render_code(language: Option<&str>, code: &str, id: String, own: bool, cx: &A
         ));
     let show_header = language.is_some() || code.lines().count() >= CODE_HEADER_MIN_LINES;
     v_flex()
+        .debug_selector(|| CODE_BLOCK_TAG.into())
         .w_full()
         .rounded(px(8.))
         .overflow_hidden()
+        .border_1()
+        .border_color(theme::code_frame())
         .bg(theme::code_surface())
         .text_color(theme::text_strong())
         .font_family(code_font(cx))
@@ -143,6 +152,40 @@ fn render_code(language: Option<&str>, code: &str, id: String, own: bool, cx: &A
         })
         .child(body)
         .into_any_element()
+}
+
+fn render_code_line(code: &str, id: String, own: bool, cx: &App) -> AnyElement {
+    h_flex()
+        .w_full()
+        .child(
+            div()
+                .debug_selector(|| CODE_LINE_TAG.into())
+                .min_w_0()
+                .flex_shrink(1.)
+                .px(px(CODE_LINE_PADDING_X))
+                .py(px(CODE_LINE_PADDING_Y))
+                .rounded(px(CODE_LINE_RADIUS))
+                .border_1()
+                .border_color(theme::code_frame())
+                .font_family(code_font(cx))
+                .text_size(px(12.5))
+                .line_height(relative(1.5))
+                .text_color(code_text(own))
+                .child(SelectableRichText::new(
+                    ElementId::Name(id.into()),
+                    code.to_owned(),
+                    Vec::new(),
+                )),
+        )
+        .into_any_element()
+}
+
+fn code_text(own: bool) -> Hsla {
+    if own {
+        theme::accent_soft()
+    } else {
+        theme::red_soft()
+    }
 }
 
 fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
@@ -371,7 +414,7 @@ fn pill_for(range: std::ops::Range<usize>, style: StyleFlags, own: bool) -> Opti
         return Some(Pill {
             range,
             fill: theme::inline_code_fill(own),
-            border: Some(theme::inline_code_border()),
+            border: Some(theme::code_frame()),
             radius: px(4.),
         });
     }
@@ -398,11 +441,7 @@ fn highlight_for(style: StyleFlags, own: bool) -> HighlightStyle {
         highlight.color = Some(readable(color, own));
     }
     if style.code {
-        highlight.color = Some(if own {
-            theme::accent_soft()
-        } else {
-            theme::text_strong()
-        });
+        highlight.color = Some(code_text(own));
     }
     if style.underline {
         highlight.underline = Some(UnderlineStyle {

@@ -27,6 +27,15 @@ const META_USER_ID: &str = "me_user_id";
 type TranslationOutcome = Result<Vec<Translation>, String>;
 
 impl AppState {
+    pub fn apply_date_locale(&self) {
+        crate::format::set_date_locale(
+            self.translation
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.display_locale.as_deref()),
+        );
+    }
+
     pub fn load_cached_translation_settings(&mut self) {
         self.translation.settings = self
             .store
@@ -35,6 +44,7 @@ impl AppState {
             .flatten()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|value| parse_language_settings(&value).ok());
+        self.apply_date_locale();
         self.translation.languages = self
             .store
             .meta(LANGUAGES_META_KEY)
@@ -119,6 +129,7 @@ impl AppState {
             this.update(cx, |state, cx| {
                 if let Ok(settings) = settings {
                     state.translation.settings = Some(settings);
+                    state.apply_date_locale();
                     state.save_translation_settings();
                 }
                 if let Some(languages) = languages.filter(|languages| !languages.is_empty()) {

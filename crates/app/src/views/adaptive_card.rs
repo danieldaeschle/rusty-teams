@@ -24,7 +24,7 @@ use super::card_widgets::{
 use super::widgets::symbol;
 use crate::app_state::{AppHandle, AppState};
 use crate::card_state::{ActionPhase, CardScope, CardState};
-use crate::render::{layout_blocks, render_blocks};
+use crate::render::{layout_card_blocks, render_blocks};
 use crate::theme;
 
 const CARD_WIDTH: f32 = 480.;
@@ -491,7 +491,7 @@ fn text_view(text: &CardText, id: &str, cx: &App) -> AnyElement {
             (true, Some(lines)) => element.text_ellipsis().line_clamp(lines),
             (true, None) => element,
         })
-        .child(render_blocks(&layout_blocks(&text.spans), id, false, cx))
+        .child(render_blocks(&layout_card_blocks(&text.spans), id, false, cx))
         .into_any_element()
 }
 
@@ -515,7 +515,7 @@ fn facts_view(facts: &[CardFact], id: &str, cx: &App) -> AnyElement {
                         .child(fact.title.clone()),
                 )
                 .child(div().flex_1().min_w(px(0.)).child(render_blocks(
-                    &layout_blocks(&fact.value),
+                    &layout_card_blocks(&fact.value),
                     &format!("{id}-{index}"),
                     false,
                     cx,

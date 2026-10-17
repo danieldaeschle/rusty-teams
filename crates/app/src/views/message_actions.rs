@@ -14,7 +14,7 @@ use gpui_kit::*;
 
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
-use super::widgets::icon;
+use super::widgets::{icon, symbol};
 use crate::rows::reaction_glyph;
 use crate::theme::{self, ElevatedSurface as _};
 
@@ -23,6 +23,8 @@ const BAR_PADDING: f32 = 3.;
 const BAR_ICON: f32 = 16.;
 const DELEGATE_ITEM_WIDTH: f32 = 188.;
 const DELEGATE_AGENT_SIZE: f32 = 11.;
+const ADD_REACTION_ICON: f32 = 15.;
+const ADD_REACTION_EXTRA_WIDTH: f32 = 8.;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
@@ -99,24 +101,42 @@ fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement 
         .into_any_element()
 }
 
-fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
-    let (picker, picker_reset, react, done, mine, pin) = (
-        menu.picker.clone(),
-        menu.picker.clone(),
-        menu.react.clone(),
-        menu.done.clone(),
-        menu.mine.clone(),
-        menu.pin.clone(),
-    );
-    Popover::new(element_id("reaction-picker", &menu.key))
-        .anchor(Anchor::TopRight)
-        .trigger(
-            Button::new(element_id("add-reaction", &menu.key))
-                .child(icon(IconName::Plus, BAR_ICON, theme::text_soft()))
-                .custom(bar_variant(cx))
-                .rounded(px(7.))
-                .size(px(BAR_BUTTON)),
-        )
+#[derive(Clone)]
+pub struct ReactionAdder {
+    pub key: String,
+    pub picker: Entity<ReactionPicker>,
+    pub react: PickHandler,
+    pub done: DoneHandler,
+    pub mine: HashSet<String>,
+    pub pin: OpenChange,
+}
+
+impl MessageMenu {
+    pub fn reaction_adder(&self) -> ReactionAdder {
+        ReactionAdder {
+            key: self.key.clone(),
+            picker: self.picker.clone(),
+            react: self.react.clone(),
+            done: self.done.clone(),
+            mine: self.mine.clone(),
+            pin: self.pin.clone(),
+        }
+    }
+}
+
+fn picker_popover(adder: ReactionAdder, prefix: &str, trigger: Button, anchor: Anchor) -> AnyElement {
+    let ReactionAdder {
+        key,
+        picker,
+        react,
+        done,
+        mine,
+        pin,
+    } = adder;
+    let picker_reset = picker.clone();
+    Popover::new(element_id(prefix, &key))
+        .anchor(anchor)
+        .trigger(trigger)
         .on_open_change(move |open, window, cx| {
             pin(*open, window, cx);
             if *open {
@@ -131,6 +151,36 @@ fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             picker.clone()
         })
         .into_any_element()
+}
+
+fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
+    let trigger = Button::new(element_id("add-reaction", &menu.key))
+        .child(icon(IconName::Plus, BAR_ICON, theme::text_soft()))
+        .custom(bar_variant(cx))
+        .rounded(px(7.))
+        .size(px(BAR_BUTTON));
+    picker_popover(
+        menu.reaction_adder(),
+        "reaction-picker",
+        trigger,
+        Anchor::TopRight,
+    )
+}
+
+pub fn add_reaction_pill(adder: ReactionAdder, height: f32, cx: &App) -> AnyElement {
+    let trigger = Button::new(element_id("pill-add-reaction", &adder.key))
+        .child(symbol("mood", ADD_REACTION_ICON, theme::text_muted()))
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(theme::border_strong())
+                .foreground(theme::text_muted())
+                .hover(theme::popup_hover())
+                .active(theme::popup_hover()),
+        )
+        .rounded(px(height / 2.))
+        .h(px(height))
+        .w(px(height + ADD_REACTION_EXTRA_WIDTH));
+    picker_popover(adder, "pill-reaction-picker", trigger, Anchor::TopLeft)
 }
 
 fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {

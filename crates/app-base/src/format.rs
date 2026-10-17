@@ -1,9 +1,59 @@
+use std::cell::Cell;
+
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, Utc, Weekday};
 
 use crate::theme;
 
 const BADGE_CAP: u32 = 99;
 const WEEKDAY_WINDOW_DAYS: i64 = 6;
+const TWELVE_HOUR_LOCALES: [&str; 6] = ["en-us", "en-ca", "en-ph", "en-au", "en-nz", "en-in"];
+const DOTTED_LOCALES: [&str; 7] = ["de", "da", "nb", "no", "fi", "cs", "sk"];
+const PADDED_DOT_LOCALES: [&str; 4] = ["ru", "pl", "tr", "uk"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DateStyle {
+    day_month: &'static str,
+    day_month_year: &'static str,
+    clock: &'static str,
+}
+
+thread_local! {
+    static DATE_STYLE: Cell<Option<DateStyle>> = const { Cell::new(None) };
+}
+
+pub fn set_date_locale(locale: Option<&str>) {
+    DATE_STYLE.with(|style| style.set(locale.map(date_style)));
+}
+
+fn current_date_style() -> Option<DateStyle> {
+    DATE_STYLE.with(Cell::get)
+}
+
+/// Numeric day and month in the order of the account's display language, as `Intl.DateTimeFormat` does in Teams.
+pub fn date_style(locale: &str) -> DateStyle {
+    let locale = locale.to_ascii_lowercase();
+    let language = locale.split(['-', '_']).next().unwrap_or_default();
+    let twelve_hour = TWELVE_HOUR_LOCALES.contains(&locale.as_str());
+    let clock = match language {
+        _ if !twelve_hour => "%H:%M",
+        _ if locale == "en-au" || locale == "en-nz" || locale == "en-in" => "%-I:%M %P",
+        _ => "%-I:%M %p",
+    };
+    let (day_month, day_month_year) = match language {
+        _ if locale == "en-us" || locale == "en-ph" || locale == "en-ca" => ("%-m/%-d", "%-m/%-d/%Y"),
+        "ja" | "zh" => ("%-m/%-d", "%Y/%-m/%-d"),
+        "nl" => ("%-d-%-m", "%-d-%-m-%Y"),
+        "sv" => ("%-d/%-m", "%Y-%m-%d"),
+        language if DOTTED_LOCALES.contains(&language) => ("%-d.%-m.", "%-d.%-m.%Y"),
+        language if PADDED_DOT_LOCALES.contains(&language) => ("%d.%m", "%d.%m.%Y"),
+        _ => ("%d/%m", "%d/%m/%Y"),
+    };
+    DateStyle {
+        day_month,
+        day_month_year,
+        clock,
+    }
+}
 
 pub fn palette_index(key: &str) -> usize {
     let mut hash: u32 = 0x811c_9dc5;
@@ -69,30 +119,58 @@ pub fn short_version(build_id: &str, package_version: &str) -> String {
 }
 
 pub fn list_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+    list_time_label_in(current_date_style(), time, today, offset)
+}
+
+pub fn list_time_label_in(
+    style: Option<DateStyle>,
+    time: DateTime<Utc>,
+    today: NaiveDate,
+    offset: FixedOffset,
+) -> String {
     let local = time.with_timezone(&offset);
     let day = local.date_naive();
     let days_ago = (today - day).num_days();
     if days_ago <= 0 {
-        local.format("%H:%M").to_string()
+        local.format(style.map_or("%H:%M", |style| style.clock)).to_string()
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
         weekday_label(local.weekday()).to_owned()
     } else {
-        local.format("%b %-d").to_string()
+        local
+            .format(style.map_or("%b %-d", |style| style.day_month))
+            .to_string()
     }
 }
 
 pub fn post_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+    post_time_label_in(current_date_style(), time, today, offset)
+}
+
+pub fn post_time_label_in(
+    style: Option<DateStyle>,
+    time: DateTime<Utc>,
+    today: NaiveDate,
+    offset: FixedOffset,
+) -> String {
     let local = time.with_timezone(&offset);
     let day = local.date_naive();
     let days_ago = (today - day).num_days();
-    let clock = local.format("%H:%M");
+    let clock = local.format(style.map_or("%H:%M", |style| style.clock));
+    let same_year = day.year() == today.year();
     if days_ago <= 0 {
         clock.to_string()
     } else if days_ago == 1 {
         format!("Yesterday {clock}")
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
         format!("{} {clock}", weekday_label(local.weekday()))
-    } else if day.year() == today.year() {
+    } else if let Some(style) = style {
+        let date = if same_year {
+            style.day_month
+        } else {
+            style.day_month_year
+        };
+        format!("{} {clock}", local.format(date))
+    } else if same_year {
         format!("{} {clock}", local.format("%b %-d"))
     } else {
         format!("{} {clock}", local.format("%b %-d, %Y"))
@@ -223,6 +301,30 @@ mod tests {
             post_time_label(last_year, today(), zero()),
             "May 22, 2020 08:42"
         );
+    }
+
+    #[test]
+    fn post_time_follows_the_display_language_like_teams() {
+        let september = Utc.with_ymd_and_hms(2026, 9, 24, 20, 54, 0).unwrap();
+        let label = |locale: &str| {
+            post_time_label_in(Some(date_style(locale)), september, today(), zero())
+        };
+        assert_eq!(label("en-GB"), "24/09 20:54");
+        assert_eq!(label("de-DE"), "24.9. 20:54");
+        assert_eq!(label("en-US"), "9/24 8:54 PM");
+        let last_year = Utc.with_ymd_and_hms(2020, 5, 2, 8, 42, 0).unwrap();
+        assert_eq!(
+            post_time_label_in(Some(date_style("en-GB")), last_year, today(), zero()),
+            "02/05/2020 08:42"
+        );
+    }
+
+    #[test]
+    fn list_time_follows_the_display_language_like_teams() {
+        let september = Utc.with_ymd_and_hms(2026, 9, 24, 20, 54, 0).unwrap();
+        let style = Some(date_style("en-GB"));
+        assert_eq!(list_time_label_in(style, september, today(), zero()), "24/09");
+        assert_eq!(list_time_label_in(style, utc(7, 13), today(), zero()), "13:05");
     }
 
     #[test]

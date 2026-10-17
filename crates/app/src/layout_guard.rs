@@ -184,7 +184,11 @@ mod frames {
         CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
         CHANNEL_DETAILS_TAG,
     };
-    use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
+    use crate::render::{CODE_BLOCK_TAG, CODE_LINE_TAG};
+    use crate::views::conversation::{FEED_EDGE_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
+    use crate::views::post_card::{
+        POST_AVATAR_TAG, POST_BODY_TAG, POST_CARD_TAG, POST_FOOTER_AVATAR_TAG,
+    };
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
     };
@@ -1533,6 +1537,83 @@ mod frames {
         assert!(visual.debug_bounds(PIN_BANNER_TAG).is_none());
     }
 
+    fn open_channel(cx: &mut TestAppContext, awaited: &'static str) -> VisualTestContext {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Channel(PINNED_CHANNEL.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(awaited));
+        visual
+    }
+
+    #[gpui_kit::test]
+    fn channel_posts_start_the_body_at_the_avatar_edge_like_teams(cx: &mut TestAppContext) {
+        let mut visual = open_channel(cx, POST_FOOTER_AVATAR_TAG);
+        let bounds_of = |visual: &mut VisualTestContext, path: &'static str| {
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} rendered"))
+        };
+        let card = bounds_of(&mut visual, POST_CARD_TAG);
+        let avatar = bounds_of(&mut visual, POST_AVATAR_TAG);
+        let body = bounds_of(&mut visual, POST_BODY_TAG);
+        let footer_avatar = bounds_of(&mut visual, POST_FOOTER_AVATAR_TAG);
+        let side = f32::from(avatar.left() - card.left());
+        let checks = [
+            ("body left", f32::from(body.left() - avatar.left())),
+            ("footer avatar left", f32::from(footer_avatar.left() - avatar.left())),
+            ("body right inset", f32::from(card.right() - body.right()) - side),
+        ];
+        for (name, gap) in checks {
+            assert!(
+                gap.abs() < INSET_TOLERANCE,
+                "{name} off by {gap}: card {card:?} avatar {avatar:?} body {body:?} footer {footer_avatar:?}"
+            );
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_code_line_is_one_frame_inside_the_post_body(cx: &mut TestAppContext) {
+        let mut visual = open_channel(cx, CODE_LINE_TAG);
+        let code = visual.debug_bounds(CODE_LINE_TAG).expect("code line");
+        let body = visual.debug_bounds(POST_BODY_TAG).expect("post body");
+        assert!(
+            f32::from(code.size.height) > 40.,
+            "the long code line wraps inside one frame: {code:?}"
+        );
+        assert!(
+            (f32::from(code.left() - body.left())).abs() < INSET_TOLERANCE
+                && code.right() <= body.right() + px(INSET_TOLERANCE),
+            "code {code:?} sits inside the body {body:?}"
+        );
+        assert!(visual.debug_bounds(CODE_BLOCK_TAG).is_none());
+    }
+
+    #[gpui_kit::test]
+    fn the_new_post_row_shows_a_scroll_edge_only_while_scrolled(cx: &mut TestAppContext) {
+        let mut visual = open_channel(cx, POST_CARD_TAG);
+        assert!(visual.debug_bounds(FEED_EDGE_TAG).is_none());
+        let timeline = visual.debug_bounds(TIMELINE_TAG).expect("timeline");
+        visual.simulate_event(ScrollWheelEvent {
+            position: timeline.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-400.))),
+            ..Default::default()
+        });
+        collect(&mut visual, Some(FEED_EDGE_TAG));
+        let edge = visual.debug_bounds(FEED_EDGE_TAG).expect("feed edge");
+        let timeline = visual.debug_bounds(TIMELINE_TAG).expect("timeline");
+        assert!(
+            (f32::from(edge.top() - timeline.top())).abs() < INSET_TOLERANCE
+                && (f32::from(edge.left() - timeline.left())).abs() < INSET_TOLERANCE
+                && (f32::from(timeline.right() - edge.right())).abs() < INSET_TOLERANCE,
+            "edge {edge:?} runs across the top of the timeline {timeline:?}"
+        );
+    }
+
     #[gpui_kit::test]
     fn the_channel_details_pane_lists_pinned_posts_inside_the_main_island(cx: &mut TestAppContext) {
         let (handle, state) = mount(cx);
@@ -1819,6 +1900,11 @@ const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
     (
         "views/card_code_block.rs",
         "theme::code_header_border()",
+        "message content drawn as Teams renders it",
+    ),
+    (
+        "render/elements.rs",
+        "theme::code_frame()",
         "message content drawn as Teams renders it",
     ),
     ("views/call_transcript.rs", "theme::border()", "input field"),

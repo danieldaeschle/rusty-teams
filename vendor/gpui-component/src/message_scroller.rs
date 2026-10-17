@@ -67,6 +67,12 @@ impl MessageScrollerState {
             && !self.list_state.is_scrolled_to_end().unwrap_or(false)
     }
 
+    /// Return whether rows are hidden above the top of the viewport.
+    pub fn is_scrolled_from_top(&self) -> bool {
+        let top = self.list_state.logical_scroll_top();
+        top.item_ix > 0 || top.offset_in_item > px(0.5)
+    }
+
     /// Return the index of the row at the top of the viewport.
     pub fn top_item(&self) -> usize {
         self.list_state.logical_scroll_top().item_ix

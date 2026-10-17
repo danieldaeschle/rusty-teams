@@ -916,6 +916,7 @@ pub fn seed_directory(state: &mut AppState) {
     state.own_email = DEMO_USER_EMAIL.to_owned();
     state.own_time_zone = Some(DEMO_TIME_ZONE.to_owned());
     state.translation.settings = Some(language_settings());
+    state.apply_date_locale();
     state.translation.languages = language_list();
     let directory = &mut state.directory;
     directory.me = Some(Person {
@@ -2080,8 +2081,44 @@ fn channel_messages() -> Vec<MessageRecord> {
         ),
     ];
     records.extend(rollout_replies);
+    records.extend(code_post(channel, tobias));
     records.extend(shared_channel_messages(channel, mara, tobias));
     records
+}
+
+fn code_post(channel: &str, tobias: (&str, &str)) -> Vec<MessageRecord> {
+    let laughs = reactions_json(vec![reaction(
+        "laugh",
+        &[
+            (PRIYA_ID, "Priya Nair", at(0, 11, 20)),
+            (JONAS_ID, "Jonas Ortega", at(0, 11, 22)),
+        ],
+    )]);
+    vec![
+        with_subject(
+            message(
+                channel,
+                "t8",
+                None,
+                tobias,
+                at(0, 11, 5),
+                "<p>I got this error message when running \"Invoke-WebRequest\" in the build script:</p><p>&nbsp;</p><p><code>Invoke-WebRequest : The response content cannot be parsed because the Internet Explorer engine is not available, or Internet Explorer's first-launch configuration is not complete. Specify the UseBasicParsing parameter and try again.</code></p>",
+                &laughs,
+                false,
+            ),
+            "Build script error",
+        ),
+        message(
+            channel,
+            "t8r1",
+            Some("t8"),
+            (JONAS_ID, "Jonas Ortega"),
+            at(0, 11, 30),
+            "<p>Add <code>-UseBasicParsing</code> to the call, that fixes it.</p>",
+            "[]",
+            false,
+        ),
+    ]
 }
 
 fn shared_channel_messages(

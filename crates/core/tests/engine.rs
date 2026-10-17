@@ -5408,3 +5408,22 @@ async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
             .any(|chat_id| chat_id == NOTES_CHAT_ID)
     );
 }
+
+#[tokio::test]
+async fn a_quoted_channel_reply_carries_the_quote_as_a_message_reference() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.fetch_newer(CHANNEL).await.unwrap();
+    engine
+        .reply_to_with_mentions(CHANNEL, "m0030", "answer", &[])
+        .await
+        .unwrap();
+    let extras = fake.extras_sent.lock().unwrap().last().cloned().unwrap();
+    let quote = &extras.kept[0];
+    assert_eq!(quote.id, "m0030");
+    assert_eq!(quote.content_type.as_deref(), Some("messageReference"));
+    let content: serde_json::Value =
+        serde_json::from_str(quote.content.as_deref().unwrap()).unwrap();
+    assert_eq!(content["messageId"], "m0030");
+    assert_eq!(content["messageSender"]["user"]["userIdentityType"], "aadUser");
+}

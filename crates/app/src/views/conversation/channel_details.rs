@@ -15,11 +15,13 @@ use crate::rows::reply_excerpt;
 use crate::theme;
 use crate::views::attachments::file_badge;
 use crate::views::avatar::person_avatar;
+use crate::views::scroll_edge::with_top_edge;
 
 pub const CHANNEL_DETAILS_TAG: &str = "shell/islands/main/channel-details";
 pub const CHANNEL_DETAILS_BUTTON: &str = "shell/islands/main/channel-details-button";
 pub const CHANNEL_DETAILS_PINNED_TAG: &str = "shell/islands/main/channel-details/pinned";
 pub const CHANNEL_DETAILS_SHARED_TAG: &str = "shell/islands/main/channel-details/shared";
+const CHANNEL_DETAILS_SCROLL_DIVIDER: &str = "shell/islands/main/channel-details/divider-scroll";
 const OPEN_LABEL: &str = "Open channel details";
 const CLOSE_LABEL: &str = "Close channel details";
 const PINNED_TITLE: &str = "Pinned";
@@ -287,14 +289,17 @@ impl ConversationView {
                                         })),
                                 ),
                         )
-                        .child(
+                        .child(with_top_edge(
                             div()
                                 .id("channel-details-body")
                                 .flex_1()
                                 .min_h_0()
                                 .overflow_y_scroll()
+                                .track_scroll(&self.channel_details_scroll)
                                 .child(body),
-                        ),
+                            &self.channel_details_scroll,
+                            CHANNEL_DETAILS_SCROLL_DIVIDER,
+                        )),
                 )
                 .into_any_element(),
         )

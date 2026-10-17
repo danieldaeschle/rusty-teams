@@ -5,16 +5,16 @@ use gpui_kit::*;
 
 use super::adaptive_card::cards_view;
 use super::attachments::{attachments_view, message_body};
-use super::avatar::{bot_avatar, person_avatar};
+use super::avatar::{bot_avatar, person_avatar, with_presence};
 use super::call_card::{CallActions, post_call_card};
 use super::call_notice::notice_line;
 use super::link_preview::{link_preview_card, meeting_join_chip};
-use super::message_actions::message_toolbar;
+use super::message_actions::{add_reaction_pill, message_toolbar};
 use super::message_row::{
     BODY_SIZE, RowActions, deleted_tombstone, delivery_note, forwarded_header, has_text,
 };
 use super::profile_card::opens_profile;
-use super::reaction_pills::reaction_pills;
+use super::reaction_pills::{PILL_HEIGHT, PillLook, reaction_pills};
 use super::reaction_proposal_pill::reaction_pill;
 use super::scheduled_toolbar::scheduled_toolbar;
 use super::toolbar_placement::placed_toolbar;
@@ -35,6 +35,14 @@ const PINNED_LABEL: &str = "Pinned";
 const SLOTS_PER_POST: usize = 64;
 const TOOLBAR_RIGHT_INSET: f32 = 8.;
 const SUBJECT_SIZE: f32 = 14.;
+const FOOTER_AVATAR: f32 = 20.;
+const FOOTER_BUTTON_PADDING: f32 = 6.;
+const FOOTER_BUTTON_VERTICAL: f32 = 4.;
+const REPLY_IN_THREAD: &str = "Reply in thread";
+pub const POST_CARD_TAG: &str = "post-card";
+pub const POST_AVATAR_TAG: &str = "post-card/avatar";
+pub const POST_BODY_TAG: &str = "post-card/body";
+pub const POST_FOOTER_AVATAR_TAG: &str = "post-card/footer-avatar";
 
 pub type PostAction = Box<dyn Fn(&mut Window, &mut App)>;
 
@@ -138,14 +146,27 @@ fn message_content(
         cx,
     ));
     if !row.reactions.is_empty() {
-        content = content.child(reaction_pills(
-            &row.reactions,
-            index,
-            false,
-            directory,
-            actions.react.clone(),
-            actions.reaction_controls.as_ref(),
-        ));
+        content = content.child(
+            h_flex()
+                .gap(px(4.))
+                .flex_wrap()
+                .items_center()
+                .child(reaction_pills(
+                    &row.reactions,
+                    index,
+                    false,
+                    PillLook::Count,
+                    directory,
+                    actions.react.clone(),
+                    actions.reaction_controls.as_ref(),
+                ))
+                .children(
+                    actions
+                        .add_reaction
+                        .clone()
+                        .map(|adder| add_reaction_pill(adder, PILL_HEIGHT, cx)),
+                ),
+        );
     }
     content
 }
@@ -161,16 +182,7 @@ fn message_header(
     h_flex()
         .gap(px(6.))
         .items_center()
-        .child(
-            opens_profile(
-                div().id(ElementId::Name(format!("post-author-{index}").into())),
-                profile_user,
-            )
-            .text_size(px(13.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::text())
-            .child(author),
-        )
+        .child(author_name(index, author, profile_user))
         .child(
             div()
                 .text_size(px(11.))
@@ -185,6 +197,51 @@ fn message_header(
         .when(row.delivery == Delivery::Sending, |line| {
             line.child(symbol("schedule", 13., theme::text_muted()))
         })
+}
+
+fn author_name(index: usize, author: String, profile_user: Option<&str>) -> Stateful<Div> {
+    opens_profile(
+        div().id(ElementId::Name(format!("post-author-{index}").into())),
+        profile_user,
+    )
+    .text_size(px(13.))
+    .font_weight(FontWeight::SEMIBOLD)
+    .text_color(theme::text())
+    .child(author)
+}
+
+fn root_header(
+    row: &MessageRow,
+    index: usize,
+    author: String,
+    profile_user: Option<&str>,
+    saved: bool,
+    pinned: bool,
+) -> Div {
+    v_flex()
+        .min_w_0()
+        .child(
+            h_flex()
+                .gap(px(6.))
+                .items_center()
+                .child(author_name(index, author, profile_user))
+                .when(saved, |line| {
+                    line.child(icon(IconName::Bookmark, 12., theme::accent_text()))
+                })
+                .when(row.delivery == Delivery::Sending, |line| {
+                    line.child(symbol("schedule", 13., theme::text_muted()))
+                }),
+        )
+        .child(
+            h_flex()
+                .gap(px(6.))
+                .items_center()
+                .text_size(px(11.))
+                .text_color(theme::text_muted())
+                .child(row.time.clone())
+                .when(row.edited, |line| line.child(edited_marker()))
+                .when(pinned, |line| line.child(pinned_marker())),
+        )
 }
 
 fn message_block(
@@ -204,9 +261,16 @@ fn message_block(
         .bot
         .as_ref()
         .map_or_else(|| row.author.clone(), |bot| bot.name.clone());
-    let avatar = match &actions.bot {
-        Some(bot) => bot_avatar(bot, size),
-        None => person_avatar(directory, row.sender_id.as_deref(), &row.author, size),
+    let avatar = match (&actions.bot, row.sender_id.as_deref()) {
+        (Some(bot), _) => bot_avatar(bot, size),
+        (None, Some(sender_id)) if role == Role::Root => with_presence(
+            person_avatar(directory, Some(sender_id), &row.author, size),
+            directory.presence_of(sender_id),
+            size,
+            theme::row_hover(),
+        )
+        .into_any_element(),
+        (None, sender_id) => person_avatar(directory, sender_id, &row.author, size),
     };
     if let (Role::Reply, Some(call)) = (role, &row.call)
         && let Some(notice) = &call.notice
@@ -247,35 +311,62 @@ fn message_block(
     } = actions;
     let note = delivery_note(row, delivery, index);
     let translation = translation_line(row, index, translation_actions.as_ref());
-    let body = v_flex()
-        .flex_1()
+    let subject = row
+        .subject
+        .clone()
+        .filter(|_| role == Role::Root)
+        .map(|subject| {
+            div()
+                .text_size(px(SUBJECT_SIZE))
+                .font_weight(FontWeight::BOLD)
+                .text_color(theme::text())
+                .child(subject)
+        });
+    let details = v_flex()
+        .w_full()
         .min_w_0()
         .gap(px(6.))
-        .child(message_header(
-            row,
-            index,
-            author,
-            profile_user,
-            saved,
-            pinned,
-        ))
-        .when_some(
-            row.subject.clone().filter(|_| role == Role::Root),
-            |column, subject| {
-                column.child(
-                    div()
-                        .text_size(px(SUBJECT_SIZE))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(theme::text())
-                        .child(subject),
-                )
-            },
-        )
+        .children(subject)
         .child(content)
         .children(translation)
         .children(note)
         .children(agent_run.map(|run| run_chip(&run, theme::surface_raised())))
         .children(reaction_proposal.map(|pill| reaction_pill(pill, &row.key)));
+    let avatar = opens_profile(
+        div().id(ElementId::Name(format!("post-avatar-{index}").into())),
+        profile_user,
+    )
+    .w(px(size))
+    .flex_none()
+    .child(avatar);
+    let layout = match role {
+        Role::Root => v_flex()
+            .w_full()
+            .gap(px(8.))
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(AVATAR_GAP))
+                    .child(avatar.debug_selector(|| POST_AVATAR_TAG.into()))
+                    .child(root_header(row, index, author, profile_user, saved, pinned)),
+            )
+            .child(details.debug_selector(|| POST_BODY_TAG.into())),
+        Role::Reply => h_flex().items_start().gap(px(8.)).child(avatar).child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(px(6.))
+                .child(message_header(
+                    row,
+                    index,
+                    author,
+                    profile_user,
+                    saved,
+                    pinned,
+                ))
+                .child(details),
+        ),
+    };
     div()
         .id(ElementId::Name(format!("post-message-{index}").into()))
         .relative()
@@ -293,21 +384,7 @@ fn message_block(
         .when_some(reply, |block, reply| {
             block.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))
         })
-        .child(
-            h_flex()
-                .items_start()
-                .gap(px(if role == Role::Root { AVATAR_GAP } else { 8. }))
-                .child(
-                    opens_profile(
-                        div().id(ElementId::Name(format!("post-avatar-{index}").into())),
-                        profile_user,
-                    )
-                    .w(px(size))
-                    .flex_none()
-                    .child(avatar),
-                )
-                .child(body),
-        )
+        .child(layout)
         .when_some(menu, |block, menu| {
             block.child(placed_toolbar(
                 message_toolbar(menu, cx),
@@ -345,37 +422,50 @@ fn reply_footer(
     post_index: usize,
     open: Option<PostAction>,
     editor: Option<AnyElement>,
+    directory: &Directory,
 ) -> Option<Div> {
     let footer = v_flex()
         .w_full()
-        .px(px(CARD_PADDING))
+        .px(px(CARD_PADDING - FOOTER_BUTTON_PADDING))
         .rounded_b(px(CARD_RADIUS))
         .bg(theme::reply_surface());
     if let Some(editor) = editor {
-        return Some(footer.py(px(8.)).child(editor));
+        return Some(footer.px(px(CARD_PADDING)).py(px(8.)).child(editor));
     }
     let open = open?;
+    let own_avatar = directory.me.as_ref().map(|me| {
+        div()
+            .debug_selector(|| POST_FOOTER_AVATAR_TAG.into())
+            .flex_none()
+            .child(person_avatar(
+                directory,
+                Some(&me.user_id),
+                &me.display_name,
+                FOOTER_AVATAR,
+            ))
+    });
     Some(
-        footer.h(px(36.)).justify_center().child(
+        footer.py(px(CARD_PADDING - FOOTER_BUTTON_VERTICAL)).child(
             h_flex().child(
                 h_flex()
                     .id(ElementId::Name(format!("post-reply-{post_index}").into()))
-                    .gap(px(6.))
-                    .px(px(6.))
-                    .py(px(4.))
+                    .gap(px(8.))
+                    .px(px(FOOTER_BUTTON_PADDING))
+                    .py(px(FOOTER_BUTTON_VERTICAL))
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(12.5))
-                    .text_color(theme::text_muted())
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text_soft())
                     .hover(|button| {
                         button
                             .bg(theme::row_hover())
                             .text_color(theme::text_strong())
                     })
                     .on_click(move |_, window, cx| open(window, cx))
-                    .child(icon(IconName::Reply, 14., theme::text_muted()))
-                    .child("Reply"),
+                    .children(own_avatar)
+                    .child(REPLY_IN_THREAD),
             ),
         ),
     )
@@ -396,6 +486,7 @@ pub fn render_post(
         reply_editor,
     } = actions;
     let mut card = v_flex()
+        .debug_selector(|| POST_CARD_TAG.into())
         .w_full()
         .rounded(px(CARD_RADIUS))
         .bg(theme::row_hover())
@@ -426,7 +517,7 @@ pub fn render_post(
             .when(closes_card, |block| block.rounded_b(px(CARD_RADIUS))),
         );
     }
-    card = card.children(reply_footer(index, open_reply, reply_editor));
+    card = card.children(reply_footer(index, open_reply, reply_editor, directory));
     div()
         .w_full()
         .px(px(20.))

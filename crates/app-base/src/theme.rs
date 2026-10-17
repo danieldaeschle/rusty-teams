@@ -323,6 +323,10 @@ pub fn inline_code_border() -> Hsla {
     color_with_alpha(palette().inline_code_border)
 }
 
+pub fn code_frame() -> Hsla {
+    color_with_alpha(palette().code_frame)
+}
+
 pub fn table_header() -> Hsla {
     color_with_alpha(palette().table_header)
 }

@@ -100,6 +100,7 @@ use shared::SharedState;
 pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
+pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -224,6 +225,8 @@ pub struct ConversationView {
     pin_index: usize,
     channel_details_open: bool,
     pinned_posts_expanded: bool,
+    channel_details_scroll: ScrollHandle,
+    scroller_watch: Option<(EntityId, Subscription)>,
     pin_previews: HashMap<String, pins::PinPreview>,
     pin_fetches: HashSet<String>,
     notice: Option<String>,
@@ -557,6 +560,8 @@ impl ConversationView {
             pin_index: 0,
             channel_details_open: false,
             pinned_posts_expanded: false,
+            channel_details_scroll: ScrollHandle::new(),
+            scroller_watch: None,
             pin_previews: HashMap::new(),
             pin_fetches: HashSet::new(),
             notice: None,
@@ -1286,8 +1291,7 @@ impl ConversationView {
                 .reply_to_id
                 .clone()
                 .unwrap_or_else(|| record.message_id.clone());
-            let quote = record.reply_to_id.is_some().then_some(preview);
-            self.open_reply_editor(root_id, quote, window, cx);
+            self.open_reply_editor(root_id, Some(preview), window, cx);
             return;
         }
         self.composer.update(cx, |composer, cx| {
@@ -1465,6 +1469,23 @@ impl ConversationView {
             title: current.title.clone(),
             user_id,
         })
+    }
+
+    fn watch_feed_scroll(&mut self, cx: &mut Context<Self>) {
+        let scroller_id = self.scroller.entity_id();
+        if self
+            .scroller_watch
+            .as_ref()
+            .is_some_and(|(watched, _)| *watched == scroller_id)
+        {
+            return;
+        }
+        let subscription = cx.observe(&self.scroller, |this, _, cx| {
+            if this.in_feed() {
+                cx.notify();
+            }
+        });
+        self.scroller_watch = Some((scroller_id, subscription));
     }
 
     fn rebuild(&mut self, reset: bool, cx: &mut Context<Self>) {
@@ -3708,6 +3729,8 @@ impl Render for ConversationView {
         let recap_active = self.recap_active();
         let empty_channel = in_feed && self.rows.borrow().is_empty();
         let new_post = self.render_new_post(window, cx);
+        self.watch_feed_scroll(cx);
+        let feed_scrolled = new_post.is_some() && self.scroller.read(cx).is_scrolled_from_top();
         let body = if drafting && self.current.is_none() && self.rows.borrow().is_empty() {
             let draft = self.draft.read(cx);
             let group_name = draft.group_name(cx);
@@ -3747,6 +3770,15 @@ impl Render for ConversationView {
                     .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
                     .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_reaction_details(cx)))
                     .child(body)
+                    .when(feed_scrolled, |timeline| {
+                        timeline.child(
+                            edge_divider(FEED_EDGE_TAG)
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0(),
+                        )
+                    })
                     .children(pin_banner.map(pin_banner_overlay)),
             )
             .children(self.render_draft_error(cx))

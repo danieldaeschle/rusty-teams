@@ -198,7 +198,7 @@ impl RenderEnv {
             ),
         };
         let actionable = is_real && !message.deleted;
-        let (menu, react, reaction_controls) = view
+        let (menu, react, reaction_controls, add_reaction) = view
             .upgrade()
             .filter(|_| actionable)
             .map(|entity| {
@@ -224,9 +224,10 @@ impl RenderEnv {
                 let visible = this.toolbar_visible(&message.key);
                 let controls = (!message.reactions.is_empty())
                     .then(|| this.reaction_controls(&message.key, view.clone()));
-                (visible.then_some(menu), Some(react), controls)
+                let adder = (!message.reactions.is_empty()).then(|| menu.reaction_adder());
+                (visible.then_some(menu), Some(react), controls, adder)
             })
-            .unwrap_or((None, None, None));
+            .unwrap_or((None, None, None, None));
         let reply = (is_real && !message.deleted).then(|| {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
             boxed(move |cx| {
@@ -297,6 +298,7 @@ impl RenderEnv {
             scheduled_menu,
             react,
             reaction_controls,
+            add_reaction,
             files,
             open_image,
             highlighted: self.highlighted.as_deref() == Some(message.key.as_str()),
@@ -431,7 +433,18 @@ impl RenderEnv {
         })
     }
 
+    fn request_author_presence(&self, message: &MessageRow, cx: &mut App) {
+        let Some(sender_id) = message.sender_id.clone().filter(|_| !message.own) else {
+            return;
+        };
+        let app = self.app.clone();
+        cx.defer(move |cx| {
+            app.update(cx, |state, cx| state.request_presence(vec![sender_id], cx));
+        });
+    }
+
     pub fn post_actions(&self, post: &PostRow, window: &mut Window, cx: &mut App) -> PostActions {
+        self.request_author_presence(&post.root, cx);
         let root_key = post.root.key.clone();
         let is_local =
             root_key.starts_with(PENDING_KEY_PREFIX) || root_key.starts_with(SCHEDULED_KEY_PREFIX);

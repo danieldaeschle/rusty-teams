@@ -86,6 +86,7 @@ pub struct Palette {
     pub inline_code_fill_own: u32,
     pub quote_fill: u32,
     pub inline_code_border: u32,
+    pub code_frame: u32,
     pub table_header: u32,
 }
 
@@ -161,6 +162,7 @@ const DARK_BASE: Palette = Palette {
     inline_code_fill_own: 0x0000003d,
     quote_fill: 0x00000052,
     inline_code_border: 0xffffff1a,
+    code_frame: 0xffffff3d,
     table_header: 0xffffff0d,
 };
 
@@ -172,6 +174,7 @@ const LIGHT_BASE: Palette = Palette {
     inline_code_fill_own: 0x0000000f,
     quote_fill: 0x0000000a,
     inline_code_border: 0x00000014,
+    code_frame: 0x0000002e,
     table_header: 0x00000008,
     ..DARK_BASE
 };
@@ -406,6 +409,7 @@ pub const HIGH_CONTRAST: Palette = Palette {
     inline_code_fill_own: 0x000000ff,
     quote_fill: 0x000000ff,
     inline_code_border: 0xffffffff,
+    code_frame: 0xffffffff,
     table_header: 0x000000ff,
     ..DARK_BASE
 };

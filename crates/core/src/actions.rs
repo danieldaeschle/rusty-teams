@@ -1,8 +1,8 @@
 use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, Utc};
 use graph::{
-    FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
-    hosted_image_order,
+    FileReference, KeptAttachment, MessageExtras, MessageTarget, OutgoingMention,
+    UploadDestination, UploadedFile, hosted_image_order,
 };
 use store::MessageRecord;
 
@@ -13,9 +13,12 @@ use crate::hidden_chats::cleared_until_ms;
 use crate::links::LinkPreview;
 use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
+use crate::preview::preview_text;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
 use crate::remote::Remote;
 use crate::scheduled::NOTES_CHAT_ID;
+
+const MESSAGE_REFERENCE: &str = "messageReference";
 
 impl<R: Remote> SyncEngine<R> {
     pub async fn send_message(
@@ -124,32 +127,42 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id).await?;
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
-        let sent = match conversation {
+        let (sent, extras) = match conversation {
             Conversation::Chat => {
-                self.remote
+                let sent = self
+                    .remote
                     .reply_with_quote(conversation_id, message_id, &html, &mentions, extras)
-                    .await?
+                    .await?;
+                (sent, extras.clone())
             }
             Conversation::Channel { team_id } => {
-                let root_id = self
+                let quoted = self
                     .store
                     .messages_by_id(conversation_id, &[message_id.to_owned()])?
-                    .remove(message_id)
-                    .and_then(|record| record.reply_to_id)
+                    .remove(message_id);
+                let root_id = quoted
+                    .as_ref()
+                    .and_then(|record| record.reply_to_id.clone())
                     .unwrap_or_else(|| message_id.to_owned());
-                self.remote
+                let mut extras = extras.clone();
+                if let Some(quoted) = &quoted {
+                    extras.kept.insert(0, quote_reference(quoted));
+                }
+                let sent = self
+                    .remote
                     .reply_to_channel_message(
                         &team_id,
                         conversation_id,
                         &root_id,
                         &html,
                         &mentions,
-                        extras,
+                        &extras,
                     )
-                    .await?
+                    .await?;
+                (sent, extras)
             }
         };
-        self.cache_sent(conversation_id, &sent, &html, extras)
+        self.cache_sent(conversation_id, &sent, &html, &extras)
     }
 
     /// Own and not deleted. Chat messages, channel posts and channel replies alike.
@@ -785,6 +798,33 @@ fn outgoing(
         ensure_allowed_in_chat(mentions)?;
     }
     Ok(apply_mentions(html, mentions))
+}
+
+/// The `messageReference` attachment Graph's chat `replyWithQuote` produces; channels have no such action.
+fn quote_reference(record: &MessageRecord) -> KeptAttachment {
+    let sender = record.sender_id.as_ref().map(|user_id| {
+        serde_json::json!({
+            "application": null,
+            "device": null,
+            "user": {
+                "userIdentityType": "aadUser",
+                "id": user_id,
+                "displayName": record.sender_name,
+            },
+        })
+    });
+    let content = serde_json::json!({
+        "messageId": record.message_id,
+        "messagePreview": preview_text(&record.body_html).unwrap_or_default(),
+        "messageSender": sender,
+    });
+    KeptAttachment {
+        id: record.message_id.clone(),
+        content_type: Some(MESSAGE_REFERENCE.to_owned()),
+        content: Some(content.to_string()),
+        content_url: None,
+        name: None,
+    }
 }
 
 fn missing_attachment_id() -> Error {

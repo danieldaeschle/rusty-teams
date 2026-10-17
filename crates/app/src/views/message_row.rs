@@ -10,10 +10,10 @@ use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, call_card_row};
 use super::jumbo_emoji::jumbo_row;
 use super::link_preview::{link_preview_card, meeting_join_chip};
-use super::message_actions::{MessageMenu, message_toolbar};
+use super::message_actions::{MessageMenu, ReactionAdder, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
-use super::reaction_pills::{ReactionControls, reaction_pills};
+use super::reaction_pills::{PillLook, ReactionControls, reaction_pills};
 use super::reaction_proposal_pill::{ReactionPill, reaction_pill};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
 use super::toolbar_placement::{HoverChange, TimelineBounds, placed_toolbar};
@@ -78,6 +78,7 @@ pub struct RowActions {
     pub scheduled_menu: Option<ScheduledMenu>,
     pub react: Option<PickHandler>,
     pub reaction_controls: Option<ReactionControls>,
+    pub add_reaction: Option<ReactionAdder>,
     pub files: Option<FileActions>,
     pub open_image: Option<ImageActions>,
     pub highlighted: bool,
@@ -290,6 +291,7 @@ fn bubble(
                         &row.reactions,
                         index,
                         own,
+                        PillLook::Faces,
                         directory,
                         extras.react.clone(),
                         extras.controls.as_ref(),
@@ -674,6 +676,7 @@ pub fn render_message_row(
         scheduled_menu,
         react,
         reaction_controls,
+        add_reaction: _,
         files,
         open_image,
         highlighted,

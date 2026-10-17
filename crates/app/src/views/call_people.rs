@@ -16,6 +16,7 @@ use super::call_extras::open_invite_picker;
 use super::call_organizer::{pill, tile_menu};
 use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH, round_control};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
+use super::scroll_edge::with_top_edge;
 use crate::app_state::AppState;
 use crate::call::{
     ActiveCall, CallModel, OptionsDialog, PeopleSections, PersonRow, people_sections,
@@ -25,6 +26,7 @@ use crate::theme::{self, ElevatedSurface as _};
 use calling::MeetingOptions;
 
 const HEADER_HEIGHT: f32 = 48.;
+const PEOPLE_SCROLL_DIVIDER: &str = "shell/islands/main/call-people/divider-scroll";
 const ROW_HEIGHT: f32 = 44.;
 const AVATAR_SIZE: f32 = 28.;
 const MORE_SIZE: f32 = 24.;
@@ -440,6 +442,7 @@ pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall)
         .min_h_0()
         .w_full()
         .overflow_y_scroll()
+        .track_scroll(&call.people_scroll)
         .pb(px(12.))
         .children(model.can_admit().then(|| lobby_section(app, state, &sections)).flatten())
         .when(!sections.hands.is_empty(), |list| {
@@ -469,7 +472,7 @@ pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall)
             .overflow_hidden()
             .bg(theme::surface())
             .child(panel_header(app, model, sections.count))
-            .child(body)
+            .child(with_top_edge(body, &call.people_scroll, PEOPLE_SCROLL_DIVIDER))
             .into_any_element(),
     )
 }
