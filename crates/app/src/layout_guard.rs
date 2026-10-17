@@ -181,6 +181,9 @@ mod frames {
         COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
     };
     use crate::views::conversation::{HEADER_DIVIDER, MEMBERS_BUTTON};
+    use crate::views::find_panel::{
+        FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
+    };
     use crate::views::message_row::BUBBLE_TAGS;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
@@ -189,7 +192,7 @@ mod frames {
         AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call,
     };
     use crate::views::shortcuts::{
-        ClearChatFilters, FilterMutedChats, OpenActivity, OpenAgents, OpenCallsTab,
+        ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCallsTab,
         OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
@@ -220,6 +223,12 @@ mod frames {
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
     const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
+    const FIND_TAGS: &[&str] = &[
+        FIND_PANEL_TAG,
+        FIND_DIVIDER_TAG,
+        FIND_INPUT_TAG,
+        FIND_RESULTS_TAG,
+    ];
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/sidebar/calls-actions",
         "shell/islands/sidebar/calls-actions/meet-now",
@@ -562,6 +571,7 @@ mod frames {
             .chain(CALLS_TAGS)
             .chain(CHAT_FILTER_TAGS)
             .chain(CHAT_FILTER_OPEN_TAGS)
+            .chain(FIND_TAGS)
             .chain(PREJOIN_TAGS)
             .chain(SHARE_GUARDED)
             .chain(CONSULT_GUARDED)
@@ -784,6 +794,15 @@ mod frames {
                     }),
                 ),
                 Screen::Tab(
+                    "find",
+                    Some(|visual| {
+                        visual.dispatch_action(OpenChatsTab);
+                        visual.dispatch_action(FindInChat);
+                        visual.run_until_parked();
+                        visual.simulate_input("access");
+                    }),
+                ),
+                Screen::Tab(
                     "activity",
                     Some(|visual| visual.dispatch_action(OpenActivity)),
                 ),
@@ -920,6 +939,7 @@ mod frames {
                         expected.extend(CHAT_FILTER_TAGS);
                         expected.extend(CHAT_FILTER_OPEN_TAGS);
                     }
+                    "find" => expected.extend(FIND_TAGS),
                     "calls" => expected.extend(CALLS_TAGS),
                     "agents" => expected.push(AGENTS_LIST),
                     "prejoin" => expected.extend(PREJOIN_TAGS),
@@ -958,6 +978,10 @@ mod frames {
                             cx.notify();
                         })
                     });
+                }
+                if screen_name == "find" {
+                    visual.dispatch_action(gpui_kit::component::input::Escape);
+                    visual.run_until_parked();
                 }
                 if screen_name == "chat-filter" {
                     visual.dispatch_action(ClearChatFilters);

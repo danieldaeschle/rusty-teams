@@ -21,7 +21,7 @@ use crate::chat_filter::ChatFilterPill;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     AcceptCall, ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
-    FilterNonMeetingChats, FilterUnreadChats, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
+    FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
     OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
@@ -974,6 +974,11 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.show_chats(cx));
+            }))
+            .on_action(cx.listener(|this, _: &FindInChat, window, cx| {
+                this.close_image_viewer(window, cx);
+                this.conversation
+                    .update(cx, |conversation, cx| conversation.open_find(window, cx));
             }))
             .on_action(cx.listener(|this, _: &OpenChatFilter, window, cx| {
                 this.close_image_viewer(window, cx);

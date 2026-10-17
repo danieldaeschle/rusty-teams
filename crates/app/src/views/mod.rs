@@ -42,6 +42,7 @@ pub mod dialog_overlay;
 pub mod emoji_popup;
 pub mod format_toolbar;
 pub mod forward_dialog;
+pub mod find_panel;
 pub mod fun_picker;
 pub mod image_menu;
 pub mod image_viewer;
