@@ -12,7 +12,7 @@ use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::new_chat::NewChatDraft;
+use super::new_chat::{NewChatDraft, Pick};
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{FormValues, Invitee, default_window, draft_from_form};
@@ -233,7 +233,20 @@ impl Render for MeetingForm {
 }
 
 pub fn open_new_meeting(state: Entity<AppState>, window: &mut Window, cx: &mut App) {
+    open_new_meeting_with(state, Vec::new(), window, cx);
+}
+
+pub fn open_new_meeting_with(
+    state: Entity<AppState>,
+    people: Vec<Pick>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let form = cx.new(|cx| MeetingForm::new(state, window, cx));
+    if !people.is_empty() {
+        let draft = form.read(cx).people.clone();
+        draft.update(cx, |draft, cx| draft.set_chips(people, cx));
+    }
     let first_field = form.read(cx).title.clone();
     window.open_dialog(cx, move |dialog: Dialog, _, cx| {
         let submit_form = form.clone();
