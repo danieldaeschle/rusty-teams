@@ -55,7 +55,10 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
-pub use members::{HistoryShare, MAX_HISTORY_DAYS, ThreadMembers};
+pub use members::{
+    HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
+    TopicProblem, topic_problem,
+};
 pub use messages::{ConversationRef, Messages};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,

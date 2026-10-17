@@ -229,6 +229,17 @@ fn chat_menu(
                     hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
                 }),
         );
+    if !target.is_group {
+        let remove_state = context.state.clone();
+        let remove_id = target.id.clone();
+        popup = popup.item(
+            PopupMenuItem::new(REMOVE_HISTORY_LABEL)
+                .icon(menu_icon(IconName::Trash))
+                .on_click(move |_, window, cx| {
+                    confirm_remove_history(&remove_state, &remove_id, window, cx);
+                }),
+        );
+    }
     if target.is_group {
         let leave_state = context.state.clone();
         let leave_id = target.id.clone();
@@ -438,6 +449,40 @@ fn leave_description(member_count: usize) -> String {
     };
     let verb = if member_count == 2 { "sees" } else { "see" };
     format!("{who} {verb} that you left. You can only come back if someone adds you.")
+}
+
+const REMOVE_HISTORY_LABEL: &str = "Remove chat history";
+const REMOVE_HISTORY_TITLE: &str = "Remove chat history?";
+const REMOVE_HISTORY_TEXT: &str =
+    "This will remove the chat from your list and search. It affects you only.";
+
+fn confirm_remove_history(
+    state: &Entity<AppState>,
+    chat_id: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let state = state.clone();
+    let chat_id = chat_id.to_owned();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let state = state.clone();
+        let chat_id = chat_id.clone();
+        let cancel = Button::new("remove-history-cancel")
+            .label("Cancel")
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let remove = Button::new("remove-history-confirm")
+            .label("Remove")
+            .primary()
+            .on_click(move |_, window, cx| {
+                state.update(cx, |state, cx| state.remove_chat_history(&chat_id, cx));
+                window.close_dialog(cx);
+            });
+        alert
+            .title(REMOVE_HISTORY_TITLE)
+            .description(REMOVE_HISTORY_TEXT)
+            .footer(DialogFooter::new().child(cancel).child(remove))
+            .on_ok(|_, _, _| false)
+    });
 }
 
 pub(crate) fn confirm_leave(

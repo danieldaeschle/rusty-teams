@@ -582,6 +582,7 @@ impl Remote for Handle {
                 muted,
                 hidden: None,
                 read: chatsvc::ReadHorizon::default(),
+                history_cleared_ms: None,
             })
             .collect();
         states.extend(
@@ -592,6 +593,7 @@ impl Remote for Handle {
                     muted: false,
                     hidden: Some(hidden),
                     read: chatsvc::ReadHorizon::default(),
+                    history_cleared_ms: None,
                 }),
         );
         let read = self.read_states.lock().unwrap().clone();
@@ -602,6 +604,7 @@ impl Remote for Handle {
                     muted: false,
                     hidden: None,
                     read,
+                    history_cleared_ms: None,
                 }),
         );
         Ok(states)

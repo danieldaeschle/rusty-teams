@@ -134,6 +134,12 @@ pub trait Remote {
         share: HistoryShare,
     ) -> Result<()>;
     async fn chat_states(&self) -> Result<Vec<ConversationState>>;
+    async fn clear_chat_history(&self, _chat_id: &str, _cleared_until_ms: i64) -> Result<()> {
+        Err(Error::Unsupported("removing chat history"))
+    }
+    async fn set_chat_topic(&self, _chat_id: &str, _topic: &str) -> Result<()> {
+        Err(Error::Unsupported("renaming a chat"))
+    }
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
     async fn set_channel_notifications(
@@ -696,6 +702,18 @@ impl Remote for Graph {
     async fn chat_states(&self) -> Result<Vec<ConversationState>> {
         Ok(Conversations::new(self.session())
             .conversation_states()
+            .await?)
+    }
+
+    async fn clear_chat_history(&self, chat_id: &str, cleared_until_ms: i64) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .clear_history(chat_id, cleared_until_ms)
+            .await?)
+    }
+
+    async fn set_chat_topic(&self, chat_id: &str, topic: &str) -> Result<()> {
+        Ok(ThreadMembers::new(self.session())
+            .set_topic(chat_id, topic)
             .await?)
     }
 

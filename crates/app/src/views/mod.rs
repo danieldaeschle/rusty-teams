@@ -43,6 +43,7 @@ pub mod emoji_popup;
 pub mod format_toolbar;
 pub mod forward_dialog;
 pub mod fun_picker;
+pub mod group_name;
 pub mod image_menu;
 pub mod image_viewer;
 pub mod join_dialog;
