@@ -59,8 +59,9 @@ pub use pins::{
     PinnedMessage, Pins, TeamLayout,
 };
 pub use presence::{
-    ActivityReporting, ForcedAvailability, ForcedKind, PresenceService, PresenceStatus, StatusNote,
-    WorkLocation, WorkLocationKind, WorkLocationSource, error_status, is_endpoint_missing,
+    ActivityReporting, ForcedAvailability, ForcedKind, PresenceLookup, PresenceService,
+    PresenceStatus, StatusNote, UserPresence, WorkLocation, WorkLocationKind, WorkLocationSource,
+    error_status, is_endpoint_missing,
 };
 pub use reactions::{
     emotion_glyph, emotion_key, emotion_keys, insert_skin_tone, reaction_glyph_for_key,
