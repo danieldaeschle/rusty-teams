@@ -31,16 +31,16 @@ mod render_env;
 mod scheduled;
 mod shared;
 
+use super::add_people_dialog::open_add_people;
 use super::attachments::FileActions;
 use super::avatar::{
     bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
-use super::add_people_dialog::open_add_people;
 use super::chat_members::members_popover;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
-use super::message_actions::{Action, DelegateEntry, MessageMenu, QUICK_REACTION_COUNT};
+use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
@@ -51,7 +51,6 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::scroll_edge::edge_divider;
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
-use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, composer_name, selection_title};
 use crate::backend::Engine;
@@ -82,6 +81,7 @@ use crate::sidebar_model::{AvatarSpec, Face, channel_unread};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
+use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
 use mcp::ReactionProposal;
@@ -3060,6 +3060,7 @@ impl ConversationView {
         let pinned = chat_id
             .as_deref()
             .is_some_and(|chat_id| state.is_pinned(chat_id, key));
+        let quick = state.quick_reactions();
         let in_chat = chat_id.is_some();
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
         MessageMenu {
@@ -3087,7 +3088,7 @@ impl ConversationView {
             pin,
             hover,
             picker: self.picker.clone(),
-            quick: self.recent.read(cx).most_used(QUICK_REACTION_COUNT),
+            quick,
             mine,
             done: action(|this, key, _, cx| this.suppress_toolbar(key, cx)),
         }

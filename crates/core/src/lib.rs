@@ -13,6 +13,7 @@ mod card_widgets;
 mod card_width;
 mod channel_sync;
 mod chat_paging;
+mod default_reactions;
 mod download;
 mod draft;
 mod emoticon_tags;
@@ -105,6 +106,10 @@ pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
     parse_language_settings, target_patch,
+};
+pub use default_reactions::{
+    DEFAULT_REACTION_SLOTS, TEAMS_DEFAULT_REACTIONS, default_reactions,
+    store_account_default_reactions,
 };
 pub use download::LibraryFile;
 pub use draft::{

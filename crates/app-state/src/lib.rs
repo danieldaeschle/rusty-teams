@@ -13,6 +13,7 @@ pub mod chat_actions;
 pub mod chat_members;
 pub mod connection_banner;
 pub mod data;
+pub mod default_reactions;
 pub mod demo;
 pub mod demo_meetings;
 pub mod demo_profiles;

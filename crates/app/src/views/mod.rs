@@ -37,6 +37,7 @@ pub mod chat_members;
 pub mod composer;
 pub mod connection_banner;
 pub mod conversation;
+pub mod customize_reactions;
 pub mod dialog_overlay;
 pub mod emoji_popup;
 pub mod format_toolbar;
