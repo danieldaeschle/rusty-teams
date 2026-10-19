@@ -21,6 +21,7 @@ pub mod fuzzy;
 pub mod image_clipboard;
 pub mod image_view_math;
 pub mod inline_image;
+pub mod native_dumps;
 pub mod notify;
 pub mod presence_link;
 pub mod read_state;

@@ -33,6 +33,7 @@ raw-window-handle = "0.6"
 x11rb = { version = "0.13", features = ["shape"] }
 
 [target.'cfg(windows)'.dependencies]
+libc = "0.2"
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
 tray-icon = { version = "0.21", default-features = false }
 windows = { version = "0.62", features = [
@@ -40,6 +41,9 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_SystemServices",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",

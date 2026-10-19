@@ -92,6 +92,8 @@ fn parse_arguments() -> Arguments {
     arguments
 }
 
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+
 fn data_path(name: &str) -> PathBuf {
     ProjectDirs::from("", "", store::DATA_DIR_NAME)
         .map(|directories| directories.data_local_dir().join(name))
@@ -138,6 +140,10 @@ fn open_store(path: &std::path::Path) -> Store {
 fn main() {
     app_base::version::set_build_version(VERSION_MARKER.trim_start_matches("teams-build:"));
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
+    app_base::native_dumps::install(
+        data_path("native-dumps"),
+        data_path(crash_log::CRASH_LOG_FILE),
+    );
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
@@ -242,6 +248,13 @@ fn main() {
         })
         .detach();
         cx.activate(true);
+        cx.spawn(async move |cx| {
+            loop {
+                app_base::native_dumps::heartbeat();
+                cx.background_executor().timer(HEARTBEAT_INTERVAL).await;
+            }
+        })
+        .detach();
     });
     presence_link::unregister_on_exit(ENDPOINT_UNREGISTER_TIMEOUT);
     #[cfg(windows)]
