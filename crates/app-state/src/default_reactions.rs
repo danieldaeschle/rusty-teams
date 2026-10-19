@@ -2,7 +2,6 @@ use gpui_kit::Context;
 
 use crate::app_state::AppState;
 use crate::emoticons;
-use crate::rows::reaction_glyph;
 
 pub fn quick_reaction_glyphs(reaction_ids: &[String], skin_tone: u8) -> Vec<String> {
     reaction_ids
@@ -10,36 +9,6 @@ pub fn quick_reaction_glyphs(reaction_ids: &[String], skin_tone: u8) -> Vec<Stri
         .filter_map(|reaction_id| chatsvc::reaction_glyph_for_key(reaction_id))
         .map(|glyph| emoticons::with_tone(&glyph, skin_tone))
         .collect()
-}
-
-/// The most used reactions first, the account defaults fill the remaining slots.
-pub fn quick_reactions_with_usage(
-    most_used: Vec<String>,
-    defaults: Vec<String>,
-    skin_tone: u8,
-) -> Vec<String> {
-    let count = if defaults.is_empty() {
-        teams_core::TEAMS_DEFAULT_REACTIONS.len()
-    } else {
-        defaults.len()
-    };
-    let mut quick: Vec<String> = Vec::with_capacity(count);
-    let toned_used = most_used
-        .into_iter()
-        .map(|glyph| emoticons::with_tone(&glyph, skin_tone));
-    for glyph in toned_used.chain(defaults) {
-        if quick.len() == count {
-            break;
-        }
-        let base = reaction_glyph(&emoticons::without_tone(&glyph));
-        if !quick
-            .iter()
-            .any(|known| reaction_glyph(&emoticons::without_tone(known)) == base)
-        {
-            quick.push(glyph);
-        }
-    }
-    quick
 }
 
 pub fn reaction_id_for_glyph(glyph: &str) -> Option<String> {
@@ -74,12 +43,10 @@ impl AppState {
         teams_core::default_reactions(&self.store)
     }
 
-    pub fn quick_reactions(&self, most_used: Vec<String>) -> Vec<String> {
-        let skin_tone = teams_core::skin_tone(&self.store);
-        quick_reactions_with_usage(
-            most_used,
-            quick_reaction_glyphs(&self.default_reactions(), skin_tone),
-            skin_tone,
+    pub fn quick_reactions(&self) -> Vec<String> {
+        quick_reaction_glyphs(
+            &self.default_reactions(),
+            teams_core::skin_tone(&self.store),
         )
     }
 
@@ -112,32 +79,6 @@ mod tests {
 
     fn ids(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
-    }
-
-    #[test]
-    fn most_used_come_first_and_defaults_fill_the_rest() {
-        let defaults = quick_reaction_glyphs(&ids(&teams_core::TEAMS_DEFAULT_REACTIONS), 0);
-        let quick = quick_reactions_with_usage(
-            vec!["\u{1F680}".to_owned(), "\u{2764}\u{FE0F}".to_owned()],
-            defaults.clone(),
-            0,
-        );
-        assert_eq!(quick.len(), defaults.len());
-        assert_eq!(quick[0], "\u{1F680}");
-        assert_eq!(quick[1], "\u{2764}\u{FE0F}");
-        assert_eq!(quick[2], defaults[0]);
-        assert_eq!(
-            quick.iter().filter(|glyph| reaction_glyph(glyph) == "\u{2764}").count(),
-            1
-        );
-    }
-
-    #[test]
-    fn used_reactions_take_the_account_tone() {
-        let defaults = quick_reaction_glyphs(&ids(&teams_core::TEAMS_DEFAULT_REACTIONS), 2);
-        let quick = quick_reactions_with_usage(vec!["\u{1F44D}".to_owned()], defaults, 2);
-        assert_eq!(quick[0], "\u{1F44D}\u{1F3FC}");
-        assert_eq!(quick.iter().filter(|glyph| glyph.starts_with('\u{1F44D}')).count(), 1);
     }
 
     #[test]
