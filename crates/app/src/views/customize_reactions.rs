@@ -75,17 +75,17 @@ impl CustomizeForm {
         filled(&self.slots) == self.saved_ids && self.skin_tone == self.saved_tone
     }
 
-    fn place(&mut self, index: usize, glyph: &str, cx: &mut Context<Self>) {
+    fn place(&mut self, index: usize, glyph: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(reaction_id) = reaction_id_for_glyph(glyph) {
             place_in_slot(&mut self.slots, index, reaction_id);
-            cx.notify();
+            changed(window, cx);
         }
     }
 
-    fn remove(&mut self, index: usize, cx: &mut Context<Self>) {
+    fn remove(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(slot) = self.slots.get_mut(index) {
             *slot = None;
-            cx.notify();
+            changed(window, cx);
         }
     }
 
@@ -147,8 +147,8 @@ impl CustomizeForm {
                 let view = view.clone();
                 picker.update(cx, |picker, _| {
                     picker.set_target(
-                        Rc::new(move |glyph, _, cx| {
-                            view.update(cx, |form, cx| form.place(index, glyph, cx))
+                        Rc::new(move |glyph, window, cx| {
+                            view.update(cx, |form, cx| form.place(index, glyph, window, cx))
                                 .ok();
                         }),
                         Rc::new(|_, _| {}),
@@ -172,9 +172,9 @@ impl CustomizeForm {
                     .hover(|button| button.bg(theme::row_hover()))
                     .child(icon(IconName::X, 10., theme::text_soft()))
                     .tooltip(|window, cx| Tooltip::new(REMOVE_REACTION).build(window, cx))
-                    .on_click(cx.listener(move |form, _, _, cx| {
+                    .on_click(cx.listener(move |form, _, window, cx| {
                         cx.stop_propagation();
-                        form.remove(index, cx);
+                        form.remove(index, window, cx);
                     })),
             )
         });
@@ -201,9 +201,9 @@ impl CustomizeForm {
                 choice.hover(|choice| choice.bg(theme::popup_hover()))
             })
             .child(with_tone(TONE_SAMPLE, tone))
-            .on_click(cx.listener(move |form, _, _, cx| {
+            .on_click(cx.listener(move |form, _, window, cx| {
                 form.skin_tone = tone;
-                cx.notify();
+                changed(window, cx);
             }))
             .into_any_element()
     }
@@ -232,6 +232,12 @@ impl Render for CustomizeForm {
             .child(div().text_color(theme::text_soft()).child(SKIN_TONE_TEXT))
             .child(h_flex().gap(px(6.)).children(tones))
     }
+}
+
+/// The dialog footer is built by the window root, so Save only re-evaluates `unchanged` on a window refresh.
+fn changed(window: &mut Window, cx: &mut Context<CustomizeForm>) {
+    cx.notify();
+    window.refresh();
 }
 
 pub fn open_customize_reactions(state: Entity<AppState>, window: &mut Window, cx: &mut App) {

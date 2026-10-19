@@ -76,7 +76,19 @@ impl Recent {
     }
 
     pub fn most_used(&self, count: usize) -> Vec<String> {
-        let mut ranked: Vec<&Entry> = self.0.iter().collect();
+        self.ranked(count, 0)
+    }
+
+    pub fn frequently_used(&self, count: usize) -> Vec<String> {
+        self.ranked(count, 1)
+    }
+
+    fn ranked(&self, count: usize, min_uses: u32) -> Vec<String> {
+        let mut ranked: Vec<&Entry> = self
+            .0
+            .iter()
+            .filter(|entry| entry.uses >= min_uses)
+            .collect();
         ranked.sort_by_key(|entry| std::cmp::Reverse(entry.uses));
         ranked
             .into_iter()

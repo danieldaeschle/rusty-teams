@@ -3079,7 +3079,11 @@ impl ConversationView {
         let saved = self
             .conversation_id()
             .is_some_and(|conversation_id| state.is_saved(&conversation_id, key));
-        let quick = state.quick_reactions();
+        let quick = state.quick_reactions(
+            self.recent
+                .read(cx)
+                .frequently_used(teams_core::DEFAULT_REACTION_SLOTS),
+        );
         let in_chat = chat_id.is_some();
         let pin_conversation_id = self.pin_conversation_id();
         let pinned = pin_conversation_id
