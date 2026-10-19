@@ -26,6 +26,7 @@ pub struct ReactionTab {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReactionEntry {
     pub reactor: Reactor,
+    pub glyph: String,
     pub label: String,
 }
 
@@ -103,6 +104,7 @@ pub fn reaction_entries(chips: &[ReactionChip], tab: Option<&str>) -> Vec<Reacti
         .flat_map(|chip| {
             chip.reactors.iter().map(|reactor| ReactionEntry {
                 reactor: reactor.clone(),
+                glyph: chip.glyph(),
                 label: chip.label.clone(),
             })
         })

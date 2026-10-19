@@ -51,6 +51,29 @@ impl ReactionChip {
     pub fn glyph(&self) -> String {
         reaction_glyph(&self.reaction_type)
     }
+
+    pub fn custom_emoji_image(&self) -> Option<ImageRef> {
+        custom_emoji_image(&self.reaction_type)
+    }
+}
+
+/// Text for places without images: the org emoji's name instead of its raw key.
+pub fn reaction_text(reaction_type: &str) -> String {
+    match chatsvc::custom_emoji(reaction_type) {
+        Some(emoji) => format!(":{}:", emoji.name),
+        None => reaction_glyph(reaction_type),
+    }
+}
+
+pub fn custom_emoji_image(reaction_type: &str) -> Option<ImageRef> {
+    let emoji = chatsvc::custom_emoji(reaction_type)?;
+    Some(ImageRef {
+        id: emoji.object_id.to_owned(),
+        url: emoji.image_url(),
+        width: None,
+        height: None,
+        alt: Some(emoji.name.to_owned()),
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1269,6 +1292,16 @@ mod tests {
         assert_eq!(chips.len(), 1);
         assert_eq!(chips[0].reaction_type, "\u{1F389}");
         assert!(chips[0].mine);
+    }
+
+    #[test]
+    fn org_emoji_shows_its_name_and_loads_its_image() {
+        let key = "absolute-cinema;0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8";
+        assert_eq!(reaction_text(key), ":absolute-cinema:");
+        assert_eq!(reaction_text("like"), "\u{1F44D}");
+        let image = custom_emoji_image(key).expect("image");
+        assert!(image.url.ends_with("/0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8/views/imgt2_anim"));
+        assert_eq!(custom_emoji_image("like"), None);
     }
 
     #[test]

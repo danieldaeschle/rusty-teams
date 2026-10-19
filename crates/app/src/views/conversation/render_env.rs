@@ -14,7 +14,7 @@ use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
 use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
-use crate::rows::{Delivery, MessageRow, PostRow, RecordingCard};
+use crate::rows::{Delivery, MessageRow, PostRow, ReactionChip, RecordingCard};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
 use crate::views::adaptive_card::{ensure_cards_inputs, request_card_refreshes};
@@ -74,6 +74,12 @@ impl RenderEnv {
                     .call
                     .as_ref()
                     .and_then(|call| call.recap.as_ref()?.recording.thumbnail.clone()),
+            )
+            .chain(
+                message
+                    .reactions
+                    .iter()
+                    .filter_map(ReactionChip::custom_emoji_image),
             )
             .filter(|image| self.app.read(cx).directory.image(&image.url).is_none())
             .collect();

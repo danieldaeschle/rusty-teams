@@ -2751,6 +2751,9 @@ impl ConversationView {
     }
 
     fn record_reaction_use(&mut self, glyph: &str, cx: &mut Context<Self>) {
+        if chatsvc::custom_emoji(glyph).is_some() {
+            return;
+        }
         let store = self.app.read(cx).store.clone();
         self.recent.update(cx, |recent, cx| {
             recent.reload(&store);

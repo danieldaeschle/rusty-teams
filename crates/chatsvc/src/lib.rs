@@ -83,7 +83,7 @@ pub use presence::{
     error_status, is_endpoint_missing,
 };
 pub use reactions::{
-    emotion_glyph, emotion_key, emotion_keys, insert_skin_tone, reaction_glyph_for_key,
+    CustomEmoji, custom_emoji, emotion_glyph, emotion_key, emotion_keys, insert_skin_tone, reaction_glyph_for_key,
     reaction_key, reaction_keys,
 };
 pub use read_horizon::ReadHorizon;

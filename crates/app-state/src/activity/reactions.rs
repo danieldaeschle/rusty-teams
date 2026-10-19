@@ -4,7 +4,7 @@ use super::feed::{ReactedMessage, Sighting};
 use super::preview_label;
 use crate::notify::preview_of;
 use crate::reaction_model::UNKNOWN_REACTOR;
-use crate::rows::reaction_glyph;
+use crate::rows::reaction_text;
 
 pub fn reacted_messages(
     records: &[MessageRecord],
@@ -22,7 +22,7 @@ pub fn reacted_messages(
                         .user_name
                         .or_else(|| reaction.user_id.as_deref().and_then(&name_of))
                         .unwrap_or_else(|| UNKNOWN_REACTOR.to_owned()),
-                    glyph: reaction_glyph(&reaction.reaction_type),
+                    glyph: reaction_text(&reaction.reaction_type),
                     user_id: reaction.user_id,
                     created_at: reaction.created_at,
                 })

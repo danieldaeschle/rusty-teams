@@ -13,11 +13,13 @@ use crate::reaction_model::{
     ReactionEntry, ReactionTab, Reactor, chip_tooltip, reaction_entries, reaction_tabs,
     reaction_time_label, shows_faces,
 };
-use crate::rows::ReactionChip;
+use crate::rows::{ReactionChip, custom_emoji_image};
 use crate::theme::{self, ElevatedSurface as _};
 
 pub const PILL_HEIGHT: f32 = 24.;
 const PILL_EMOJI_SIZE: f32 = 14.;
+const TAB_EMOJI_SIZE: f32 = 12.5;
+const ENTRY_EMOJI_SIZE: f32 = 17.;
 const PILL_TEXT_SIZE: f32 = 12.;
 const PILL_GAP: f32 = 3.;
 const FACE_SIZE: f32 = 18.;
@@ -76,12 +78,33 @@ pub enum PillLook {
     Count,
 }
 
+fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) -> AnyElement {
+    let Some(image) = custom_emoji_image(glyph) else {
+        return div()
+            .text_size(px(size))
+            .child(label.to_owned())
+            .into_any_element();
+    };
+    match directory.image(&image.url) {
+        Some(entry) => img(entry.path.clone())
+            .size(px(size))
+            .object_fit(ObjectFit::Contain)
+            .flex_none()
+            .into_any_element(),
+        None if directory.image_failed(&image.url) => div()
+            .child(image.alt.unwrap_or_default())
+            .into_any_element(),
+        None => div().size(px(size)).flex_none().into_any_element(),
+    }
+}
+
 fn pill_content(chip: &ReactionChip, look: PillLook, background: Hsla, directory: &Directory) -> Div {
-    let content = h_flex().items_center().child(
-        div()
-            .text_size(px(PILL_EMOJI_SIZE))
-            .child(chip.label.clone()),
-    );
+    let content = h_flex().items_center().child(reaction_emoji(
+        &chip.glyph(),
+        &chip.label,
+        PILL_EMOJI_SIZE,
+        directory,
+    ));
     if look == PillLook::Faces && shows_faces(chip.reactors.len()) {
         content.child(
             div()
@@ -173,7 +196,12 @@ fn pill(
         })
 }
 
-fn tab_button(tab: &ReactionTab, active: bool, select_tab: SelectTab) -> Stateful<Div> {
+fn tab_button(
+    tab: &ReactionTab,
+    active: bool,
+    select_tab: SelectTab,
+    directory: &Directory,
+) -> Stateful<Div> {
     let glyph = tab.glyph.clone();
     h_flex()
         .id(ElementId::Name(
@@ -192,7 +220,10 @@ fn tab_button(tab: &ReactionTab, active: bool, select_tab: SelectTab) -> Statefu
             theme::text_muted()
         })
         .when(active, |button| button.bg(theme::popup_hover()))
-        .child(tab.label.clone())
+        .child(match &tab.glyph {
+            Some(glyph) => reaction_emoji(glyph, &tab.label, TAB_EMOJI_SIZE, directory),
+            None => tab.label.clone().into_any_element(),
+        })
         .child(tab.count.to_string())
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, _, cx| {
@@ -238,7 +269,12 @@ fn entry_row(entry: &ReactionEntry, directory: &Directory) -> Div {
                         }),
                 ),
         )
-        .child(div().text_size(px(17.)).child(entry.label.clone()))
+        .child(reaction_emoji(
+            &entry.glyph,
+            &entry.label,
+            ENTRY_EMOJI_SIZE,
+            directory,
+        ))
 }
 
 fn popover(
@@ -272,6 +308,7 @@ fn popover(
                     tab,
                     tab.glyph.as_deref() == selected,
                     controls.select_tab.clone(),
+                    directory,
                 )
             })))
         })

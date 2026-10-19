@@ -9,6 +9,9 @@ const TONE_MARKER: &str = "-tone";
 const ZERO_WIDTH_JOINER: char = '\u{200d}';
 const VARIATION_SELECTOR: char = '\u{fe0f}';
 const MAX_TONE: u8 = 5;
+const CUSTOM_EMOJI_SEPARATOR: char = ';';
+const AMS_OBJECTS_BASE: &str = "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/";
+const CUSTOM_EMOJI_VIEW: &str = "/views/imgt2_anim";
 
 type Index = HashMap<&'static str, Vec<&'static str>>;
 
@@ -142,9 +145,45 @@ pub fn emotion_key(glyph: &str) -> Option<&'static str> {
     emotion_keys(glyph).first().copied()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CustomEmoji<'a> {
+    pub name: &'a str,
+    pub object_id: &'a str,
+}
+
+impl CustomEmoji<'_> {
+    pub fn image_url(&self) -> String {
+        format!("{AMS_OBJECTS_BASE}{}{CUSTOM_EMOJI_VIEW}", self.object_id)
+    }
+}
+
+/// `absolute-cinema;0-wcde-d3-5f5e...`: an org emoji, name and AMS object of its image.
+pub fn custom_emoji(key: &str) -> Option<CustomEmoji<'_>> {
+    let (name, object_id) = key.split_once(CUSTOM_EMOJI_SEPARATOR)?;
+    let valid_object = !object_id.is_empty()
+        && object_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-');
+    (!name.is_empty() && valid_object).then_some(CustomEmoji { name, object_id })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_emoji_key_maps_to_its_ams_image() {
+        let emoji = custom_emoji("absolute-cinema;0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8")
+            .expect("custom emoji");
+        assert_eq!(emoji.name, "absolute-cinema");
+        assert_eq!(
+            emoji.image_url(),
+            "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8/views/imgt2_anim"
+        );
+        assert_eq!(custom_emoji("like"), None);
+        assert_eq!(custom_emoji("x;../evil"), None);
+        assert_eq!(custom_emoji(";0-wcde-d3-1"), None);
+    }
 
     #[test]
     fn resolves_teams_keys() {
