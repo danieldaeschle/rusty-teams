@@ -70,7 +70,20 @@ impl PersonProfile {
 }
 
 pub(crate) async fn load_profile(graph: &Graph, user_id: &str) -> Result<PersonProfile> {
-    let details = graph.user_profile(user_id).await?;
+    let details = match graph.user_profile(user_id).await {
+        Ok(details) => details,
+        // People from other organizations are not in this directory. Like Teams, their card
+        // still shows what presence knows: availability, status note and out of office.
+        Err(graph::Error::Session(session::Error::Api { status: 404, .. })) => ProfileDetails {
+            user: graph::UserProfile {
+                id: user_id.to_owned(),
+                ..Default::default()
+            },
+            manager: None,
+            direct_reports: Vec::new(),
+        },
+        Err(error) => return Err(error.into()),
+    };
     let mail = details
         .user
         .mail
