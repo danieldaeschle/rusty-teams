@@ -50,6 +50,7 @@ impl Default for SessionConfig {
 #[derive(Default)]
 struct TokenSearch {
     refresh_error: Option<String>,
+    pages: Vec<String>,
     ungranted: HashSet<App>,
 }
 
@@ -168,10 +169,13 @@ impl Session {
         if !diagnosis.app_tab_open {
             return Err(Error::NoAppTab);
         }
-        let detail = search
+        let mut detail = search
             .refresh_error
             .map(|reason| format!(" (token refresh failed in {reason})"))
             .unwrap_or_default();
+        if !search.pages.is_empty() {
+            detail.push_str(&format!(" [{}]", search.pages.join("; ")));
+        }
         Err(Error::NoFreshToken {
             scope: scope.to_string(),
             detail,
@@ -203,6 +207,11 @@ impl Session {
                 serde_json::from_value(outcome).map_err(|error| Error::Cdp(format!("unexpected page answer: {error}")))?;
             if let Some(results) = outcome.results {
                 return Ok(Some(results.into_iter().map(WireResult::into).collect()));
+            }
+            if let Some(page) = &outcome.page {
+                let line = format!("{app}: {page}");
+                search.pages.retain(|seen| !seen.starts_with(&format!("{app}:")));
+                search.pages.push(line);
             }
             if let Some(reason) = outcome.refresh_error {
                 if reason.starts_with(NOT_GRANTED_PREFIX) {

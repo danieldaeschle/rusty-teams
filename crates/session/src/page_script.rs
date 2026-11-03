@@ -7,7 +7,7 @@ use crate::request::Outcome;
 use crate::scope::Scope;
 use crate::session::{FETCH_SCRIPT, NOT_GRANTED_PREFIX, Session};
 
-const TOKEN_MARKER: &str = "if (!token) return {noToken: true, refreshError};";
+const TOKEN_MARKER: &str = "if (!token) return {noToken: true, refreshError, page};";
 const ACQUIRE_CALL: &str = "const {token, refreshError} = await acquire(resource, scope);";
 
 /// A JS function expression: `(factory)({marginMs, forceRefresh})` resolves to `acquire(resource, scope)`, which answers `{token, refreshError}`.
@@ -69,11 +69,14 @@ impl Session {
                     "{app} app is not granted {scope}"
                 )));
             }
-            let detail = if reason.is_empty() {
+            let mut detail = if reason.is_empty() {
                 String::new()
             } else {
                 format!(" (token refresh failed in {app}: {reason})")
             };
+            if let Some(page) = outcome.page {
+                detail.push_str(&format!(" [{app}: {page}]"));
+            }
             return Err(Error::NoFreshToken {
                 scope: scope.to_string(),
                 detail,

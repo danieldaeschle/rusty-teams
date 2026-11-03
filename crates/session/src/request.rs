@@ -178,6 +178,28 @@ pub(crate) struct Outcome {
     pub results: Option<Vec<WireResult>>,
     #[serde(default, rename = "refreshError")]
     pub refresh_error: Option<String>,
+    #[serde(default)]
+    pub page: Option<PageState>,
+}
+
+/// What the page held when it had no token, to tell an unreadable cache apart from a missing sign-in.
+#[derive(Debug, Deserialize)]
+pub(crate) struct PageState {
+    pub visibility: String,
+    pub plain: usize,
+    pub sealed: usize,
+    #[serde(default)]
+    pub opened: usize,
+}
+
+impl std::fmt::Display for PageState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "page {}, {} plain / {} sealed cache entries ({} opened)",
+            self.visibility, self.plain, self.sealed, self.opened
+        )
+    }
 }
 
 impl From<WireResult> for ApiResponse {
@@ -290,5 +312,18 @@ mod tests {
             serde_json::from_value(json!({"noToken": true, "refreshError": "invalid_grant"})).unwrap();
         assert!(outcome.results.is_none());
         assert_eq!(outcome.refresh_error.as_deref(), Some("invalid_grant"));
+    }
+
+    #[test]
+    fn describes_the_page_state_of_a_no_token_outcome() {
+        let outcome: Outcome = serde_json::from_value(json!({
+            "noToken": true,
+            "page": {"visibility": "hidden", "plain": 3, "sealed": 40, "opened": 38},
+        }))
+        .unwrap();
+        assert_eq!(
+            outcome.page.unwrap().to_string(),
+            "page hidden, 3 plain / 40 sealed cache entries (38 opened)"
+        );
     }
 }
