@@ -1,4 +1,4 @@
-use chatsvc::ConversationRef;
+use chatsvc::{ConversationRef, read_horizon};
 use chrono::{DateTime, Duration, Utc};
 use graph::{
     FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
@@ -14,6 +14,7 @@ use crate::links::LinkPreview;
 use crate::mapping::message_record;
 use crate::markdown::markdown_to_html;
 use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
+use crate::notes_chat::is_notes_chat;
 use crate::remote::Remote;
 use crate::scheduled::NOTES_CHAT_ID;
 use crate::teams_quote::{chatsvc_mention_html, quote_reply_properties, teams_quote};
@@ -399,7 +400,13 @@ impl<R: Remote> SyncEngine<R> {
         self.remote
             .mark_chat_read(conversation_id, &user_id, &tenant_id)
             .await?;
-        self.store.mark_chat_read(conversation_id, Utc::now())?;
+        let now = Utc::now();
+        if is_notes_chat(conversation_id) {
+            self.remote
+                .set_read_bookmark(conversation_id, &read_horizon::cleared_bookmark(now))
+                .await?;
+        }
+        self.store.mark_chat_read(conversation_id, now)?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
     }
@@ -451,14 +458,33 @@ impl<R: Remote> SyncEngine<R> {
         message_created_at: DateTime<Utc>,
     ) -> Result<()> {
         let last_read_at = message_created_at - Duration::milliseconds(1);
-        let user_id = self.my_user_id().await?;
-        let tenant_id = self.my_tenant_id(chat_id).await?;
-        self.remote
-            .mark_chat_unread(chat_id, &user_id, &tenant_id, last_read_at)
-            .await?;
+        if is_notes_chat(chat_id) {
+            let bookmark = read_horizon::bookmark_at(
+                message_created_at,
+                &self.message_id_at(chat_id, message_created_at)?,
+                Utc::now(),
+            );
+            self.remote.set_read_bookmark(chat_id, &bookmark).await?;
+        } else {
+            let user_id = self.my_user_id().await?;
+            let tenant_id = self.my_tenant_id(chat_id).await?;
+            self.remote
+                .mark_chat_unread(chat_id, &user_id, &tenant_id, last_read_at)
+                .await?;
+        }
         self.store.mark_chat_unread(chat_id, last_read_at)?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
+    }
+
+    fn message_id_at(&self, chat_id: &str, created_at: DateTime<Utc>) -> Result<String> {
+        Ok(self
+            .store
+            .messages_between(chat_id, created_at, created_at)?
+            .into_iter()
+            .next()
+            .map(|message| message.message_id)
+            .unwrap_or_else(|| created_at.timestamp_millis().to_string()))
     }
 
     pub async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()> {
@@ -483,6 +509,14 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn hide_chat(&self, chat_id: &str) -> Result<()> {
+        if is_notes_chat(chat_id) {
+            self.remote
+                .set_chat_hidden_at(chat_id, Some(Utc::now().timestamp_millis()))
+                .await?;
+            self.store.remove_chats(&[chat_id.to_owned()])?;
+            let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
+            return Ok(());
+        }
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;
         self.remote.hide_chat(chat_id, &user_id, &tenant_id).await?;
@@ -498,6 +532,11 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub async fn unhide_chat(&self, chat_id: &str) -> Result<()> {
+        if is_notes_chat(chat_id) {
+            self.remote.set_chat_hidden_at(chat_id, None).await?;
+            self.refresh_sidebar_full().await?;
+            return Ok(());
+        }
         let user_id = self.my_user_id().await?;
         let tenant_id = self.my_tenant_id(chat_id).await?;
         self.remote

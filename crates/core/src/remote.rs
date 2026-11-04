@@ -155,6 +155,12 @@ pub trait Remote {
     }
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
+    async fn set_read_bookmark(&self, _conversation_id: &str, _bookmark: &str) -> Result<()> {
+        Err(Error::Unsupported("marking the notes chat as unread"))
+    }
+    async fn set_chat_hidden_at(&self, _chat_id: &str, _hidden_at_ms: Option<i64>) -> Result<()> {
+        Err(Error::Unsupported("hiding the notes chat"))
+    }
     async fn set_channel_notifications(
         &self,
         channel_id: &str,
@@ -812,6 +818,18 @@ impl Remote for Graph {
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
         Ok(Conversations::new(self.session())
             .set_read_horizon(conversation_id, horizon)
+            .await?)
+    }
+
+    async fn set_read_bookmark(&self, conversation_id: &str, bookmark: &str) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_read_bookmark(conversation_id, bookmark)
+            .await?)
+    }
+
+    async fn set_chat_hidden_at(&self, chat_id: &str, hidden_at_ms: Option<i64>) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_hidden_at(chat_id, hidden_at_ms)
             .await?)
     }
 
