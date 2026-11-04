@@ -6,7 +6,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use session::{App, Error, Result, TabCommand, TabEvent, is_login_url};
+use session::{App, Error, TabCommand, TabEvent, is_login_url};
 use tokio::sync::watch;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
@@ -21,8 +21,10 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, PCWSTR, PWSTR, w};
 
+use crate::cdp_failure::{CallContext, failure_reason, tab_state};
 use crate::fanout::Subscribers;
 use crate::host_dialog::{self, Dialog};
+use crate::park::{ParkDecision, ParkGate};
 use crate::transport::{HostState, UiRequest, WebViewTransport};
 use crate::{BROWSER_ARGUMENTS, FORWARDED_EVENTS};
 
@@ -55,6 +57,7 @@ pub(crate) struct Shared {
     pub(crate) environment: RefCell<Option<ICoreWebView2Environment>>,
     pub(crate) dialogs: RefCell<HashMap<u64, Dialog>>,
     subscribers: RefCell<Subscribers>,
+    park_gate: RefCell<ParkGate>,
     state: watch::Sender<HostState>,
     requests: mpsc::Receiver<UiRequest>,
     restarting: Cell<bool>,
@@ -115,6 +118,7 @@ fn run(
         environment: RefCell::new(None),
         dialogs: RefCell::new(HashMap::new()),
         subscribers: RefCell::new(Subscribers::default()),
+        park_gate: RefCell::new(ParkGate::default()),
         state,
         requests,
         restarting: Cell::new(false),
@@ -426,6 +430,7 @@ fn drain(shared: &Rc<Shared>) {
             UiRequest::Call { app, command } => call(shared, app, command),
             UiRequest::Subscribe { app, sink } => shared.subscribers.borrow_mut().add(app, sink),
             UiRequest::Wake { app } => wake(shared, app),
+            UiRequest::Hold { app, held } => shared.park_gate.borrow_mut().hold(app, held),
             UiRequest::Retry => {
                 if !shared.state.borrow().ready && !shared.restarting.replace(true) {
                     restart(shared);
@@ -443,14 +448,30 @@ fn call(shared: &Shared, app: App, command: TabCommand) {
     let Some(webview) = webview_of(shared, app) else {
         return command.respond(Err(Error::Cdp("webview is restarting".into())));
     };
+    let parameters_json = command.params.to_string();
+    let parameters_bytes = parameters_json.len();
     let method = HSTRING::from(command.method.as_str());
-    let parameters = HSTRING::from(command.params.to_string());
+    let parameters = HSTRING::from(parameters_json);
     let pending = Rc::new(RefCell::new(Some(command)));
     let answered = pending.clone();
+    shared.park_gate.borrow_mut().command_started(app);
     let handler =
         CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |code, json| {
             if let Some(command) = answered.borrow_mut().take() {
-                command.respond(answer(code, &json));
+                let result = match code {
+                    Ok(()) => Ok(serde_json::from_str(&json).unwrap_or(Value::Null)),
+                    Err(error) => Err(Error::Cdp(describe_failure(
+                        app,
+                        &command.method,
+                        parameters_bytes,
+                        &error.to_string(),
+                        &json,
+                    ))),
+                };
+                if let Some(shared) = self::shared() {
+                    shared.park_gate.borrow_mut().command_finished(app);
+                }
+                command.respond(result);
             }
             Ok(())
         }));
@@ -458,24 +479,27 @@ fn call(shared: &Shared, app: App, command: TabCommand) {
         unsafe { webview.CallDevToolsProtocolMethod(&method, &parameters, &handler) }
         && let Some(command) = pending.borrow_mut().take()
     {
-        let reason = format!("{}: {error}", command.method);
+        let reason = describe_failure(app, &command.method, parameters_bytes, &error.to_string(), "");
+        shared.park_gate.borrow_mut().command_finished(app);
         command.respond(Err(Error::Cdp(reason)));
     }
 }
 
-fn answer(code: windows::core::Result<()>, json: &str) -> Result<Value> {
-    let parsed = serde_json::from_str::<Value>(json).unwrap_or(Value::Null);
-    match code {
-        Ok(()) => Ok(parsed),
-        Err(error) => {
-            let reason = parsed
-                .get("message")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| error.to_string());
-            Err(Error::Cdp(reason))
-        }
-    }
+fn describe_failure(app: App, method: &str, parameters_bytes: usize, hresult: &str, json: &str) -> String {
+    let (tab, in_flight) = match shared() {
+        Some(shared) => (
+            tab_state(app, &current_url(&shared, app)),
+            shared.park_gate.borrow().in_flight(app),
+        ),
+        None => ("unknown", 0),
+    };
+    let context = CallContext {
+        method,
+        params_bytes: parameters_bytes,
+        tab,
+        in_flight,
+    };
+    failure_reason(&context, hresult, json)
 }
 
 fn wake(shared: &Shared, app: App) {
@@ -523,6 +547,7 @@ fn show(shared: &Shared, app: App) {
 fn restart(shared: &Rc<Shared>) {
     shared.state.send_modify(|state| state.ready = false);
     shared.subscribers.borrow_mut().clear();
+    shared.park_gate.borrow_mut().forget_commands();
     host_dialog::close_all(shared);
     let views: Vec<View> = shared
         .views
@@ -590,7 +615,13 @@ extern "system" fn window_procedure(
                 let _ = KillTimer(Some(window), PARK_TIMER);
             }
             if let Some(app) = app_of(&shared, window) {
-                park(&shared, app);
+                let decision = shared.park_gate.borrow().decide(app);
+                match decision {
+                    ParkDecision::Park => park(&shared, app),
+                    ParkDecision::Wait => unsafe {
+                        SetTimer(Some(window), PARK_TIMER, PARK_DELAY_MS, None);
+                    },
+                }
             }
         }
         WM_CLOSE => unsafe {
