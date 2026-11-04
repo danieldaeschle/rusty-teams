@@ -3429,7 +3429,7 @@ impl ConversationView {
                             }
                             _ => String::new(),
                         };
-                        if is_one_on_one(chat) {
+                        if is_one_on_one(chat) && !is_notes_chat(chat_id) {
                             stack = Some(add_people_button(&self.app, chat_id));
                         }
                     } else {
