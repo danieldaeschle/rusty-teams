@@ -23,6 +23,7 @@ pub enum ChannelMenuItem {
 pub enum TeamMenuItem {
     Show,
     Hide,
+    ManageTeam,
     CopyLink,
 }
 
@@ -51,6 +52,7 @@ impl TeamMenuItem {
         match self {
             TeamMenuItem::Show => "Show",
             TeamMenuItem::Hide => "Hide",
+            TeamMenuItem::ManageTeam => "Manage team",
             TeamMenuItem::CopyLink => "Copy link",
         }
     }
@@ -110,6 +112,7 @@ pub fn team_menu_entries(hidden: bool) -> Vec<MenuEntry<TeamMenuItem>> {
             TeamMenuItem::Hide
         }),
         MenuEntry::Separator,
+        MenuEntry::Item(TeamMenuItem::ManageTeam),
         MenuEntry::Item(TeamMenuItem::CopyLink),
     ]
 }
@@ -307,6 +310,10 @@ impl AppState {
         self.with_team_link(team_id, LinkUse::Copy, cx);
     }
 
+    pub fn manage_team_in_browser(&mut self, team_id: &str, cx: &mut Context<Self>) {
+        self.with_team_link(team_id, LinkUse::OpenInBrowser, cx);
+    }
+
     fn with_team_link(&mut self, team_id: &str, link_use: LinkUse, cx: &mut Context<Self>) {
         let Some(engine) = self.engine.clone() else {
             if self.mode.demo {
@@ -459,11 +466,11 @@ mod tests {
     fn team_menu_switches_between_show_and_hide() {
         assert_eq!(
             labels(&team_menu_entries(false), TeamMenuItem::label),
-            ["Hide", "-", "Copy link"]
+            ["Hide", "-", "Manage team", "Copy link"]
         );
         assert_eq!(
             labels(&team_menu_entries(true), TeamMenuItem::label),
-            ["Show", "-", "Copy link"]
+            ["Show", "-", "Manage team", "Copy link"]
         );
     }
 

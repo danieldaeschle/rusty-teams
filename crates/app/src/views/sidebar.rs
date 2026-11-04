@@ -1968,12 +1968,14 @@ fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: b
                 .icon(menu_icon(match item {
                     TeamMenuItem::Show => IconName::Eye,
                     TeamMenuItem::Hide => IconName::EyeOff,
+                    TeamMenuItem::ManageTeam => IconName::Settings,
                     TeamMenuItem::CopyLink => IconName::Link,
                 }))
                 .on_click(move |_, _, cx| {
                     action_state.update(cx, |state, cx| match item {
                         TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
                         TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
+                        TeamMenuItem::ManageTeam => state.manage_team_in_browser(&action_id, cx),
                         TeamMenuItem::CopyLink => state.copy_team_link(&action_id, cx),
                     });
                 }),
