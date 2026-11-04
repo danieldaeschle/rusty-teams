@@ -5,6 +5,7 @@ use chrono::{DateTime, Local, Offset, Utc};
 use gpui_kit::Context;
 
 use super::agenda::{AgendaRow, demo_events};
+use super::list::HistoryFilter;
 use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 
 const NO_MEETING_CHAT_NOTICE: &str = "This meeting chat is not available";
@@ -43,6 +44,11 @@ impl AppState {
         );
         cx.emit(AppEvent::CallHistory);
         cx.notify();
+    }
+
+    pub fn set_call_history_filter(&mut self, filter: HistoryFilter, cx: &mut Context<Self>) {
+        self.calls_list.set_filter(filter);
+        self.rebuild_calls_list(cx);
     }
 
     pub fn join_agenda_row(&mut self, row: &AgendaRow, cx: &mut Context<Self>) {

@@ -20,6 +20,7 @@ use crate::profile_model::{
     mailto_url, status_box, status_line, work_location_label,
 };
 use crate::theme::{self, ElevatedSurface as _};
+use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 
 const CARD_WIDTH: f32 = 340.;
 const CARD_RADIUS: f32 = 10.;
@@ -276,6 +277,8 @@ impl ProfileCard {
         };
         let chat_id = user_id.clone();
         let (video_id, audio_id) = (user_id.clone(), user_id.clone());
+        let followed = self.app.read(cx).is_presence_followed(&user_id);
+        let (follow_id, follow_name) = (user_id.clone(), name.clone());
         h_flex()
             .gap(px(8.))
             .when(!is_me, |row| {
@@ -324,6 +327,28 @@ impl ProfileCard {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         open_new_meeting_with(this.app.clone(), vec![invitee.clone()], window, cx);
                         cx.emit(ProfileCardEvent::Close);
+                    })),
+                )
+                .child(
+                    icon_action(
+                        "profile-follow-presence",
+                        if followed {
+                            IconName::BellOff
+                        } else {
+                            IconName::BellRing
+                        },
+                        if followed {
+                            TURN_OFF_NOTIFICATIONS
+                        } else {
+                            NOTIFY_WHEN_AVAILABLE
+                        }
+                        .to_owned(),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let (user_id, name) = (follow_id.clone(), follow_name.clone());
+                        this.app.update(cx, |state, cx| {
+                            state.set_presence_followed(&user_id, &name, !followed, cx)
+                        });
                     })),
                 )
             })

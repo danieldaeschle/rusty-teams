@@ -6,6 +6,7 @@ use crate::messages::{MessageTransport, Messages, ensure_success};
 use crate::window::WindowDirection;
 
 const ORGID_PREFIX: &str = "8:orgid:";
+const ANNOTATION_KEYS: [&str; 3] = ["follow", "star", "acks"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmotionReaction {
@@ -30,7 +31,11 @@ fn reactions(emotions: Option<&Value>) -> Vec<EmotionReaction> {
         .into_iter()
         .flatten()
         .flat_map(|entry| {
-            let key = entry.get("key").and_then(Value::as_str).unwrap_or_default();
+            let key = entry
+                .get("key")
+                .and_then(Value::as_str)
+                .filter(|key| !ANNOTATION_KEYS.contains(key))
+                .unwrap_or_default();
             entry
                 .get("users")
                 .and_then(Value::as_array)
@@ -110,5 +115,20 @@ mod tests {
         assert_eq!(parsed[0].reactions[0].user_id.as_deref(), Some("aaa"));
         assert_eq!(parsed[0].reactions[1].time_ms, Some(1792135855900));
         assert!(parsed[1].reactions.is_empty());
+    }
+
+    #[test]
+    fn follow_star_and_acks_annotations_are_not_reactions() {
+        let body = json!({"messages": [
+            {"id": "1", "properties": {"emotions": [
+                {"key": "follow", "users": [{"mri": "8:orgid:aaa", "time": 1_i64, "value": "1"}]},
+                {"key": "star", "users": [{"mri": "8:orgid:aaa", "time": 2_i64, "value": "1"}]},
+                {"key": "acks", "users": [{"mri": "8:orgid:bbb", "time": 3_i64, "value": "1"}]},
+                {"key": "like", "users": [{"mri": "8:orgid:bbb", "time": 4_i64, "value": "1"}]}
+            ]}}
+        ]});
+        let parsed = parse_message_emotions(&body);
+        let keys: Vec<&str> = parsed[0].reactions.iter().map(|reaction| reaction.key.as_str()).collect();
+        assert_eq!(keys, ["like"]);
     }
 }

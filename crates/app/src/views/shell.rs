@@ -1,3 +1,5 @@
+mod team_keys;
+
 use std::sync::Arc;
 
 use gpui_kit::component::{elevation, h_flex, v_flex};
@@ -20,15 +22,16 @@ use super::rail::RailView;
 use crate::chat_filter::ChatFilterPill;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
+    ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
     FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, PopOutSelectedChat, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
     ZoomShareReset,
 };
 use super::window_zoom::{WindowZoom, change_zoom};
 use super::call_pop_out::zoom_listener;
+use super::chat_pop_out;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SidebarEvent, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
@@ -76,6 +79,7 @@ pub struct Startup {
     pub switcher_query: Option<String>,
     pub composer_text: Option<String>,
     pub reply_to_last: bool,
+    pub launched_by_autostart: bool,
 }
 
 pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
@@ -96,7 +100,14 @@ pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx:
     cx.set_global(RenderHooks {
         open_profile_link: super::profile_card::open_profile_link,
         jump_to_quoted,
+        inline_image,
     });
+}
+
+fn inline_image(url: &str, cx: &App) -> Option<std::path::PathBuf> {
+    let handle = cx.try_global::<crate::app_state::AppHandle>()?;
+    let entry = handle.0.read(cx).directory.image(url)?;
+    Some(entry.path.clone())
 }
 
 fn jump_to_quoted(message_id: String, cx: &mut App) {
@@ -356,7 +367,18 @@ impl AppShell {
             switcher_query,
             composer_text,
             reply_to_last,
+            launched_by_autostart,
         } = startup;
+        if shell
+            .notifications
+            .read(cx)
+            .startup()
+            .starts_hidden(launched_by_autostart)
+        {
+            cx.defer_in(window, |this, window, cx| {
+                this.notifications.read(cx).start_in_background(window)
+            });
+        }
         if let Some(query) = switcher_query {
             shell.toggle_switcher(&query, window, cx);
         }
@@ -764,6 +786,7 @@ impl AppShell {
                         state.select(target.clone(), cx)
                     });
                     this.state.update(cx, |state, cx| {
+                        state.cancel_forward_selection(cx);
                         state.raise_notice(format!("Forwarded to {title}"), Some(open), cx)
                     });
                 }
@@ -785,6 +808,7 @@ impl AppShell {
             .w_full()
             .gap(px(ISLAND_GAP))
             .pr(px(ISLAND_GAP))
+            .pb(px(ISLAND_GAP))
             .child(
                 h_flex()
                     .h_full()
@@ -918,10 +942,11 @@ impl Render for AppShell {
             .flatten(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
         );
-        div()
+        let shell = div()
             .id("app-shell")
             .key_context("AppShell")
-            .track_focus(&self.focus_handle)
+            .track_focus(&self.focus_handle);
+        self.team_keys(shell, cx)
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))
@@ -980,6 +1005,12 @@ impl Render for AppShell {
                 this.conversation
                     .update(cx, |conversation, cx| conversation.open_find(window, cx));
             }))
+            .on_action(cx.listener(|this, _: &PopOutSelectedChat, _, cx| {
+                let selected = this.state.read(cx).selection.clone();
+                if let Some(Selection::Chat(chat_id)) = selected {
+                    chat_pop_out::pop_out_chat(&this.state, &chat_id, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &OpenChatFilter, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.sidebar
@@ -1025,10 +1056,6 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
-            }))
-            .on_action(cx.listener(|this, _: &AcceptCall, _, cx| {
-                this.state
-                    .update(cx, |state, cx| state.accept_ringing_call(cx));
             }))
             .on_action(cx.listener(|this, _: &DeclineCall, _, cx| {
                 this.state

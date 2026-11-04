@@ -136,7 +136,7 @@ struct Fake {
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
     search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
     member_requests: Mutex<Vec<String>>,
-    mention_activities: Mutex<Vec<chatsvc::MentionActivity>>,
+    activity_feed: Mutex<chatsvc::ActivitySnapshot>,
     app_channel_horizon_ms: Mutex<i64>,
 }
 
@@ -605,6 +605,7 @@ impl Remote for Handle {
                 read: chatsvc::ReadHorizon::default(),
                 notification_settings: None,
                 history_cleared_ms: None,
+                hidden_at_ms: None,
             })
             .collect();
         states.extend(
@@ -617,6 +618,7 @@ impl Remote for Handle {
                     read: chatsvc::ReadHorizon::default(),
                     notification_settings: None,
                     history_cleared_ms: None,
+                    hidden_at_ms: None,
                 }),
         );
         let read = self.read_states.lock().unwrap().clone();
@@ -629,6 +631,7 @@ impl Remote for Handle {
                     read,
                     notification_settings: None,
                     history_cleared_ms: None,
+                    hidden_at_ms: None,
                 }),
         );
         Ok(states)
@@ -641,6 +644,17 @@ impl Remote for Handle {
 
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
         self.record(format!("read horizon {conversation_id} {horizon}"));
+        Ok(())
+    }
+
+    async fn set_read_bookmark(&self, conversation_id: &str, bookmark: &str) -> Result<()> {
+        self.record(format!("read bookmark {conversation_id} {bookmark}"));
+        Ok(())
+    }
+
+    async fn set_chat_hidden_at(&self, chat_id: &str, hidden_at_ms: Option<i64>) -> Result<()> {
+        let hidden = hidden_at_ms.map_or("none".to_owned(), |_| "now".to_owned());
+        self.record(format!("hidden at {chat_id} {hidden}"));
         Ok(())
     }
 
@@ -890,6 +904,17 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn set_post_followed(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        followed: bool,
+    ) -> Result<Option<String>> {
+        self.record(format!("follow {user_id} {channel_id} {root_id} {followed}"));
+        Ok(None)
+    }
+
     async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
         self.record(format!("pin {chat_id} {message_id}"));
         Ok(())
@@ -931,8 +956,18 @@ impl Remote for Handle {
         Ok(())
     }
 
-    async fn mention_activities(&self) -> Result<Vec<chatsvc::MentionActivity>> {
-        Ok(self.mention_activities.lock().unwrap().clone())
+    async fn activity_feed(&self) -> Result<chatsvc::ActivitySnapshot> {
+        Ok(self.activity_feed.lock().unwrap().clone())
+    }
+
+    async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
+        self.record(format!("activity read {message_id}"));
+        Ok(())
+    }
+
+    async fn mark_all_activity_read(&self, _now_ms: i64) -> Result<()> {
+        self.record("activity all read".to_owned());
+        Ok(())
     }
 
     async fn app_consumption_horizon(&self) -> Result<chatsvc::AppConsumptionHorizon> {
@@ -1082,6 +1117,16 @@ impl Remote for Handle {
     async fn set_status_note(&self, note: Option<&chatsvc::StatusNote>) -> Result<()> {
         self.note_puts.lock().unwrap().push(note.cloned());
         Ok(())
+    }
+
+    async fn team_tags(&self, team_id: &str) -> Result<Vec<graph::Tag>> {
+        self.record(format!("tags {team_id}"));
+        Ok(vec![
+            serde_json::from_value(
+                json!({"id": "tag-design", "displayName": "Designers", "memberCount": 4}),
+            )
+            .unwrap(),
+        ])
     }
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
@@ -2395,7 +2440,7 @@ async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
     assert_eq!(fake.sent.lock().unwrap().as_slice(), ["note to self"]);
     let calls = fake.calls();
     for expected in [
-        "quote_reply 48:notes m9000 again",
+        "chatsvc post 48:notes",
         "edit m9000 edited",
         "set_reaction m9000 \u{1f44d}",
         "unset_reaction m9000 \u{1f44d}",
@@ -3844,10 +3889,13 @@ async fn chat_reply_quotes_and_channel_reply_uses_the_thread_root() {
         .reply_to(CHAT, "m0001", "answer **bold**")
         .await
         .unwrap();
-    assert_eq!(sent.message_id, "m9003");
+    assert_eq!(sent.message_id, "1727203440000");
+    assert!(fake.calls().contains(&format!("chatsvc post {CHAT}")));
     assert!(
-        fake.calls()
-            .contains(&format!("quote_reply {CHAT} m0001 answer <b>bold</b>"))
+        !fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("quote_reply"))
     );
 
     let channel_fake = Arc::new(Fake::default());
@@ -4020,9 +4068,14 @@ async fn people_candidates_list_members_first_then_the_directory_without_duplica
     ];
     let engine = chat_engine(&fake, small_pages()).await;
 
-    let everyone = engine.mention_candidates(CHAT, "", 10).await.unwrap();
-    assert_eq!(everyone.len(), 1);
-    assert_eq!(everyone[0].display_name(), "Ada Example");
+    let all = engine.mention_candidates(CHAT, "", 10).await.unwrap();
+    assert_eq!(all.len(), 2);
+    assert!(matches!(&all[0], MentionCandidate::Everyone { chat_id } if chat_id == CHAT));
+    assert_eq!(
+        all[0].to_mention(),
+        MentionInput::everyone(CHAT, "Everyone")
+    );
+    assert_eq!(all[1].display_name(), "Ada Example");
     assert!(!fake.calls().iter().any(|call| call.starts_with("search")));
 
     let found = engine.mention_candidates(CHAT, "@ada", 10).await.unwrap();
@@ -4064,12 +4117,30 @@ async fn channel_candidates_offer_recent_senders_the_channel_and_its_team() {
     let engine = channel_engine(&fake).await;
     engine.fetch_newer(CHANNEL).await.unwrap();
     let all = engine.mention_candidates(CHANNEL, "", 10).await.unwrap();
-    assert_eq!(all.len(), 3);
+    assert_eq!(all.len(), 4);
     assert!(matches!(&all[0], MentionCandidate::Person(person) if person.user_id == "user-ada"));
     assert!(
         matches!(&all[1], MentionCandidate::Channel { channel_id, .. } if channel_id == CHANNEL)
     );
     assert!(matches!(&all[2], MentionCandidate::Team { team_id, .. } if team_id == "team-1"));
+    assert!(
+        matches!(&all[3], MentionCandidate::Tag { tag_id, member_count: Some(4), .. } if tag_id == "tag-design")
+    );
+    let design = engine
+        .mention_candidates(CHANNEL, "desi", 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        design[0].to_mention(),
+        MentionInput::tag("tag-design", "Designers")
+    );
+    engine.mention_candidates(CHANNEL, "", 10).await.unwrap();
+    let tag_loads = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("tags"))
+        .count();
+    assert_eq!(tag_loads, 1);
     let squad = engine.mention_candidates(CHANNEL, "squ", 10).await.unwrap();
     assert_eq!(squad[0].to_mention(), MentionInput::team("team-1", "Squad"));
 }
@@ -4887,6 +4958,17 @@ async fn save_uses_the_message_id_as_root_in_chats() {
 }
 
 #[tokio::test]
+async fn post_follow_writes_as_the_signed_in_user() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.set_post_followed(CHANNEL, "3", false).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("follow {ME} {CHANNEL} 3 false")
+    );
+}
+
+#[tokio::test]
 async fn pinning_announces_in_chats() {
     let fake = Arc::new(Fake::default());
     let engine = channel_engine(&fake).await;
@@ -4952,18 +5034,17 @@ async fn channel_mentions_follow_the_activity_feed_and_mark_all_as_read() {
             ..chatsvc::ReadHorizon::default()
         },
     ));
-    let mention = |activity_id: &str, kind: chatsvc::MentionKind| chatsvc::MentionActivity {
+    let mention = |activity_id: &str, subtype: &str| chatsvc::ActivityItem {
+        message_id: activity_id.to_owned(),
         activity_id: activity_id.to_owned(),
-        kind,
+        activity_type: "mention".to_owned(),
+        activity_subtype: subtype.to_owned(),
         source_thread_id: CHANNEL.to_owned(),
-        source_message_id: None,
         timestamp_ms: 8,
-        is_read: false,
+        version_ms: 8,
+        ..chatsvc::ActivityItem::default()
     };
-    *fake.mention_activities.lock().unwrap() = vec![
-        mention("1", chatsvc::MentionKind::Personal),
-        mention("2", chatsvc::MentionKind::Team),
-    ];
+    fake.activity_feed.lock().unwrap().items = vec![mention("1", "person"), mention("2", "team")];
     let engine = channel_engine(&fake).await;
     engine.refresh_sidebar().await.unwrap();
     let mentions = engine.store().sidebar().unwrap().teams[0].channel_mentions(CHANNEL);
@@ -4985,6 +5066,54 @@ async fn channel_mentions_follow_the_activity_feed_and_mark_all_as_read() {
             .mentions
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn activity_feed_is_stored_and_marked_read_like_teams() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    let mut events = engine.subscribe();
+    *fake.activity_feed.lock().unwrap() = chatsvc::ActivitySnapshot {
+        items: vec![chatsvc::ActivityItem {
+            message_id: "1791368000001".to_owned(),
+            activity_type: "reactionInChat".to_owned(),
+            source_thread_id: CHAT.to_owned(),
+            timestamp_ms: 20,
+            version_ms: 20,
+            ..chatsvc::ActivityItem::default()
+        }],
+        horizons: chatsvc::ActivityHorizons {
+            seen_ms: 10,
+            bookmark_ms: 5,
+        },
+    };
+    engine.refresh_sidebar().await.unwrap();
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| event == CoreEvent::ActivityChanged));
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.counts_for_bell(&stored.items[0]));
+
+    engine.mark_activity_read("1791368000001").await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), "activity read 1791368000001");
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]));
+    engine.refresh_sidebar().await.unwrap();
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]), "a fetch from before the PUT keeps the local mark");
+
+    stored_feed_unread(&fake, &engine).await;
+    engine.mark_all_activity_read().await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), "activity all read");
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]));
+}
+
+async fn stored_feed_unread(fake: &Arc<Fake>, engine: &SyncEngine<Handle>) {
+    fake.activity_feed.lock().unwrap().items[0].read_flag = true;
+    engine.refresh_sidebar().await.unwrap();
+    fake.activity_feed.lock().unwrap().items[0].read_flag = false;
+    engine.refresh_sidebar().await.unwrap();
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(!stored.is_read(&stored.items[0]));
 }
 
 #[tokio::test]
@@ -5412,7 +5541,70 @@ async fn a_new_note_refreshes_the_line_and_an_unlisted_notes_chat_leaves_the_sid
 
     fake.read_states.lock().unwrap().clear();
     engine.refresh_sidebar().await.unwrap();
+    let placeholder = engine.store().chat(NOTES_CHAT_ID).unwrap().unwrap();
+    assert_eq!(placeholder.title, "Me Myself (You)");
+    assert_eq!(placeholder.last_message_at, None);
+    assert_eq!(placeholder.last_message_preview, None);
+
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push((NOTES_CHAT_ID.to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
     assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn marking_an_own_note_unread_sets_the_chatsvc_bookmark_and_reading_clears_it() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    engine.mark_unread(NOTES_CHAT_ID).await.unwrap();
+    engine.mark_read(NOTES_CHAT_ID).await.unwrap();
+
+    let arrived_ms = (base() + Duration::minutes(20)).timestamp_millis();
+    let calls = fake.calls();
+    let bookmarks: Vec<&String> = calls
+        .iter()
+        .filter(|call| call.starts_with("read bookmark "))
+        .collect();
+    assert_eq!(bookmarks.len(), 2, "{calls:?}");
+    let marked = bookmarks[0].strip_prefix("read bookmark 48:notes ").unwrap();
+    let fields: Vec<&str> = marked.split(';').collect();
+    assert_eq!(fields[0], (arrived_ms - 1).to_string());
+    assert_eq!(fields[2], "m0001");
+    let cleared = bookmarks[1].strip_prefix("read bookmark 48:notes ").unwrap();
+    assert!(cleared.starts_with("0;") && cleared.ends_with(";0"), "{cleared}");
+    assert!(!calls.iter().any(|call| call.starts_with("mark_unread")), "{calls:?}");
+}
+
+#[tokio::test]
+async fn hiding_the_notes_chat_writes_the_chatsvc_hide_time_and_undo_clears_it() {
+    let fake = Arc::new(Fake::default());
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    engine.hide_chat(NOTES_CHAT_ID).await.unwrap();
+    assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_none());
+    engine.unhide_chat(NOTES_CHAT_ID).await.unwrap();
+
+    let calls = fake.calls();
+    let hides: Vec<&String> = calls
+        .iter()
+        .filter(|call| call.starts_with("hidden at ") || call.starts_with("hide"))
+        .collect();
+    assert_eq!(
+        hides,
+        ["hidden at 48:notes now", "hidden at 48:notes none"],
+        "{calls:?}"
+    );
+    assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_some());
 }
 
 #[tokio::test]
@@ -5436,6 +5628,110 @@ async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
         !member_requests
             .iter()
             .any(|chat_id| chat_id == NOTES_CHAT_ID)
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_chat_reply_is_written_through_chatsvc_in_the_teams_shape() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let extras = MessageExtras {
+        importance: Some("high"),
+        ..MessageExtras::default()
+    };
+    let sent = engine
+        .reply_to_with_extras(
+            CHAT,
+            "m0001",
+            "<p>thanks @Ada Example</p>",
+            &[MentionInput::user("user-ada", "Ada Example")],
+            &extras,
+        )
+        .await
+        .unwrap();
+    let (conversation_id, html, display_name, properties) =
+        fake.chatsvc_posts.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(conversation_id, CHAT);
+    assert_eq!(display_name, "Me Myself");
+    let time = (base() + Duration::minutes(1)).timestamp_millis();
+    let quote = format!(
+        "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"m0001\"><strong itemprop=\"mri\" itemid=\"8:orgid:user-ada\">Ada Example</strong><span itemprop=\"time\" itemid=\"{time}\"></span><p itemprop=\"preview\">n1</p></blockquote>"
+    );
+    assert_eq!(
+        html,
+        format!(
+            "{quote}<p>thanks <span itemscope=\"\" itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Ada Example</span></p>"
+        )
+    );
+    let mentions = json!([{
+        "@type": "http://schema.skype.com/Mention",
+        "itemid": "0",
+        "mri": "8:orgid:user-ada",
+        "mentionType": "person",
+        "displayName": "Ada Example",
+    }]);
+    let quoted = json!([{"messageId": "m0001", "sender": "8:orgid:user-ada", "time": time}]);
+    assert_eq!(
+        properties,
+        json!({
+            "importance": "high",
+            "links": "[]",
+            "mentions": mentions.to_string(),
+            "onbehalfof": null,
+            "files": "[]",
+            "qtdMsgs": quoted.to_string(),
+            "formatVariant": "TEAMS",
+        })
+    );
+    assert_eq!(sent.message_id, "1727203440000");
+    assert_eq!(sent.reply_to_id, None);
+    assert_eq!(sent.importance, store::MessageImportance::High);
+    assert!(sent.body_html.starts_with(&quote));
+    assert!(
+        !fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("quote_reply"))
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_chat_reply_with_an_image_stays_on_graph() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let extras = MessageExtras {
+        images: vec![HostedImage {
+            content_type: "image/png".into(),
+            bytes: Arc::new(vec![9]),
+        }],
+        ..MessageExtras::default()
+    };
+    engine
+        .reply_to_with_extras(CHAT, "m0001", "look", &[], &extras)
+        .await
+        .unwrap();
+    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
+    assert!(
+        fake.calls()
+            .contains(&format!("quote_reply {CHAT} m0001 look"))
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_reply_to_an_unknown_message_stays_on_graph() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    engine.reply_to(CHAT, "m7777", "hi").await.unwrap();
+    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
+    assert!(
+        fake.calls()
+            .contains(&format!("quote_reply {CHAT} m7777 hi"))
     );
 }
 

@@ -12,19 +12,21 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, MessageImportance, SidebarTeam,
-    Store, TeamRecord,
+    Store,
 };
 use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
+use super::chat_pop_out;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 use crate::channel_menu::{
     ChannelMenuItem, MenuEntry, TeamMenuItem, channel_menu_entries, team_menu_entries,
 };
@@ -37,9 +39,9 @@ use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_CHAT_PREVIEW, EMPTY_FOLDER_HINT, MentionBadge,
     NameStyle, NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
-    channel_badge, channel_name_style, channel_shown, older_chats_trigger_resets, step_id,
-    team_badge, team_channel_rows, team_hoisted, team_name_style, visible_channel_ids,
-    wants_older_chats,
+    channel_badge, channel_name_style, channel_shown, channel_shows_unread,
+    older_chats_trigger_resets, step_id, team_badge, team_channel_rows, team_hoisted,
+    team_name_style, visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
@@ -217,8 +219,16 @@ fn chat_menu(
             });
         }),
     );
+    let hide_item = PopupMenuItem::new("Hide")
+        .icon(menu_icon(IconName::EyeOff))
+        .on_click(move |_, _, cx| {
+            hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
+        });
     if notes {
-        return popup;
+        return popup
+            .item(pop_out_item(context, target))
+            .separator()
+            .item(hide_item);
     }
     popup = popup.item(
         PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
@@ -231,15 +241,35 @@ fn chat_menu(
                 mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
             }),
     );
-    popup = chat_notifications_submenu(popup, window, cx, context, target)
-        .separator()
-        .item(
-            PopupMenuItem::new("Hide")
-                .icon(menu_icon(IconName::EyeOff))
-                .on_click(move |_, _, cx| {
-                    hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
-                }),
+    popup = chat_notifications_submenu(popup, window, cx, context, target);
+    let partner = (!target.is_group)
+        .then(|| context.state.read(cx).one_on_one_partner(&target.id))
+        .flatten();
+    if let Some(partner) = partner {
+        let follow_state = context.state.clone();
+        let follow = !context.state.read(cx).is_presence_followed(&partner.user_id);
+        popup = popup.item(
+            PopupMenuItem::new(if follow {
+                NOTIFY_WHEN_AVAILABLE
+            } else {
+                TURN_OFF_NOTIFICATIONS
+            })
+            .icon(menu_icon(if follow {
+                IconName::BellRing
+            } else {
+                IconName::BellOff
+            }))
+            .on_click(move |_, _, cx| {
+                follow_state.update(cx, |state, cx| {
+                    state.set_presence_followed(&partner.user_id, &partner.name, follow, cx)
+                });
+            }),
         );
+    }
+    popup = popup
+        .item(pop_out_item(context, target))
+        .separator()
+        .item(hide_item);
     if !target.is_group {
         let remove_state = context.state.clone();
         let remove_id = target.id.clone();
@@ -267,6 +297,13 @@ fn chat_menu(
         );
     }
     popup
+}
+
+fn pop_out_item(context: &MenuContext, target: &ChatMenuTarget) -> PopupMenuItem {
+    let (state, chat_id) = (context.state.clone(), target.id.clone());
+    PopupMenuItem::new(chat_pop_out::POP_OUT_CHAT_LABEL)
+        .icon(menu_icon(IconName::ExternalLink))
+        .on_click(move |_, _, cx| chat_pop_out::pop_out_chat(&state, &chat_id, cx))
 }
 
 const CHAT_NOTIFICATION_MODES: [(&str, ChatNotificationMode); 2] = [
@@ -804,6 +841,10 @@ impl SidebarView {
                 state.refresh_calendar(cx);
             }),
             SidebarTab::Saved => self.state.update(cx, |state, cx| state.refresh_saved(cx)),
+            SidebarTab::Activity => {
+                let activity = self.activity_panel.read(cx).activity();
+                activity.update(cx, |activity, cx| activity.mark_seen(cx));
+            }
             _ => {}
         }
         cx.notify();
@@ -1419,13 +1460,14 @@ impl SidebarView {
     fn channel_row(
         &self,
         channel_id: &str,
-        team: &TeamRecord,
+        entry: &SidebarTeam,
         channel: &ChannelRecord,
         selected: bool,
-        notifications: ChannelNotifications,
-        badge: Option<MentionBadge>,
     ) -> AnyElement {
-        let unread = channel.unread;
+        let team = &entry.team;
+        let unread = channel_shows_unread(entry, channel);
+        let notifications = entry.channel_notifications(channel_id);
+        let badge = channel_badge(entry, channel_id);
         let name_style = channel_name_style(unread, true, selected);
         let state = self.state.clone();
         let menu_state = self.state.clone();
@@ -1600,7 +1642,7 @@ impl SidebarView {
                 channel,
                 is_selected(channel),
                 channel_name_style(
-                    channel.unread,
+                    channel_shows_unread(entry, channel),
                     channel_shown(entry, &channel.id),
                     is_selected(channel),
                 ),
@@ -1628,7 +1670,7 @@ impl SidebarView {
             list = list.child(self.team_channel_row(
                 channel,
                 false,
-                channel_name_style(channel.unread, false, false),
+                channel_name_style(channel_shows_unread(entry, channel), false, false),
                 entry.channel_notifications(&channel.id),
                 channel_badge(entry, &channel.id),
             ));
@@ -1764,14 +1806,7 @@ impl SidebarView {
             list = list.child(self.plain_header(PINNED_LABEL));
             for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
-                list = list.child(self.channel_row(
-                    &channel.id,
-                    &entry.team,
-                    channel,
-                    is_selected,
-                    entry.channel_notifications(&channel.id),
-                    channel_badge(entry, &channel.id),
-                ));
+                list = list.child(self.channel_row(&channel.id, entry, channel, is_selected));
             }
         }
         list = list.child(self.plain_header(TEAMS_LABEL));
@@ -1896,6 +1931,9 @@ fn channel_menu(
                         ChannelMenuItem::Unpin => state.set_channel_pinned(&action_id, false, cx),
                         ChannelMenuItem::Show => state.set_channel_shown(&action_id, true, cx),
                         ChannelMenuItem::Hide => state.set_channel_shown(&action_id, false, cx),
+                        ChannelMenuItem::ManageChannel => {
+                            state.manage_channel_in_browser(&action_id, cx)
+                        }
                         ChannelMenuItem::CopyLink => state.copy_channel_link(&action_id, cx),
                         ChannelMenuItem::Notifications => {}
                     });
@@ -1912,6 +1950,7 @@ fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
         ChannelMenuItem::Unpin => IconName::PinOff,
         ChannelMenuItem::Show => IconName::Eye,
         ChannelMenuItem::Hide => IconName::EyeOff,
+        ChannelMenuItem::ManageChannel => IconName::Settings,
         ChannelMenuItem::CopyLink => IconName::Link,
     }
 }
@@ -1929,12 +1968,14 @@ fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: b
                 .icon(menu_icon(match item {
                     TeamMenuItem::Show => IconName::Eye,
                     TeamMenuItem::Hide => IconName::EyeOff,
+                    TeamMenuItem::ManageTeam => IconName::Settings,
                     TeamMenuItem::CopyLink => IconName::Link,
                 }))
                 .on_click(move |_, _, cx| {
                     action_state.update(cx, |state, cx| match item {
                         TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
                         TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
+                        TeamMenuItem::ManageTeam => state.manage_team_in_browser(&action_id, cx),
                         TeamMenuItem::CopyLink => state.copy_team_link(&action_id, cx),
                     });
                 }),

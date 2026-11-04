@@ -208,6 +208,13 @@ pub fn mentions(record: &MessageRecord) -> Vec<MentionInfo> {
     infos
 }
 
+/// An @Everyone of a group chat: Graph names the chat itself as the mentioned conversation. Only meaningful in chats, a channel mention looks the same in its channel.
+pub fn mentions_whole_chat(record: &MessageRecord) -> bool {
+    mentions(record).iter().any(|mention| {
+        mention.group && mention.target_id.as_deref() == Some(record.conversation_id.as_str())
+    })
+}
+
 pub fn quotes(record: &MessageRecord) -> Vec<QuoteInfo> {
     attachments(record)
         .into_iter()
@@ -488,6 +495,7 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => push_plain(text, children),
@@ -527,6 +535,11 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
                 }
             }
             Span::Image { .. } => {}
+            Span::CustomEmoji { name, .. } => {
+                text.push(':');
+                text.push_str(name);
+                text.push(':');
+            }
         }
     }
 }
@@ -617,6 +630,7 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
@@ -710,6 +724,7 @@ fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
@@ -756,6 +771,7 @@ fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)

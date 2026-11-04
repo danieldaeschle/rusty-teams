@@ -35,6 +35,7 @@ pub mod card_media;
 pub mod card_table;
 pub mod card_widgets;
 pub mod chat_members;
+pub mod chat_pop_out;
 pub mod composer;
 pub mod connection_banner;
 pub mod conversation;
@@ -57,6 +58,8 @@ pub mod new_chat;
 pub mod notice_toast;
 pub mod new_meeting_dialog;
 pub mod pin_banner;
+#[cfg(test)]
+mod popup_tooltip_tests;
 pub mod post_card;
 pub mod prejoin_view;
 pub mod profile_card;

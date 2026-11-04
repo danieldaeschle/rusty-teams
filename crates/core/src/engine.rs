@@ -14,7 +14,7 @@ use crate::events::CoreEvent;
 use crate::folders::FolderSource;
 use crate::links::{LinkPreview, has_stored_links};
 use crate::mapping::{flatten_thread, message_record};
-use crate::people::DirectoryCache;
+use crate::people::{DirectoryCache, TagCache};
 use crate::presence::Presence;
 use crate::preview::OwnedPreview;
 use crate::receipts::ReceiptCache;
@@ -123,6 +123,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) images_in_flight: Mutex<HashSet<String>>,
     pub(crate) image_files: Option<ImageFileCache>,
     pub(crate) directory_cache: Mutex<DirectoryCache>,
+    pub(crate) tag_cache: Mutex<TagCache>,
     preview_changed: AtomicBool,
     pub(crate) receipts: ReceiptCache,
     pub(crate) channel_folders: Mutex<HashMap<String, DriveFolder>>,
@@ -132,6 +133,7 @@ pub struct SyncEngine<R: Remote = Graph> {
     pub(crate) forwards_healed: Mutex<HashSet<String>>,
     pub(crate) chat_states: Mutex<HashMap<String, ConversationState>>,
     pub(crate) app_channel_horizon_ms: Mutex<i64>,
+    pub(crate) activity: Mutex<crate::activity_sync::ActivityState>,
     pub(crate) chat_paging: Mutex<ChatPaging>,
     pub(crate) locally_hidden_lock: Mutex<()>,
     pub(crate) bot_partners: Mutex<crate::bot_partners::BotPartners>,
@@ -160,6 +162,7 @@ impl<R: Remote> SyncEngine<R> {
             images_in_flight: Mutex::new(HashSet::new()),
             image_files: None,
             directory_cache: Mutex::new(DirectoryCache::new()),
+            tag_cache: Mutex::new(TagCache::default()),
             preview_changed: AtomicBool::new(false),
             receipts: ReceiptCache::default(),
             channel_folders: Mutex::new(HashMap::new()),
@@ -169,6 +172,7 @@ impl<R: Remote> SyncEngine<R> {
             forwards_healed: Mutex::new(HashSet::new()),
             chat_states: Mutex::new(HashMap::new()),
             app_channel_horizon_ms: Mutex::new(0),
+            activity: Mutex::new(crate::activity_sync::ActivityState::default()),
             chat_paging,
             locally_hidden_lock: Mutex::new(()),
             bot_partners: Mutex::default(),

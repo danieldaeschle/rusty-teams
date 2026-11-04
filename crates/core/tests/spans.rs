@@ -479,3 +479,59 @@ fn sized_text_nests_with_bold_and_color() {
         )]
     );
 }
+
+#[test]
+fn margin_left_paragraphs_become_indent_levels() {
+    assert_eq!(
+        html_to_spans("<p style=\"margin-left:40px;\">a</p><div style=\"margin-left: 120px\">b</div>"),
+        vec![
+            Span::Indent {
+                level: 1,
+                children: vec![text("a")],
+            },
+            Span::LineBreak,
+            Span::Indent {
+                level: 3,
+                children: vec![text("b")],
+            },
+        ]
+    );
+    assert_eq!(
+        html_to_spans("<p style=\"margin-left:10px\">a</p>"),
+        vec![text("a")]
+    );
+}
+
+#[test]
+fn teams_code_blocks_keep_their_line_breaks() {
+    assert_eq!(
+        html_to_spans(
+            "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>a<br>&nbsp; b</code></pre>"
+        ),
+        vec![Span::CodeBlock {
+            language: None,
+            code: "a\n\u{a0} b".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn org_emoji_keep_their_image_and_name() {
+    let source = "https://graph.microsoft.com/v1.0/chats/19:a@thread.v2/messages/1/hostedContents/aWQ9/$value";
+    assert_eq!(
+        html_to_spans(&format!(
+            "<p>hi <customemoji id=\"MC13\" alt=\"crying_cat\" source=\"{source}\"></customemoji></p>"
+        )),
+        vec![
+            text("hi "),
+            Span::CustomEmoji {
+                name: "crying_cat".to_owned(),
+                url: source.to_owned(),
+            },
+        ]
+    );
+    assert_eq!(
+        html_to_spans("<p><customemoji alt=\"crying_cat\"></customemoji></p>"),
+        vec![text(":crying_cat:")]
+    );
+}

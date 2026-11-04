@@ -9,9 +9,10 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 
-use crate::app_state::{AppState, Selection};
+use crate::app_state::{AppState, Selection, selection_title};
 use crate::channel_menu::post_pin_dialog;
-use crate::rows::reply_excerpt;
+use crate::post_follow::post_followed;
+use crate::rows::{Row, reply_excerpt};
 use crate::runtime;
 use crate::views::message_actions::Action;
 use crate::views::pin_banner::{PinBannerActions, PinBannerData, cycle_pin, render_pin_banner};
@@ -253,6 +254,17 @@ impl ConversationView {
         }
     }
 
+    pub(super) fn share_to_outlook(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let conversation_id = current.selection.conversation_id().to_owned();
+        let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
+        self.app.update(cx, |state, cx| {
+            state.share_to_outlook(&conversation_id, message_id, &title, cx)
+        });
+    }
+
     pub(super) fn toggle_saved(&mut self, message_id: &str, cx: &mut Context<Self>) {
         if let Some(conversation_id) = self.conversation_id() {
             self.app.update(cx, |state, cx| {
@@ -278,6 +290,44 @@ impl ConversationView {
         }
         let pin = !self.app.read(cx).is_pinned(&conversation_id, message_id);
         confirm_post_pin(&self.app, &conversation_id, message_id, pin, window, cx);
+    }
+
+    /// `Some(followed)` for a channel root post, `None` for everything else.
+    pub(super) fn post_follow(&self, message_id: &str, cx: &App) -> Option<bool> {
+        let Selection::Channel(ref channel_id) = self.current.as_ref()?.selection else {
+            return None;
+        };
+        let participated = self.rows.borrow().iter().find_map(|row| match row {
+            Row::Post(post) if post.root.key == message_id => {
+                Some(post.messages().any(|message| message.own))
+            }
+            _ => None,
+        })?;
+        let state = self.app.read(cx).post_follow_state(channel_id, message_id);
+        Some(post_followed(state, participated))
+    }
+
+    pub(super) fn request_post_follow(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        if let Some(Selection::Channel(channel_id)) =
+            self.current.as_ref().map(|current| current.selection.clone())
+            && self.post_follow(message_id, cx).is_some()
+        {
+            self.app.update(cx, |state, cx| {
+                state.request_post_follow_state(&channel_id, message_id, cx)
+            });
+        }
+    }
+
+    pub(super) fn toggle_post_follow(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(followed) = self.post_follow(message_id, cx) else {
+            return;
+        };
+        let Some(channel_id) = self.pin_conversation_id() else {
+            return;
+        };
+        self.app.update(cx, |state, cx| {
+            state.set_post_followed(&channel_id, message_id, !followed, cx)
+        });
     }
 
     pub(super) fn mark_unread_from(&mut self, message_id: &str, cx: &mut Context<Self>) {

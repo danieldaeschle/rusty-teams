@@ -11,13 +11,12 @@ use store::{
     Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
+    Activity, ActivityHorizons, ActivityItem, ActivitySnapshot, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
     LanguageSettings, LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource,
     PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior,
     TranslationStatus,
 };
 
-use crate::activity::{Actor, Entry, Kind};
 use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{AvatarState, FolderInfo, FolderKind, Person, PresenceKind};
@@ -493,6 +492,13 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
                 source: PersonSource::Member,
             })
         });
+    let everyone = demo_chats()
+        .into_iter()
+        .find(|chat| chat.id == conversation_id && chat.kind == "group")
+        .map(|chat| MentionCandidate::Everyone {
+            chat_id: chat.id.to_owned(),
+        })
+        .filter(|candidate| matches(candidate.display_name()));
     let scope: Vec<MentionCandidate> = if conversation_id.starts_with("demo-channel") {
         [
             MentionCandidate::Channel {
@@ -503,6 +509,11 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
                 team_id: "demo-team-1".to_owned(),
                 name: "Platform".to_owned(),
             },
+            MentionCandidate::Tag {
+                tag_id: "demo-tag-design".to_owned(),
+                name: "Designers".to_owned(),
+                member_count: Some(3),
+            },
         ]
         .into_iter()
         .filter(|candidate| matches(candidate.display_name()))
@@ -510,7 +521,7 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
     } else {
         Vec::new()
     };
-    people.chain(scope).collect()
+    everyone.into_iter().chain(people).chain(scope).collect()
 }
 
 pub fn send_in_chat(
@@ -689,92 +700,116 @@ pub fn first_selection() -> Selection {
     Selection::Chat(RELEASE_CHAT.to_owned())
 }
 
-pub fn activity_entries() -> Vec<Entry> {
-    let actor = |user_id: &str, name: &str| Actor {
-        user_id: Some(user_id.to_owned()),
-        name: name.to_owned(),
-    };
-    let entry = |conversation_id: &str,
-                 kind: Kind,
-                 message_id: &str,
-                 actors: Vec<Actor>,
-                 preview: &str,
-                 count: u32,
-                 updated_at: DateTime<Utc>,
-                 read: bool| Entry {
-        id: 0,
-        conversation_id: conversation_id.to_owned(),
-        kind,
+pub fn activity_snapshot() -> ActivitySnapshot {
+    let item = |message_id: &str,
+                activity_type: &str,
+                subtype: &str,
+                conversation_id: &str,
+                thread_type: &str,
+                source_message_id: &str,
+                actor: (&str, &str),
+                preview: &str,
+                time: DateTime<Utc>,
+                read: bool| ActivityItem {
         message_id: message_id.to_owned(),
-        actors,
+        activity_id: message_id.to_owned(),
+        activity_type: activity_type.to_owned(),
+        activity_subtype: subtype.to_owned(),
+        source_thread_id: conversation_id.to_owned(),
+        source_message_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
+        source_reply_chain_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
+        source_user_id: Some(format!("8:orgid:{}", actor.0)),
+        source_user_name: actor.1.to_owned(),
         preview: preview.to_owned(),
-        glyphs: Vec::new(),
-        count,
-        updated_at,
-        read,
+        preview_template: "hasText".to_owned(),
+        thread_type: Some(thread_type.to_owned()),
+        count: 1,
+        timestamp_ms: time.timestamp_millis(),
+        version_ms: time.timestamp_millis(),
+        read_flag: read,
+        ..ActivityItem::default()
     };
-    let reaction = Entry {
-        glyphs: vec!["\u{1F602}".to_owned(), "\u{1F44D}".to_owned()],
-        ..entry(
-            RELEASE_CHAT,
-            Kind::Reaction,
-            "m3",
-            vec![
-                actor(PRIYA_ID, "Priya Nair"),
-                actor(LEA_ID, "Lea Schneider"),
-            ],
-            "I'll take the changelog.",
-            2,
-            at(0, 13, 20),
-            false,
-        )
-    };
-    vec![
-        entry(
+    let items = vec![
+        item(
+            "demo-activity-1",
+            "replyInChat",
+            "",
             UNREAD_CHAT,
-            Kind::Messages,
+            "chat",
             "u3",
-            vec![
-                actor(LEA_ID, "Lea Schneider"),
-                actor(PRIYA_ID, "Priya Nair"),
-            ],
+            (LEA_ID, "Lea Schneider"),
             "Who is taking the review?",
-            3,
             at(0, 13, 12),
             false,
         ),
-        entry(
+        ActivityItem {
+            count: 2,
+            ..item(
+                "demo-activity-2",
+                "reactionInChat",
+                "laugh",
+                RELEASE_CHAT,
+                "chat",
+                "m3",
+                (PRIYA_ID, "Priya Nair"),
+                "I'll take the changelog.",
+                at(0, 13, 20),
+                false,
+            )
+        },
+        item(
+            "demo-activity-3",
+            "mention",
+            "person",
             "demo-channel-1-1",
-            Kind::Mention,
+            "topic",
             "t1",
-            vec![actor(MARA_ID, "Mara Lindqvist")],
+            (MARA_ID, "Mara Lindqvist"),
             "@Dana can you approve the merge? The pipeline is waiting.",
-            1,
             at(0, 11, 40),
             false,
         ),
-        reaction,
-        entry(
+        item(
+            "demo-activity-4",
+            "mentionInChat",
+            "person",
             "demo-chat-allhands",
-            Kind::Mention,
+            "chat",
             "demo-allhands-policy",
-            vec![actor(LEA_ID, "Lea Schneider")],
+            (LEA_ID, "Lea Schneider"),
             "@Dana please read the new vacation policy before Friday.",
-            1,
             at(0, 9, 0),
             false,
         ),
-        entry(
+        item(
+            "demo-activity-5",
+            "follow",
+            "channelNewMessage",
+            "demo-channel-1-3",
+            "topic",
+            "demo-release-post",
+            (MARA_ID, "Mara Lindqvist"),
+            "Release 4.2 is tagged, notes are in the wiki.",
+            at(1, 17, 30),
+            true,
+        ),
+        item(
+            "demo-activity-6",
+            "call",
+            "missedCall",
             "demo-chat-customer-3",
-            Kind::Messages,
-            "demo-customer-3-closed",
-            vec![actor(TOBIAS_ID, "Tobias Klein")],
-            "Ticket is closed",
-            1,
+            "chat",
+            "",
+            (TOBIAS_ID, "Tobias Klein"),
+            "",
             at(1, 16, 0),
             true,
         ),
-    ]
+    ];
+    ActivitySnapshot {
+        items,
+        horizons: ActivityHorizons::default(),
+    }
 }
 
 pub fn seed(store: &Store) {
@@ -1075,13 +1110,24 @@ pub fn forwarded_message(
     } else {
         format!("<p>{}</p>", teams_core::escape_html(comment))
     };
-    let html = format!(
-        "{comment_html}<blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"{}\"><strong>{}</strong><p>{}</p></blockquote>",
-        teams_core::escape_html(&source.message_id),
-        teams_core::escape_html(&source.author),
-        teams_core::escape_html(&source.text),
-    );
-    send_in_chat(chat, &source.text, &html, now)
+    let quotes: String = source
+        .messages
+        .iter()
+        .map(|item| {
+            format!(
+                "<blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"{}\"><strong>{}</strong><p>{}</p></blockquote>",
+                teams_core::escape_html(&item.message_id),
+                teams_core::escape_html(&item.author),
+                teams_core::escape_html(&item.text),
+            )
+        })
+        .collect();
+    let preview = source
+        .messages
+        .first()
+        .map(|item| item.text.as_str())
+        .unwrap_or_default();
+    send_in_chat(chat, preview, &format!("{comment_html}{quotes}"), now)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1734,7 +1780,7 @@ fn release_messages() -> Vec<MessageRecord> {
             None,
             jonas,
             at(0, 11, 5),
-            "<h2>Release notes 0.2</h2><p>The <s>old sync path</s> <u>is gone</u>.</p><table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr><tr><td>Render</td><td>Jonas</td></tr></tbody></table><hr><blockquote>Measure twice, cut once.</blockquote><p><span style=\"background-color: rgb(255, 255, 0)\">Important:</span> <span style=\"color: #c00000\">backup first</span>.</p>",
+            "<h2>Release notes 0.2</h2><p>The <s>old sync path</s> <u>is gone</u>.</p><table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr><tr><td>Render</td><td>Jonas</td></tr></tbody></table><hr><blockquote>Measure twice, cut once.</blockquote><p><span style=\"background-color: rgb(255, 255, 0)\">Important:</span> <span style=\"color: #c00000\">backup first</span>.</p><p style=\"margin-left:40px;\">Then <span style=\"color:#1E53A3;\">sync</span> <span style=\"background-color:#82CDA8;\">once</span>.</p><pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>backup --all<br>sync --once</code></pre>",
             "[]",
             false,
         ),
@@ -2352,6 +2398,33 @@ mod tests {
     }
 
     #[test]
+    fn a_multi_forward_quotes_each_message_in_order_after_the_comment() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store);
+        let chat = store
+            .recent_chats(100)
+            .unwrap()
+            .into_iter()
+            .find(|chat| chat.id == PRIORITY_CHAT)
+            .unwrap();
+        let item = |message_id: &str, text: &str| crate::message_actions::ForwardItem {
+            message_id: message_id.to_owned(),
+            author: "Synthetic Sender".to_owned(),
+            time: "09:00".to_owned(),
+            text: text.to_owned(),
+        };
+        let source = ForwardSource {
+            conversation_id: PRIORITY_CHAT.to_owned(),
+            messages: vec![item("m1", "first"), item("m2", "second")],
+        };
+        let (_, record) = forwarded_message(&chat, &source, "fyi", Utc::now());
+        let html = &record.body_html;
+        assert!(html.starts_with("<p>fyi</p>"));
+        assert_eq!(html.matches(FORWARD_ITEMTYPE).count(), 2);
+        assert!(html.find("first").unwrap() < html.find("second").unwrap());
+    }
+
+    #[test]
     fn png_has_signature_and_ends_with_iend() {
         let png = encode_png(&MARA);
         assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -2371,7 +2444,18 @@ mod tests {
         assert_eq!(chat[0].display_name(), "Mara Lindqvist");
         let channel = mention_candidates("demo-channel-1-1", "gen");
         assert!(matches!(channel[0], MentionCandidate::Channel { .. }));
-        assert_eq!(mention_candidates("demo-chat-release", "").len(), 5);
+        let all = mention_candidates("demo-chat-release", "");
+        assert_eq!(all.len(), 6);
+        assert!(matches!(all[0], MentionCandidate::Everyone { .. }));
+        assert!(
+            mention_candidates("demo-chat-mara", "")
+                .iter()
+                .all(|candidate| !matches!(candidate, MentionCandidate::Everyone { .. }))
+        );
+        assert!(matches!(
+            mention_candidates("demo-channel-1-1", "desi")[0],
+            MentionCandidate::Tag { .. }
+        ));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::rc::Rc;
 
 use chrono::{DateTime, Local, NaiveDate, Offset};
@@ -9,7 +10,7 @@ use gpui_kit::*;
 use store::Sidebar;
 
 use super::avatar::person_avatar;
-use super::scroll_edge::with_top_edge;
+use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{Corner, corner_badge, dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
@@ -18,6 +19,7 @@ use crate::agent_api::{
     pending::{PendingKind, PendingProposal, conversation_label as proposal_conversation_label},
 };
 use crate::app_state::{AppState, chat_title};
+use crate::chat_filter::{FEWER_FILTERS, MORE_FILTERS};
 use crate::data::is_one_on_one;
 use crate::format;
 use crate::people::resolve_names;
@@ -27,6 +29,11 @@ const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
+const ROW_HEIGHT: f32 = 58.;
+const HEADER_HEIGHT: f32 = 30.;
+const EMPTY_HEIGHT: f32 = 84.;
+const FALLBACK_VIEWPORT: f32 = 900.;
+const VIEWPORT_MARGIN: f32 = 300.;
 const FILTER_KEY: &str = "activity_filter";
 const PROPOSALS_LABEL: &str = "Agent proposals";
 pub const ACTIVITY_PROPOSALS_TAG: &str = "shell/islands/sidebar/activity-proposals";
@@ -43,6 +50,7 @@ pub struct ActivityPanel {
     app: Entity<AppState>,
     activity: Entity<ActivityCenter>,
     filter: Filter,
+    more_filters_open: bool,
     scroll: ScrollHandle,
     resolved_names: HashMap<String, String>,
     looked_up: HashSet<String>,
@@ -77,6 +85,7 @@ impl ActivityPanel {
             app,
             activity,
             filter,
+            more_filters_open: false,
             scroll: ScrollHandle::new(),
             resolved_names: HashMap::new(),
             looked_up: HashSet::new(),
@@ -84,7 +93,7 @@ impl ActivityPanel {
         }
     }
 
-    fn open(&mut self, id: i64, cx: &mut Context<Self>) {
+    fn open(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(entry) = self.activity.read(cx).feed().get(id) else {
             return;
         };
@@ -97,35 +106,82 @@ impl ActivityPanel {
         cx.emit(event);
     }
 
+    fn filter_pill(&self, filter: Filter, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = filter == self.filter;
+        div()
+            .id(ElementId::Name(
+                format!("activity-filter-{}", filter.label()).into(),
+            ))
+            .h(px(24.))
+            .px(px(12.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .rounded_full()
+            .cursor_pointer()
+            .text_size(px(12.))
+            .when(selected, |pill| {
+                pill.bg(theme::accent()).text_color(theme::on_accent())
+            })
+            .when(!selected, |pill| {
+                pill.bg(theme::surface_raised())
+                    .text_color(theme::text_soft())
+                    .hover(|pill| pill.bg(theme::border_strong()))
+            })
+            .child(filter.label())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.filter = filter;
+                let _ = this.app.read(cx).store.set_meta(FILTER_KEY, filter.key());
+                cx.notify();
+            }))
+    }
+
+    fn more_filters_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let open = self.more_filters_open;
+        let label = if open { FEWER_FILTERS } else { MORE_FILTERS };
+        div()
+            .id("activity-filter-more")
+            .size(px(24.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .bg(theme::surface_raised())
+            .hover(|pill| pill.bg(theme::border_strong()))
+            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+            .child(icon(
+                if open {
+                    IconName::ChevronUp
+                } else {
+                    IconName::ChevronDown
+                },
+                14.,
+                theme::text_soft(),
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.more_filters_open = !this.more_filters_open;
+                cx.notify();
+            }))
+    }
+
     fn header(&self, cx: &mut Context<Self>) -> Div {
-        let pills = Filter::ALL.into_iter().map(|filter| {
-            let selected = filter == self.filter;
-            div()
-                .id(ElementId::Name(
-                    format!("activity-filter-{}", filter.label()).into(),
-                ))
-                .h(px(24.))
-                .px(px(12.))
-                .flex()
-                .items_center()
-                .rounded_full()
-                .cursor_pointer()
-                .text_size(px(12.))
-                .when(selected, |pill| {
-                    pill.bg(theme::accent()).text_color(theme::on_accent())
-                })
-                .when(!selected, |pill| {
-                    pill.bg(theme::surface_raised())
-                        .text_color(theme::text_soft())
-                        .hover(|pill| pill.bg(theme::border_strong()))
-                })
-                .child(filter.label())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.filter = filter;
-                    let _ = this.app.read(cx).store.set_meta(FILTER_KEY, filter.key());
-                    cx.notify();
-                }))
-        });
+        let overflow_active = Filter::OVERFLOW.contains(&self.filter);
+        let mut pills: Vec<AnyElement> = Filter::PRIMARY
+            .into_iter()
+            .map(|filter| self.filter_pill(filter, cx).into_any_element())
+            .collect();
+        if self.more_filters_open || overflow_active {
+            pills.extend(
+                Filter::OVERFLOW
+                    .into_iter()
+                    .map(|filter| self.filter_pill(filter, cx).into_any_element()),
+            );
+        }
+        if !overflow_active {
+            pills.push(self.more_filters_button(cx).into_any_element());
+        }
         v_flex()
             .flex_none()
             .child(
@@ -178,7 +234,14 @@ impl ActivityPanel {
                             })),
                     ),
             )
-            .child(h_flex().px(px(16.)).pb(px(12.)).gap(px(6.)).children(pills))
+            .child(
+                h_flex()
+                    .px(px(16.))
+                    .pb(px(12.))
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .children(pills),
+            )
     }
 
     fn row(
@@ -191,7 +254,7 @@ impl ActivityPanel {
         panel: Entity<ActivityPanel>,
     ) -> AnyElement {
         let activity = self.activity.clone();
-        let id = entry.id;
+        let id = entry.id.clone();
         let actor = entry.latest_actor();
         let avatar = person_avatar(
             directory,
@@ -209,11 +272,12 @@ impl ActivityPanel {
             detail: detail(entry),
             unread: !entry.read,
             time: format::list_time_label(entry.updated_at, today, offset),
-            mark_read: Rc::new(move |cx: &mut App| {
-                activity.update(cx, |activity, cx| activity.mark_read(id, cx))
+            mark_read: Rc::new({
+                let id = id.clone();
+                move |cx: &mut App| activity.update(cx, |activity, cx| activity.mark_read(&id, cx))
             }),
         })
-        .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open(id, cx)))
+        .on_click(move |_, _, cx| panel.update(cx, |this, cx| this.open(&id, cx)))
         .into_any_element()
     }
 
@@ -284,6 +348,8 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
         .id(ElementId::Name(element_id.clone().into()))
         .debug_selector(move || selector)
         .group(group.clone())
+        .h(px(ROW_HEIGHT))
+        .flex_none()
         .mx(px(6.))
         .px(px(10.))
         .py(px(8.))
@@ -363,6 +429,7 @@ fn admits_proposal(filter: Filter, pending: &PendingProposal) -> bool {
         Filter::All => true,
         Filter::Mentions => false,
         Filter::Unread => !pending.seen,
+        Filter::Replies | Filter::Reactions | Filter::MissedCalls => false,
     }
 }
 
@@ -436,24 +503,64 @@ fn proposal_marker(pending: &PendingProposal, row_group: SharedString) -> Div {
 
 fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
     let marker = marker_frame(row_group);
+    let muted_icon = |name: IconName| icon(name, 10., theme::text_muted());
     match entry.kind {
-        Kind::Messages => marker.child(icon(IconName::MessageCircle, 10., theme::text_muted())),
         Kind::Mention => marker
             .text_color(theme::accent_text())
             .font_weight(FontWeight::BOLD)
             .child("@"),
-        Kind::Reaction => marker.child(entry.glyphs.first().cloned().unwrap_or_default()),
+        Kind::Reaction => match entry.glyphs.first() {
+            Some(glyph) => marker.child(glyph.clone()),
+            None => marker.child(muted_icon(IconName::Heart)),
+        },
         Kind::MissedCall => marker.child(icon(IconName::PhoneOff, 10., theme::red())),
+        Kind::Reply => marker.child(muted_icon(IconName::Reply)),
+        Kind::Call => marker.child(muted_icon(IconName::Phone)),
+        Kind::Posted => marker.child(muted_icon(IconName::MessageSquare)),
+        Kind::Team => marker.child(muted_icon(IconName::Users)),
+        Kind::App => marker.child(muted_icon(IconName::AppWindow)),
+        Kind::Other => marker.child(muted_icon(IconName::Bell)),
     }
 }
 
 fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, String>) -> String {
-    let names = entry.names(resolved_names);
-    let verb = match entry.kind {
-        Kind::Messages => names,
-        Kind::Mention => format!("{names} mentioned you"),
-        Kind::Reaction => format!("{names} reacted"),
-        Kind::MissedCall => format!("Missed call from {names}"),
+    let actor = entry
+        .latest_actor()
+        .map(|actor| actor.display_name(resolved_names).to_owned())
+        .unwrap_or_default();
+    let names = if entry.count > 1 && matches!(entry.kind, Kind::Reaction | Kind::Reply) {
+        format!("{actor} +{}", entry.count - 1)
+    } else {
+        actor.clone()
+    };
+    let channel = channel_of(sidebar, &entry.conversation_id);
+    let verb = match (entry.kind, entry.subtype.as_str()) {
+        (Kind::Mention, "everyone") => format!("{names} mentioned Everyone"),
+        (Kind::Mention, "channel") => match channel {
+            Some((_, channel_name)) => format!("{names} mentioned {channel_name}"),
+            None => format!("{names} mentioned the channel"),
+        },
+        (Kind::Mention, "team") => match channel {
+            Some((team_name, _)) => format!("{names} mentioned {team_name}"),
+            None => format!("{names} mentioned the team"),
+        },
+        (Kind::Mention, _) => format!("{names} mentioned you"),
+        (Kind::Reply, _) => reply_headline(entry, &names),
+        (Kind::Reaction, _) => format!("{names} reacted to your message"),
+        (Kind::MissedCall, _) => format!("Missed call from {actor}"),
+        (Kind::Call, "voicemail") => format!("Voicemail from {actor}"),
+        (Kind::Call, "missedMeetingNudge") => format!("{actor} asked you to join a meeting"),
+        (Kind::Call, _) => actor,
+        (Kind::Posted, "channelReplyMessage") => format!("{names} replied"),
+        (Kind::Posted, _) => format!("{names} posted a new message"),
+        (Kind::Team, "promotedToTeamAdmin") => {
+            return format!("{actor} made you an owner of {}", team_label(entry, channel));
+        }
+        (Kind::Team, _) => {
+            return format!("{actor} added you to {}", team_label(entry, channel));
+        }
+        (Kind::App, _) => entry.source_label.clone().unwrap_or(actor),
+        (Kind::Other, _) => actor,
     };
     match conversation_label(sidebar, &entry.conversation_id) {
         Some(label) => format!("{verb} in {label}"),
@@ -461,12 +568,35 @@ fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, S
     }
 }
 
+fn reply_headline(entry: &Entry, names: &str) -> String {
+    match entry.activity_type.as_str() {
+        "reply" => format!("{names} replied to your post"),
+        "replyInChat" => format!("{names} replied to message"),
+        _ => format!("{names} replied"),
+    }
+}
+
+fn team_label(entry: &Entry, channel: Option<(&str, &str)>) -> String {
+    channel
+        .map(|(team_name, _)| team_name.to_owned())
+        .or_else(|| entry.source_label.clone())
+        .unwrap_or_else(|| "a team".to_owned())
+}
+
+fn channel_of<'a>(sidebar: &'a Sidebar, conversation_id: &str) -> Option<(&'a str, &'a str)> {
+    sidebar.teams.iter().find_map(|team| {
+        team.channels
+            .iter()
+            .find(|channel| channel.id == conversation_id)
+            .map(|channel| (team.team.name.as_str(), channel.name.as_str()))
+    })
+}
+
 fn detail(entry: &Entry) -> String {
     match entry.kind {
-        Kind::Messages if entry.count > 1 => {
-            format!("{} new messages: {}", entry.count, entry.preview)
+        Kind::Reaction if !entry.glyphs.is_empty() => {
+            format!("{} to: {}", entry.glyphs.join(" "), entry.preview)
         }
-        Kind::Reaction => format!("{} to: {}", entry.glyphs.join(" "), entry.preview),
         Kind::MissedCall if entry.count > 1 => format!("{} missed calls", entry.count),
         _ => entry.preview.clone(),
     }
@@ -486,7 +616,7 @@ fn conversation_label(sidebar: &Sidebar, conversation_id: &str) -> Option<String
 
 fn group_header(label: &'static str) -> Div {
     div()
-        .h(px(26.))
+        .h(px(HEADER_HEIGHT - 4.))
         .mt(px(4.))
         .px(px(16.))
         .flex()
@@ -498,8 +628,62 @@ fn group_header(label: &'static str) -> Div {
         .child(label)
 }
 
+enum Slot<'a> {
+    Proposals(Vec<PendingProposal>),
+    Header(&'static str),
+    Row(&'a Entry),
+    Empty,
+}
+
+impl Slot<'_> {
+    fn height(&self) -> f32 {
+        match self {
+            Slot::Proposals(proposals) => HEADER_HEIGHT + proposals.len() as f32 * ROW_HEIGHT,
+            Slot::Header(_) => HEADER_HEIGHT,
+            Slot::Row(_) => ROW_HEIGHT,
+            Slot::Empty => EMPTY_HEIGHT,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct VisibleSlots {
+    range: Range<usize>,
+    before: f32,
+    after: f32,
+}
+
+fn visible_slots(heights: &[f32], from: f32, to: f32) -> VisibleSlots {
+    let mut position = 0.;
+    let mut first = heights.len();
+    let mut last = heights.len();
+    let mut before = 0.;
+    for (index, height) in heights.iter().enumerate() {
+        let end = position + height;
+        if first == heights.len() && end >= from {
+            first = index;
+            before = position;
+        }
+        if position > to {
+            last = index;
+            break;
+        }
+        position = end;
+    }
+    if first == heights.len() {
+        before = position;
+    }
+    let last = last.max(first);
+    let after = heights[last..].iter().sum();
+    VisibleSlots {
+        range: first..last,
+        before,
+        after,
+    }
+}
+
 impl Render for ActivityPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now: DateTime<Local> = Local::now();
         let (today, offset) = (now.date_naive(), now.offset().fix());
         let panel = cx.entity();
@@ -510,10 +694,38 @@ impl Render for ActivityPanel {
             .read(cx)
             .feed()
             .sections(self.filter, today, offset);
-        let unresolved: Vec<String> = sections
+        let mut slots: Vec<Slot> = Vec::new();
+        let proposals: Vec<PendingProposal> = agent_api::pending_proposals(cx)
+            .into_iter()
+            .filter(|pending| admits_proposal(self.filter, pending))
+            .collect();
+        if !proposals.is_empty() {
+            slots.push(Slot::Proposals(proposals));
+        }
+        for section in &sections {
+            slots.push(Slot::Header(section.bucket.label()));
+            slots.extend(section.entries.iter().map(|entry| Slot::Row(entry)));
+        }
+        if slots.is_empty() {
+            slots.push(Slot::Empty);
+        }
+        let heights: Vec<f32> = slots.iter().map(Slot::height).collect();
+        let top = -f32::from(scroll_offset(&self.scroll).y);
+        let measured = f32::from(self.scroll.bounds().size.height);
+        let height = if measured > 1. {
+            measured
+        } else {
+            f32::from(window.viewport_size().height).max(FALLBACK_VIEWPORT)
+        };
+        let visible = visible_slots(&heights, top - VIEWPORT_MARGIN, top + height + VIEWPORT_MARGIN);
+        let visible_slots = &slots[visible.range.clone()];
+        let unresolved: Vec<String> = visible_slots
             .iter()
-            .flat_map(|section| section.entries.iter())
-            .flat_map(|entry| entry.unresolved_user_ids())
+            .filter_map(|slot| match slot {
+                Slot::Row(entry) => Some(entry.unresolved_user_ids()),
+                _ => None,
+            })
+            .flatten()
             .filter(|user_id| !self.looked_up.contains(*user_id))
             .cloned()
             .collect();
@@ -523,44 +735,41 @@ impl Render for ActivityPanel {
                 .extend(resolve_names(state, &unresolved));
         }
         let mut rows: Vec<AnyElement> = Vec::new();
-        let proposal_rows: Vec<AnyElement> = agent_api::pending_proposals(cx)
-            .iter()
-            .filter(|pending| admits_proposal(self.filter, pending))
-            .map(|pending| self.proposal_row(pending, &state.sidebar, today, offset, panel.clone()))
-            .collect();
-        if !proposal_rows.is_empty() {
-            rows.push(
-                v_flex()
+        if visible.before > 0. {
+            rows.push(div().h(px(visible.before)).flex_none().into_any_element());
+        }
+        for slot in visible_slots {
+            rows.push(match slot {
+                Slot::Proposals(proposals) => v_flex()
                     .debug_selector(|| ACTIVITY_PROPOSALS_TAG.into())
                     .child(group_header(PROPOSALS_LABEL))
-                    .children(proposal_rows)
+                    .children(proposals.iter().map(|pending| {
+                        self.proposal_row(pending, &state.sidebar, today, offset, panel.clone())
+                    }))
                     .into_any_element(),
-            );
-        }
-        for section in sections {
-            rows.push(group_header(section.bucket.label()).into_any_element());
-            for entry in section.entries {
-                rows.push(self.row(
+                Slot::Header(label) => group_header(label).into_any_element(),
+                Slot::Row(entry) => self.row(
                     entry,
                     &state.sidebar,
                     &state.directory,
                     today,
                     offset,
                     panel.clone(),
-                ));
-            }
-        }
-        if rows.is_empty() {
-            rows.push(
-                div()
-                    .py(px(32.))
+                ),
+                Slot::Empty => div()
+                    .h(px(EMPTY_HEIGHT))
                     .flex()
+                    .flex_none()
+                    .items_center()
                     .justify_center()
                     .text_size(px(13.))
                     .text_color(theme::text_muted())
                     .child(self.filter.empty_label())
                     .into_any_element(),
-            );
+            });
+        }
+        if visible.after > 0. {
+            rows.push(div().h(px(visible.after)).flex_none().into_any_element());
         }
         let list = v_flex()
             .id("activity-list")
@@ -587,13 +796,15 @@ mod tests {
     use gpui_kit::{AppContext as _, Modifiers, TestAppContext};
     use store::{ChatRecord, Sidebar, Store};
 
-    use super::{ActivityPanel, detail, headline};
+    use super::{
+        ActivityPanel, ROW_HEIGHT, VIEWPORT_MARGIN, VisibleSlots, detail, headline, visible_slots,
+    };
     use crate::activity::{ActivityCenter, Actor, Entry, Filter, Kind};
     use crate::app_state::{AppState, Mode};
 
     fn entry(kind: Kind, count: u32) -> Entry {
         Entry {
-            id: 1,
+            id: "1".into(),
             conversation_id: "chat".into(),
             kind,
             message_id: "m1".into(),
@@ -605,21 +816,55 @@ mod tests {
             glyphs: vec!["A".into(), "B".into()],
             count,
             updated_at: Utc.with_ymd_and_hms(2026, 10, 8, 9, 0, 0).unwrap(),
-            read: false,
+            ..Entry::default()
+        }
+    }
+
+    fn with(kind: Kind, activity_type: &str, subtype: &str, count: u32) -> Entry {
+        Entry {
+            activity_type: activity_type.into(),
+            subtype: subtype.into(),
+            ..entry(kind, count)
         }
     }
 
     #[test]
-    fn detail_follows_the_kind() {
-        assert_eq!(detail(&entry(Kind::Messages, 1)), "hello");
-        assert_eq!(detail(&entry(Kind::Messages, 3)), "3 new messages: hello");
-        assert_eq!(detail(&entry(Kind::Mention, 1)), "hello");
-        assert_eq!(detail(&entry(Kind::Reaction, 1)), "A B to: hello");
-        assert_eq!(detail(&entry(Kind::MissedCall, 3)), "3 missed calls");
+    fn only_rows_near_the_viewport_are_built() {
+        let heights = vec![ROW_HEIGHT; 300];
+        let viewport = 900.;
+        let at_top = visible_slots(&heights, -VIEWPORT_MARGIN, viewport + VIEWPORT_MARGIN);
+        assert_eq!(
+            at_top,
+            VisibleSlots {
+                range: 0..21,
+                before: 0.,
+                after: 279. * ROW_HEIGHT,
+            }
+        );
+        let scrolled = visible_slots(
+            &heights,
+            5000. - VIEWPORT_MARGIN,
+            5000. + viewport + VIEWPORT_MARGIN,
+        );
+        assert_eq!(scrolled.range, 81..107);
+        assert_eq!(scrolled.before, 81. * ROW_HEIGHT);
+        assert_eq!(scrolled.after, 193. * ROW_HEIGHT);
+        let past_the_end = visible_slots(&heights, 90_000., 91_000.);
+        assert_eq!(past_the_end.range, 300..300);
+        assert_eq!(past_the_end.before, 300. * ROW_HEIGHT);
+        assert_eq!(past_the_end.after, 0.);
     }
 
     #[test]
-    fn headline_names_the_actor_and_skips_direct_chat_context() {
+    fn detail_follows_the_kind() {
+        assert_eq!(detail(&entry(Kind::Mention, 1)), "hello");
+        assert_eq!(detail(&entry(Kind::Reaction, 1)), "A B to: hello");
+        assert_eq!(detail(&entry(Kind::MissedCall, 3)), "3 missed calls");
+        assert_eq!(detail(&entry(Kind::Reply, 2)), "hello");
+    }
+
+    #[test]
+    fn headline_uses_the_teams_activity_texts() {
         let sidebar = Sidebar {
             chats: vec![ChatRecord {
                 id: "chat".into(),
@@ -628,34 +873,72 @@ mod tests {
             }],
             teams: Vec::new(),
         };
+        let cases = [
+            (with(Kind::Mention, "mentionInChat", "person", 1), "Anna mentioned you"),
+            (with(Kind::Mention, "mentionInChat", "everyone", 1), "Anna mentioned Everyone"),
+            (with(Kind::Reaction, "reactionInChat", "like", 1), "Anna reacted to your message"),
+            (with(Kind::Reaction, "reactionInChat", "like", 3), "Anna +2 reacted to your message"),
+            (with(Kind::Reply, "reply", "", 1), "Anna replied to your post"),
+            (with(Kind::Reply, "replyToReply", "", 1), "Anna replied"),
+            (with(Kind::MissedCall, "call", "missedCall", 1), "Missed call from Anna"),
+            (with(Kind::Call, "call", "missedMeetingNudge", 1), "Anna asked you to join a meeting"),
+            (with(Kind::Posted, "follow", "channelNewMessage", 1), "Anna posted a new message"),
+        ];
+        for (entry, expected) in cases {
+            assert_eq!(headline(&entry, &sidebar, &HashMap::new()), expected);
+        }
+    }
+
+    #[test]
+    fn headline_names_channel_and_team_mentions() {
+        let sidebar = Sidebar {
+            chats: Vec::new(),
+            teams: vec![store::SidebarTeam {
+                team: store::TeamRecord {
+                    id: "team".into(),
+                    name: "Platform".into(),
+                },
+                channels: vec![store::ChannelRecord {
+                    id: "chat".into(),
+                    team_id: "team".into(),
+                    name: "Releases".into(),
+                    membership_type: None,
+                    last_message_at: None,
+                    unread: false,
+                }],
+                hidden: false,
+                hidden_channel_ids: Vec::new(),
+                notifications: Default::default(),
+                mentions: Default::default(),
+            }],
+        };
         assert_eq!(
-            headline(&entry(Kind::Messages, 1), &sidebar, &HashMap::new()),
-            "Anna"
+            headline(&with(Kind::Mention, "mention", "channel", 1), &sidebar, &HashMap::new()),
+            "Anna mentioned Releases in Platform > Releases"
         );
         assert_eq!(
-            headline(&entry(Kind::Reaction, 1), &sidebar, &HashMap::new()),
-            "Anna reacted"
+            headline(&with(Kind::Mention, "mention", "team", 1), &sidebar, &HashMap::new()),
+            "Anna mentioned Platform in Platform > Releases"
         );
         assert_eq!(
-            headline(&entry(Kind::Mention, 1), &sidebar, &HashMap::new()),
-            "Anna mentioned you"
-        );
-        assert_eq!(
-            headline(&entry(Kind::MissedCall, 1), &sidebar, &HashMap::new()),
-            "Missed call from Anna"
+            headline(
+                &with(Kind::Team, "teamMembershipChange", "addedToTeam", 1),
+                &sidebar,
+                &HashMap::new()
+            ),
+            "Anna added you to Platform"
         );
     }
 
     #[test]
-    fn headline_resolves_a_persisted_unknown_actor() {
-        let mut stale = entry(Kind::Reaction, 1);
+    fn headline_resolves_an_unknown_actor() {
+        let mut stale = with(Kind::Reaction, "reactionInChat", "like", 1);
         stale.actors[0].name = "Unknown".into();
         let sidebar = Sidebar::default();
         let resolved = HashMap::from([("u1".to_owned(), "Anna".to_owned())]);
-        assert_eq!(headline(&stale, &sidebar, &resolved), "Anna reacted");
         assert_eq!(
-            headline(&stale, &sidebar, &HashMap::new()),
-            "Unknown reacted"
+            headline(&stale, &sidebar, &resolved),
+            "Anna reacted to your message"
         );
     }
 
@@ -692,12 +975,13 @@ mod tests {
                 .sections(Filter::Unread, now.date_naive(), now.offset().fix())[0]
                 .entries[0]
                 .id
+                .clone()
         });
         let selector: &'static str = format!("activity-row-{first_unread}").leak();
         let first_row = cx.debug_bounds(selector).unwrap();
         cx.simulate_mouse_move(first_row.center(), None, Modifiers::none());
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.update(|_, cx| activity.update(cx, |activity, cx| activity.mark_read(first_unread, cx)));
+        cx.update(|_, cx| activity.update(cx, |activity, cx| activity.mark_read(&first_unread, cx)));
         cx.update(|window, cx| window.draw(cx).clear(cx));
     }
 }

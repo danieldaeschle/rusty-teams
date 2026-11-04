@@ -40,8 +40,8 @@ pub use health::{HealthBanner, level_text, media_text, network_rows, transport_t
 pub use history::CallRow;
 pub use launcher::CallLauncher;
 pub use list::{
-    AGENDA_ROW_HEIGHT, CALL_ROW_HEIGHT, CallsList, DAY_HEIGHT, EMPTY_HEIGHT, ListEntry,
-    SECTION_HEIGHT,
+    AGENDA_ROW_HEIGHT, CALL_ROW_HEIGHT, CallsList, DAY_HEIGHT, EMPTY_HEIGHT, FILTERS_HEIGHT,
+    HistoryFilter, ListEntry, SECTION_HEIGHT,
 };
 pub use media::CallMedia;
 pub use model::{

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use graph::User;
+use graph::{Tag, User};
 
 use crate::engine::{Conversation, META_USER_ID, SyncEngine};
 use crate::error::Result;
@@ -11,6 +11,9 @@ const DIRECTORY_CACHE_TTL: Duration = Duration::from_secs(300);
 const DIRECTORY_CACHE_MAX_QUERIES: usize = 64;
 const DIRECTORY_MIN_QUERY_CHARS: usize = 2;
 const RECENT_SENDERS_SCANNED: usize = 200;
+const TAG_CACHE_TTL: Duration = Duration::from_secs(300);
+const GROUP_CHAT_KIND: &str = "group";
+pub const EVERYONE_MENTION_TEXT: &str = "Everyone";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersonSource {
@@ -30,15 +33,32 @@ pub struct PersonCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MentionCandidate {
     Person(PersonCandidate),
-    Channel { channel_id: String, name: String },
-    Team { team_id: String, name: String },
+    Channel {
+        channel_id: String,
+        name: String,
+    },
+    Team {
+        team_id: String,
+        name: String,
+    },
+    Everyone {
+        chat_id: String,
+    },
+    Tag {
+        tag_id: String,
+        name: String,
+        member_count: Option<u32>,
+    },
 }
 
 impl MentionCandidate {
     pub fn display_name(&self) -> &str {
         match self {
             MentionCandidate::Person(person) => &person.display_name,
-            MentionCandidate::Channel { name, .. } | MentionCandidate::Team { name, .. } => name,
+            MentionCandidate::Channel { name, .. }
+            | MentionCandidate::Team { name, .. }
+            | MentionCandidate::Tag { name, .. } => name,
+            MentionCandidate::Everyone { .. } => EVERYONE_MENTION_TEXT,
         }
     }
 
@@ -52,7 +72,28 @@ impl MentionCandidate {
                 crate::MentionInput::channel(channel_id, name)
             }
             MentionCandidate::Team { team_id, name } => crate::MentionInput::team(team_id, name),
+            MentionCandidate::Everyone { chat_id } => {
+                crate::MentionInput::everyone(chat_id, EVERYONE_MENTION_TEXT)
+            }
+            MentionCandidate::Tag { tag_id, name, .. } => crate::MentionInput::tag(tag_id, name),
         }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct TagCache {
+    entries: std::collections::HashMap<String, (Instant, Vec<Tag>)>,
+}
+
+impl TagCache {
+    fn get(&self, team_id: &str) -> Option<Vec<Tag>> {
+        let (stored_at, tags) = self.entries.get(team_id)?;
+        (stored_at.elapsed() < TAG_CACHE_TTL).then(|| tags.clone())
+    }
+
+    fn put(&mut self, team_id: &str, tags: Vec<Tag>) {
+        self.entries
+            .insert(team_id.to_owned(), (Instant::now(), tags));
     }
 }
 
@@ -97,8 +138,19 @@ impl<R: Remote> SyncEngine<R> {
         Ok(users)
     }
 
-    /// Autocomplete for `@`: members of the conversation first, then (channels) the channel and its team,
-    /// then the directory. A failing directory search still returns the local part.
+    /// The team's tags, cached in memory for five minutes per team; a failed load is cached as no tags.
+    pub async fn team_tags(&self, team_id: &str) -> Result<Vec<Tag>> {
+        if let Some(cached) = self.tag_lock().get(team_id) {
+            return Ok(cached);
+        }
+        let tags = self.remote.team_tags(team_id).await;
+        self.tag_lock()
+            .put(team_id, tags.as_ref().cloned().unwrap_or_default());
+        tags
+    }
+
+    /// Autocomplete for `@`: Everyone in a group chat, members of the conversation, then (channels) the channel,
+    /// its team and the team's tags, then the directory. A failing tag or directory lookup still returns the local part.
     pub async fn mention_candidates(
         &self,
         conversation_id: &str,
@@ -110,18 +162,23 @@ impl<R: Remote> SyncEngine<R> {
         let my_user_id = self.store.meta(META_USER_ID)?.unwrap_or_default();
         let mut seen: HashSet<String> = HashSet::from([my_user_id]);
 
-        let mut candidates: Vec<MentionCandidate> = ranked(
+        let mut candidates: Vec<MentionCandidate> =
+            ranked(self.everyone_entry(conversation_id)?.into_iter(), &query);
+        candidates.extend(ranked(
             self.local_people(conversation_id)?
                 .into_iter()
                 .filter(|person| seen.insert(person.user_id.clone()))
                 .map(MentionCandidate::Person),
             &query,
-        );
+        ));
         if let Conversation::Channel { team_id } = &conversation {
             candidates.extend(ranked(
                 self.scope_entries(conversation_id, team_id)?,
                 &query,
             ));
+            if let Ok(tags) = self.team_tags(team_id).await {
+                candidates.extend(ranked(tags.into_iter().map(tag_candidate), &query));
+            }
         }
         let local_people = candidates
             .iter()
@@ -172,6 +229,14 @@ impl<R: Remote> SyncEngine<R> {
             .collect())
     }
 
+    fn everyone_entry(&self, conversation_id: &str) -> Result<Option<MentionCandidate>> {
+        Ok(self
+            .store
+            .chat(conversation_id)?
+            .filter(|chat| chat.kind.eq_ignore_ascii_case(GROUP_CHAT_KIND))
+            .map(|chat| MentionCandidate::Everyone { chat_id: chat.id }))
+    }
+
     fn scope_entries(
         &self,
         channel_id: &str,
@@ -194,10 +259,24 @@ impl<R: Remote> SyncEngine<R> {
         Ok(channel.into_iter().chain(team))
     }
 
+    fn tag_lock(&self) -> std::sync::MutexGuard<'_, TagCache> {
+        self.tag_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn directory_lock(&self) -> std::sync::MutexGuard<'_, DirectoryCache> {
         self.directory_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+fn tag_candidate(tag: Tag) -> MentionCandidate {
+    MentionCandidate::Tag {
+        tag_id: tag.id,
+        name: tag.display_name,
+        member_count: tag.member_count,
     }
 }
 
@@ -323,6 +402,32 @@ mod tests {
             name: "Squad".to_owned(),
         };
         assert_eq!(team.to_mention(), crate::MentionInput::team("t", "Squad"));
+        let everyone = MentionCandidate::Everyone {
+            chat_id: "19:g".to_owned(),
+        };
+        assert_eq!(
+            everyone.to_mention(),
+            crate::MentionInput::everyone("19:g", "Everyone")
+        );
+        let tag = MentionCandidate::Tag {
+            tag_id: "tag-1".to_owned(),
+            name: "Design".to_owned(),
+            member_count: Some(3),
+        };
+        assert_eq!(
+            tag.to_mention(),
+            crate::MentionInput::tag("tag-1", "Design")
+        );
+    }
+
+    #[test]
+    fn everyone_matches_its_name_like_any_candidate() {
+        let everyone = || MentionCandidate::Everyone {
+            chat_id: "19:g".to_owned(),
+        };
+        assert_eq!(ranked([everyone()].into_iter(), "ev").len(), 1);
+        assert_eq!(ranked([everyone()].into_iter(), "").len(), 1);
+        assert!(ranked([everyone()].into_iter(), "ada").is_empty());
     }
 
     #[test]

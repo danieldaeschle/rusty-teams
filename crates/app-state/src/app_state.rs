@@ -15,6 +15,7 @@ use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::forward_selection::ForwardSelection;
 use crate::image_view_gallery::ViewerRequest;
 use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
@@ -44,6 +45,7 @@ impl Selection {
 
 pub enum AppEvent {
     Sidebar,
+    Activity,
     Selection,
     Messages(String),
     Images(Vec<String>),
@@ -61,6 +63,7 @@ pub enum AppEvent {
     CallHistory,
     Translation,
     Forward,
+    ForwardSelection,
     ImageViewer,
     StatusMessage,
     Settings(crate::settings_section::SettingsSection),
@@ -74,6 +77,10 @@ pub enum AppEvent {
     CallTone(chatsvc::sounds::CallTone),
     SoundSettings,
     ChatSettings,
+    FollowedStatus {
+        user_id: String,
+        text: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -110,6 +117,8 @@ pub struct AppState {
     pub connection_banner: crate::connection_banner::BannerTiming,
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
+    pub followed_presence: Vec<crate::presence_follow::FollowedPerson>,
+    pub followed_changes: Vec<(String, &'static str)>,
     pub keep_unread: Option<String>,
     pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
@@ -123,7 +132,9 @@ pub struct AppState {
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
+    pub post_follows: crate::post_follow::PostFollows,
     pub forward_request: Option<ForwardSource>,
+    pub forward_selection: Option<ForwardSelection>,
     pub image_viewer_request: Option<ViewerRequest>,
     pub own_status: PresenceStatus,
     pub own_email: String,
@@ -270,6 +281,8 @@ impl AppState {
             connection_banner: Default::default(),
             live_retry: None,
             notice_count: 0,
+            followed_presence: Vec::new(),
+            followed_changes: Vec::new(),
             keep_unread: None,
             restorable_deletes: Default::default(),
             typing: TypingState::default(),
@@ -283,7 +296,9 @@ impl AppState {
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
             pins: HashMap::new(),
+            post_follows: Default::default(),
             forward_request: None,
+            forward_selection: None,
             image_viewer_request: None,
             own_status: PresenceStatus::default(),
             own_email: String::new(),
@@ -339,6 +354,7 @@ impl AppState {
             section_changes: crate::section_actions::SectionChanges::default(),
         };
         state.local_previews = load_local_previews(&state.store);
+        state.followed_presence = crate::presence_follow::load_followed(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
         state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
@@ -672,7 +688,12 @@ impl AppState {
                 let activity_changed = self
                     .directory
                     .set_activity(user_id, data::presence_activity(&engine, user_id));
-                self.directory.set_presence(user_id, kind) || activity_changed
+                let previous = self.directory.presence_of(user_id);
+                let changed = self.directory.set_presence(user_id, kind);
+                if changed {
+                    self.note_followed_change(user_id, previous, kind);
+                }
+                changed || activity_changed
             })
             .collect()
     }
@@ -691,6 +712,7 @@ impl AppState {
             let done = data::refresh_presence(&engine, wanted.clone());
             self.on_done(done, cx, move |state, cx| {
                 state.sync_presence();
+                state.announce_followed_changes(cx);
                 state.directory.save_presence(&state.store, &wanted);
                 state.directory.settle_presence(&wanted);
                 cx.emit(AppEvent::Directory);
@@ -878,6 +900,7 @@ impl AppState {
         let conversation_id = selection.conversation_id().to_owned();
         self.selection = Some(selection);
         self.keep_unread = None;
+        self.forward_selection = None;
         cx.emit(AppEvent::Selection);
         cx.notify();
         self.refresh_live_meeting(&conversation_id, cx);
@@ -1015,10 +1038,12 @@ impl AppState {
                 self.refresh_chat_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
+                self.watch_followed_presence(cx);
                 self.refresh_own_status(cx);
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar_after_sync(cx),
+            BackendEvent::Core(CoreEvent::ActivityChanged) => cx.emit(AppEvent::Activity),
             BackendEvent::Core(
                 CoreEvent::MessagesChanged { conversation_id }
                 | CoreEvent::ReceiptsChanged { conversation_id },
@@ -1053,6 +1078,7 @@ impl AppState {
             }
             BackendEvent::Core(CoreEvent::PresenceChanged) => {
                 let changed = self.sync_presence();
+                self.announce_followed_changes(cx);
                 self.directory.save_presence(&self.store, &changed);
                 cx.emit(AppEvent::Directory);
                 cx.notify();

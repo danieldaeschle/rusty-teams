@@ -9,6 +9,7 @@ use super::account::{
 };
 use super::rows::{Choice, caption, control_row, select, text_button, toggle_row};
 use crate::app_state::AppState;
+use crate::presence_follow::{MANAGE_STATUS_NOTIFICATIONS, STATUS_NOTIFICATIONS_DESCRIPTION, TURN_OFF};
 use crate::notify::NotificationCenter;
 use crate::notify::rules::{Corner, Settings};
 use crate::notify::sounds::AlertSound;
@@ -192,6 +193,35 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
             ChatSettingChange::MeetingChats,
         ))
         .child(hide_in_calls)
+        .child(caption("PEOPLE"))
+        .child(control_row(
+            MANAGE_STATUS_NOTIFICATIONS,
+            STATUS_NOTIFICATIONS_DESCRIPTION,
+            div(),
+        ))
+        .children(followed_rows(app, cx))
+}
+
+fn followed_rows(app: &Entity<AppState>, cx: &App) -> Vec<Div> {
+    app.read(cx)
+        .followed_presence
+        .iter()
+        .enumerate()
+        .map(|(index, person)| {
+            let (app, user_id, name) = (app.clone(), person.user_id.clone(), person.name.clone());
+            control_row(
+                person.name.clone(),
+                "",
+                text_button(("settings-unfollow-presence", index), TURN_OFF).on_click(
+                    move |_, _, cx| {
+                        app.update(cx, |state, cx| {
+                            state.set_presence_followed(&user_id, &name, false, cx)
+                        })
+                    },
+                ),
+            )
+        })
+        .collect()
 }
 
 fn preview_toggle(app: &Entity<AppState>, on: bool) -> Stateful<Div> {

@@ -1,27 +1,21 @@
-use std::collections::HashMap;
-
-use chrono::{DateTime, Duration, Utc};
+use chrono::Utc;
 use gpui_kit::*;
+use teams_core::{ActivitySnapshot, stored_activity_feed};
 
-use super::feed::{Actor, Entry, Feed, RETENTION_DAYS, ReactedMessage, start_time};
-use super::preview_label;
-use super::reactions::reacted_messages;
+use super::feed::{Entry, Feed};
+use super::server::feed_of;
 use crate::agent_api;
 use crate::app_state::{AppEvent, AppState};
-use crate::call::MissedCall;
 use crate::demo;
-use crate::notify::{IncomingTracker, alerts};
-use crate::people::resolve_names;
 
-const WATERMARK_KEY: &str = "activity_watermark";
-const RECENT_WINDOW: usize = 20;
+const SEEN_KEY: &str = "activity_seen_ms";
 
 pub struct ActivityCenter {
     app: Entity<AppState>,
     main_window: AnyWindowHandle,
+    snapshot: ActivitySnapshot,
+    seen_locally_ms: i64,
     feed: Feed,
-    tracker: IncomingTracker,
-    cutoff: DateTime<Utc>,
     _subscription: Subscription,
     _proposal_observation: Option<Subscription>,
 }
@@ -29,31 +23,34 @@ pub struct ActivityCenter {
 impl ActivityCenter {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = app.read(cx);
-        let store = state.store.clone();
-        let now = Utc::now();
-        let _ = store.prune_activity(now - Duration::days(RETENTION_DAYS));
-        let cutoff = start_time(store.meta_time(WATERMARK_KEY).ok().flatten(), now);
-        let mut feed = Feed::load(store.activity().unwrap_or_default());
-        if state.mode.demo {
-            for entry in demo::activity_entries() {
-                feed.add(entry);
-            }
-        }
+        let snapshot = if state.mode.demo {
+            demo::activity_snapshot()
+        } else {
+            stored_activity_feed(&state.store).unwrap_or_default()
+        };
+        let seen_locally_ms = state
+            .store
+            .meta(SEEN_KEY)
+            .ok()
+            .flatten()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(0);
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
         });
         let proposal_observation =
             agent_api::handle(cx).map(|api| cx.observe(&api, |this, _, cx| this.on_proposals(cx)));
-        let mut center = ActivityCenter {
+        let feed = feed_of(&snapshot, seen_locally_ms);
+        let center = ActivityCenter {
             app,
             main_window: window.window_handle(),
+            snapshot,
+            seen_locally_ms,
             feed,
-            tracker: IncomingTracker::new(cutoff),
-            cutoff,
             _subscription: subscription,
             _proposal_observation: proposal_observation,
         };
-        center.flush(cx);
+        center.request_avatars(cx);
         center
     }
 
@@ -61,71 +58,88 @@ impl ActivityCenter {
         &self.feed
     }
 
-    pub fn mark_read(&mut self, id: i64, cx: &mut Context<Self>) {
-        if self.feed.mark_read(id) {
-            self.flush(cx);
-        }
+    pub fn mark_read(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.mark_read_where(|entry| entry.id == id, cx);
     }
 
     pub fn mark_all_read(&mut self, cx: &mut Context<Self>) {
         agent_api::mark_all_proposals_seen(cx);
-        if self.feed.mark_all_read() {
-            self.flush(cx);
+        if self.feed.unread_count() == 0 {
+            return;
         }
+        self.snapshot.mark_all_read(Utc::now().timestamp_millis());
+        self.rebuild(cx);
+        self.app
+            .update(cx, |state, cx| state.mark_all_activity_read(cx));
+    }
+
+    /// Teams resets the bell when the feed is opened.
+    pub fn mark_seen(&mut self, cx: &mut Context<Self>) {
+        if self.feed.bell_count() == 0 {
+            return;
+        }
+        self.seen_locally_ms = Utc::now().timestamp_millis();
+        let _ = self
+            .app
+            .read(cx)
+            .store
+            .set_meta(SEEN_KEY, &self.seen_locally_ms.to_string());
+        self.rebuild(cx);
+    }
+
+    fn mark_read_where(&mut self, matches: impl Fn(&Entry) -> bool, cx: &mut Context<Self>) {
+        let message_ids: Vec<String> = self
+            .feed
+            .unread_entries()
+            .filter(|entry| matches(entry))
+            .map(|entry| entry.id.clone())
+            .collect();
+        if message_ids.is_empty() {
+            return;
+        }
+        for message_id in &message_ids {
+            self.snapshot.mark_read(message_id);
+        }
+        self.rebuild(cx);
+        self.app
+            .update(cx, |state, cx| state.mark_activity_read(message_ids, cx));
     }
 
     fn on_app_event(&mut self, event: &AppEvent, cx: &mut Context<Self>) {
         match event {
-            AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
+            AppEvent::Activity => self.reload(cx),
             AppEvent::Selection => self.on_selection(cx),
-            AppEvent::Sidebar => self.on_sidebar(cx),
-            AppEvent::MissedCall(missed) => self.on_missed_call(missed, cx),
+            AppEvent::Messages(conversation_id) if self.in_foreground(conversation_id, cx) => {
+                let conversation_id = conversation_id.clone();
+                self.mark_read_where(|entry| entry.conversation_id == conversation_id, cx);
+            }
             _ => {}
         }
     }
 
-    fn on_missed_call(&mut self, missed: &MissedCall, cx: &mut Context<Self>) {
-        let conversation_id = self
-            .app
-            .read(cx)
-            .conversation_of_missed_call(missed)
-            .unwrap_or_default();
-        let actor = Actor {
-            user_id: missed
-                .caller_mri
-                .strip_prefix("8:orgid:")
-                .map(str::to_owned),
-            name: missed.caller_name.clone(),
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        let state = self.app.read(cx);
+        if state.mode.demo {
+            return;
+        }
+        let Some(snapshot) = stored_activity_feed(&state.store) else {
+            return;
         };
-        self.feed
-            .record_missed_call(&conversation_id, actor, missed.at);
-        self.flush(cx);
+        self.snapshot = snapshot;
+        self.rebuild(cx);
+        self.request_avatars(cx);
     }
 
     fn on_selection(&mut self, cx: &mut Context<Self>) {
-        let selected = self
-            .app
-            .read(cx)
-            .selection
-            .as_ref()
-            .map(|selection| selection.conversation_id().to_owned());
-        let Some(conversation_id) = selected else {
+        let Some(conversation_id) = self.selected_conversation(cx) else {
             return;
         };
         agent_api::mark_conversation_proposals_seen(&conversation_id, cx);
-        if self.feed.mark_conversation_read(&conversation_id) {
-            self.flush(cx);
-        }
+        self.mark_read_where(|entry| entry.conversation_id == conversation_id, cx);
     }
 
     fn on_proposals(&mut self, cx: &mut Context<Self>) {
-        let selected = self
-            .app
-            .read(cx)
-            .selection
-            .as_ref()
-            .map(|selection| selection.conversation_id().to_owned());
-        if let Some(conversation_id) = selected
+        if let Some(conversation_id) = self.selected_conversation(cx)
             && self.in_foreground(&conversation_id, cx)
         {
             agent_api::mark_conversation_proposals_seen(&conversation_id, cx);
@@ -133,128 +147,40 @@ impl ActivityCenter {
         cx.notify();
     }
 
-    fn on_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.record_offline_chats(cx);
-        let sidebar = &self.app.read(cx).sidebar;
-        let read_at: HashMap<&str, DateTime<Utc>> = sidebar
-            .chats
-            .iter()
-            .filter(|chat| !chat.unread)
-            .filter_map(|chat| Some((chat.id.as_str(), chat.last_read_at?)))
-            .collect();
-        if self
-            .feed
-            .sync_read(|conversation_id| read_at.get(conversation_id).copied())
-        {
-            self.flush(cx);
-        }
-    }
-
-    fn record_offline_chats(&mut self, cx: &mut Context<Self>) {
-        let state = self.app.read(cx);
-        let my_user_id = state.directory.me.as_ref().map(|me| me.user_id.as_str());
-        let selected = state
-            .selection
-            .as_ref()
-            .map(|selection| selection.conversation_id());
-        for chat in state.sidebar.chats.iter().filter(|chat| chat.unread) {
-            let (Some(at), Some(preview)) = (chat.last_message_at, &chat.last_message_preview)
-            else {
-                continue;
-            };
-            let from_me =
-                my_user_id.is_some() && chat.last_message_sender_id.as_deref() == my_user_id;
-            if at <= self.cutoff
-                || chat.muted
-                || from_me
-                || chat.last_message_deleted
-                || selected == Some(chat.id.as_str())
-            {
-                continue;
-            }
-            let actor = Actor {
-                user_id: chat.last_message_sender_id.clone(),
-                name: chat.last_message_sender_name.clone().unwrap_or_default(),
-            };
-            self.feed
-                .record_chat_preview(&chat.id, actor, preview.clone(), at);
-        }
-    }
-
-    fn on_messages(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
-        let foreground = self.in_foreground(conversation_id, cx);
-        let state = self.app.read(cx);
-        let my_user_id = state.directory.me.as_ref().map(|me| me.user_id.clone());
-        let found = self.tracker.collect(
-            &state.store,
-            &state.sidebar,
-            my_user_id.as_deref(),
-            &state.late_arrivals,
-            conversation_id,
-        );
-        let reacted = my_user_id
-            .as_deref()
-            .map(|me| reacted_in(state, conversation_id, me))
-            .unwrap_or_default();
-        let _ = state.store.set_meta_time(WATERMARK_KEY, Utc::now());
-        if !foreground {
-            for incoming in found.iter().filter(|incoming| alerts(incoming)) {
-                self.feed
-                    .record_message(incoming, preview_label(&incoming.preview));
-            }
-        }
-        if let Some(me) = my_user_id {
-            for message in &reacted {
-                self.feed
-                    .record_reactions(conversation_id, message, &me, self.cutoff, Utc::now());
-            }
-        }
-        if foreground {
-            self.feed.mark_conversation_read(conversation_id);
-        }
-        self.flush(cx);
-    }
-
-    fn in_foreground(&self, conversation_id: &str, cx: &mut Context<Self>) -> bool {
-        let selected = self
-            .app
+    fn selected_conversation(&self, cx: &App) -> Option<String> {
+        self.app
             .read(cx)
             .selection
             .as_ref()
-            .is_some_and(|selection| selection.conversation_id() == conversation_id);
-        selected
+            .map(|selection| selection.conversation_id().to_owned())
+    }
+
+    fn in_foreground(&self, conversation_id: &str, cx: &mut Context<Self>) -> bool {
+        self.selected_conversation(cx).as_deref() == Some(conversation_id)
             && self
                 .main_window
                 .update(cx, |_, window, _| window.is_window_active())
                 .unwrap_or(false)
     }
 
-    fn flush(&mut self, cx: &mut Context<Self>) {
-        let dirty = self.feed.take_dirty();
-        if !dirty.is_empty() {
-            let records: Vec<_> = dirty.iter().map(Entry::to_record).collect();
-            let _ = self.app.read(cx).store.upsert_activity(&records);
-            let user_ids: Vec<String> = dirty
-                .iter()
-                .filter_map(|entry| entry.latest_actor()?.user_id.clone())
-                .collect();
-            self.app
-                .update(cx, |state, cx| state.request_avatars(user_ids, cx));
-        }
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        self.feed = feed_of(&self.snapshot, self.seen_locally_ms);
         cx.notify();
     }
-}
 
-fn reacted_in(state: &AppState, conversation_id: &str, my_user_id: &str) -> Vec<ReactedMessage> {
-    let Ok(records) = state.store.messages(conversation_id, None, RECENT_WINDOW) else {
-        return Vec::new();
-    };
-    let reactor_ids: Vec<String> = records
-        .iter()
-        .flat_map(teams_core::reactions)
-        .filter(|reaction| reaction.user_name.is_none())
-        .filter_map(|reaction| reaction.user_id)
-        .collect();
-    let names = resolve_names(state, &reactor_ids);
-    reacted_messages(&records, my_user_id, |user_id| names.get(user_id).cloned())
+    fn request_avatars(&self, cx: &mut Context<Self>) {
+        let mut user_ids: Vec<String> = self
+            .feed
+            .entries()
+            .iter()
+            .filter_map(|entry| entry.latest_actor()?.user_id.clone())
+            .collect();
+        user_ids.sort();
+        user_ids.dedup();
+        if user_ids.is_empty() {
+            return;
+        }
+        self.app
+            .update(cx, |state, cx| state.request_avatars(user_ids, cx));
+    }
 }

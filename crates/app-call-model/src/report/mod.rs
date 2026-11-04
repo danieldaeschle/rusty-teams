@@ -1,3 +1,4 @@
+mod common_words;
 mod document;
 mod markdown;
 mod scrub;

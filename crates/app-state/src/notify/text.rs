@@ -34,6 +34,7 @@ pub fn describe(model: &ToastModel, preview_on: bool) -> ToastText {
     };
     let subtitle = subtitle_of(&model.kind);
     let body = match (&model.preview, preview_on) {
+        (Preview::Text(text), false) if model.status_change => text.clone(),
         (_, false) => PREVIEW_OFF.to_owned(),
         (Preview::Text(text), true) => text.clone(),
         (Preview::Image, true) => IMAGE_LABEL.to_owned(),
@@ -106,6 +107,7 @@ mod tests {
             dismissed: false,
             fade: Fade::shown(Instant::now()),
             agent: None,
+            status_change: false,
             urgent: false,
         }
     }

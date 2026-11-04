@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget, is_bot_id};
 use teams_core::{
-    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
+    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, is_notes_chat, without_islands,
 };
 
 mod channel_details;
@@ -29,7 +29,13 @@ pub use channel_details::{
 mod deletes;
 mod detached;
 mod feed;
+mod forward_select;
+#[cfg(test)]
+pub use forward_select::{
+    FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG, FORWARD_FOOTER_TAG,
+};
 mod jump;
+mod notes_space;
 mod pins;
 mod proposal;
 mod recap;
@@ -46,6 +52,7 @@ use super::avatar::{
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
 use super::chat_members::members_popover;
+use super::chat_pop_out;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::group_name_button;
@@ -105,6 +112,7 @@ pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
+const POP_IN_BUTTON_SIZE: f32 = 32.;
 const HEADER_LEAD_SIZE: f32 = 36.;
 const TABS_INLINE_MIN_WIDTH: f32 = 560.;
 const FIND_MIN_TIMELINE_WIDTH: f32 = 360.;
@@ -193,6 +201,7 @@ enum ReactionAttempt {
 pub struct ConversationView {
     app: Entity<AppState>,
     pinned: bool,
+    popped_out: bool,
     scroller: Entity<MessageScrollerState>,
     composer: Entity<Composer>,
     subject: Entity<InputState>,
@@ -487,6 +496,17 @@ impl ConversationView {
         Self::build(app, Some(selection), window, cx)
     }
 
+    pub fn popped_out(
+        app: Entity<AppState>,
+        selection: Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::build(app, Some(selection), window, cx);
+        view.popped_out = true;
+        view
+    }
+
     fn build(
         app: Entity<AppState>,
         pinned: Option<Selection>,
@@ -528,6 +548,7 @@ impl ConversationView {
         let mut view = ConversationView {
             app,
             pinned: pinned.is_some(),
+            popped_out: false,
             scroller,
             composer,
             subject,
@@ -678,6 +699,7 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
+            AppEvent::ForwardSelection => self.on_forward_selection_changed(window, cx),
             AppEvent::TaskDialog
             | AppEvent::LocalPreviews
             | AppEvent::Forward
@@ -687,11 +709,13 @@ impl ConversationView {
             | AppEvent::Profile
             | AppEvent::CallHistory
             | AppEvent::Ring
+            | AppEvent::Activity
             | AppEvent::MissedCall(_)
             | AppEvent::MeetingReminder
             | AppEvent::MeetingChime
             | AppEvent::CallTone(_)
             | AppEvent::SoundSettings
+            | AppEvent::FollowedStatus { .. }
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),
@@ -1243,6 +1267,11 @@ impl ConversationView {
             .update(cx, |composer, cx| composer.focus(window, cx));
     }
 
+    pub fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |composer, cx| composer.focus(window, cx));
+    }
+
     pub fn reply_to_latest_from_others(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let key = self
             .rows
@@ -1456,21 +1485,35 @@ impl ConversationView {
     fn start_info(&self, cx: &App) -> Option<StartInfo> {
         let current = self.current.as_ref()?;
         let app = self.app.read(cx);
-        let user_id = match &current.selection {
-            Selection::Chat(chat_id) => app
-                .sidebar
-                .chats
-                .iter()
-                .find(|chat| &chat.id == chat_id)
-                .filter(|chat| is_one_on_one(chat))
-                .and_then(|chat| others(chat, app.directory.me.as_ref()).into_iter().next())
-                .and_then(|(user_id, _)| user_id),
-            Selection::Channel(_) => None,
+        let (user_id, member_name, notes) = match &current.selection {
+            Selection::Chat(chat_id) => {
+                let member = app
+                    .sidebar
+                    .chats
+                    .iter()
+                    .find(|chat| &chat.id == chat_id)
+                    .filter(|chat| is_one_on_one(chat))
+                    .and_then(|chat| others(chat, app.directory.me.as_ref()).into_iter().next());
+                let (user_id, name) = member.unzip();
+                (user_id.flatten(), name, is_notes_chat(chat_id))
+            }
+            Selection::Channel(_) => (None, None, false),
         };
         Some(StartInfo {
             title: current.title.clone(),
             user_id,
+            avatar_name: member_name
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| current.title.clone()),
+            notes,
         })
+    }
+
+    fn notes_space(&self) -> Option<StartInfo> {
+        match self.rows.borrow().as_slice() {
+            [Row::Start(start)] if start.notes => Some(start.clone()),
+            _ => None,
+        }
     }
 
     fn watch_feed_scroll(&mut self, cx: &mut Context<Self>) {
@@ -2531,6 +2574,9 @@ impl ConversationView {
     }
 
     fn set_hover(&mut self, slot: HoverSlot, key: &str, hovered: bool, cx: &mut Context<Self>) {
+        if hovered && matches!(slot, HoverSlot::Row) {
+            self.request_post_follow(key, cx);
+        }
         let target = match slot {
             HoverSlot::Row => &mut self.hovered_message,
             HoverSlot::Toolbar => &mut self.toolbar_hovered,
@@ -2539,6 +2585,12 @@ impl ConversationView {
             *target = Some(key.to_owned());
         } else if target.as_deref() == Some(key) {
             *target = None;
+        }
+        if hovered
+            && matches!(slot, HoverSlot::Row)
+            && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
+        {
+            self.toolbar_hovered = None;
         }
         if let Some(suppressed) = self.toolbar_suppressed.as_deref()
             && self.hovered_message.as_deref() != Some(suppressed)
@@ -3039,7 +3091,11 @@ impl ConversationView {
         let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
             let (view, key) = (view.clone(), key.to_owned());
             Rc::new(move |window, cx| {
-                view.update(cx, |this, cx| run(this, &key, window, cx)).ok();
+                view.update(cx, |this, cx| {
+                    this.set_pinned(&key, false, cx);
+                    run(this, &key, window, cx)
+                })
+                .ok();
             })
         };
         let react: PickHandler = {
@@ -3092,6 +3148,7 @@ impl ConversationView {
                     .is_some_and(|record| record.reply_to_id.is_none())
             });
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
+        let post_followed = self.post_follow(key, cx);
         MessageMenu {
             key: key.to_owned(),
             react,
@@ -3099,15 +3156,21 @@ impl ConversationView {
                 this.begin_reply(key, window, cx)
             })),
             forward: Some(action(|this, key, _, cx| this.forward_message(key, cx))),
+            forward_multiple: in_chat
+                .then(|| action(|this, key, _, cx| this.start_forward_selection(key, cx))),
             copy_link: Some(action(|this, key, _, cx| this.copy_link(key, cx))),
             copy: action(|this, key, _, cx| this.copy_text(key, cx)),
             translate: Some(action(|this, key, _, cx| this.translate_message(key, cx))),
             translate_label,
+            share_to_outlook: Some(action(|this, key, _, cx| this.share_to_outlook(key, cx))),
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
             toggle_pinned: pinnable
                 .then(|| action(|this, key, window, cx| this.toggle_pinned(key, window, cx))),
             pinned,
+            toggle_follow: post_followed
+                .map(|_| action(|this, key, _, cx| this.toggle_post_follow(key, cx))),
+            followed: post_followed.unwrap_or_default(),
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
             mark_unread: (in_chat && !own)
@@ -3390,7 +3453,7 @@ impl ConversationView {
                             }
                             _ => String::new(),
                         };
-                        if is_one_on_one(chat) {
+                        if is_one_on_one(chat) && !is_notes_chat(chat_id) {
                             stack = Some(add_people_button(&self.app, chat_id));
                         }
                     } else {
@@ -3466,7 +3529,7 @@ impl ConversationView {
         if let Some(note) = channel_note {
             subline = note.to_owned();
         }
-        let call_controls = if self.pinned {
+        let call_controls = if self.pinned && !self.popped_out {
             Vec::new()
         } else {
             header_call_controls(&self.app, app, &current.selection)
@@ -3532,6 +3595,29 @@ impl ConversationView {
             .children(stack)
             .children(call_controls)
             .children(self.channel_details_button(cx))
+            .children(self.pop_in_button(current))
+    }
+
+    fn pop_in_button(&self, current: &Current) -> Option<AnyElement> {
+        let Selection::Chat(chat_id) = &current.selection else {
+            return None;
+        };
+        if !self.popped_out {
+            return None;
+        }
+        let (app, chat_id) = (self.app.clone(), chat_id.clone());
+        Some(
+            Button::new("chat-pop-in")
+                .icon(IconName::SquareArrowDownLeft)
+                .ghost()
+                .size(px(POP_IN_BUTTON_SIZE))
+                .rounded(px(8.))
+                .tooltip(chat_pop_out::POP_IN_TOOLTIP)
+                .on_click(move |_, window, cx| {
+                    chat_pop_out::return_to_main_window(&app, &chat_id, window, cx)
+                })
+                .into_any_element(),
+        )
     }
 }
 
@@ -3566,6 +3652,7 @@ impl Render for ConversationView {
         if in_feed && rows_seen != usize::MAX {
             self.feed_at_top = rows_seen == 0;
         }
+        let forward_selection = self.active_forward_selection(cx);
         let rows = self.rows.clone();
         let rows_seen = self.feed_rows_seen.clone();
         let env = RenderEnv {
@@ -3577,6 +3664,7 @@ impl Render for ConversationView {
             timeline: self.timeline_bounds.clone(),
             agent_runs: self.agent_runs.clone(),
             reaction_proposals: self.reaction_proposals.clone(),
+            forward_selection: forward_selection.clone(),
         };
         let pin_banner = self
             .render_pin_banner(cx)
@@ -3652,9 +3740,12 @@ impl Render for ConversationView {
                                     },
                                     56.,
                                 ),
-                                user_id => {
-                                    person_avatar(&state.directory, user_id, &start.title, 56.)
-                                }
+                                user_id => person_avatar(
+                                    &state.directory,
+                                    user_id,
+                                    &start.avatar_name,
+                                    56.,
+                                ),
                             })
                             .child(
                                 div()
@@ -3757,6 +3848,8 @@ impl Render for ConversationView {
             self.render_shared(cx)
         } else if self.recap_active() {
             self.render_recap(cx)
+        } else if let Some(start) = self.notes_space() {
+            notes_space::render_notes_space(&self.app.read(cx).directory, &start)
         } else if empty_channel {
             div()
                 .size_full()
@@ -3800,12 +3893,16 @@ impl Render for ConversationView {
                     .children(pin_banner.map(pin_banner_overlay)),
             )
             .children(self.render_draft_error(cx))
-            .when(!in_feed && !recap_active, |column| {
-                column
-                    .child(self.render_typing_line(cx))
-                    .children(self.render_proposal_card(cx))
-                    .child(self.composer.clone())
-            })
+            .when(
+                !in_feed && !recap_active,
+                |column| match &forward_selection {
+                    Some(snapshot) => column.child(self.render_forward_footer(snapshot, cx)),
+                    None => column
+                        .child(self.render_typing_line(cx))
+                        .children(self.render_proposal_card(cx))
+                        .child(self.composer.clone()),
+                },
+            )
             .child(self.render_drop_overlay(cx));
         root.child(
             h_flex()
@@ -3839,6 +3936,7 @@ impl Render for ConversationView {
                 if this.draft.read(cx).has_focus(window, cx) {
                     this.draft.update(cx, |draft, cx| draft.escape(cx));
                 }
+            } else if this.cancel_forward_selection(cx) {
             } else if !this.on_escape(window, cx) {
                 cx.propagate();
             }

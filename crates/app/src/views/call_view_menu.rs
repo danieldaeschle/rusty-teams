@@ -101,6 +101,13 @@ pub(super) fn view_items(
             app,
         ))
         .item(switch_item(
+            "call-view-hide-timer",
+            "Hide meeting timer",
+            model.view.hide_timer,
+            |state, cx| state.toggle_call_hide_timer(cx),
+            app,
+        ))
+        .item(switch_item(
             "call-view-chat-bubbles",
             "Chat bubbles",
             model.view.chat_bubbles,

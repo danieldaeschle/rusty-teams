@@ -125,10 +125,10 @@ fn reactions_submenu(
             for reaction in Reaction::ALL {
                 let app = app.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(format!("{} {}", reaction_glyph(reaction), reaction.name()))
+                    PopupMenuItem::new(format!("{} {}", reaction_glyph(&reaction), reaction.name()))
                         .disabled(!can_react)
                         .on_click(move |_, _, cx| {
-                            app.update(cx, |state, cx| state.send_call_reaction(reaction, cx))
+                            app.update(cx, |state, cx| state.send_call_reaction(reaction.clone(), cx))
                         }),
                 );
             }

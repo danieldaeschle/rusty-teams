@@ -50,6 +50,14 @@ pub(crate) fn notes_chat_record(
     record
 }
 
+/// Teams lists a hidden chat again once a message is newer than the hide time.
+fn is_hidden(state: &ConversationState) -> bool {
+    state.hidden == Some(true)
+        || state
+            .hidden_at_ms
+            .is_some_and(|hidden_at_ms| hidden_at_ms >= state.read.last_message_ms)
+}
+
 fn needs_messages(record: &ChatRecord) -> bool {
     record.last_message_at.is_some()
         && record.last_message_preview.is_none()
@@ -73,17 +81,22 @@ impl<R: Remote> SyncEngine<R> {
         let Some(states) = states else {
             return stored.map(|stored| stored.id);
         };
+        let placeholder = ConversationState {
+            id: NOTES_CHAT_ID.to_owned(),
+            ..ConversationState::default()
+        };
         let state = states
             .iter()
-            .find(|state| is_notes_chat(&state.id) && state.hidden != Some(true));
-        let Some(state) = state else {
+            .find(|state| is_notes_chat(&state.id))
+            .unwrap_or(&placeholder);
+        if is_hidden(state) {
             if stored.is_some()
                 && let Err(error) = self.store.remove_chats(&[NOTES_CHAT_ID.to_owned()])
             {
                 self.report(format!("cannot remove the notes chat: {error}"));
             }
             return None;
-        };
+        }
         let display_name = self.me().map(|me| me.display_name).unwrap_or_default();
         let record = notes_chat_record(state, my_user_id, &display_name, stored.as_ref());
         if let Err(error) = self.store.upsert_chats(std::slice::from_ref(&record)) {
@@ -118,6 +131,7 @@ mod tests {
             },
             notification_settings: None,
             history_cleared_ms: None,
+            hidden_at_ms: None,
         }
     }
 
@@ -148,6 +162,18 @@ mod tests {
         let newer = notes_chat_record(&state(12, 9, "me"), "me", "Ada", Some(&stored));
         assert_eq!(newer.last_message_preview, None);
         assert!(needs_messages(&newer));
+    }
+
+    #[test]
+    fn a_hidden_notes_chat_comes_back_with_a_newer_note() {
+        let mut hidden = state(9, 9, "me");
+        hidden.hidden_at_ms = Some(9);
+        assert!(is_hidden(&hidden));
+        hidden.read.last_message_ms = 10;
+        assert!(!is_hidden(&hidden));
+        hidden.hidden = Some(true);
+        assert!(is_hidden(&hidden));
+        assert!(!is_hidden(&state(9, 9, "me")));
     }
 
     #[test]

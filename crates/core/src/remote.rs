@@ -1,18 +1,20 @@
+use std::collections::HashMap;
+
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, AppConsumptionHorizon, ChatNotificationMode, ChatNotificationWrite,
-    ChatSettingChange, ChatSettingsClient, ChatSettingsDocument, DesktopNotifications,
-    MentionActivity, UserSettings, parse_app_consumption_horizon,
+    ActivityFeed, ActivitySnapshot, AppConsumptionHorizon, ChatNotificationMode,
+    ChatNotificationWrite, ChatSettingChange, ChatSettingsClient, ChatSettingsDocument,
+    DesktopNotifications, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
     ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, HistoryShare,
     InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo,
     MemberHorizon, MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages,
-    PinnedMessage, Pins, PresenceLookup, PresenceService, PresenceStatus, Receipts,
+    PinnedMessage, Pins, PostFollowState, PresenceLookup, PresenceService, PresenceStatus, Receipts,
     RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, ThreadMembers,
     TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
     WorkLocationKind,
@@ -20,7 +22,7 @@ use chatsvc::{
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
+    OutgoingMention, Photo, Presence, SharedFile, Tag, Team, UploadDestination, UploadedFile, User,
 };
 
 use crate::error::{Error, Result};
@@ -155,6 +157,12 @@ pub trait Remote {
     }
     async fn set_chat_muted(&self, chat_id: &str, muted: bool) -> Result<()>;
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()>;
+    async fn set_read_bookmark(&self, _conversation_id: &str, _bookmark: &str) -> Result<()> {
+        Err(Error::Unsupported("marking the notes chat as unread"))
+    }
+    async fn set_chat_hidden_at(&self, _chat_id: &str, _hidden_at_ms: Option<i64>) -> Result<()> {
+        Err(Error::Unsupported("hiding the notes chat"))
+    }
     async fn set_channel_notifications(
         &self,
         channel_id: &str,
@@ -180,6 +188,10 @@ pub trait Remote {
         topic: Option<&str>,
     ) -> Result<Chat>;
     async fn search_people(&self, query: &str) -> Result<Vec<User>>;
+
+    async fn team_tags(&self, _team_id: &str) -> Result<Vec<Tag>> {
+        Err(Error::Unsupported("team tags"))
+    }
 
     async fn reply_with_quote(
         &self,
@@ -333,6 +345,24 @@ pub trait Remote {
         Err(Error::Unsupported("saved messages"))
     }
 
+    async fn set_post_followed(
+        &self,
+        _user_id: &str,
+        _channel_id: &str,
+        _root_id: &str,
+        _followed: bool,
+    ) -> Result<Option<String>> {
+        Err(Error::Unsupported("following posts"))
+    }
+
+    async fn post_follow_states(
+        &self,
+        _channel_id: &str,
+        _root_ids: &[String],
+    ) -> Result<HashMap<String, PostFollowState>> {
+        Err(Error::Unsupported("post follow states"))
+    }
+
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
         Err(Error::Unsupported("call history"))
     }
@@ -390,8 +420,16 @@ pub trait Remote {
         Err(Error::Unsupported("pinning channel posts"))
     }
 
-    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
+    async fn activity_feed(&self) -> Result<ActivitySnapshot> {
         Err(Error::Unsupported("the activity feed"))
+    }
+
+    async fn mark_activity_read(&self, _message_id: &str) -> Result<()> {
+        Err(Error::Unsupported("marking activity as read"))
+    }
+
+    async fn mark_all_activity_read(&self, _now_ms: i64) -> Result<()> {
+        Err(Error::Unsupported("marking all activity as read"))
     }
 
     async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
@@ -811,6 +849,18 @@ impl Remote for Graph {
             .await?)
     }
 
+    async fn set_read_bookmark(&self, conversation_id: &str, bookmark: &str) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_read_bookmark(conversation_id, bookmark)
+            .await?)
+    }
+
+    async fn set_chat_hidden_at(&self, chat_id: &str, hidden_at_ms: Option<i64>) -> Result<()> {
+        Ok(Conversations::new(self.session())
+            .set_hidden_at(chat_id, hidden_at_ms)
+            .await?)
+    }
+
     async fn set_channel_notifications(
         &self,
         channel_id: &str,
@@ -915,6 +965,10 @@ impl Remote for Graph {
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
         Ok(Graph::search_people(self, query).await?)
+    }
+
+    async fn team_tags(&self, team_id: &str) -> Result<Vec<Tag>> {
+        Ok(Graph::team_tags(self, team_id).await?)
     }
 
     async fn reply_with_quote(
@@ -1110,6 +1164,28 @@ impl Remote for Graph {
         Ok(Messages::new(self.session()).list_saved().await?)
     }
 
+    async fn set_post_followed(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        followed: bool,
+    ) -> Result<Option<String>> {
+        Ok(Messages::new(self.session())
+            .set_post_followed(user_id, channel_id, root_id, followed)
+            .await?)
+    }
+
+    async fn post_follow_states(
+        &self,
+        channel_id: &str,
+        root_ids: &[String],
+    ) -> Result<HashMap<String, PostFollowState>> {
+        Ok(Messages::new(self.session())
+            .post_follow_states(channel_id, root_ids)
+            .await?)
+    }
+
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
         Ok(Messages::new(self.session()).list_call_logs().await?)
     }
@@ -1181,8 +1257,16 @@ impl Remote for Graph {
             .await?)
     }
 
-    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
-        Ok(ActivityFeed::new(self.session()).mentions().await?)
+    async fn activity_feed(&self) -> Result<ActivitySnapshot> {
+        Ok(ActivityFeed::new(self.session()).snapshot().await?)
+    }
+
+    async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
+        Ok(ActivityFeed::new(self.session()).mark_read(message_id).await?)
+    }
+
+    async fn mark_all_activity_read(&self, now_ms: i64) -> Result<()> {
+        Ok(ActivityFeed::new(self.session()).mark_all_read(now_ms).await?)
     }
 
     async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {

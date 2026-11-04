@@ -1,10 +1,14 @@
 use crate::root::WindowState;
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::{Rc, Weak},
+    time::Duration,
+};
 
 use gpui::{
-    Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_base::{
     Tooltip as BaseTooltip, TooltipOverlay as BaseTooltipOverlay,
@@ -28,6 +32,8 @@ enum TooltipContext {
     Text(Text),
     Element(Box<dyn Fn(&mut Window, &mut App) -> AnyElement>),
 }
+
+pub const TOOLTIP_DEBUG_SELECTOR: &str = "tooltip";
 
 /// A Tooltip element that can display text or custom content,
 /// with optional key binding information.
@@ -106,7 +112,8 @@ impl Render for Tooltip {
             }
         };
 
-        div().child(
+        let tooltip = div().debug_selector(|| TOOLTIP_DEBUG_SELECTOR.into());
+        tooltip.child(
             // Wrap in a child, to ensure the left margin is applied to the tooltip
             BaseTooltip::new("tooltip-popup")
                 .h_flex()
@@ -140,6 +147,32 @@ impl Render for Tooltip {
         )
     }
 }
+
+/// A tooltip for an element that opens a popup or menu. It is dropped while
+/// the popup is open, so it never covers it and does not come back until the
+/// popup closes.
+pub trait PopupTriggerTooltip: StatefulInteractiveElement + Sized {
+    fn popup_trigger_tooltip(
+        self,
+        popup_open: bool,
+        build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
+    ) -> Self {
+        if popup_open {
+            self
+        } else {
+            self.tooltip(build_tooltip)
+        }
+    }
+
+    fn popup_trigger_tooltip_text(self, popup_open: bool, text: impl Into<SharedString>) -> Self {
+        let text = text.into();
+        self.popup_trigger_tooltip(popup_open, move |window, cx| {
+            Tooltip::new(text.clone()).build(window, cx)
+        })
+    }
+}
+
+impl<E: StatefulInteractiveElement + Sized> PopupTriggerTooltip for E {}
 
 // ── Managed tooltip system ──────────────────────────────────────────────────
 
@@ -250,9 +283,12 @@ pub(crate) trait ManagedTooltipExt:
         let build_tooltip = Rc::new(build_tooltip);
         let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
         let bounds_writer = trigger_bounds_cell.clone();
+        let trigger_alive_cell: Rc<RefCell<Weak<()>>> = Rc::new(RefCell::new(Weak::new()));
+        let alive_writer = trigger_alive_cell.clone();
 
-        self.on_prepaint(move |bounds, _, _| {
+        self.on_prepaint(move |bounds, window, _| {
             bounds_writer.set(bounds);
+            *alive_writer.borrow_mut() = trigger_alive_token(window);
         })
         .on_hover({
             let trigger_bounds_cell = trigger_bounds_cell.clone();
@@ -261,11 +297,13 @@ pub(crate) trait ManagedTooltipExt:
                 if let Some(overlay) = WindowState::tooltip_overlay(window, cx) {
                     if *hovered {
                         let bounds = trigger_bounds_cell.get();
+                        let trigger_alive = trigger_alive_cell.borrow().clone();
                         overlay.update(cx, |o: &mut BaseTooltipOverlay, cx| {
                             let build = build_tooltip.clone();
                             let request = BaseTooltipRequest::new(bounds, move |window, cx| {
                                 build(window, cx)
-                            });
+                            })
+                            .while_alive(trigger_alive);
                             let request = match preferred_placement {
                                 Some(placement) => request.placement(placement),
                                 None => request,
@@ -291,3 +329,16 @@ pub(crate) trait ManagedTooltipExt:
 }
 
 impl<E: StatefulInteractiveElement + crate::ElementExt> ManagedTooltipExt for E {}
+
+/// Lives in the trigger's element state, so it is dropped after the first frame that does not render the trigger.
+fn trigger_alive_token(window: &mut Window) -> Weak<()> {
+    window.with_global_id(
+        ElementId::Name("managed-tooltip-alive".into()),
+        |id, window| {
+            window.with_element_state(id, |token: Option<Rc<()>>, _| {
+                let token = token.unwrap_or_default();
+                (Rc::downgrade(&token), token)
+            })
+        },
+    )
+}
