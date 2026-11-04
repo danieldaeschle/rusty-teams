@@ -176,6 +176,16 @@ impl Store {
         Ok(changed > 0)
     }
 
+    pub fn touch_chat_time(&self, chat_id: &str, at: DateTime<Utc>) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE chats SET last_message_at = ?2
+             WHERE id = ?1 AND (last_message_at IS NULL OR last_message_at < ?2)",
+            params![chat_id, to_millis(at)],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn recent_chats(&self, limit: usize) -> Result<Vec<ChatRecord>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare_cached(&format!(

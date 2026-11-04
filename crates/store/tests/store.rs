@@ -769,6 +769,18 @@ fn preview_updates_only_for_newer_messages() {
 }
 
 #[test]
+fn a_call_moves_the_chat_time_and_keeps_the_line() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_chats(&[chat("a", "A", Some(at(5)))]).unwrap();
+    let before = store.chat("a").unwrap().unwrap().last_message_preview;
+    assert!(!store.touch_chat_time("a", at(4)).unwrap());
+    assert!(store.touch_chat_time("a", at(7)).unwrap());
+    let record = store.chat("a").unwrap().unwrap();
+    assert_eq!(record.last_message_at, Some(at(7)));
+    assert_eq!(record.last_message_preview, before);
+}
+
+#[test]
 fn avatars_round_trip_and_report_stale_ids() {
     let store = Store::open_in_memory().unwrap();
     store

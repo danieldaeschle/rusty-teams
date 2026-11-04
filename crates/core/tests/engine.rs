@@ -2823,7 +2823,7 @@ async fn a_newer_message_updates_the_preview_and_announces_the_sidebar() {
 }
 
 #[tokio::test]
-async fn a_newer_call_event_leaves_the_preview_alone() {
+async fn a_newer_call_event_keeps_the_line_and_moves_the_time() {
     let fake = Arc::new(Fake::default());
     let mut before = numbered(3);
     before.push(message(4, 30, "<p>before the call</p>"));
@@ -2849,7 +2849,7 @@ async fn a_newer_call_event_leaves_the_preview_alone() {
         record.last_message_preview.as_deref(),
         Some("before the call")
     );
-    assert_eq!(record.last_message_at, Some(base() + Duration::minutes(30)));
+    assert_eq!(record.last_message_at, Some(base() + Duration::minutes(40)));
 }
 
 #[tokio::test]
