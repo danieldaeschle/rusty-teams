@@ -263,6 +263,13 @@ impl FormatButton {
         tooltip.split(" (").next().unwrap_or(tooltip)
     }
 
+    fn edits_table(self) -> bool {
+        matches!(
+            self,
+            FormatButton::TableInsertLine | FormatButton::TableRemoveLine
+        )
+    }
+
     /// Opens a picker or menu below itself instead of acting at once.
     pub fn opens_popup(self) -> bool {
         matches!(
@@ -523,7 +530,7 @@ pub fn render_format_bar(
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
 ) -> Div {
     let row = groups_row(&fit.visible, state, on_press.clone(), overlay);
-    if fit.overflow.is_empty() {
+    if menu_groups(&fit.overflow, state).is_empty() {
         return row;
     }
     row.child(button(
@@ -542,7 +549,7 @@ pub fn render_overflow_menu(
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
 ) -> Div {
     let mut menu = v_flex().w(px(MENU_WIDTH)).py(px(MENU_PADDING));
-    for (index, group) in groups.iter().enumerate() {
+    for (index, group) in menu_groups(groups, state).iter().enumerate() {
         if index > 0 {
             menu = menu.child(
                 div()
@@ -562,6 +569,23 @@ pub fn render_overflow_menu(
         }
     }
     menu
+}
+
+fn menu_groups(
+    groups: &[Vec<FormatButton>],
+    state: &dyn Fn(FormatButton) -> ButtonState,
+) -> Vec<Vec<FormatButton>> {
+    groups
+        .iter()
+        .map(|group| {
+            group
+                .iter()
+                .copied()
+                .filter(|format| !format.edits_table() || state(*format).enabled)
+                .collect::<Vec<_>>()
+        })
+        .filter(|group| !group.is_empty())
+        .collect()
 }
 
 fn menu_row(
@@ -730,8 +754,9 @@ mod tests {
     use gpui_kit::px;
 
     use super::{
-        ARROW_MARGIN, BAR_GROUPS, BUTTON, FormatButton, SELECTION_GROUPS, bar_width, fit_groups,
-        groups_width, place, toggle_symbol, toggle_tooltip,
+        ARROW_MARGIN, BAR_GROUPS, BUTTON, ButtonState, FormatButton, FormatState,
+        SELECTION_GROUPS, bar_width, fit_groups, groups_width, menu_groups, place, toggle_symbol,
+        toggle_tooltip,
     };
 
 
@@ -845,6 +870,18 @@ mod tests {
         assert_eq!(fit.visible.len(), 2);
         assert_eq!(fit.visible[1], vec![FormatButton::Superscript]);
         assert_eq!(fit.overflow[0], vec![FormatButton::Subscript]);
+    }
+
+    #[test]
+    fn outside_a_table_the_menu_drops_the_table_edits_and_their_group() {
+        let fit = fit_groups(groups_width(&BAR_GROUPS) - 1., &BAR_GROUPS);
+        let outside = |format: FormatButton| match format {
+            FormatButton::TableInsertLine | FormatButton::TableRemoveLine => ButtonState::disabled(),
+            _ => ButtonState::enabled(FormatState::Off),
+        };
+        assert!(menu_groups(&fit.overflow, &outside).is_empty());
+        let inside = |_| ButtonState::enabled(FormatState::Off);
+        assert_eq!(menu_groups(&fit.overflow, &inside), fit.overflow);
     }
 
     #[test]
