@@ -89,6 +89,13 @@ impl DraftWrites {
         *landed = sequence;
         Some(write.apply(store))
     }
+
+    fn latest(landed: &Mutex<u64>, sequence: u64) -> bool {
+        *landed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            == sequence
+    }
 }
 
 impl Composer {
@@ -109,6 +116,7 @@ impl Composer {
             else {
                 return;
             };
+            let check = landed.clone();
             let result = cx
                 .background_spawn(async move {
                     let saved = DraftWrites::apply(&landed, sequence, &write, &store)?;
@@ -122,9 +130,11 @@ impl Composer {
                 if composer.draft_writes.issued == sequence {
                     composer.saved_images = fingerprint.filter(|_| saved);
                 }
-                composer
-                    .app
-                    .update(cx, |state, cx| state.set_local_previews(previews, cx));
+                if DraftWrites::latest(&check, sequence) {
+                    composer
+                        .app
+                        .update(cx, |state, cx| state.set_local_previews(previews, cx));
+                }
             })
             .ok();
         }));
