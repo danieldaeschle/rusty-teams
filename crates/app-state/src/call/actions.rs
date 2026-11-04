@@ -28,6 +28,7 @@ use super::target::{is_echo_chat, is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title, selection_for};
 use crate::notice::NoticeAction;
 
+const LOBBY_TONE_THROTTLE: Duration = Duration::from_secs(30);
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
 const SHARE_SOURCES_EVERY_TICKS: u32 = 10;
 pub(super) const NOT_CONNECTED_NOTICE: &str = "Not connected to Teams yet";
@@ -525,7 +526,16 @@ impl AppState {
             crate::agent_api::note_caption(thread, &entry.id, speaker, &entry.text, cx);
         }
         let sharer_before = call.model.screen_sharer.clone();
+        let lobby_before = call.model.lobby_mris();
         call.model.apply(update);
+        if call.model.someone_entered_the_lobby(&lobby_before)
+            && call
+                .lobby_tone_at
+                .is_none_or(|played_at| played_at.elapsed() >= LOBBY_TONE_THROTTLE)
+        {
+            call.lobby_tone_at = Some(Instant::now());
+            cx.emit(AppEvent::CallTone(chatsvc::sounds::CallTone::MeetingReminder));
+        }
         if call.model.screen_sharer != sharer_before {
             call.pictures.forget(&VideoKey::Screen, cx);
         }
