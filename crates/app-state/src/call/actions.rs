@@ -798,7 +798,7 @@ impl AppState {
             return;
         };
         if let Some(own_mri) = call.model.own_mri.clone() {
-            call.model.note_reaction(own_mri, reaction, Instant::now());
+            call.model.note_reaction(own_mri, reaction.clone(), Instant::now());
         }
         self.send_call_command(CallCommand::SendReaction(reaction));
         cx.emit(AppEvent::Call);

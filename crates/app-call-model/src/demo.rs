@@ -582,7 +582,7 @@ async fn speak_until_hangup(
                 if ticks % REACTION_EVERY_TICKS == REACTION_EVERY_TICKS / 2
                     && let Some((mri, _)) = people.get((ticks / REACTION_EVERY_TICKS) as usize % people.len().max(1))
                 {
-                    let reaction = Reaction::ALL[(ticks / REACTION_EVERY_TICKS) as usize % Reaction::ALL.len()];
+                    let reaction = Reaction::ALL[(ticks / REACTION_EVERY_TICKS) as usize % Reaction::ALL.len()].clone();
                     control.send(CallUpdate::Reaction { mri: mri.clone(), reaction });
                 }
                 if captions_on {

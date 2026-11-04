@@ -1840,13 +1840,13 @@ mod tests {
         let reaction_at = |model: &CallModel, mri: &str, seconds: u64| {
             model
                 .chip_of(mri, start + Duration::from_secs(seconds))
-                .map(|chip| chip.reaction)
+                .map(|chip| chip.reaction.clone())
         };
         assert_eq!(reaction_at(&model, "8:orgid:a", 2), Some(Reaction::Heart));
         assert_eq!(
             model
                 .own_chip(start + Duration::from_secs(2))
-                .map(|chip| chip.reaction),
+                .map(|chip| chip.reaction.clone()),
             Some(Reaction::Like)
         );
         assert_eq!(reaction_at(&model, "8:orgid:a", 3), None);
