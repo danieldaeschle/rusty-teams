@@ -1931,6 +1931,9 @@ fn channel_menu(
                         ChannelMenuItem::Unpin => state.set_channel_pinned(&action_id, false, cx),
                         ChannelMenuItem::Show => state.set_channel_shown(&action_id, true, cx),
                         ChannelMenuItem::Hide => state.set_channel_shown(&action_id, false, cx),
+                        ChannelMenuItem::ManageChannel => {
+                            state.manage_channel_in_browser(&action_id, cx)
+                        }
                         ChannelMenuItem::CopyLink => state.copy_channel_link(&action_id, cx),
                         ChannelMenuItem::Notifications => {}
                     });
@@ -1947,6 +1950,7 @@ fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
         ChannelMenuItem::Unpin => IconName::PinOff,
         ChannelMenuItem::Show => IconName::Eye,
         ChannelMenuItem::Hide => IconName::EyeOff,
+        ChannelMenuItem::ManageChannel => IconName::Settings,
         ChannelMenuItem::CopyLink => IconName::Link,
     }
 }
