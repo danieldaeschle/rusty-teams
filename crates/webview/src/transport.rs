@@ -29,6 +29,10 @@ pub(crate) enum UiRequest {
     Wake {
         app: App,
     },
+    Hold {
+        app: App,
+        held: bool,
+    },
     Retry,
     OpenDialog {
         id: u64,
@@ -145,6 +149,10 @@ impl Transport for WebViewTransport {
 
     fn wake(&self, app: App) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { self.send(UiRequest::Wake { app }) })
+    }
+
+    fn hold(&self, app: App, held: bool) {
+        let _ = self.send(UiRequest::Hold { app, held });
     }
 
     fn diagnose(&self) -> BoxFuture<'_, Result<Diagnosis>> {

@@ -2395,7 +2395,7 @@ async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
     assert_eq!(fake.sent.lock().unwrap().as_slice(), ["note to self"]);
     let calls = fake.calls();
     for expected in [
-        "quote_reply 48:notes m9000 again",
+        "chatsvc post 48:notes",
         "edit m9000 edited",
         "set_reaction m9000 \u{1f44d}",
         "unset_reaction m9000 \u{1f44d}",
@@ -3844,10 +3844,13 @@ async fn chat_reply_quotes_and_channel_reply_uses_the_thread_root() {
         .reply_to(CHAT, "m0001", "answer **bold**")
         .await
         .unwrap();
-    assert_eq!(sent.message_id, "m9003");
+    assert_eq!(sent.message_id, "1727203440000");
+    assert!(fake.calls().contains(&format!("chatsvc post {CHAT}")));
     assert!(
-        fake.calls()
-            .contains(&format!("quote_reply {CHAT} m0001 answer <b>bold</b>"))
+        !fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("quote_reply"))
     );
 
     let channel_fake = Arc::new(Fake::default());
@@ -5436,6 +5439,110 @@ async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
         !member_requests
             .iter()
             .any(|chat_id| chat_id == NOTES_CHAT_ID)
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_chat_reply_is_written_through_chatsvc_in_the_teams_shape() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let extras = MessageExtras {
+        importance: Some("high"),
+        ..MessageExtras::default()
+    };
+    let sent = engine
+        .reply_to_with_extras(
+            CHAT,
+            "m0001",
+            "<p>thanks @Ada Example</p>",
+            &[MentionInput::user("user-ada", "Ada Example")],
+            &extras,
+        )
+        .await
+        .unwrap();
+    let (conversation_id, html, display_name, properties) =
+        fake.chatsvc_posts.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(conversation_id, CHAT);
+    assert_eq!(display_name, "Me Myself");
+    let time = (base() + Duration::minutes(1)).timestamp_millis();
+    let quote = format!(
+        "<blockquote itemscope=\"\" itemtype=\"http://schema.skype.com/Reply\" itemid=\"m0001\"><strong itemprop=\"mri\" itemid=\"8:orgid:user-ada\">Ada Example</strong><span itemprop=\"time\" itemid=\"{time}\"></span><p itemprop=\"preview\">n1</p></blockquote>"
+    );
+    assert_eq!(
+        html,
+        format!(
+            "{quote}<p>thanks <span itemscope=\"\" itemtype=\"http://schema.skype.com/Mention\" itemid=\"0\">Ada Example</span></p>"
+        )
+    );
+    let mentions = json!([{
+        "@type": "http://schema.skype.com/Mention",
+        "itemid": "0",
+        "mri": "8:orgid:user-ada",
+        "mentionType": "person",
+        "displayName": "Ada Example",
+    }]);
+    let quoted = json!([{"messageId": "m0001", "sender": "8:orgid:user-ada", "time": time}]);
+    assert_eq!(
+        properties,
+        json!({
+            "importance": "high",
+            "links": "[]",
+            "mentions": mentions.to_string(),
+            "onbehalfof": null,
+            "files": "[]",
+            "qtdMsgs": quoted.to_string(),
+            "formatVariant": "TEAMS",
+        })
+    );
+    assert_eq!(sent.message_id, "1727203440000");
+    assert_eq!(sent.reply_to_id, None);
+    assert_eq!(sent.importance, store::MessageImportance::High);
+    assert!(sent.body_html.starts_with(&quote));
+    assert!(
+        !fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("quote_reply"))
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_chat_reply_with_an_image_stays_on_graph() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let extras = MessageExtras {
+        images: vec![HostedImage {
+            content_type: "image/png".into(),
+            bytes: Arc::new(vec![9]),
+        }],
+        ..MessageExtras::default()
+    };
+    engine
+        .reply_to_with_extras(CHAT, "m0001", "look", &[], &extras)
+        .await
+        .unwrap();
+    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
+    assert!(
+        fake.calls()
+            .contains(&format!("quote_reply {CHAT} m0001 look"))
+    );
+}
+
+#[tokio::test]
+async fn a_quoted_reply_to_an_unknown_message_stays_on_graph() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(2));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    engine.reply_to(CHAT, "m7777", "hi").await.unwrap();
+    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
+    assert!(
+        fake.calls()
+            .contains(&format!("quote_reply {CHAT} m7777 hi"))
     );
 }
 

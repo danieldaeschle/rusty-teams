@@ -5,9 +5,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting,
-    MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle, SourceError,
-    SourceFuture, TeamsSource, Transcript, TranscriptTurn,
+    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind,
+    LinkInfo, Meeting, MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle,
+    SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig};
@@ -1026,14 +1026,11 @@ async fn recent_messages_unread_only_covers_chats_and_channels() {
 
     harness
         .store
-        .upsert_channels(&[ChannelRecord {
-            id: CHANNEL.to_owned(),
-            team_id: "team-1".to_owned(),
-            name: "General".to_owned(),
-            membership_type: None,
-            last_message_at: Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 6, 0).unwrap()),
-            unread: true,
-        }])
+        .apply_channel_read_states(&[(
+            CHANNEL.to_owned(),
+            true,
+            Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 6, 0).unwrap()),
+        )])
         .unwrap();
     let (_, body) = call(&client, "recent_messages", arguments()).await;
     assert_eq!(

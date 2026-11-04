@@ -139,6 +139,15 @@ impl Session {
         Ok(results.into_iter().flatten().collect())
     }
 
+    /// Keeps the app tab where it is until the guard drops, e.g. for the length of a call.
+    pub fn hold_tab(&self, app: App) -> TabHold {
+        self.transport.hold(app, true);
+        TabHold {
+            transport: self.transport.clone(),
+            app,
+        }
+    }
+
     pub async fn close(&self) {
         self.drop_all().await;
     }
@@ -270,6 +279,17 @@ impl Session {
     }
 }
 
+pub struct TabHold {
+    transport: Arc<dyn Transport>,
+    app: App,
+}
+
+impl Drop for TabHold {
+    fn drop(&mut self) {
+        self.transport.hold(self.app, false);
+    }
+}
+
 pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
     header
         .and_then(|value| value.trim().parse::<f64>().ok())
@@ -280,7 +300,47 @@ pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex as StdMutex;
+
     use super::*;
+    use crate::transport::{BoxFuture, Diagnosis, OpenedTab};
+
+    #[derive(Default)]
+    struct HoldRecorder {
+        holds: StdMutex<Vec<(App, bool)>>,
+    }
+
+    impl Transport for HoldRecorder {
+        fn check(&self) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn open(&self, _app: App, _with_events: bool) -> BoxFuture<'_, Result<Option<OpenedTab>>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn wake(&self, _app: App) -> BoxFuture<'_, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn diagnose(&self) -> BoxFuture<'_, Result<Diagnosis>> {
+            Box::pin(async { Ok(Diagnosis::default()) })
+        }
+
+        fn hold(&self, app: App, held: bool) {
+            self.holds.lock().unwrap().push((app, held));
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_hold_releases_the_tab_when_dropped() {
+        let recorder = Arc::new(HoldRecorder::default());
+        let session = Session::with_transport(recorder.clone(), SessionConfig::default()).await.unwrap();
+        let hold = session.hold_tab(App::Teams);
+        assert_eq!(*recorder.holds.lock().unwrap(), vec![(App::Teams, true)]);
+        drop(hold);
+        assert_eq!(*recorder.holds.lock().unwrap(), vec![(App::Teams, true), (App::Teams, false)]);
+    }
 
     #[test]
     fn retry_after_seconds_parse() {

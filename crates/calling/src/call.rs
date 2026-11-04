@@ -441,6 +441,7 @@ impl CallEngine {
     pub(crate) async fn run(&self, plan: Plan, options: CallOptions, mut control: CallControl) -> Result<CallReport> {
         let inner = self.inner.as_ref();
         let _one_call_at_a_time = if options.concurrent { None } else { Some(inner.gate.lock().await) };
+        let _trouter_tab_stays = inner.session.hold_tab(session::App::Teams);
         let timeline = Timeline::new(options.trace);
         let mut report = CallReport::default();
         let mut state = CallState::Idle;

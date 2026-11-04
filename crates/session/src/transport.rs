@@ -28,6 +28,9 @@ pub trait Transport: Send + Sync {
     fn wake(&self, app: App) -> BoxFuture<'_, Result<()>>;
 
     fn diagnose(&self) -> BoxFuture<'_, Result<Diagnosis>>;
+
+    /// While held the host must not navigate the app on its own (no parking).
+    fn hold(&self, _app: App, _held: bool) {}
 }
 
 pub struct CdpTransport {

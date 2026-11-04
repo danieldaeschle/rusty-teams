@@ -1,3 +1,5 @@
+#[cfg(any(windows, test))]
+mod cdp_failure;
 #[cfg(windows)]
 mod dialog;
 #[cfg(windows)]
@@ -11,6 +13,8 @@ mod host;
 mod host_dialog;
 #[cfg(windows)]
 mod main_embed;
+#[cfg(any(windows, test))]
+mod park;
 #[cfg(windows)]
 mod transport;
 

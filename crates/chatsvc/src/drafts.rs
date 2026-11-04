@@ -7,13 +7,13 @@ use session::{ApiResponse, Method, Request, Session};
 use crate::error::Result;
 use crate::messages::{
     DEFAULT_RETRY_DELAY, MessageTransport, SessionMessageTransport, encode, ensure_success,
+    new_client_message_id,
 };
 use crate::pins::DEFAULT_REGION;
 
 const SCHEDULED_DRAFT: &str = "ScheduledDraft";
 const NOT_FOUND_RETRIES: u32 = 3;
 const BACKOFF_FACTOR: u32 = 3;
-const CLIENT_MESSAGE_ID_LENGTH: usize = 19;
 const LIST_PAGE_SIZE: u32 = 200;
 const LIST_WINDOW_DAYS: i64 = 8;
 
@@ -213,15 +213,6 @@ fn draft_body(
         "innerThreadId": inner_thread_id,
         "message": message,
     })
-}
-
-fn new_client_message_id() -> String {
-    let random = uuid::Uuid::new_v4().as_u128();
-    let first = (random >> 96) as u32;
-    let second = (random >> 64) as u32;
-    let mut id = format!("{first}{second}");
-    id.truncate(CLIENT_MESSAGE_ID_LENGTH);
-    id
 }
 
 fn parse_drafts(body: &Value) -> Vec<ScheduledDraft> {
