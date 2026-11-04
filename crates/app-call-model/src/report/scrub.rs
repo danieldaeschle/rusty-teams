@@ -3,6 +3,8 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex, escape};
 
+use super::common_words::is_common_word;
+
 pub const SELF_PLACEHOLDER: &str = "self";
 pub const ECHO_PLACEHOLDER: &str = "echo-bot";
 const ORGID_PREFIX: &str = "8:orgid:";
@@ -103,12 +105,13 @@ impl Scrubber {
         if name.trim().is_empty() {
             return;
         }
-        let mut candidates = vec![name.to_owned()];
-        candidates.extend(
-            name.split(|character: char| !character.is_alphanumeric())
-                .filter(|part| part.chars().count() >= MIN_NAME_PART)
-                .map(str::to_owned),
-        );
+        let parts: Vec<&str> =
+            name.split(|character: char| !character.is_alphanumeric()).filter(|part| !part.is_empty()).collect();
+        let mut candidates: Vec<String> = parts.iter().copied().filter(|part| is_name_part(part)).map(str::to_owned).collect();
+        let full_name = name.trim();
+        if parts.len() > 1 || (full_name.chars().count() > 1 && !is_common_word(full_name)) {
+            candidates.insert(0, full_name.to_owned());
+        }
         for candidate in candidates {
             if !self.names.iter().any(|(known, _)| known.eq_ignore_ascii_case(&candidate)) {
                 self.names.push((candidate, placeholder.to_owned()));
@@ -171,6 +174,12 @@ impl Scrubber {
             })
             .into_owned()
     }
+}
+
+fn is_name_part(part: &str) -> bool {
+    part.chars().count() >= MIN_NAME_PART
+        && !part.chars().all(|character| character.is_ascii_digit())
+        && !is_common_word(part)
 }
 
 fn normalize(key: &str) -> String {
@@ -276,6 +285,41 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
         let mut scrubber = scrubber();
         let text = "ICE state Connected at 12:30:45, in packets=1200 level=0.031 mixer reports 4 (rtt 31 ms)";
         assert_eq!(scrubber.scrub(text), text);
+    }
+
+    #[test]
+    fn common_words_in_a_name_are_only_replaced_as_the_full_name() {
+        let mut scrubber = Scrubber::new();
+        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Check Testperson");
+        scrubber.register_person("8:orgid:99999999-8888-7777-6666-555555555555", "Max Video");
+        assert_eq!(
+            scrubber.scrub("check video max bitrate, Check Testperson and Max Video joined, testperson left"),
+            "check video max bitrate, person-1 and person-2 joined, person-1 left"
+        );
+    }
+
+    #[test]
+    fn name_parts_match_only_whole_words() {
+        let mut scrubber = Scrubber::new();
+        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Quilla Brandtmoor");
+        assert_eq!(
+            scrubber.scrub("Quillay quilla Brandtmoorish BRANDTMOOR"),
+            "Quillay person-1 Brandtmoorish person-1"
+        );
+    }
+
+    #[test]
+    fn short_and_numeric_name_parts_are_ignored() {
+        let mut scrubber = Scrubber::new();
+        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Yu Zentrel 2024");
+        assert_eq!(scrubber.scrub("yu 2024 Zentrel Yu Zentrel 2024"), "yu 2024 person-1 person-1");
+    }
+
+    #[test]
+    fn a_single_word_common_name_is_not_replaced_everywhere() {
+        let mut scrubber = Scrubber::new();
+        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Test");
+        assert_eq!(scrubber.scrub("test call Test"), "test call Test");
     }
 
     #[test]
