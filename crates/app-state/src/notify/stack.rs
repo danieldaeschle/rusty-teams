@@ -194,6 +194,7 @@ pub struct ToastModel {
     pub dismissed: bool,
     pub fade: Fade,
     pub agent: Option<AgentToast>,
+    pub status_change: bool,
     pub urgent: bool,
 }
 
@@ -233,7 +234,9 @@ pub struct ToastStack {
 impl ToastStack {
     pub fn push(&mut self, incoming: &Incoming, now: Instant) -> PushOutcome {
         if let Some(existing) = self.toasts.iter_mut().find(|toast| {
-            toast.agent.is_none() && toast.conversation_id == incoming.conversation_id
+            toast.agent.is_none()
+                && !toast.status_change
+                && toast.conversation_id == incoming.conversation_id
         }) {
             let became_mention = incoming.mentions_me && !existing.mentions_me;
             existing.count += 1;
@@ -273,6 +276,7 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: None,
+            status_change: false,
             urgent: incoming.is_urgent(),
         });
         PushOutcome {
@@ -311,6 +315,43 @@ impl ToastStack {
             dismissed: false,
             fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
             agent: Some(agent),
+            status_change: false,
+            urgent: false,
+        });
+        self.next_id
+    }
+
+    pub fn push_status_change(
+        &mut self,
+        user_id: &str,
+        name: &str,
+        text: &str,
+        conversation_id: &str,
+        now: Instant,
+    ) -> u64 {
+        self.next_id += 1;
+        let queued = self.toasts.len() >= MAX_VISIBLE;
+        self.toasts.push(ToastModel {
+            id: self.next_id,
+            conversation_id: conversation_id.to_owned(),
+            message_id: String::new(),
+            kind: ChatKind::Direct,
+            chat_title: name.to_owned(),
+            sender_id: Some(user_id.to_owned()),
+            sender_name: name.to_owned(),
+            preview: Preview::Text(text.to_owned()),
+            mentions_me: false,
+            count: 1,
+            timer: ToastTimer::new(now, false),
+            reply: ReplyState::Closed,
+            reply_text: String::new(),
+            hovered: false,
+            time: String::new(),
+            queued,
+            dismissed: false,
+            fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
+            agent: None,
+            status_change: true,
             urgent: false,
         });
         self.next_id

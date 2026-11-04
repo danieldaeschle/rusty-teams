@@ -852,7 +852,9 @@ impl RenderOnce for Button {
             })
         })
         .map(|this| {
-            if let Some(builder) = self.tooltip_builder {
+            if self.open {
+                this
+            } else if let Some(builder) = self.tooltip_builder {
                 this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
                     builder(window, cx)
                 })

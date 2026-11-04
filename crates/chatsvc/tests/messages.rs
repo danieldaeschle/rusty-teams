@@ -407,7 +407,8 @@ async fn post_message_sends_rich_text_to_the_reply_thread_and_returns_the_arriva
     let mock = ArrivalMock {
         requests: Mutex::new(Vec::new()),
     };
-    let properties = serde_json::json!({"importance": "", "subject": "", "qtdMsgs": "[]"});
+    let properties =
+        serde_json::json!({"importance": "", "mentions": "[]", "formatVariant": "TEAMS"});
     let message_id = Messages::with_transport(&mock, "emea")
         .post_message(
             &ConversationRef::channel_reply("19:c@thread.tacv2", "99"),
@@ -430,5 +431,12 @@ async fn post_message_sends_rich_text_to_the_reply_thread_and_returns_the_arriva
     assert_eq!(body["content"], "<p>hi</p>");
     assert_eq!(body["imdisplayname"], "Daniel");
     assert_eq!(body["properties"], properties);
-    assert!(body["clientmessageid"].is_string());
+    assert_eq!(body["amsreferences"], serde_json::json!([]));
+    let client_message_id = body["clientmessageid"].as_str().unwrap();
+    assert!((2..=19).contains(&client_message_id.len()));
+    assert!(
+        client_message_id
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    );
 }

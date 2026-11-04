@@ -14,6 +14,8 @@ const PAGE_SIZE: usize = 200;
 const MAX_PAGES: usize = 100;
 const ALERTS_OFF: &str = "false";
 const CLEAR_HISTORY_PROPERTY: &str = "clearHistoryTime";
+const HIDDEN_TIME_PROPERTY: &str = "unpinnedTime";
+const HISTORY_HIDDEN_TIME_PROPERTY: &str = "historyHiddenTime";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConversationState {
@@ -22,6 +24,7 @@ pub struct ConversationState {
     pub hidden: Option<bool>,
     pub read: ReadHorizon,
     pub history_cleared_ms: Option<i64>,
+    pub hidden_at_ms: Option<i64>,
     pub notification_settings: Option<String>,
 }
 
@@ -135,16 +138,42 @@ impl<T: MessageTransport> Conversations<T> {
     }
 
     pub async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
+        self.put_property(conversation_id, read_horizon::PROPERTY_NAME, json!(horizon))
+            .await
+    }
+
+    /// Teams' "Mark as unread": a bookmark marks the conversation unread even when the last message is my own.
+    pub async fn set_read_bookmark(&self, conversation_id: &str, bookmark: &str) -> Result<()> {
+        self.put_property(
+            conversation_id,
+            read_horizon::BOOKMARK_PROPERTY_NAME,
+            json!(bookmark),
+        )
+        .await
+    }
+
+    /// Teams' chat "Hide" (`setChatVisibility`): hidden until a newer message; `None` shows it again.
+    pub async fn set_hidden_at(&self, conversation_id: &str, hidden_at_ms: Option<i64>) -> Result<()> {
+        self.put_property(conversation_id, HIDDEN_TIME_PROPERTY, json!(hidden_at_ms))
+            .await?;
+        let history_hidden = hidden_at_ms.map(|millis| millis.to_string());
+        self.put_property(
+            conversation_id,
+            HISTORY_HIDDEN_TIME_PROPERTY,
+            json!(history_hidden),
+        )
+        .await
+    }
+
+    async fn put_property(&self, conversation_id: &str, name: &str, value: Value) -> Result<()> {
         let url = format!(
-            "{}/{}/properties?name={}",
+            "{}/{}/properties?name={name}",
             self.base_url,
-            encode(conversation_id),
-            read_horizon::PROPERTY_NAME
+            encode(conversation_id)
         );
-        let body = json!({ read_horizon::PROPERTY_NAME: horizon });
         let answer = self
             .transport
-            .send(Request::with_body(Method::Put, url, body))
+            .send(Request::with_body(Method::Put, url, json!({ name: value })))
             .await?;
         ensure_success(&answer)
     }
@@ -184,7 +213,18 @@ pub fn clear_history_request(
 }
 
 fn history_cleared_ms(conversation: &Value) -> Option<i64> {
-    let value = &conversation["properties"][CLEAR_HISTORY_PROPERTY];
+    millis_property(conversation, CLEAR_HISTORY_PROPERTY)
+}
+
+fn hidden_at_ms(conversation: &Value) -> Option<i64> {
+    [HIDDEN_TIME_PROPERTY, HISTORY_HIDDEN_TIME_PROPERTY]
+        .into_iter()
+        .filter_map(|name| millis_property(conversation, name))
+        .max()
+}
+
+fn millis_property(conversation: &Value, name: &str) -> Option<i64> {
+    let value = &conversation["properties"][name];
     value
         .as_i64()
         .or_else(|| value.as_str()?.parse().ok())
@@ -245,6 +285,7 @@ fn states_in_page(body: &Value) -> Result<Vec<ConversationState>> {
                     .as_str()
                     .map(str::to_owned),
                 history_cleared_ms: history_cleared_ms(conversation),
+                hidden_at_ms: hidden_at_ms(conversation),
             })
         })
         .collect())
@@ -523,6 +564,77 @@ mod tests {
             requests[0].body,
             Some(json!({"consumptionhorizon": "9;10;0"}))
         );
+    }
+
+    #[tokio::test]
+    async fn set_read_bookmark_puts_the_bookmark_property() {
+        let transport = canned(vec![(200, Value::Null)]);
+        Conversations::with_transport(&transport, "emea")
+            .set_read_bookmark("48:notes", "8;10;9")
+            .await
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[0].method, Method::Put);
+        assert_eq!(
+            requests[0].url,
+            format!("{BASE}/48%3Anotes/properties?name=consumptionHorizonBookmark")
+        );
+        assert_eq!(
+            requests[0].body,
+            Some(json!({"consumptionHorizonBookmark": "8;10;9"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn hide_puts_the_hidden_time_as_number_and_the_history_time_as_text() {
+        let transport = canned(vec![(200, Value::Null); 4]);
+        let conversations = Conversations::with_transport(&transport, "emea");
+        conversations.set_hidden_at("48:notes", Some(42)).await.unwrap();
+        conversations.set_hidden_at("48:notes", None).await.unwrap();
+        let requests = transport.requests.lock().unwrap();
+        let writes: Vec<(String, Option<Value>)> = requests
+            .iter()
+            .map(|request| (request.url.replace(BASE, ""), request.body.clone()))
+            .collect();
+        assert_eq!(
+            writes,
+            [
+                (
+                    "/48%3Anotes/properties?name=unpinnedTime".to_owned(),
+                    Some(json!({"unpinnedTime": 42}))
+                ),
+                (
+                    "/48%3Anotes/properties?name=historyHiddenTime".to_owned(),
+                    Some(json!({"historyHiddenTime": "42"}))
+                ),
+                (
+                    "/48%3Anotes/properties?name=unpinnedTime".to_owned(),
+                    Some(json!({"unpinnedTime": null}))
+                ),
+                (
+                    "/48%3Anotes/properties?name=historyHiddenTime".to_owned(),
+                    Some(json!({"historyHiddenTime": null}))
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn states_carry_the_newest_hidden_time() {
+        let transport = canned(vec![(
+            200,
+            json!({"conversations": [
+                {"id": "48:notes", "properties": {"unpinnedTime": 30, "historyHiddenTime": "40"}},
+                {"id": "19:b", "properties": {"unpinnedTime": "50"}},
+                {"id": "19:c", "properties": {}},
+            ]}),
+        )]);
+        let states = Conversations::with_transport(&transport, "emea")
+            .conversation_states()
+            .await
+            .unwrap();
+        let hidden: Vec<Option<i64>> = states.iter().map(|state| state.hidden_at_ms).collect();
+        assert_eq!(hidden, [Some(40), Some(50), None]);
     }
 
     #[tokio::test]

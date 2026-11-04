@@ -170,6 +170,7 @@ impl Composer {
             };
             self.sync_table_view(&id, &table, window, cx);
         }
+        self.sync_rules(window, cx);
     }
 
     fn sync_table_view(

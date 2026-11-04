@@ -16,8 +16,8 @@ use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{icon, menu_icon};
 use crate::app_state::AppState;
 use crate::call::{
-    AGENDA_ROW_HEIGHT, AgendaRow, CALL_ROW_HEIGHT, CallRow, DAY_HEIGHT, EMPTY_HEIGHT, ListEntry,
-    SECTION_HEIGHT, join_available, response_label,
+    AGENDA_ROW_HEIGHT, AgendaRow, CALL_ROW_HEIGHT, CallRow, DAY_HEIGHT, EMPTY_HEIGHT,
+    FILTERS_HEIGHT, HistoryFilter, ListEntry, SECTION_HEIGHT, join_available, response_label,
 };
 use crate::theme;
 
@@ -224,6 +224,42 @@ fn section_header(title: &'static str) -> AnyElement {
         .into_any_element()
 }
 
+fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyElement {
+    let pills = HistoryFilter::ALL.into_iter().map(|filter| {
+        let selected = filter == current;
+        let state = state.clone();
+        div()
+            .id(SharedString::from(format!("calls-filter-{}", filter.label())))
+            .h(px(24.))
+            .px(px(10.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .rounded_full()
+            .cursor_pointer()
+            .text_size(px(12.))
+            .when(selected, |pill| {
+                pill.bg(theme::accent()).text_color(theme::on_accent())
+            })
+            .when(!selected, |pill| {
+                pill.bg(theme::surface_raised())
+                    .text_color(theme::text_soft())
+                    .hover(|pill| pill.bg(theme::border_strong()))
+            })
+            .child(filter.label())
+            .on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| state.set_call_history_filter(filter, cx))
+            })
+    });
+    h_flex()
+        .h(px(FILTERS_HEIGHT))
+        .px(px(16.))
+        .gap(px(6.))
+        .items_center()
+        .children(pills)
+        .into_any_element()
+}
+
 fn day_header(label: &str) -> AnyElement {
     div()
         .h(px(DAY_HEIGHT))
@@ -330,7 +366,8 @@ fn agenda_row(
     let click_row = row.clone();
     let join_state = state.clone();
     let join_row = row.clone();
-    h_flex()
+    let menu_join_url = row.join_url.clone();
+    let line = h_flex()
         .id(SharedString::from(format!("agenda-{}", row.key)))
         .mx(px(6.))
         .h(px(AGENDA_ROW_HEIGHT))
@@ -395,8 +432,21 @@ fn agenda_row(
         })
         .on_click(move |_, _, cx| {
             click_state.update(cx, |state, cx| state.open_agenda_chat(&click_row, cx));
-        })
-        .into_any_element()
+        });
+    let Some(join_url) = menu_join_url else {
+        return line.into_any_element();
+    };
+    line.context_menu(move |popup, _, _| {
+        let join_url = join_url.clone();
+        popup.item(
+            PopupMenuItem::new("Copy meeting link")
+                .icon(menu_icon(IconName::Link))
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(join_url.clone()));
+                }),
+        )
+    })
+    .into_any_element()
 }
 
 pub fn calls_body(
@@ -430,6 +480,7 @@ pub fn calls_body(
     for entry in entries {
         list = list.child(match entry {
             ListEntry::Section(title) => section_header(title),
+            ListEntry::Filters(filter) => history_filters(state, *filter),
             ListEntry::Day(label) => day_header(label),
             ListEntry::Empty(text) => empty_row(text),
             ListEntry::Agenda(row) => agenda_row(

@@ -249,6 +249,22 @@ pub fn tile_menu(
                 pin_app.update(cx, |state, cx| state.toggle_call_pin(&pin_mri, cx))
             }),
     );
+    if model.is_one_to_one()
+        || model
+            .tiles
+            .iter()
+            .any(|tile| tile.mri == mri && tile.has_video)
+    {
+        let (fit_app, fit_mri) = (app.clone(), mri.to_owned());
+        let fitted = model.is_fitted(mri);
+        popup = popup.item(
+            PopupMenuItem::new(if fitted { "Fill frame" } else { "Fit to frame" })
+                .icon(if fitted { IconName::Expand } else { IconName::Shrink })
+                .on_click(move |_, _, cx| {
+                    fit_app.update(cx, |state, cx| state.toggle_call_fit(&fit_mri, cx))
+                }),
+        );
+    }
     if organizes {
         let (spotlight_app, spotlight_mri) = (app.clone(), mri.to_owned());
         popup = popup.item(

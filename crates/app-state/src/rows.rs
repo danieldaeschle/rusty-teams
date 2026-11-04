@@ -178,6 +178,8 @@ pub struct MessageRow {
 pub struct StartInfo {
     pub title: String,
     pub user_id: Option<String>,
+    pub avatar_name: String,
+    pub notes: bool,
 }
 
 pub const START_KEY: &str = "conversation-start";

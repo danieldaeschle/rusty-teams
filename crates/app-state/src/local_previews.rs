@@ -27,6 +27,14 @@ pub fn load_local_previews(store: &Store) -> HashMap<String, LocalPreview> {
 impl AppState {
     pub fn refresh_local_previews(&mut self, cx: &mut Context<Self>) {
         let previews = load_local_previews(&self.store);
+        self.set_local_previews(previews, cx);
+    }
+
+    pub fn set_local_previews(
+        &mut self,
+        previews: HashMap<String, LocalPreview>,
+        cx: &mut Context<Self>,
+    ) {
         if previews != self.local_previews {
             self.local_previews = previews;
             cx.emit(AppEvent::LocalPreviews);

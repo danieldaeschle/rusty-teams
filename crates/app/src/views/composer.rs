@@ -32,14 +32,18 @@ use teams_core::{
 
 pub(crate) mod delivery;
 mod drafts;
+mod format_menus;
+mod rule;
 mod schedule;
+mod slash;
 mod table;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLink,
-    InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
-    InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend, ToggleBold,
-    ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript, ToggleSuperscript,
+    COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLastMessage,
+    EditLink, InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
+    InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend,
+    SetHeading1, SetHeading2, SetHeading3, SetParagraph, ToggleBold, ToggleCode, ToggleCodeBlock,
+    ToggleFormatBar, ToggleItalic, ToggleQuote, ToggleStrike, ToggleSubscript, ToggleSuperscript,
     ToggleUnderline,
 };
 use super::attachment_tray::{
@@ -55,6 +59,7 @@ use super::fun_picker::{FunPicker, FunPickerEvent};
 use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
+use crate::data::Directory;
 use crate::emoji;
 pub use crate::outgoing::{EditPreview, Outgoing, ReplyPreview};
 use crate::remote_image::RemoteImage;
@@ -62,6 +67,9 @@ use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
+use format_menus::{FormatPopup, paragraph_label};
+use rule::{is_rule_token, render_rule_token};
+use slash::SlashPopup;
 use table::{TableKey, TableLineMenu, TableMenu, TablePicker, TableViews, is_table_token};
 
 const MIN_ROWS: usize = 1;
@@ -192,6 +200,8 @@ pub struct Composer {
     lookup: Option<Task<()>>,
     emoji_popup: Option<EmojiPopup>,
     emoji_dismissed_at: Option<usize>,
+    slash_popup: Option<SlashPopup>,
+    slash_dismissed: bool,
     recent_emoji: emoji::Recent,
     conversion: Option<Conversion>,
     undone_value: Option<String>,
@@ -214,6 +224,7 @@ pub struct Composer {
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
     draft_save: Option<Task<()>>,
+    draft_writes: drafts::DraftWrites,
     saved_images: Option<drafts::ImageFingerprint>,
     schedule: Option<schedule::SchedulePopover>,
     scheduling: Option<String>,
@@ -224,6 +235,8 @@ pub struct Composer {
     table_counter: usize,
     table_picker: Option<TablePicker>,
     table_menu: Option<TableMenu>,
+    format_popup: Option<FormatPopup>,
+    format_overflow: bool,
     format_bar: HashSet<String>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
@@ -238,6 +251,14 @@ impl EventEmitter<ComposerEvent> for Composer {}
 /// With "Start a new line", plain Enter breaks the line and only Ctrl+Enter sends.
 pub fn enter_starts_line(behavior: EnterKeyBehavior, shift: bool, secondary: bool) -> bool {
     behavior == EnterKeyBehavior::NewLine && !shift && !secondary
+}
+
+pub fn enter_behavior(setting: EnterKeyBehavior, expanded: bool) -> EnterKeyBehavior {
+    if expanded {
+        EnterKeyBehavior::NewLine
+    } else {
+        setting
+    }
 }
 
 pub fn up_arrow_event(behavior: UpArrowBehavior) -> Option<ComposerEvent> {
@@ -302,7 +323,34 @@ fn candidate_subtitle(candidate: &MentionCandidate) -> String {
             .unwrap_or_default(),
         MentionCandidate::Channel { .. } => "Channel".to_owned(),
         MentionCandidate::Team { .. } => "Team".to_owned(),
+        MentionCandidate::Tag { .. } => "Tag".to_owned(),
+        MentionCandidate::Everyone { .. } => String::new(),
     }
+}
+
+fn candidate_avatar(candidate: &MentionCandidate, directory: &Directory) -> AnyElement {
+    let name = candidate.display_name();
+    match candidate {
+        MentionCandidate::Person(person) => {
+            person_avatar(directory, Some(&person.user_id), name, 28.)
+        }
+        MentionCandidate::Everyone { .. } => symbol_avatar("group", 28., 14.),
+        MentionCandidate::Tag { .. } => symbol_avatar("tag", 28., 7.),
+        other => square_avatar(name, candidate_key(other), 28., 7.).into_any_element(),
+    }
+}
+
+fn symbol_avatar(symbol_name: &str, size: f32, radius: f32) -> AnyElement {
+    div()
+        .size(px(size))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(radius))
+        .bg(theme::surface_raised())
+        .child(symbol(symbol_name, 16., theme::text()))
+        .into_any_element()
 }
 
 fn step_kind(previous: &str, value: &str, cursor: usize) -> StepKind {
@@ -370,6 +418,8 @@ fn candidate_key(candidate: &MentionCandidate) -> &str {
         MentionCandidate::Person(person) => &person.user_id,
         MentionCandidate::Channel { channel_id, .. } => channel_id,
         MentionCandidate::Team { team_id, .. } => team_id,
+        MentionCandidate::Everyone { chat_id } => chat_id,
+        MentionCandidate::Tag { tag_id, .. } => tag_id,
     }
 }
 
@@ -413,6 +463,8 @@ impl Composer {
             lookup: None,
             emoji_popup: None,
             emoji_dismissed_at: None,
+            slash_popup: None,
+            slash_dismissed: false,
             recent_emoji,
             conversion: None,
             undone_value: None,
@@ -440,6 +492,7 @@ impl Composer {
             demo_failed: HashSet::new(),
             carry_images_into: None,
             draft_save: None,
+            draft_writes: drafts::DraftWrites::default(),
             saved_images: None,
             schedule: None,
             scheduling: None,
@@ -450,6 +503,8 @@ impl Composer {
             table_counter: 0,
             table_picker: None,
             table_menu: None,
+            format_popup: None,
+            format_overflow: false,
             format_bar: HashSet::new(),
             active_cell: None,
             caret_before_table: 0,
@@ -472,6 +527,7 @@ impl Composer {
             self.on_change(window, cx);
             self.update_emoji(cx);
             self.update_mention(cx);
+            self.update_slash(cx);
             self.update_link_preview(cx);
             self.schedule_draft_save(cx);
         }
@@ -511,6 +567,7 @@ impl Composer {
     fn close_popup(&mut self) {
         self.close_mention_popup();
         self.emoji_popup = None;
+        self.slash_popup = None;
     }
 
     fn close_mention_popup(&mut self) {
@@ -849,6 +906,8 @@ impl Composer {
         self.pending_anchors.clear();
         self.active_cell = None;
         self.table_picker = None;
+        self.format_popup = None;
+        self.format_overflow = false;
         self.sync_tables(window, cx);
         self.history.clear();
         self.history_index = 0;
@@ -963,6 +1022,9 @@ impl Composer {
     }
 
     fn press_format(&mut self, button: FormatButton, window: &mut Window, cx: &mut Context<Self>) {
+        if !button.opens_popup() {
+            self.format_overflow = false;
+        }
         match button {
             FormatButton::Bold => self.toggle_mark(MarkKind::Bold, cx),
             FormatButton::Italic => self.toggle_mark(MarkKind::Italic, cx),
@@ -989,6 +1051,18 @@ impl Composer {
             FormatButton::TableRemoveLine => {
                 self.open_table_menu(TableLineMenu::Remove, window, cx);
             }
+            FormatButton::Highlight => self.toggle_format_popup(FormatPopup::Highlight, cx),
+            FormatButton::FontColor => self.toggle_format_popup(FormatPopup::FontColor, cx),
+            FormatButton::ParagraphStyle => {
+                self.toggle_format_popup(FormatPopup::ParagraphStyle, cx)
+            }
+            FormatButton::ClearFormatting => self.clear_formatting(window, cx),
+            FormatButton::Outdent => self.indent_blocks(true, window, cx),
+            FormatButton::Indent => self.indent_blocks(false, window, cx),
+            FormatButton::CodeBlock => self.toggle_code_block(window, cx),
+            FormatButton::Rule => self.insert_rule(window, cx),
+            FormatButton::FontSize => self.toggle_format_popup(FormatPopup::FontSize, cx),
+            FormatButton::More => self.toggle_format_overflow(cx),
         }
     }
 
@@ -1068,6 +1142,31 @@ impl Composer {
             FormatButton::Table | FormatButton::TableInsertLine | FormatButton::TableRemoveLine => {
                 FormatState::Off
             }
+            FormatButton::Highlight if self.format_popup == Some(FormatPopup::Highlight) => {
+                FormatState::On
+            }
+            FormatButton::FontColor if self.format_popup == Some(FormatPopup::FontColor) => {
+                FormatState::On
+            }
+            FormatButton::ParagraphStyle
+                if self.format_popup == Some(FormatPopup::ParagraphStyle) =>
+            {
+                FormatState::On
+            }
+            FormatButton::FontSize if self.format_popup == Some(FormatPopup::FontSize) => {
+                FormatState::On
+            }
+            FormatButton::More if self.format_overflow => FormatState::On,
+            FormatButton::CodeBlock => self.draft.line_state(range, &LineKind::Code(None)),
+            FormatButton::Highlight
+            | FormatButton::FontColor
+            | FormatButton::FontSize
+            | FormatButton::More
+            | FormatButton::ParagraphStyle
+            | FormatButton::ClearFormatting
+            | FormatButton::Outdent
+            | FormatButton::Indent
+            | FormatButton::Rule => FormatState::Off,
         }
     }
 
@@ -1080,13 +1179,20 @@ impl Composer {
     ) -> ButtonState {
         let enabled = match button {
             FormatButton::TableInsertLine | FormatButton::TableRemoveLine => in_table,
-            FormatButton::Table => true,
+            FormatButton::Table | FormatButton::More => true,
+            FormatButton::Outdent => !in_table && self.draft.can_outdent(selection.clone()),
             _ => !in_table,
         };
-        if enabled {
+        let state = if enabled {
             ButtonState::enabled(self.format_state(button, selection))
         } else {
             ButtonState::disabled()
+        };
+        match button {
+            FormatButton::ParagraphStyle => {
+                state.with_label(paragraph_label(self.draft.heading_at(selection.start)))
+            }
+            _ => state,
         }
     }
 
@@ -1103,6 +1209,8 @@ impl Composer {
             self.format_bar.remove(&key);
             self.table_picker = None;
             self.table_menu = None;
+            self.format_popup = None;
+            self.format_overflow = false;
         }
         cx.notify();
     }
@@ -1556,7 +1664,10 @@ impl Composer {
     }
 
     fn popup_is_open(&self) -> bool {
-        self.emoji_popup.is_some()
+        self.slash_popup
+            .as_ref()
+            .is_some_and(|popup| !popup.commands.is_empty())
+            || self.emoji_popup.is_some()
             || self
                 .popup
                 .as_ref()
@@ -1564,7 +1675,10 @@ impl Composer {
     }
 
     fn move_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if let Some(popup) = self.emoji_popup.as_mut() {
+        if let Some(popup) = self.slash_popup.as_mut() {
+            popup.move_highlight(delta);
+            cx.notify();
+        } else if let Some(popup) = self.emoji_popup.as_mut() {
             popup.move_highlight(delta);
             cx.notify();
         } else if let Some(popup) = self.popup.as_mut() {
@@ -1575,7 +1689,9 @@ impl Composer {
     }
 
     fn accept_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.emoji_popup.is_some() {
+        if self.slash_popup.is_some() {
+            self.accept_slash(window, cx);
+        } else if self.emoji_popup.is_some() {
             self.accept_emoji(window, cx);
         } else {
             self.accept_mention(window, cx);
@@ -1660,6 +1776,8 @@ impl Composer {
             self.schedule = None;
             self.table_picker = None;
             self.table_menu = None;
+            self.format_popup = None;
+            self.format_overflow = false;
             self.reset_importance();
             if !carry {
                 self.load_stored_draft(conversation_id, window, cx);
@@ -2354,12 +2472,7 @@ impl Composer {
             .enumerate()
             .map(|(index, candidate)| {
                 let name = candidate.display_name().to_owned();
-                let avatar = match candidate {
-                    MentionCandidate::Person(person) => {
-                        person_avatar(directory, Some(&person.user_id), &name, 28.)
-                    }
-                    other => square_avatar(&name, candidate_key(other), 28., 7.).into_any_element(),
-                };
+                let avatar = candidate_avatar(candidate, directory);
                 let subtitle = candidate_subtitle(candidate);
                 h_flex()
                     .id(ElementId::Name(format!("mention-row-{index}").into()))
@@ -2501,6 +2614,10 @@ impl Composer {
             ),
             None => {
                 let state_of = |button| ButtonState::enabled(self.format_state(button, &range));
+                let mut overlay = |button| match button {
+                    FormatButton::FontSize => self.render_format_popup(FormatPopup::FontSize, cx),
+                    _ => None,
+                };
                 format_toolbar::render(
                     placement,
                     format_toolbar::Mode::Bar {
@@ -2510,6 +2627,7 @@ impl Composer {
                                 .update(cx, |this, cx| this.press_format(button, window, cx))
                                 .ok();
                         }),
+                        overlay: &mut overlay,
                     },
                 )
             }
@@ -2517,23 +2635,65 @@ impl Composer {
         Some(element)
     }
 
+    fn format_press_handler(&self, cx: &mut Context<Self>) -> format_toolbar::PressHandler {
+        let composer = cx.weak_entity();
+        Rc::new(move |button, window, cx| {
+            composer
+                .update(cx, |this, cx| this.press_format(button, window, cx))
+                .ok();
+        })
+    }
+
+    fn format_bar_fit(&self) -> format_toolbar::BarFit {
+        let available = self.composer_bounds.get().map_or(f32::INFINITY, |bounds| {
+            f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.)
+        });
+        format_toolbar::fit_groups(available, &format_toolbar::BAR_GROUPS)
+    }
+
+    fn render_format_overlay(
+        &self,
+        button: FormatButton,
+        overflow: &[Vec<FormatButton>],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        match button {
+            FormatButton::Table => self.render_table_picker(cx),
+            FormatButton::TableInsertLine => self.render_table_menu(TableLineMenu::Insert, cx),
+            FormatButton::TableRemoveLine => self.render_table_menu(TableLineMenu::Remove, cx),
+            FormatButton::Highlight => self.render_format_popup(FormatPopup::Highlight, cx),
+            FormatButton::FontColor => self.render_format_popup(FormatPopup::FontColor, cx),
+            FormatButton::FontSize => self.render_format_popup(FormatPopup::FontSize, cx),
+            FormatButton::ParagraphStyle => {
+                self.render_format_popup(FormatPopup::ParagraphStyle, cx)
+            }
+            FormatButton::More if self.format_overflow => {
+                let selection = self.selection(cx);
+                let in_table = self.in_table(window, cx);
+                let state_of = |button| self.button_state(button, &selection, in_table);
+                let on_press = self.format_press_handler(cx);
+                let mut overlay = |button| self.render_format_overlay(button, &[], window, cx);
+                let menu = format_toolbar::render_overflow_menu(
+                    overflow,
+                    &state_of,
+                    on_press,
+                    &mut overlay,
+                );
+                Some(self.render_overflow_surface(menu, cx))
+            }
+            _ => None,
+        }
+    }
+
     fn render_format_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let selection = self.selection(cx);
         let in_table = self.in_table(window, cx);
         let state_of = |button| self.button_state(button, &selection, in_table);
-        let composer = cx.weak_entity();
-        let on_press: format_toolbar::PressHandler = Rc::new(move |button, window, cx| {
-            composer
-                .update(cx, |this, cx| this.press_format(button, window, cx))
-                .ok();
-        });
-        let mut overlay = |button| match button {
-            FormatButton::Table => self.render_table_picker(cx),
-            FormatButton::TableInsertLine => self.render_table_menu(TableLineMenu::Insert, cx),
-            FormatButton::TableRemoveLine => self.render_table_menu(TableLineMenu::Remove, cx),
-            _ => None,
-        };
-        let row = format_toolbar::render_format_bar(&state_of, on_press, &mut overlay);
+        let on_press = self.format_press_handler(cx);
+        let fit = self.format_bar_fit();
+        let mut overlay = |button| self.render_format_overlay(button, &fit.overflow, window, cx);
+        let row = format_toolbar::render_format_bar(&fit, &state_of, on_press, &mut overlay);
         v_flex()
             .debug_selector(|| COMPOSER_FORMAT_BAR_TAG.into())
             .w_full()
@@ -2807,6 +2967,13 @@ impl Render for Composer {
                     .unwrap_or(false)
             })
             .token(move |context, _, cx| {
+                if context.is_block() && is_rule_token(context.token()) {
+                    return render_rule_token(
+                        context.available_width(),
+                        context.line_height(),
+                        context.is_selected(),
+                    );
+                }
                 if context.is_block() && is_table_token(context.token()) {
                     let token_id = context.token().id().to_string();
                     let width = context.available_width();
@@ -2962,11 +3129,34 @@ impl Render for Composer {
             .on_action(cx.listener(|this, _: &ToggleFormatBar, window, cx| {
                 this.toggle_format_bar(window, cx)
             }))
+            .on_action(cx.listener(|_, _: &EditLastMessage, _, cx| {
+                cx.emit(ComposerEvent::EditLast)
+            }))
             .on_action(cx.listener(|this, _: &InsertTableLine, window, cx| {
                 this.open_table_menu(TableLineMenu::Insert, window, cx);
             }))
             .on_action(cx.listener(|this, _: &RemoveTableLine, window, cx| {
                 this.open_table_menu(TableLineMenu::Remove, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SetParagraph, window, cx| {
+                this.set_paragraph_style(None, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SetHeading1, window, cx| {
+                this.set_paragraph_style(Some(1), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SetHeading2, window, cx| {
+                this.set_paragraph_style(Some(2), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SetHeading3, window, cx| {
+                this.set_paragraph_style(Some(3), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCodeBlock, window, cx| {
+                this.toggle_code_block(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleQuote, window, cx| {
+                if !this.cell_has_focus(window, cx) {
+                    this.toggle_lines(LineKind::Quote, window, cx)
+                }
             }))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
                 if this.link_editor.is_none() {
@@ -3065,8 +3255,13 @@ impl Render for Composer {
                 } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
                     cx.stop_propagation();
+                } else if this.break_line(action.shift, window, cx) {
+                    cx.stop_propagation();
                 } else if enter_starts_line(
-                    this.app.read(cx).account_chat_settings().enter_key,
+                    enter_behavior(
+                        this.app.read(cx).account_chat_settings().enter_key,
+                        this.format_bar_open() && !this.app.read(cx).markdown_mode,
+                    ),
                     action.shift,
                     action.secondary,
                 ) {
@@ -3078,8 +3273,6 @@ impl Render for Composer {
                         }),
                         cx,
                     );
-                } else if this.break_line(action.shift, window, cx) {
-                    cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
@@ -3144,7 +3337,10 @@ impl Render for Composer {
                 if let Some(popup) = &this.emoji_popup {
                     this.emoji_dismissed_at = Some(popup.range.start);
                 }
-                if this.popup.is_some() || this.emoji_popup.is_some() {
+                if this.slash_popup.is_some() {
+                    this.slash_dismissed = true;
+                }
+                if this.popup.is_some() || this.emoji_popup.is_some() || this.slash_popup.is_some() {
                     this.close_popup();
                     cx.notify();
                     cx.stop_propagation();
@@ -3164,6 +3360,7 @@ impl Render for Composer {
                     .relative()
                     .w_full()
                     .children(self.render_popup(cx))
+                    .children(self.render_slash_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
@@ -3183,7 +3380,14 @@ impl Render for Composer {
                             })
                             .child(
                                 canvas(
-                                    move |bounds, _, _| composer_bounds.set(Some(bounds)),
+                                    move |bounds, window, _| {
+                                        let previous = composer_bounds.replace(Some(bounds));
+                                        if previous.map(|previous| previous.size.width)
+                                            != Some(bounds.size.width)
+                                        {
+                                            window.refresh();
+                                        }
+                                    },
                                     |_, _, _, _| {},
                                 )
                                 .absolute()
@@ -3251,8 +3455,8 @@ impl Render for Composer {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposerEvent, EnterKeyBehavior, UpArrowBehavior, active_mention, enter_starts_line,
-        submitted_text, up_arrow_event,
+        ComposerEvent, EnterKeyBehavior, UpArrowBehavior, active_mention, enter_behavior,
+        enter_starts_line, submitted_text, up_arrow_event,
     };
 
     #[test]
@@ -3261,6 +3465,22 @@ mod tests {
         assert!(!enter_starts_line(EnterKeyBehavior::NewLine, false, true));
         assert!(!enter_starts_line(EnterKeyBehavior::NewLine, true, false));
         assert!(!enter_starts_line(EnterKeyBehavior::Send, false, false));
+    }
+
+    #[test]
+    fn expanded_compose_box_starts_a_line_on_enter_like_teams() {
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::Send, true),
+            EnterKeyBehavior::NewLine
+        );
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::Send, false),
+            EnterKeyBehavior::Send
+        );
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::NewLine, false),
+            EnterKeyBehavior::NewLine
+        );
     }
 
     #[test]
@@ -4316,7 +4536,7 @@ mod tests {
             typist.press("enter");
             typist.type_text("b");
             typist.press("up end delete");
-            assert_eq!(typist.outgoing().html(), "<pre>ab</pre>");
+            assert_eq!(typist.outgoing().html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>ab</code></pre>");
         }
 
         #[gpui_kit::test]
@@ -4474,7 +4694,7 @@ mod tests {
                     .update(|cx| composer.read(cx).paste_hint.is_none())
             );
             let outgoing = typist.outgoing();
-            assert_eq!(outgoing.html(), "<pre>:) **x**</pre>");
+            assert_eq!(outgoing.html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>:) **x**</code></pre>");
         }
 
         #[gpui_kit::test]
@@ -4502,6 +4722,21 @@ mod tests {
             assert_eq!(
                 typist.outgoing().html(),
                 "<blockquote>quoted<br>more</blockquote>after"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn enter_on_an_empty_quote_line_leaves_it_with_the_format_bar_open(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.press("ctrl-shift-x");
+            typist.type_text(">quoted");
+            typist.press("enter enter");
+            typist.type_text("after");
+            assert_eq!(
+                typist.outgoing().html(),
+                "<blockquote>quoted</blockquote>after"
             );
         }
 

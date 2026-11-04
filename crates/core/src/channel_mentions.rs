@@ -64,6 +64,7 @@ mod tests {
             },
             notification_settings: None,
             history_cleared_ms: None,
+            hidden_at_ms: None,
         }
     }
 

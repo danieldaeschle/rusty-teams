@@ -5,6 +5,7 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{ChatSettingChange, TranslationBehavior};
 
@@ -21,7 +22,42 @@ const BEHAVIORS: [(&str, TranslationBehavior); 3] = [
     ("Never translate", TranslationBehavior::Never),
 ];
 const CHIP_HEIGHT: f32 = 24.;
+const DISABLED_OPACITY: f32 = 0.4;
 const LANGUAGE_MENU_HEIGHT: f32 = 320.;
+
+fn startup_rows(center: &Entity<NotificationCenter>, cx: &App) -> [Stateful<Div>; 2] {
+    let startup = center.read(cx).startup();
+    let (auto_start_center, background_center) = (center.clone(), center.clone());
+    [
+        toggle_row(
+            "settings-auto-start",
+            "Auto-start Teams",
+            "",
+            theme::text_muted(),
+            startup.auto_start,
+        )
+        .on_click(move |_, _, cx| {
+            auto_start_center.update(cx, |center, cx| {
+                center.set_auto_start(!startup.auto_start, cx)
+            })
+        }),
+        toggle_row(
+            "settings-open-in-background",
+            "Open application in background",
+            "",
+            theme::text_muted(),
+            startup.open_in_background,
+        )
+        .when(!startup.auto_start, |row| row.opacity(DISABLED_OPACITY))
+        .when(startup.auto_start, |row| {
+            row.on_click(move |_, _, cx| {
+                background_center.update(cx, |center, cx| {
+                    center.set_open_in_background(!startup.open_in_background, cx)
+                })
+            })
+        }),
+    ]
+}
 
 pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &App) -> Div {
     let close_to_tray = center.read(cx).settings().close_to_tray;
@@ -29,6 +65,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
     v_flex()
         .w_full()
         .child(caption("SYSTEM"))
+        .children(startup_rows(center, cx))
         .child(
             toggle_row(
                 "settings-close-to-tray",

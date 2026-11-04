@@ -3,33 +3,43 @@ use serde_json::{Value, json};
 pub const DEFAULT_SKIN_TONE: u8 = 2;
 const REACTION_TYPE: &str = "Reaction";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reaction {
     Like,
     Heart,
     Applause,
     Laugh,
     Surprised,
+    Other(String),
 }
 
 impl Reaction {
     pub const ALL: [Reaction; 5] = [Reaction::Like, Reaction::Heart, Reaction::Applause, Reaction::Laugh, Reaction::Surprised];
 
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
             Reaction::Like => "like",
             Reaction::Heart => "heart",
             Reaction::Applause => "applause",
             Reaction::Laugh => "laugh",
             Reaction::Surprised => "surprised",
+            Reaction::Other(name) => name,
         }
     }
 
     pub fn from_name(name: &str) -> Option<Reaction> {
-        Reaction::ALL.into_iter().find(|reaction| reaction.name() == name)
+        if name.trim().is_empty() {
+            return None;
+        }
+        Some(
+            Reaction::ALL
+                .into_iter()
+                .find(|reaction| reaction.name() == name)
+                .unwrap_or_else(|| Reaction::Other(name.to_owned())),
+        )
     }
 
-    fn takes_skin_tone(self) -> bool {
+    fn takes_skin_tone(&self) -> bool {
         matches!(self, Reaction::Like | Reaction::Applause)
     }
 }
@@ -107,7 +117,8 @@ mod tests {
         for reaction in Reaction::ALL {
             assert_eq!(Reaction::from_name(reaction.name()), Some(reaction));
         }
-        assert_eq!(Reaction::from_name("confetti"), None);
+        assert_eq!(Reaction::from_name("confetti"), Some(Reaction::Other("confetti".into())));
+        assert_eq!(Reaction::from_name(""), None);
     }
 
     #[test]
@@ -132,9 +143,10 @@ mod tests {
             ],
         });
         let events = parse_reactions(&body);
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert_eq!(events[0], ReactionEvent { mri: "8:orgid:a".into(), reaction: Reaction::Heart, count: 1 });
-        assert_eq!(events[1].mri, "8:orgid:b");
+        assert_eq!(events[1].reaction, Reaction::Other("unknown".into()));
+        assert_eq!(events[2].mri, "8:orgid:b");
     }
 
     #[test]

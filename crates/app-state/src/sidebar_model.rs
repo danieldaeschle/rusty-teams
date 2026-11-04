@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use app_ui_kit::widgets::Unread;
 use chrono::{DateTime, FixedOffset, Utc};
-use store::{ChannelRecord, ChatRecord, MessageImportance, Sidebar, SidebarTeam, is_bot_id};
+use store::{
+    ChannelNotificationLevel, ChannelRecord, ChatRecord, MessageImportance, Sidebar, SidebarTeam,
+    is_bot_id,
+};
 use teams_core::{ChatSection, is_event_preview};
 
 use crate::app_state::chat_title;
@@ -338,10 +341,16 @@ pub fn team_badge(team: &SidebarTeam, expanded: bool) -> Option<MentionBadge> {
     }
 }
 
+pub fn channel_shows_unread(team: &SidebarTeam, channel: &ChannelRecord) -> bool {
+    channel.unread
+        && (team.channel_notifications(&channel.id).level != ChannelNotificationLevel::Off
+            || team.channel_mentions(&channel.id).personal > 0)
+}
+
 pub fn team_has_unread(team: &SidebarTeam) -> bool {
     team.channels
         .iter()
-        .any(|channel| channel.unread && channel_shown(team, &channel.id))
+        .any(|channel| channel_shows_unread(team, channel) && channel_shown(team, &channel.id))
 }
 
 pub fn team_name_style(team: &SidebarTeam, expanded: bool) -> NameStyle {
@@ -510,6 +519,27 @@ pub fn step_id(ids: &[&str], current: Option<&str>, step: Step) -> Option<String
         (None, Step::Previous) => ids.len().checked_sub(1)?,
     };
     ids.get(target).map(|id| (*id).to_owned())
+}
+
+pub fn step_unread_id(
+    sections: &[Section],
+    current: Option<&str>,
+    step: Step,
+) -> Option<String> {
+    let items: Vec<&ChatItem> = sections
+        .iter()
+        .filter(|section| !section.collapsed)
+        .flat_map(|section| section.items.iter())
+        .collect();
+    let position = current.and_then(|current| items.iter().position(|item| item.id == current));
+    let unread = |item: &&&ChatItem| item.unread.is_unread();
+    let found = match (position, step) {
+        (Some(position), Step::Next) => items[position + 1..].iter().find(unread),
+        (Some(position), Step::Previous) => items[..position].iter().rev().find(unread),
+        (None, Step::Next) => items.iter().find(unread),
+        (None, Step::Previous) => items.iter().rev().find(unread),
+    };
+    found.map(|item| item.id.clone())
 }
 
 pub struct ChannelOrderInput<'a> {
@@ -820,6 +850,37 @@ mod tests {
     }
 
     #[test]
+    fn unread_stepping_skips_read_chats_in_both_directions() {
+        let directory = Directory::default();
+        let collapsed = HashSet::new();
+        let chats = [
+            chat("a", "group", true),
+            chat("b", "group", false),
+            chat("c", "group", true),
+            chat("d", "group", false),
+        ];
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        let unread: Vec<&str> = visible_chat_ids(&sections)
+            .into_iter()
+            .filter(|id| *id == "a" || *id == "c")
+            .collect();
+        let (first_unread, last_unread) = (unread[0], unread[1]);
+        assert_eq!(
+            step_unread_id(&sections, None, Step::Next).as_deref(),
+            Some(first_unread)
+        );
+        assert_eq!(step_unread_id(&sections, Some(last_unread), Step::Next), None);
+        assert_eq!(
+            step_unread_id(&sections, Some(last_unread), Step::Previous).as_deref(),
+            Some(first_unread)
+        );
+        assert_eq!(
+            step_unread_id(&sections, None, Step::Previous).as_deref(),
+            Some(last_unread)
+        );
+    }
+
+    #[test]
     fn visible_chats_skip_collapsed_sections_and_see_more_rows() {
         let mut chats = vec![chat("fav", "group", false), chat("hid", "group", false)];
         chats.extend((0..7).map(|index| muted_chat(&format!("m{index}"))));
@@ -917,6 +978,28 @@ mod tests {
         assert_eq!(team_name_style(&entry, true), NameStyle::PLAIN);
         let only_hidden = with_unread(team("t1", false, &["a", "b"], &["b"]), &["b"]);
         assert_eq!(team_name_style(&only_hidden, false), NameStyle::PLAIN);
+    }
+
+    #[test]
+    fn muted_channel_shows_no_unread_unless_personally_mentioned() {
+        let mut entry = with_unread(team("t1", false, &["a"], &[]), &["a"]);
+        entry.notifications.insert(
+            "a".into(),
+            store::ChannelNotifications {
+                level: ChannelNotificationLevel::Off,
+                include_replies: false,
+            },
+        );
+        assert!(!channel_shows_unread(&entry, &entry.channels[0]));
+        assert_eq!(team_name_style(&entry, false), NameStyle::PLAIN);
+        entry.mentions.insert(
+            "a".into(),
+            store::ChannelMentions {
+                personal: 1,
+                ..Default::default()
+            },
+        );
+        assert!(channel_shows_unread(&entry, &entry.channels[0]));
     }
 
     #[test]

@@ -73,7 +73,7 @@ impl<R: Remote> SyncEngine<R> {
         let (states, app_horizon_ms, mentions) = tokio::join!(
             self.refresh_chat_states(),
             self.refresh_app_channel_horizon(),
-            self.remote.mention_activities()
+            self.refresh_activity_feed()
         );
         self.drop_chats_hidden_by_chatsvc(states.as_deref())?;
         let mut page = self.remote.chats_page(self.config.chat_page_size).await?;
@@ -176,7 +176,7 @@ impl<R: Remote> SyncEngine<R> {
             states,
             mentions.inspect_err(|error| {
                 if !matches!(error, Error::Unsupported(_)) {
-                    self.report(format!("cannot refresh channel mentions: {error}"));
+                    self.report(format!("cannot refresh the activity feed: {error}"));
                 }
             }),
         ) else {

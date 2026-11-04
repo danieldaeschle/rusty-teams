@@ -307,13 +307,26 @@ fn edit_body(message_id: &str, html: &str) -> Value {
 
 fn rich_text_body(html: &str, display_name: &str, properties: &Value) -> Value {
     json!({
-        "clientmessageid": Utc::now().timestamp_millis().to_string(),
+        "clientmessageid": new_client_message_id(),
         "content": html,
         "messagetype": "RichText/Html",
         "contenttype": "text",
         "imdisplayname": display_name,
+        "amsreferences": [],
         "properties": properties,
     })
+}
+
+const CLIENT_MESSAGE_ID_LENGTH: usize = 19;
+
+/// Teams web: two random `uint32` as decimal strings, joined and cut to 19 characters.
+pub(crate) fn new_client_message_id() -> String {
+    let random = uuid::Uuid::new_v4().as_u128();
+    let first = (random >> 96) as u32;
+    let second = (random >> 64) as u32;
+    let mut id = format!("{first}{second}");
+    id.truncate(CLIENT_MESSAGE_ID_LENGTH);
+    id
 }
 
 fn typing_body(active: bool) -> Value {

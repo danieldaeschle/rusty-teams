@@ -9,7 +9,8 @@ use teams_core::roster_event::{RosterChange, RosterEvent, SharedHistory, merge_m
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::notice::{NoticeAction, short_error, truncated};
 use crate::sidebar_model::{
-    Section, SectionInput, Step, build_sections, next_chat_id, step_id, visible_chat_ids,
+    Section, SectionInput, Step, build_sections, next_chat_id, step_id, step_unread_id,
+    visible_chat_ids,
 };
 
 pub const TITLE_LIMIT: usize = 40;
@@ -478,6 +479,14 @@ impl AppState {
             _ => None,
         };
         step_id(&visible_chat_ids(&self.chat_sections()), current, step)
+    }
+
+    pub fn adjacent_unread_chat_id(&self, step: Step) -> Option<String> {
+        let current = match &self.selection {
+            Some(Selection::Chat(chat_id)) => Some(chat_id.as_str()),
+            _ => None,
+        };
+        step_unread_id(&self.chat_sections(), current, step)
     }
 
     fn chat_sections(&self) -> Vec<Section> {

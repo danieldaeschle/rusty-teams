@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::tooltip::{PopupTriggerTooltip as _, Tooltip};
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
@@ -804,7 +805,7 @@ fn overflow_button(overflow_key: &str, open: bool, context: &CardContext) -> Sta
         .cursor_pointer()
         .hover(|button| button.bg(theme::row_hover()))
         .when(open, |button| button.bg(theme::row_hover()))
-        .tooltip(|window, cx| Tooltip::new(ACTION_OVERFLOW_TOOLTIP).build(window, cx))
+        .popup_trigger_tooltip_text(open, ACTION_OVERFLOW_TOOLTIP)
         .child(ACTION_OVERFLOW_LABEL)
         .on_click(move |_, _, cx| {
             cx.stop_propagation();

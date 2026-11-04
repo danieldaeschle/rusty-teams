@@ -11,12 +11,17 @@ use crate::table::{TABLE_MARK, Table, markdown_table};
 pub const MAX_DEPTH: u8 = 2;
 pub const MAX_HEADING: u8 = 3;
 pub const OBJECT_MARK: char = '\u{FFFC}';
+pub const RULE_MARK: char = '\u{FFFA}';
+pub const MAX_INDENT: u8 = 8;
+pub const INDENT_PIXELS: u32 = 40;
+pub const RULE_HTML: &str = "<hr>";
 const BULLETS: [&str; 3] = ["•", "◦", "▪"];
 const PASTED_BULLETS: [&str; 6] = ["- ", "* ", "+ ", "• ", "◦ ", "▪ "];
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 const AUTOLINK_PREFIXES: [&str; 4] = ["http://", "https://", "www.", "mailto:"];
 const AUTOLINK_TRAILING: &str = ".,;:!?'\"";
 const FENCE: &str = "```";
+const PLAIN_LANGUAGE: &str = "plaintext";
 const MARKDOWN_INDENT: usize = 2;
 
 static TYPED_LINK: LazyLock<Regex> =
@@ -49,6 +54,8 @@ pub enum MarkKind {
     Superscript,
     Subscript,
     Size(SizeStep),
+    Color(u32),
+    Highlight(u32),
     Code,
 }
 
@@ -60,6 +67,8 @@ impl MarkKind {
     fn covers(&self, other: &MarkKind) -> bool {
         match (self, other) {
             (MarkKind::Size(left), MarkKind::Size(right)) => left == right,
+            (MarkKind::Color(left), MarkKind::Color(right)) => left == right,
+            (MarkKind::Highlight(left), MarkKind::Highlight(right)) => left == right,
             _ => self.same_format(other),
         }
     }
@@ -82,6 +91,8 @@ impl MarkKind {
                 | MarkKind::Superscript
                 | MarkKind::Subscript
                 | MarkKind::Size(_)
+                | MarkKind::Color(_)
+                | MarkKind::Highlight(_)
         )
     }
 
@@ -95,6 +106,10 @@ impl MarkKind {
             MarkKind::Superscript => "<sup>".to_owned(),
             MarkKind::Subscript => "<sub>".to_owned(),
             MarkKind::Size(step) => format!("<span style=\"font-size:{};\">", step.css()),
+            MarkKind::Color(color) => format!("<span style=\"color:{};\">", hex_color(*color)),
+            MarkKind::Highlight(color) => {
+                format!("<span style=\"background-color:{};\">", hex_color(*color))
+            }
             MarkKind::Code => "<code>".to_owned(),
         }
     }
@@ -108,7 +123,7 @@ impl MarkKind {
             MarkKind::Strike => "</s>",
             MarkKind::Superscript => "</sup>",
             MarkKind::Subscript => "</sub>",
-            MarkKind::Size(_) => "</span>",
+            MarkKind::Size(_) | MarkKind::Color(_) | MarkKind::Highlight(_) => "</span>",
             MarkKind::Code => "</code>",
         }
     }
@@ -123,12 +138,14 @@ pub struct Mark {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LineKind {
     Text,
+    Indent(u8),
     Bullet(u8),
     Numbered(u8),
     Quote,
     Code(Option<String>),
     Heading(u8),
     Table(Table),
+    Rule,
 }
 
 impl LineKind {
@@ -138,6 +155,15 @@ impl LineKind {
 
     pub fn is_table(&self) -> bool {
         matches!(self, LineKind::Table(_))
+    }
+
+    /// A line that holds one object mark alone: a table or a horizontal rule.
+    pub fn object_mark(&self) -> Option<char> {
+        match self {
+            LineKind::Table(_) => Some(TABLE_MARK),
+            LineKind::Rule => Some(RULE_MARK),
+            _ => None,
+        }
     }
 
     pub fn depth(&self) -> u8 {
@@ -216,15 +242,44 @@ impl TypingStyle {
 
     /// `None` is the normal size.
     pub fn set_size(&mut self, size: Option<SizeStep>, active: &[MarkKind]) {
-        let marker = MarkKind::Size(SizeStep::Small);
+        self.set_exclusive(
+            MarkKind::Size(SizeStep::Small),
+            size.map(MarkKind::Size),
+            active,
+        );
+    }
+
+    /// `None` is Automatic.
+    pub fn set_color(&mut self, color: Option<u32>, active: &[MarkKind]) {
+        self.set_exclusive(MarkKind::Color(0), color.map(MarkKind::Color), active);
+    }
+
+    /// `None` is No highlight.
+    pub fn set_highlight(&mut self, color: Option<u32>, active: &[MarkKind]) {
+        self.set_exclusive(
+            MarkKind::Highlight(0),
+            color.map(MarkKind::Highlight),
+            active,
+        );
+    }
+
+    /// Text typed next drops every format but a link.
+    pub fn clear(&mut self, active: &[MarkKind]) {
+        self.add.clear();
+        self.remove = active
+            .iter()
+            .filter(|kind| !matches!(kind, MarkKind::Link(_)))
+            .cloned()
+            .collect();
+    }
+
+    fn set_exclusive(&mut self, marker: MarkKind, value: Option<MarkKind>, active: &[MarkKind]) {
         self.add.retain(|added| !added.same_format(&marker));
         self.remove.retain(|removed| !removed.same_format(&marker));
         if active.iter().any(|existing| existing.same_format(&marker)) {
             self.remove.push(marker);
         }
-        if let Some(step) = size {
-            self.add.push(MarkKind::Size(step));
-        }
+        self.add.extend(value);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -440,6 +495,7 @@ impl Draft {
             .into_iter()
             .map(|line| match &line.kind {
                 LineKind::Table(table) => table.plain_text(),
+                LineKind::Rule => String::new(),
                 _ => line.content,
             })
             .collect::<Vec<_>>()
@@ -579,11 +635,66 @@ impl Draft {
 
     /// `None` is the normal size: any size mark on `range` is removed.
     pub fn set_size(&mut self, range: Range<usize>, size: Option<SizeStep>) {
+        self.set_exclusive(
+            range,
+            &MarkKind::Size(SizeStep::Small),
+            size.map(MarkKind::Size),
+        );
+    }
+
+    /// `None` is Automatic: the font colour on `range` is removed.
+    pub fn set_color(&mut self, range: Range<usize>, color: Option<u32>) {
+        self.set_exclusive(range, &MarkKind::Color(0), color.map(MarkKind::Color));
+    }
+
+    /// `None` is No highlight.
+    pub fn set_highlight(&mut self, range: Range<usize>, color: Option<u32>) {
+        self.set_exclusive(
+            range,
+            &MarkKind::Highlight(0),
+            color.map(MarkKind::Highlight),
+        );
+    }
+
+    /// The colour of `marker`'s kind that covers all of `range`.
+    pub fn color_in(&self, range: Range<usize>, marker: &MarkKind) -> Option<u32> {
+        self.marks
+            .iter()
+            .filter(|mark| mark.kind.same_format(marker))
+            .find(|mark| self.state(range.clone(), &mark.kind) == FormatState::On)
+            .and_then(|mark| match mark.kind {
+                MarkKind::Color(color) | MarkKind::Highlight(color) => Some(color),
+                _ => None,
+            })
+    }
+
+    /// Teams' Clear all formatting: every inline format but links, and the block indent.
+    pub fn clear_formatting(&mut self, range: Range<usize>) {
         self.journal = Journal::default();
-        self.remove_marks(range.clone(), &MarkKind::Size(SizeStep::Small));
-        if let Some(step) = size {
+        let kinds: Vec<MarkKind> = self
+            .marks
+            .iter()
+            .filter(|mark| {
+                !matches!(mark.kind, MarkKind::Link(_)) && overlaps(&mark.range, &range)
+            })
+            .map(|mark| mark.kind.clone())
+            .collect();
+        for kind in kinds {
+            self.remove_marks(range.clone(), &kind);
+        }
+        for index in self.selected_lines(&range) {
+            if matches!(self.lines[index], LineKind::Indent(_)) {
+                self.lines[index] = LineKind::Text;
+            }
+        }
+    }
+
+    fn set_exclusive(&mut self, range: Range<usize>, marker: &MarkKind, value: Option<MarkKind>) {
+        self.journal = Journal::default();
+        self.remove_marks(range.clone(), marker);
+        if let Some(kind) = value {
             for part in self.content_parts(range) {
-                self.add_mark(part, MarkKind::Size(step));
+                self.add_mark(part, kind.clone());
             }
         }
     }
@@ -773,7 +884,13 @@ impl Draft {
                 self.splice(content.clone(), "", &[]);
                 Some(self.set_line_kind(index, LineKind::Code(language), None, content.start))
             }
-            LineKind::Heading(_) | LineKind::Table(_) => None,
+            LineKind::Heading(_) | LineKind::Table(_) | LineKind::Rule => None,
+            LineKind::Indent(_) if !shift => None,
+            LineKind::Indent(_) => {
+                self.splice(cursor..cursor, "\n", &[]);
+                self.lines[index + 1] = kind;
+                Some(cursor + 1)
+            }
             LineKind::Quote if content.is_empty() && !shift => {
                 self.lines[index] = LineKind::Text;
                 Some(cursor)
@@ -841,6 +958,11 @@ impl Draft {
         if self.lines[index + 1].is_table() {
             return Some(cursor);
         }
+        if self.lines[index + 1] == LineKind::Rule {
+            let rule = self.line_ranges()[index + 1].clone();
+            self.splice(cursor..rule.end, "", &[]);
+            return Some(self.repair(cursor));
+        }
         let next_marker = self.marker_range(index + 1);
         if next_marker.is_empty() {
             return None;
@@ -856,8 +978,14 @@ impl Draft {
         let kind = self.lines[index].clone();
         let line = self.line_ranges()[index].clone();
         let content = self.content_range(index);
+        if cursor == line.start && index > 0 && self.lines[index - 1] == LineKind::Rule {
+            let rule = self.line_ranges()[index - 1].clone();
+            self.splice(rule.start..line.start, "", &[]);
+            self.lines[index - 1] = kind;
+            return Some(self.repair(rule.start));
+        }
         match &kind {
-            LineKind::Text => None,
+            LineKind::Text | LineKind::Indent(_) | LineKind::Rule => None,
             LineKind::Code(_) => {
                 let first_of_block = index == 0 || self.lines[index - 1] != kind;
                 (cursor == line.start && first_of_block).then(|| {
@@ -917,6 +1045,85 @@ impl Draft {
         }
         self.repair(0);
         true
+    }
+
+    /// Teams' Increase / Decrease indent: list items nest or lift, paragraphs move by one
+    /// block indent step.
+    pub fn indent_blocks(&mut self, range: Range<usize>, outdent: bool) {
+        self.journal = Journal::default();
+        for index in self.selected_lines(&range) {
+            let kind = self.lines[index].clone();
+            let target = match (&kind, outdent) {
+                (list, _) if list.is_list() => match (outdent, list.depth()) {
+                    (true, 0) => LineKind::Text,
+                    (true, depth) => list.with_depth(depth - 1),
+                    (false, depth) => list.with_depth((depth + 1).min(MAX_DEPTH)),
+                },
+                (LineKind::Text, false) => LineKind::Indent(1),
+                (LineKind::Indent(level), false) => LineKind::Indent((level + 1).min(MAX_INDENT)),
+                (LineKind::Indent(1), true) => LineKind::Text,
+                (LineKind::Indent(level), true) => LineKind::Indent(level - 1),
+                _ => continue,
+            };
+            self.set_line_kind(index, target, None, 0);
+        }
+        self.repair(0);
+    }
+
+    /// Decrease indent has something to lift: a list item or an indented paragraph.
+    pub fn can_outdent(&self, range: Range<usize>) -> bool {
+        self.selected_lines(&range)
+            .any(|index| self.lines[index].is_list() || matches!(self.lines[index], LineKind::Indent(_)))
+    }
+
+    /// Teams' paragraph style: `None` is Paragraph, otherwise Heading 1 to 3.
+    pub fn set_heading(&mut self, range: Range<usize>, level: Option<u8>) {
+        self.journal = Journal::default();
+        let target = level.map_or(LineKind::Text, |level| {
+            LineKind::Heading(level.clamp(1, MAX_HEADING))
+        });
+        for index in self.selected_lines(&range) {
+            let current = &self.lines[index];
+            if current.object_mark().is_some() || matches!(current, LineKind::Code(_)) {
+                continue;
+            }
+            if *current != target {
+                self.set_line_kind(index, target.clone(), None, 0);
+            }
+        }
+        self.repair(0);
+    }
+
+    /// The paragraph style of the cursor's line: `None` for Paragraph.
+    pub fn heading_at(&self, offset: usize) -> Option<u8> {
+        match self.lines[self.line_at(offset)] {
+            LineKind::Heading(level) => Some(level),
+            _ => None,
+        }
+    }
+
+    /// The rule goes in place of an empty text line, otherwise below the cursor's line; the
+    /// cursor goes to the text line after it, added when the rule ends the draft.
+    pub fn insert_rule(&mut self, cursor: usize) -> usize {
+        self.journal = Journal::default();
+        let index = self.line_at(cursor);
+        let line = self.line_ranges()[index].clone();
+        let mark = RULE_MARK.to_string();
+        let replaces_line = self.lines[index] == LineKind::Text && line.is_empty();
+        let rule_index = if replaces_line {
+            self.splice(line, &mark, &[]);
+            index
+        } else {
+            self.splice(line.end..line.end, &format!("\n{mark}"), &[]);
+            index + 1
+        };
+        self.lines[rule_index] = LineKind::Rule;
+        if rule_index + 1 == self.lines.len() {
+            let end = self.text.len();
+            self.splice(end..end, "\n", &[]);
+            self.lines[rule_index + 1] = LineKind::Text;
+        }
+        self.line_ranges()[rule_index + 1].start
     }
 
     /// All selected lines `kind` already: back to text. Otherwise all become `kind`.
@@ -1220,6 +1427,17 @@ impl Draft {
                         html.push_str(&format!("<h{level}>{inline}</h{level}>"));
                     }
                 }
+                LineKind::Indent(_) => {
+                    for line in run {
+                        let level = match line.kind {
+                            LineKind::Indent(level) => u32::from(level.clamp(1, MAX_INDENT)),
+                            _ => 1,
+                        };
+                        let inline = inline_html(&line.content, &line.marks);
+                        let margin = level * INDENT_PIXELS;
+                        html.push_str(&format!("<p style=\"margin-left:{margin}px;\">{inline}</p>"));
+                    }
+                }
                 LineKind::Table(_) => {
                     for line in run {
                         if let LineKind::Table(table) = &line.kind {
@@ -1227,21 +1445,20 @@ impl Draft {
                         }
                     }
                 }
+                LineKind::Rule => html.push_str(&RULE_HTML.repeat(run.len())),
                 LineKind::Code(language) => {
-                    match language {
-                        Some(language) => html.push_str(&format!(
-                            "<pre class=\"language-{}\">",
-                            escape_html(language)
-                        )),
-                        None => html.push_str("<pre>"),
-                    }
+                    let language = language.as_deref().unwrap_or(PLAIN_LANGUAGE);
+                    html.push_str(&format!(
+                        "<pre class=\"language-{} skipProofing\" spellcheck=\"false\"><code>",
+                        escape_html(&language.to_ascii_lowercase())
+                    ));
                     let code = run
                         .iter()
                         .map(|line| escape_html(&line.content))
                         .collect::<Vec<_>>()
-                        .join("\n");
+                        .join("<br>");
                     html.push_str(&code);
-                    html.push_str("</pre>");
+                    html.push_str("</code></pre>");
                 }
                 _ => html.push_str(&list_html(run)),
             }
@@ -1532,36 +1749,43 @@ impl Draft {
         }
     }
 
-    /// A table line holds its mark alone: text typed next to it moves to its own line, a mark
-    /// without its table is dropped and a table without its mark becomes text.
-    fn repair_tables(&mut self, mut cursor: usize) -> usize {
-        let mark_length = TABLE_MARK.len_utf8();
+    /// A table or rule line holds its mark alone: text typed next to it moves to its own
+    /// line, a mark without its line kind is dropped and a line without its mark becomes text.
+    fn repair_objects(&mut self, mut cursor: usize) -> usize {
         let mut index = 0;
         while index < self.lines.len() {
             let line = self.line_ranges()[index].clone();
-            let found = self.text[line.clone()].find(TABLE_MARK);
-            match (self.lines[index].clone(), found) {
-                (LineKind::Table(_), None) => self.lines[index] = LineKind::Text,
-                (LineKind::Table(table), Some(at)) if at > 0 => {
+            let kind = self.lines[index].clone();
+            let expected = kind.object_mark();
+            let stray = self.text[line.clone()].char_indices().find(|(_, character)| {
+                [TABLE_MARK, RULE_MARK].contains(character) && Some(*character) != expected
+            });
+            if let Some((at, character)) = stray {
+                let mark = line.start + at..line.start + at + character.len_utf8();
+                self.splice(mark.clone(), "", &[]);
+                cursor = map_offset(&[(mark, String::new())], cursor);
+                continue;
+            }
+            let Some(object_mark) = expected else {
+                index += 1;
+                continue;
+            };
+            let mark_length = object_mark.len_utf8();
+            match self.text[line.clone()].find(object_mark) {
+                None => self.lines[index] = LineKind::Text,
+                Some(at) if at > 0 => {
                     let split = line.start + at;
                     self.splice(split..split, "\n", &[]);
                     self.lines[index] = LineKind::Text;
-                    self.lines[index + 1] = LineKind::Table(table);
+                    self.lines[index + 1] = kind;
                     cursor += usize::from(cursor > split);
                 }
-                (LineKind::Table(_), Some(_)) if line.len() > mark_length => {
+                Some(_) if line.len() > mark_length => {
                     let split = line.start + mark_length;
                     self.splice(split..split, "\n", &[]);
                     cursor += usize::from(cursor > split);
                 }
-                (LineKind::Table(_), Some(_)) => {}
-                (_, Some(at)) => {
-                    let mark = line.start + at..line.start + at + mark_length;
-                    self.splice(mark.clone(), "", &[]);
-                    cursor = map_offset(&[(mark, String::new())], cursor);
-                    continue;
-                }
-                (_, None) => {}
+                Some(_) => {}
             }
             index += 1;
         }
@@ -1570,7 +1794,7 @@ impl Draft {
 
     /// List items whose marker was edited away become text; numbered items are renumbered.
     fn repair(&mut self, cursor: usize) -> usize {
-        let mut cursor = self.repair_tables(cursor);
+        let mut cursor = self.repair_objects(cursor);
         for index in 0..self.lines.len() {
             let kind = self.lines[index].clone();
             if !kind.is_list() {
@@ -1594,6 +1818,10 @@ impl Draft {
     }
 }
 
+fn hex_color(color: u32) -> String {
+    format!("#{:06X}", color & 0xFF_FFFF)
+}
+
 fn overlaps(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
@@ -1607,10 +1835,12 @@ fn marker_text(kind: &LineKind, number: u32) -> String {
         LineKind::Bullet(depth) => bullet_marker(*depth),
         LineKind::Numbered(_) => format!("{number}. "),
         LineKind::Text
+        | LineKind::Indent(_)
         | LineKind::Quote
         | LineKind::Code(_)
         | LineKind::Heading(_)
-        | LineKind::Table(_) => String::new(),
+        | LineKind::Table(_)
+        | LineKind::Rule => String::new(),
     }
 }
 
@@ -2160,6 +2390,8 @@ impl SpanLines {
                         | Span::CodeBlock { .. }
                         | Span::Heading { .. }
                         | Span::Table { .. }
+                        | Span::Rule
+                        | Span::Indent { .. }
                 )
             );
             match span {
@@ -2179,7 +2411,16 @@ impl SpanLines {
                     self.walk(children, kind, &with(MarkKind::Size(SizeStep::Large)))
                 }
                 Span::Sized(_, children) => self.walk(children, kind, marks),
-                Span::Colored { children, .. } => self.walk(children, kind, marks),
+                Span::Colored {
+                    color,
+                    background,
+                    children,
+                } => {
+                    let mut colored = marks.to_vec();
+                    colored.extend(color.map(MarkKind::Color));
+                    colored.extend(background.map(MarkKind::Highlight));
+                    self.walk(children, kind, &colored)
+                }
                 Span::Code(text) => self.append(text, kind, &with(MarkKind::Code)),
                 Span::Link { url, children } => {
                     self.walk(children, kind, &with(MarkKind::Link(url.clone())))
@@ -2187,10 +2428,31 @@ impl SpanLines {
                 Span::Mention { name, .. } => {
                     self.append(&format!("@{}", name.trim_start_matches('@')), kind, marks)
                 }
+                Span::Rule if *kind == LineKind::Text => {
+                    self.lines.push(DraftLine {
+                        kind: LineKind::Rule,
+                        number: None,
+                        content: RULE_MARK.to_string(),
+                        marks: Vec::new(),
+                    });
+                    self.open = false;
+                }
+                Span::Indent { level, children }
+                    if *kind == LineKind::Text
+                        && !children
+                            .iter()
+                            .any(|child| matches!(child, Span::Heading { .. })) =>
+                {
+                    let indent = LineKind::Indent((*level).clamp(1, MAX_INDENT));
+                    self.start_line(&indent, None);
+                    self.walk(children, &indent, marks);
+                    self.open = false;
+                }
+                Span::Indent { children, .. } => self.walk(children, kind, marks),
                 Span::LineBreak | Span::Rule if !self.open || block_follows => {}
                 Span::LineBreak | Span::Rule => {
                     let continued = match kind {
-                        LineKind::Quote | LineKind::Code(_) => kind.clone(),
+                        LineKind::Quote | LineKind::Code(_) | LineKind::Indent(_) => kind.clone(),
                         _ => LineKind::Text,
                     };
                     self.start_line(&continued, None);
@@ -2244,7 +2506,7 @@ impl SpanLines {
                     self.lines.push(table_line(Table::from_rows(rows)));
                     self.open = false;
                 }
-                Span::Image { .. } | Span::Quote { .. } => {}
+                Span::Image { .. } | Span::Quote { .. } | Span::CustomEmoji { .. } => {}
             }
         }
     }
@@ -2707,7 +2969,7 @@ mod tests {
         assert_eq!(draft.lines()[1], LineKind::Text);
         assert_eq!(
             draft.to_html(),
-            "<pre class=\"language-rust\">fn x() {}</pre>"
+            "<pre class=\"language-rust skipProofing\" spellcheck=\"false\"><code>fn x() {}</code></pre>"
         );
     }
 
@@ -2742,7 +3004,7 @@ mod tests {
              <blockquote>q1<br>q2</blockquote>\
              <ul><li>a<ul><li>b</li></ul></li></ul>\
              <ol><li>x</li><li>y</li></ol>\
-             <pre class=\"language-py\">print(1)</pre>"
+             <pre class=\"language-py skipProofing\" spellcheck=\"false\"><code>print(1)</code></pre>"
         );
     }
 
@@ -2947,7 +3209,7 @@ mod tests {
     fn code_lines_hold_only_their_content() {
         let mut draft = Draft::from_markdown("```\nlet a = 1;\n\u{2003}b\n```");
         assert_eq!(draft.text(), "let a = 1;\n\u{2003}b");
-        assert_eq!(draft.to_html(), "<pre>let a = 1;\n\u{2003}b</pre>");
+        assert_eq!(draft.to_html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>let a = 1;<br>\u{2003}b</code></pre>");
         assert_eq!(draft.backspace_at_start(draft.line_ranges()[1].start), None);
         assert_eq!(draft.backspace_at_start(0), Some(0));
         assert_eq!(draft.lines()[0], LineKind::Text);
@@ -2972,12 +3234,12 @@ mod tests {
         draft.apply_edit(&next, cursor + pasted.len(), None);
         assert_eq!(
             draft.to_html(),
-            "<pre class=\"language-py\">def f():\n    return 1</pre>"
+            "<pre class=\"language-py skipProofing\" spellcheck=\"false\"><code>def f():<br>    return 1</code></pre>"
         );
         let mut split = Draft::from_markdown("```\n   a    b\n```");
         let after_a = "   a".len();
         split.break_line(after_a, false).unwrap();
-        assert_eq!(split.to_html(), "<pre>   a\n    b</pre>");
+        assert_eq!(split.to_html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>   a<br>    b</code></pre>");
     }
 
     #[test]

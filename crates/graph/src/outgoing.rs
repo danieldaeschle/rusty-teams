@@ -10,6 +10,8 @@ pub enum MentionTarget {
     User { user_id: String },
     Channel { channel_id: String },
     Team { team_id: String },
+    Everyone { chat_id: String },
+    Tag { tag_id: String },
 }
 
 /// `id` matches the `<at id="n">` tag in the html body.
@@ -31,6 +33,12 @@ impl OutgoingMention {
             }),
             MentionTarget::Team { team_id } => json!({
                 "conversation": {"id": team_id, "displayName": self.text, "conversationIdentityType": "team"}
+            }),
+            MentionTarget::Everyone { chat_id } => json!({
+                "conversation": {"id": chat_id, "displayName": self.text, "conversationIdentityType": "chat"}
+            }),
+            MentionTarget::Tag { tag_id } => json!({
+                "tag": {"id": tag_id, "displayName": self.text}
             }),
         };
         json!({"id": self.id, "mentionText": self.text, "mentioned": mentioned})
@@ -230,6 +238,34 @@ mod tests {
             "team"
         );
         assert_eq!(team["mentioned"]["conversation"]["id"], "t");
+    }
+
+    #[test]
+    fn everyone_and_tag_mentions_match_the_documented_payload() {
+        let everyone = mention(
+            0,
+            "Everyone",
+            MentionTarget::Everyone {
+                chat_id: "19:g@thread.v2".into(),
+            },
+        )
+        .to_json();
+        assert_eq!(
+            everyone["mentioned"],
+            json!({"conversation": {"id": "19:g@thread.v2", "displayName": "Everyone", "conversationIdentityType": "chat"}})
+        );
+        let tag = mention(
+            1,
+            "Designers",
+            MentionTarget::Tag {
+                tag_id: "tag-1".into(),
+            },
+        )
+        .to_json();
+        assert_eq!(
+            tag,
+            json!({"id": 1, "mentionText": "Designers", "mentioned": {"tag": {"id": "tag-1", "displayName": "Designers"}}})
+        );
     }
 
     #[test]

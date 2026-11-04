@@ -1,4 +1,5 @@
 mod actions;
+mod activity_sync;
 mod adaptive_card;
 mod avatars;
 mod bot_partners;
@@ -67,6 +68,8 @@ mod translate_sync;
 mod translation;
 mod youtube;
 
+pub use activity_sync::stored_activity_feed;
+pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,
     CardElement, CardFact, CardIcon, CardImage, CardItem, CardMedia, CardRefresh, CardSpacing,
@@ -103,7 +106,7 @@ pub use card_width::{TargetWidth, WidthClass};
 pub use chatsvc::substrate_search;
 pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
-    ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
+    ForwardResult, Gif, PinnedMessage, PostFollowState, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chat_settings_sync::{store_chat_settings, stored_chat_settings};
@@ -124,7 +127,8 @@ pub use default_reactions::{
 };
 pub use download::LibraryFile;
 pub use draft::{
-    Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
+    Draft, DraftLine, Edit, FormatState, INDENT_PIXELS, LineKind, MAX_DEPTH, MAX_INDENT, Mark,
+    MarkKind, OBJECT_MARK, RULE_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 pub use emoticon_tags::{EmoticonTag, emoticon_tags};
@@ -157,7 +161,7 @@ pub use meeting_join::{
 pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
     ChannelAddress, ChannelLinkInput, channel_link, channel_message_link, channel_tab_link,
-    chat_message_link, team_link,
+    chat_message_link, outlook_compose_link, team_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use notes_chat::{is_notes_chat, notes_chat_title};
@@ -175,7 +179,7 @@ pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
     card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with,
-    mentions, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
+    mentions, mentions_whole_chat, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
     readable_text, translated_spans, user_mention_inputs,
 };
 pub use table::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};

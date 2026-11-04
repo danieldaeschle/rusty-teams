@@ -2,7 +2,8 @@ use gpui_kit::component::fluent::{
     MENU_ICON_LABEL_GAP, MENU_ICON_SLOT, MENU_ITEM_GAP, MENU_ITEM_HEIGHT, MENU_ITEM_PADDING_X,
     MENU_LIST_PADDING, OPTION_CHECK_SIZE,
 };
-use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::tooltip::{PopupTriggerTooltip as _, Tooltip};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageImportance;
@@ -84,7 +85,7 @@ impl Composer {
                 .cursor_pointer()
                 .when(open, |button| button.bg(theme::popup_hover()))
                 .hover(|button| button.bg(theme::popup_hover()))
-                .tooltip(|window, cx| Tooltip::new(DELIVERY_BUTTON_TITLE).build(window, cx))
+                .popup_trigger_tooltip_text(open, DELIVERY_BUTTON_TITLE)
                 .child(symbol(
                     "fluent_important",
                     COMPOSER_ICON_SIZE,

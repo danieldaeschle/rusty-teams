@@ -1,4 +1,7 @@
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::{Rc, Weak},
+    time::Duration,
+};
 
 use gpui::{
     AnyElement, AnyView, App, Bounds, Context, Div, ElementId, InteractiveElement, IntoElement,
@@ -57,6 +60,7 @@ pub struct TooltipRequest {
     build: TooltipBuilder,
     trigger_bounds: Bounds<Pixels>,
     preferred_placement: Option<Placement>,
+    trigger_alive: Option<Weak<()>>,
 }
 
 impl TooltipRequest {
@@ -68,12 +72,26 @@ impl TooltipRequest {
             build: Rc::new(build),
             trigger_bounds,
             preferred_placement: None,
+            trigger_alive: None,
         }
     }
 
     pub fn placement(mut self, placement: Placement) -> Self {
         self.preferred_placement = Some(placement);
         self
+    }
+
+    /// The tooltip closes once `trigger_alive` can no longer be upgraded,
+    /// i.e. when the trigger stopped being rendered.
+    pub fn while_alive(mut self, trigger_alive: Weak<()>) -> Self {
+        self.trigger_alive = Some(trigger_alive);
+        self
+    }
+
+    fn trigger_gone(&self) -> bool {
+        self.trigger_alive
+            .as_ref()
+            .is_some_and(|alive| alive.upgrade().is_none())
     }
 }
 
@@ -104,6 +122,7 @@ pub struct TooltipOverlay {
     is_switching: bool,
     show_task: Option<Task<()>>,
     hide_task: Option<Task<()>>,
+    trigger_check_scheduled: bool,
     renderer: TooltipRenderer,
 }
 
@@ -119,6 +138,7 @@ impl TooltipOverlay {
             is_switching: false,
             show_task: None,
             hide_task: None,
+            trigger_check_scheduled: false,
             renderer: Rc::new(|view, _, _, _| div().child(view).into_any_element()),
         }
     }
@@ -218,8 +238,47 @@ impl Default for TooltipOverlay {
     }
 }
 
+impl TooltipOverlay {
+    fn schedule_trigger_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.trigger_check_scheduled {
+            return;
+        }
+        self.trigger_check_scheduled = true;
+        let overlay = cx.weak_entity();
+        // Element state of a trigger that was not rendered is dropped only after the frame.
+        window.on_next_frame(move |_, cx| {
+            let _ = overlay.update(cx, |overlay, cx| {
+                overlay.trigger_check_scheduled = false;
+                if overlay
+                    .content
+                    .as_ref()
+                    .is_some_and(TooltipRequest::trigger_gone)
+                {
+                    overlay.hide(cx);
+                }
+            });
+        });
+    }
+}
+
 impl Render for TooltipOverlay {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self
+            .content
+            .as_ref()
+            .is_some_and(TooltipRequest::trigger_gone)
+        {
+            self.content = None;
+            self.previous_bounds = None;
+            self.is_switching = false;
+        }
+        if self
+            .content
+            .as_ref()
+            .is_some_and(|content| content.trigger_alive.is_some())
+        {
+            self.schedule_trigger_check(window, cx);
+        }
         let Some(content) = self.content.as_ref() else {
             return div().into_any_element();
         };

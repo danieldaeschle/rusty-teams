@@ -200,6 +200,7 @@ mod tests {
             dismissed: false,
             fade: super::super::stack::Fade::shown(std::time::Instant::now()),
             agent: None,
+            status_change: false,
             urgent: false,
         };
         assert_eq!(toast_height(&model("Hi"), 1), 112.);

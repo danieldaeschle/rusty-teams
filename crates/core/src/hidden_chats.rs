@@ -194,6 +194,7 @@ mod tests {
                 read: chatsvc::ReadHorizon::default(),
                 notification_settings: None,
                 history_cleared_ms: None,
+                hidden_at_ms: None,
             },
         )])
     }

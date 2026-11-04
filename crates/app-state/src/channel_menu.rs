@@ -15,6 +15,7 @@ pub enum ChannelMenuItem {
     Unpin,
     Show,
     Hide,
+    ManageChannel,
     CopyLink,
 }
 
@@ -22,6 +23,7 @@ pub enum ChannelMenuItem {
 pub enum TeamMenuItem {
     Show,
     Hide,
+    ManageTeam,
     CopyLink,
 }
 
@@ -39,6 +41,7 @@ impl ChannelMenuItem {
             ChannelMenuItem::Unpin => "Unpin",
             ChannelMenuItem::Show => "Show",
             ChannelMenuItem::Hide => "Hide",
+            ChannelMenuItem::ManageChannel => "Manage channel",
             ChannelMenuItem::CopyLink => "Copy link",
         }
     }
@@ -49,7 +52,23 @@ impl TeamMenuItem {
         match self {
             TeamMenuItem::Show => "Show",
             TeamMenuItem::Hide => "Hide",
+            TeamMenuItem::ManageTeam => "Manage team",
             TeamMenuItem::CopyLink => "Copy link",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkUse {
+    Copy,
+    OpenInBrowser,
+}
+
+impl LinkUse {
+    fn failure(self, reason: &str) -> String {
+        match self {
+            LinkUse::Copy => format!("Copy link failed: {reason}"),
+            LinkUse::OpenInBrowser => format!("Couldn't open Teams on the web: {reason}"),
         }
     }
 }
@@ -80,6 +99,7 @@ pub fn channel_menu_entries(state: ChannelMenuState) -> Vec<MenuEntry<ChannelMen
             ChannelMenuItem::Show
         }),
         MenuEntry::Separator,
+        MenuEntry::Item(ChannelMenuItem::ManageChannel),
         MenuEntry::Item(ChannelMenuItem::CopyLink),
     ]
 }
@@ -92,6 +112,7 @@ pub fn team_menu_entries(hidden: bool) -> Vec<MenuEntry<TeamMenuItem>> {
             TeamMenuItem::Hide
         }),
         MenuEntry::Separator,
+        MenuEntry::Item(TeamMenuItem::ManageTeam),
         MenuEntry::Item(TeamMenuItem::CopyLink),
     ]
 }
@@ -260,6 +281,14 @@ impl AppState {
     }
 
     pub fn copy_channel_link(&mut self, channel_id: &str, cx: &mut Context<Self>) {
+        self.with_channel_link(channel_id, LinkUse::Copy, cx);
+    }
+
+    pub fn manage_channel_in_browser(&mut self, channel_id: &str, cx: &mut Context<Self>) {
+        self.with_channel_link(channel_id, LinkUse::OpenInBrowser, cx);
+    }
+
+    fn with_channel_link(&mut self, channel_id: &str, link_use: LinkUse, cx: &mut Context<Self>) {
         let Some(engine) = self.engine.clone() else {
             if self.mode.demo {
                 let link = teams_core::channel_link(&teams_core::ChannelAddress {
@@ -269,15 +298,23 @@ impl AppState {
                     channel_name: self.channel_name(channel_id).unwrap_or_default(),
                     membership_type: None,
                 });
-                self.copy_link(link, cx);
+                self.use_link(link, link_use, cx);
             }
             return;
         };
         let owned_id = channel_id.to_owned();
-        self.copy_link_from(async move { engine.channel_link(&owned_id).await }, cx);
+        self.link_from(async move { engine.channel_link(&owned_id).await }, link_use, cx);
     }
 
     pub fn copy_team_link(&mut self, team_id: &str, cx: &mut Context<Self>) {
+        self.with_team_link(team_id, LinkUse::Copy, cx);
+    }
+
+    pub fn manage_team_in_browser(&mut self, team_id: &str, cx: &mut Context<Self>) {
+        self.with_team_link(team_id, LinkUse::OpenInBrowser, cx);
+    }
+
+    fn with_team_link(&mut self, team_id: &str, link_use: LinkUse, cx: &mut Context<Self>) {
         let Some(engine) = self.engine.clone() else {
             if self.mode.demo {
                 let team_thread_id = self.store.team_thread_id(team_id).ok().flatten();
@@ -286,12 +323,12 @@ impl AppState {
                     team_id,
                     crate::demo::DEMO_TENANT_ID,
                 );
-                self.copy_link(link, cx);
+                self.use_link(link, link_use, cx);
             }
             return;
         };
         let owned_id = team_id.to_owned();
-        self.copy_link_from(async move { engine.team_link(&owned_id).await }, cx);
+        self.link_from(async move { engine.team_link(&owned_id).await }, link_use, cx);
     }
 
     fn channel_team_id(&self, channel_id: &str) -> Option<String> {
@@ -312,14 +349,20 @@ impl AppState {
             .map(|channel| channel.name.clone())
     }
 
-    fn copy_link(&mut self, link: String, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(link));
-        self.raise_notice(COPIED_TO_CLIPBOARD.to_owned(), None, cx);
+    fn use_link(&mut self, link: String, link_use: LinkUse, cx: &mut Context<Self>) {
+        match link_use {
+            LinkUse::Copy => {
+                cx.write_to_clipboard(ClipboardItem::new_string(link));
+                self.raise_notice(COPIED_TO_CLIPBOARD.to_owned(), None, cx);
+            }
+            LinkUse::OpenInBrowser => cx.open_url(&link),
+        }
     }
 
-    fn copy_link_from(
+    fn link_from(
         &mut self,
         call: impl Future<Output = teams_core::Result<String>> + Send + 'static,
+        link_use: LinkUse,
         cx: &mut Context<Self>,
     ) {
         let receiver = crate::runtime::spawn(call);
@@ -330,8 +373,8 @@ impl AppState {
                 Err(_) => Err("cancelled".to_owned()),
             };
             this.update(cx, |state, cx| match outcome {
-                Ok(link) => state.copy_link(link, cx),
-                Err(reason) => state.raise_notice(format!("Copy link failed: {reason}"), None, cx),
+                Ok(link) => state.use_link(link, link_use, cx),
+                Err(reason) => state.raise_notice(link_use.failure(&reason), None, cx),
             })
             .ok();
         })
@@ -392,7 +435,7 @@ mod tests {
         });
         assert_eq!(
             labels(&shown, ChannelMenuItem::label),
-            ["Notifications", "Pin", "Hide", "-", "Copy link"]
+            ["Notifications", "Pin", "Hide", "-", "Manage channel", "Copy link"]
         );
         let hidden_pinned = channel_menu_entries(ChannelMenuState {
             pinned: true,
@@ -400,7 +443,7 @@ mod tests {
         });
         assert_eq!(
             labels(&hidden_pinned, ChannelMenuItem::label),
-            ["Notifications", "Unpin", "Show", "-", "Copy link"]
+            ["Notifications", "Unpin", "Show", "-", "Manage channel", "Copy link"]
         );
     }
 
@@ -423,11 +466,11 @@ mod tests {
     fn team_menu_switches_between_show_and_hide() {
         assert_eq!(
             labels(&team_menu_entries(false), TeamMenuItem::label),
-            ["Hide", "-", "Copy link"]
+            ["Hide", "-", "Manage team", "Copy link"]
         );
         assert_eq!(
             labels(&team_menu_entries(true), TeamMenuItem::label),
-            ["Show", "-", "Copy link"]
+            ["Show", "-", "Manage team", "Copy link"]
         );
     }
 

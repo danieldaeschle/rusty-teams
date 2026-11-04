@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 pub const PROPERTY_NAME: &str = "consumptionhorizon";
+pub const BOOKMARK_PROPERTY_NAME: &str = "consumptionHorizonBookmark";
 
 /// Read state of one conversation as chatsvc lists it, judged like the Teams worker (`hasUnreadMessages`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -69,6 +70,20 @@ pub fn read_up_to(last_message_at: DateTime<Utc>, now: DateTime<Utc>) -> String 
         last_message_at.timestamp_millis(),
         now.timestamp_millis()
     )
+}
+
+/// Teams' unread bookmark on a message: one millisecond before its arrival, now, its id.
+pub fn bookmark_at(message_arrived_at: DateTime<Utc>, message_id: &str, now: DateTime<Utc>) -> String {
+    format!(
+        "{};{};{message_id}",
+        message_arrived_at.timestamp_millis() - 1,
+        now.timestamp_millis()
+    )
+}
+
+/// The value Teams writes to clear the bookmark when a conversation is read.
+pub fn cleared_bookmark(now: DateTime<Utc>) -> String {
+    format!("0;{};0", now.timestamp_millis())
 }
 
 struct ParsedHorizon {
@@ -236,5 +251,19 @@ mod tests {
         let last = DateTime::from_timestamp_millis(1792182658901).unwrap();
         let now = DateTime::from_timestamp_millis(1792190000000).unwrap();
         assert_eq!(read_up_to(last, now), "1792182658901;1792190000000;0");
+    }
+
+    #[test]
+    fn own_note_marked_unread_by_bookmark_is_unread_until_the_bookmark_is_cleared() {
+        let arrived = DateTime::from_timestamp_millis(1792182658901).unwrap();
+        let now = DateTime::from_timestamp_millis(1792190000000).unwrap();
+        let bookmark = bookmark_at(arrived, "1792182658901", now);
+        assert_eq!(bookmark, "1792182658900;1792190000000;1792182658901");
+        let last = Some(("2026-10-16T21:10:58.901Z", ME));
+        let marked = conversation(Some("1792182658901;1;0"), Some(&bookmark), last);
+        assert!(unread(&marked));
+        let cleared = cleared_bookmark(now);
+        assert_eq!(cleared, "0;1792190000000;0");
+        assert!(!unread(&conversation(Some("1792182658901;1;0"), Some(&cleared), last)));
     }
 }

@@ -1,4 +1,9 @@
-use chatsvc::{CallLogEntry, EventKind, ForwardResult, MessageEvent, PinnedMessage, SavedMessage};
+use std::collections::HashMap;
+
+use chatsvc::{
+    CallLogEntry, EventKind, ForwardResult, MessageEvent, PinnedMessage, PostFollowState,
+    SavedMessage,
+};
 
 use crate::engine::{Conversation, SyncEngine};
 use crate::error::{Error, Result};
@@ -58,6 +63,26 @@ impl<R: Remote> SyncEngine<R> {
                 saved,
             )
             .await
+    }
+
+    pub async fn set_post_followed(
+        &self,
+        channel_id: &str,
+        root_id: &str,
+        followed: bool,
+    ) -> Result<Option<String>> {
+        let my_user_id = self.my_user_id().await?;
+        self.remote
+            .set_post_followed(&my_user_id, channel_id, root_id, followed)
+            .await
+    }
+
+    pub async fn post_follow_states(
+        &self,
+        channel_id: &str,
+        root_ids: &[String],
+    ) -> Result<HashMap<String, PostFollowState>> {
+        self.remote.post_follow_states(channel_id, root_ids).await
     }
 
     pub async fn list_saved(&self) -> Result<Vec<SavedMessage>> {

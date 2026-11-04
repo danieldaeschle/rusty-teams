@@ -15,7 +15,10 @@ use gpui_kit::*;
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::{icon, symbol};
+use crate::post_follow::follow_label;
+use crate::forward_selection::{FORWARD_LABEL, MULTIPLE_MESSAGES_LABEL, THIS_MESSAGE_LABEL};
 use crate::rows::reaction_glyph;
+use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
 use crate::theme::{self, ElevatedSurface as _};
 
 const BAR_BUTTON: f32 = 30.;
@@ -41,14 +44,18 @@ pub struct MessageMenu {
     pub react: PickHandler,
     pub reply: Option<Action>,
     pub forward: Option<Action>,
+    pub forward_multiple: Option<Action>,
     pub copy_link: Option<Action>,
     pub copy: Action,
     pub translate: Option<Action>,
     pub translate_label: &'static str,
+    pub share_to_outlook: Option<Action>,
     pub save: Option<Action>,
     pub saved: bool,
     pub toggle_pinned: Option<Action>,
     pub pinned: bool,
+    pub toggle_follow: Option<Action>,
+    pub followed: bool,
     pub edit: Option<Action>,
     pub delete: Option<Action>,
     pub mark_unread: Option<Action>,
@@ -184,6 +191,7 @@ pub fn add_reaction_pill(adder: ReactionAdder, height: f32, cx: &App) -> AnyElem
 }
 
 fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
+    let forward_multiple = menu.forward_multiple.clone();
     let (
         reply,
         forward,
@@ -192,10 +200,12 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         translate,
         save,
         toggle_pinned,
+        toggle_follow,
         edit,
         delete,
         mark_unread,
         refresh_card,
+        share_to_outlook,
         pin,
     ) = (
         menu.reply.clone(),
@@ -205,19 +215,22 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         menu.translate.clone(),
         menu.save.clone(),
         menu.toggle_pinned.clone(),
+        menu.toggle_follow.clone(),
         menu.edit.clone(),
         menu.delete.clone(),
         menu.mark_unread.clone(),
         menu.refresh_card.clone(),
+        menu.share_to_outlook.clone(),
         menu.pin.clone(),
     );
-    let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
+    let (saved, pinned, followed, translate_label) =
+        (menu.saved, menu.pinned, menu.followed, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
         .child(icon(IconName::Ellipsis, BAR_ICON, theme::text_soft()))
         .custom(bar_variant(cx))
         .rounded(px(7.))
         .size(px(BAR_BUTTON))
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
             let item = |label: &'static str, glyph: IconName, action: Action| {
                 PopupMenuItem::new(label)
                     .icon(glyph)
@@ -227,8 +240,31 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             if let Some(reply) = reply.clone() {
                 popup = popup.item(item("Reply with quote", IconName::Reply, reply));
             }
-            if let Some(forward) = forward.clone() {
-                popup = popup.item(item("Forward", IconName::Forward, forward));
+            match (forward.clone(), forward_multiple.clone()) {
+                (Some(forward), Some(forward_multiple)) => {
+                    popup = popup.submenu_with_icon(
+                        Some(IconName::Forward.into()),
+                        FORWARD_LABEL,
+                        window,
+                        cx,
+                        move |submenu, _, _| {
+                            let (single, multiple) = (forward.clone(), forward_multiple.clone());
+                            submenu
+                                .item(
+                                    PopupMenuItem::new(THIS_MESSAGE_LABEL)
+                                        .on_click(move |_, window, cx| single(window, cx)),
+                                )
+                                .item(
+                                    PopupMenuItem::new(MULTIPLE_MESSAGES_LABEL)
+                                        .on_click(move |_, window, cx| multiple(window, cx)),
+                                )
+                        },
+                    );
+                }
+                (Some(forward), None) => {
+                    popup = popup.item(item(FORWARD_LABEL, IconName::Forward, forward));
+                }
+                (None, _) => {}
             }
             if let Some(copy_link) = copy_link.clone() {
                 popup = popup.item(item("Copy link", IconName::Link, copy_link));
@@ -239,6 +275,13 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
             if let Some(translate) = translate.clone() {
                 popup = popup.item(item(translate_label, IconName::Languages, translate));
+            }
+            if let Some(share_to_outlook) = share_to_outlook.clone() {
+                popup = popup.item(item(
+                    SHARE_TO_OUTLOOK_LABEL,
+                    IconName::Mail,
+                    share_to_outlook,
+                ));
             }
             if let Some(save) = save.clone() {
                 popup = popup.item(if saved {
@@ -252,6 +295,13 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
                     item("Unpin", IconName::PinOff, toggle_pinned)
                 } else {
                     item("Pin", IconName::Pin, toggle_pinned)
+                });
+            }
+            if let Some(toggle_follow) = toggle_follow.clone() {
+                popup = popup.item(if followed {
+                    item(follow_label(true), IconName::BellOff, toggle_follow)
+                } else {
+                    item(follow_label(false), IconName::Bell, toggle_follow)
                 });
             }
             if let Some(edit) = edit.clone() {
