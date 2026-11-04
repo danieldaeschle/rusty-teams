@@ -841,6 +841,10 @@ impl SidebarView {
                 state.refresh_calendar(cx);
             }),
             SidebarTab::Saved => self.state.update(cx, |state, cx| state.refresh_saved(cx)),
+            SidebarTab::Activity => {
+                let activity = self.activity_panel.read(cx).activity();
+                activity.update(cx, |activity, cx| activity.mark_seen(cx));
+            }
             _ => {}
         }
         cx.notify();

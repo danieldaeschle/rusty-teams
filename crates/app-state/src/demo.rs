@@ -11,13 +11,12 @@ use store::{
     Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Activity, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
+    Activity, ActivityHorizons, ActivityItem, ActivitySnapshot, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
     LanguageSettings, LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource,
     PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior,
     TranslationStatus,
 };
 
-use crate::activity::{Actor, Entry, Kind};
 use crate::app_state::{AppState, Selection};
 use crate::card_actions::{CardAnswer, CardTask};
 use crate::data::{AvatarState, FolderInfo, FolderKind, Person, PresenceKind};
@@ -701,92 +700,116 @@ pub fn first_selection() -> Selection {
     Selection::Chat(RELEASE_CHAT.to_owned())
 }
 
-pub fn activity_entries() -> Vec<Entry> {
-    let actor = |user_id: &str, name: &str| Actor {
-        user_id: Some(user_id.to_owned()),
-        name: name.to_owned(),
-    };
-    let entry = |conversation_id: &str,
-                 kind: Kind,
-                 message_id: &str,
-                 actors: Vec<Actor>,
-                 preview: &str,
-                 count: u32,
-                 updated_at: DateTime<Utc>,
-                 read: bool| Entry {
-        id: 0,
-        conversation_id: conversation_id.to_owned(),
-        kind,
+pub fn activity_snapshot() -> ActivitySnapshot {
+    let item = |message_id: &str,
+                activity_type: &str,
+                subtype: &str,
+                conversation_id: &str,
+                thread_type: &str,
+                source_message_id: &str,
+                actor: (&str, &str),
+                preview: &str,
+                time: DateTime<Utc>,
+                read: bool| ActivityItem {
         message_id: message_id.to_owned(),
-        actors,
+        activity_id: message_id.to_owned(),
+        activity_type: activity_type.to_owned(),
+        activity_subtype: subtype.to_owned(),
+        source_thread_id: conversation_id.to_owned(),
+        source_message_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
+        source_reply_chain_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
+        source_user_id: Some(format!("8:orgid:{}", actor.0)),
+        source_user_name: actor.1.to_owned(),
         preview: preview.to_owned(),
-        glyphs: Vec::new(),
-        count,
-        updated_at,
-        read,
+        preview_template: "hasText".to_owned(),
+        thread_type: Some(thread_type.to_owned()),
+        count: 1,
+        timestamp_ms: time.timestamp_millis(),
+        version_ms: time.timestamp_millis(),
+        read_flag: read,
+        ..ActivityItem::default()
     };
-    let reaction = Entry {
-        glyphs: vec!["\u{1F602}".to_owned(), "\u{1F44D}".to_owned()],
-        ..entry(
-            RELEASE_CHAT,
-            Kind::Reaction,
-            "m3",
-            vec![
-                actor(PRIYA_ID, "Priya Nair"),
-                actor(LEA_ID, "Lea Schneider"),
-            ],
-            "I'll take the changelog.",
-            2,
-            at(0, 13, 20),
-            false,
-        )
-    };
-    vec![
-        entry(
+    let items = vec![
+        item(
+            "demo-activity-1",
+            "replyInChat",
+            "",
             UNREAD_CHAT,
-            Kind::Messages,
+            "chat",
             "u3",
-            vec![
-                actor(LEA_ID, "Lea Schneider"),
-                actor(PRIYA_ID, "Priya Nair"),
-            ],
+            (LEA_ID, "Lea Schneider"),
             "Who is taking the review?",
-            3,
             at(0, 13, 12),
             false,
         ),
-        entry(
+        ActivityItem {
+            count: 2,
+            ..item(
+                "demo-activity-2",
+                "reactionInChat",
+                "laugh",
+                RELEASE_CHAT,
+                "chat",
+                "m3",
+                (PRIYA_ID, "Priya Nair"),
+                "I'll take the changelog.",
+                at(0, 13, 20),
+                false,
+            )
+        },
+        item(
+            "demo-activity-3",
+            "mention",
+            "person",
             "demo-channel-1-1",
-            Kind::Mention,
+            "topic",
             "t1",
-            vec![actor(MARA_ID, "Mara Lindqvist")],
+            (MARA_ID, "Mara Lindqvist"),
             "@Dana can you approve the merge? The pipeline is waiting.",
-            1,
             at(0, 11, 40),
             false,
         ),
-        reaction,
-        entry(
+        item(
+            "demo-activity-4",
+            "mentionInChat",
+            "person",
             "demo-chat-allhands",
-            Kind::Mention,
+            "chat",
             "demo-allhands-policy",
-            vec![actor(LEA_ID, "Lea Schneider")],
+            (LEA_ID, "Lea Schneider"),
             "@Dana please read the new vacation policy before Friday.",
-            1,
             at(0, 9, 0),
             false,
         ),
-        entry(
+        item(
+            "demo-activity-5",
+            "follow",
+            "channelNewMessage",
+            "demo-channel-1-3",
+            "topic",
+            "demo-release-post",
+            (MARA_ID, "Mara Lindqvist"),
+            "Release 4.2 is tagged, notes are in the wiki.",
+            at(1, 17, 30),
+            true,
+        ),
+        item(
+            "demo-activity-6",
+            "call",
+            "missedCall",
             "demo-chat-customer-3",
-            Kind::Messages,
-            "demo-customer-3-closed",
-            vec![actor(TOBIAS_ID, "Tobias Klein")],
-            "Ticket is closed",
-            1,
+            "chat",
+            "",
+            (TOBIAS_ID, "Tobias Klein"),
+            "",
             at(1, 16, 0),
             true,
         ),
-    ]
+    ];
+    ActivitySnapshot {
+        items,
+        horizons: ActivityHorizons::default(),
+    }
 }
 
 pub fn seed(store: &Store) {

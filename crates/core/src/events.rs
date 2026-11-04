@@ -3,6 +3,7 @@ use chatsvc::PresenceStatus;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreEvent {
     SidebarChanged,
+    ActivityChanged,
     MessagesChanged {
         conversation_id: String,
     },

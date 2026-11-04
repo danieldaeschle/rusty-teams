@@ -1,3 +1,4 @@
+pub mod activity_feed;
 pub mod activity_mentions;
 pub mod bot_profiles;
 pub mod calendar;
@@ -38,7 +39,10 @@ pub mod transcripts;
 pub mod translate;
 pub mod window;
 
-pub use activity_mentions::{ActivityFeed, MentionActivity, MentionKind};
+pub use activity_feed::{
+    ACTIVITY_FEED_ID, ActivityFeed, ActivityHorizons, ActivityItem, ActivitySnapshot,
+};
+pub use activity_mentions::{MentionActivity, MentionKind, mentions_of};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Reminder, Repeat, Reply,

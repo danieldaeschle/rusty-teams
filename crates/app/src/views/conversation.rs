@@ -709,6 +709,7 @@ impl ConversationView {
             | AppEvent::Profile
             | AppEvent::CallHistory
             | AppEvent::Ring
+            | AppEvent::Activity
             | AppEvent::MissedCall(_)
             | AppEvent::MeetingReminder
             | AppEvent::MeetingChime

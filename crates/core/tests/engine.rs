@@ -136,7 +136,7 @@ struct Fake {
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
     search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
     member_requests: Mutex<Vec<String>>,
-    mention_activities: Mutex<Vec<chatsvc::MentionActivity>>,
+    activity_feed: Mutex<chatsvc::ActivitySnapshot>,
     app_channel_horizon_ms: Mutex<i64>,
 }
 
@@ -945,8 +945,18 @@ impl Remote for Handle {
         Ok(())
     }
 
-    async fn mention_activities(&self) -> Result<Vec<chatsvc::MentionActivity>> {
-        Ok(self.mention_activities.lock().unwrap().clone())
+    async fn activity_feed(&self) -> Result<chatsvc::ActivitySnapshot> {
+        Ok(self.activity_feed.lock().unwrap().clone())
+    }
+
+    async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
+        self.record(format!("activity read {message_id}"));
+        Ok(())
+    }
+
+    async fn mark_all_activity_read(&self, _now_ms: i64) -> Result<()> {
+        self.record("activity all read".to_owned());
+        Ok(())
     }
 
     async fn app_consumption_horizon(&self) -> Result<chatsvc::AppConsumptionHorizon> {
@@ -5002,18 +5012,17 @@ async fn channel_mentions_follow_the_activity_feed_and_mark_all_as_read() {
             ..chatsvc::ReadHorizon::default()
         },
     ));
-    let mention = |activity_id: &str, kind: chatsvc::MentionKind| chatsvc::MentionActivity {
+    let mention = |activity_id: &str, subtype: &str| chatsvc::ActivityItem {
+        message_id: activity_id.to_owned(),
         activity_id: activity_id.to_owned(),
-        kind,
+        activity_type: "mention".to_owned(),
+        activity_subtype: subtype.to_owned(),
         source_thread_id: CHANNEL.to_owned(),
-        source_message_id: None,
         timestamp_ms: 8,
-        is_read: false,
+        version_ms: 8,
+        ..chatsvc::ActivityItem::default()
     };
-    *fake.mention_activities.lock().unwrap() = vec![
-        mention("1", chatsvc::MentionKind::Personal),
-        mention("2", chatsvc::MentionKind::Team),
-    ];
+    fake.activity_feed.lock().unwrap().items = vec![mention("1", "person"), mention("2", "team")];
     let engine = channel_engine(&fake).await;
     engine.refresh_sidebar().await.unwrap();
     let mentions = engine.store().sidebar().unwrap().teams[0].channel_mentions(CHANNEL);
@@ -5035,6 +5044,49 @@ async fn channel_mentions_follow_the_activity_feed_and_mark_all_as_read() {
             .mentions
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn activity_feed_is_stored_and_marked_read_like_teams() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    let mut events = engine.subscribe();
+    *fake.activity_feed.lock().unwrap() = chatsvc::ActivitySnapshot {
+        items: vec![chatsvc::ActivityItem {
+            message_id: "1791368000001".to_owned(),
+            activity_type: "reactionInChat".to_owned(),
+            source_thread_id: CHAT.to_owned(),
+            timestamp_ms: 20,
+            version_ms: 20,
+            ..chatsvc::ActivityItem::default()
+        }],
+        horizons: chatsvc::ActivityHorizons {
+            seen_ms: 10,
+            bookmark_ms: 5,
+        },
+    };
+    engine.refresh_sidebar().await.unwrap();
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| event == CoreEvent::ActivityChanged));
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.counts_for_bell(&stored.items[0]));
+
+    engine.mark_activity_read("1791368000001").await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), "activity read 1791368000001");
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]));
+
+    stored_feed_unread(&fake, &engine).await;
+    engine.mark_all_activity_read().await.unwrap();
+    assert_eq!(fake.calls().last().unwrap(), "activity all read");
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]));
+}
+
+async fn stored_feed_unread(fake: &Arc<Fake>, engine: &SyncEngine<Handle>) {
+    fake.activity_feed.lock().unwrap().items[0].read_flag = false;
+    engine.refresh_sidebar().await.unwrap();
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(!stored.is_read(&stored.items[0]));
 }
 
 #[tokio::test]

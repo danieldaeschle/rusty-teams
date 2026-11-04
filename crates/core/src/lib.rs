@@ -1,4 +1,5 @@
 mod actions;
+mod activity_sync;
 mod adaptive_card;
 mod avatars;
 mod bot_partners;
@@ -67,6 +68,8 @@ mod translate_sync;
 mod translation;
 mod youtube;
 
+pub use activity_sync::stored_activity_feed;
+pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,
     CardElement, CardFact, CardIcon, CardImage, CardItem, CardMedia, CardRefresh, CardSpacing,

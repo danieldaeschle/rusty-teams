@@ -45,6 +45,7 @@ impl Selection {
 
 pub enum AppEvent {
     Sidebar,
+    Activity,
     Selection,
     Messages(String),
     Images(Vec<String>),
@@ -1040,6 +1041,7 @@ impl AppState {
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Core(CoreEvent::SidebarChanged) => self.reload_sidebar_after_sync(cx),
+            BackendEvent::Core(CoreEvent::ActivityChanged) => cx.emit(AppEvent::Activity),
             BackendEvent::Core(
                 CoreEvent::MessagesChanged { conversation_id }
                 | CoreEvent::ReceiptsChanged { conversation_id },

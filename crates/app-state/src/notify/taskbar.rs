@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use store::Sidebar;
 
-use crate::activity::Kind;
 use crate::activity::feed::Feed;
 use crate::sidebar_model::unread_chat_count;
 
@@ -13,30 +12,26 @@ pub fn taskbar_badge_count(sidebar: &Sidebar, feed: &Feed, adaptive_rail: bool) 
         .flat_map(|team| team.channels.iter())
         .map(|channel| channel.id.as_str())
         .collect();
-    let is_channel = |conversation_id: &str| channel_ids.contains(conversation_id);
-    let activity = feed
-        .unread_entries()
-        .filter(|entry| entry.kind != Kind::Messages || is_channel(&entry.conversation_id))
-        .count();
     let channels_with_mentions = if adaptive_rail {
         feed.unread_entries()
-            .filter(|entry| entry.kind == Kind::Mention && is_channel(&entry.conversation_id))
+            .filter(|entry| {
+                entry.is_personal_mention() && channel_ids.contains(entry.conversation_id.as_str())
+            })
             .map(|entry| entry.conversation_id.as_str())
             .collect::<HashSet<_>>()
             .len()
     } else {
         0
     };
-    activity + unread_chat_count(&sidebar.chats) as usize + channels_with_mentions
+    feed.bell_count() + unread_chat_count(&sidebar.chats) as usize + channels_with_mentions
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
     use store::{ChannelRecord, ChatRecord, SidebarTeam, TeamRecord};
 
     use super::*;
-    use crate::activity::Entry;
+    use crate::activity::{Entry, Kind};
 
     fn sidebar() -> Sidebar {
         let chat = |id: &str, unread: bool, muted: bool| ChatRecord {
@@ -74,22 +69,21 @@ mod tests {
     }
 
     fn feed(entries: &[(&str, Kind, bool)]) -> Feed {
-        let mut feed = Feed::load(Vec::new());
-        for (conversation_id, kind, read) in entries {
-            feed.add(Entry {
-                id: 0,
-                conversation_id: (*conversation_id).into(),
-                kind: *kind,
-                message_id: String::new(),
-                actors: Vec::new(),
-                preview: String::new(),
-                glyphs: Vec::new(),
-                count: 1,
-                updated_at: Utc::now(),
-                read: *read,
-            });
-        }
-        feed
+        Feed::new(
+            entries
+                .iter()
+                .enumerate()
+                .map(|(index, (conversation_id, kind, read))| Entry {
+                    id: index.to_string(),
+                    conversation_id: (*conversation_id).into(),
+                    kind: *kind,
+                    subtype: "person".into(),
+                    read: *read,
+                    counts_for_bell: !*read,
+                    ..Entry::default()
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -104,14 +98,24 @@ mod tests {
     }
 
     #[test]
-    fn chat_message_rows_are_counted_once_by_the_chat() {
-        let rows = feed(&[
-            ("chat-unread", Kind::Messages, false),
-            ("chat-unread", Kind::Reaction, false),
-            ("channel-a", Kind::Messages, false),
+    fn the_activity_term_is_the_bell() {
+        let mut rows = feed(&[
+            ("chat-unread", Kind::Reply, false),
             ("channel-a", Kind::Reaction, true),
+            ("channel-a", Kind::Posted, false),
         ]);
         assert_eq!(taskbar_badge_count(&sidebar(), &rows, false), 3);
+        rows = Feed::new(
+            rows.entries()
+                .iter()
+                .cloned()
+                .map(|entry| Entry {
+                    counts_for_bell: false,
+                    ..entry
+                })
+                .collect(),
+        );
+        assert_eq!(taskbar_badge_count(&sidebar(), &rows, false), 1);
     }
 
     #[test]

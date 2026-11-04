@@ -3,9 +3,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, AppConsumptionHorizon, ChatNotificationMode, ChatNotificationWrite,
-    ChatSettingChange, ChatSettingsClient, ChatSettingsDocument, DesktopNotifications,
-    MentionActivity, UserSettings, parse_app_consumption_horizon,
+    ActivityFeed, ActivitySnapshot, AppConsumptionHorizon, ChatNotificationMode,
+    ChatNotificationWrite, ChatSettingChange, ChatSettingsClient, ChatSettingsDocument,
+    DesktopNotifications, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -400,8 +400,16 @@ pub trait Remote {
         Err(Error::Unsupported("pinning channel posts"))
     }
 
-    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
+    async fn activity_feed(&self) -> Result<ActivitySnapshot> {
         Err(Error::Unsupported("the activity feed"))
+    }
+
+    async fn mark_activity_read(&self, _message_id: &str) -> Result<()> {
+        Err(Error::Unsupported("marking activity as read"))
+    }
+
+    async fn mark_all_activity_read(&self, _now_ms: i64) -> Result<()> {
+        Err(Error::Unsupported("marking all activity as read"))
     }
 
     async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
@@ -1207,8 +1215,16 @@ impl Remote for Graph {
             .await?)
     }
 
-    async fn mention_activities(&self) -> Result<Vec<MentionActivity>> {
-        Ok(ActivityFeed::new(self.session()).mentions().await?)
+    async fn activity_feed(&self) -> Result<ActivitySnapshot> {
+        Ok(ActivityFeed::new(self.session()).snapshot().await?)
+    }
+
+    async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
+        Ok(ActivityFeed::new(self.session()).mark_read(message_id).await?)
+    }
+
+    async fn mark_all_activity_read(&self, now_ms: i64) -> Result<()> {
+        Ok(ActivityFeed::new(self.session()).mark_all_read(now_ms).await?)
     }
 
     async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
