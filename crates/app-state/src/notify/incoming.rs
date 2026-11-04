@@ -161,6 +161,8 @@ pub fn build_incoming(
         _ => ChannelSignals::default(),
     };
     let chat = chat_signals(store, sidebar, &record.conversation_id, my_user_id);
+    let mentions_me = mentions_me(record, my_user_id)
+        || (!matches!(kind, ChatKind::Channel { .. }) && teams_core::mentions_whole_chat(record));
     Some(Incoming {
         conversation_id: record.conversation_id.clone(),
         message_id: record.message_id.clone(),
@@ -169,7 +171,7 @@ pub fn build_incoming(
         sender_id: record.sender_id.clone(),
         sender_name: record.sender_name.clone().unwrap_or_default(),
         preview: preview_of(record),
-        mentions_me: mentions_me(record, my_user_id),
+        mentions_me,
         muted: is_muted_chat(sidebar, &record.conversation_id),
         signals,
         chat,
@@ -591,6 +593,19 @@ mod tests {
             Some("other"),
         );
         assert!(!other.unwrap().mentions_me);
+    }
+
+    #[test]
+    fn everyone_in_a_group_chat_counts_as_a_mention_but_a_channel_mention_does_not() {
+        let store = Store::open_in_memory().unwrap();
+        let mut message = record("group", "u1", Utc::now(), "<at>Everyone</at>");
+        message.mentions_json =
+            r#"[{"user_id":null,"name":"Everyone","target_id":"group","group":true}]"#.into();
+        assert!(collect_one(message, &store).mentions_me);
+        let mut post = record("channel-open", "u1", Utc::now(), "<at>channel</at>");
+        post.mentions_json =
+            r#"[{"user_id":null,"name":"channel","target_id":"channel-open","group":true}]"#.into();
+        assert!(!collect_one(post, &store).mentions_me);
     }
 
     #[test]

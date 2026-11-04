@@ -239,6 +239,14 @@ pub struct Team {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub id: String,
+    pub display_name: String,
+    pub member_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Channel {
     pub id: String,
     pub display_name: String,

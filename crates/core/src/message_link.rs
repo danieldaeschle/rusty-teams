@@ -3,6 +3,7 @@ use serde_json::json;
 
 const LINK_HOST: &str = "https://teams.microsoft.com";
 const DEEP_LINK_HOST: &str = "https://teams.cloud.microsoft";
+const OUTLOOK_COMPOSE: &str = "https://outlook.office.com/mail/deeplink/compose";
 
 const ENCODE_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -29,6 +30,15 @@ pub struct ChannelLinkInput {
 
 fn encode(value: &str) -> String {
     utf8_percent_encode(value, ENCODE_COMPONENT).to_string()
+}
+
+/// Outlook on the web opens a new mail with this subject and plain text body; nothing is sent.
+pub fn outlook_compose_link(subject: &str, body: &str) -> String {
+    format!(
+        "{OUTLOOK_COMPOSE}?subject={}&body={}",
+        encode(subject),
+        encode(body)
+    )
 }
 
 /// `notes_oid` is the own object id, needed for the notes chat only.
@@ -110,6 +120,14 @@ mod tests {
         assert_eq!(
             chat_message_link("19:abc@thread.v2", "1791368000000", None),
             "https://teams.microsoft.com/l/message/19:abc@thread.v2/1791368000000?context=%7B%22contextType%22%3A%22chat%22%7D"
+        );
+    }
+
+    #[test]
+    fn outlook_compose_link_encodes_subject_and_body() {
+        assert_eq!(
+            outlook_compose_link("Release & plan", "Ada\nhi there"),
+            "https://outlook.office.com/mail/deeplink/compose?subject=Release%20%26%20plan&body=Ada%0Ahi%20there"
         );
     }
 

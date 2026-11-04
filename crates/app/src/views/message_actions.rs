@@ -17,6 +17,7 @@ use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::{icon, symbol};
 use crate::forward_selection::{FORWARD_LABEL, MULTIPLE_MESSAGES_LABEL, THIS_MESSAGE_LABEL};
 use crate::rows::reaction_glyph;
+use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
 use crate::theme::{self, ElevatedSurface as _};
 
 const BAR_BUTTON: f32 = 30.;
@@ -47,6 +48,7 @@ pub struct MessageMenu {
     pub copy: Action,
     pub translate: Option<Action>,
     pub translate_label: &'static str,
+    pub share_to_outlook: Option<Action>,
     pub save: Option<Action>,
     pub saved: bool,
     pub toggle_pinned: Option<Action>,
@@ -199,6 +201,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         delete,
         mark_unread,
         refresh_card,
+        share_to_outlook,
         pin,
     ) = (
         menu.reply.clone(),
@@ -212,6 +215,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         menu.delete.clone(),
         menu.mark_unread.clone(),
         menu.refresh_card.clone(),
+        menu.share_to_outlook.clone(),
         menu.pin.clone(),
     );
     let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
@@ -265,6 +269,13 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
             if let Some(translate) = translate.clone() {
                 popup = popup.item(item(translate_label, IconName::Languages, translate));
+            }
+            if let Some(share_to_outlook) = share_to_outlook.clone() {
+                popup = popup.item(item(
+                    SHARE_TO_OUTLOOK_LABEL,
+                    IconName::Mail,
+                    share_to_outlook,
+                ));
             }
             if let Some(save) = save.clone() {
                 popup = popup.item(if saved {

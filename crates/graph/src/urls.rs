@@ -265,6 +265,13 @@ pub fn joined_teams() -> String {
     format!("{GRAPH}/v1.0/me/joinedTeams?$select=id,displayName")
 }
 
+pub fn team_tags(team_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/tags?$select=id,displayName,memberCount",
+        segment(team_id)
+    )
+}
+
 pub fn channels(team_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/teams/{}/channels?$select=id,displayName,membershipType",

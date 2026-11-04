@@ -9,7 +9,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 
-use crate::app_state::{AppState, Selection};
+use crate::app_state::{AppState, Selection, selection_title};
 use crate::channel_menu::post_pin_dialog;
 use crate::rows::reply_excerpt;
 use crate::runtime;
@@ -251,6 +251,17 @@ impl ConversationView {
                 state.copy_message_link(&conversation_id, message_id, cx)
             });
         }
+    }
+
+    pub(super) fn share_to_outlook(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(current) = self.current.as_ref() else {
+            return;
+        };
+        let conversation_id = current.selection.conversation_id().to_owned();
+        let title = selection_title(&self.app.read(cx).sidebar, &current.selection);
+        self.app.update(cx, |state, cx| {
+            state.share_to_outlook(&conversation_id, message_id, &title, cx)
+        });
     }
 
     pub(super) fn toggle_saved(&mut self, message_id: &str, cx: &mut Context<Self>) {

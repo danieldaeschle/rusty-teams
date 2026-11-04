@@ -79,11 +79,15 @@ const MUSIC_MODE_LABEL: &str = "Music mode";
 const PUSH_TO_TALK_HINT: &str = "Unmuted - release Ctrl+Space to mute";
 const PUSH_TO_TALK_TOP: f32 = 12.;
 
-pub fn reaction_glyph(reaction: Reaction) -> String {
+pub fn reaction_glyph(reaction: &Reaction) -> String {
     match reaction {
         Reaction::Applause => "\u{1F44F}".to_owned(),
         other => chat_reaction_glyph(other.name()),
     }
+}
+
+fn is_emoji_glyph(glyph: &str) -> bool {
+    !glyph.is_ascii()
 }
 
 #[derive(Default)]
@@ -114,18 +118,22 @@ fn hand_badge(position: usize, own: bool) -> Div {
 }
 
 fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
+    let glyph = reaction_glyph(&reaction);
+    let emoji = is_emoji_glyph(&glyph);
     div()
         .absolute()
         .right(px(12.))
         .bottom(px(32.))
-        .size(px(36.))
+        .h(px(36.))
+        .min_w(px(36.))
+        .when(!emoji, |chip| chip.px(px(12.)))
         .flex()
         .items_center()
         .justify_center()
         .rounded_full()
         .bg(theme::popup())
-        .text_size(px(20.))
-        .child(reaction_glyph(reaction))
+        .text_size(px(if emoji { 20. } else { 13. }))
+        .child(glyph)
         .with_animation(
             ("call-reaction", serial as usize),
             Animation::new(REACTION_SHOWN),
@@ -152,6 +160,7 @@ fn tile_overlays(extras: &TileExtras) -> Vec<AnyElement> {
     });
     let reaction = extras
         .reaction
+        .clone()
         .map(|(reaction, serial)| reaction_chip(reaction, serial));
     badges.into_iter().chain(reaction).collect()
 }
@@ -796,7 +805,7 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
                     let app = app.clone();
                     let popover = popover.clone();
                     div()
-                        .id(reaction.name())
+                        .id(ElementId::Name(reaction.name().to_owned().into()))
                         .size(px(REACTION_CELL))
                         .flex()
                         .items_center()
@@ -805,9 +814,9 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
                         .text_size(px(24.))
                         .cursor_pointer()
                         .hover(|cell| cell.bg(theme::border_strong()))
-                        .child(reaction_glyph(reaction))
+                        .child(reaction_glyph(&reaction))
                         .on_click(move |_, window, cx| {
-                            app.update(cx, |state, cx| state.send_call_reaction(reaction, cx));
+                            app.update(cx, |state, cx| state.send_call_reaction(reaction.clone(), cx));
                             popover
                                 .update(cx, |state, cx| state.dismiss(window, cx))
                                 .ok();
@@ -980,7 +989,7 @@ pub(super) fn plain_person_tile(
         own: false,
         reaction: model
             .chip_of(&remote.mri, now)
-            .map(|chip| (chip.reaction, chip.serial)),
+            .map(|chip| (chip.reaction.clone(), chip.serial)),
         spotlight: remote.spotlight.is_some(),
         pinned: model.is_pinned(&remote.mri),
     };
@@ -1069,7 +1078,7 @@ pub(super) fn plain_own_tile(
     let extras = TileExtras {
         hand: model.own_hand.map(|rank| model.hand_position(rank)),
         own: true,
-        reaction: model.own_chip(now).map(|chip| (chip.reaction, chip.serial)),
+        reaction: model.own_chip(now).map(|chip| (chip.reaction.clone(), chip.serial)),
         spotlight: model.own_spotlight.is_some(),
         pinned: model.is_pinned(own_mri),
     };
