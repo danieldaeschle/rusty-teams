@@ -716,6 +716,7 @@ mod frames {
                 switcher_query: None,
                 composer_text: None,
                 reply_to_last: false,
+                launched_by_autostart: false,
             };
             let window = gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
                 cx.new(|cx| AppShell::new(state, None, startup, window, cx))

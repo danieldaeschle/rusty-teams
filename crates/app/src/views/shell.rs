@@ -78,6 +78,7 @@ pub struct Startup {
     pub switcher_query: Option<String>,
     pub composer_text: Option<String>,
     pub reply_to_last: bool,
+    pub launched_by_autostart: bool,
 }
 
 pub const SIDEBAR_HIDDEN_BELOW: f32 = 960.;
@@ -358,7 +359,18 @@ impl AppShell {
             switcher_query,
             composer_text,
             reply_to_last,
+            launched_by_autostart,
         } = startup;
+        if shell
+            .notifications
+            .read(cx)
+            .startup()
+            .starts_hidden(launched_by_autostart)
+        {
+            cx.defer_in(window, |this, window, cx| {
+                this.notifications.read(cx).start_in_background(window)
+            });
+        }
         if let Some(query) = switcher_query {
             shell.toggle_switcher(&query, window, cx);
         }
