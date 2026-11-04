@@ -159,12 +159,9 @@ impl CallsList {
         }
         entries.push(ListEntry::Section(RECENT_TITLE));
         entries.push(ListEntry::Filters(self.filter));
-        let filtered: Vec<CallLogEntry> = history
-            .iter()
-            .filter(|entry| self.filter.admits(entry))
-            .cloned()
-            .collect();
-        let calls = call_rows(&filtered, chats, now, offset);
+        let filter = self.filter;
+        let admitted = history.iter().filter(|entry| filter.admits(entry));
+        let calls = call_rows(admitted, chats, now, offset);
         if calls.is_empty() {
             entries.push(ListEntry::Empty(self.filter.empty_text()));
         }

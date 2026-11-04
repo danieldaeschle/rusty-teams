@@ -75,8 +75,8 @@ fn known_names(chats: &[ChatRecord]) -> HashMap<&str, &str> {
         .collect()
 }
 
-pub fn call_rows(
-    entries: &[CallLogEntry],
+pub fn call_rows<'a>(
+    entries: impl IntoIterator<Item = &'a CallLogEntry>,
     chats: &[ChatRecord],
     now: DateTime<Utc>,
     offset: FixedOffset,
@@ -86,7 +86,7 @@ pub fn call_rows(
         chats.iter().map(|chat| (chat.id.as_str(), chat)).collect();
     let today = now.with_timezone(&offset).date_naive();
     entries
-        .iter()
+        .into_iter()
         .map(|entry| {
             let user_id = entry
                 .peer_id

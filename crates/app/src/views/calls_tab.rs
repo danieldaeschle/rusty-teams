@@ -367,7 +367,7 @@ fn agenda_row(
     let join_state = state.clone();
     let join_row = row.clone();
     let menu_join_url = row.join_url.clone();
-    h_flex()
+    let line = h_flex()
         .id(SharedString::from(format!("agenda-{}", row.key)))
         .mx(px(6.))
         .h(px(AGENDA_ROW_HEIGHT))
@@ -432,19 +432,21 @@ fn agenda_row(
         })
         .on_click(move |_, _, cx| {
             click_state.update(cx, |state, cx| state.open_agenda_chat(&click_row, cx));
-        })
-        .context_menu(move |popup, _, _| {
-            popup.when_some(menu_join_url.clone(), |popup, join_url| {
-                popup.item(
-                    PopupMenuItem::new("Copy meeting link")
-                        .icon(menu_icon(IconName::Link))
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(join_url.clone()));
-                        }),
-                )
-            })
-        })
-        .into_any_element()
+        });
+    let Some(join_url) = menu_join_url else {
+        return line.into_any_element();
+    };
+    line.context_menu(move |popup, _, _| {
+        let join_url = join_url.clone();
+        popup.item(
+            PopupMenuItem::new("Copy meeting link")
+                .icon(menu_icon(IconName::Link))
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(join_url.clone()));
+                }),
+        )
+    })
+    .into_any_element()
 }
 
 pub fn calls_body(
