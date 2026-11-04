@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget, is_bot_id};
 use teams_core::{
-    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, without_islands,
+    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, is_notes_chat, without_islands,
 };
 
 mod channel_details;
@@ -35,6 +35,7 @@ pub use forward_select::{
     FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG, FORWARD_FOOTER_TAG,
 };
 mod jump;
+mod notes_space;
 mod pins;
 mod proposal;
 mod recap;
@@ -1477,21 +1478,35 @@ impl ConversationView {
     fn start_info(&self, cx: &App) -> Option<StartInfo> {
         let current = self.current.as_ref()?;
         let app = self.app.read(cx);
-        let user_id = match &current.selection {
-            Selection::Chat(chat_id) => app
-                .sidebar
-                .chats
-                .iter()
-                .find(|chat| &chat.id == chat_id)
-                .filter(|chat| is_one_on_one(chat))
-                .and_then(|chat| others(chat, app.directory.me.as_ref()).into_iter().next())
-                .and_then(|(user_id, _)| user_id),
-            Selection::Channel(_) => None,
+        let (user_id, member_name, notes) = match &current.selection {
+            Selection::Chat(chat_id) => {
+                let member = app
+                    .sidebar
+                    .chats
+                    .iter()
+                    .find(|chat| &chat.id == chat_id)
+                    .filter(|chat| is_one_on_one(chat))
+                    .and_then(|chat| others(chat, app.directory.me.as_ref()).into_iter().next());
+                let (user_id, name) = member.unzip();
+                (user_id.flatten(), name, is_notes_chat(chat_id))
+            }
+            Selection::Channel(_) => (None, None, false),
         };
         Some(StartInfo {
             title: current.title.clone(),
             user_id,
+            avatar_name: member_name
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| current.title.clone()),
+            notes,
         })
+    }
+
+    fn notes_space(&self) -> Option<StartInfo> {
+        match self.rows.borrow().as_slice() {
+            [Row::Start(start)] if start.notes => Some(start.clone()),
+            _ => None,
+        }
     }
 
     fn watch_feed_scroll(&mut self, cx: &mut Context<Self>) {
@@ -3701,9 +3716,12 @@ impl Render for ConversationView {
                                     },
                                     56.,
                                 ),
-                                user_id => {
-                                    person_avatar(&state.directory, user_id, &start.title, 56.)
-                                }
+                                user_id => person_avatar(
+                                    &state.directory,
+                                    user_id,
+                                    &start.avatar_name,
+                                    56.,
+                                ),
                             })
                             .child(
                                 div()
@@ -3806,6 +3824,8 @@ impl Render for ConversationView {
             self.render_shared(cx)
         } else if self.recap_active() {
             self.render_recap(cx)
+        } else if let Some(start) = self.notes_space() {
+            notes_space::render_notes_space(&self.app.read(cx).directory, &start)
         } else if empty_channel {
             div()
                 .size_full()

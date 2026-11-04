@@ -218,8 +218,16 @@ fn chat_menu(
             });
         }),
     );
+    let hide_item = PopupMenuItem::new("Hide")
+        .icon(menu_icon(IconName::EyeOff))
+        .on_click(move |_, _, cx| {
+            hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
+        });
     if notes {
-        return popup.item(pop_out_item(context, target));
+        return popup
+            .item(pop_out_item(context, target))
+            .separator()
+            .item(hide_item);
     }
     popup = popup.item(
         PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
@@ -235,13 +243,7 @@ fn chat_menu(
     popup = chat_notifications_submenu(popup, window, cx, context, target)
         .item(pop_out_item(context, target))
         .separator()
-        .item(
-            PopupMenuItem::new("Hide")
-                .icon(menu_icon(IconName::EyeOff))
-                .on_click(move |_, _, cx| {
-                    hide_state.update(cx, |state, cx| state.hide_chat(&hide_id, cx));
-                }),
-        );
+        .item(hide_item);
     if !target.is_group {
         let remove_state = context.state.clone();
         let remove_id = target.id.clone();

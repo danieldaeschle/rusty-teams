@@ -605,6 +605,7 @@ impl Remote for Handle {
                 read: chatsvc::ReadHorizon::default(),
                 notification_settings: None,
                 history_cleared_ms: None,
+                hidden_at_ms: None,
             })
             .collect();
         states.extend(
@@ -617,6 +618,7 @@ impl Remote for Handle {
                     read: chatsvc::ReadHorizon::default(),
                     notification_settings: None,
                     history_cleared_ms: None,
+                    hidden_at_ms: None,
                 }),
         );
         let read = self.read_states.lock().unwrap().clone();
@@ -629,6 +631,7 @@ impl Remote for Handle {
                     read,
                     notification_settings: None,
                     history_cleared_ms: None,
+                    hidden_at_ms: None,
                 }),
         );
         Ok(states)
@@ -641,6 +644,17 @@ impl Remote for Handle {
 
     async fn set_read_horizon(&self, conversation_id: &str, horizon: &str) -> Result<()> {
         self.record(format!("read horizon {conversation_id} {horizon}"));
+        Ok(())
+    }
+
+    async fn set_read_bookmark(&self, conversation_id: &str, bookmark: &str) -> Result<()> {
+        self.record(format!("read bookmark {conversation_id} {bookmark}"));
+        Ok(())
+    }
+
+    async fn set_chat_hidden_at(&self, chat_id: &str, hidden_at_ms: Option<i64>) -> Result<()> {
+        let hidden = hidden_at_ms.map_or("none".to_owned(), |_| "now".to_owned());
+        self.record(format!("hidden at {chat_id} {hidden}"));
         Ok(())
     }
 
@@ -5448,7 +5462,70 @@ async fn a_new_note_refreshes_the_line_and_an_unlisted_notes_chat_leaves_the_sid
 
     fake.read_states.lock().unwrap().clear();
     engine.refresh_sidebar().await.unwrap();
+    let placeholder = engine.store().chat(NOTES_CHAT_ID).unwrap().unwrap();
+    assert_eq!(placeholder.title, "Me Myself (You)");
+    assert_eq!(placeholder.last_message_at, None);
+    assert_eq!(placeholder.last_message_preview, None);
+
+    fake.hidden_states
+        .lock()
+        .unwrap()
+        .push((NOTES_CHAT_ID.to_owned(), true));
+    engine.refresh_sidebar().await.unwrap();
     assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn marking_an_own_note_unread_sets_the_chatsvc_bookmark_and_reading_clears_it() {
+    let fake = Arc::new(Fake::default());
+    *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    engine.mark_unread(NOTES_CHAT_ID).await.unwrap();
+    engine.mark_read(NOTES_CHAT_ID).await.unwrap();
+
+    let arrived_ms = (base() + Duration::minutes(20)).timestamp_millis();
+    let calls = fake.calls();
+    let bookmarks: Vec<&String> = calls
+        .iter()
+        .filter(|call| call.starts_with("read bookmark "))
+        .collect();
+    assert_eq!(bookmarks.len(), 2, "{calls:?}");
+    let marked = bookmarks[0].strip_prefix("read bookmark 48:notes ").unwrap();
+    let fields: Vec<&str> = marked.split(';').collect();
+    assert_eq!(fields[0], (arrived_ms - 1).to_string());
+    assert_eq!(fields[2], "m0001");
+    let cleared = bookmarks[1].strip_prefix("read bookmark 48:notes ").unwrap();
+    assert!(cleared.starts_with("0;") && cleared.ends_with(";0"), "{cleared}");
+    assert!(!calls.iter().any(|call| call.starts_with("mark_unread")), "{calls:?}");
+}
+
+#[tokio::test]
+async fn hiding_the_notes_chat_writes_the_chatsvc_hide_time_and_undo_clears_it() {
+    let fake = Arc::new(Fake::default());
+    list_notes_chat(&fake, 20);
+    fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+
+    engine.hide_chat(NOTES_CHAT_ID).await.unwrap();
+    assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_none());
+    engine.unhide_chat(NOTES_CHAT_ID).await.unwrap();
+
+    let calls = fake.calls();
+    let hides: Vec<&String> = calls
+        .iter()
+        .filter(|call| call.starts_with("hidden at ") || call.starts_with("hide"))
+        .collect();
+    assert_eq!(
+        hides,
+        ["hidden at 48:notes now", "hidden at 48:notes none"],
+        "{calls:?}"
+    );
+    assert!(engine.store().chat(NOTES_CHAT_ID).unwrap().is_some());
 }
 
 #[tokio::test]
