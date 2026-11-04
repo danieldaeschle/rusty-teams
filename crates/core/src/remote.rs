@@ -20,7 +20,7 @@ use chatsvc::{
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
+    OutgoingMention, Photo, Presence, SharedFile, Tag, Team, UploadDestination, UploadedFile, User,
 };
 
 use crate::error::{Error, Result};
@@ -180,6 +180,10 @@ pub trait Remote {
         topic: Option<&str>,
     ) -> Result<Chat>;
     async fn search_people(&self, query: &str) -> Result<Vec<User>>;
+
+    async fn team_tags(&self, _team_id: &str) -> Result<Vec<Tag>> {
+        Err(Error::Unsupported("team tags"))
+    }
 
     async fn reply_with_quote(
         &self,
@@ -915,6 +919,10 @@ impl Remote for Graph {
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
         Ok(Graph::search_people(self, query).await?)
+    }
+
+    async fn team_tags(&self, team_id: &str) -> Result<Vec<Tag>> {
+        Ok(Graph::team_tags(self, team_id).await?)
     }
 
     async fn reply_with_quote(

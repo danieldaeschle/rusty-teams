@@ -1084,6 +1084,16 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn team_tags(&self, team_id: &str) -> Result<Vec<graph::Tag>> {
+        self.record(format!("tags {team_id}"));
+        Ok(vec![
+            serde_json::from_value(
+                json!({"id": "tag-design", "displayName": "Designers", "memberCount": 4}),
+            )
+            .unwrap(),
+        ])
+    }
+
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
         self.record(format!("search {query}"));
         let configured = self.directory_users.lock().unwrap().clone();
@@ -4023,9 +4033,14 @@ async fn people_candidates_list_members_first_then_the_directory_without_duplica
     ];
     let engine = chat_engine(&fake, small_pages()).await;
 
-    let everyone = engine.mention_candidates(CHAT, "", 10).await.unwrap();
-    assert_eq!(everyone.len(), 1);
-    assert_eq!(everyone[0].display_name(), "Ada Example");
+    let all = engine.mention_candidates(CHAT, "", 10).await.unwrap();
+    assert_eq!(all.len(), 2);
+    assert!(matches!(&all[0], MentionCandidate::Everyone { chat_id } if chat_id == CHAT));
+    assert_eq!(
+        all[0].to_mention(),
+        MentionInput::everyone(CHAT, "Everyone")
+    );
+    assert_eq!(all[1].display_name(), "Ada Example");
     assert!(!fake.calls().iter().any(|call| call.starts_with("search")));
 
     let found = engine.mention_candidates(CHAT, "@ada", 10).await.unwrap();
@@ -4067,12 +4082,30 @@ async fn channel_candidates_offer_recent_senders_the_channel_and_its_team() {
     let engine = channel_engine(&fake).await;
     engine.fetch_newer(CHANNEL).await.unwrap();
     let all = engine.mention_candidates(CHANNEL, "", 10).await.unwrap();
-    assert_eq!(all.len(), 3);
+    assert_eq!(all.len(), 4);
     assert!(matches!(&all[0], MentionCandidate::Person(person) if person.user_id == "user-ada"));
     assert!(
         matches!(&all[1], MentionCandidate::Channel { channel_id, .. } if channel_id == CHANNEL)
     );
     assert!(matches!(&all[2], MentionCandidate::Team { team_id, .. } if team_id == "team-1"));
+    assert!(
+        matches!(&all[3], MentionCandidate::Tag { tag_id, member_count: Some(4), .. } if tag_id == "tag-design")
+    );
+    let design = engine
+        .mention_candidates(CHANNEL, "desi", 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        design[0].to_mention(),
+        MentionInput::tag("tag-design", "Designers")
+    );
+    engine.mention_candidates(CHANNEL, "", 10).await.unwrap();
+    let tag_loads = fake
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("tags"))
+        .count();
+    assert_eq!(tag_loads, 1);
     let squad = engine.mention_candidates(CHANNEL, "squ", 10).await.unwrap();
     assert_eq!(squad[0].to_mention(), MentionInput::team("team-1", "Squad"));
 }

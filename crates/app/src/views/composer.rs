@@ -55,6 +55,7 @@ use super::fun_picker::{FunPicker, FunPickerEvent};
 use super::link_preview::{ComposeLink, draft_link, link_preview_card, meeting_join_chip};
 use super::widgets::{icon, symbol};
 use crate::app_state::AppState;
+use crate::data::Directory;
 use crate::emoji;
 pub use crate::outgoing::{EditPreview, Outgoing, ReplyPreview};
 use crate::remote_image::RemoteImage;
@@ -302,7 +303,34 @@ fn candidate_subtitle(candidate: &MentionCandidate) -> String {
             .unwrap_or_default(),
         MentionCandidate::Channel { .. } => "Channel".to_owned(),
         MentionCandidate::Team { .. } => "Team".to_owned(),
+        MentionCandidate::Tag { .. } => "Tag".to_owned(),
+        MentionCandidate::Everyone { .. } => String::new(),
     }
+}
+
+fn candidate_avatar(candidate: &MentionCandidate, directory: &Directory) -> AnyElement {
+    let name = candidate.display_name();
+    match candidate {
+        MentionCandidate::Person(person) => {
+            person_avatar(directory, Some(&person.user_id), name, 28.)
+        }
+        MentionCandidate::Everyone { .. } => symbol_avatar("group", 28., 14.),
+        MentionCandidate::Tag { .. } => symbol_avatar("tag", 28., 7.),
+        other => square_avatar(name, candidate_key(other), 28., 7.).into_any_element(),
+    }
+}
+
+fn symbol_avatar(symbol_name: &str, size: f32, radius: f32) -> AnyElement {
+    div()
+        .size(px(size))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(radius))
+        .bg(theme::surface_raised())
+        .child(symbol(symbol_name, 16., theme::text()))
+        .into_any_element()
 }
 
 fn step_kind(previous: &str, value: &str, cursor: usize) -> StepKind {
@@ -370,6 +398,8 @@ fn candidate_key(candidate: &MentionCandidate) -> &str {
         MentionCandidate::Person(person) => &person.user_id,
         MentionCandidate::Channel { channel_id, .. } => channel_id,
         MentionCandidate::Team { team_id, .. } => team_id,
+        MentionCandidate::Everyone { chat_id } => chat_id,
+        MentionCandidate::Tag { tag_id, .. } => tag_id,
     }
 }
 
@@ -2354,12 +2384,7 @@ impl Composer {
             .enumerate()
             .map(|(index, candidate)| {
                 let name = candidate.display_name().to_owned();
-                let avatar = match candidate {
-                    MentionCandidate::Person(person) => {
-                        person_avatar(directory, Some(&person.user_id), &name, 28.)
-                    }
-                    other => square_avatar(&name, candidate_key(other), 28., 7.).into_any_element(),
-                };
+                let avatar = candidate_avatar(candidate, directory);
                 let subtitle = candidate_subtitle(candidate);
                 h_flex()
                     .id(ElementId::Name(format!("mention-row-{index}").into()))

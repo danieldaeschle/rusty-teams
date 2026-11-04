@@ -178,13 +178,19 @@ mod tests {
     }
 
     #[test]
-    fn channel_and_team_mentions_have_no_chatsvc_shape() {
+    fn group_mentions_have_no_chatsvc_shape() {
         for target in [
             MentionTarget::Channel {
                 channel_id: "19:c@thread.tacv2".into(),
             },
             MentionTarget::Team {
                 team_id: "team-1".into(),
+            },
+            MentionTarget::Everyone {
+                chat_id: "19:g@thread.v2".into(),
+            },
+            MentionTarget::Tag {
+                tag_id: "tag-1".into(),
             },
         ] {
             let mentions = [mention(0, target)];

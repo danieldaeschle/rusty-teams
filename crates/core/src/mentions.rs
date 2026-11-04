@@ -41,6 +41,24 @@ impl MentionInput {
             text: text.to_owned(),
         }
     }
+
+    pub fn everyone(chat_id: &str, text: &str) -> Self {
+        MentionInput {
+            target: MentionTarget::Everyone {
+                chat_id: chat_id.to_owned(),
+            },
+            text: text.to_owned(),
+        }
+    }
+
+    pub fn tag(tag_id: &str, text: &str) -> Self {
+        MentionInput {
+            target: MentionTarget::Tag {
+                tag_id: tag_id.to_owned(),
+            },
+            text: text.to_owned(),
+        }
+    }
 }
 
 fn same_char(expected: char, actual: char, ignore_case: bool) -> bool {
@@ -244,11 +262,15 @@ pub fn apply_mentions(html: &str, inputs: &[MentionInput]) -> (String, Vec<Outgo
 }
 
 pub(crate) fn ensure_allowed_in_chat(inputs: &[MentionInput]) -> Result<()> {
-    if inputs
-        .iter()
-        .any(|input| !matches!(input.target, MentionTarget::User { .. }))
-    {
-        return Err(Error::Unsupported("a channel or team mention in a chat"));
+    if inputs.iter().any(|input| {
+        !matches!(
+            input.target,
+            MentionTarget::User { .. } | MentionTarget::Everyone { .. }
+        )
+    }) {
+        return Err(Error::Unsupported(
+            "a channel, team or tag mention in a chat",
+        ));
     }
     Ok(())
 }
@@ -416,6 +438,8 @@ mod tests {
     #[test]
     fn chats_only_take_user_mentions() {
         assert!(ensure_allowed_in_chat(&[MentionInput::user("u", "A")]).is_ok());
+        assert!(ensure_allowed_in_chat(&[MentionInput::everyone("19:g", "Everyone")]).is_ok());
         assert!(ensure_allowed_in_chat(&[MentionInput::team("t", "Squad")]).is_err());
+        assert!(ensure_allowed_in_chat(&[MentionInput::tag("tag-1", "Design")]).is_err());
     }
 }

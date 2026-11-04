@@ -208,6 +208,13 @@ pub fn mentions(record: &MessageRecord) -> Vec<MentionInfo> {
     infos
 }
 
+/// An @Everyone of a group chat: Graph names the chat itself as the mentioned conversation. Only meaningful in chats, a channel mention looks the same in its channel.
+pub fn mentions_whole_chat(record: &MessageRecord) -> bool {
+    mentions(record).iter().any(|mention| {
+        mention.group && mention.target_id.as_deref() == Some(record.conversation_id.as_str())
+    })
+}
+
 pub fn quotes(record: &MessageRecord) -> Vec<QuoteInfo> {
     attachments(record)
         .into_iter()

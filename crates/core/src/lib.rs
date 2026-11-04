@@ -157,7 +157,7 @@ pub use meeting_join::{
 pub use mentions::{MentionInput, apply_mentions, plain_mention_spans};
 pub use message_link::{
     ChannelAddress, ChannelLinkInput, channel_link, channel_message_link, channel_tab_link,
-    chat_message_link, team_link,
+    chat_message_link, outlook_compose_link, team_link,
 };
 pub use message_window::{JumpPlan, WINDOW_PAGE_SIZE, WindowPage, jump_plan, without_islands};
 pub use notes_chat::{is_notes_chat, notes_chat_title};
@@ -175,7 +175,7 @@ pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
     card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with,
-    mentions, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
+    mentions, mentions_whole_chat, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
     readable_text, translated_spans, user_mention_inputs,
 };
 pub use table::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};

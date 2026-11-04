@@ -493,6 +493,13 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
                 source: PersonSource::Member,
             })
         });
+    let everyone = demo_chats()
+        .into_iter()
+        .find(|chat| chat.id == conversation_id && chat.kind == "group")
+        .map(|chat| MentionCandidate::Everyone {
+            chat_id: chat.id.to_owned(),
+        })
+        .filter(|candidate| matches(candidate.display_name()));
     let scope: Vec<MentionCandidate> = if conversation_id.starts_with("demo-channel") {
         [
             MentionCandidate::Channel {
@@ -503,6 +510,11 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
                 team_id: "demo-team-1".to_owned(),
                 name: "Platform".to_owned(),
             },
+            MentionCandidate::Tag {
+                tag_id: "demo-tag-design".to_owned(),
+                name: "Designers".to_owned(),
+                member_count: Some(3),
+            },
         ]
         .into_iter()
         .filter(|candidate| matches(candidate.display_name()))
@@ -510,7 +522,7 @@ pub fn mention_candidates(conversation_id: &str, query: &str) -> Vec<MentionCand
     } else {
         Vec::new()
     };
-    people.chain(scope).collect()
+    everyone.into_iter().chain(people).chain(scope).collect()
 }
 
 pub fn send_in_chat(
@@ -2409,7 +2421,18 @@ mod tests {
         assert_eq!(chat[0].display_name(), "Mara Lindqvist");
         let channel = mention_candidates("demo-channel-1-1", "gen");
         assert!(matches!(channel[0], MentionCandidate::Channel { .. }));
-        assert_eq!(mention_candidates("demo-chat-release", "").len(), 5);
+        let all = mention_candidates("demo-chat-release", "");
+        assert_eq!(all.len(), 6);
+        assert!(matches!(all[0], MentionCandidate::Everyone { .. }));
+        assert!(
+            mention_candidates("demo-chat-mara", "")
+                .iter()
+                .all(|candidate| !matches!(candidate, MentionCandidate::Everyone { .. }))
+        );
+        assert!(matches!(
+            mention_candidates("demo-channel-1-1", "desi")[0],
+            MentionCandidate::Tag { .. }
+        ));
     }
 
     #[test]

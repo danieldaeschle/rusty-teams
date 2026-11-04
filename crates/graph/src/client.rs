@@ -4,7 +4,7 @@ use serde_json::Value;
 use session::{ApiResponse, GRAPH, Method, Request, Scope, Session};
 
 use crate::error::{Error, Result};
-use crate::models::{Channel, Chat, Member, Message, Team, User};
+use crate::models::{Channel, Chat, Member, Message, Tag, Team, User};
 use crate::page::Page;
 use crate::urls;
 
@@ -112,6 +112,11 @@ impl Graph {
 
     pub async fn joined_teams(&self) -> Result<Vec<Team>> {
         self.get_all(&urls::joined_teams(), Scope::graph("Team.ReadBasic.All"))
+            .await
+    }
+
+    pub async fn team_tags(&self, team_id: &str) -> Result<Vec<Tag>> {
+        self.get_all(&urls::team_tags(team_id), Scope::graph("TeamworkTag.Read"))
             .await
     }
 
