@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use app_ui_kit::widgets::Unread;
 use chrono::{DateTime, FixedOffset, Utc};
-use store::{ChannelRecord, ChatRecord, MessageImportance, Sidebar, SidebarTeam, is_bot_id};
+use store::{
+    ChannelNotificationLevel, ChannelRecord, ChatRecord, MessageImportance, Sidebar, SidebarTeam,
+    is_bot_id,
+};
 use teams_core::{ChatSection, is_event_preview};
 
 use crate::app_state::chat_title;
@@ -338,10 +341,16 @@ pub fn team_badge(team: &SidebarTeam, expanded: bool) -> Option<MentionBadge> {
     }
 }
 
+pub fn channel_shows_unread(team: &SidebarTeam, channel: &ChannelRecord) -> bool {
+    channel.unread
+        && (team.channel_notifications(&channel.id).level != ChannelNotificationLevel::Off
+            || team.channel_mentions(&channel.id).personal > 0)
+}
+
 pub fn team_has_unread(team: &SidebarTeam) -> bool {
     team.channels
         .iter()
-        .any(|channel| channel.unread && channel_shown(team, &channel.id))
+        .any(|channel| channel_shows_unread(team, channel) && channel_shown(team, &channel.id))
 }
 
 pub fn team_name_style(team: &SidebarTeam, expanded: bool) -> NameStyle {
@@ -917,6 +926,28 @@ mod tests {
         assert_eq!(team_name_style(&entry, true), NameStyle::PLAIN);
         let only_hidden = with_unread(team("t1", false, &["a", "b"], &["b"]), &["b"]);
         assert_eq!(team_name_style(&only_hidden, false), NameStyle::PLAIN);
+    }
+
+    #[test]
+    fn muted_channel_shows_no_unread_unless_personally_mentioned() {
+        let mut entry = with_unread(team("t1", false, &["a"], &[]), &["a"]);
+        entry.notifications.insert(
+            "a".into(),
+            store::ChannelNotifications {
+                level: ChannelNotificationLevel::Off,
+                include_replies: false,
+            },
+        );
+        assert!(!channel_shows_unread(&entry, &entry.channels[0]));
+        assert_eq!(team_name_style(&entry, false), NameStyle::PLAIN);
+        entry.mentions.insert(
+            "a".into(),
+            store::ChannelMentions {
+                personal: 1,
+                ..Default::default()
+            },
+        );
+        assert!(channel_shows_unread(&entry, &entry.channels[0]));
     }
 
     #[test]
