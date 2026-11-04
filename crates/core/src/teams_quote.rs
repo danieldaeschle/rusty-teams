@@ -66,16 +66,14 @@ pub(crate) fn quote_reply_properties(
 }
 
 fn mention_entry(mention: &OutgoingMention) -> Option<Value> {
-    let (mri, mention_type) = match &mention.target {
-        MentionTarget::User { user_id } => (user_mri(user_id), "person"),
-        MentionTarget::Channel { channel_id } => (channel_id.clone(), "channel"),
-        MentionTarget::Team { .. } => return None,
+    let MentionTarget::User { user_id } = &mention.target else {
+        return None;
     };
     Some(json!({
         "@type": MENTION_ITEMTYPE,
         "itemid": mention.id.to_string(),
-        "mri": mri,
-        "mentionType": mention_type,
+        "mri": user_mri(user_id),
+        "mentionType": "person",
         "displayName": mention.text,
     }))
 }
@@ -180,30 +178,18 @@ mod tests {
     }
 
     #[test]
-    fn a_channel_mention_points_at_the_channel_thread() {
-        let mentions = [mention(
-            1,
+    fn channel_and_team_mentions_have_no_chatsvc_shape() {
+        for target in [
             MentionTarget::Channel {
                 channel_id: "19:c@thread.tacv2".into(),
             },
-        )];
-        let properties = quote_reply_properties(&quote(), &mentions, None).unwrap();
-        let entries: Value =
-            serde_json::from_str(properties["mentions"].as_str().unwrap()).unwrap();
-        assert_eq!(entries[0]["mri"], "19:c@thread.tacv2");
-        assert_eq!(entries[0]["mentionType"], "channel");
-        assert_eq!(entries[0]["itemid"], "1");
-    }
-
-    #[test]
-    fn a_team_mention_has_no_chatsvc_shape() {
-        let mentions = [mention(
-            0,
             MentionTarget::Team {
                 team_id: "team-1".into(),
             },
-        )];
-        assert!(quote_reply_properties(&quote(), &mentions, None).is_none());
+        ] {
+            let mentions = [mention(0, target)];
+            assert!(quote_reply_properties(&quote(), &mentions, None).is_none());
+        }
     }
 
     #[test]
