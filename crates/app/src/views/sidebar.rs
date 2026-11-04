@@ -26,6 +26,7 @@ use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
+use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 use crate::channel_menu::{
     ChannelMenuItem, MenuEntry, TeamMenuItem, channel_menu_entries, team_menu_entries,
 };
@@ -232,7 +233,32 @@ fn chat_menu(
                 mute_state.update(cx, |state, cx| state.set_chat_muted(&mute_id, !muted, cx));
             }),
     );
-    popup = chat_notifications_submenu(popup, window, cx, context, target)
+    popup = chat_notifications_submenu(popup, window, cx, context, target);
+    let partner = (!target.is_group)
+        .then(|| context.state.read(cx).one_on_one_partner(&target.id))
+        .flatten();
+    if let Some(partner) = partner {
+        let follow_state = context.state.clone();
+        let follow = !context.state.read(cx).is_presence_followed(&partner.user_id);
+        popup = popup.item(
+            PopupMenuItem::new(if follow {
+                NOTIFY_WHEN_AVAILABLE
+            } else {
+                TURN_OFF_NOTIFICATIONS
+            })
+            .icon(menu_icon(if follow {
+                IconName::BellRing
+            } else {
+                IconName::BellOff
+            }))
+            .on_click(move |_, _, cx| {
+                follow_state.update(cx, |state, cx| {
+                    state.set_presence_followed(&partner.user_id, &partner.name, follow, cx)
+                });
+            }),
+        );
+    }
+    popup = popup
         .item(pop_out_item(context, target))
         .separator()
         .item(

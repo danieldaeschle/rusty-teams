@@ -388,6 +388,9 @@ impl NotificationCenter {
             AppEvent::Call => self.sync_call_sounds(cx),
             AppEvent::SoundSettings => self.on_account_sounds(cx),
             AppEvent::ChatSettings => self.on_account_notifications(cx),
+            AppEvent::FollowedStatus { user_id, text } => {
+                self.present_status_change(user_id, text, cx)
+            }
             _ => {}
         }
     }
@@ -510,6 +513,32 @@ impl NotificationCenter {
             self.app
                 .update(cx, |state, cx| state.request_avatars(vec![user_id], cx));
         }
+        self.sync_windows(cx);
+    }
+
+    fn present_status_change(&mut self, user_id: &str, text: &str, cx: &mut Context<Self>) {
+        if self.settings.do_not_disturb {
+            return;
+        }
+        let (name, conversation_id) = {
+            let state = self.app.read(cx);
+            let name = state
+                .followed_presence
+                .iter()
+                .find(|person| person.user_id == user_id)
+                .map(|person| person.name.clone())
+                .unwrap_or_default();
+            (name, state.one_on_one_chat_with(user_id).unwrap_or_default())
+        };
+        let id = self
+            .stack
+            .push_status_change(user_id, &name, text, &conversation_id, Instant::now());
+        if let Some(model) = self.stack.get_mut(id) {
+            model.time = chrono::Local::now().format("%H:%M").to_string();
+        }
+        let user_id = user_id.to_owned();
+        self.app
+            .update(cx, |state, cx| state.request_avatars(vec![user_id], cx));
         self.sync_windows(cx);
     }
 

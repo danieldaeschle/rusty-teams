@@ -713,6 +713,7 @@ impl ConversationView {
             | AppEvent::MeetingChime
             | AppEvent::CallTone(_)
             | AppEvent::SoundSettings
+            | AppEvent::FollowedStatus { .. }
             | AppEvent::Call => {}
             AppEvent::LiveMeeting => cx.notify(),
             AppEvent::Saved => cx.notify(),

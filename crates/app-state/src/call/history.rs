@@ -257,7 +257,7 @@ impl AppState {
         .detach();
     }
 
-    fn one_on_one_chat_with(&self, user_id: &str) -> Option<String> {
+    pub fn one_on_one_chat_with(&self, user_id: &str) -> Option<String> {
         self.sidebar
             .chats
             .iter()

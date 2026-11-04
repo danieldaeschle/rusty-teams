@@ -76,6 +76,10 @@ pub enum AppEvent {
     CallTone(chatsvc::sounds::CallTone),
     SoundSettings,
     ChatSettings,
+    FollowedStatus {
+        user_id: String,
+        text: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -112,6 +116,8 @@ pub struct AppState {
     pub connection_banner: crate::connection_banner::BannerTiming,
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
+    pub followed_presence: Vec<crate::presence_follow::FollowedPerson>,
+    pub followed_changes: Vec<(String, &'static str)>,
     pub keep_unread: Option<String>,
     pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
@@ -273,6 +279,8 @@ impl AppState {
             connection_banner: Default::default(),
             live_retry: None,
             notice_count: 0,
+            followed_presence: Vec::new(),
+            followed_changes: Vec::new(),
             keep_unread: None,
             restorable_deletes: Default::default(),
             typing: TypingState::default(),
@@ -343,6 +351,7 @@ impl AppState {
             section_changes: crate::section_actions::SectionChanges::default(),
         };
         state.local_previews = load_local_previews(&state.store);
+        state.followed_presence = crate::presence_follow::load_followed(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
         state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
@@ -676,7 +685,12 @@ impl AppState {
                 let activity_changed = self
                     .directory
                     .set_activity(user_id, data::presence_activity(&engine, user_id));
-                self.directory.set_presence(user_id, kind) || activity_changed
+                let previous = self.directory.presence_of(user_id);
+                let changed = self.directory.set_presence(user_id, kind);
+                if changed {
+                    self.note_followed_change(user_id, previous, kind);
+                }
+                changed || activity_changed
             })
             .collect()
     }
@@ -695,6 +709,7 @@ impl AppState {
             let done = data::refresh_presence(&engine, wanted.clone());
             self.on_done(done, cx, move |state, cx| {
                 state.sync_presence();
+                state.announce_followed_changes(cx);
                 state.directory.save_presence(&state.store, &wanted);
                 state.directory.settle_presence(&wanted);
                 cx.emit(AppEvent::Directory);
@@ -1020,6 +1035,7 @@ impl AppState {
                 self.refresh_chat_settings(cx);
                 let waiting = self.directory.waiting_presence_ids();
                 self.request_presence(waiting, cx);
+                self.watch_followed_presence(cx);
                 self.refresh_own_status(cx);
                 cx.emit(AppEvent::Status);
             }
@@ -1058,6 +1074,7 @@ impl AppState {
             }
             BackendEvent::Core(CoreEvent::PresenceChanged) => {
                 let changed = self.sync_presence();
+                self.announce_followed_changes(cx);
                 self.directory.save_presence(&self.store, &changed);
                 cx.emit(AppEvent::Directory);
                 cx.notify();
