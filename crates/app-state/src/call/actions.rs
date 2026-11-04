@@ -24,7 +24,7 @@ use super::report::{
     CallRecorder, OwnIdentity, SETTING_META_KEY, SharedRecorder, report_directory, save_report, shared,
 };
 use super::ring::{MissedCall, RingOutcome};
-use super::target::{is_organizer, plan_for_chat};
+use super::target::{is_echo_chat, is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title, selection_for};
 use crate::notice::NoticeAction;
 
@@ -134,12 +134,12 @@ impl AppState {
             self.show_call(true, cx);
             return;
         }
-        let plan = self
-            .sidebar
-            .chats
-            .iter()
-            .find(|chat| chat.id == conversation_id)
-            .and_then(|chat| plan_for_chat(chat, self.directory.me.as_ref()));
+        let chat = self.sidebar.chats.iter().find(|chat| chat.id == conversation_id);
+        if chat.is_some_and(is_echo_chat) {
+            self.start_test_call(cx);
+            return;
+        }
+        let plan = chat.and_then(|chat| plan_for_chat(chat, self.directory.me.as_ref()));
         let Some(plan) = plan else {
             self.raise_notice(NOT_CALLABLE_NOTICE.to_owned(), None, cx);
             return;

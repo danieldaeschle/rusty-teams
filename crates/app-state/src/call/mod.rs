@@ -66,6 +66,6 @@ pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use record_rights::{RecordBlock, RecordFeature};
 pub use recording_menu::{RecordAction, RecordingChip, record_actions, recording_chip};
 pub use report::load_enabled as load_report_enabled;
-pub use target::plan_for_chat;
+pub use target::{is_echo_chat, plan_for_chat};
 pub use transcript::clock_label;
 pub use view_settings::{CallLayout, ViewSettings};
