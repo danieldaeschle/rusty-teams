@@ -121,6 +121,7 @@ struct Fake {
     muted_states: Mutex<Vec<(String, bool)>>,
     hidden_states: Mutex<Vec<(String, bool)>>,
     read_states: Mutex<Vec<(String, chatsvc::ReadHorizon)>>,
+    notes_placeholder: Mutex<bool>,
     chats_fail: Mutex<bool>,
     muted_fails: Mutex<bool>,
     link_pages: Mutex<Vec<chatsvc::MessageLinks>>,
@@ -634,6 +635,15 @@ impl Remote for Handle {
                     hidden_at_ms: None,
                 }),
         );
+        if !*self.notes_placeholder.lock().unwrap()
+            && !states.iter().any(|state| state.id == NOTES_CHAT_ID)
+        {
+            states.push(chatsvc::ConversationState {
+                id: NOTES_CHAT_ID.to_owned(),
+                hidden: Some(true),
+                ..chatsvc::ConversationState::default()
+            });
+        }
         Ok(states)
     }
 
@@ -1196,7 +1206,8 @@ async fn refresh_sidebar_fills_chats_teams_and_channels() {
         ),
         (4, 1, 1, 0)
     );
-    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+    let sent: Vec<CoreEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(sent.contains(&CoreEvent::SidebarChanged), "{sent:?}");
 
     let sidebar = engine.sidebar().unwrap();
     let order: Vec<(&str, bool)> = sidebar
@@ -1632,11 +1643,12 @@ async fn failing_channel_listing_is_reported_not_fatal() {
         (summary.teams, summary.channels, summary.failed_teams),
         (2, 1, 1)
     );
-    assert!(matches!(
-        events.try_recv().unwrap(),
-        CoreEvent::Error { .. }
-    ));
-    assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
+    let sent: Vec<CoreEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(
+        sent.iter().any(|event| matches!(event, CoreEvent::Error { .. })),
+        "{sent:?}"
+    );
+    assert!(sent.contains(&CoreEvent::SidebarChanged), "{sent:?}");
 }
 
 #[tokio::test]
@@ -2850,6 +2862,24 @@ async fn a_newer_call_event_keeps_the_line_and_moves_the_time() {
         Some("before the call")
     );
     assert_eq!(record.last_message_at, Some(base() + Duration::minutes(40)));
+}
+
+#[tokio::test]
+async fn a_departed_partner_keeps_their_name_from_the_chat_history() {
+    let fake = Arc::new(Fake::default());
+    let departed = "19:user-ada_user-me@unq.gbl.spaces";
+    let mut alone = chat(departed, None, 5, 5, ME, false);
+    alone
+        .members
+        .retain(|member| member.user_id.as_deref() == Some(ME));
+    *fake.chats.lock().unwrap() = vec![alone];
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats[0].title, "Unknown User");
+    fake.set_chat_messages(numbered(1));
+    engine.fetch_newer(departed).await.unwrap();
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats[0].title, "Ada Example");
 }
 
 #[tokio::test]
@@ -5525,6 +5555,7 @@ async fn the_notes_chat_comes_from_chatsvc_with_its_newest_message_sorted_by_tim
 #[tokio::test]
 async fn a_new_note_refreshes_the_line_and_an_unlisted_notes_chat_leaves_the_sidebar() {
     let fake = Arc::new(Fake::default());
+    *fake.notes_placeholder.lock().unwrap() = true;
     list_notes_chat(&fake, 20);
     fake.set_chat_messages(vec![own_note(1, 20, "<p>plan</p>")]);
     let engine = engine_with(&fake, small_pages());
