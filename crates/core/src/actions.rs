@@ -1,8 +1,8 @@
 use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, Utc};
 use graph::{
-    FileReference, MessageExtras, MessageTarget, OutgoingMention,
-    UploadDestination, UploadedFile, hosted_image_order,
+    FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
+    hosted_image_order,
 };
 use store::MessageRecord;
 
@@ -87,7 +87,7 @@ impl<R: Remote> SyncEngine<R> {
         self.cache_sent(conversation_id, &sent, &html, extras)
     }
 
-    /// Chat: quoted reply (Graph beta `replyWithQuote`). Channel: reply in the thread of `message_id`.
+    /// Quoted reply in Teams' chatsvc shape; channels answer in the thread of `message_id`.
     pub async fn reply_to(
         &self,
         conversation_id: &str,
@@ -125,52 +125,57 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<MessageRecord> {
         let conversation = self.resolve(conversation_id).await?;
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
-        let (sent, extras) = match conversation {
-            Conversation::Chat => {
-                let sent = self
-                    .remote
-                    .reply_with_quote(conversation_id, message_id, &html, &mentions, extras)
-                    .await?;
-                (sent, extras.clone())
-            }
-            Conversation::Channel { team_id } => {
-                let quoted = self
-                    .store
-                    .messages_by_id(conversation_id, &[message_id.to_owned()])?
-                    .remove(message_id);
+        let quoted = self
+            .store
+            .messages_by_id(conversation_id, &[message_id.to_owned()])?
+            .remove(message_id);
+        let (chatsvc_conversation, root_id) = match &conversation {
+            Conversation::Chat => (ConversationRef::chat(conversation_id), None),
+            Conversation::Channel { .. } => {
                 let root_id = quoted
                     .as_ref()
                     .and_then(|record| record.reply_to_id.clone())
                     .unwrap_or_else(|| message_id.to_owned());
-                if let Some(quoted) = &quoted
-                    && let Some((sent, html)) = self
-                        .quote_reply_via_chatsvc(
-                            conversation_id,
-                            &root_id,
-                            quoted,
-                            &html,
-                            &mentions,
-                            extras,
-                        )
-                        .await?
-                {
-                    return self.cache_sent(conversation_id, &sent, &html, extras);
-                }
-                let sent = self
-                    .remote
+                (
+                    ConversationRef::channel_reply(conversation_id, &root_id),
+                    Some(root_id),
+                )
+            }
+        };
+        if let Some(quoted) = &quoted
+            && let Some((sent, html)) = self
+                .quote_reply_via_chatsvc(
+                    &chatsvc_conversation,
+                    root_id.as_deref(),
+                    quoted,
+                    &html,
+                    &mentions,
+                    extras,
+                )
+                .await?
+        {
+            return self.cache_sent(conversation_id, &sent, &html, extras);
+        }
+        let sent = match (&conversation, &root_id) {
+            (Conversation::Channel { team_id }, Some(root_id)) => {
+                self.remote
                     .reply_to_channel_message(
-                        &team_id,
+                        team_id,
                         conversation_id,
-                        &root_id,
+                        root_id,
                         &html,
                         &mentions,
                         extras,
                     )
-                    .await?;
-                (sent, extras.clone())
+                    .await?
+            }
+            _ => {
+                self.remote
+                    .reply_with_quote(conversation_id, message_id, &html, &mentions, extras)
+                    .await?
             }
         };
-        self.cache_sent(conversation_id, &sent, &html, &extras)
+        self.cache_sent(conversation_id, &sent, &html, extras)
     }
 
     /// Own and not deleted. Chat messages, channel posts and channel replies alike.
@@ -750,10 +755,11 @@ impl<R: Remote> SyncEngine<R> {
         self.seed_images(&seeds)
     }
 
+    /// `None` when Teams' shape cannot be written here (images, files, team mentions, no quote).
     async fn quote_reply_via_chatsvc(
         &self,
-        channel_id: &str,
-        root_id: &str,
+        conversation: &ConversationRef,
+        root_id: Option<&str>,
         quoted: &MessageRecord,
         html: &str,
         mentions: &[OutgoingMention],
@@ -775,12 +781,7 @@ impl<R: Remote> SyncEngine<R> {
         let content = format!("{}{}", quote.html, chatsvc_mention_html(html, mentions));
         let message_id = self
             .remote
-            .post_chatsvc_message(
-                &ConversationRef::channel_reply(channel_id, root_id),
-                &content,
-                &me.display_name,
-                &properties,
-            )
+            .post_chatsvc_message(conversation, &content, &me.display_name, &properties)
             .await?;
         let created_at = message_id
             .parse::<i64>()
