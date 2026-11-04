@@ -33,6 +33,7 @@ actions!(
         OpenCallsTab,
         OpenAgents,
         OpenChatFilter,
+        PopOutSelectedChat,
         FindInChat,
         FilterUnreadChats,
         FilterNonMeetingChats,
@@ -138,6 +139,7 @@ macro_rules! shortcut {
 pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(General, OutsideComposer, "Search and switch chats", "ctrl-k", Some("cmd-k"), OpenSwitcher),
     shortcut!(General, Global, "New chat", "ctrl-n", Some("cmd-n"), NewChat),
+    shortcut!(General, OutsideTextFields, "Pop out selected chat", "ctrl-enter", Some("cmd-enter"), PopOutSelectedChat),
     shortcut!(General, GlobalOverTextFields, "Keyboard shortcuts", "ctrl-.", Some("cmd-."), ShowShortcuts),
     shortcut!(General, GlobalOverTextFields, "Settings", "ctrl-,", Some("cmd-,"), OpenSettings),
     shortcut!(General, OutsideComposer, "Zoom in", "ctrl-=", Some("cmd-="), ZoomIn),

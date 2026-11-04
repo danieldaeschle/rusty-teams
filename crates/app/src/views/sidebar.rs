@@ -19,6 +19,7 @@ use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, square_avatar, with_presence};
 use super::calls_tab::calls_body;
+use super::chat_pop_out;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
@@ -218,7 +219,7 @@ fn chat_menu(
         }),
     );
     if notes {
-        return popup;
+        return popup.item(pop_out_item(context, target));
     }
     popup = popup.item(
         PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
@@ -232,6 +233,7 @@ fn chat_menu(
             }),
     );
     popup = chat_notifications_submenu(popup, window, cx, context, target)
+        .item(pop_out_item(context, target))
         .separator()
         .item(
             PopupMenuItem::new("Hide")
@@ -267,6 +269,13 @@ fn chat_menu(
         );
     }
     popup
+}
+
+fn pop_out_item(context: &MenuContext, target: &ChatMenuTarget) -> PopupMenuItem {
+    let (state, chat_id) = (context.state.clone(), target.id.clone());
+    PopupMenuItem::new(chat_pop_out::POP_OUT_CHAT_LABEL)
+        .icon(menu_icon(IconName::ExternalLink))
+        .on_click(move |_, _, cx| chat_pop_out::pop_out_chat(&state, &chat_id, cx))
 }
 
 const CHAT_NOTIFICATION_MODES: [(&str, ChatNotificationMode); 2] = [

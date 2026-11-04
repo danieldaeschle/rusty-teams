@@ -24,13 +24,14 @@ use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
     FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, PopOutSelectedChat, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
     ZoomShareReset,
 };
 use super::window_zoom::{WindowZoom, change_zoom};
 use super::call_pop_out::zoom_listener;
+use super::chat_pop_out;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SidebarEvent, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
@@ -995,6 +996,12 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.conversation
                     .update(cx, |conversation, cx| conversation.open_find(window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &PopOutSelectedChat, _, cx| {
+                let selected = this.state.read(cx).selection.clone();
+                if let Some(Selection::Chat(chat_id)) = selected {
+                    chat_pop_out::pop_out_chat(&this.state, &chat_id, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &OpenChatFilter, window, cx| {
                 this.close_image_viewer(window, cx);
