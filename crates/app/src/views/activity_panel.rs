@@ -19,6 +19,7 @@ use crate::agent_api::{
     pending::{PendingKind, PendingProposal, conversation_label as proposal_conversation_label},
 };
 use crate::app_state::{AppState, chat_title};
+use crate::chat_filter::{FEWER_FILTERS, MORE_FILTERS};
 use crate::data::is_one_on_one;
 use crate::format;
 use crate::people::resolve_names;
@@ -49,6 +50,7 @@ pub struct ActivityPanel {
     app: Entity<AppState>,
     activity: Entity<ActivityCenter>,
     filter: Filter,
+    more_filters_open: bool,
     scroll: ScrollHandle,
     resolved_names: HashMap<String, String>,
     looked_up: HashSet<String>,
@@ -83,6 +85,7 @@ impl ActivityPanel {
             app,
             activity,
             filter,
+            more_filters_open: false,
             scroll: ScrollHandle::new(),
             resolved_names: HashMap::new(),
             looked_up: HashSet::new(),
@@ -103,35 +106,82 @@ impl ActivityPanel {
         cx.emit(event);
     }
 
+    fn filter_pill(&self, filter: Filter, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = filter == self.filter;
+        div()
+            .id(ElementId::Name(
+                format!("activity-filter-{}", filter.label()).into(),
+            ))
+            .h(px(24.))
+            .px(px(12.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .rounded_full()
+            .cursor_pointer()
+            .text_size(px(12.))
+            .when(selected, |pill| {
+                pill.bg(theme::accent()).text_color(theme::on_accent())
+            })
+            .when(!selected, |pill| {
+                pill.bg(theme::surface_raised())
+                    .text_color(theme::text_soft())
+                    .hover(|pill| pill.bg(theme::border_strong()))
+            })
+            .child(filter.label())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.filter = filter;
+                let _ = this.app.read(cx).store.set_meta(FILTER_KEY, filter.key());
+                cx.notify();
+            }))
+    }
+
+    fn more_filters_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let open = self.more_filters_open;
+        let label = if open { FEWER_FILTERS } else { MORE_FILTERS };
+        div()
+            .id("activity-filter-more")
+            .size(px(24.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .bg(theme::surface_raised())
+            .hover(|pill| pill.bg(theme::border_strong()))
+            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+            .child(icon(
+                if open {
+                    IconName::ChevronUp
+                } else {
+                    IconName::ChevronDown
+                },
+                14.,
+                theme::text_soft(),
+            ))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.more_filters_open = !this.more_filters_open;
+                cx.notify();
+            }))
+    }
+
     fn header(&self, cx: &mut Context<Self>) -> Div {
-        let pills = Filter::ALL.into_iter().map(|filter| {
-            let selected = filter == self.filter;
-            div()
-                .id(ElementId::Name(
-                    format!("activity-filter-{}", filter.label()).into(),
-                ))
-                .h(px(24.))
-                .px(px(12.))
-                .flex()
-                .items_center()
-                .rounded_full()
-                .cursor_pointer()
-                .text_size(px(12.))
-                .when(selected, |pill| {
-                    pill.bg(theme::accent()).text_color(theme::on_accent())
-                })
-                .when(!selected, |pill| {
-                    pill.bg(theme::surface_raised())
-                        .text_color(theme::text_soft())
-                        .hover(|pill| pill.bg(theme::border_strong()))
-                })
-                .child(filter.label())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.filter = filter;
-                    let _ = this.app.read(cx).store.set_meta(FILTER_KEY, filter.key());
-                    cx.notify();
-                }))
-        });
+        let overflow_active = Filter::OVERFLOW.contains(&self.filter);
+        let mut pills: Vec<AnyElement> = Filter::PRIMARY
+            .into_iter()
+            .map(|filter| self.filter_pill(filter, cx).into_any_element())
+            .collect();
+        if self.more_filters_open || overflow_active {
+            pills.extend(
+                Filter::OVERFLOW
+                    .into_iter()
+                    .map(|filter| self.filter_pill(filter, cx).into_any_element()),
+            );
+        }
+        if !overflow_active {
+            pills.push(self.more_filters_button(cx).into_any_element());
+        }
         v_flex()
             .flex_none()
             .child(
@@ -184,7 +234,14 @@ impl ActivityPanel {
                             })),
                     ),
             )
-            .child(h_flex().px(px(16.)).pb(px(12.)).gap(px(6.)).children(pills))
+            .child(
+                h_flex()
+                    .px(px(16.))
+                    .pb(px(12.))
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .children(pills),
+            )
     }
 
     fn row(
@@ -372,6 +429,7 @@ fn admits_proposal(filter: Filter, pending: &PendingProposal) -> bool {
         Filter::All => true,
         Filter::Mentions => false,
         Filter::Unread => !pending.seen,
+        Filter::Replies | Filter::Reactions | Filter::MissedCalls => false,
     }
 }
 

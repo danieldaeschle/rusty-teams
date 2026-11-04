@@ -25,16 +25,31 @@ pub enum Filter {
     All,
     Mentions,
     Unread,
+    Replies,
+    Reactions,
+    MissedCalls,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 3] = [Filter::All, Filter::Mentions, Filter::Unread];
+    pub const PRIMARY: [Filter; 3] = [Filter::All, Filter::Mentions, Filter::Unread];
+    pub const OVERFLOW: [Filter; 3] = [Filter::Replies, Filter::Reactions, Filter::MissedCalls];
+    pub const ALL: [Filter; 6] = [
+        Filter::All,
+        Filter::Mentions,
+        Filter::Unread,
+        Filter::Replies,
+        Filter::Reactions,
+        Filter::MissedCalls,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
             Filter::All => "all",
             Filter::Mentions => "mentions",
             Filter::Unread => "unread",
+            Filter::Replies => "replies",
+            Filter::Reactions => "reactions",
+            Filter::MissedCalls => "missed_calls",
         }
     }
 
@@ -47,6 +62,9 @@ impl Filter {
             Filter::All => "All",
             Filter::Mentions => "@Mentions",
             Filter::Unread => "Unread",
+            Filter::Replies => "Replies",
+            Filter::Reactions => "Reactions",
+            Filter::MissedCalls => "Missed calls",
         }
     }
 
@@ -55,6 +73,9 @@ impl Filter {
             Filter::All => "No activity yet",
             Filter::Mentions => "No mentions",
             Filter::Unread => "Nothing unread",
+            Filter::Replies => "No replies",
+            Filter::Reactions => "No reactions",
+            Filter::MissedCalls => "No missed calls",
         }
     }
 
@@ -63,6 +84,9 @@ impl Filter {
             Filter::All => true,
             Filter::Mentions => entry.kind == Kind::Mention,
             Filter::Unread => !entry.read,
+            Filter::Replies => entry.kind == Kind::Reply,
+            Filter::Reactions => entry.kind == Kind::Reaction,
+            Filter::MissedCalls => entry.kind == Kind::MissedCall,
         }
     }
 }
@@ -284,5 +308,26 @@ mod tests {
         assert_eq!(unread.iter().map(|section| section.entries.len()).sum::<usize>(), 2);
         assert_eq!(feed.unread_count(), 2);
         assert_eq!(feed.bell_count(), 2);
+    }
+
+    #[test]
+    fn kind_filters_keep_only_their_kind() {
+        let feed = Feed::new(vec![
+            entry("reply", Kind::Reply, at(8, 9), true),
+            entry("reaction", Kind::Reaction, at(8, 9), false),
+            entry("missed", Kind::MissedCall, at(8, 9), false),
+            entry("call", Kind::Call, at(8, 9), false),
+        ]);
+        let today = at(8, 12).date_naive();
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let ids = |filter| -> Vec<String> {
+            feed.sections(filter, today, offset)
+                .iter()
+                .flat_map(|section| section.entries.iter().map(|entry| entry.id.clone()))
+                .collect()
+        };
+        assert_eq!(ids(Filter::Replies), ["reply"]);
+        assert_eq!(ids(Filter::Reactions), ["reaction"]);
+        assert_eq!(ids(Filter::MissedCalls), ["missed"]);
     }
 }
