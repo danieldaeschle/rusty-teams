@@ -3,10 +3,11 @@ use std::rc::Rc;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use teams_core::FormatState;
 
-use super::widgets::symbol;
+use super::widgets::{icon, symbol};
 use crate::theme::{self, ElevatedSurface as _};
 
 const PADDING: f32 = 4.;
@@ -46,6 +47,14 @@ pub enum FormatButton {
     Table,
     TableInsertLine,
     TableRemoveLine,
+    Highlight,
+    FontColor,
+    ParagraphStyle,
+    ClearFormatting,
+    Outdent,
+    Indent,
+    CodeBlock,
+    Rule,
 }
 
 const STYLE_GROUP: &[FormatButton] = &[
@@ -72,6 +81,29 @@ const TABLE_GROUP: &[FormatButton] = &[
     FormatButton::TableRemoveLine,
 ];
 
+const FONT_GROUP: &[FormatButton] = &[
+    FormatButton::Highlight,
+    FormatButton::FontColor,
+    FormatButton::SizeSmall,
+    FormatButton::SizeNormal,
+    FormatButton::SizeLarge,
+    FormatButton::ParagraphStyle,
+    FormatButton::ClearFormatting,
+];
+const PARAGRAPH_GROUP: &[FormatButton] = &[
+    FormatButton::Outdent,
+    FormatButton::Indent,
+    FormatButton::Bulleted,
+    FormatButton::Numbered,
+];
+const INSERT_GROUP: &[FormatButton] = &[
+    FormatButton::Quote,
+    FormatButton::Link,
+    FormatButton::Code,
+    FormatButton::CodeBlock,
+    FormatButton::Rule,
+];
+
 /// The floating bar over a selection: text formats only, tables live in the format bar.
 pub const SELECTION_GROUPS: [&[FormatButton]; 5] = [
     STYLE_GROUP,
@@ -81,15 +113,18 @@ pub const SELECTION_GROUPS: [&[FormatButton]; 5] = [
     LINE_GROUP,
 ];
 
-/// The format bar the Format button opens, table group second to last like Teams.
+/// The format bar the Format button opens, in Teams' group order; Teams' last group (undo,
+/// redo) is left out, so the table group ends the bar.
 pub const BAR_GROUPS: [&[FormatButton]; 6] = [
     STYLE_GROUP,
     SCRIPT_GROUP,
-    SIZE_GROUP,
-    INLINE_GROUP,
+    FONT_GROUP,
+    PARAGRAPH_GROUP,
+    INSERT_GROUP,
     TABLE_GROUP,
-    LINE_GROUP,
 ];
+
+pub const PARAGRAPH_STYLE_WIDTH: f32 = 104.;
 
 pub const TOGGLE_SHORTCUT: &str = "Ctrl+Shift+X";
 
@@ -114,6 +149,7 @@ pub fn toggle_symbol(open: bool) -> &'static str {
 pub struct ButtonState {
     pub format: FormatState,
     pub enabled: bool,
+    pub label: Option<&'static str>,
 }
 
 impl ButtonState {
@@ -121,6 +157,7 @@ impl ButtonState {
         ButtonState {
             format,
             enabled: true,
+            label: None,
         }
     }
 
@@ -128,6 +165,14 @@ impl ButtonState {
         ButtonState {
             format: FormatState::Off,
             enabled: false,
+            label: None,
+        }
+    }
+
+    pub fn with_label(self, label: &'static str) -> Self {
+        ButtonState {
+            label: Some(label),
+            ..self
         }
     }
 }
@@ -148,14 +193,22 @@ impl FormatButton {
             FormatButton::Link => "Link (Ctrl+K)",
             FormatButton::Bulleted => "Bulleted list",
             FormatButton::Numbered => "Numbered list",
-            FormatButton::Quote => "Quote",
+            FormatButton::Quote => "Quote (Ctrl+Alt+4)",
             FormatButton::Table => "Insert table",
             FormatButton::TableInsertLine => "Insert column or row (Ctrl+Alt+=)",
             FormatButton::TableRemoveLine => "Delete column, row, or table (Ctrl+Alt+-)",
+            FormatButton::Highlight => "Text highlight colour",
+            FormatButton::FontColor => "Font colour",
+            FormatButton::ParagraphStyle => "Rich style",
+            FormatButton::ClearFormatting => "Clear all formatting",
+            FormatButton::Outdent => "Decrease indent",
+            FormatButton::Indent => "Increase indent",
+            FormatButton::CodeBlock => "Code block (Ctrl+Shift+B)",
+            FormatButton::Rule => "Insert horizontal rule",
         }
     }
 
-    fn content(self, color: Hsla) -> AnyElement {
+    fn content(self, color: Hsla, label: Option<&'static str>) -> AnyElement {
         let letter = |text: &'static str| div().text_size(px(15.)).text_color(color).child(text);
         match self {
             FormatButton::Bold => letter("B").font_weight(FontWeight::BOLD).into_any_element(),
@@ -179,6 +232,37 @@ impl FormatButton {
             FormatButton::TableRemoveLine => {
                 symbol("fluent_table_dismiss", 20., color).into_any_element()
             }
+            FormatButton::Highlight => symbol("fluent_highlight", 20., color).into_any_element(),
+            FormatButton::FontColor => symbol("fluent_text_color", 20., color).into_any_element(),
+            FormatButton::ParagraphStyle => h_flex()
+                .w_full()
+                .px(px(6.))
+                .gap(px(4.))
+                .items_center()
+                .justify_between()
+                .text_size(px(13.))
+                .text_color(color)
+                .child(label.unwrap_or_default())
+                .child(icon(IconName::ChevronDown, 12., color))
+                .into_any_element(),
+            FormatButton::ClearFormatting => {
+                symbol("fluent_text_clear_formatting", 20., color).into_any_element()
+            }
+            FormatButton::Outdent => {
+                symbol("fluent_text_indent_decrease", 20., color).into_any_element()
+            }
+            FormatButton::Indent => {
+                symbol("fluent_text_indent_increase", 20., color).into_any_element()
+            }
+            FormatButton::CodeBlock => symbol("fluent_code_block", 20., color).into_any_element(),
+            FormatButton::Rule => symbol("fluent_line_horizontal_1", 20., color).into_any_element(),
+        }
+    }
+
+    fn width(self) -> f32 {
+        match self {
+            FormatButton::ParagraphStyle => PARAGRAPH_STYLE_WIDTH,
+            _ => BUTTON,
         }
     }
 }
@@ -271,14 +355,15 @@ fn button(
     div()
         .id(ElementId::Name(format!("format-{format:?}").into()))
         .relative()
-        .size(px(BUTTON))
+        .w(px(format.width()))
+        .h(px(BUTTON))
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
         .rounded(px(6.))
         .tooltip(move |window, cx| Tooltip::new(format.tooltip()).build(window, cx))
-        .child(format.content(color))
+        .child(format.content(color, state.label))
         .on_mouse_down(MouseButton::Left, |_, window, cx| {
             window.prevent_default();
             cx.stop_propagation();
@@ -521,18 +606,31 @@ mod tests {
     }
 
     #[test]
-    fn the_format_bar_has_the_teams_table_group_second_to_last() {
-        let table_group = BAR_GROUPS[BAR_GROUPS.len() - 2];
+    fn the_format_bar_follows_the_teams_groups_and_keeps_every_selection_format() {
         assert_eq!(
-            table_group,
+            BAR_GROUPS[BAR_GROUPS.len() - 1],
             &[
                 FormatButton::Table,
                 FormatButton::TableInsertLine,
                 FormatButton::TableRemoveLine
             ][..]
         );
-        for group in SELECTION_GROUPS {
-            assert!(BAR_GROUPS.contains(&group));
+        assert_eq!(
+            BAR_GROUPS[2][..2],
+            [FormatButton::Highlight, FormatButton::FontColor]
+        );
+        assert_eq!(
+            BAR_GROUPS[3],
+            &[
+                FormatButton::Outdent,
+                FormatButton::Indent,
+                FormatButton::Bulleted,
+                FormatButton::Numbered
+            ][..]
+        );
+        assert_eq!(BAR_GROUPS[4].last(), Some(&FormatButton::Rule));
+        for button in SELECTION_GROUPS.iter().flat_map(|group| group.iter()) {
+            assert!(BAR_GROUPS.iter().any(|group| group.contains(button)));
         }
     }
 

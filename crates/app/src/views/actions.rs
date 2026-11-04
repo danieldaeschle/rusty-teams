@@ -24,7 +24,13 @@ actions!(
         DeleteTable,
         ToggleFormatBar,
         InsertTableLine,
-        RemoveTableLine
+        RemoveTableLine,
+        SetParagraph,
+        SetHeading1,
+        SetHeading2,
+        SetHeading3,
+        ToggleCodeBlock,
+        ToggleQuote
     ]
 );
 

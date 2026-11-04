@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 64] = symbols![
+const SYMBOLS: [(&str, &[u8]); 72] = symbols![
     "bot",
     "done",
     "table",
@@ -73,6 +73,14 @@ const SYMBOLS: [(&str, &[u8]); 64] = symbols![
     "fluent_alert_urgent",
     "fluent_alert_urgent_filled",
     "fluent_chat",
+    "fluent_text_color",
+    "fluent_highlight",
+    "fluent_text_indent_increase",
+    "fluent_text_indent_decrease",
+    "fluent_line_horizontal_1",
+    "fluent_text_clear_formatting",
+    "fluent_code_block",
+    "fluent_text_header_1",
 ];
 
 pub struct AppAssets;

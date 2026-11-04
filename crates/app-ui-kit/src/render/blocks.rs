@@ -194,6 +194,10 @@ pub enum Block {
         children: Vec<Block>,
     },
     Quote(Vec<Block>),
+    Indent {
+        level: u8,
+        children: Vec<Block>,
+    },
     List {
         ordered: bool,
         start: u32,
@@ -248,7 +252,7 @@ impl Block {
                     .collect::<Vec<_>>()
                     .join("\n"),
             ),
-            Block::Quote(children) => Some(join(children)),
+            Block::Quote(children) | Block::Indent { children, .. } => Some(join(children)),
             Block::Reply { .. } | Block::Rule | Block::Image { .. } => None,
         }
     }
@@ -259,7 +263,9 @@ impl Block {
             Block::Code { code, .. } | Block::CodeLine { code } => Some(code.clone()),
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
             Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
-            Block::Quote(children) => children.iter().find_map(Block::first_line),
+            Block::Quote(children) | Block::Indent { children, .. } => {
+                children.iter().find_map(Block::first_line)
+            }
             Block::Reply { .. } | Block::Rule | Block::Image { .. } => None,
         }
     }
@@ -282,7 +288,9 @@ fn unlink(blocks: &mut [Block]) {
                     segment.style.link = false;
                 }
             }
-            Block::Reply { children, .. } | Block::Quote(children) => unlink(children),
+            Block::Reply { children, .. }
+            | Block::Quote(children)
+            | Block::Indent { children, .. } => unlink(children),
             Block::List { items, .. } => items.iter_mut().for_each(|item| unlink(item)),
             _ => {}
         }
@@ -310,6 +318,10 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
             Block::Quote(children) => {
                 let children = strip_image_placeholders(children);
                 (!children.is_empty()).then_some(Block::Quote(children))
+            }
+            Block::Indent { level, children } => {
+                let children = strip_image_placeholders(children);
+                (!children.is_empty()).then_some(Block::Indent { level, children })
             }
             Block::List {
                 ordered,
@@ -371,6 +383,16 @@ fn layout_blocks_with(spans: &[Span], split_images: bool, frame_code: bool) -> V
                 let inner = layout_blocks_with(children, false, frame_code);
                 if !inner.is_empty() {
                     blocks.push(Block::Quote(inner));
+                }
+            }
+            Span::Indent { level, children } => {
+                flush(&mut current, &mut blocks, frame_code);
+                let inner = layout_blocks_with(children, split_images, frame_code);
+                if !inner.is_empty() {
+                    blocks.push(Block::Indent {
+                        level: *level,
+                        children: inner,
+                    });
                 }
             }
             Span::List {
@@ -674,7 +696,9 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 );
             }
             Span::LineBreak | Span::Rule => out.push("\n", style, link),
-            Span::Quote { children, .. } | Span::BlockQuote(children) => {
+            Span::Quote { children, .. }
+            | Span::BlockQuote(children)
+            | Span::Indent { children, .. } => {
                 append_inline(children, style, link, out);
                 out.push("\n", style, link);
             }

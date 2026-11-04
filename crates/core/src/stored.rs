@@ -488,6 +488,7 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
             | Span::Link { children, .. } => push_plain(text, children),
@@ -617,6 +618,7 @@ fn link_user_mentions(spans: &mut [Span], infos: &[MentionInfo]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
@@ -710,6 +712,7 @@ fn collect_user_mentions(spans: &[Span], infos: &[MentionInfo], inputs: &mut Vec
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
@@ -756,6 +759,7 @@ fn merge_split_mentions(spans: &mut Vec<Span>, mentions: &[MentionInfo]) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)

@@ -1745,7 +1745,7 @@ fn release_messages() -> Vec<MessageRecord> {
             None,
             jonas,
             at(0, 11, 5),
-            "<h2>Release notes 0.2</h2><p>The <s>old sync path</s> <u>is gone</u>.</p><table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr><tr><td>Render</td><td>Jonas</td></tr></tbody></table><hr><blockquote>Measure twice, cut once.</blockquote><p><span style=\"background-color: rgb(255, 255, 0)\">Important:</span> <span style=\"color: #c00000\">backup first</span>.</p>",
+            "<h2>Release notes 0.2</h2><p>The <s>old sync path</s> <u>is gone</u>.</p><table><thead><tr><th>Area</th><th>Owner</th></tr></thead><tbody><tr><td>Sync</td><td>Priya</td></tr><tr><td>Render</td><td>Jonas</td></tr></tbody></table><hr><blockquote>Measure twice, cut once.</blockquote><p><span style=\"background-color: rgb(255, 255, 0)\">Important:</span> <span style=\"color: #c00000\">backup first</span>.</p><p style=\"margin-left:40px;\">Then <span style=\"color:#1E53A3;\">sync</span> <span style=\"background-color:#82CDA8;\">once</span>.</p><pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>backup --all<br>sync --once</code></pre>",
             "[]",
             false,
         ),

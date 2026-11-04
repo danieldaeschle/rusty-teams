@@ -11,6 +11,7 @@ use crate::widgets::symbol;
 use app_base::theme;
 
 const LIST_GAP: f32 = 2.;
+const INDENT_STEP: f32 = teams_core::INDENT_PIXELS as f32;
 const MARKER_WIDTH: f32 = 18.;
 const WIDE_MARKER_WIDTH: f32 = 26.;
 const BULLETS: [&str; 3] = ["\u{2022}", "\u{25e6}", "\u{25aa}"];
@@ -87,6 +88,11 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .rounded_r(px(4.))
             .bg(theme::quote_fill())
             .text_color(theme::text_soft())
+            .child(render_block_list(children, &id, own, depth, cx))
+            .into_any_element(),
+        Block::Indent { level, children } => div()
+            .w_full()
+            .pl(px(f32::from(*level) * INDENT_STEP))
             .child(render_block_list(children, &id, own, depth, cx))
             .into_any_element(),
         Block::List {
@@ -418,12 +424,9 @@ fn pill_for(range: std::ops::Range<usize>, style: StyleFlags, own: bool) -> Opti
             radius: px(4.),
         });
     }
-    let background = style.background?;
-    let mut fill: Hsla = rgb(background).into();
-    fill.a = HIGHLIGHT_ALPHA;
     Some(Pill {
         range,
-        fill,
+        fill: highlight_fill(style.background?),
         border: None,
         radius: px(3.),
     })
@@ -481,12 +484,26 @@ fn highlight_for(style: StyleFlags, own: bool) -> HighlightStyle {
     highlight
 }
 
+pub fn highlight_fill(color: u32) -> Hsla {
+    let mut fill: Hsla = rgb(color).into();
+    fill.a = HIGHLIGHT_ALPHA;
+    fill
+}
+
 fn readable(color: u32, own: bool) -> Hsla {
-    let background = Rgba::from(if own {
-        theme::bubble_own()
-    } else {
-        theme::bubble_other()
-    });
+    readable_on(
+        color,
+        if own {
+            theme::bubble_own()
+        } else {
+            theme::bubble_other()
+        },
+    )
+}
+
+/// `color` moved towards black or white until it reads on `background`.
+pub fn readable_on(color: u32, background: Hsla) -> Hsla {
+    let background = Rgba::from(background);
     let mut foreground = rgb(color);
     let target = if luminance(background) > 0.5 { 0. } else { 1. };
     for _ in 0..10 {

@@ -124,6 +124,7 @@ fn collect(spans: &[Span], parts: &mut BodyParts) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
+            | Span::Indent { children, .. }
             | Span::Link { children, .. } => collect(children, parts),
             Span::Heading { children, .. } | Span::BlockQuote(children) => {
                 parts.text.push(' ');

@@ -479,3 +479,38 @@ fn sized_text_nests_with_bold_and_color() {
         )]
     );
 }
+
+#[test]
+fn margin_left_paragraphs_become_indent_levels() {
+    assert_eq!(
+        html_to_spans("<p style=\"margin-left:40px;\">a</p><div style=\"margin-left: 120px\">b</div>"),
+        vec![
+            Span::Indent {
+                level: 1,
+                children: vec![text("a")],
+            },
+            Span::LineBreak,
+            Span::Indent {
+                level: 3,
+                children: vec![text("b")],
+            },
+        ]
+    );
+    assert_eq!(
+        html_to_spans("<p style=\"margin-left:10px\">a</p>"),
+        vec![text("a")]
+    );
+}
+
+#[test]
+fn teams_code_blocks_keep_their_line_breaks() {
+    assert_eq!(
+        html_to_spans(
+            "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>a<br>&nbsp; b</code></pre>"
+        ),
+        vec![Span::CodeBlock {
+            language: None,
+            code: "a\n\u{a0} b".to_owned(),
+        }]
+    );
+}
