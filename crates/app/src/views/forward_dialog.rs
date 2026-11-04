@@ -12,7 +12,7 @@ use super::switcher::{Candidate, candidate_avatar, clamp_highlight};
 use super::widgets::{icon, symbol};
 use crate::app_state::{AppState, Selection};
 use crate::fuzzy;
-use crate::message_actions::ForwardSource;
+use crate::message_actions::{ForwardItem, ForwardSource};
 use crate::notice::short_error;
 use crate::runtime;
 use crate::theme::{self, ElevatedSurface as _};
@@ -27,6 +27,13 @@ const BACKDROP_OPACITY: f32 = 0.55;
 const ROW_HEIGHT: f32 = 40.;
 const AVATAR_SIZE: f32 = 28.;
 const PREVIEW_LINES: usize = 4;
+const MULTI_PREVIEW_LINES: usize = 2;
+const PREVIEW_GAP: f32 = 6.;
+const PREVIEW_MAX_HEIGHT: f32 = 240.;
+pub const FORWARD_CARD_TAG: &str = "forward-dialog";
+pub const FORWARD_PREVIEW_TAG: &str = "forward-dialog/preview";
+pub const DIALOG_TITLE: &str = "Forward this message";
+pub const DIALOG_SUBTITLE: &str = "You can forward to any chat or channel.";
 const CLOSE_SIZE: f32 = 28.;
 const FIELD_HEIGHT: f32 = 36.;
 const BUTTON_HEIGHT: f32 = 32.;
@@ -189,16 +196,12 @@ impl ForwardDialog {
         };
         self.sending = true;
         self.error = None;
-        let source = self.source.clone();
+        let source_id = self.source.conversation_id.clone();
+        let message_ids = self.source.message_ids();
         let target_id = target.selection.conversation_id().to_owned();
         let receiver = runtime::spawn(async move {
             engine
-                .forward_messages(
-                    &source.conversation_id,
-                    &target_id,
-                    &[source.message_id],
-                    &comment,
-                )
+                .forward_messages(&source_id, &target_id, &message_ids, &comment)
                 .await
         });
         cx.spawn(async move |this, cx| {
@@ -227,11 +230,22 @@ impl ForwardDialog {
             .items_center()
             .gap(px(SECTION_GAP))
             .child(
-                div()
+                v_flex()
                     .flex_1()
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Forward message"),
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(DIALOG_TITLE),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme::text_muted())
+                            .child(DIALOG_SUBTITLE),
+                    ),
             )
             .child(
                 div()
@@ -386,46 +400,72 @@ impl ForwardDialog {
         }
     }
 
-    fn preview(&self) -> Div {
-        let text = match self.source.text.trim() {
-            "" => EMPTY_PREVIEW.to_owned(),
-            text => text.to_owned(),
-        };
+    fn preview(&self) -> Stateful<Div> {
+        let lines = preview_lines(self.source.messages.len());
         v_flex()
+            .id("forward-preview")
+            .debug_selector(|| FORWARD_PREVIEW_TAG.into())
             .w_full()
-            .px(px(10.))
-            .py(px(6.))
-            .gap(px(2.))
-            .border_l(px(3.))
-            .border_color(theme::accent())
-            .rounded_r(px(4.))
-            .bg(theme::quote_fill())
-            .child(
-                h_flex()
-                    .gap(px(8.))
-                    .items_baseline()
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text_soft())
-                            .child(self.source.author.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(theme::text_muted())
-                            .child(self.source.time.clone()),
-                    ),
-            )
-            .child(
-                div()
-                    .line_clamp(PREVIEW_LINES)
-                    .text_size(px(12.5))
-                    .text_color(theme::text_muted())
-                    .child(text),
+            .max_h(px(PREVIEW_MAX_HEIGHT))
+            .overflow_y_scroll()
+            .gap(px(PREVIEW_GAP))
+            .children(
+                self.source
+                    .messages
+                    .iter()
+                    .map(|item| preview_quote(item, lines)),
             )
     }
+}
+
+pub fn preview_lines(message_count: usize) -> usize {
+    if message_count > 1 {
+        MULTI_PREVIEW_LINES
+    } else {
+        PREVIEW_LINES
+    }
+}
+
+fn preview_quote(item: &ForwardItem, lines: usize) -> Div {
+    let text = match item.text.trim() {
+        "" => EMPTY_PREVIEW.to_owned(),
+        text => text.to_owned(),
+    };
+    v_flex()
+        .w_full()
+        .flex_none()
+        .px(px(10.))
+        .py(px(6.))
+        .gap(px(2.))
+        .border_l(px(3.))
+        .border_color(theme::accent())
+        .rounded_r(px(4.))
+        .bg(theme::quote_fill())
+        .child(
+            h_flex()
+                .gap(px(8.))
+                .items_baseline()
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_soft())
+                        .child(item.author.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme::text_muted())
+                        .child(item.time.clone()),
+                ),
+        )
+        .child(
+            div()
+                .line_clamp(lines)
+                .text_size(px(12.5))
+                .text_color(theme::text_muted())
+                .child(text),
+        )
 }
 
 impl Render for ForwardDialog {
@@ -454,6 +494,7 @@ impl Render for ForwardDialog {
             .child(
                 v_flex()
                     .id("forward-card")
+                    .debug_selector(|| FORWARD_CARD_TAG.into())
                     .w(px(CARD_WIDTH))
                     .max_w(relative(1.))
                     .max_h(relative(1.))
@@ -497,7 +538,10 @@ impl Render for ForwardDialog {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_RESULTS, can_forward, visible_candidates};
+    use super::{
+        MAX_RESULTS, MULTI_PREVIEW_LINES, PREVIEW_LINES, can_forward, preview_lines,
+        visible_candidates,
+    };
     use crate::app_state::Selection;
     use crate::views::switcher::{Candidate, CandidateAvatar};
 
@@ -552,5 +596,11 @@ mod tests {
         assert!(!can_forward(None, false));
         assert!(can_forward(Some(target), false));
         assert!(!can_forward(Some(target), true));
+    }
+
+    #[test]
+    fn several_forwarded_messages_get_shorter_previews() {
+        assert_eq!(preview_lines(1), PREVIEW_LINES);
+        assert_eq!(preview_lines(5), MULTI_PREVIEW_LINES);
     }
 }

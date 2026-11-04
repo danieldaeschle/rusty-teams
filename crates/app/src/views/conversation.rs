@@ -29,6 +29,11 @@ pub use channel_details::{
 mod deletes;
 mod detached;
 mod feed;
+mod forward_select;
+#[cfg(test)]
+pub use forward_select::{
+    FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG, FORWARD_FOOTER_TAG,
+};
 mod jump;
 mod pins;
 mod proposal;
@@ -678,6 +683,7 @@ impl ConversationView {
                 self.refresh_reactor_names(cx);
                 cx.notify();
             }
+            AppEvent::ForwardSelection => self.on_forward_selection_changed(window, cx),
             AppEvent::TaskDialog
             | AppEvent::LocalPreviews
             | AppEvent::Forward
@@ -3099,6 +3105,8 @@ impl ConversationView {
                 this.begin_reply(key, window, cx)
             })),
             forward: Some(action(|this, key, _, cx| this.forward_message(key, cx))),
+            forward_multiple: in_chat
+                .then(|| action(|this, key, _, cx| this.start_forward_selection(key, cx))),
             copy_link: Some(action(|this, key, _, cx| this.copy_link(key, cx))),
             copy: action(|this, key, _, cx| this.copy_text(key, cx)),
             translate: Some(action(|this, key, _, cx| this.translate_message(key, cx))),
@@ -3566,6 +3574,7 @@ impl Render for ConversationView {
         if in_feed && rows_seen != usize::MAX {
             self.feed_at_top = rows_seen == 0;
         }
+        let forward_selection = self.active_forward_selection(cx);
         let rows = self.rows.clone();
         let rows_seen = self.feed_rows_seen.clone();
         let env = RenderEnv {
@@ -3577,6 +3586,7 @@ impl Render for ConversationView {
             timeline: self.timeline_bounds.clone(),
             agent_runs: self.agent_runs.clone(),
             reaction_proposals: self.reaction_proposals.clone(),
+            forward_selection: forward_selection.clone(),
         };
         let pin_banner = self
             .render_pin_banner(cx)
@@ -3800,12 +3810,16 @@ impl Render for ConversationView {
                     .children(pin_banner.map(pin_banner_overlay)),
             )
             .children(self.render_draft_error(cx))
-            .when(!in_feed && !recap_active, |column| {
-                column
-                    .child(self.render_typing_line(cx))
-                    .children(self.render_proposal_card(cx))
-                    .child(self.composer.clone())
-            })
+            .when(
+                !in_feed && !recap_active,
+                |column| match &forward_selection {
+                    Some(snapshot) => column.child(self.render_forward_footer(snapshot, cx)),
+                    None => column
+                        .child(self.render_typing_line(cx))
+                        .children(self.render_proposal_card(cx))
+                        .child(self.composer.clone()),
+                },
+            )
             .child(self.render_drop_overlay(cx));
         root.child(
             h_flex()
@@ -3839,6 +3853,7 @@ impl Render for ConversationView {
                 if this.draft.read(cx).has_focus(window, cx) {
                     this.draft.update(cx, |draft, cx| draft.escape(cx));
                 }
+            } else if this.cancel_forward_selection(cx) {
             } else if !this.on_escape(window, cx) {
                 cx.propagate();
             }

@@ -34,6 +34,7 @@ Upstream: crates.io `gpui-base 0.7.1` (git `87d10ae5`, `crates/base`). Wired in 
 | `src/input/editor/display_map/text_wrapper.rs`, `wrap_map.rs`, `display_map.rs` | `set_line_height()`, wrap measures every scale piece at its own size, rows taller than the line height are stored in `LineItem.blocks`, `_update(.., row_heights)` | wrap width and row tops follow the real glyph sizes |
 | `src/input/editor/display_map/inline_line.rs` | `InlineFragment.placement` (paint offset and height), `InputLine.inline_offset` | fragments of a scaled row paint on one baseline; atomic tokens sit on it too |
 | `src/input/base/element.rs` | `scale_font()`, `push_text_fragments()`; `layout_lines` / `layout_token_lines` build `InputLine::inline` rows for rows with scaled pieces, `prepaint_tokens` adds `inline_offset`, prepaint sets the wrapper line height | rows without scaled pieces keep the single `ShapedLine` path |
+| `src/tooltip.rs` | `TooltipRequest::while_alive(Weak<()>)`; the overlay drops content whose trigger token is gone, checked on render and on the next frame | the trigger's element state is dropped only after a frame without it, so the check runs one frame later |
 
 ## Limits
 

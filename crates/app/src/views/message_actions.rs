@@ -15,6 +15,7 @@ use gpui_kit::*;
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::{icon, symbol};
+use crate::forward_selection::{FORWARD_LABEL, MULTIPLE_MESSAGES_LABEL, THIS_MESSAGE_LABEL};
 use crate::rows::reaction_glyph;
 use crate::theme::{self, ElevatedSurface as _};
 
@@ -41,6 +42,7 @@ pub struct MessageMenu {
     pub react: PickHandler,
     pub reply: Option<Action>,
     pub forward: Option<Action>,
+    pub forward_multiple: Option<Action>,
     pub copy_link: Option<Action>,
     pub copy: Action,
     pub translate: Option<Action>,
@@ -184,6 +186,7 @@ pub fn add_reaction_pill(adder: ReactionAdder, height: f32, cx: &App) -> AnyElem
 }
 
 fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
+    let forward_multiple = menu.forward_multiple.clone();
     let (
         reply,
         forward,
@@ -217,7 +220,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         .custom(bar_variant(cx))
         .rounded(px(7.))
         .size(px(BAR_BUTTON))
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
             let item = |label: &'static str, glyph: IconName, action: Action| {
                 PopupMenuItem::new(label)
                     .icon(glyph)
@@ -227,8 +230,31 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             if let Some(reply) = reply.clone() {
                 popup = popup.item(item("Reply with quote", IconName::Reply, reply));
             }
-            if let Some(forward) = forward.clone() {
-                popup = popup.item(item("Forward", IconName::Forward, forward));
+            match (forward.clone(), forward_multiple.clone()) {
+                (Some(forward), Some(forward_multiple)) => {
+                    popup = popup.submenu_with_icon(
+                        Some(IconName::Forward.into()),
+                        FORWARD_LABEL,
+                        window,
+                        cx,
+                        move |submenu, _, _| {
+                            let (single, multiple) = (forward.clone(), forward_multiple.clone());
+                            submenu
+                                .item(
+                                    PopupMenuItem::new(THIS_MESSAGE_LABEL)
+                                        .on_click(move |_, window, cx| single(window, cx)),
+                                )
+                                .item(
+                                    PopupMenuItem::new(MULTIPLE_MESSAGES_LABEL)
+                                        .on_click(move |_, window, cx| multiple(window, cx)),
+                                )
+                        },
+                    );
+                }
+                (Some(forward), None) => {
+                    popup = popup.item(item(FORWARD_LABEL, IconName::Forward, forward));
+                }
+                (None, _) => {}
             }
             if let Some(copy_link) = copy_link.clone() {
                 popup = popup.item(item("Copy link", IconName::Link, copy_link));

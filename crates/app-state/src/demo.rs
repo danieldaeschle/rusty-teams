@@ -1075,13 +1075,24 @@ pub fn forwarded_message(
     } else {
         format!("<p>{}</p>", teams_core::escape_html(comment))
     };
-    let html = format!(
-        "{comment_html}<blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"{}\"><strong>{}</strong><p>{}</p></blockquote>",
-        teams_core::escape_html(&source.message_id),
-        teams_core::escape_html(&source.author),
-        teams_core::escape_html(&source.text),
-    );
-    send_in_chat(chat, &source.text, &html, now)
+    let quotes: String = source
+        .messages
+        .iter()
+        .map(|item| {
+            format!(
+                "<blockquote itemscope=\"\" itemtype=\"{FORWARD_ITEMTYPE}\" itemid=\"{}\"><strong>{}</strong><p>{}</p></blockquote>",
+                teams_core::escape_html(&item.message_id),
+                teams_core::escape_html(&item.author),
+                teams_core::escape_html(&item.text),
+            )
+        })
+        .collect();
+    let preview = source
+        .messages
+        .first()
+        .map(|item| item.text.as_str())
+        .unwrap_or_default();
+    send_in_chat(chat, preview, &format!("{comment_html}{quotes}"), now)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2349,6 +2360,33 @@ mod tests {
             importance(UNREAD_CHAT, "u5"),
             Some(MessageImportance::Urgent)
         );
+    }
+
+    #[test]
+    fn a_multi_forward_quotes_each_message_in_order_after_the_comment() {
+        let store = Store::open_in_memory().unwrap();
+        seed(&store);
+        let chat = store
+            .recent_chats(100)
+            .unwrap()
+            .into_iter()
+            .find(|chat| chat.id == PRIORITY_CHAT)
+            .unwrap();
+        let item = |message_id: &str, text: &str| crate::message_actions::ForwardItem {
+            message_id: message_id.to_owned(),
+            author: "Synthetic Sender".to_owned(),
+            time: "09:00".to_owned(),
+            text: text.to_owned(),
+        };
+        let source = ForwardSource {
+            conversation_id: PRIORITY_CHAT.to_owned(),
+            messages: vec![item("m1", "first"), item("m2", "second")],
+        };
+        let (_, record) = forwarded_message(&chat, &source, "fyi", Utc::now());
+        let html = &record.body_html;
+        assert!(html.starts_with("<p>fyi</p>"));
+        assert_eq!(html.matches(FORWARD_ITEMTYPE).count(), 2);
+        assert!(html.find("first").unwrap() < html.find("second").unwrap());
     }
 
     #[test]
