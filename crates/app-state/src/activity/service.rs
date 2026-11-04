@@ -109,11 +109,9 @@ impl ActivityCenter {
         match event {
             AppEvent::Activity => self.reload(cx),
             AppEvent::Selection => self.on_selection(cx),
-            AppEvent::Messages(conversation_id) => {
-                if self.in_foreground(conversation_id, cx) {
-                    let conversation_id = conversation_id.clone();
-                    self.mark_read_where(|entry| entry.conversation_id == conversation_id, cx);
-                }
+            AppEvent::Messages(conversation_id) if self.in_foreground(conversation_id, cx) => {
+                let conversation_id = conversation_id.clone();
+                self.mark_read_where(|entry| entry.conversation_id == conversation_id, cx);
             }
             _ => {}
         }

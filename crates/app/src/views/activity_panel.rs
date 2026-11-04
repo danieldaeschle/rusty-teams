@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::rc::Rc;
 
 use chrono::{DateTime, Local, NaiveDate, Offset};
@@ -9,7 +10,7 @@ use gpui_kit::*;
 use store::Sidebar;
 
 use super::avatar::person_avatar;
-use super::scroll_edge::with_top_edge;
+use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
 use super::widgets::{Corner, corner_badge, dot, icon};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
@@ -27,6 +28,11 @@ const AVATAR_SIZE: f32 = 32.;
 const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
+const ROW_HEIGHT: f32 = 58.;
+const HEADER_HEIGHT: f32 = 30.;
+const EMPTY_HEIGHT: f32 = 84.;
+const FALLBACK_VIEWPORT: f32 = 900.;
+const VIEWPORT_MARGIN: f32 = 300.;
 const FILTER_KEY: &str = "activity_filter";
 const PROPOSALS_LABEL: &str = "Agent proposals";
 pub const ACTIVITY_PROPOSALS_TAG: &str = "shell/islands/sidebar/activity-proposals";
@@ -285,6 +291,8 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
         .id(ElementId::Name(element_id.clone().into()))
         .debug_selector(move || selector)
         .group(group.clone())
+        .h(px(ROW_HEIGHT))
+        .flex_none()
         .mx(px(6.))
         .px(px(10.))
         .py(px(8.))
@@ -550,7 +558,7 @@ fn conversation_label(sidebar: &Sidebar, conversation_id: &str) -> Option<String
 
 fn group_header(label: &'static str) -> Div {
     div()
-        .h(px(26.))
+        .h(px(HEADER_HEIGHT - 4.))
         .mt(px(4.))
         .px(px(16.))
         .flex()
@@ -562,8 +570,62 @@ fn group_header(label: &'static str) -> Div {
         .child(label)
 }
 
+enum Slot<'a> {
+    Proposals(Vec<PendingProposal>),
+    Header(&'static str),
+    Row(&'a Entry),
+    Empty,
+}
+
+impl Slot<'_> {
+    fn height(&self) -> f32 {
+        match self {
+            Slot::Proposals(proposals) => HEADER_HEIGHT + proposals.len() as f32 * ROW_HEIGHT,
+            Slot::Header(_) => HEADER_HEIGHT,
+            Slot::Row(_) => ROW_HEIGHT,
+            Slot::Empty => EMPTY_HEIGHT,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct VisibleSlots {
+    range: Range<usize>,
+    before: f32,
+    after: f32,
+}
+
+fn visible_slots(heights: &[f32], from: f32, to: f32) -> VisibleSlots {
+    let mut position = 0.;
+    let mut first = heights.len();
+    let mut last = heights.len();
+    let mut before = 0.;
+    for (index, height) in heights.iter().enumerate() {
+        let end = position + height;
+        if first == heights.len() && end >= from {
+            first = index;
+            before = position;
+        }
+        if position > to {
+            last = index;
+            break;
+        }
+        position = end;
+    }
+    if first == heights.len() {
+        before = position;
+    }
+    let last = last.max(first);
+    let after = heights[last..].iter().sum();
+    VisibleSlots {
+        range: first..last,
+        before,
+        after,
+    }
+}
+
 impl Render for ActivityPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now: DateTime<Local> = Local::now();
         let (today, offset) = (now.date_naive(), now.offset().fix());
         let panel = cx.entity();
@@ -574,10 +636,38 @@ impl Render for ActivityPanel {
             .read(cx)
             .feed()
             .sections(self.filter, today, offset);
-        let unresolved: Vec<String> = sections
+        let mut slots: Vec<Slot> = Vec::new();
+        let proposals: Vec<PendingProposal> = agent_api::pending_proposals(cx)
+            .into_iter()
+            .filter(|pending| admits_proposal(self.filter, pending))
+            .collect();
+        if !proposals.is_empty() {
+            slots.push(Slot::Proposals(proposals));
+        }
+        for section in &sections {
+            slots.push(Slot::Header(section.bucket.label()));
+            slots.extend(section.entries.iter().map(|entry| Slot::Row(entry)));
+        }
+        if slots.is_empty() {
+            slots.push(Slot::Empty);
+        }
+        let heights: Vec<f32> = slots.iter().map(Slot::height).collect();
+        let top = -f32::from(scroll_offset(&self.scroll).y);
+        let measured = f32::from(self.scroll.bounds().size.height);
+        let height = if measured > 1. {
+            measured
+        } else {
+            f32::from(window.viewport_size().height).max(FALLBACK_VIEWPORT)
+        };
+        let visible = visible_slots(&heights, top - VIEWPORT_MARGIN, top + height + VIEWPORT_MARGIN);
+        let visible_slots = &slots[visible.range.clone()];
+        let unresolved: Vec<String> = visible_slots
             .iter()
-            .flat_map(|section| section.entries.iter())
-            .flat_map(|entry| entry.unresolved_user_ids())
+            .filter_map(|slot| match slot {
+                Slot::Row(entry) => Some(entry.unresolved_user_ids()),
+                _ => None,
+            })
+            .flatten()
             .filter(|user_id| !self.looked_up.contains(*user_id))
             .cloned()
             .collect();
@@ -587,44 +677,41 @@ impl Render for ActivityPanel {
                 .extend(resolve_names(state, &unresolved));
         }
         let mut rows: Vec<AnyElement> = Vec::new();
-        let proposal_rows: Vec<AnyElement> = agent_api::pending_proposals(cx)
-            .iter()
-            .filter(|pending| admits_proposal(self.filter, pending))
-            .map(|pending| self.proposal_row(pending, &state.sidebar, today, offset, panel.clone()))
-            .collect();
-        if !proposal_rows.is_empty() {
-            rows.push(
-                v_flex()
+        if visible.before > 0. {
+            rows.push(div().h(px(visible.before)).flex_none().into_any_element());
+        }
+        for slot in visible_slots {
+            rows.push(match slot {
+                Slot::Proposals(proposals) => v_flex()
                     .debug_selector(|| ACTIVITY_PROPOSALS_TAG.into())
                     .child(group_header(PROPOSALS_LABEL))
-                    .children(proposal_rows)
+                    .children(proposals.iter().map(|pending| {
+                        self.proposal_row(pending, &state.sidebar, today, offset, panel.clone())
+                    }))
                     .into_any_element(),
-            );
-        }
-        for section in sections {
-            rows.push(group_header(section.bucket.label()).into_any_element());
-            for entry in section.entries {
-                rows.push(self.row(
+                Slot::Header(label) => group_header(label).into_any_element(),
+                Slot::Row(entry) => self.row(
                     entry,
                     &state.sidebar,
                     &state.directory,
                     today,
                     offset,
                     panel.clone(),
-                ));
-            }
-        }
-        if rows.is_empty() {
-            rows.push(
-                div()
-                    .py(px(32.))
+                ),
+                Slot::Empty => div()
+                    .h(px(EMPTY_HEIGHT))
                     .flex()
+                    .flex_none()
+                    .items_center()
                     .justify_center()
                     .text_size(px(13.))
                     .text_color(theme::text_muted())
                     .child(self.filter.empty_label())
                     .into_any_element(),
-            );
+            });
+        }
+        if visible.after > 0. {
+            rows.push(div().h(px(visible.after)).flex_none().into_any_element());
         }
         let list = v_flex()
             .id("activity-list")
@@ -651,7 +738,9 @@ mod tests {
     use gpui_kit::{AppContext as _, Modifiers, TestAppContext};
     use store::{ChatRecord, Sidebar, Store};
 
-    use super::{ActivityPanel, detail, headline};
+    use super::{
+        ActivityPanel, ROW_HEIGHT, VIEWPORT_MARGIN, VisibleSlots, detail, headline, visible_slots,
+    };
     use crate::activity::{ActivityCenter, Actor, Entry, Filter, Kind};
     use crate::app_state::{AppState, Mode};
 
@@ -679,6 +768,33 @@ mod tests {
             subtype: subtype.into(),
             ..entry(kind, count)
         }
+    }
+
+    #[test]
+    fn only_rows_near_the_viewport_are_built() {
+        let heights = vec![ROW_HEIGHT; 300];
+        let viewport = 900.;
+        let at_top = visible_slots(&heights, -VIEWPORT_MARGIN, viewport + VIEWPORT_MARGIN);
+        assert_eq!(
+            at_top,
+            VisibleSlots {
+                range: 0..21,
+                before: 0.,
+                after: 279. * ROW_HEIGHT,
+            }
+        );
+        let scrolled = visible_slots(
+            &heights,
+            5000. - VIEWPORT_MARGIN,
+            5000. + viewport + VIEWPORT_MARGIN,
+        );
+        assert_eq!(scrolled.range, 81..107);
+        assert_eq!(scrolled.before, 81. * ROW_HEIGHT);
+        assert_eq!(scrolled.after, 193. * ROW_HEIGHT);
+        let past_the_end = visible_slots(&heights, 90_000., 91_000.);
+        assert_eq!(past_the_end.range, 300..300);
+        assert_eq!(past_the_end.before, 300. * ROW_HEIGHT);
+        assert_eq!(past_the_end.after, 0.);
     }
 
     #[test]
