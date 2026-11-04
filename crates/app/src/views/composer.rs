@@ -35,6 +35,7 @@ mod drafts;
 mod format_menus;
 mod rule;
 mod schedule;
+mod slash;
 mod table;
 
 use super::actions::{
@@ -68,6 +69,7 @@ use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
 use format_menus::{FormatPopup, paragraph_label};
 use rule::{is_rule_token, render_rule_token};
+use slash::SlashPopup;
 use table::{TableKey, TableLineMenu, TableMenu, TablePicker, TableViews, is_table_token};
 
 const MIN_ROWS: usize = 1;
@@ -198,6 +200,8 @@ pub struct Composer {
     lookup: Option<Task<()>>,
     emoji_popup: Option<EmojiPopup>,
     emoji_dismissed_at: Option<usize>,
+    slash_popup: Option<SlashPopup>,
+    slash_dismissed: bool,
     recent_emoji: emoji::Recent,
     conversion: Option<Conversion>,
     undone_value: Option<String>,
@@ -458,6 +462,8 @@ impl Composer {
             lookup: None,
             emoji_popup: None,
             emoji_dismissed_at: None,
+            slash_popup: None,
+            slash_dismissed: false,
             recent_emoji,
             conversion: None,
             undone_value: None,
@@ -519,6 +525,7 @@ impl Composer {
             self.on_change(window, cx);
             self.update_emoji(cx);
             self.update_mention(cx);
+            self.update_slash(cx);
             self.update_link_preview(cx);
             self.schedule_draft_save(cx);
         }
@@ -558,6 +565,7 @@ impl Composer {
     fn close_popup(&mut self) {
         self.close_mention_popup();
         self.emoji_popup = None;
+        self.slash_popup = None;
     }
 
     fn close_mention_popup(&mut self) {
@@ -1654,7 +1662,10 @@ impl Composer {
     }
 
     fn popup_is_open(&self) -> bool {
-        self.emoji_popup.is_some()
+        self.slash_popup
+            .as_ref()
+            .is_some_and(|popup| !popup.commands.is_empty())
+            || self.emoji_popup.is_some()
             || self
                 .popup
                 .as_ref()
@@ -1662,7 +1673,10 @@ impl Composer {
     }
 
     fn move_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if let Some(popup) = self.emoji_popup.as_mut() {
+        if let Some(popup) = self.slash_popup.as_mut() {
+            popup.move_highlight(delta);
+            cx.notify();
+        } else if let Some(popup) = self.emoji_popup.as_mut() {
             popup.move_highlight(delta);
             cx.notify();
         } else if let Some(popup) = self.popup.as_mut() {
@@ -1673,7 +1687,9 @@ impl Composer {
     }
 
     fn accept_popup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.emoji_popup.is_some() {
+        if self.slash_popup.is_some() {
+            self.accept_slash(window, cx);
+        } else if self.emoji_popup.is_some() {
             self.accept_emoji(window, cx);
         } else {
             self.accept_mention(window, cx);
@@ -3319,7 +3335,10 @@ impl Render for Composer {
                 if let Some(popup) = &this.emoji_popup {
                     this.emoji_dismissed_at = Some(popup.range.start);
                 }
-                if this.popup.is_some() || this.emoji_popup.is_some() {
+                if this.slash_popup.is_some() {
+                    this.slash_dismissed = true;
+                }
+                if this.popup.is_some() || this.emoji_popup.is_some() || this.slash_popup.is_some() {
                     this.close_popup();
                     cx.notify();
                     cx.stop_propagation();
@@ -3339,6 +3358,7 @@ impl Render for Composer {
                     .relative()
                     .w_full()
                     .children(self.render_popup(cx))
+                    .children(self.render_slash_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
