@@ -56,6 +56,10 @@ pub enum Span {
     Image {
         hosted_content_url: String,
     },
+    CustomEmoji {
+        name: String,
+        url: String,
+    },
     Quote {
         message_id: Option<String>,
         children: Vec<Span>,
@@ -184,6 +188,7 @@ fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         }),
         "blockquote" => spans.push(Span::BlockQuote(convert_children(element))),
         "emoji" => push_emoji(element, spans),
+        "customemoji" => push_custom_emoji(element, spans),
         "img" => push_image(element, spans),
         _ => spans.extend(convert_children(element)),
     }
@@ -420,6 +425,19 @@ fn push_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| raw_text(element));
     push_text(spans, &without_repeated_skin_tone(&glyph));
+}
+
+fn push_custom_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+    let value = element.value();
+    let name = value.attr("alt").unwrap_or_default().to_owned();
+    match value.attr("source").filter(|source| !source.is_empty()) {
+        Some(source) => spans.push(Span::CustomEmoji {
+            name,
+            url: source.to_owned(),
+        }),
+        None if !name.is_empty() => push_text(spans, &format!(":{name}:")),
+        None => {}
+    }
 }
 
 fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {

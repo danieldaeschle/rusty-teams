@@ -110,6 +110,11 @@ fn collect(spans: &[Span], parts: &mut BodyParts) {
                 parts.text.push(' ');
             }
             Span::Mention { name, .. } => parts.text.push_str(name),
+            Span::CustomEmoji { name, .. } => {
+                parts.text.push(':');
+                parts.text.push_str(name);
+                parts.text.push(':');
+            }
             Span::Quote { .. } => {}
             Span::Image { hosted_content_url } if is_giphy_url(hosted_content_url) => {
                 parts.gifs += 1

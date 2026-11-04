@@ -4,6 +4,7 @@ use teams_core::{FontSize, PROFILE_LINK_PREFIX, Span};
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
 pub const CODE_PADDING: &str = "\u{2004}";
+pub const EMOJI_PLACEHOLDER: &str = "\u{25a0}\u{25a0}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
 const BASE_FONT_PIXELS: f32 = 14.;
@@ -71,6 +72,7 @@ pub struct Segment {
     pub range: Range<usize>,
     pub style: StyleFlags,
     pub link: Option<String>,
+    pub emoji: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -87,6 +89,10 @@ impl Inline {
     }
 
     fn push(&mut self, text: &str, style: StyleFlags, link: Option<&str>) {
+        self.push_part(text, style, link, None);
+    }
+
+    fn push_part(&mut self, text: &str, style: StyleFlags, link: Option<&str>, emoji: Option<&str>) {
         if text.is_empty() {
             return;
         }
@@ -94,6 +100,8 @@ impl Inline {
         self.text.push_str(text);
         let end = self.text.len();
         if let Some(last) = self.segments.last_mut()
+            && emoji.is_none()
+            && last.emoji.is_none()
             && last.style == style
             && last.link.as_deref() == link
             && last.range.end == start
@@ -105,11 +113,23 @@ impl Inline {
             range: start..end,
             style,
             link: link.map(str::to_owned),
+            emoji: emoji.map(str::to_owned),
         });
     }
 
+    pub fn emoji(&self) -> Vec<(Range<usize>, String)> {
+        self.segments
+            .iter()
+            .filter_map(|segment| Some((segment.range.clone(), segment.emoji.clone()?)))
+            .collect()
+    }
+
     pub fn plain_text(&self) -> String {
-        self.text.replace(CODE_PADDING, "")
+        self.segments
+            .iter()
+            .filter(|segment| segment.emoji.is_none())
+            .map(|segment| self.text[segment.range.clone()].replace(CODE_PADDING, ""))
+            .collect()
     }
 
     pub fn with_trailing_room(&self, width_in_spaces: usize) -> Inline {
@@ -128,7 +148,12 @@ impl Inline {
             let start = segment.range.start.max(range.start);
             let end = segment.range.end.min(range.end);
             if start < end {
-                part.push(&self.text[start..end], segment.style, segment.link.as_deref());
+                part.push_part(
+                    &self.text[start..end],
+                    segment.style,
+                    segment.link.as_deref(),
+                    segment.emoji.as_deref(),
+                );
             }
         }
         part
@@ -151,7 +176,7 @@ impl Inline {
         let mut stripped = Inline::default();
         for segment in &self.segments {
             let text = self.text[segment.range.clone()].replace(needle, "");
-            stripped.push(&text, segment.style, segment.link.as_deref());
+            stripped.push_part(&text, segment.style, segment.link.as_deref(), segment.emoji.as_deref());
         }
         stripped.trim_end();
         let leading = stripped.text.len() - stripped.text.trim_start().len();
@@ -160,7 +185,12 @@ impl Inline {
             for segment in &stripped.segments {
                 let text = stripped.text[segment.range.clone()].to_owned();
                 let skip = leading.saturating_sub(segment.range.start).min(text.len());
-                trimmed.push(&text[skip..], segment.style, segment.link.as_deref());
+                trimmed.push_part(
+                    &text[skip..],
+                    segment.style,
+                    segment.link.as_deref(),
+                    segment.emoji.as_deref(),
+                );
             }
             return trimmed;
         }
@@ -342,6 +372,30 @@ pub fn strip_image_placeholders(blocks: Vec<Block>) -> Vec<Block> {
             other => Some(other),
         })
         .collect()
+}
+
+pub fn emoji_urls(blocks: &[Block]) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    let mut add = |inline: &Inline| {
+        for (_, url) in inline.emoji() {
+            if !urls.contains(&url) {
+                urls.push(url);
+            }
+        }
+    };
+    let mut pending: Vec<&Block> = blocks.iter().collect();
+    while let Some(block) = pending.pop() {
+        match block {
+            Block::Paragraph(inline) | Block::Heading { inline, .. } => add(inline),
+            Block::Table { rows, .. } => rows.iter().flatten().for_each(&mut add),
+            Block::Reply { children, .. } | Block::Quote(children) | Block::Indent { children, .. } => {
+                pending.extend(children)
+            }
+            Block::List { items, .. } => pending.extend(items.iter().flatten()),
+            Block::Code { .. } | Block::CodeLine { .. } | Block::Rule | Block::Image { .. } => {}
+        }
+    }
+    urls
 }
 
 pub fn layout_blocks(spans: &[Span]) -> Vec<Block> {
@@ -720,6 +774,7 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 }
             }
             Span::Image { .. } => out.push(IMAGE_PLACEHOLDER, style, link),
+            Span::CustomEmoji { url, .. } => out.push_part(EMOJI_PLACEHOLDER, style, link, Some(url)),
         }
     }
 }
@@ -795,6 +850,26 @@ mod tests {
 
     fn text(value: &str) -> Span {
         Span::Text(value.to_owned())
+    }
+
+    #[test]
+    fn org_emoji_sit_in_the_text_and_stay_out_of_copied_text() {
+        let emoji = |url: &str| Span::CustomEmoji {
+            name: "cat".into(),
+            url: url.into(),
+        };
+        let blocks = layout_blocks(&[text("hi "), emoji("a"), emoji("a"), text(" ok")]);
+        let Block::Paragraph(inline) = &blocks[0] else {
+            panic!("paragraph expected");
+        };
+        assert_eq!(inline.emoji().len(), 2);
+        assert_eq!(inline.plain_text(), "hi  ok");
+        assert_eq!(emoji_urls(&blocks), vec!["a".to_owned()]);
+        let trailing = layout_blocks(&[text("bye "), emoji("b")]);
+        let Block::Paragraph(inline) = &trailing[0] else {
+            panic!("paragraph expected");
+        };
+        assert_eq!(inline.emoji().len(), 1);
     }
 
     #[test]

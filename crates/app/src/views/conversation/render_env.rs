@@ -84,6 +84,11 @@ impl RenderEnv {
                     .iter()
                     .filter_map(ReactionChip::custom_emoji_image),
             )
+            .chain(
+                app_ui_kit::render::blocks::emoji_urls(&message.blocks)
+                    .into_iter()
+                    .map(inline_emoji_image),
+            )
             .filter(|image| self.app.read(cx).directory.image(&image.url).is_none())
             .collect();
         if !missing_images.is_empty() {
@@ -522,5 +527,18 @@ impl RenderEnv {
                 ),
             )
             .into_any_element()
+    }
+}
+
+fn inline_emoji_image(url: String) -> ImageRef {
+    let hash = url.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    });
+    ImageRef {
+        id: format!("emoji-{hash:08x}"),
+        url,
+        width: None,
+        height: None,
+        alt: None,
     }
 }

@@ -514,3 +514,24 @@ fn teams_code_blocks_keep_their_line_breaks() {
         }]
     );
 }
+
+#[test]
+fn org_emoji_keep_their_image_and_name() {
+    let source = "https://graph.microsoft.com/v1.0/chats/19:a@thread.v2/messages/1/hostedContents/aWQ9/$value";
+    assert_eq!(
+        html_to_spans(&format!(
+            "<p>hi <customemoji id=\"MC13\" alt=\"crying_cat\" source=\"{source}\"></customemoji></p>"
+        )),
+        vec![
+            text("hi "),
+            Span::CustomEmoji {
+                name: "crying_cat".to_owned(),
+                url: source.to_owned(),
+            },
+        ]
+    );
+    assert_eq!(
+        html_to_spans("<p><customemoji alt=\"crying_cat\"></customemoji></p>"),
+        vec![text(":crying_cat:")]
+    );
+}

@@ -535,6 +535,11 @@ pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
                 }
             }
             Span::Image { .. } => {}
+            Span::CustomEmoji { name, .. } => {
+                text.push(':');
+                text.push_str(name);
+                text.push(':');
+            }
         }
     }
 }

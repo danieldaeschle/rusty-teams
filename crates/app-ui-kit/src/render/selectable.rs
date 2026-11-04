@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::base::{
@@ -7,7 +8,7 @@ use gpui_kit::base::{
 };
 use gpui_kit::*;
 
-use super::blocks::CODE_PADDING;
+use super::blocks::{CODE_PADDING, EMOJI_PLACEHOLDER};
 use super::hooks::open_profile_link;
 
 pub(super) const TIME_ROOM: char = '\u{2007}';
@@ -43,6 +44,7 @@ impl Participant {
 }
 
 pub(super) const PILL_OUTSET: f32 = 3.;
+const INLINE_IMAGE_SIZE: f32 = 20.;
 pub(super) const PILL_INSET_Y: f32 = 1.;
 
 #[derive(Clone, Debug)]
@@ -60,6 +62,7 @@ pub struct SelectableRichText {
     styled_text: StyledText,
     links: Vec<(Range<usize>, String)>,
     pills: Vec<Pill>,
+    inline_images: Vec<(Range<usize>, PathBuf)>,
 }
 
 impl SelectableRichText {
@@ -75,11 +78,17 @@ impl SelectableRichText {
             text,
             links: Vec::new(),
             pills: Vec::new(),
+            inline_images: Vec::new(),
         }
     }
 
     pub fn links(mut self, links: Vec<(Range<usize>, String)>) -> Self {
         self.links = links;
+        self
+    }
+
+    pub fn inline_images(mut self, images: Vec<(Range<usize>, PathBuf)>) -> Self {
+        self.inline_images = images;
         self
     }
 
@@ -94,6 +103,36 @@ impl SelectableRichText {
     pub fn pills(mut self, pills: Vec<Pill>) -> Self {
         self.pills = pills;
         self
+    }
+}
+
+fn paint_inline_images(
+    images: &[(Range<usize>, PathBuf)],
+    text: &str,
+    layout: &TextLayout,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let line_height = layout.line_height();
+    let left = layout.bounds().left();
+    for (range, path) in images {
+        let Some(line) = pill_lines(text, range.clone(), left, |index| {
+            layout.position_for_index(index)
+        })
+        .into_iter()
+        .next() else {
+            continue;
+        };
+        let Some(Ok(image)) =
+            window.use_asset::<ImgResourceLoader>(&Resource::Path(path.clone().into()), cx)
+        else {
+            continue;
+        };
+        let side = line_height.min(px(INLINE_IMAGE_SIZE));
+        let center_x = line.left + (line.right - line.left) / 2.;
+        let origin = point(center_x - side / 2., line.top + (line_height - side) / 2.);
+        let image_bounds = Bounds::new(origin, size(side, side));
+        let _ = window.paint_image(image_bounds, image_bounds, Corners::default(), image, 0, false);
     }
 }
 
@@ -307,7 +346,11 @@ impl Element for SelectableRichText {
             if end_index <= range.start {
                 continue;
             }
-            copied.push_str(&self.text[range.start..end_index].replace(CODE_PADDING, ""));
+            copied.push_str(
+                &self.text[range.start..end_index]
+                    .replace(CODE_PADDING, "")
+                    .replace(EMOJI_PLACEHOLDER, ""),
+            );
             let (Some(start), Some(end)) = (
                 layout.position_for_index(range.start),
                 layout.position_for_index(end_index),
@@ -328,6 +371,7 @@ impl Element for SelectableRichText {
             window,
             cx,
         );
+        paint_inline_images(&self.inline_images, &self.text, &layout, window, cx);
 
         let hovered_link = hitbox.is_hovered(window)
             && link_at(&layout, &self.links, window.mouse_position()).is_some();

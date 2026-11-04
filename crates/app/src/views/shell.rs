@@ -100,7 +100,14 @@ pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx:
     cx.set_global(RenderHooks {
         open_profile_link: super::profile_card::open_profile_link,
         jump_to_quoted,
+        inline_image,
     });
+}
+
+fn inline_image(url: &str, cx: &App) -> Option<std::path::PathBuf> {
+    let handle = cx.try_global::<crate::app_state::AppHandle>()?;
+    let entry = handle.0.read(cx).directory.image(url)?;
+    Some(entry.path.clone())
 }
 
 fn jump_to_quoted(message_id: String, cx: &mut App) {

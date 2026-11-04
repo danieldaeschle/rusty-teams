@@ -2506,7 +2506,7 @@ impl SpanLines {
                     self.lines.push(table_line(Table::from_rows(rows)));
                     self.open = false;
                 }
-                Span::Image { .. } | Span::Quote { .. } => {}
+                Span::Image { .. } | Span::Quote { .. } | Span::CustomEmoji { .. } => {}
             }
         }
     }

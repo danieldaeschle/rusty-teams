@@ -372,6 +372,23 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .filter(|segment| segment.style.code)
         .map(|segment| (segment.range.clone(), mono.clone()))
         .collect();
+    let emoji = inline.emoji();
+    let highlights = highlights
+        .into_iter()
+        .chain(emoji.iter().map(|(range, _)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(transparent_black()),
+                    ..Default::default()
+                },
+            )
+        }))
+        .collect::<Vec<_>>();
+    let inline_images = emoji
+        .into_iter()
+        .filter_map(|(range, url)| Some((range, super::hooks::inline_image(&url, cx)?)))
+        .collect();
     let pills = inline
         .segments
         .iter()
@@ -387,7 +404,13 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
             .iter()
             .map(|segment| FlowSegment {
                 range: segment.range.clone(),
-                highlight: highlight_for(segment.style, own),
+                highlight: match segment.emoji {
+                    Some(_) => HighlightStyle {
+                        color: Some(transparent_black()),
+                        ..Default::default()
+                    },
+                    None => highlight_for(segment.style, own),
+                },
                 family: segment.style.code.then(|| mono.clone()),
                 scale: segment.style.font_scale(),
                 raise: segment.style.baseline_raise(),
@@ -410,7 +433,8 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
             SelectableRichText::new(ElementId::Name(id.into()), inline.text.clone(), highlights)
                 .links(inline.links())
                 .font_overrides(font_overrides)
-                .pills(pills),
+                .pills(pills)
+                .inline_images(inline_images),
         )
         .into_any_element()
 }
