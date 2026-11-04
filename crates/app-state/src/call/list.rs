@@ -3,7 +3,7 @@ use std::ops::Range;
 use chatsvc::CalendarEvent;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use store::ChatRecord;
-use teams_core::CallLogEntry;
+use teams_core::{CallDirection, CallLogEntry};
 
 use super::agenda::{AgendaRow, group_by_day};
 use super::history::{CallRow, call_rows};
@@ -13,15 +13,62 @@ pub const DAY_HEIGHT: f32 = 26.;
 pub const AGENDA_ROW_HEIGHT: f32 = 58.;
 pub const CALL_ROW_HEIGHT: f32 = 54.;
 pub const EMPTY_HEIGHT: f32 = 56.;
+pub const FILTERS_HEIGHT: f32 = 36.;
 const MAX_AGE_SECONDS: i64 = 60;
 const UPCOMING_TITLE: &str = "Upcoming";
 const RECENT_TITLE: &str = "Recent";
 const NO_MEETINGS_TEXT: &str = "No meetings in the next 7 days";
 const NO_CALLS_TEXT: &str = "No calls yet";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HistoryFilter {
+    #[default]
+    All,
+    Missed,
+    Incoming,
+    Outgoing,
+}
+
+impl HistoryFilter {
+    pub const ALL: [HistoryFilter; 4] = [
+        HistoryFilter::All,
+        HistoryFilter::Missed,
+        HistoryFilter::Incoming,
+        HistoryFilter::Outgoing,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HistoryFilter::All => "All",
+            HistoryFilter::Missed => "Missed",
+            HistoryFilter::Incoming => "Incoming",
+            HistoryFilter::Outgoing => "Outgoing",
+        }
+    }
+
+    fn empty_text(self) -> &'static str {
+        match self {
+            HistoryFilter::All => NO_CALLS_TEXT,
+            HistoryFilter::Missed => "No missed calls",
+            HistoryFilter::Incoming => "No incoming calls",
+            HistoryFilter::Outgoing => "No outgoing calls",
+        }
+    }
+
+    fn admits(self, entry: &CallLogEntry) -> bool {
+        match self {
+            HistoryFilter::All => true,
+            HistoryFilter::Missed => entry.missed(),
+            HistoryFilter::Incoming => entry.direction == CallDirection::Incoming && !entry.missed(),
+            HistoryFilter::Outgoing => entry.direction == CallDirection::Outgoing,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListEntry {
     Section(&'static str),
+    Filters(HistoryFilter),
     Day(String),
     Agenda(AgendaRow),
     Call(CallRow),
@@ -32,6 +79,7 @@ impl ListEntry {
     pub fn height(&self) -> f32 {
         match self {
             ListEntry::Section(_) => SECTION_HEIGHT,
+            ListEntry::Filters(_) => FILTERS_HEIGHT,
             ListEntry::Day(_) => DAY_HEIGHT,
             ListEntry::Agenda(_) => AGENDA_ROW_HEIGHT,
             ListEntry::Call(_) => CALL_ROW_HEIGHT,
@@ -60,11 +108,23 @@ pub struct CallsList {
     ends: Vec<f32>,
     built_at: Option<BuiltAt>,
     invalidated: bool,
+    filter: HistoryFilter,
 }
 
 impl CallsList {
     pub fn invalidate(&mut self) {
         self.invalidated = true;
+    }
+
+    pub fn filter(&self) -> HistoryFilter {
+        self.filter
+    }
+
+    pub fn set_filter(&mut self, filter: HistoryFilter) {
+        if self.filter != filter {
+            self.filter = filter;
+            self.invalidated = true;
+        }
     }
 
     pub fn needs_rebuild(&self, now: DateTime<Utc>, offset: FixedOffset) -> bool {
@@ -98,9 +158,15 @@ impl CallsList {
             entries.extend(day.rows.into_iter().map(ListEntry::Agenda));
         }
         entries.push(ListEntry::Section(RECENT_TITLE));
-        let calls = call_rows(history, chats, now, offset);
+        entries.push(ListEntry::Filters(self.filter));
+        let filtered: Vec<CallLogEntry> = history
+            .iter()
+            .filter(|entry| self.filter.admits(entry))
+            .cloned()
+            .collect();
+        let calls = call_rows(&filtered, chats, now, offset);
         if calls.is_empty() {
-            entries.push(ListEntry::Empty(NO_CALLS_TEXT));
+            entries.push(ListEntry::Empty(self.filter.empty_text()));
         }
         entries.extend(calls.into_iter().map(ListEntry::Call));
         self.set_entries(entries);
@@ -213,9 +279,46 @@ mod tests {
                 ListEntry::Section("Upcoming"),
                 ListEntry::Empty("No meetings in the next 7 days"),
                 ListEntry::Section("Recent"),
+                ListEntry::Filters(HistoryFilter::All),
                 ListEntry::Empty("No calls yet"),
             ]
         );
+    }
+
+    #[test]
+    fn the_history_filter_keeps_only_matching_calls() {
+        let missed = CallLogEntry {
+            direction: CallDirection::Incoming,
+            outcome: CallOutcome::Missed,
+            ..call("missed")
+        };
+        let incoming = CallLogEntry {
+            direction: CallDirection::Incoming,
+            ..call("incoming")
+        };
+        let history = [missed, incoming, call("outgoing")];
+        let keys = |filter: HistoryFilter| -> Vec<String> {
+            let mut list = CallsList::default();
+            list.set_filter(filter);
+            list.rebuild(&history, &[], &[], now(), zero());
+            list.entries()
+                .iter()
+                .filter_map(|entry| match entry {
+                    ListEntry::Call(row) => Some(row.key.clone()),
+                    ListEntry::Empty(text) => Some((*text).to_owned()),
+                    _ => None,
+                })
+                .skip(1)
+                .collect()
+        };
+        assert_eq!(keys(HistoryFilter::All), ["missed", "incoming", "outgoing"]);
+        assert_eq!(keys(HistoryFilter::Missed), ["missed"]);
+        assert_eq!(keys(HistoryFilter::Incoming), ["incoming"]);
+        assert_eq!(keys(HistoryFilter::Outgoing), ["outgoing"]);
+        let mut list = CallsList::default();
+        list.set_filter(HistoryFilter::Missed);
+        list.rebuild(&[call("outgoing")], &[], &[], now(), zero());
+        assert_eq!(list.entries().last(), Some(&ListEntry::Empty("No missed calls")));
     }
 
     #[test]
@@ -226,6 +329,7 @@ mod tests {
             .iter()
             .map(|entry| match entry {
                 ListEntry::Section(_) => "section",
+                ListEntry::Filters(_) => "filters",
                 ListEntry::Day(_) => "day",
                 ListEntry::Agenda(_) => "agenda",
                 ListEntry::Call(_) => "call",
@@ -235,7 +339,7 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                "section", "day", "agenda", "agenda", "section", "call", "call"
+                "section", "day", "agenda", "agenda", "section", "filters", "call", "call"
             ]
         );
     }
