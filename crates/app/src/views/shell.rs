@@ -808,6 +808,7 @@ impl AppShell {
             .w_full()
             .gap(px(ISLAND_GAP))
             .pr(px(ISLAND_GAP))
+            .pb(px(ISLAND_GAP))
             .child(
                 h_flex()
                     .h_full()
