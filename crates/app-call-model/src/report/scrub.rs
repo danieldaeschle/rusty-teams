@@ -46,10 +46,27 @@ static IPV6: LazyLock<Regex> = LazyLock::new(|| {
 static PHONE: LazyLock<Regex> = LazyLock::new(|| compiled(r"\+\d[\d ()\-/]{6,}\d"));
 static OPAQUE: LazyLock<Regex> = LazyLock::new(|| compiled(r"[A-Za-z0-9+/_\-]{40,}={0,2}"));
 
+#[derive(Debug, Clone)]
+struct NameMatch {
+    name: String,
+    placeholder: String,
+    exact_case: bool,
+}
+
+impl NameMatch {
+    fn matches(&self, text: &str) -> bool {
+        if self.exact_case {
+            self.name == text
+        } else {
+            self.name.to_lowercase() == text.to_lowercase()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Scrubber {
     people: HashMap<String, String>,
-    names: Vec<(String, String)>,
+    names: Vec<NameMatch>,
     meetings: HashMap<String, String>,
     identifiers: HashMap<String, String>,
     person_count: usize,
@@ -71,7 +88,7 @@ impl Scrubber {
         let placeholder = if mri == calling::signaling::ECHO_BOT_MRI {
             self.alias(mri, ECHO_PLACEHOLDER);
             if !display_name.trim().is_empty() {
-                self.names.push((display_name.to_owned(), ECHO_PLACEHOLDER.to_owned()));
+                self.push_name(display_name, ECHO_PLACEHOLDER, false);
             }
             return;
         } else if mri.is_empty() {
@@ -105,18 +122,27 @@ impl Scrubber {
         if name.trim().is_empty() {
             return;
         }
-        let parts: Vec<&str> =
-            name.split(|character: char| !character.is_alphanumeric()).filter(|part| !part.is_empty()).collect();
-        let mut candidates: Vec<String> = parts.iter().copied().filter(|part| is_name_part(part)).map(str::to_owned).collect();
         let full_name = name.trim();
-        if parts.len() > 1 || (full_name.chars().count() > 1 && !is_common_word(full_name)) {
-            candidates.insert(0, full_name.to_owned());
+        let parts: Vec<&str> =
+            full_name.split(|character: char| !character.is_alphanumeric()).filter(|part| !part.is_empty()).collect();
+        if full_name.chars().count() > 1 {
+            self.push_name(full_name, placeholder, parts.len() == 1 && is_common_word(full_name));
         }
-        for candidate in candidates {
-            if !self.names.iter().any(|(known, _)| known.eq_ignore_ascii_case(&candidate)) {
-                self.names.push((candidate, placeholder.to_owned()));
-            }
+        for part in parts.into_iter().filter(|part| is_name_part(part)) {
+            self.push_name(part, placeholder, is_common_word(part));
         }
+    }
+
+    /// `exact_case`: a dictionary word only counts as the name in the name's own spelling ("Mark", not "mark").
+    fn push_name(&mut self, name: &str, placeholder: &str, exact_case: bool) {
+        if self.names.iter().any(|known| known.name.eq_ignore_ascii_case(name)) {
+            return;
+        }
+        self.names.push(NameMatch {
+            name: name.to_owned(),
+            placeholder: placeholder.to_owned(),
+            exact_case,
+        });
     }
 
     pub fn scrub(&mut self, text: &str) -> String {
@@ -157,20 +183,22 @@ impl Scrubber {
         if self.names.is_empty() {
             return text.to_owned();
         }
-        let mut ordered: Vec<&(String, String)> = self.names.iter().collect();
-        ordered.sort_by_key(|(name, _)| std::cmp::Reverse(name.chars().count()));
-        let alternatives: Vec<String> = ordered.iter().map(|(name, _)| escape(name)).collect();
-        let pattern = format!(r"(?i)\b(?:{})\b", alternatives.join("|"));
+        let mut ordered: Vec<&NameMatch> = self.names.iter().collect();
+        ordered.sort_by_key(|entry| std::cmp::Reverse(entry.name.chars().count()));
+        let alternatives: Vec<String> = ordered
+            .iter()
+            .map(|entry| if entry.exact_case { escape(&entry.name) } else { format!("(?i:{})", escape(&entry.name)) })
+            .collect();
+        let pattern = format!(r"\b(?:{})\b", alternatives.join("|"));
         let Ok(names) = Regex::new(&pattern) else {
             return text.to_owned();
         };
         names
             .replace_all(text, |captures: &Captures| {
-                let matched = captures[0].to_lowercase();
                 ordered
                     .iter()
-                    .find(|(name, _)| name.to_lowercase() == matched)
-                    .map_or_else(|| REMOVED.to_owned(), |(_, placeholder)| placeholder.clone())
+                    .find(|entry| entry.matches(&captures[0]))
+                    .map_or_else(|| REMOVED.to_owned(), |entry| entry.placeholder.clone())
             })
             .into_owned()
     }
@@ -179,7 +207,7 @@ impl Scrubber {
 fn is_name_part(part: &str) -> bool {
     part.chars().count() >= MIN_NAME_PART
         && !part.chars().all(|character| character.is_ascii_digit())
-        && !is_common_word(part)
+        && (!is_common_word(part) || part.chars().next().is_some_and(char::is_uppercase))
 }
 
 fn normalize(key: &str) -> String {
@@ -288,7 +316,7 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     }
 
     #[test]
-    fn common_words_in_a_name_are_only_replaced_as_the_full_name() {
+    fn common_words_in_a_name_are_only_replaced_in_the_names_spelling() {
         let mut scrubber = Scrubber::new();
         scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Check Testperson");
         scrubber.register_person("8:orgid:99999999-8888-7777-6666-555555555555", "Max Video");
@@ -316,10 +344,17 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     }
 
     #[test]
-    fn a_single_word_common_name_is_not_replaced_everywhere() {
+    fn a_single_word_common_name_is_replaced_only_in_its_spelling() {
         let mut scrubber = Scrubber::new();
         scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Test");
-        assert_eq!(scrubber.scrub("test call Test"), "test call Test");
+        assert_eq!(scrubber.scrub("test call Test"), "test call person-1");
+    }
+
+    #[test]
+    fn a_given_name_that_is_a_word_is_still_replaced_when_capitalized() {
+        let mut scrubber = Scrubber::new();
+        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Mark Zentrel");
+        assert_eq!(scrubber.scrub("Mark joined, mark the stream"), "person-1 joined, mark the stream");
     }
 
     #[test]
