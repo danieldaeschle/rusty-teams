@@ -2583,6 +2583,12 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
+        if hovered
+            && matches!(slot, HoverSlot::Row)
+            && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
+        {
+            self.toolbar_hovered = None;
+        }
         if let Some(suppressed) = self.toolbar_suppressed.as_deref()
             && self.hovered_message.as_deref() != Some(suppressed)
             && self.toolbar_hovered.as_deref() != Some(suppressed)
@@ -3082,7 +3088,11 @@ impl ConversationView {
         let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
             let (view, key) = (view.clone(), key.to_owned());
             Rc::new(move |window, cx| {
-                view.update(cx, |this, cx| run(this, &key, window, cx)).ok();
+                view.update(cx, |this, cx| {
+                    this.set_pinned(&key, false, cx);
+                    run(this, &key, window, cx)
+                })
+                .ok();
             })
         };
         let react: PickHandler = {
