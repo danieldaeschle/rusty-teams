@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::tooltip::PopupTriggerTooltip as _;
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
@@ -66,11 +67,7 @@ const STYLE_GROUP: &[FormatButton] = &[
     FormatButton::Strike,
 ];
 const SCRIPT_GROUP: &[FormatButton] = &[FormatButton::Superscript, FormatButton::Subscript];
-const SIZE_GROUP: &[FormatButton] = &[
-    FormatButton::SizeSmall,
-    FormatButton::SizeNormal,
-    FormatButton::SizeLarge,
-];
+const SIZE_GROUP: &[FormatButton] = &[FormatButton::FontSize];
 const INLINE_GROUP: &[FormatButton] = &[FormatButton::Code, FormatButton::Link];
 const LINE_GROUP: &[FormatButton] = &[
     FormatButton::Bulleted,
@@ -131,37 +128,50 @@ const MENU_ROW_PADDING_X: f32 = 10.;
 const MENU_PADDING: f32 = 4.;
 const MENU_WIDTH: f32 = 220.;
 
-/// The groups of the format bar that fit, and those that go into More options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BarFit<'a> {
-    pub visible: &'a [&'a [FormatButton]],
-    pub overflow: &'a [&'a [FormatButton]],
+/// The format bar split like Teams' overflow: buttons leave from the end into More options,
+/// each side keeps the group boundaries of its own buttons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BarFit {
+    pub visible: Vec<Vec<FormatButton>>,
+    pub overflow: Vec<Vec<FormatButton>>,
 }
 
-fn group_width(group: &[FormatButton]) -> f32 {
-    let buttons: f32 = group.iter().map(|button| button.width()).sum();
-    buttons + group.len().saturating_sub(1) as f32 * BUTTON_GAP
+fn groups_width<G: AsRef<[FormatButton]>>(groups: &[G]) -> f32 {
+    let buttons = groups.iter().flat_map(|group| group.as_ref().iter());
+    let widths: f32 = buttons.clone().map(|button| button.width()).sum();
+    let gaps = buttons.count().saturating_sub(1) as f32 * BUTTON_GAP;
+    let separators = groups.len().saturating_sub(1) as f32 * (SEPARATOR_WIDTH + BUTTON_GAP);
+    widths + gaps + separators
 }
 
-fn groups_width(groups: &[&[FormatButton]]) -> f32 {
-    let buttons: f32 = groups.iter().map(|group| group_width(group)).sum();
-    let separators = groups.len().saturating_sub(1) as f32 * (SEPARATOR_WIDTH + 2. * BUTTON_GAP);
-    buttons + separators
-}
-
-/// Like Teams' overflow: groups leave from the end until the rest and the More button fit.
-pub fn fit_groups<'a>(available: f32, groups: &'a [&'a [FormatButton]]) -> BarFit<'a> {
-    let more = BUTTON_GAP + FormatButton::More.width();
-    let visible = if groups_width(groups) <= available {
-        groups.len()
-    } else {
-        (0..groups.len())
-            .rev()
-            .find(|count| groups_width(&groups[..*count]) + more <= available)
-            .unwrap_or(0)
-    };
-    let (visible, overflow) = groups.split_at(visible);
+fn split_groups(groups: &[&[FormatButton]], count: usize) -> BarFit {
+    let mut visible = Vec::new();
+    let mut overflow = Vec::new();
+    let mut taken = 0;
+    for group in groups {
+        let shown = group.len().min(count - taken.min(count));
+        taken += group.len();
+        if shown > 0 {
+            visible.push(group[..shown].to_vec());
+        }
+        if shown < group.len() {
+            overflow.push(group[shown..].to_vec());
+        }
+    }
     BarFit { visible, overflow }
+}
+
+pub fn fit_groups(available: f32, groups: &[&[FormatButton]]) -> BarFit {
+    let total: usize = groups.iter().map(|group| group.len()).sum();
+    if groups_width(groups) <= available {
+        return split_groups(groups, total);
+    }
+    let more = BUTTON_GAP + FormatButton::More.width();
+    let count = (0..total)
+        .rev()
+        .find(|count| groups_width(&split_groups(groups, *count).visible) + more <= available)
+        .unwrap_or(0);
+    split_groups(groups, count)
 }
 
 pub const TOGGLE_SHORTCUT: &str = "Ctrl+Shift+X";
@@ -355,11 +365,7 @@ fn sized_letter(size: f32, color: Hsla) -> AnyElement {
 }
 
 pub fn bar_width() -> f32 {
-    let groups = SELECTION_GROUPS;
-    let buttons: usize = groups.iter().map(|group| group.len()).sum();
-    let gaps: usize = groups.iter().map(|group| group.len() - 1).sum();
-    let separators = (groups.len() - 1) as f32 * (1. + 2. * SEPARATOR_MARGIN);
-    2. * PADDING + buttons as f32 * BUTTON + gaps as f32 * BUTTON_GAP + separators
+    2. * PADDING + groups_width(&SELECTION_GROUPS)
 }
 
 pub fn link_width() -> f32 {
@@ -396,6 +402,7 @@ pub enum Mode<'a> {
     Bar {
         state: &'a dyn Fn(FormatButton) -> ButtonState,
         on_press: PressHandler,
+        overlay: &'a mut dyn FnMut(FormatButton) -> Option<AnyElement>,
     },
     Link {
         field: &'a Entity<InputState>,
@@ -426,7 +433,7 @@ fn button(
         .items_center()
         .justify_center()
         .rounded(px(6.))
-        .tooltip(move |window, cx| Tooltip::new(format.tooltip()).build(window, cx))
+        .popup_trigger_tooltip_text(format.opens_popup() && on, format.tooltip())
         .child(format.content(color, state.label))
         .on_mouse_down(MouseButton::Left, |_, window, cx| {
             window.prevent_default();
@@ -476,8 +483,8 @@ fn separator() -> Div {
         .bg(theme::popup_hover())
 }
 
-fn groups_row(
-    groups: &[&[FormatButton]],
+fn groups_row<G: AsRef<[FormatButton]>>(
+    groups: &[G],
     state: &dyn Fn(FormatButton) -> ButtonState,
     on_press: PressHandler,
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
@@ -487,7 +494,7 @@ fn groups_row(
         if index > 0 {
             row = row.child(separator());
         }
-        for format in group.iter().copied() {
+        for format in group.as_ref().iter().copied() {
             row = row.child(button(
                 format,
                 state(format),
@@ -499,19 +506,23 @@ fn groups_row(
     row
 }
 
-fn bar(state: &dyn Fn(FormatButton) -> ButtonState, on_press: PressHandler) -> Div {
-    groups_row(&SELECTION_GROUPS, state, on_press, &mut |_| None)
+fn bar(
+    state: &dyn Fn(FormatButton) -> ButtonState,
+    on_press: PressHandler,
+    overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
+) -> Div {
+    groups_row(&SELECTION_GROUPS, state, on_press, overlay)
 }
 
 /// The format bar inside the composer box. `overlay` hangs a popup under a button; the
 /// More button's popup is the overflow menu, built with `render_overflow_menu`.
 pub fn render_format_bar(
-    fit: BarFit<'_>,
+    fit: &BarFit,
     state: &dyn Fn(FormatButton) -> ButtonState,
     on_press: PressHandler,
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
 ) -> Div {
-    let row = groups_row(fit.visible, state, on_press.clone(), overlay);
+    let row = groups_row(&fit.visible, state, on_press.clone(), overlay);
     if fit.overflow.is_empty() {
         return row;
     }
@@ -525,7 +536,7 @@ pub fn render_format_bar(
 
 /// The groups that do not fit, as menu rows with a divider between groups.
 pub fn render_overflow_menu(
-    groups: &[&[FormatButton]],
+    groups: &[Vec<FormatButton>],
     state: &dyn Fn(FormatButton) -> ButtonState,
     on_press: PressHandler,
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
@@ -681,7 +692,11 @@ fn arrow(offset: Pixels) -> impl IntoElement {
 
 pub fn render(placement: Placement, mode: Mode<'_>) -> AnyElement {
     let content = match mode {
-        Mode::Bar { state, on_press } => bar(state, on_press),
+        Mode::Bar {
+            state,
+            on_press,
+            overlay,
+        } => bar(state, on_press, overlay),
         Mode::Link {
             field,
             refused,
@@ -719,11 +734,6 @@ mod tests {
         groups_width, place, toggle_symbol, toggle_tooltip,
     };
 
-    const SIZES: [FormatButton; 3] = [
-        FormatButton::SizeSmall,
-        FormatButton::SizeNormal,
-        FormatButton::SizeLarge,
-    ];
 
     #[test]
     fn the_bar_centers_over_the_selection() {
@@ -757,14 +767,15 @@ mod tests {
                 .iter()
                 .map(|group| group.len())
                 .sum::<usize>(),
-            14
+            12
         );
         assert!(
             SELECTION_GROUPS
                 .iter()
                 .all(|group| !group.contains(&FormatButton::Table))
         );
-        assert!(bar_width() > 14. * BUTTON);
+        assert!(SELECTION_GROUPS.iter().any(|group| group == &[FormatButton::FontSize]));
+        assert!(bar_width() > 12. * BUTTON);
     }
 
     #[test]
@@ -796,33 +807,44 @@ mod tests {
         );
         assert_eq!(BAR_GROUPS[4].last(), Some(&FormatButton::Rule));
         for button in SELECTION_GROUPS.iter().flat_map(|group| group.iter()) {
-            let covered = if SIZES.contains(button) {
-                &FormatButton::FontSize
-            } else {
-                button
-            };
-            assert!(BAR_GROUPS.iter().any(|group| group.contains(covered)));
+            assert!(BAR_GROUPS.iter().any(|group| group.contains(button)));
         }
     }
 
+    fn flat(groups: &[Vec<FormatButton>]) -> Vec<FormatButton> {
+        groups.iter().flatten().copied().collect()
+    }
+
     #[test]
-    fn a_wide_bar_shows_every_group_without_more_options() {
+    fn a_wide_bar_shows_every_button_without_more_options() {
         let fit = fit_groups(groups_width(&BAR_GROUPS), &BAR_GROUPS);
         assert_eq!(fit.visible.len(), BAR_GROUPS.len());
         assert!(fit.overflow.is_empty());
     }
 
     #[test]
-    fn groups_leave_from_the_end_and_more_options_fits_beside_the_rest() {
+    fn single_buttons_leave_from_the_end_and_keep_their_groups() {
+        let all: Vec<FormatButton> = BAR_GROUPS.iter().flat_map(|group| group.iter()).copied().collect();
         let fit = fit_groups(groups_width(&BAR_GROUPS) - 1., &BAR_GROUPS);
-        assert_eq!(fit.visible, &BAR_GROUPS[..BAR_GROUPS.len() - 1]);
-        assert_eq!(fit.overflow, &BAR_GROUPS[BAR_GROUPS.len() - 1..]);
-        let three = groups_width(&BAR_GROUPS[..3]);
-        let fit = fit_groups(three + 2. + BUTTON, &BAR_GROUPS);
-        assert_eq!(fit.visible.len(), 3);
-        let fit = fit_groups(three + 2. + BUTTON - 1., &BAR_GROUPS);
-        assert_eq!(fit.visible.len(), 2);
+        assert_eq!(flat(&fit.overflow), all[all.len() - 2..]);
+        assert_eq!(fit.overflow, vec![vec![FormatButton::TableInsertLine, FormatButton::TableRemoveLine]]);
+        assert_eq!(fit.visible.last(), Some(&vec![FormatButton::Table]));
+        let mut both = flat(&fit.visible);
+        both.extend(flat(&fit.overflow));
+        assert_eq!(both, all);
+    }
+
+    #[test]
+    fn a_cut_between_groups_leaves_no_empty_group_on_either_side() {
+        let two = groups_width(&BAR_GROUPS[..2]);
+        let fit = fit_groups(two + 2. + BUTTON, &BAR_GROUPS);
+        assert_eq!(fit.visible, vec![BAR_GROUPS[0].to_vec(), BAR_GROUPS[1].to_vec()]);
         assert_eq!(fit.overflow.len(), BAR_GROUPS.len() - 2);
+        assert!(fit.overflow.iter().chain(&fit.visible).all(|group| !group.is_empty()));
+        let fit = fit_groups(two + 2. + BUTTON - 1., &BAR_GROUPS);
+        assert_eq!(fit.visible.len(), 2);
+        assert_eq!(fit.visible[1], vec![FormatButton::Superscript]);
+        assert_eq!(fit.overflow[0], vec![FormatButton::Subscript]);
     }
 
     #[test]

@@ -113,7 +113,9 @@ impl Composer {
         self.table_picker = None;
         self.table_menu = None;
         self.format_popup = (self.format_popup != Some(popup)).then_some(popup);
-        self.toolbar_dismissed = Some(self.selection(cx));
+        if self.format_bar_open() {
+            self.toolbar_dismissed = Some(self.selection(cx));
+        }
         cx.notify();
     }
 
@@ -363,7 +365,7 @@ impl Composer {
         let selection = self.selection(cx);
         let rows = FONT_SIZES.iter().map(|(size, button, label)| {
             let size = *size;
-            let current = self.format_state(*button, &selection) == FormatState::On;
+            let current = size.is_some() && self.format_state(*button, &selection) == FormatState::On;
             swallow_mouse_down(
                 div()
                     .id(ElementId::Name(format!("font-size-{label}").into()))

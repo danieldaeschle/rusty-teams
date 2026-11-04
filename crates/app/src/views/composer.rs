@@ -2563,6 +2563,10 @@ impl Composer {
             ),
             None => {
                 let state_of = |button| ButtonState::enabled(self.format_state(button, &range));
+                let mut overlay = |button| match button {
+                    FormatButton::FontSize => self.render_format_popup(FormatPopup::FontSize, cx),
+                    _ => None,
+                };
                 format_toolbar::render(
                     placement,
                     format_toolbar::Mode::Bar {
@@ -2572,6 +2576,7 @@ impl Composer {
                                 .update(cx, |this, cx| this.press_format(button, window, cx))
                                 .ok();
                         }),
+                        overlay: &mut overlay,
                     },
                 )
             }
@@ -2588,7 +2593,7 @@ impl Composer {
         })
     }
 
-    fn format_bar_fit(&self) -> format_toolbar::BarFit<'static> {
+    fn format_bar_fit(&self) -> format_toolbar::BarFit {
         let available = self.composer_bounds.get().map_or(f32::INFINITY, |bounds| {
             f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.)
         });
@@ -2598,7 +2603,7 @@ impl Composer {
     fn render_format_overlay(
         &self,
         button: FormatButton,
-        overflow: &[&[FormatButton]],
+        overflow: &[Vec<FormatButton>],
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -2636,8 +2641,8 @@ impl Composer {
         let state_of = |button| self.button_state(button, &selection, in_table);
         let on_press = self.format_press_handler(cx);
         let fit = self.format_bar_fit();
-        let mut overlay = |button| self.render_format_overlay(button, fit.overflow, window, cx);
-        let row = format_toolbar::render_format_bar(fit, &state_of, on_press, &mut overlay);
+        let mut overlay = |button| self.render_format_overlay(button, &fit.overflow, window, cx);
+        let row = format_toolbar::render_format_bar(&fit, &state_of, on_press, &mut overlay);
         v_flex()
             .debug_selector(|| COMPOSER_FORMAT_BAR_TAG.into())
             .w_full()
