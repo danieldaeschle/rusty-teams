@@ -8,6 +8,7 @@ use teams_core::{PinnedMessage, SavedMessage};
 use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 use crate::channel_menu::{post_pin_failure, post_pin_notice};
 use crate::format;
+use crate::forward_selection::FORWARD_SELECTION_LIMIT;
 use crate::image_view_gallery::ViewerRequest;
 use crate::notice::short_error;
 use crate::rows::{message_text, reply_excerpt};
@@ -57,10 +58,25 @@ fn saved_key(item: &SavedMessage) -> (String, String) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForwardSource {
     pub conversation_id: String,
+    /// 1 to 5 messages, oldest first.
+    pub messages: Vec<ForwardItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardItem {
     pub message_id: String,
     pub author: String,
     pub time: String,
     pub text: String,
+}
+
+impl ForwardSource {
+    pub fn message_ids(&self) -> Vec<String> {
+        self.messages
+            .iter()
+            .map(|item| item.message_id.clone())
+            .collect()
+    }
 }
 
 fn saved_entry(record: &MessageRecord, is_channel: bool) -> SavedMessage {
@@ -336,23 +352,43 @@ impl AppState {
         message_id: &str,
         cx: &mut Context<Self>,
     ) {
+        self.request_forward_messages(conversation_id, &[message_id.to_owned()], cx);
+    }
+
+    pub fn request_forward_messages(
+        &mut self,
+        conversation_id: &str,
+        message_ids: &[String],
+        cx: &mut Context<Self>,
+    ) {
         if self.mode.read_only {
             self.raise_notice("Read-only mode: message not forwarded".to_owned(), None, cx);
             return;
         }
-        let Some(record) = self.message_record(conversation_id, message_id) else {
+        let mut records: Vec<MessageRecord> = message_ids
+            .iter()
+            .filter_map(|message_id| self.message_record(conversation_id, message_id))
+            .collect();
+        if records.is_empty() {
             return;
-        };
+        }
+        records.sort_by_key(|record| record.created_at);
+        records.truncate(FORWARD_SELECTION_LIMIT);
         let now = Local::now();
         self.forward_request = Some(ForwardSource {
-            conversation_id: record.conversation_id.clone(),
-            message_id: record.message_id.clone(),
-            author: record
-                .sender_name
-                .clone()
-                .unwrap_or_else(|| "Unknown".to_owned()),
-            time: forward_time(record.created_at, now),
-            text: message_text(&record),
+            conversation_id: records[0].conversation_id.clone(),
+            messages: records
+                .iter()
+                .map(|record| ForwardItem {
+                    message_id: record.message_id.clone(),
+                    author: record
+                        .sender_name
+                        .clone()
+                        .unwrap_or_else(|| "Unknown".to_owned()),
+                    time: forward_time(record.created_at, now),
+                    text: message_text(record),
+                })
+                .collect(),
         });
         cx.emit(AppEvent::Forward);
         cx.notify();

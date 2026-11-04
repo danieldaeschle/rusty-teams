@@ -156,6 +156,7 @@ mod frames {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use app_ui_kit::layout::ROW_PADDING;
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{
         AppContext as _, Bounds, Pixels, ScrollDelta, ScrollWheelEvent, TestAppContext,
@@ -190,14 +191,20 @@ mod frames {
         CHANNEL_DETAILS_TAG,
     };
     use crate::render::{CODE_BLOCK_TAG, CODE_LINE_TAG};
-    use crate::views::conversation::{FEED_EDGE_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG};
+    use crate::views::conversation::{
+        FEED_EDGE_TAG, FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG,
+        FORWARD_FOOTER_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG,
+    };
     use crate::views::post_card::{
         POST_AVATAR_TAG, POST_BODY_TAG, POST_CARD_TAG, POST_FOOTER_AVATAR_TAG,
     };
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
     };
-    use crate::views::message_row::{BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y};
+    use crate::views::forward_dialog::{FORWARD_CARD_TAG, FORWARD_PREVIEW_TAG};
+    use crate::views::message_row::{
+        BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y, select_box_selector,
+    };
     use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
     use crate::views::activity_panel::ACTIVITY_PROPOSALS_TAG;
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
@@ -1504,6 +1511,149 @@ mod frames {
                 .collect();
             visual.simulate_keystrokes("escape");
             visual.run_until_parked();
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
+    }
+
+    const FORWARD_CHAT: &str = "demo-chat-release";
+    const FORWARD_FOOTER_TAGS: [&str; 4] = [
+        FORWARD_FOOTER_TAG,
+        FORWARD_FOOTER_BAR_TAG,
+        FORWARD_FOOTER_COUNT_TAG,
+        FORWARD_FOOTER_NEXT_TAG,
+    ];
+    const FORWARD_DIALOG_PADDING: f32 = 16.;
+    const FORWARD_BAR_PADDING: f32 = 8.;
+    const FORWARD_ROWS_SCANNED: usize = 80;
+
+    fn forward_message_ids(
+        state: &Entity<AppState>,
+        visual: &mut VisualTestContext,
+    ) -> Vec<String> {
+        visual.update(|_, cx| {
+            let mut records = state
+                .read(cx)
+                .store
+                .messages(FORWARD_CHAT, None, 50)
+                .expect("demo messages");
+            records.retain(|record| !record.deleted);
+            records.sort_by_key(|record| record.created_at);
+            records
+                .iter()
+                .rev()
+                .take(2)
+                .map(|record| record.message_id.clone())
+                .collect()
+        })
+    }
+
+    #[gpui_kit::test]
+    fn forward_selection_footer_checks_and_dialog_keep_their_insets(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        for (width, height) in SIZES {
+            visual.simulate_resize(size(px(width), px(height)));
+            let window = Bounds {
+                origin: point(px(0.), px(0.)),
+                size: size(px(width), px(height)),
+            };
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.select(Selection::Chat(FORWARD_CHAT.to_owned()), cx)
+                })
+            });
+            collect(&mut visual, Some(COMPOSER_BOX_TAG));
+            let composer = visual.debug_bounds(COMPOSER_BOX_TAG).expect("composer");
+            let ids = forward_message_ids(&state, &mut visual);
+            visual.update(|_, cx| {
+                state.update(cx, |state, cx| {
+                    state.start_forward_selection(FORWARD_CHAT, &ids[0], cx);
+                    state.toggle_forward_selected(&ids[1], cx);
+                })
+            });
+            collect(&mut visual, Some(FORWARD_FOOTER_NEXT_TAG));
+            assert!(
+                visual.debug_bounds(COMPOSER_BOX_TAG).is_none(),
+                "the footer replaces the composer"
+            );
+            let tags: Vec<Tag> = FORWARD_FOOTER_TAGS
+                .iter()
+                .filter_map(|path| visual.debug_bounds(path).map(|bounds| (*path, bounds)))
+                .collect();
+            let mut found: Vec<String> = violations(&tags, window, &FORWARD_FOOTER_TAGS)
+                .into_iter()
+                .map(|(key, message)| format!("forward@{width}x{height}:{key}: {message}"))
+                .collect();
+            let main = visual.debug_bounds(MAIN).expect("main island");
+            let bar = visual.debug_bounds(FORWARD_FOOTER_BAR_TAG).expect("bar");
+            let next = visual.debug_bounds(FORWARD_FOOTER_NEXT_TAG).expect("next");
+            if (f32::from(bar.left() - composer.left())).abs() > TOLERANCE
+                || (f32::from(bar.right() - composer.right())).abs() > TOLERANCE
+            {
+                found.push(format!(
+                    "forward@{width}x{height}: bar {} not on the composer edges {}",
+                    describe(bar),
+                    describe(composer)
+                ));
+            }
+            for edge in [Edge::Top, Edge::Right, Edge::Bottom] {
+                let gap = inset(bar, next, edge);
+                if (gap - FORWARD_BAR_PADDING).abs() > TOLERANCE {
+                    found.push(format!(
+                        "forward@{width}x{height}: next button {edge:?} inset {gap} != {FORWARD_BAR_PADDING}"
+                    ));
+                }
+            }
+            let checks: Vec<Bounds<Pixels>> = (0..FORWARD_ROWS_SCANNED)
+                .filter_map(|index| {
+                    visual.debug_bounds(Box::leak(select_box_selector(index).into_boxed_str()))
+                })
+                .filter(|check| contains(main, *check))
+                .collect();
+            if checks.is_empty() {
+                found.push(format!("forward@{width}x{height}: no checkbox rendered"));
+            }
+            for check in &checks {
+                let left = inset(main, *check, Edge::Left);
+                if (left - ROW_PADDING).abs() > TOLERANCE {
+                    found.push(format!(
+                        "forward@{width}x{height}: checkbox {} starts {left} from the island, not {ROW_PADDING}",
+                        describe(*check)
+                    ));
+                }
+            }
+            visual.simulate_click(next.center(), Default::default());
+            collect(&mut visual, Some(FORWARD_PREVIEW_TAG));
+            let card = visual.debug_bounds(FORWARD_CARD_TAG).expect("dialog card");
+            let preview = visual.debug_bounds(FORWARD_PREVIEW_TAG).expect("preview");
+            if !contains(window, card) || !contains(card, preview) {
+                found.push(format!(
+                    "forward@{width}x{height}: dialog {} or preview {} clipped",
+                    describe(card),
+                    describe(preview)
+                ));
+            }
+            let (left, right) = (
+                inset(card, preview, Edge::Left),
+                inset(card, preview, Edge::Right),
+            );
+            if (left - FORWARD_DIALOG_PADDING).abs() > TOLERANCE
+                || (right - FORWARD_DIALOG_PADDING).abs() > TOLERANCE
+            {
+                found.push(format!(
+                    "forward@{width}x{height}: preview insets {left}/{right} != {FORWARD_DIALOG_PADDING}"
+                ));
+            }
+            visual.simulate_keystrokes("escape");
+            collect(&mut visual, None);
+            assert!(visual.debug_bounds(FORWARD_CARD_TAG).is_none());
+            assert!(
+                visual.debug_bounds(FORWARD_FOOTER_TAG).is_some(),
+                "closing the dialog keeps the selection"
+            );
+            visual.update(|_, cx| state.update(cx, |state, cx| state.cancel_forward_selection(cx)));
+            collect(&mut visual, Some(COMPOSER_BOX_TAG));
+            assert!(visual.debug_bounds(FORWARD_FOOTER_TAG).is_none());
             assert!(found.is_empty(), "{}", found.join("\n"));
         }
     }

@@ -15,6 +15,7 @@ use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
 use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
+use crate::forward_selection::ForwardSelection;
 use crate::image_view_gallery::ViewerRequest;
 use crate::local_previews::{LocalPreview, load_local_previews};
 use crate::message_actions::{ForwardSource, SavedSet};
@@ -61,6 +62,7 @@ pub enum AppEvent {
     CallHistory,
     Translation,
     Forward,
+    ForwardSelection,
     ImageViewer,
     StatusMessage,
     Settings(crate::settings_section::SettingsSection),
@@ -124,6 +126,7 @@ pub struct AppState {
     pub calls_list: crate::call::CallsList,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub forward_request: Option<ForwardSource>,
+    pub forward_selection: Option<ForwardSelection>,
     pub image_viewer_request: Option<ViewerRequest>,
     pub own_status: PresenceStatus,
     pub own_email: String,
@@ -284,6 +287,7 @@ impl AppState {
             calls_list: crate::call::CallsList::default(),
             pins: HashMap::new(),
             forward_request: None,
+            forward_selection: None,
             image_viewer_request: None,
             own_status: PresenceStatus::default(),
             own_email: String::new(),
@@ -878,6 +882,7 @@ impl AppState {
         let conversation_id = selection.conversation_id().to_owned();
         self.selection = Some(selection);
         self.keep_unread = None;
+        self.forward_selection = None;
         cx.emit(AppEvent::Selection);
         cx.notify();
         self.refresh_live_meeting(&conversation_id, cx);

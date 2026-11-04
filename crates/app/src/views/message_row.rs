@@ -72,6 +72,15 @@ const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
 const SKELETON_LINE_HEIGHT: f32 = 20.;
+pub const SELECT_BOX_SIZE: f32 = 16.;
+pub const SELECT_GAP: f32 = 12.;
+const SELECT_CHECK_SIZE: f32 = 12.;
+const SELECT_BOX_RADIUS: f32 = 4.;
+const SELECT_BLOCKED_OPACITY: f32 = 0.4;
+const SELECTED_TINT: f32 = 0.08;
+pub fn select_box_selector(index: usize) -> String {
+    format!("forward-check/{index}")
+}
 
 pub struct DeliveryActions {
     pub retry: RowAction,
@@ -79,7 +88,14 @@ pub struct DeliveryActions {
     pub send_now: RowAction,
 }
 
+pub struct RowSelect {
+    pub checked: bool,
+    pub blocked: Option<&'static str>,
+    pub toggle: std::rc::Rc<dyn Fn(&mut App)>,
+}
+
 pub struct RowActions {
+    pub select: Option<RowSelect>,
     pub bot: Option<BotIdentity>,
     pub delivery: DeliveryActions,
     pub reply: RowAction,
@@ -713,9 +729,20 @@ pub fn render_message_row(
     cx: &App,
 ) -> AnyElement {
     if let Some(call) = &row.call {
-        return call_card_row(row, call, index, directory, actions.call);
+        let selecting = actions.select.is_some();
+        let card = call_card_row(row, call, index, directory, actions.call);
+        return if selecting {
+            div()
+                .w_full()
+                .pl(px(SELECT_BOX_SIZE + SELECT_GAP))
+                .child(card)
+                .into_any_element()
+        } else {
+            card
+        };
     }
     let RowActions {
+        select,
         bot,
         delivery,
         reply,
@@ -768,6 +795,11 @@ pub fn render_message_row(
     } else {
         others_row(row, index, directory, bot.as_ref(), delivery, extras, cx)
     };
+    let checked = select.as_ref().is_some_and(|select| select.checked);
+    let body = match select {
+        Some(select) => selectable_body(select, index, body).into_any_element(),
+        None => body.into_any_element(),
+    };
     container
         .child(
             div()
@@ -784,10 +816,60 @@ pub fn render_message_row(
                         .when(highlighted, |element| {
                             element.bg(theme::accent().opacity(0.2))
                         })
+                        .when(checked && !highlighted, |element| {
+                            element.bg(theme::accent().opacity(SELECTED_TINT))
+                        })
                         .child(body),
                 ),
         )
         .into_any_element()
+}
+
+fn selectable_body(select: RowSelect, index: usize, body: impl IntoElement) -> Stateful<Div> {
+    let RowSelect {
+        checked,
+        blocked,
+        toggle,
+    } = select;
+    h_flex()
+        .id(ElementId::Name(format!("forward-select-{index}").into()))
+        .w_full()
+        .items_center()
+        .gap(px(SELECT_GAP))
+        .child(select_box(checked, blocked.is_some(), index))
+        .child(div().flex_1().min_w_0().child(body))
+        .map(|row| match blocked {
+            Some(reason) => row.tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(reason).build(window, cx)
+            }),
+            None => row.cursor_pointer().on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                toggle(cx)
+            }),
+        })
+}
+
+pub fn select_box(checked: bool, blocked: bool, index: usize) -> Div {
+    div()
+        .debug_selector(|| select_box_selector(index))
+        .size(px(SELECT_BOX_SIZE))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(SELECT_BOX_RADIUS))
+        .map(|element| {
+            if checked {
+                element.bg(theme::accent()).child(icon(
+                    IconName::Check,
+                    SELECT_CHECK_SIZE,
+                    theme::on_accent(),
+                ))
+            } else {
+                element.bg(theme::border_strong())
+            }
+        })
+        .when(blocked, |element| element.opacity(SELECT_BLOCKED_OPACITY))
 }
 
 #[cfg(test)]

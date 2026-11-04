@@ -764,6 +764,7 @@ impl AppShell {
                         state.select(target.clone(), cx)
                     });
                     this.state.update(cx, |state, cx| {
+                        state.cancel_forward_selection(cx);
                         state.raise_notice(format!("Forwarded to {title}"), Some(open), cx)
                     });
                 }

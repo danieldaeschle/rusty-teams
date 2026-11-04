@@ -13,6 +13,7 @@ pub mod channel_menu;
 pub mod chat_actions;
 pub mod chat_filter;
 pub mod find_in_chat;
+pub mod forward_selection;
 pub mod chat_members;
 pub mod chat_settings_actions;
 pub mod connection_banner;

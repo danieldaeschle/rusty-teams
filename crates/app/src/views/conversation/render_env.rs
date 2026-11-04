@@ -10,10 +10,12 @@ use gpui_kit::*;
 use mcp::ReactionProposal;
 use teams_core::{ImageRef, LinkPreview};
 
+use super::forward_select::SelectionSnapshot;
 use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
 use crate::agent_api::agent_label;
 use crate::agents::AgentRun;
 use crate::app_state::AppState;
+use crate::forward_selection::block_reason;
 use crate::rows::{Delivery, MessageRow, PostRow, ReactionChip, RecordingCard};
 use crate::scheduled_rows::SCHEDULED_KEY_PREFIX;
 use crate::translation::TranslationLine;
@@ -22,7 +24,7 @@ use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
 use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
-use crate::views::message_row::{DeliveryActions, RowActions, SharedRowAction};
+use crate::views::message_row::{DeliveryActions, RowActions, RowSelect, SharedRowAction};
 use crate::views::post_card::{PostAction, PostActions};
 use crate::views::reaction_proposal_pill::ReactionPill;
 use crate::views::toolbar_placement::TimelineBounds;
@@ -37,6 +39,7 @@ pub(super) struct RenderEnv {
     pub timeline: TimelineBounds,
     pub agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     pub reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
+    pub forward_selection: Option<SelectionSnapshot>,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -295,18 +298,24 @@ impl RenderEnv {
             &message.key,
             cx,
         );
+        let select = self
+            .forward_selection
+            .as_ref()
+            .map(|snapshot| self.row_select(snapshot, message));
+        let selecting = select.is_some();
         RowActions {
+            select,
             bot,
             delivery,
-            reply,
-            hovered,
-            menu,
+            reply: reply.filter(|_| !selecting),
+            hovered: hovered.filter(|_| !selecting),
+            menu: menu.filter(|_| !selecting),
             scheduled_menu,
-            react,
+            react: react.filter(|_| !selecting),
             reaction_controls,
-            add_reaction,
-            files,
-            open_image,
+            add_reaction: add_reaction.filter(|_| !selecting),
+            files: files.filter(|_| !selecting),
+            open_image: open_image.filter(|_| !selecting),
             highlighted: self.highlighted.as_deref() == Some(message.key.as_str()),
             saved: self
                 .app
@@ -324,6 +333,17 @@ impl RenderEnv {
             undo_delete: self.undo_delete_action(message, is_real, view, cx),
             compact: self.app.read(cx).account_chat_settings().message_density
                 == teams_core::MessageDensity::Compact,
+        }
+    }
+
+    fn row_select(&self, snapshot: &SelectionSnapshot, message: &MessageRow) -> RowSelect {
+        let (app, key) = (self.app.clone(), message.key.clone());
+        RowSelect {
+            checked: snapshot.selection.contains(&message.key),
+            blocked: block_reason(message, &snapshot.selection, snapshot.image_count),
+            toggle: Rc::new(move |cx| {
+                app.update(cx, |state, cx| state.toggle_forward_selected(&key, cx))
+            }),
         }
     }
 
