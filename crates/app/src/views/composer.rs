@@ -224,6 +224,7 @@ pub struct Composer {
     demo_failed: HashSet<u64>,
     carry_images_into: Option<String>,
     draft_save: Option<Task<()>>,
+    draft_writes: drafts::DraftWrites,
     saved_images: Option<drafts::ImageFingerprint>,
     schedule: Option<schedule::SchedulePopover>,
     scheduling: Option<String>,
@@ -491,6 +492,7 @@ impl Composer {
             demo_failed: HashSet::new(),
             carry_images_into: None,
             draft_save: None,
+            draft_writes: drafts::DraftWrites::default(),
             saved_images: None,
             schedule: None,
             scheduling: None,
@@ -3253,6 +3255,8 @@ impl Render for Composer {
                 } else if this.popup_is_open() {
                     this.accept_popup(window, cx);
                     cx.stop_propagation();
+                } else if this.break_line(action.shift, window, cx) {
+                    cx.stop_propagation();
                 } else if enter_starts_line(
                     enter_behavior(
                         this.app.read(cx).account_chat_settings().enter_key,
@@ -3269,8 +3273,6 @@ impl Render for Composer {
                         }),
                         cx,
                     );
-                } else if this.break_line(action.shift, window, cx) {
-                    cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
@@ -4720,6 +4722,21 @@ mod tests {
             assert_eq!(
                 typist.outgoing().html(),
                 "<blockquote>quoted<br>more</blockquote>after"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn enter_on_an_empty_quote_line_leaves_it_with_the_format_bar_open(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.press("ctrl-shift-x");
+            typist.type_text(">quoted");
+            typist.press("enter enter");
+            typist.type_text("after");
+            assert_eq!(
+                typist.outgoing().html(),
+                "<blockquote>quoted</blockquote>after"
             );
         }
 
