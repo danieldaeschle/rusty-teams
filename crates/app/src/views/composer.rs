@@ -230,6 +230,7 @@ pub struct Composer {
     table_picker: Option<TablePicker>,
     table_menu: Option<TableMenu>,
     format_popup: Option<FormatPopup>,
+    format_overflow: bool,
     format_bar: HashSet<String>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
@@ -457,6 +458,7 @@ impl Composer {
             table_picker: None,
             table_menu: None,
             format_popup: None,
+            format_overflow: false,
             format_bar: HashSet::new(),
             active_cell: None,
             caret_before_table: 0,
@@ -857,6 +859,7 @@ impl Composer {
         self.active_cell = None;
         self.table_picker = None;
         self.format_popup = None;
+        self.format_overflow = false;
         self.sync_tables(window, cx);
         self.history.clear();
         self.history_index = 0;
@@ -971,6 +974,9 @@ impl Composer {
     }
 
     fn press_format(&mut self, button: FormatButton, window: &mut Window, cx: &mut Context<Self>) {
+        if !button.opens_popup() {
+            self.format_overflow = false;
+        }
         match button {
             FormatButton::Bold => self.toggle_mark(MarkKind::Bold, cx),
             FormatButton::Italic => self.toggle_mark(MarkKind::Italic, cx),
@@ -1007,6 +1013,8 @@ impl Composer {
             FormatButton::Indent => self.indent_blocks(false, window, cx),
             FormatButton::CodeBlock => self.toggle_code_block(window, cx),
             FormatButton::Rule => self.insert_rule(window, cx),
+            FormatButton::FontSize => self.toggle_format_popup(FormatPopup::FontSize, cx),
+            FormatButton::More => self.toggle_format_overflow(cx),
         }
     }
 
@@ -1097,9 +1105,15 @@ impl Composer {
             {
                 FormatState::On
             }
+            FormatButton::FontSize if self.format_popup == Some(FormatPopup::FontSize) => {
+                FormatState::On
+            }
+            FormatButton::More if self.format_overflow => FormatState::On,
             FormatButton::CodeBlock => self.draft.line_state(range, &LineKind::Code(None)),
             FormatButton::Highlight
             | FormatButton::FontColor
+            | FormatButton::FontSize
+            | FormatButton::More
             | FormatButton::ParagraphStyle
             | FormatButton::ClearFormatting
             | FormatButton::Outdent
@@ -1117,7 +1131,7 @@ impl Composer {
     ) -> ButtonState {
         let enabled = match button {
             FormatButton::TableInsertLine | FormatButton::TableRemoveLine => in_table,
-            FormatButton::Table => true,
+            FormatButton::Table | FormatButton::More => true,
             FormatButton::Outdent => !in_table && self.draft.can_outdent(selection.clone()),
             _ => !in_table,
         };
@@ -1148,6 +1162,7 @@ impl Composer {
             self.table_picker = None;
             self.table_menu = None;
             self.format_popup = None;
+            self.format_overflow = false;
         }
         cx.notify();
     }
@@ -1706,6 +1721,7 @@ impl Composer {
             self.table_picker = None;
             self.table_menu = None;
             self.format_popup = None;
+            self.format_overflow = false;
             self.reset_importance();
             if !carry {
                 self.load_stored_draft(conversation_id, window, cx);
@@ -2563,28 +2579,65 @@ impl Composer {
         Some(element)
     }
 
-    fn render_format_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let selection = self.selection(cx);
-        let in_table = self.in_table(window, cx);
-        let state_of = |button| self.button_state(button, &selection, in_table);
+    fn format_press_handler(&self, cx: &mut Context<Self>) -> format_toolbar::PressHandler {
         let composer = cx.weak_entity();
-        let on_press: format_toolbar::PressHandler = Rc::new(move |button, window, cx| {
+        Rc::new(move |button, window, cx| {
             composer
                 .update(cx, |this, cx| this.press_format(button, window, cx))
                 .ok();
+        })
+    }
+
+    fn format_bar_fit(&self) -> format_toolbar::BarFit<'static> {
+        let available = self.composer_bounds.get().map_or(f32::INFINITY, |bounds| {
+            f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.)
         });
-        let mut overlay = |button| match button {
+        format_toolbar::fit_groups(available, &format_toolbar::BAR_GROUPS)
+    }
+
+    fn render_format_overlay(
+        &self,
+        button: FormatButton,
+        overflow: &[&[FormatButton]],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        match button {
             FormatButton::Table => self.render_table_picker(cx),
             FormatButton::TableInsertLine => self.render_table_menu(TableLineMenu::Insert, cx),
             FormatButton::TableRemoveLine => self.render_table_menu(TableLineMenu::Remove, cx),
             FormatButton::Highlight => self.render_format_popup(FormatPopup::Highlight, cx),
             FormatButton::FontColor => self.render_format_popup(FormatPopup::FontColor, cx),
+            FormatButton::FontSize => self.render_format_popup(FormatPopup::FontSize, cx),
             FormatButton::ParagraphStyle => {
                 self.render_format_popup(FormatPopup::ParagraphStyle, cx)
             }
+            FormatButton::More if self.format_overflow => {
+                let selection = self.selection(cx);
+                let in_table = self.in_table(window, cx);
+                let state_of = |button| self.button_state(button, &selection, in_table);
+                let on_press = self.format_press_handler(cx);
+                let mut overlay = |button| self.render_format_overlay(button, &[], window, cx);
+                let menu = format_toolbar::render_overflow_menu(
+                    overflow,
+                    &state_of,
+                    on_press,
+                    &mut overlay,
+                );
+                Some(self.render_overflow_surface(menu, cx))
+            }
             _ => None,
-        };
-        let row = format_toolbar::render_format_bar(&state_of, on_press, &mut overlay);
+        }
+    }
+
+    fn render_format_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let selection = self.selection(cx);
+        let in_table = self.in_table(window, cx);
+        let state_of = |button| self.button_state(button, &selection, in_table);
+        let on_press = self.format_press_handler(cx);
+        let fit = self.format_bar_fit();
+        let mut overlay = |button| self.render_format_overlay(button, fit.overflow, window, cx);
+        let row = format_toolbar::render_format_bar(fit, &state_of, on_press, &mut overlay);
         v_flex()
             .debug_selector(|| COMPOSER_FORMAT_BAR_TAG.into())
             .w_full()
@@ -3261,7 +3314,14 @@ impl Render for Composer {
                             })
                             .child(
                                 canvas(
-                                    move |bounds, _, _| composer_bounds.set(Some(bounds)),
+                                    move |bounds, window, _| {
+                                        let previous = composer_bounds.replace(Some(bounds));
+                                        if previous.map(|previous| previous.size.width)
+                                            != Some(bounds.size.width)
+                                        {
+                                            window.refresh();
+                                        }
+                                    },
                                     |_, _, _, _| {},
                                 )
                                 .absolute()

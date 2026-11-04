@@ -3,9 +3,10 @@ use std::ops::Range;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use teams_core::{Draft, LineKind, MarkKind, TypingStyle};
+use teams_core::{Draft, FormatState, LineKind, MarkKind, SizeStep, TypingStyle};
 
 use super::Composer;
+use super::FormatButton;
 use crate::theme::{self, ElevatedSurface as _};
 
 const SWATCH: f32 = 24.;
@@ -13,6 +14,7 @@ const SWATCH_GAP: f32 = 6.;
 const SWATCH_COLUMNS: usize = 4;
 const POPUP_PADDING: f32 = 8.;
 const MENU_WIDTH: f32 = 180.;
+const FONT_SIZE_MENU_WIDTH: f32 = 120.;
 const MENU_PADDING: f32 = 4.;
 const MENU_ROW_PADDING_X: f32 = 10.;
 const MENU_ROW_PADDING_Y: f32 = 6.;
@@ -23,6 +25,7 @@ pub(super) enum FormatPopup {
     Highlight,
     FontColor,
     ParagraphStyle,
+    FontSize,
 }
 
 pub(super) struct Swatch {
@@ -58,6 +61,14 @@ pub(super) const PARAGRAPH_STYLES: [(Option<u8>, &str); 4] = [
     (Some(1), "Heading 1"),
     (Some(2), "Heading 2"),
     (Some(3), "Heading 3"),
+];
+
+/// Teams' Font size menu (`compose_font_size`): Large is `x-large`, Medium removes the size,
+/// Small is `xx-small`.
+pub(super) const FONT_SIZES: [(Option<SizeStep>, FormatButton, &str); 3] = [
+    (Some(SizeStep::Large), FormatButton::SizeLarge, "Large"),
+    (None, FormatButton::SizeNormal, "Medium"),
+    (Some(SizeStep::Small), FormatButton::SizeSmall, "Small"),
 ];
 
 pub(super) fn paragraph_label(level: Option<u8>) -> &'static str {
@@ -106,6 +117,41 @@ impl Composer {
         cx.notify();
     }
 
+    pub(super) fn toggle_format_overflow(&mut self, cx: &mut Context<Self>) {
+        self.table_picker = None;
+        self.table_menu = None;
+        self.format_popup = None;
+        self.format_overflow = !self.format_overflow;
+        cx.notify();
+    }
+
+    fn close_format_popups(&mut self) {
+        self.format_popup = None;
+        self.format_overflow = false;
+    }
+
+    fn apply_font_size(&mut self, size: Option<SizeStep>, cx: &mut Context<Self>) {
+        self.close_format_popups();
+        self.set_size(size, cx);
+    }
+
+    pub(super) fn render_overflow_surface(&self, menu: Div, cx: &mut Context<Self>) -> AnyElement {
+        menu.id("format-overflow-menu")
+            .rounded(px(10.))
+            .flyout_surface()
+            .occlude()
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                let nested_open = this.format_popup.is_some()
+                    || this.table_picker.is_some()
+                    || this.table_menu.is_some();
+                if !nested_open {
+                    this.format_overflow = false;
+                    cx.notify();
+                }
+            }))
+            .into_any_element()
+    }
+
     /// Text typed at a collapsed cursor takes the change, a selection gets it at once.
     fn change_style(
         &mut self,
@@ -141,7 +187,7 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.format_popup = None;
+        self.close_format_popups();
         match popup {
             FormatPopup::FontColor => self.change_style(
                 |pending, active| pending.set_color(color, active),
@@ -178,7 +224,7 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.format_popup = None;
+        self.close_format_popups();
         if self.cell_has_focus(window, cx) {
             return;
         }
@@ -244,6 +290,7 @@ impl Composer {
         }
         let content = match popup {
             FormatPopup::ParagraphStyle => self.render_paragraph_menu(cx),
+            FormatPopup::FontSize => self.render_font_size_menu(cx),
             _ => self.render_color_picker(popup, cx),
         };
         Some(
@@ -312,6 +359,32 @@ impl Composer {
             .child(clear)
     }
 
+    fn render_font_size_menu(&self, cx: &mut Context<Self>) -> Div {
+        let selection = self.selection(cx);
+        let rows = FONT_SIZES.iter().map(|(size, button, label)| {
+            let size = *size;
+            let current = self.format_state(*button, &selection) == FormatState::On;
+            swallow_mouse_down(
+                div()
+                    .id(ElementId::Name(format!("font-size-{label}").into()))
+                    .px(px(MENU_ROW_PADDING_X))
+                    .py(px(MENU_ROW_PADDING_Y))
+                    .rounded(px(6.))
+                    .text_size(px(13.))
+                    .text_color(theme::text())
+                    .when(current, |row| row.font_weight(FontWeight::BOLD))
+                    .cursor_pointer()
+                    .hover(|row| row.bg(theme::popup_hover())),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.apply_font_size(size, cx)))
+            .child(*label)
+        });
+        v_flex()
+            .min_w(px(FONT_SIZE_MENU_WIDTH))
+            .p(px(MENU_PADDING))
+            .children(rows)
+    }
+
     fn render_paragraph_menu(&self, cx: &mut Context<Self>) -> Div {
         let current = self.draft.heading_at(self.selection(cx).start);
         let rows = PARAGRAPH_STYLES
@@ -346,7 +419,18 @@ impl Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::{FONT_COLORS, HIGHLIGHT_COLORS, PARAGRAPH_STYLES, paragraph_label};
+    use teams_core::SizeStep;
+
+    use super::{FONT_COLORS, FONT_SIZES, HIGHLIGHT_COLORS, PARAGRAPH_STYLES, paragraph_label};
+
+    #[test]
+    fn font_sizes_read_like_teams() {
+        assert_eq!(FONT_SIZES.map(|(_, _, label)| label), ["Large", "Medium", "Small"]);
+        assert_eq!(
+            FONT_SIZES.map(|(size, _, _)| size),
+            [Some(SizeStep::Large), None, Some(SizeStep::Small)]
+        );
+    }
 
     #[test]
     fn palettes_hold_the_eight_teams_colours_each() {

@@ -55,6 +55,8 @@ pub enum FormatButton {
     Indent,
     CodeBlock,
     Rule,
+    FontSize,
+    More,
 }
 
 const STYLE_GROUP: &[FormatButton] = &[
@@ -84,9 +86,7 @@ const TABLE_GROUP: &[FormatButton] = &[
 const FONT_GROUP: &[FormatButton] = &[
     FormatButton::Highlight,
     FormatButton::FontColor,
-    FormatButton::SizeSmall,
-    FormatButton::SizeNormal,
-    FormatButton::SizeLarge,
+    FormatButton::FontSize,
     FormatButton::ParagraphStyle,
     FormatButton::ClearFormatting,
 ];
@@ -125,6 +125,44 @@ pub const BAR_GROUPS: [&[FormatButton]; 6] = [
 ];
 
 pub const PARAGRAPH_STYLE_WIDTH: f32 = 104.;
+const SEPARATOR_WIDTH: f32 = 1. + 2. * SEPARATOR_MARGIN;
+const MENU_ROW_HEIGHT: f32 = 32.;
+const MENU_ROW_PADDING_X: f32 = 10.;
+const MENU_PADDING: f32 = 4.;
+const MENU_WIDTH: f32 = 220.;
+
+/// The groups of the format bar that fit, and those that go into More options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BarFit<'a> {
+    pub visible: &'a [&'a [FormatButton]],
+    pub overflow: &'a [&'a [FormatButton]],
+}
+
+fn group_width(group: &[FormatButton]) -> f32 {
+    let buttons: f32 = group.iter().map(|button| button.width()).sum();
+    buttons + group.len().saturating_sub(1) as f32 * BUTTON_GAP
+}
+
+fn groups_width(groups: &[&[FormatButton]]) -> f32 {
+    let buttons: f32 = groups.iter().map(|group| group_width(group)).sum();
+    let separators = groups.len().saturating_sub(1) as f32 * (SEPARATOR_WIDTH + 2. * BUTTON_GAP);
+    buttons + separators
+}
+
+/// Like Teams' overflow: groups leave from the end until the rest and the More button fit.
+pub fn fit_groups<'a>(available: f32, groups: &'a [&'a [FormatButton]]) -> BarFit<'a> {
+    let more = BUTTON_GAP + FormatButton::More.width();
+    let visible = if groups_width(groups) <= available {
+        groups.len()
+    } else {
+        (0..groups.len())
+            .rev()
+            .find(|count| groups_width(&groups[..*count]) + more <= available)
+            .unwrap_or(0)
+    };
+    let (visible, overflow) = groups.split_at(visible);
+    BarFit { visible, overflow }
+}
 
 pub const TOGGLE_SHORTCUT: &str = "Ctrl+Shift+X";
 
@@ -205,7 +243,29 @@ impl FormatButton {
             FormatButton::Indent => "Increase indent",
             FormatButton::CodeBlock => "Code block (Ctrl+Shift+B)",
             FormatButton::Rule => "Insert horizontal rule",
+            FormatButton::FontSize => "Font size",
+            FormatButton::More => "More options",
         }
+    }
+
+    pub fn menu_label(self) -> &'static str {
+        let tooltip = self.tooltip();
+        tooltip.split(" (").next().unwrap_or(tooltip)
+    }
+
+    /// Opens a picker or menu below itself instead of acting at once.
+    pub fn opens_popup(self) -> bool {
+        matches!(
+            self,
+            FormatButton::Highlight
+                | FormatButton::FontColor
+                | FormatButton::FontSize
+                | FormatButton::ParagraphStyle
+                | FormatButton::Table
+                | FormatButton::TableInsertLine
+                | FormatButton::TableRemoveLine
+                | FormatButton::More
+        )
     }
 
     fn content(self, color: Hsla, label: Option<&'static str>) -> AnyElement {
@@ -256,6 +316,10 @@ impl FormatButton {
             }
             FormatButton::CodeBlock => symbol("fluent_code_block", 20., color).into_any_element(),
             FormatButton::Rule => symbol("fluent_line_horizontal_1", 20., color).into_any_element(),
+            FormatButton::FontSize => {
+                symbol("fluent_text_font_size", 20., color).into_any_element()
+            }
+            FormatButton::More => icon(IconName::Ellipsis, 18., color).into_any_element(),
         }
     }
 
@@ -390,16 +454,18 @@ fn button(
                 })
                 .on_click(move |_, window, cx| on_press(format, window, cx))
         })
-        .children(overlay.map(|overlay| {
-            div().absolute().top(px(BUTTON + GAP / 2.)).left_0().child(
-                deferred(
-                    anchored()
-                        .snap_to_window_with_margin(px(GAP))
-                        .child(overlay),
-                )
-                .with_priority(2),
-            )
-        }))
+        .children(overlay.map(|overlay| overlay_below(overlay, BUTTON + GAP / 2.)))
+}
+
+fn overlay_below(overlay: AnyElement, offset: f32) -> Div {
+    div().absolute().top(px(offset)).left_0().child(
+        deferred(
+            anchored()
+                .snap_to_window_with_margin(px(GAP))
+                .child(overlay),
+        )
+        .with_priority(2),
+    )
 }
 
 fn separator() -> Div {
@@ -416,7 +482,7 @@ fn groups_row(
     on_press: PressHandler,
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
 ) -> Div {
-    let mut row = h_flex().flex_wrap().gap(px(BUTTON_GAP)).items_center();
+    let mut row = h_flex().gap(px(BUTTON_GAP)).items_center();
     for (index, group) in groups.iter().enumerate() {
         if index > 0 {
             row = row.child(separator());
@@ -437,13 +503,103 @@ fn bar(state: &dyn Fn(FormatButton) -> ButtonState, on_press: PressHandler) -> D
     groups_row(&SELECTION_GROUPS, state, on_press, &mut |_| None)
 }
 
-/// The format bar inside the composer box. `overlay` hangs a popup under a button.
+/// The format bar inside the composer box. `overlay` hangs a popup under a button; the
+/// More button's popup is the overflow menu, built with `render_overflow_menu`.
 pub fn render_format_bar(
+    fit: BarFit<'_>,
     state: &dyn Fn(FormatButton) -> ButtonState,
     on_press: PressHandler,
     overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
 ) -> Div {
-    groups_row(&BAR_GROUPS, state, on_press, overlay)
+    let row = groups_row(fit.visible, state, on_press.clone(), overlay);
+    if fit.overflow.is_empty() {
+        return row;
+    }
+    row.child(button(
+        FormatButton::More,
+        state(FormatButton::More),
+        on_press,
+        overlay(FormatButton::More),
+    ))
+}
+
+/// The groups that do not fit, as menu rows with a divider between groups.
+pub fn render_overflow_menu(
+    groups: &[&[FormatButton]],
+    state: &dyn Fn(FormatButton) -> ButtonState,
+    on_press: PressHandler,
+    overlay: &mut dyn FnMut(FormatButton) -> Option<AnyElement>,
+) -> Div {
+    let mut menu = v_flex().w(px(MENU_WIDTH)).py(px(MENU_PADDING));
+    for (index, group) in groups.iter().enumerate() {
+        if index > 0 {
+            menu = menu.child(
+                div()
+                    .w_full()
+                    .h(px(1.))
+                    .my(px(MENU_PADDING))
+                    .bg(theme::popup_hover()),
+            );
+        }
+        for format in group.iter().copied() {
+            menu = menu.child(menu_row(
+                format,
+                state(format),
+                on_press.clone(),
+                overlay(format),
+            ));
+        }
+    }
+    menu
+}
+
+fn menu_row(
+    format: FormatButton,
+    state: ButtonState,
+    on_press: PressHandler,
+    overlay: Option<AnyElement>,
+) -> impl IntoElement {
+    let on = state.enabled && state.format == FormatState::On;
+    let color = if on {
+        theme::accent_soft()
+    } else {
+        theme::text_soft()
+    };
+    let content = match format {
+        FormatButton::ParagraphStyle => symbol("fluent_text_header_1", 20., color).into_any_element(),
+        _ => format.content(color, None),
+    };
+    div()
+        .id(ElementId::Name(format!("format-overflow-{format:?}").into()))
+        .relative()
+        .mx(px(MENU_PADDING))
+        .h(px(MENU_ROW_HEIGHT))
+        .flex_none()
+        .px(px(MENU_ROW_PADDING_X))
+        .flex()
+        .items_center()
+        .gap(px(GAP))
+        .rounded(px(6.))
+        .child(div().w(px(BUTTON)).flex().justify_center().child(content))
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(13.))
+                .text_color(theme::text())
+                .child(format.menu_label()),
+        )
+        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+            window.prevent_default();
+            cx.stop_propagation();
+        })
+        .when(!state.enabled, |row| row.opacity(DISABLED_OPACITY))
+        .when(state.enabled, |row| {
+            row.cursor_pointer()
+                .when(on, |row| row.bg(theme::accent().opacity(ACTIVE_ALPHA)))
+                .hover(|row| row.bg(theme::popup_hover()))
+                .on_click(move |_, window, cx| on_press(format, window, cx))
+        })
+        .children(overlay.map(|overlay| overlay_below(overlay, MENU_ROW_HEIGHT)))
 }
 
 fn link_editor(field: &Entity<InputState>, refused: bool, on_apply: ApplyHandler) -> Div {
@@ -559,9 +715,15 @@ mod tests {
     use gpui_kit::px;
 
     use super::{
-        ARROW_MARGIN, BAR_GROUPS, BUTTON, FormatButton, SELECTION_GROUPS, bar_width, place,
-        toggle_symbol, toggle_tooltip,
+        ARROW_MARGIN, BAR_GROUPS, BUTTON, FormatButton, SELECTION_GROUPS, bar_width, fit_groups,
+        groups_width, place, toggle_symbol, toggle_tooltip,
     };
+
+    const SIZES: [FormatButton; 3] = [
+        FormatButton::SizeSmall,
+        FormatButton::SizeNormal,
+        FormatButton::SizeLarge,
+    ];
 
     #[test]
     fn the_bar_centers_over_the_selection() {
@@ -616,8 +778,12 @@ mod tests {
             ][..]
         );
         assert_eq!(
-            BAR_GROUPS[2][..2],
-            [FormatButton::Highlight, FormatButton::FontColor]
+            BAR_GROUPS[2][..3],
+            [
+                FormatButton::Highlight,
+                FormatButton::FontColor,
+                FormatButton::FontSize
+            ]
         );
         assert_eq!(
             BAR_GROUPS[3],
@@ -630,8 +796,48 @@ mod tests {
         );
         assert_eq!(BAR_GROUPS[4].last(), Some(&FormatButton::Rule));
         for button in SELECTION_GROUPS.iter().flat_map(|group| group.iter()) {
-            assert!(BAR_GROUPS.iter().any(|group| group.contains(button)));
+            let covered = if SIZES.contains(button) {
+                &FormatButton::FontSize
+            } else {
+                button
+            };
+            assert!(BAR_GROUPS.iter().any(|group| group.contains(covered)));
         }
+    }
+
+    #[test]
+    fn a_wide_bar_shows_every_group_without_more_options() {
+        let fit = fit_groups(groups_width(&BAR_GROUPS), &BAR_GROUPS);
+        assert_eq!(fit.visible.len(), BAR_GROUPS.len());
+        assert!(fit.overflow.is_empty());
+    }
+
+    #[test]
+    fn groups_leave_from_the_end_and_more_options_fits_beside_the_rest() {
+        let fit = fit_groups(groups_width(&BAR_GROUPS) - 1., &BAR_GROUPS);
+        assert_eq!(fit.visible, &BAR_GROUPS[..BAR_GROUPS.len() - 1]);
+        assert_eq!(fit.overflow, &BAR_GROUPS[BAR_GROUPS.len() - 1..]);
+        let three = groups_width(&BAR_GROUPS[..3]);
+        let fit = fit_groups(three + 2. + BUTTON, &BAR_GROUPS);
+        assert_eq!(fit.visible.len(), 3);
+        let fit = fit_groups(three + 2. + BUTTON - 1., &BAR_GROUPS);
+        assert_eq!(fit.visible.len(), 2);
+        assert_eq!(fit.overflow.len(), BAR_GROUPS.len() - 2);
+    }
+
+    #[test]
+    fn a_tiny_bar_keeps_only_more_options() {
+        let fit = fit_groups(BUTTON, &BAR_GROUPS);
+        assert!(fit.visible.is_empty());
+        assert_eq!(fit.overflow.len(), BAR_GROUPS.len());
+    }
+
+    #[test]
+    fn overflow_rows_read_without_the_shortcut() {
+        assert_eq!(FormatButton::CodeBlock.menu_label(), "Code block");
+        assert_eq!(FormatButton::Rule.menu_label(), "Insert horizontal rule");
+        assert_eq!(FormatButton::More.tooltip(), "More options");
+        assert_eq!(FormatButton::FontSize.tooltip(), "Font size");
     }
 
     #[test]
