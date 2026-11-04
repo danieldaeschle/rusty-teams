@@ -35,6 +35,7 @@ pub mod card_media;
 pub mod card_table;
 pub mod card_widgets;
 pub mod chat_members;
+pub mod chat_pop_out;
 pub mod composer;
 pub mod connection_banner;
 pub mod conversation;

@@ -51,6 +51,7 @@ use super::avatar::{
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
 use super::chat_members::members_popover;
+use super::chat_pop_out;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::group_name_button;
@@ -110,6 +111,7 @@ pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
+const POP_IN_BUTTON_SIZE: f32 = 32.;
 const HEADER_LEAD_SIZE: f32 = 36.;
 const TABS_INLINE_MIN_WIDTH: f32 = 560.;
 const FIND_MIN_TIMELINE_WIDTH: f32 = 360.;
@@ -198,6 +200,7 @@ enum ReactionAttempt {
 pub struct ConversationView {
     app: Entity<AppState>,
     pinned: bool,
+    popped_out: bool,
     scroller: Entity<MessageScrollerState>,
     composer: Entity<Composer>,
     subject: Entity<InputState>,
@@ -492,6 +495,17 @@ impl ConversationView {
         Self::build(app, Some(selection), window, cx)
     }
 
+    pub fn popped_out(
+        app: Entity<AppState>,
+        selection: Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::build(app, Some(selection), window, cx);
+        view.popped_out = true;
+        view
+    }
+
     fn build(
         app: Entity<AppState>,
         pinned: Option<Selection>,
@@ -533,6 +547,7 @@ impl ConversationView {
         let mut view = ConversationView {
             app,
             pinned: pinned.is_some(),
+            popped_out: false,
             scroller,
             composer,
             subject,
@@ -3474,7 +3489,7 @@ impl ConversationView {
         if let Some(note) = channel_note {
             subline = note.to_owned();
         }
-        let call_controls = if self.pinned {
+        let call_controls = if self.pinned && !self.popped_out {
             Vec::new()
         } else {
             header_call_controls(&self.app, app, &current.selection)
@@ -3540,6 +3555,29 @@ impl ConversationView {
             .children(stack)
             .children(call_controls)
             .children(self.channel_details_button(cx))
+            .children(self.pop_in_button(current))
+    }
+
+    fn pop_in_button(&self, current: &Current) -> Option<AnyElement> {
+        let Selection::Chat(chat_id) = &current.selection else {
+            return None;
+        };
+        if !self.popped_out {
+            return None;
+        }
+        let (app, chat_id) = (self.app.clone(), chat_id.clone());
+        Some(
+            Button::new("chat-pop-in")
+                .icon(IconName::SquareArrowDownLeft)
+                .ghost()
+                .size(px(POP_IN_BUTTON_SIZE))
+                .rounded(px(8.))
+                .tooltip(chat_pop_out::POP_IN_TOOLTIP)
+                .on_click(move |_, window, cx| {
+                    chat_pop_out::return_to_main_window(&app, &chat_id, window, cx)
+                })
+                .into_any_element(),
+        )
     }
 }
 
