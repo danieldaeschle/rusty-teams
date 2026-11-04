@@ -46,6 +46,14 @@ const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
 const CAMERA_META_KEY: &str = "call_camera";
 const INPUT_META_KEY: &str = "call_input";
+pub fn apply_sound_output(choice: &DeviceChoice) {
+    let device_key = match choice {
+        DeviceChoice::SystemDefault => None,
+        DeviceChoice::Device(device_key) => Some(device_key.clone()),
+    };
+    app_base::notify::platform::set_sound_output(device_key);
+}
+
 const OUTPUT_META_KEY: &str = "call_output";
 const EFFECTS_META_KEY: &str = "call_camera_effects";
 const DEFAULT_DEVICE_META: &str = "default";
@@ -691,6 +699,7 @@ impl AppState {
     pub fn select_call_output(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
         let _ = self.store.set_meta(OUTPUT_META_KEY, device_meta(&choice));
         self.call_output = choice.clone();
+        apply_sound_output(&choice);
         self.send_call_command(CallCommand::SelectOutput(choice));
     }
 

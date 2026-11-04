@@ -25,7 +25,9 @@ pub use app_call_model::{
     recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
 };
 
-pub use actions::{load_camera, load_camera_effects, load_input, load_output, load_share_sound};
+pub use actions::{
+    apply_sound_output, load_camera, load_camera_effects, load_input, load_output, load_share_sound,
+};
 pub use mic::load_mic;
 pub use agenda::{AgendaRow, fetch_window, join_available, response_label};
 pub use caption_style::{CaptionPosition, CaptionSize};

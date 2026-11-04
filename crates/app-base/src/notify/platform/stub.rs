@@ -90,6 +90,8 @@ pub fn set_badge(_handle: NativeHandle, _badge: Option<&Badge>) {}
 
 pub fn play_sound() {}
 
+pub fn set_sound_output(_device_key: Option<String>) {}
+
 pub fn play_mp3(_bytes: Vec<u8>) {}
 
 pub fn play_mp3_until(_bytes: Vec<u8>, _looped: bool, _stop: Arc<AtomicBool>) {}
