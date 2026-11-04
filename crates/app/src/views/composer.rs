@@ -248,6 +248,14 @@ pub fn enter_starts_line(behavior: EnterKeyBehavior, shift: bool, secondary: boo
     behavior == EnterKeyBehavior::NewLine && !shift && !secondary
 }
 
+pub fn enter_behavior(setting: EnterKeyBehavior, expanded: bool) -> EnterKeyBehavior {
+    if expanded {
+        EnterKeyBehavior::NewLine
+    } else {
+        setting
+    }
+}
+
 pub fn up_arrow_event(behavior: UpArrowBehavior) -> Option<ComposerEvent> {
     match behavior {
         UpArrowBehavior::EditLastMessage => Some(ComposerEvent::EditLast),
@@ -3227,7 +3235,10 @@ impl Render for Composer {
                     this.accept_popup(window, cx);
                     cx.stop_propagation();
                 } else if enter_starts_line(
-                    this.app.read(cx).account_chat_settings().enter_key,
+                    enter_behavior(
+                        this.app.read(cx).account_chat_settings().enter_key,
+                        this.format_bar_open() && !this.app.read(cx).markdown_mode,
+                    ),
                     action.shift,
                     action.secondary,
                 ) {
@@ -3419,8 +3430,8 @@ impl Render for Composer {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposerEvent, EnterKeyBehavior, UpArrowBehavior, active_mention, enter_starts_line,
-        submitted_text, up_arrow_event,
+        ComposerEvent, EnterKeyBehavior, UpArrowBehavior, active_mention, enter_behavior,
+        enter_starts_line, submitted_text, up_arrow_event,
     };
 
     #[test]
@@ -3429,6 +3440,22 @@ mod tests {
         assert!(!enter_starts_line(EnterKeyBehavior::NewLine, false, true));
         assert!(!enter_starts_line(EnterKeyBehavior::NewLine, true, false));
         assert!(!enter_starts_line(EnterKeyBehavior::Send, false, false));
+    }
+
+    #[test]
+    fn expanded_compose_box_starts_a_line_on_enter_like_teams() {
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::Send, true),
+            EnterKeyBehavior::NewLine
+        );
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::Send, false),
+            EnterKeyBehavior::Send
+        );
+        assert_eq!(
+            enter_behavior(EnterKeyBehavior::NewLine, false),
+            EnterKeyBehavior::NewLine
+        );
     }
 
     #[test]

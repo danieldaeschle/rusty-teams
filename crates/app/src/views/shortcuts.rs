@@ -1,3 +1,4 @@
+use gpui_kit::component::input::Enter;
 use gpui_kit::*;
 
 use super::actions::{
@@ -149,7 +150,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Composer, Composer, "Bold", "ctrl-b", Some("cmd-b"), ToggleBold),
     shortcut!(Composer, Composer, "Italic", "ctrl-i", Some("cmd-i"), ToggleItalic),
     shortcut!(Composer, Composer, "Underline", "ctrl-u", Some("cmd-u"), ToggleUnderline),
-    shortcut!(Composer, Composer, "Format", "ctrl-shift-x", Some("cmd-shift-x"), ToggleFormatBar),
+    shortcut!(Composer, Composer, "Expand compose box", "ctrl-shift-x", Some("cmd-shift-x"), ToggleFormatBar),
+    shortcut!(Composer, Composer, "Send (expanded compose box)", "ctrl-enter", Some("cmd-enter"), Enter { secondary: true, shift: false }),
     shortcut!(Composer, Composer, "Strikethrough", "ctrl-alt-x", None, ToggleStrike),
     shortcut!(Composer, Composer, "Superscript", "ctrl-shift-=", None, ToggleSuperscript),
     shortcut!(Composer, Composer, "Subscript", "ctrl-=", None, ToggleSubscript),
@@ -442,7 +444,8 @@ mod tests {
             )
         };
         for (keys, label) in [
-            ("ctrl-shift-x", "Format"),
+            ("ctrl-shift-x", "Expand compose box"),
+            ("ctrl-enter", "Send (expanded compose box)"),
             ("ctrl-alt-x", "Strikethrough"),
             ("ctrl-alt-=", "Insert column or row"),
             ("ctrl-alt-+", "Insert column or row"),
