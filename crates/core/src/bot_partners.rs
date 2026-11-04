@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use chatsvc::BotProfile;
 use chrono::Utc;
 use graph::Chat;
-use store::{AvatarRecord, BOT_MRI_PREFIX, ChatRecord, MemberRecord};
+use store::{AvatarRecord, BOT_MRI_PREFIX, ChatRecord, MemberRecord, UNKNOWN_USER_NAME};
 
 use crate::engine::SyncEngine;
 use crate::error::{Error, Result};
 use crate::mapping::chat_record;
 use crate::remote::Remote;
+
+const ALONE_TITLE: &str = "(only you)";
 
 /// Bots Graph leaves out of 1:1 chat members, such as the Echo test call bot, by the id in the chat id.
 #[derive(Default)]
@@ -83,7 +85,49 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     pub(crate) fn partner_chat_record(&self, chat: &Chat, my_user_id: &str) -> ChatRecord {
-        self.bot_partners().chat_record(chat, my_user_id)
+        let mut record = self.bot_partners().chat_record(chat, my_user_id);
+        self.name_departed_partners(std::slice::from_ref(chat), std::slice::from_mut(&mut record), my_user_id);
+        record
+    }
+
+    /// Graph drops a departed person from the members; Teams keeps their name from the chat history.
+    pub(crate) fn name_departed_partners(
+        &self,
+        chats: &[Chat],
+        records: &mut [ChatRecord],
+        my_user_id: &str,
+    ) {
+        let partner_ids: HashMap<&str, &str> = chats
+            .iter()
+            .filter_map(|chat| Some((chat.id.as_str(), chat.memberless_partner_id(my_user_id)?)))
+            .collect();
+        let departed: Vec<(usize, String)> = records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| record.title == ALONE_TITLE)
+            .filter_map(|(index, record)| {
+                Some((index, (*partner_ids.get(record.id.as_str())?).to_owned()))
+            })
+            .collect();
+        if departed.is_empty() {
+            return;
+        }
+        let partner_ids: Vec<String> = departed.iter().map(|(_, partner_id)| partner_id.clone()).collect();
+        let names = match self.store.display_names(&partner_ids) {
+            Ok(names) => names,
+            Err(error) => {
+                self.report(format!("cannot name departed chat partners: {error}"));
+                return;
+            }
+        };
+        for (index, partner_id) in departed {
+            let name = names
+                .get(&partner_id)
+                .map_or(UNKNOWN_USER_NAME, String::as_str)
+                .to_owned();
+            records[index].member_summary = name.clone();
+            records[index].title = name;
+        }
     }
 
     pub(crate) async fn fetch_bot_icons(&self, bot_mris: &[String]) -> Result<Vec<String>> {
