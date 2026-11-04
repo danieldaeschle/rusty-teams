@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, MessageImportance, SidebarTeam,
-    Store, TeamRecord,
+    Store,
 };
 use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
 
@@ -37,9 +37,9 @@ use crate::notice::truncated;
 use crate::sidebar_model::{
     AvatarSpec, ChannelOrderInput, ChatItem, DELETED_CHAT_PREVIEW, EMPTY_FOLDER_HINT, MentionBadge,
     NameStyle, NameWeight, Preview, Section, SectionInput, SectionKind, Step, build_sections,
-    channel_badge, channel_name_style, channel_shown, older_chats_trigger_resets, step_id,
-    team_badge, team_channel_rows, team_hoisted, team_name_style, visible_channel_ids,
-    wants_older_chats,
+    channel_badge, channel_name_style, channel_shown, channel_shows_unread,
+    older_chats_trigger_resets, step_id, team_badge, team_channel_rows, team_hoisted,
+    team_name_style, visible_channel_ids, wants_older_chats,
 };
 use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
@@ -1419,13 +1419,14 @@ impl SidebarView {
     fn channel_row(
         &self,
         channel_id: &str,
-        team: &TeamRecord,
+        entry: &SidebarTeam,
         channel: &ChannelRecord,
         selected: bool,
-        notifications: ChannelNotifications,
-        badge: Option<MentionBadge>,
     ) -> AnyElement {
-        let unread = channel.unread;
+        let team = &entry.team;
+        let unread = channel_shows_unread(entry, channel);
+        let notifications = entry.channel_notifications(channel_id);
+        let badge = channel_badge(entry, channel_id);
         let name_style = channel_name_style(unread, true, selected);
         let state = self.state.clone();
         let menu_state = self.state.clone();
@@ -1600,7 +1601,7 @@ impl SidebarView {
                 channel,
                 is_selected(channel),
                 channel_name_style(
-                    channel.unread,
+                    channel_shows_unread(entry, channel),
                     channel_shown(entry, &channel.id),
                     is_selected(channel),
                 ),
@@ -1628,7 +1629,7 @@ impl SidebarView {
             list = list.child(self.team_channel_row(
                 channel,
                 false,
-                channel_name_style(channel.unread, false, false),
+                channel_name_style(channel_shows_unread(entry, channel), false, false),
                 entry.channel_notifications(&channel.id),
                 channel_badge(entry, &channel.id),
             ));
@@ -1764,14 +1765,7 @@ impl SidebarView {
             list = list.child(self.plain_header(PINNED_LABEL));
             for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
-                list = list.child(self.channel_row(
-                    &channel.id,
-                    &entry.team,
-                    channel,
-                    is_selected,
-                    entry.channel_notifications(&channel.id),
-                    channel_badge(entry, &channel.id),
-                ));
+                list = list.child(self.channel_row(&channel.id, entry, channel, is_selected));
             }
         }
         list = list.child(self.plain_header(TEAMS_LABEL));
