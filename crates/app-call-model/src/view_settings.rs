@@ -3,6 +3,7 @@ use super::caption_style::{CaptionPosition, CaptionSize};
 const LAYOUT_META_KEY: &str = "call_layout";
 const HIDE_NO_VIDEO_META_KEY: &str = "call_hide_no_video";
 const CHAT_BUBBLES_META_KEY: &str = "call_chat_bubbles";
+const HIDE_TIMER_META_KEY: &str = "call_hide_timer";
 const CAPTION_SIZE_META_KEY: &str = "call_caption_size";
 const CAPTION_POSITION_META_KEY: &str = "call_caption_position";
 
@@ -47,6 +48,7 @@ pub struct ViewSettings {
     pub hide_no_video: bool,
     pub chat_bubbles: bool,
     pub hide_me: bool,
+    pub hide_timer: bool,
     pub caption_size: CaptionSize,
     pub caption_position: CaptionPosition,
 }
@@ -59,6 +61,7 @@ impl Default for ViewSettings {
             hide_no_video: false,
             chat_bubbles: true,
             hide_me: false,
+            hide_timer: false,
             caption_size: CaptionSize::Medium,
             caption_position: CaptionPosition::Bottom,
         }
@@ -81,6 +84,7 @@ impl ViewSettings {
             layout,
             hide_no_video: flag(HIDE_NO_VIDEO_META_KEY, false),
             chat_bubbles: flag(CHAT_BUBBLES_META_KEY, true),
+            hide_timer: flag(HIDE_TIMER_META_KEY, false),
             caption_size: store
                 .meta(CAPTION_SIZE_META_KEY)
                 .ok()
@@ -104,6 +108,10 @@ impl ViewSettings {
         let _ = store.set_meta(
             CHAT_BUBBLES_META_KEY,
             if self.chat_bubbles { "1" } else { "0" },
+        );
+        let _ = store.set_meta(
+            HIDE_TIMER_META_KEY,
+            if self.hide_timer { "1" } else { "0" },
         );
         let _ = store.set_meta(CAPTION_SIZE_META_KEY, self.caption_size.meta());
         let _ = store.set_meta(CAPTION_POSITION_META_KEY, self.caption_position.meta());
@@ -129,6 +137,7 @@ mod tests {
         assert!(settings.chat_bubbles);
         assert!(!settings.hide_no_video);
         assert!(!settings.hide_me);
+        assert!(!settings.hide_timer);
         assert_eq!(settings.caption_size, CaptionSize::Medium);
         assert_eq!(settings.caption_position, CaptionPosition::Bottom);
     }
@@ -141,6 +150,7 @@ mod tests {
         settings.hide_no_video = true;
         settings.chat_bubbles = false;
         settings.hide_me = true;
+        settings.hide_timer = true;
         settings.caption_size = CaptionSize::Large;
         settings.caption_position = CaptionPosition::Top;
         settings.save(&store);
@@ -149,6 +159,7 @@ mod tests {
         assert!(loaded.hide_no_video);
         assert!(!loaded.chat_bubbles);
         assert!(!loaded.hide_me);
+        assert!(loaded.hide_timer);
         assert_eq!(loaded.caption_size, CaptionSize::Large);
         assert_eq!(loaded.caption_position, CaptionPosition::Top);
     }

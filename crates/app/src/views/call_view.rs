@@ -173,6 +173,8 @@ pub fn status_line(model: &CallModel, now: Instant) -> (String, Hsla) {
         (model.connecting_text().to_owned(), theme::text_muted())
     } else if model.is_reconnecting() {
         ("Reconnecting...".to_owned(), theme::amber())
+    } else if model.view.hide_timer {
+        (String::new(), theme::text_muted())
     } else {
         (model.timer_text(now), theme::text_muted())
     }
