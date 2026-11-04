@@ -1249,6 +1249,11 @@ impl ConversationView {
             .update(cx, |composer, cx| composer.focus(window, cx));
     }
 
+    pub fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |composer, cx| composer.focus(window, cx));
+    }
+
     pub fn reply_to_latest_from_others(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let key = self
             .rows

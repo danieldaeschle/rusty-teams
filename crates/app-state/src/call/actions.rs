@@ -926,6 +926,18 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn toggle_call_background_blur(&mut self, cx: &mut Context<Self>) {
+        if self.call.is_none() {
+            return;
+        }
+        let pick = if self.call_background == BackgroundPick::Blur {
+            BackgroundPick::None
+        } else {
+            BackgroundPick::Blur
+        };
+        self.set_call_background(pick, cx);
+    }
+
     pub(super) fn send_background_command(&mut self, cx: &mut Context<Self>) {
         let pick = self.call_background.clone();
         if let Some(choice) = self.call_backgrounds.choice_for(&pick) {
@@ -1172,9 +1184,9 @@ impl AppState {
         }
     }
 
-    pub fn accept_ringing_call(&mut self, cx: &mut Context<Self>) {
+    pub fn accept_ringing_call(&mut self, mode: AcceptMode, cx: &mut Context<Self>) {
         if let Some(ring_id) = self.rings.first_ringing_id() {
-            self.accept_ring(ring_id, AcceptMode::Audio, cx);
+            self.accept_ring(ring_id, mode, cx);
         }
     }
 

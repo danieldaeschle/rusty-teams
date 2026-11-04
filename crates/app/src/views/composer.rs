@@ -38,8 +38,8 @@ mod schedule;
 mod table;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLink,
-    InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
+    COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLastMessage,
+    EditLink, InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
     InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend,
     SetHeading1, SetHeading2, SetHeading3, SetParagraph, ToggleBold, ToggleCode, ToggleCodeBlock,
     ToggleFormatBar, ToggleItalic, ToggleQuote, ToggleStrike, ToggleSubscript, ToggleSuperscript,
@@ -3110,6 +3110,9 @@ impl Render for Composer {
             .on_action(cx.listener(|this, _: &ScheduleSend, _, cx| this.open_schedule_picker(cx)))
             .on_action(cx.listener(|this, _: &ToggleFormatBar, window, cx| {
                 this.toggle_format_bar(window, cx)
+            }))
+            .on_action(cx.listener(|_, _: &EditLastMessage, _, cx| {
+                cx.emit(ComposerEvent::EditLast)
             }))
             .on_action(cx.listener(|this, _: &InsertTableLine, window, cx| {
                 this.open_table_menu(TableLineMenu::Insert, window, cx);

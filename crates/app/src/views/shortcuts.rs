@@ -2,9 +2,10 @@ use gpui_kit::component::input::Enter;
 use gpui_kit::*;
 
 use super::actions::{
-    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, InsertTableLine, NewChat, OpenSwitcher,
-    PastePlainText, RemoveTableLine, ReplyToHovered, ScheduleSend, ToggleBold, ToggleCallMute,
-    ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript, ToggleSuperscript,
+    COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLastMessage, EditLink, InsertTableLine, NewChat,
+    OpenSwitcher, PastePlainText, RemoveTableLine, ReplyToHovered, ScheduleSend, ToggleBold,
+    ToggleCallMute, ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript,
+    ToggleSuperscript,
     ToggleUnderline, SetParagraph, SetHeading1, SetHeading2, SetHeading3, ToggleCodeBlock,
     ToggleQuote,
 };
@@ -41,6 +42,18 @@ actions!(
         PreviousConversation,
         NextConversation,
         JumpToLastReadOrNewest,
+        GoToComposeBox,
+        ReplyToLastMessage,
+        PreviousUnreadConversation,
+        NextUnreadConversation,
+        SetPresenceAvailable,
+        SetPresenceBusy,
+        SetPresenceDoNotDisturb,
+        SetPresenceBeRightBack,
+        SetPresenceAway,
+        AcceptAudioCall,
+        ToggleBackgroundBlur,
+        ToggleLiveCaptions,
         AcceptCall,
         DeclineCall,
         JoinMeetingFromToast,
@@ -130,6 +143,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(General, OutsideComposer, "Zoom in", "ctrl-=", Some("cmd-="), ZoomIn),
     shortcut!(General, GlobalOverTextFields, "Zoom out", "ctrl--", Some("cmd--"), ZoomOut),
     shortcut!(General, GlobalOverTextFields, "Reset zoom level", "ctrl-0", Some("cmd-0"), ZoomReset),
+    shortcut!(General, Global, "Set presence status to Available", "alt-shift-q", None, SetPresenceAvailable),
+    shortcut!(General, Global, "Set presence status to Busy", "alt-shift-y", None, SetPresenceBusy),
+    shortcut!(General, Global, "Set presence status to Do Not Disturb", "alt-shift-u", None, SetPresenceDoNotDisturb),
+    shortcut!(General, Global, "Set presence status to Be Right Back", "alt-shift-k", None, SetPresenceBeRightBack),
+    shortcut!(General, Global, "Set presence status to Away", "alt-shift-w", None, SetPresenceAway),
     shortcut!(Navigation, GlobalOverTextFields, "Open Activity", "ctrl-1", Some("cmd-1"), OpenActivity),
     shortcut!(Navigation, GlobalOverTextFields, "Show Chats", "ctrl-2", Some("cmd-2"), OpenChatsTab),
     shortcut!(Navigation, GlobalOverTextFields, "Show Channels", "ctrl-3", Some("cmd-3"), OpenChannelsTab),
@@ -138,6 +156,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Navigation, GlobalOverTextFields, "Open Agents", "ctrl-6", Some("cmd-6"), OpenAgents),
     shortcut!(Navigation, GlobalOverTextFields, "Previous chat or channel", "alt-up", None, PreviousConversation),
     shortcut!(Navigation, GlobalOverTextFields, "Next chat or channel", "alt-down", None, NextConversation),
+    shortcut!(Navigation, GlobalOverTextFields, "Go to previous unread conversation", "ctrl-alt-up", None, PreviousUnreadConversation),
+    shortcut!(Navigation, GlobalOverTextFields, "Go to next unread conversation", "ctrl-alt-down", None, NextUnreadConversation),
+    shortcut!(Navigation, GlobalOverTextFields, "Go to a specific chat or channel", "ctrl-g", Some("cmd-g"), OpenSwitcher),
+    shortcut!(Navigation, Global, "Go to compose box", "ctrl-r", Some("cmd-r"), GoToComposeBox),
     shortcut!(Navigation, GlobalOverTextFields, "Open filter", "ctrl-shift-f", Some("cmd-shift-f"), OpenChatFilter),
     shortcut!(Navigation, OutsideTextFields, "Filter chat list by unread chats only", "ctrl-alt-u", None, FilterUnreadChats),
     shortcut!(Navigation, OutsideTextFields, "Filter chat list by chats only", "ctrl-alt-c", None, FilterNonMeetingChats),
@@ -146,6 +168,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Navigation, OutsideTextFields, "Remove all filters in the chat list", "ctrl-alt-z", None, ClearChatFilters),
     shortcut!(Composer, GlobalOverTextFields, "Find in chat", "ctrl-f", Some("cmd-f"), FindInChat),
     shortcut!(Composer, Global, "Reply to the message under the pointer", "alt-r", None, ReplyToHovered),
+    shortcut!(Composer, Global, "Reply to the last message", "alt-shift-r", None, ReplyToLastMessage),
+    shortcut!(Composer, Composer, "Edit last message", "ctrl-up", Some("cmd-up"), EditLastMessage),
     shortcut!(Composer, Global, "Jump to last read or newest message", "ctrl-j", Some("cmd-j"), JumpToLastReadOrNewest),
     shortcut!(Composer, Composer, "Bold", "ctrl-b", Some("cmd-b"), ToggleBold),
     shortcut!(Composer, Composer, "Italic", "ctrl-i", Some("cmd-i"), ToggleItalic),
@@ -167,14 +191,17 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Composer, Composer, "Heading 2", "ctrl-alt-2", None, SetHeading2),
     shortcut!(Composer, Composer, "Heading 3", "ctrl-alt-3", None, SetHeading3),
     shortcut!(Composer, Composer, "Paragraph", "ctrl-alt-p", None, SetParagraph),
-    shortcut!(Calls, GlobalOverTextFields, "Accept incoming call", "ctrl-shift-a", Some("cmd-shift-a"), AcceptCall),
-    shortcut!(Calls, GlobalOverTextFields, "Decline incoming call", "ctrl-shift-d", Some("cmd-shift-d"), DeclineCall),
+    shortcut!(Calls, GlobalOverTextFields, "Accept video call", "ctrl-shift-a", Some("cmd-shift-a"), AcceptCall),
+    shortcut!(Calls, GlobalOverTextFields, "Accept audio call", "ctrl-shift-s", Some("cmd-shift-s"), AcceptAudioCall),
+    shortcut!(Calls, GlobalOverTextFields, "Decline call", "ctrl-shift-d", Some("cmd-shift-d"), DeclineCall),
     shortcut!(Calls, GlobalOverTextFields, "Join the meeting from its reminder", "ctrl-shift-j", Some("cmd-shift-j"), JoinMeetingFromToast),
     shortcut!(Calls, GlobalOverTextFields, "Hang up or leave", "ctrl-shift-h", Some("cmd-shift-h"), HangUpCall),
     shortcut!(Calls, GlobalOverTextFields, "Mute or unmute", "ctrl-shift-m", None, ToggleCallMute),
     shortcut!(Calls, GlobalOverTextFields, "Turn camera on or off", "ctrl-shift-o", Some("cmd-shift-o"), ToggleCallCamera),
     shortcut!(Calls, GlobalOverTextFields, "Open the share menu or stop sharing", "ctrl-shift-e", Some("cmd-shift-e"), ToggleCallShare),
     shortcut!(Calls, GlobalOverTextFields, "Raise or lower hand", "ctrl-shift-k", Some("cmd-shift-k"), ToggleCallHand),
+    shortcut!(Calls, GlobalOverTextFields, "Toggle background blur", "ctrl-shift-p", Some("cmd-shift-p"), ToggleBackgroundBlur),
+    shortcut!(Calls, GlobalOverTextFields, "Toggle live captions", "alt-shift-c", None, ToggleLiveCaptions),
     shortcut!(Calls, GlobalOverTextFields, "Open the lobby list", "ctrl-shift-y", Some("cmd-shift-y"), OpenLobbyList),
     shortcut!(Calls, GlobalOverTextFields, "Start an audio call in this chat", "alt-shift-a", None, StartAudioCall),
     shortcut!(Calls, GlobalOverTextFields, "Start a video call in this chat", "alt-shift-v", None, StartVideoCall),
@@ -376,6 +403,43 @@ mod tests {
         for shortcut in SHORTCUTS {
             let scope = matches!(shortcut.scope, Scope::Composer);
             assert!(seen.insert((shortcut.keys, scope)), "{}", shortcut.keys);
+        }
+    }
+
+    #[gpui_kit::test]
+    fn teams_message_presence_and_call_keys_resolve(cx: &mut TestAppContext) {
+        registered(cx);
+        let action_of = |label: &str| {
+            action_name(
+                SHORTCUTS
+                    .iter()
+                    .find(|shortcut| shortcut.label == label)
+                    .unwrap(),
+            )
+        };
+        let typing = ["AppShell", "Composer", "Input"];
+        for (keys, label) in [
+            ("ctrl-r", "Go to compose box"),
+            ("alt-shift-r", "Reply to the last message"),
+            ("ctrl-up", "Edit last message"),
+            ("ctrl-alt-up", "Go to previous unread conversation"),
+            ("ctrl-alt-down", "Go to next unread conversation"),
+            ("ctrl-g", "Go to a specific chat or channel"),
+            ("alt-shift-q", "Set presence status to Available"),
+            ("alt-shift-y", "Set presence status to Busy"),
+            ("alt-shift-u", "Set presence status to Do Not Disturb"),
+            ("alt-shift-k", "Set presence status to Be Right Back"),
+            ("alt-shift-w", "Set presence status to Away"),
+            ("ctrl-shift-a", "Accept video call"),
+            ("ctrl-shift-s", "Accept audio call"),
+            ("ctrl-shift-p", "Toggle background blur"),
+            ("alt-shift-c", "Toggle live captions"),
+        ] {
+            assert_eq!(
+                bound_action(cx, keys, &typing),
+                Some(action_of(label)),
+                "{keys}"
+            );
         }
     }
 

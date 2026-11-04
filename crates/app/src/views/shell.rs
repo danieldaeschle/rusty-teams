@@ -1,3 +1,5 @@
+mod team_keys;
+
 use std::sync::Arc;
 
 use gpui_kit::component::{elevation, h_flex, v_flex};
@@ -20,7 +22,7 @@ use super::rail::RailView;
 use crate::chat_filter::ChatFilterPill;
 use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
-    AcceptCall, ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
+    ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
     FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
     OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
@@ -919,10 +921,11 @@ impl Render for AppShell {
             .flatten(),
             cx.listener(|this, _, window, cx| this.toggle_switcher("", window, cx)),
         );
-        div()
+        let shell = div()
             .id("app-shell")
             .key_context("AppShell")
-            .track_focus(&self.focus_handle)
+            .track_focus(&self.focus_handle);
+        self.team_keys(shell, cx)
             .on_action(cx.listener(|this, _: &OpenSwitcher, window, cx| {
                 this.toggle_switcher("", window, cx);
             }))
@@ -1026,10 +1029,6 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.select_adjacent(Step::Next, cx));
-            }))
-            .on_action(cx.listener(|this, _: &AcceptCall, _, cx| {
-                this.state
-                    .update(cx, |state, cx| state.accept_ringing_call(cx));
             }))
             .on_action(cx.listener(|this, _: &DeclineCall, _, cx| {
                 this.state

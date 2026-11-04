@@ -521,6 +521,27 @@ pub fn step_id(ids: &[&str], current: Option<&str>, step: Step) -> Option<String
     ids.get(target).map(|id| (*id).to_owned())
 }
 
+pub fn step_unread_id(
+    sections: &[Section],
+    current: Option<&str>,
+    step: Step,
+) -> Option<String> {
+    let items: Vec<&ChatItem> = sections
+        .iter()
+        .filter(|section| !section.collapsed)
+        .flat_map(|section| section.items.iter())
+        .collect();
+    let position = current.and_then(|current| items.iter().position(|item| item.id == current));
+    let unread = |item: &&&ChatItem| item.unread.is_unread();
+    let found = match (position, step) {
+        (Some(position), Step::Next) => items[position + 1..].iter().find(unread),
+        (Some(position), Step::Previous) => items[..position].iter().rev().find(unread),
+        (None, Step::Next) => items.iter().find(unread),
+        (None, Step::Previous) => items.iter().rev().find(unread),
+    };
+    found.map(|item| item.id.clone())
+}
+
 pub struct ChannelOrderInput<'a> {
     pub teams: &'a [SidebarTeam],
     pub pinned_ids: &'a [String],
@@ -826,6 +847,37 @@ mod tests {
             Some("c".to_owned())
         );
         assert_eq!(step_id(&[], None, Step::Next), None);
+    }
+
+    #[test]
+    fn unread_stepping_skips_read_chats_in_both_directions() {
+        let directory = Directory::default();
+        let collapsed = HashSet::new();
+        let chats = [
+            chat("a", "group", true),
+            chat("b", "group", false),
+            chat("c", "group", true),
+            chat("d", "group", false),
+        ];
+        let sections = build_sections(&input(&chats, &directory, &collapsed));
+        let unread: Vec<&str> = visible_chat_ids(&sections)
+            .into_iter()
+            .filter(|id| *id == "a" || *id == "c")
+            .collect();
+        let (first_unread, last_unread) = (unread[0], unread[1]);
+        assert_eq!(
+            step_unread_id(&sections, None, Step::Next).as_deref(),
+            Some(first_unread)
+        );
+        assert_eq!(step_unread_id(&sections, Some(last_unread), Step::Next), None);
+        assert_eq!(
+            step_unread_id(&sections, Some(last_unread), Step::Previous).as_deref(),
+            Some(first_unread)
+        );
+        assert_eq!(
+            step_unread_id(&sections, None, Step::Previous).as_deref(),
+            Some(last_unread)
+        );
     }
 
     #[test]
