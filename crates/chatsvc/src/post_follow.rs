@@ -111,17 +111,18 @@ impl<T: MessageTransport> Messages<T> {
         channel_id: &str,
         root_id: &str,
         followed: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let answer = self
             .transport
             .send(self.post_follow_request(user_id, channel_id, root_id, followed))
             .await?;
         ensure_success(&answer)?;
-        let answer = self
+        let annotation = self
             .transport
             .send(self.post_follow_annotation_request(channel_id, root_id, followed))
-            .await?;
-        ensure_success(&answer)
+            .await
+            .and_then(|answer| ensure_success(&answer));
+        Ok(annotation.err().map(|error| error.to_string()))
     }
 
     pub async fn post_follow_states(
@@ -151,16 +152,18 @@ mod tests {
     use super::*;
 
     struct Canned {
-        status: u16,
+        statuses: Vec<u16>,
         body: Value,
         requests: Mutex<Vec<Request>>,
     }
 
     impl MessageTransport for Canned {
         async fn send(&self, request: Request) -> Result<ApiResponse> {
-            self.requests.lock().unwrap().push(request);
+            let mut requests = self.requests.lock().unwrap();
+            let status = self.statuses[requests.len().min(self.statuses.len() - 1)];
+            requests.push(request);
             Ok(ApiResponse {
-                status: self.status,
+                status,
                 body: self.body.clone(),
                 retry_after: None,
             })
@@ -168,9 +171,13 @@ mod tests {
     }
 
     fn canned(status: u16, body: Value) -> Messages<Canned> {
+        canned_sequence(vec![status], body)
+    }
+
+    fn canned_sequence(statuses: Vec<u16>, body: Value) -> Messages<Canned> {
         Messages::with_transport(
             Canned {
-                status,
+                statuses,
                 body,
                 requests: Mutex::new(Vec::new()),
             },
@@ -227,6 +234,17 @@ mod tests {
                 .is_err()
         );
         assert_eq!(messages.transport.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_annotation_still_counts_as_followed() {
+        let messages = canned_sequence(vec![200, 500], json!({}));
+        let annotation_failure = messages
+            .set_post_followed("a1", "19:c", "1", true)
+            .await
+            .unwrap();
+        assert!(annotation_failure.is_some());
+        assert_eq!(messages.transport.requests.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]

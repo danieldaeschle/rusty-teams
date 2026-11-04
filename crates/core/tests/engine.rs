@@ -910,9 +910,9 @@ impl Remote for Handle {
         channel_id: &str,
         root_id: &str,
         followed: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         self.record(format!("follow {user_id} {channel_id} {root_id} {followed}"));
-        Ok(())
+        Ok(None)
     }
 
     async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {

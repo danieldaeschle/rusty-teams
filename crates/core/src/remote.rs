@@ -351,7 +351,7 @@ pub trait Remote {
         _channel_id: &str,
         _root_id: &str,
         _followed: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         Err(Error::Unsupported("following posts"))
     }
 
@@ -1170,7 +1170,7 @@ impl Remote for Graph {
         channel_id: &str,
         root_id: &str,
         followed: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         Ok(Messages::new(self.session())
             .set_post_followed(user_id, channel_id, root_id, followed)
             .await?)

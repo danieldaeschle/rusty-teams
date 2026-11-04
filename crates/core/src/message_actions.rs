@@ -70,7 +70,7 @@ impl<R: Remote> SyncEngine<R> {
         channel_id: &str,
         root_id: &str,
         followed: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let my_user_id = self.my_user_id().await?;
         self.remote
             .set_post_followed(&my_user_id, channel_id, root_id, followed)

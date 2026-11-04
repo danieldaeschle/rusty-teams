@@ -129,7 +129,13 @@ impl AppState {
         let (channel, root) = (channel_id.to_owned(), root_id.to_owned());
         self.run_channel_action(
             follow_failure(followed),
-            async move { engine.set_post_followed(&channel, &root, followed).await },
+            async move {
+                let annotation_failure = engine.set_post_followed(&channel, &root, followed).await?;
+                if let Some(error) = annotation_failure {
+                    log::warn!("post follow annotation not written: {error}");
+                }
+                Ok(())
+            },
             move |state, cx| {
                 match previous {
                     Some(previous) => state.post_follows.states.insert(key, previous),
