@@ -45,6 +45,7 @@ pub mod scheduled;
 pub mod scheduled_rows;
 pub mod section_actions;
 pub mod settings_section;
+pub mod share_outlook;
 pub mod sidebar_model;
 pub mod sound_actions;
 pub mod stored_outgoing;

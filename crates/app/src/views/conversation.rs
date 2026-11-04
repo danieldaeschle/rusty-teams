@@ -3111,6 +3111,7 @@ impl ConversationView {
             copy: action(|this, key, _, cx| this.copy_text(key, cx)),
             translate: Some(action(|this, key, _, cx| this.translate_message(key, cx))),
             translate_label,
+            share_to_outlook: Some(action(|this, key, _, cx| this.share_to_outlook(key, cx))),
             save: Some(action(|this, key, _, cx| this.toggle_saved(key, cx))),
             saved,
             toggle_pinned: pinnable
