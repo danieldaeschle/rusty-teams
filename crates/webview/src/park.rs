@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use session::App;
 
+const MAX_COMMAND_WAITS: usize = 5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParkDecision {
     Park,
@@ -14,6 +16,7 @@ pub(crate) enum ParkDecision {
 pub(crate) struct ParkGate {
     holds: HashMap<App, usize>,
     in_flight: HashMap<App, usize>,
+    command_waits: HashMap<App, usize>,
 }
 
 impl ParkGate {
@@ -37,13 +40,18 @@ impl ParkGate {
         self.in_flight.get(&app).copied().unwrap_or(0)
     }
 
-    pub(crate) fn decide(&self, app: App) -> ParkDecision {
-        let held = self.holds.get(&app).copied().unwrap_or(0) > 0;
-        if held || self.in_flight(app) > 0 {
-            ParkDecision::Wait
-        } else {
-            ParkDecision::Park
+    /// A protocol call whose page promise never settles stays in flight; after a few waits it no longer blocks the park.
+    pub(crate) fn decide(&mut self, app: App) -> ParkDecision {
+        if self.holds.get(&app).copied().unwrap_or(0) > 0 {
+            return ParkDecision::Wait;
         }
+        let waits = self.command_waits.entry(app).or_default();
+        if self.in_flight.get(&app).copied().unwrap_or(0) > 0 && *waits < MAX_COMMAND_WAITS {
+            *waits += 1;
+            return ParkDecision::Wait;
+        }
+        *waits = 0;
+        ParkDecision::Park
     }
 }
 
@@ -68,6 +76,16 @@ mod tests {
         assert_eq!(gate.decide(App::Teams), ParkDecision::Wait);
         assert_eq!(gate.decide(App::Outlook), ParkDecision::Park);
         gate.command_finished(App::Teams);
+        assert_eq!(gate.decide(App::Teams), ParkDecision::Park);
+    }
+
+    #[test]
+    fn a_command_that_never_answers_stops_blocking_after_a_few_waits() {
+        let mut gate = ParkGate::default();
+        gate.command_started(App::Teams);
+        for _ in 0..MAX_COMMAND_WAITS {
+            assert_eq!(gate.decide(App::Teams), ParkDecision::Wait);
+        }
         assert_eq!(gate.decide(App::Teams), ParkDecision::Park);
     }
 

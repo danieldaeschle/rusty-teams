@@ -615,7 +615,7 @@ extern "system" fn window_procedure(
                 let _ = KillTimer(Some(window), PARK_TIMER);
             }
             if let Some(app) = app_of(&shared, window) {
-                let decision = shared.park_gate.borrow().decide(app);
+                let decision = shared.park_gate.borrow_mut().decide(app);
                 match decision {
                     ParkDecision::Park => park(&shared, app),
                     ParkDecision::Wait => unsafe {
