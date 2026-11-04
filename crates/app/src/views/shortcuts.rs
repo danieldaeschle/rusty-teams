@@ -12,7 +12,7 @@ use super::actions::{
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
 const OUTSIDE_COMPOSER_CONTEXT: &str = "!Composer";
-const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input";
+const OUTSIDE_TEXT_FIELD_CONTEXT: &str = "!Input && !Composer";
 const ALTERNATE_KEYS: &[(&str, &str)] = &[
     ("Zoom in on shared content", "alt-shift-+"),
     ("Insert column or row", "ctrl-alt-+"),
