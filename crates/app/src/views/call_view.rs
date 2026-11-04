@@ -97,6 +97,7 @@ struct TileExtras {
     reaction: Option<(Reaction, u64)>,
     spotlight: bool,
     pinned: bool,
+    fitted: bool,
 }
 
 fn hand_badge(position: usize, own: bool) -> Div {
@@ -253,7 +254,11 @@ fn video_tile(
         .child(
             img(ImageSource::Render(image))
                 .size_full()
-                .object_fit(ObjectFit::Cover)
+                .object_fit(if extras.fitted {
+                    ObjectFit::Contain
+                } else {
+                    ObjectFit::Cover
+                })
                 .rounded(px(TILE_RADIUS)),
         )
         .child(
@@ -992,6 +997,7 @@ pub(super) fn plain_person_tile(
             .map(|chip| (chip.reaction.clone(), chip.serial)),
         spotlight: remote.spotlight.is_some(),
         pinned: model.is_pinned(&remote.mri),
+        fitted: model.is_fitted(&remote.mri),
     };
     person_tile_body(state, model, remote, size, now, &extras)
 }
@@ -1081,6 +1087,7 @@ pub(super) fn plain_own_tile(
         reaction: model.own_chip(now).map(|chip| (chip.reaction.clone(), chip.serial)),
         spotlight: model.own_spotlight.is_some(),
         pinned: model.is_pinned(own_mri),
+        fitted: false,
     };
     own_tile_body(state, model, size, now, &extras)
 }

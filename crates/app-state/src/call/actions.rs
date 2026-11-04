@@ -897,6 +897,13 @@ impl AppState {
         }
     }
 
+    pub fn toggle_call_fit(&mut self, mri: &str, cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.model.toggle_fit(mri);
+            cx.notify();
+        }
+    }
+
     pub fn toggle_call_captions(&mut self, _cx: &mut Context<Self>) {
         let Some(call) = self
             .call
