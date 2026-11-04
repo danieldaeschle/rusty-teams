@@ -106,7 +106,7 @@ pub use card_width::{TargetWidth, WidthClass};
 pub use chatsvc::substrate_search;
 pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
-    ForwardResult, Gif, PinnedMessage, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
+    ForwardResult, Gif, PinnedMessage, PostFollowState, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
     WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
 };
 pub use chat_settings_sync::{store_chat_settings, stored_chat_settings};

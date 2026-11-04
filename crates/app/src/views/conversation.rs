@@ -2574,6 +2574,9 @@ impl ConversationView {
     }
 
     fn set_hover(&mut self, slot: HoverSlot, key: &str, hovered: bool, cx: &mut Context<Self>) {
+        if hovered && matches!(slot, HoverSlot::Row) {
+            self.request_post_follow(key, cx);
+        }
         let target = match slot {
             HoverSlot::Row => &mut self.hovered_message,
             HoverSlot::Toolbar => &mut self.toolbar_hovered,
@@ -3145,6 +3148,7 @@ impl ConversationView {
                     .is_some_and(|record| record.reply_to_id.is_none())
             });
         let (delegate, manage_agents) = self.delegate_entries(key, cx);
+        let post_followed = self.post_follow(key, cx);
         MessageMenu {
             key: key.to_owned(),
             react,
@@ -3164,6 +3168,9 @@ impl ConversationView {
             toggle_pinned: pinnable
                 .then(|| action(|this, key, window, cx| this.toggle_pinned(key, window, cx))),
             pinned,
+            toggle_follow: post_followed
+                .map(|_| action(|this, key, _, cx| this.toggle_post_follow(key, cx))),
+            followed: post_followed.unwrap_or_default(),
             edit: own.then(|| action(|this, key, window, cx| this.begin_edit(key, window, cx))),
             delete: own.then(|| action(|this, key, _, cx| this.delete(key, cx))),
             mark_unread: (in_chat && !own)

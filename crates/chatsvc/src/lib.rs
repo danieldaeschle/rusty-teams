@@ -21,6 +21,7 @@ mod mask;
 pub mod members;
 pub mod messages;
 pub mod pins;
+pub mod post_follow;
 pub mod presence;
 pub mod reactions;
 pub mod read_horizon;
@@ -77,6 +78,7 @@ pub use members::{
     TopicProblem, topic_problem,
 };
 pub use messages::{ConversationRef, Messages};
+pub use post_follow::{PostFollowState, parse_post_follow_states};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,
     PinnedMessage, Pins, TeamLayout,

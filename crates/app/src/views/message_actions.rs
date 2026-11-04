@@ -15,6 +15,7 @@ use gpui_kit::*;
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::{icon, symbol};
+use crate::post_follow::follow_label;
 use crate::forward_selection::{FORWARD_LABEL, MULTIPLE_MESSAGES_LABEL, THIS_MESSAGE_LABEL};
 use crate::rows::reaction_glyph;
 use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
@@ -53,6 +54,8 @@ pub struct MessageMenu {
     pub saved: bool,
     pub toggle_pinned: Option<Action>,
     pub pinned: bool,
+    pub toggle_follow: Option<Action>,
+    pub followed: bool,
     pub edit: Option<Action>,
     pub delete: Option<Action>,
     pub mark_unread: Option<Action>,
@@ -197,6 +200,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         translate,
         save,
         toggle_pinned,
+        toggle_follow,
         edit,
         delete,
         mark_unread,
@@ -211,6 +215,7 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         menu.translate.clone(),
         menu.save.clone(),
         menu.toggle_pinned.clone(),
+        menu.toggle_follow.clone(),
         menu.edit.clone(),
         menu.delete.clone(),
         menu.mark_unread.clone(),
@@ -218,7 +223,8 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         menu.share_to_outlook.clone(),
         menu.pin.clone(),
     );
-    let (saved, pinned, translate_label) = (menu.saved, menu.pinned, menu.translate_label);
+    let (saved, pinned, followed, translate_label) =
+        (menu.saved, menu.pinned, menu.followed, menu.translate_label);
     Button::new(element_id("message-more", &menu.key))
         .child(icon(IconName::Ellipsis, BAR_ICON, theme::text_soft()))
         .custom(bar_variant(cx))
@@ -289,6 +295,13 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
                     item("Unpin", IconName::PinOff, toggle_pinned)
                 } else {
                     item("Pin", IconName::Pin, toggle_pinned)
+                });
+            }
+            if let Some(toggle_follow) = toggle_follow.clone() {
+                popup = popup.item(if followed {
+                    item(follow_label(true), IconName::BellOff, toggle_follow)
+                } else {
+                    item(follow_label(false), IconName::Bell, toggle_follow)
                 });
             }
             if let Some(edit) = edit.clone() {

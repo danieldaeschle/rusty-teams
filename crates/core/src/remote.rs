@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
@@ -12,7 +14,7 @@ use chatsvc::{
     ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, HistoryShare,
     InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo,
     MemberHorizon, MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages,
-    PinnedMessage, Pins, PresenceLookup, PresenceService, PresenceStatus, Receipts,
+    PinnedMessage, Pins, PostFollowState, PresenceLookup, PresenceService, PresenceStatus, Receipts,
     RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, ThreadMembers,
     TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
     WorkLocationKind,
@@ -341,6 +343,24 @@ pub trait Remote {
 
     async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
         Err(Error::Unsupported("saved messages"))
+    }
+
+    async fn set_post_followed(
+        &self,
+        _user_id: &str,
+        _channel_id: &str,
+        _root_id: &str,
+        _followed: bool,
+    ) -> Result<()> {
+        Err(Error::Unsupported("following posts"))
+    }
+
+    async fn post_follow_states(
+        &self,
+        _channel_id: &str,
+        _root_ids: &[String],
+    ) -> Result<HashMap<String, PostFollowState>> {
+        Err(Error::Unsupported("post follow states"))
     }
 
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {
@@ -1142,6 +1162,28 @@ impl Remote for Graph {
 
     async fn list_saved(&self) -> Result<Vec<SavedMessage>> {
         Ok(Messages::new(self.session()).list_saved().await?)
+    }
+
+    async fn set_post_followed(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        followed: bool,
+    ) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_post_followed(user_id, channel_id, root_id, followed)
+            .await?)
+    }
+
+    async fn post_follow_states(
+        &self,
+        channel_id: &str,
+        root_ids: &[String],
+    ) -> Result<HashMap<String, PostFollowState>> {
+        Ok(Messages::new(self.session())
+            .post_follow_states(channel_id, root_ids)
+            .await?)
     }
 
     async fn list_call_logs(&self) -> Result<Vec<CallLogEntry>> {

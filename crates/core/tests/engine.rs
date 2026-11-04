@@ -904,6 +904,17 @@ impl Remote for Handle {
         Ok(())
     }
 
+    async fn set_post_followed(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        root_id: &str,
+        followed: bool,
+    ) -> Result<()> {
+        self.record(format!("follow {user_id} {channel_id} {root_id} {followed}"));
+        Ok(())
+    }
+
     async fn pin_message(&self, chat_id: &str, message_id: &str) -> Result<()> {
         self.record(format!("pin {chat_id} {message_id}"));
         Ok(())
@@ -4943,6 +4954,17 @@ async fn save_uses_the_message_id_as_root_in_chats() {
     assert_eq!(
         fake.calls().last().unwrap(),
         &format!("save {CHANNEL} 3 7 false")
+    );
+}
+
+#[tokio::test]
+async fn post_follow_writes_as_the_signed_in_user() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine.set_post_followed(CHANNEL, "3", false).await.unwrap();
+    assert_eq!(
+        fake.calls().last().unwrap(),
+        &format!("follow {ME} {CHANNEL} 3 false")
     );
 }
 
