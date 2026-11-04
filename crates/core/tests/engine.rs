@@ -5074,6 +5074,9 @@ async fn activity_feed_is_stored_and_marked_read_like_teams() {
     assert_eq!(fake.calls().last().unwrap(), "activity read 1791368000001");
     let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
     assert!(stored.is_read(&stored.items[0]));
+    engine.refresh_sidebar().await.unwrap();
+    let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
+    assert!(stored.is_read(&stored.items[0]), "a fetch from before the PUT keeps the local mark");
 
     stored_feed_unread(&fake, &engine).await;
     engine.mark_all_activity_read().await.unwrap();
@@ -5083,6 +5086,8 @@ async fn activity_feed_is_stored_and_marked_read_like_teams() {
 }
 
 async fn stored_feed_unread(fake: &Arc<Fake>, engine: &SyncEngine<Handle>) {
+    fake.activity_feed.lock().unwrap().items[0].read_flag = true;
+    engine.refresh_sidebar().await.unwrap();
     fake.activity_feed.lock().unwrap().items[0].read_flag = false;
     engine.refresh_sidebar().await.unwrap();
     let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
