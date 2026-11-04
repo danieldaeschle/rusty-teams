@@ -4,7 +4,8 @@ use super::actions::{
     COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLink, InsertTableLine, NewChat, OpenSwitcher,
     PastePlainText, RemoveTableLine, ReplyToHovered, ScheduleSend, ToggleBold, ToggleCallMute,
     ToggleCode, ToggleFormatBar, ToggleItalic, ToggleStrike, ToggleSubscript, ToggleSuperscript,
-    ToggleUnderline,
+    ToggleUnderline, SetParagraph, SetHeading1, SetHeading2, SetHeading3, ToggleCodeBlock,
+    ToggleQuote,
 };
 
 const TEXT_FIELD_CONTEXT: &str = "Input";
@@ -158,6 +159,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!(Composer, Composer, "Schedule send", "ctrl-shift-enter", None, ScheduleSend),
     shortcut!(Composer, Composer, "Insert column or row", "ctrl-alt-=", None, InsertTableLine),
     shortcut!(Composer, Composer, "Delete column, row, or table", "ctrl-alt--", None, RemoveTableLine),
+    shortcut!(Composer, Composer, "Code block", "ctrl-shift-b", None, ToggleCodeBlock),
+    shortcut!(Composer, Composer, "Quote", "ctrl-alt-4", None, ToggleQuote),
+    shortcut!(Composer, Composer, "Heading 1", "ctrl-alt-1", None, SetHeading1),
+    shortcut!(Composer, Composer, "Heading 2", "ctrl-alt-2", None, SetHeading2),
+    shortcut!(Composer, Composer, "Heading 3", "ctrl-alt-3", None, SetHeading3),
+    shortcut!(Composer, Composer, "Paragraph", "ctrl-alt-p", None, SetParagraph),
     shortcut!(Calls, GlobalOverTextFields, "Accept incoming call", "ctrl-shift-a", Some("cmd-shift-a"), AcceptCall),
     shortcut!(Calls, GlobalOverTextFields, "Decline incoming call", "ctrl-shift-d", Some("cmd-shift-d"), DeclineCall),
     shortcut!(Calls, GlobalOverTextFields, "Join the meeting from its reminder", "ctrl-shift-j", Some("cmd-shift-j"), JoinMeetingFromToast),
@@ -440,6 +447,11 @@ mod tests {
             ("ctrl-alt-=", "Insert column or row"),
             ("ctrl-alt-+", "Insert column or row"),
             ("ctrl-alt--", "Delete column, row, or table"),
+            ("ctrl-shift-b", "Code block"),
+            ("ctrl-alt-4", "Quote"),
+            ("ctrl-alt-1", "Heading 1"),
+            ("ctrl-alt-3", "Heading 3"),
+            ("ctrl-alt-p", "Paragraph"),
         ] {
             assert_eq!(
                 bound_action(cx, keys, &typing),

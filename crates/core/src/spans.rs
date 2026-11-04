@@ -61,6 +61,10 @@ pub enum Span {
         children: Vec<Span>,
     },
     BlockQuote(Vec<Span>),
+    Indent {
+        level: u8,
+        children: Vec<Span>,
+    },
 }
 
 const BLOCK_ELEMENTS: [&str; 12] = [
@@ -73,6 +77,10 @@ const REPLY_ITEMTYPE: &str = "schema.skype.com/Reply";
 const MAX_HEADING_LEVEL: u8 = 3;
 const MARK_BACKGROUND: u32 = 0xffff00;
 const MAX_CONSECUTIVE_BREAKS: usize = 2;
+const INDENTED_ELEMENTS: [&str; 8] = ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6"];
+const INDENT_STEP_PIXELS: f32 = 40.;
+const MAX_INDENT_LEVEL: u8 = 8;
+const PLAIN_LANGUAGE: &str = "plaintext";
 
 pub fn html_to_spans(html: &str) -> Vec<Span> {
     let fragment = Html::parse_fragment(html);
@@ -119,6 +127,29 @@ fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
     if SKIPPED_ELEMENTS.contains(&name) {
         return;
     }
+    match block_indent(element) {
+        Some(level) => {
+            let mut children = Vec::new();
+            convert_unindented(element, &mut children);
+            spans.push(Span::Indent { level, children });
+        }
+        None => convert_unindented(element, spans),
+    }
+}
+
+fn block_indent(element: ElementRef<'_>) -> Option<u8> {
+    let value = element.value();
+    if !INDENTED_ELEMENTS.contains(&value.name()) {
+        return None;
+    }
+    let margin = style_value(value.attr("style")?, "margin-left")?;
+    let pixels: f32 = margin.trim().strip_suffix("px")?.trim().parse().ok()?;
+    let level = (pixels / INDENT_STEP_PIXELS).round();
+    (level >= 1.).then(|| level.min(f32::from(MAX_INDENT_LEVEL)) as u8)
+}
+
+fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+    let name = element.value().name();
     match name {
         "b" | "strong" => spans.push(Span::Bold(convert_children(element))),
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => spans.push(Span::Heading {
@@ -344,9 +375,21 @@ fn code_block(element: ElementRef<'_>) -> Span {
             .find_map(language_of)
     });
     Span::CodeBlock {
-        language,
-        code: raw_text(element).trim_end_matches('\n').to_owned(),
+        language: language.filter(|language| language != PLAIN_LANGUAGE),
+        code: code_text(element).trim_end_matches('\n').to_owned(),
     }
+}
+
+fn code_text(element: ElementRef<'_>) -> String {
+    let mut text = String::new();
+    for node in element.descendants() {
+        match node.value() {
+            Node::Text(piece) => text.push_str(piece),
+            Node::Element(child) if child.name() == "br" => text.push('\n'),
+            _ => {}
+        }
+    }
+    text
 }
 
 fn language_of(element: ElementRef<'_>) -> Option<String> {
@@ -426,6 +469,7 @@ fn tidy(spans: &mut Vec<Span>) {
             | Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
+            | Span::Indent { children, .. }
             | Span::Link { children, .. } => tidy(children),
             Span::List { items, .. } => items.iter_mut().for_each(tidy),
             Span::Table { rows, .. } => rows.iter_mut().flatten().for_each(tidy),
@@ -457,6 +501,7 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
                         | Span::Heading { .. }
                         | Span::Quote { .. }
                         | Span::BlockQuote(_)
+                        | Span::Indent { .. }
                 )
             )
         };

@@ -5,6 +5,7 @@ use gpui_kit::*;
 use teams_core::{Draft, FontSize, LineKind, MarkKind, SizeStep};
 
 use crate::render::blocks::{Script, StyleFlags};
+use crate::render::elements::{highlight_fill, readable_on};
 use app_base::theme;
 
 const CODE_PILL_RADIUS: f32 = 4.;
@@ -14,6 +15,8 @@ const QUOTE_INDENT: f32 = 12.;
 const CODE_INDENT: f32 = 10.;
 const LIST_LEVEL_INDENT: f32 = 18.;
 const HEADING_SCALES: [f32; 3] = [1.6, 1.35, 1.15];
+const INDENT_STEP: f32 = teams_core::INDENT_PIXELS as f32;
+const HIGHLIGHT_RADIUS: f32 = 3.;
 
 /// How the composer paints a draft: text styles, fills and the list markers to hang under.
 pub struct DraftStyle {
@@ -25,7 +28,8 @@ pub struct DraftStyle {
 
 fn line_indent(kind: &LineKind) -> f32 {
     match kind {
-        LineKind::Text | LineKind::Heading(_) | LineKind::Table(_) => 0.,
+        LineKind::Text | LineKind::Heading(_) | LineKind::Table(_) | LineKind::Rule => 0.,
+        LineKind::Indent(level) => INDENT_STEP * f32::from(*level),
         LineKind::Quote => QUOTE_INDENT,
         LineKind::Code(_) => CODE_INDENT,
         LineKind::Bullet(depth) | LineKind::Numbered(depth) => {
@@ -62,7 +66,10 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
                 color: None,
             });
         }
-        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(_) => {}
+        MarkKind::Color(value) => {
+            style.color = Some(readable_on(*value, theme::surface_raised()));
+        }
+        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(_) | MarkKind::Highlight(_) => {}
         MarkKind::Code => style.color = Some(theme::text_strong()),
         MarkKind::Link(_) => {
             style.color = Some(theme::accent_text());
@@ -120,6 +127,14 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
             if flags.baseline_raise() != 0. {
                 decoration = decoration.with_baseline_shift(flags.baseline_raise());
             }
+        }
+        if let MarkKind::Highlight(value) = mark.kind {
+            ranges.push(
+                RangeDecoration::new(mark.range.clone())
+                    .with_style(RangeDecorationStyle::Pill)
+                    .with_color(highlight_fill(value))
+                    .with_radius(px(HIGHLIGHT_RADIUS)),
+            );
         }
         if mark.kind == MarkKind::Code {
             text.push(decoration.with_font_family(mono.clone()));

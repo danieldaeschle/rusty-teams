@@ -124,7 +124,8 @@ pub use default_reactions::{
 };
 pub use download::LibraryFile;
 pub use draft::{
-    Draft, DraftLine, Edit, FormatState, LineKind, MAX_DEPTH, Mark, MarkKind, OBJECT_MARK,
+    Draft, DraftLine, Edit, FormatState, INDENT_PIXELS, LineKind, MAX_DEPTH, MAX_INDENT, Mark,
+    MarkKind, OBJECT_MARK, RULE_MARK,
     SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
 };
 pub use emoticon_tags::{EmoticonTag, emoticon_tags};
