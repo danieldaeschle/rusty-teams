@@ -30,7 +30,8 @@ actions!(
         SetHeading2,
         SetHeading3,
         ToggleCodeBlock,
-        ToggleQuote
+        ToggleQuote,
+        EditLastMessage
     ]
 );
 

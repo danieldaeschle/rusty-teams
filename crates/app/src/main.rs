@@ -49,6 +49,7 @@ struct Arguments {
     composer_text: Option<String>,
     reply_to_last: bool,
     channels_tab: bool,
+    autostart: bool,
     demo_sync: Option<Duration>,
 }
 
@@ -66,6 +67,7 @@ fn parse_arguments() -> Arguments {
             "--type" => arguments.composer_text = input.next(),
             "--reply-last" => arguments.reply_to_last = true,
             "--channels-tab" => arguments.channels_tab = true,
+            autostart::AUTOSTART_FLAG => arguments.autostart = true,
             "--demo-sync" => {
                 arguments.demo_sync = input
                     .next()
@@ -235,6 +237,7 @@ fn main() {
             switcher_query: arguments.switcher_query,
             composer_text: arguments.composer_text,
             reply_to_last: arguments.reply_to_last,
+            launched_by_autostart: arguments.autostart,
         };
         let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
             cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
@@ -247,7 +250,9 @@ fn main() {
             }
         })
         .detach();
-        cx.activate(true);
+        if !arguments.autostart {
+            cx.activate(true);
+        }
         cx.spawn(async move |cx| {
             loop {
                 app_base::native_dumps::heartbeat();

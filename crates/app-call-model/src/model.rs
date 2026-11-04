@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -302,6 +303,7 @@ pub struct CallModel {
     pub own_role: Option<MeetingRole>,
     pub capability: MeetingCapability,
     pub pinned: Option<String>,
+    pub fitted: HashSet<String>,
     pub captions: CaptionState,
     pub caption_lines: Vec<CaptionLine>,
     pub transcript: Transcript,
@@ -368,6 +370,7 @@ impl CallModel {
             own_role: None,
             capability: MeetingCapability::default(),
             pinned: None,
+            fitted: HashSet::new(),
             captions: CaptionState::Off,
             caption_lines: Vec::new(),
             transcript: Transcript::default(),
@@ -706,6 +709,16 @@ impl CallModel {
             Some(mri.to_owned())
         };
         self.refresh_layout(Instant::now());
+    }
+
+    pub fn is_fitted(&self, mri: &str) -> bool {
+        self.fitted.contains(mri)
+    }
+
+    pub fn toggle_fit(&mut self, mri: &str) {
+        if !self.fitted.remove(mri) {
+            self.fitted.insert(mri.to_owned());
+        }
     }
 
     pub fn is_spotlighted(&self, mri: &str) -> bool {
@@ -1561,6 +1574,17 @@ mod tests {
             .iter()
             .map(|tile| tile.mri.clone())
             .collect()
+    }
+
+    #[test]
+    fn fit_to_frame_is_per_tile_and_toggles_back_to_fill() {
+        let mut model = meeting_with_me();
+        assert!(!model.is_fitted("8:orgid:a"));
+        model.toggle_fit("8:orgid:a");
+        assert!(model.is_fitted("8:orgid:a"));
+        assert!(!model.is_fitted("8:orgid:b"));
+        model.toggle_fit("8:orgid:a");
+        assert!(!model.is_fitted("8:orgid:a"));
     }
 
     #[test]

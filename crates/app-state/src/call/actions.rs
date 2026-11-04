@@ -897,6 +897,13 @@ impl AppState {
         }
     }
 
+    pub fn toggle_call_fit(&mut self, mri: &str, cx: &mut Context<Self>) {
+        if let Some(call) = self.call.as_mut() {
+            call.model.toggle_fit(mri);
+            cx.notify();
+        }
+    }
+
     pub fn toggle_call_captions(&mut self, _cx: &mut Context<Self>) {
         let Some(call) = self
             .call
@@ -924,6 +931,18 @@ impl AppState {
         }
         self.send_background_command(cx);
         cx.notify();
+    }
+
+    pub fn toggle_call_background_blur(&mut self, cx: &mut Context<Self>) {
+        if self.call.is_none() {
+            return;
+        }
+        let pick = if self.call_background == BackgroundPick::Blur {
+            BackgroundPick::None
+        } else {
+            BackgroundPick::Blur
+        };
+        self.set_call_background(pick, cx);
     }
 
     pub(super) fn send_background_command(&mut self, cx: &mut Context<Self>) {
@@ -1172,9 +1191,9 @@ impl AppState {
         }
     }
 
-    pub fn accept_ringing_call(&mut self, cx: &mut Context<Self>) {
+    pub fn accept_ringing_call(&mut self, mode: AcceptMode, cx: &mut Context<Self>) {
         if let Some(ring_id) = self.rings.first_ringing_id() {
-            self.accept_ring(ring_id, AcceptMode::Audio, cx);
+            self.accept_ring(ring_id, mode, cx);
         }
     }
 

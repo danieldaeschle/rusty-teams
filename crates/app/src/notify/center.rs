@@ -32,6 +32,7 @@ use crate::activity::ActivityCenter;
 use crate::agent_api::{self, pending::PendingProposal};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
+use crate::autostart::{self, StartupSettings};
 use crate::appearance::AppIcon;
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
@@ -77,6 +78,7 @@ pub struct NotificationCenter {
     main_window: AnyWindowHandle,
     main_native: Option<NativeHandle>,
     settings: Settings,
+    startup: StartupSettings,
     stack: ToastStack,
     tracker: IncomingTracker,
     throttle: SoundThrottle,
@@ -152,6 +154,7 @@ impl NotificationCenter {
             main_window: window.window_handle(),
             main_native: platform::native_handle(window),
             settings,
+            startup: StartupSettings::load(&app.read(cx).store, !app.read(cx).mode.demo),
             stack: ToastStack::default(),
             tracker: IncomingTracker::new(Utc::now()),
             throttle: SoundThrottle::default(),
@@ -268,6 +271,36 @@ impl NotificationCenter {
 
     pub fn reply_text(&self, id: u64) -> Option<String> {
         self.stack.get(id).map(|toast| toast.reply_text.clone())
+    }
+
+    pub fn startup(&self) -> StartupSettings {
+        self.startup
+    }
+
+    pub fn set_auto_start(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !self.demo_mode
+            && let Err(error) = autostart::set_enabled(crate::APP_NAME, enabled)
+        {
+            self.app.update(cx, |state, cx| {
+                state.raise_notice(format!("Auto-start could not be changed: {error}"), None, cx)
+            });
+            return;
+        }
+        self.startup.auto_start = enabled;
+        cx.notify();
+    }
+
+    pub fn set_open_in_background(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.startup.open_in_background = enabled;
+        self.startup.save_background(&self.app.read(cx).store);
+        cx.notify();
+    }
+
+    pub fn start_in_background(&self, window: &mut Window) {
+        match (&self.tray, self.main_native) {
+            (Some(_), Some(native)) => platform::hide_window(native),
+            _ => window.minimize_window(),
+        }
     }
 
     pub fn intercept_close(&self, _cx: &App) -> bool {

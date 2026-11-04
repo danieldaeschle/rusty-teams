@@ -58,6 +58,10 @@ impl AppState {
         self.change_call_view(|view| view.chat_bubbles = !view.chat_bubbles, cx);
     }
 
+    pub fn toggle_call_hide_timer(&mut self, cx: &mut Context<Self>) {
+        self.change_call_view(|view| view.hide_timer = !view.hide_timer, cx);
+    }
+
     pub fn set_call_hide_me(&mut self, hidden: bool, cx: &mut Context<Self>) {
         if let Some(call) = self.call.as_mut() {
             call.model.view.hide_me = hidden;

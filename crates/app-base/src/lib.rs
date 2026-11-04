@@ -2,6 +2,7 @@ pub mod agent_api;
 pub mod appearance;
 pub mod agents;
 pub mod assets;
+pub mod autostart;
 pub mod avatar_image;
 pub mod channel_files;
 pub mod crash_log;
