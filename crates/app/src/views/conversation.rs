@@ -111,6 +111,11 @@ pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
+const QUIET_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+];
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -178,6 +183,7 @@ struct Current {
     has_older: bool,
     loading_older: bool,
     older_blocked: bool,
+    quiet_retries: usize,
     fetched: bool,
     first_unread: Option<String>,
     posts_new_after: Option<DateTime<Utc>>,
@@ -929,6 +935,7 @@ impl ConversationView {
             loading_older: false,
             older_blocked: false,
             fetched: false,
+            quiet_retries: 0,
             first_unread,
             posts_new_after,
             sync: SyncProgress::default(),
@@ -1923,15 +1930,38 @@ impl ConversationView {
         sync.messages = false;
         let (newest_cached, started_at) = (sync.newest_cached, sync.started_at);
         match result {
-            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, started_at, cx),
-            Ok(Err(error)) => self.fail_sync(generation, short_error(&error)),
-            Err(error) => self.fail_sync(generation, short_error(&error)),
+            Ok(Ok(_)) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.quiet_retries = 0;
+                }
+                self.mark_fetched_new(newest_cached, started_at, cx)
+            }
+            Ok(Err(error)) => self.fail_sync(generation, short_error(&error), cx),
+            Err(error) => self.fail_sync(generation, short_error(&error), cx),
         }
         self.rebuild(false, cx);
         self.settle_progress(generation, cx);
     }
 
-    fn fail_sync(&mut self, generation: u64, error: String) {
+    fn fail_sync(&mut self, generation: u64, error: String, cx: &mut Context<Self>) {
+        let quiet_retry = self.current.as_mut().and_then(|current| {
+            let delay = QUIET_RETRY_DELAYS.get(current.quiet_retries).copied()?;
+            current.quiet_retries += 1;
+            Some(delay)
+        });
+        if let Some(delay) = quiet_retry {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                this.update(cx, |this, cx| {
+                    if this.sync_generation == generation {
+                        this.retry_fetch(cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
+            return;
+        }
         if let Some(sync) = self.sync_of(generation) {
             sync.failed = true;
             sync.receipts = false;
