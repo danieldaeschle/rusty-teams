@@ -13,6 +13,8 @@ const MAX_PAGES: usize = 3;
 const READ_PROPERTY: &str = "isread";
 const SEEN_PROPERTY: &str = "consumptionhorizon";
 const BOOKMARK_PROPERTY: &str = "consumptionHorizonBookmark";
+const MEETING_THREAD_PREFIX: &str = "19:meeting_";
+const MEETING_THREAD_SUFFIX: &str = "@thread.v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ActivityItem {
@@ -34,6 +36,8 @@ pub struct ActivityItem {
     pub timestamp_ms: i64,
     pub version_ms: i64,
     pub read_flag: bool,
+    pub tap_url: Option<String>,
+    pub meeting_thread_id: Option<String>,
 }
 
 /// `seen_ms`: the bell horizon (`consumptionhorizon`), `bookmark_ms`: Mark all as read (`consumptionHorizonBookmark`).
@@ -228,7 +232,24 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
         timestamp_ms,
         version_ms,
         read_flag: flag(properties.get(READ_PROPERTY)),
+        tap_url: text("customTapAction"),
+        meeting_thread_id: meeting_thread_in(&activity.to_string()),
     })
+}
+
+fn meeting_thread_in(text: &str) -> Option<String> {
+    let decoded = text
+        .replace("%3a", ":")
+        .replace("%3A", ":")
+        .replace("%40", "@");
+    let start = decoded.find(MEETING_THREAD_PREFIX)?;
+    let rest = &decoded[start..];
+    let end = rest.find(MEETING_THREAD_SUFFIX)? + MEETING_THREAD_SUFFIX.len();
+    let thread_id = &rest[..end];
+    thread_id
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "_:@.-=".contains(character))
+        .then(|| thread_id.to_owned())
 }
 
 fn object_property(properties: &Value, key: &str) -> Option<Value> {
@@ -352,8 +373,29 @@ mod tests {
                 timestamp_ms: 1791368000000,
                 version_ms: 1791368000500,
                 read_flag: false,
+                tap_url: None,
+                meeting_thread_id: None,
             }]
         );
+    }
+
+    #[test]
+    fn an_app_activity_keeps_its_tap_link_and_the_meeting_it_names() {
+        let body = json!({"messages": [
+            message("1", 1, json!({
+                "activityType": "msGraph", "activitySubtype": "recapIsReadyV2",
+                "customTapAction": "https://teams.microsoft.com/l/entity/x?context=%7B%22threadId%22%3A%2219%3Ameeting_Zm9v%40thread.v2%22%7D",
+            }), "false"),
+            message("2", 1, json!({
+                "activityType": "msGraph", "activitySubtype": "recapIsReadyV2",
+                "activityContext": {"templateParameters": "{\"threadId\":\"19:meeting_YmFy@thread.v2\"}"},
+            }), "false"),
+        ]});
+        let items = parse_page(&body).unwrap();
+        assert!(items[0].tap_url.as_deref().unwrap().starts_with("https://teams.microsoft.com/l/entity/"));
+        assert_eq!(items[0].meeting_thread_id.as_deref(), Some("19:meeting_Zm9v@thread.v2"));
+        assert_eq!(items[1].tap_url, None);
+        assert_eq!(items[1].meeting_thread_id.as_deref(), Some("19:meeting_YmFy@thread.v2"));
     }
 
     #[test]

@@ -43,6 +43,7 @@ pub enum ActivityPanelEvent {
     Open {
         conversation_id: String,
         message_id: String,
+        link: Option<String>,
     },
 }
 
@@ -100,6 +101,7 @@ impl ActivityPanel {
         let event = ActivityPanelEvent::Open {
             conversation_id: entry.conversation_id.clone(),
             message_id: entry.message_id.clone(),
+            link: entry.link.clone(),
         };
         self.activity
             .update(cx, |activity, cx| activity.mark_read(id, cx));
@@ -313,6 +315,7 @@ impl ActivityPanel {
         cx.emit(ActivityPanelEvent::Open {
             conversation_id: pending.conversation_id.clone(),
             message_id: pending.jump_message_id().to_owned(),
+            link: None,
         });
     }
 }

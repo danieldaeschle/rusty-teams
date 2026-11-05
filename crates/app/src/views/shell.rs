@@ -238,7 +238,14 @@ impl AppShell {
                     ActivityPanelEvent::Open {
                         conversation_id,
                         message_id,
-                    } => this.open_message(conversation_id, message_id, cx),
+                        link,
+                    } => {
+                        if !this.open_message(conversation_id, message_id, cx)
+                            && let Some(link) = link
+                        {
+                            cx.open_url(link);
+                        }
+                    }
                 },
             ),
             cx.subscribe(&saved_panel, |this, _, event: &SavedPanelEvent, cx| {
@@ -536,9 +543,14 @@ impl AppShell {
         cx.notify();
     }
 
-    fn open_message(&mut self, conversation_id: &str, message_id: &str, cx: &mut Context<Self>) {
+    fn open_message(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(selection) = selection_for(&self.state.read(cx).sidebar, conversation_id) else {
-            return;
+            return false;
         };
         let message_id = message_id.to_owned();
         self.state.update(cx, |state, cx| {
@@ -548,6 +560,7 @@ impl AppShell {
                 state.jump_to_message(selection, message_id, cx)
             }
         });
+        true
     }
 
     fn open_status_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {

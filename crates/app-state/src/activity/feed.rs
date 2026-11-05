@@ -158,6 +158,7 @@ pub struct Entry {
     pub read: bool,
     pub counts_for_bell: bool,
     pub source_label: Option<String>,
+    pub link: Option<String>,
 }
 
 impl Entry {

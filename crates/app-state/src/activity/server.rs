@@ -27,9 +27,13 @@ pub fn feed_of(snapshot: &ActivitySnapshot, seen_locally_ms: i64) -> Feed {
 
 fn entry_of(item: &ActivityItem) -> Entry {
     let kind = kind_of(item);
+    let conversation_id = match (&item.meeting_thread_id, item.source_thread_id.is_empty()) {
+        (Some(meeting_thread_id), true) => meeting_thread_id.clone(),
+        _ => item.source_thread_id.clone(),
+    };
     Entry {
         id: item.message_id.clone(),
-        conversation_id: item.source_thread_id.clone(),
+        conversation_id,
         kind,
         activity_type: item.activity_type.clone(),
         subtype: item.activity_subtype.clone(),
@@ -54,6 +58,7 @@ fn entry_of(item: &ActivityItem) -> Entry {
         read: false,
         counts_for_bell: false,
         source_label: item.source_app_name.clone().or_else(|| item.thread_topic.clone()),
+        link: item.tap_url.clone(),
     }
 }
 
@@ -161,6 +166,19 @@ mod tests {
         assert_eq!(chat.message_id, "1791367000002");
         assert_eq!(entry_of(&item("call", "missedCall")).message_id, "");
         assert_eq!(chat.actors[0].user_id.as_deref(), Some("user-1"));
+    }
+
+    #[test]
+    fn a_recap_opens_the_meeting_chat_it_names() {
+        let recap = entry_of(&ActivityItem {
+            source_thread_id: String::new(),
+            meeting_thread_id: Some("19:meeting_Zm9v@thread.v2".into()),
+            tap_url: Some("https://teams.microsoft.com/l/entity/x".into()),
+            ..item("msGraph", "recapIsReadyV2")
+        });
+        assert_eq!(recap.conversation_id, "19:meeting_Zm9v@thread.v2");
+        assert_eq!(recap.message_id, "");
+        assert_eq!(recap.link.as_deref(), Some("https://teams.microsoft.com/l/entity/x"));
     }
 
     #[test]
