@@ -59,6 +59,7 @@ fn entry_of(item: &ActivityItem) -> Entry {
         counts_for_bell: false,
         source_label: item.source_app_name.clone().or_else(|| item.thread_topic.clone()),
         link: item.tap_url.clone(),
+        reply_id: channel_reply(item, kind),
     }
 }
 
@@ -78,6 +79,13 @@ pub fn kind_of(item: &ActivityItem) -> Kind {
         "msGraph" | "thirdParty" => Kind::App,
         _ => Kind::Other,
     }
+}
+
+fn channel_reply(item: &ActivityItem, kind: Kind) -> Option<String> {
+    let target = jump_target(item, kind);
+    item.source_message_id
+        .clone()
+        .filter(|reply_id| !target.is_empty() && *reply_id != target)
 }
 
 fn jump_target(item: &ActivityItem, kind: Kind) -> String {
@@ -159,11 +167,13 @@ mod tests {
     fn a_channel_reply_jumps_to_its_root_and_a_chat_to_the_message() {
         let channel = entry_of(&item("replyToReply", ""));
         assert_eq!(channel.message_id, "1791367000001");
+        assert_eq!(channel.reply_id.as_deref(), Some("1791367000002"));
         let chat = entry_of(&ActivityItem {
             thread_type: Some("chat".into()),
             ..item("mentionInChat", "person")
         });
         assert_eq!(chat.message_id, "1791367000002");
+        assert_eq!(chat.reply_id, None);
         assert_eq!(entry_of(&item("call", "missedCall")).message_id, "");
         assert_eq!(chat.actors[0].user_id.as_deref(), Some("user-1"));
     }

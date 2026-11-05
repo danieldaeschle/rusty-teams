@@ -167,6 +167,16 @@ impl MessageScrollerState {
         true
     }
 
+    /// Scroll as little as needed to show the row at `index` in full.
+    pub fn reveal_item(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        if index >= self.list_state.item_count() {
+            return false;
+        }
+        self.list_state.scroll_to_reveal_item(index);
+        cx.notify();
+        true
+    }
+
     /// Return the space kept free above the first row.
     pub fn top_inset(&self) -> gpui::Pixels {
         self.top_inset

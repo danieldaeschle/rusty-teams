@@ -772,6 +772,7 @@ impl ConversationView {
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
             ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
+            ComposerEvent::Edited => {}
         }
     }
 
@@ -1183,6 +1184,7 @@ impl ConversationView {
             }
         }
         let Some(record) = record else {
+            self.open_unloaded_post(message_id, cx);
             return;
         };
         let messages_from_target = store
@@ -1230,6 +1232,20 @@ impl ConversationView {
         self.reload_pending(cx);
         self.rebuild(true, cx);
         self.reveal_row(target_key, cx);
+    }
+
+    fn open_unloaded_post(&mut self, root_id: &str, cx: &mut Context<Self>) {
+        let in_channel = self
+            .current
+            .as_ref()
+            .is_some_and(|current| matches!(current.selection, Selection::Channel(_)));
+        if !in_channel {
+            return;
+        }
+        self.pane = ChannelPane::Posts;
+        self.enter_thread_mode(root_id.to_owned(), cx);
+        self.refresh_thread(root_id.to_owned(), cx);
+        self.rebuild(true, cx);
     }
 
     fn reveal_row(&mut self, target_key: String, cx: &mut Context<Self>) {

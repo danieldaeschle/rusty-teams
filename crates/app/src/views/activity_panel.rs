@@ -98,9 +98,16 @@ impl ActivityPanel {
         let Some(entry) = self.activity.read(cx).feed().get(id) else {
             return;
         };
+        let stored_reply = entry.reply_id.clone().filter(|reply_id| {
+            self.app
+                .read(cx)
+                .store
+                .messages_by_id(&entry.conversation_id, std::slice::from_ref(reply_id))
+                .is_ok_and(|found| !found.is_empty())
+        });
         let event = ActivityPanelEvent::Open {
             conversation_id: entry.conversation_id.clone(),
-            message_id: entry.message_id.clone(),
+            message_id: stored_reply.unwrap_or_else(|| entry.message_id.clone()),
             link: entry.link.clone(),
         };
         self.activity

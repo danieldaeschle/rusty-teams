@@ -110,6 +110,23 @@ impl ConversationView {
         composer
     }
 
+    fn keep_reply_editor_in_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root_id) = self.reply_root.clone() else {
+            return;
+        };
+        let view = cx.entity().downgrade();
+        window.on_next_frame(move |_, cx| {
+            view.update(cx, |this, cx| {
+                let index = this.rows.borrow().iter().position(|row| row.key() == root_id);
+                if let Some(index) = index {
+                    this.scroller
+                        .update(cx, |scroller, cx| scroller.reveal_item(index, cx));
+                }
+            })
+            .ok();
+        });
+    }
+
     pub(super) fn sync_reply_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reply_root = None;
         let (Some(composer), Some(conversation_id)) =
@@ -190,6 +207,7 @@ impl ConversationView {
                 let root_id = self.reply_root.clone();
                 self.send_typing_in(root_id, *active, cx);
             }
+            ComposerEvent::Edited => self.keep_reply_editor_in_view(window, cx),
             ComposerEvent::Schedule { .. }
             | ComposerEvent::EditLast
             | ComposerEvent::FocusMessages => {}
