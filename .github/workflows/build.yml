@@ -3,10 +3,10 @@
 # packages the artifacts.
 name: Build
 
+# Builds run for tags (the release assets); pushes are tested in test.yml.
 on:
   push:
-    branches: [main, build]
-  pull_request:
+    tags: ['*']
   workflow_dispatch:
 
 permissions:

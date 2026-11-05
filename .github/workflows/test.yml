@@ -3,10 +3,10 @@
 # key tests), it only builds - see build.yml.
 name: Test
 
+# Tests gate pushes to main; releases build from tags in build.yml.
 on:
   push:
-    branches: [main, build]
-  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
