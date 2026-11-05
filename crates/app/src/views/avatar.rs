@@ -20,6 +20,7 @@ const PRESENCE_MIN: f32 = 10.;
 const PRESENCE_MAX: f32 = 15.;
 const PRESENCE_RATIO: f32 = 0.38;
 const PRESENCE_RING: f32 = 2.;
+const STATUS_GLYPH_DISC: f32 = 0.75;
 const PRESENCE_SPIN_PERIOD: Duration = Duration::from_millis(1600);
 const CACHED_PRESENCE_OPACITY: f32 = 0.5;
 const INITIALS_RATIO: f32 = 0.36;
@@ -172,32 +173,34 @@ pub fn presence_size(avatar_size: f32) -> f32 {
         .clamp(PRESENCE_MIN, PRESENCE_MAX)
 }
 
+pub fn status_glyph(kind: PresenceKind) -> Option<(&'static str, Hsla)> {
+    Some(match kind {
+        PresenceKind::Available => ("status_available", theme::green()),
+        PresenceKind::Busy => ("status_dot", theme::red()),
+        PresenceKind::DoNotDisturb => ("status_dnd", theme::red()),
+        PresenceKind::Away => ("status_away", theme::amber()),
+        PresenceKind::OutOfOffice => ("status_dot", theme::out_of_office()),
+        PresenceKind::Offline => ("status_offline", theme::text_muted()),
+        PresenceKind::Unknown => return None,
+    })
+}
+
 fn presence_badge(kind: PresenceKind, ring: Hsla, outer: f32) -> Option<Div> {
     let inner = outer - 2. * PRESENCE_RING;
-    let fill = match kind {
-        PresenceKind::Available => theme::green(),
-        PresenceKind::Busy | PresenceKind::DoNotDisturb => theme::red(),
-        PresenceKind::Away => theme::amber(),
-        PresenceKind::OutOfOffice => theme::out_of_office(),
-        PresenceKind::Offline => ring,
-        PresenceKind::Unknown => return None,
-    };
-    let mut center = div()
-        .size(px(inner))
-        .rounded_full()
-        .bg(fill)
-        .flex()
-        .items_center()
-        .justify_center();
-    center = match kind {
-        PresenceKind::DoNotDisturb => {
-            center.child(div().w(px(inner - 4.)).h(px(2.)).rounded(px(1.)).bg(ring))
+    let glyph = match kind {
+        PresenceKind::OutOfOffice => div()
+            .size(px(inner))
+            .rounded_full()
+            .bg(theme::out_of_office())
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon(IconName::ArrowLeft, inner - 2., theme::white()))
+            .into_any_element(),
+        _ => {
+            let (name, color) = status_glyph(kind)?;
+            symbol(name, inner / STATUS_GLYPH_DISC, color).into_any_element()
         }
-        PresenceKind::Offline => center.border(px(1.5)).border_color(theme::text_muted()),
-        PresenceKind::OutOfOffice => {
-            center.child(icon(IconName::ArrowLeft, inner - 2., theme::white()))
-        }
-        _ => center,
     };
     Some(
         corner_badge(Corner::BottomRight, 2.)
@@ -207,7 +210,7 @@ fn presence_badge(kind: PresenceKind, ring: Hsla, outer: f32) -> Option<Div> {
             .flex()
             .items_center()
             .justify_center()
-            .child(center),
+            .child(glyph),
     )
 }
 

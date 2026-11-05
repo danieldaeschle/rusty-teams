@@ -2606,11 +2606,6 @@ const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
         "cutout ring in the background color, invisible against its surface",
     ),
     (
-        "views/avatar.rs",
-        "theme::text_muted()",
-        "offline presence glyph, Teams icon",
-    ),
-    (
         "views/message_row.rs",
         "theme::border_strong()",
         "deleted message placeholder, Teams look",

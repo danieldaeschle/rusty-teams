@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 73] = symbols![
+const SYMBOLS: [(&str, &[u8]); 75] = symbols![
     "bot",
     "done",
     "table",
@@ -43,6 +43,8 @@ const SYMBOLS: [(&str, &[u8]); 73] = symbols![
     "status_dnd",
     "status_away",
     "status_ring",
+    "status_available",
+    "status_offline",
     "zoom_in",
     "zoom_out",
     "rotate_right",
