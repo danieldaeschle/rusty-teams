@@ -47,9 +47,10 @@ jobs:
       - name: Build
         run: cargo build -p app --release
 
+      # The runner is x86_64; the artifact name carries the architecture.
       - uses: actions/upload-artifact@v7
         with:
-          name: teams-linux
+          name: teams-linux-amd64
           path: target/release/teams
 
   windows:
@@ -75,9 +76,10 @@ jobs:
       - name: Build
         run: cargo build -p app --release --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
 
+      # The runner is x86_64; the artifact name carries the architecture.
       - uses: actions/upload-artifact@v7
         with:
-          name: teams-windows
+          name: teams-windows-amd64
           path: target/release/teams.exe
 
   macos:
@@ -93,13 +95,13 @@ jobs:
         with:
           key: build
 
-      # scripts/build-macos.sh builds the arm64 and x86_64 slices and lipos them
-      # into one universal binary (README "Quick start"); it installs the x86_64
-      # rustup target itself and needs Xcode CLT only.
+      # scripts/build-macos.sh builds the arm64 and x86_64 slices, lipos them into
+      # one universal binary and wraps it in a .app with the icon (README "Quick
+      # start"); it installs the x86_64 rustup target itself and needs Xcode CLT only.
       - name: Build
         run: scripts/build-macos.sh crates/app teams
 
       - uses: actions/upload-artifact@v7
         with:
           name: teams-macos
-          path: target/universal/release/teams
+          path: target/universal/release/teams-macos.zip
