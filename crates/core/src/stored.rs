@@ -46,6 +46,7 @@ pub enum FileKind {
     PowerPoint,
     Pdf,
     Image,
+    Video,
     Archive,
     Loop,
     Other,
@@ -64,6 +65,7 @@ impl FileKind {
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "heic" | "tif" | "tiff" => {
                 FileKind::Image
             }
+            "mp4" | "mov" | "webm" | "mkv" | "avi" | "m4v" => FileKind::Video,
             "zip" | "rar" | "7z" | "tar" | "gz" | "tgz" => FileKind::Archive,
             _ => FileKind::Other,
         }
@@ -403,6 +405,21 @@ pub struct FileCard {
     pub content_type: Option<String>,
     pub size: Option<u64>,
     pub open_url: String,
+}
+
+impl FileCard {
+    pub fn preview(&self) -> Option<ImageRef> {
+        if !matches!(self.kind, FileKind::Image | FileKind::Video) {
+            return None;
+        }
+        Some(ImageRef {
+            id: format!("file-preview-{}", self.open_url),
+            url: crate::call_event::sharepoint_thumbnail_url(&self.open_url)?,
+            width: None,
+            height: None,
+            alt: Some(self.name.clone()),
+        })
+    }
 }
 
 /// File attachments (`reference` type) with a name and a URL. `size` is rarely known; Graph does not send it for these.
@@ -1094,6 +1111,24 @@ mod tests {
         let preserved = edit_preserved(&record(QUOTED_HTML, attachments));
         assert_eq!(preserved.files[0].attachment_id, "F1");
         assert!(preserved.kept.is_empty());
+    }
+
+    #[test]
+    fn sharepoint_videos_and_images_get_a_graph_thumbnail() {
+        let card = |name: &str, url: &str| FileCard {
+            name: name.to_owned(),
+            kind: FileKind::from_name(name),
+            content_type: Some("reference".to_owned()),
+            size: None,
+            open_url: url.to_owned(),
+        };
+        let sharepoint = "https://contoso.sharepoint.com/personal/a/Documents/clip.mp4";
+        let preview = card("clip.mp4", sharepoint).preview().unwrap();
+        assert!(preview.url.starts_with("https://graph.microsoft.com/v1.0/shares/u!"));
+        assert!(preview.url.ends_with("/driveItem/thumbnails/0/large/content"));
+        assert!(card("shot.PNG", sharepoint).preview().is_some());
+        assert_eq!(card("plan.docx", sharepoint).preview(), None);
+        assert_eq!(card("clip.mov", "https://example.com/clip.mov").preview(), None);
     }
 
     #[test]

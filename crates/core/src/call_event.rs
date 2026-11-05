@@ -72,15 +72,17 @@ impl Recording {
     }
 
     pub fn thumbnail_url(&self) -> Option<String> {
-        let url = self
-            .url
-            .as_deref()
-            .filter(|url| url.contains(SHAREPOINT_HOST))?;
-        Some(format!(
+        sharepoint_thumbnail_url(self.url.as_deref()?)
+    }
+}
+
+pub fn sharepoint_thumbnail_url(url: &str) -> Option<String> {
+    url.contains(SHAREPOINT_HOST).then(|| {
+        format!(
             "{GRAPH_SHARES}{}{THUMBNAIL_PATH}",
             chatsvc::transcripts::share_id(url)
-        ))
-    }
+        )
+    })
 }
 
 fn is_recording_stamp(stamp: &str) -> bool {

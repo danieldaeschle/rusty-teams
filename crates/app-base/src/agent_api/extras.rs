@@ -76,6 +76,7 @@ fn file_type(kind: teams_core::FileKind) -> &'static str {
         teams_core::FileKind::PowerPoint => "powerpoint",
         teams_core::FileKind::Pdf => "pdf",
         teams_core::FileKind::Image => "image",
+        teams_core::FileKind::Video => "video",
         teams_core::FileKind::Archive => "archive",
         teams_core::FileKind::Loop => "loop",
         teams_core::FileKind::Other => "other",
