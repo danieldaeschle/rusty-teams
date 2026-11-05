@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use chrono::Local;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::base::GlobalState;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -316,7 +317,7 @@ fn popover(
             v_flex()
                 .id("reaction-popover-entries")
                 .max_h(px(POPOVER_MAX_HEIGHT))
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
                 .children(entries.iter().map(|entry| entry_row(entry, directory))),
         );
     deferred(

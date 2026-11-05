@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::GlobalState;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
@@ -524,7 +525,7 @@ impl ProfileCard {
                     v_flex()
                         .id("profile-reports")
                         .max_h(px(REPORTS_MAX_HEIGHT))
-                        .overflow_y_scroll()
+                        .overflow_y_scrollbar()
                         .children(rows),
                 );
             }

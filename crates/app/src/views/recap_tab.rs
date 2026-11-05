@@ -5,6 +5,7 @@ use chatsvc::{
     days_until_expiry,
 };
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, Offset as _, Utc};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -493,7 +494,7 @@ pub fn render_recap(view: RecapView, run: &RecapRun) -> AnyElement {
             .w_full()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .py(px(16.))
             .gap(px(SECTION_GAP))
             .when(!view.occurrences.is_empty(), |column| {

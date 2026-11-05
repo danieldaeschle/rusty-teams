@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -189,7 +190,7 @@ pub fn render(
             v_flex()
                 .id("emoji-rows")
                 .max_h(px(ROW_HEIGHT * visible))
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
                 .track_scroll(&popup.scroll)
                 .children(rows),
         )

@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use chrono::{Local, Offset as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -471,7 +472,7 @@ pub fn render_library(view: LibraryView, run: &SharedRun) -> AnyElement {
             .w_full()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(entries.iter().enumerate().map(|(index, entry)| {
                 let download = view
                     .download_states
@@ -645,7 +646,7 @@ pub fn render_messages(view: MessagesView, run: &SharedRun) -> AnyElement {
             .w_full()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(groups.into_iter().map(|(group, indices)| {
                 v_flex()
                     .w_full()

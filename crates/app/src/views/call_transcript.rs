@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     h_flex,
@@ -156,7 +157,7 @@ impl Render for TranscriptPanel {
             .id("call-transcript-list")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .track_scroll(&self.scroll)
             .on_scroll_wheel(cx.listener(|this, _, _, cx| {
                 this.scrolled = true;

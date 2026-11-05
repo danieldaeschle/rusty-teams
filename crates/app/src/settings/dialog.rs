@@ -1,4 +1,5 @@
 use app_ui_kit::settings_controls::PAGE_PADDING;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
@@ -216,16 +217,15 @@ impl Render for SettingsDialog {
         } else {
             metrics.padding
         };
-        let body = div()
+        let scroll_area = div()
             .id(SharedString::from(format!(
                 "settings-body-{}",
                 label(self.section)
             )))
-            .debug_selector(|| "settings/main/body".into())
             .w_full()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .track_scroll(&self.body_scroll)
             .px(px(body_inset.max(0.)))
             .pb(px(metrics.padding))
@@ -236,6 +236,14 @@ impl Render for SettingsDialog {
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .child(self.content(cx)),
             );
+        let body = div()
+            .debug_selector(|| "settings/main/body".into())
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(scroll_area);
         div()
             .id("settings-layer")
             .absolute()

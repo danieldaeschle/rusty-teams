@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -93,7 +94,7 @@ fn panel(dialog: &TaskDialogState, cx: &App) -> Div {
                 .w_full()
                 .flex_1()
                 .min_h(px(0.))
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
                 .child(card_view(&dialog.card, &dialog.scope, cx)),
         )
 }
