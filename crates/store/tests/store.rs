@@ -35,7 +35,7 @@ fn a_call_event_keeps_the_previous_preview() {
 
     let mut call = chat("chat-call", "Planning", Some(at(12)));
     call.last_event_system = true;
-    call.last_event_call = true;
+    call.keeps_stored_preview = true;
     store.upsert_chats(&[call]).unwrap();
     let stored = store.chat("chat-call").unwrap().unwrap();
     assert_eq!(

@@ -75,10 +75,20 @@ pub fn message_preview(html: &str, attachments: &[AttachmentInfo]) -> Option<Str
     if parts.images > 0 {
         return Some(IMAGE_PREVIEW.to_owned());
     }
-    attachment_label(attachments).map(str::to_owned)
+    attachment_label(attachments)
 }
 
-fn attachment_label(attachments: &[AttachmentInfo]) -> Option<&'static str> {
+fn attachment_label(attachments: &[AttachmentInfo]) -> Option<String> {
+    fixed_label(attachments).map(str::to_owned).or_else(|| {
+        let mut cards = attachments.iter().filter(|attachment| attachment.is_card());
+        cards
+            .clone()
+            .find_map(|card| collapse(&card.card_text()?))
+            .or_else(|| cards.next().map(|_| CARD_PREVIEW.to_owned()))
+    })
+}
+
+fn fixed_label(attachments: &[AttachmentInfo]) -> Option<&'static str> {
     let has_type = |wanted: &str| {
         attachments
             .iter()
@@ -92,8 +102,6 @@ fn attachment_label(attachments: &[AttachmentInfo]) -> Option<&'static str> {
         Some(AUDIO_PREVIEW)
     } else if has_type(LOOP_CARD_TYPE) {
         Some(LOOP_PREVIEW)
-    } else if attachments.iter().any(AttachmentInfo::is_card) {
-        Some(CARD_PREVIEW)
     } else {
         None
     }
@@ -214,6 +222,7 @@ pub(crate) struct OwnedPreview {
     pub deleted: bool,
     pub system: bool,
     pub call: bool,
+    pub attachments_only: bool,
 }
 
 impl OwnedPreview {
@@ -227,17 +236,20 @@ impl OwnedPreview {
         let call = detail
             .and_then(CallEvent::from_graph)
             .is_some_and(|event| event.phase.is_call());
+        let html = message
+            .body
+            .as_ref()
+            .and_then(|body| body.content.as_deref())
+            .filter(|_| regular && !deleted);
         let text = if deleted {
             None
         } else if regular {
-            message
-                .body
-                .as_ref()
-                .and_then(|body| body.content.as_deref())
-                .and_then(|html| message_preview(html, &[]))
+            html.and_then(|html| message_preview(html, &[]))
         } else {
             detail.and_then(system_event_preview).map(str::to_owned)
         };
+        let attachments_only =
+            text.is_none() && html.is_some_and(|html| html.contains("<attachment"));
         let sender = message.from.as_ref().filter(|_| regular);
         OwnedPreview {
             text,
@@ -250,6 +262,7 @@ impl OwnedPreview {
             deleted,
             system: !regular,
             call,
+            attachments_only,
         }
     }
 
@@ -273,6 +286,7 @@ impl OwnedPreview {
             deleted: record.deleted,
             system: !sender,
             call: event.is_some_and(|event| event.phase.is_call()),
+            attachments_only: false,
         }
     }
 
@@ -393,6 +407,41 @@ mod tests {
             );
         }
         assert_eq!(message_preview(body, &[]), None);
+    }
+
+    #[test]
+    fn a_card_with_text_shows_the_card_text() {
+        let body = r#"<attachment id="1792149081221"></attachment>"#;
+        let mut card = attachment("application/vnd.microsoft.card.adaptive");
+        card.content = Some(
+            serde_json::json!({
+                "type": "AdaptiveCard",
+                "body": [
+                    {"type": "TextBlock", "text": "Ada Lovelace edited Engine Notes"},
+                    {"type": "TextBlock", "text": "Page   updated"},
+                ],
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            message_preview(body, &[card]).as_deref(),
+            Some("Ada Lovelace edited Engine Notes Page updated")
+        );
+    }
+
+    #[test]
+    fn graph_attachment_only_bodies_keep_the_stored_line() {
+        let preview = |content: &str| {
+            OwnedPreview::from_graph(&graph_message(serde_json::json!({
+                "id": "1",
+                "messageType": "message",
+                "body": {"contentType": "html", "content": content},
+            })))
+        };
+        let card = preview(r#"<attachment id="1792149081221"></attachment>"#);
+        assert!(card.attachments_only);
+        assert_eq!(card.text, None);
+        assert!(!preview("<p>hi</p>").attachments_only);
     }
 
     #[test]
