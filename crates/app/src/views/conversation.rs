@@ -1226,9 +1226,23 @@ impl ConversationView {
         if in_channel {
             self.pane = ChannelPane::Posts;
             self.enter_feed_mode();
+            self.stop_typing(cx);
+            self.enter_thread_mode(row_key.clone(), cx);
         }
         self.reload_pending(cx);
         self.rebuild(true, cx);
+        if in_channel {
+            self.refresh_thread(row_key.clone(), cx);
+            let shown_alone = self
+                .rows
+                .borrow()
+                .iter()
+                .any(|row| row.key() == message_id);
+            if shown_alone {
+                self.reveal_row(message_id.to_owned(), message_id.to_owned(), cx);
+                return;
+            }
+        }
         self.reveal_row(row_key, message_id.to_owned(), cx);
     }
 
