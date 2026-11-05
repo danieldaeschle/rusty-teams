@@ -233,6 +233,7 @@ pub struct ConversationView {
     picker: Entity<ReactionPicker>,
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
+    fetched_jump: Option<String>,
     pin_index: usize,
     channel_details_open: bool,
     pinned_posts_expanded: bool,
@@ -580,6 +581,7 @@ impl ConversationView {
             picker,
             reaction_details: None,
             highlighted_message: None,
+            fetched_jump: None,
             pin_index: 0,
             channel_details_open: false,
             pinned_posts_expanded: false,
@@ -1210,54 +1212,57 @@ impl ConversationView {
         let in_channel = matches!(current.selection, Selection::Channel(_));
         if in_channel {
             self.pane = ChannelPane::Posts;
-            match record.reply_to_id.clone() {
-                Some(root_id) => {
-                    self.enter_thread_mode(root_id.clone(), cx);
-                    self.refresh_thread(root_id, cx);
-                }
-                None => {
-                    self.enter_feed_mode();
-                }
-            }
+            self.enter_feed_mode();
         }
-        let in_thread = self
-            .current
-            .as_ref()
-            .is_some_and(|current| matches!(current.mode, ViewMode::Thread(_)));
-        let target_key = if in_thread {
-            message_id.to_owned()
-        } else {
-            row_key
-        };
         self.reload_pending(cx);
         self.rebuild(true, cx);
-        self.reveal_row(target_key, cx);
+        self.reveal_row(row_key, message_id.to_owned(), cx);
     }
 
-    fn open_unloaded_post(&mut self, root_id: &str, cx: &mut Context<Self>) {
-        let in_channel = self
-            .current
-            .as_ref()
-            .is_some_and(|current| matches!(current.selection, Selection::Channel(_)));
-        if !in_channel {
+    fn open_unloaded_post(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let state = self.app.read(cx);
+        let (Some(engine), Some(current)) = (state.engine.clone(), self.current.as_ref()) else {
+            return;
+        };
+        if !matches!(current.selection, Selection::Channel(_))
+            || state.mode.demo
+            || self.fetched_jump.as_deref() == Some(message_id)
+        {
             return;
         }
-        self.pane = ChannelPane::Posts;
-        self.enter_thread_mode(root_id.to_owned(), cx);
-        self.refresh_thread(root_id.to_owned(), cx);
-        self.rebuild(true, cx);
+        self.fetched_jump = Some(message_id.to_owned());
+        let conversation_id = current.selection.conversation_id().to_owned();
+        let (task_conversation_id, task_message_id) = (conversation_id.clone(), message_id.to_owned());
+        let receiver = runtime::spawn(async move {
+            engine
+                .refresh_message(&task_conversation_id, &task_message_id)
+                .await
+        });
+        let message_id = message_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(_))) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if this.conversation_id().as_deref() == Some(conversation_id.as_str()) {
+                    this.jump_to_message(&conversation_id, &message_id, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
-    fn reveal_row(&mut self, target_key: String, cx: &mut Context<Self>) {
+    fn reveal_row(&mut self, row_key: String, message_key: String, cx: &mut Context<Self>) {
         let index = self
             .rows
             .borrow()
             .iter()
-            .position(|row| row.key() == target_key);
+            .position(|row| row.key() == row_key);
         if let Some(index) = index {
             self.scroller
                 .update(cx, |scroller, cx| scroller.scroll_to_item(index, cx));
-            self.highlight(target_key, cx);
+            self.highlight(message_key, cx);
         }
     }
 

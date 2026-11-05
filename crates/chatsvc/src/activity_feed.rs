@@ -263,11 +263,7 @@ fn object_property(properties: &Value, key: &str) -> Option<Value> {
 }
 
 fn text_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) if !text.is_empty() => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
+    crate::json_id::id_text(value)
 }
 
 fn flag(value: Option<&Value>) -> bool {
@@ -343,7 +339,7 @@ mod tests {
             message("1791368000001", 1791368000500, json!({
                 "activityId": 4711, "activityType": "reactionInChat", "activitySubtype": "heart",
                 "activityTimestamp": "1791368000000", "sourceThreadId": "19:a@thread.v2",
-                "sourceMessageId": 1791367000000_i64, "sourceReplyChainId": "1791367000000",
+                "sourceMessageId": 1791367000000.0, "sourceReplyChainId": "1791367000000",
                 "sourceUserId": "8:orgid:user-1", "sourceUserImDisplayName": "Ada Example",
                 "messagePreview": "Ship it", "messagePreviewTemplateOption": "hasText",
                 "sourceThreadTopic": "Release", "sourceThreadType": "chat", "count": "3"
