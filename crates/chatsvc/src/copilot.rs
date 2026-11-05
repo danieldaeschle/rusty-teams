@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use session::{Request, Scope, Session, SignalrExchange};
+use session::{NestedApp, Request, Scope, Session, SignalrExchange};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -7,6 +7,12 @@ use crate::error::{Error, Result};
 const CHATHUB_URL: &str = "https://substrate.office.com/m365Copilot/Chathub";
 const SYDNEY_RESOURCE: &str = "https://substrate.office.com/sydney";
 const SYDNEY_SCOPE: &str = "sydney.readwrite";
+const COPILOT_APP: NestedApp = NestedApp {
+    client_id: "c0ab8ce9-e9a0-42e7-b064-33d422df41f1",
+    redirect_uri: "brk-multihub://m365copilotapp.svc.cloud.microsoft",
+    broker_redirect_uri: "https://teams.cloud.microsoft/v2/authv2",
+};
+const HOST_PARAMETERS: &str = "source=%22officeweb%22&product=Office&agentHost=Bizchat.FullScreen&licenseType=Premium&isEdu=false&agent=work&scenario=officeweb";
 const HANDSHAKE: &str = r#"{"protocol":"json","version":1}"#;
 const INVOCATION: u8 = 4;
 const COMPLETION: u8 = 2;
@@ -52,7 +58,10 @@ impl Copilot {
         );
         let response = self
             .session
-            .send(request, &Scope::new(SYDNEY_RESOURCE, SYDNEY_SCOPE))
+            .send(
+                request,
+                &Scope::new(SYDNEY_RESOURCE, SYDNEY_SCOPE).for_nested_app(COPILOT_APP),
+            )
             .await?;
         answer_of(&response.body)
     }
@@ -61,7 +70,7 @@ impl Copilot {
 fn chathub_url(ask: &CopilotAsk, session_id: &str, request_id: &str) -> String {
     let route = format!("{}@{}", ask.user_id, ask.tenant_id);
     format!(
-        "{CHATHUB_URL}/{route}?chatsessionid={request_id}&XRoutingParameterSessionKey={user}&clientrequestid={request_id}&X-SessionId={session_id}&ConversationId={conversation}",
+        "{CHATHUB_URL}/{route}?chatsessionid={request_id}&XRoutingParameterSessionKey={user}&clientrequestid={request_id}&X-SessionId={session_id}&ConversationId={conversation}&{HOST_PARAMETERS}",
         user = ask.user_id,
         conversation = Uuid::new_v4(),
     )

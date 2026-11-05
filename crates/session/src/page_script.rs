@@ -50,6 +50,7 @@ impl Session {
             "requests": [],
             "resource": scope.resource,
             "scope": scope.name,
+            "nestedApp": scope.nested_app_json(),
             "marginMs": self.config.refresh_margin.as_millis() as u64,
             "concurrency": 1,
             "maxBytes": 1,

@@ -2,7 +2,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Disableable as _, Selectable as _, h_flex, v_flex};
+use gpui_kit::component::{Selectable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -13,21 +13,29 @@ use crate::runtime;
 use crate::theme;
 use crate::views::scroll_edge::with_top_edge;
 
-pub const COPILOT_PANE_TAG: &str = "shell/islands/main/copilot";
-const COPILOT_SCROLL_DIVIDER: &str = "shell/islands/main/copilot/divider-scroll";
+pub const COPILOT_PANE_TAG: &str = "shell/islands/copilot";
+const COPILOT_SCROLL_DIVIDER: &str = "shell/islands/copilot/divider-scroll";
 const TITLE: &str = "Copilot";
 const OPEN_LABEL: &str = "Open Copilot";
 const CLOSE_LABEL: &str = "Close Copilot";
 const PLACEHOLDER: &str = "Message Copilot";
 const WORKING: &str = "Copilot is reading the chat ...";
 const UNAVAILABLE: &str = "Copilot needs a signed-in account.";
-const INTRO: &str = "Ask Copilot about this chat.";
+const FAILED: &str = "Copilot could not answer:";
+const GREETING: &str = "Hi, how can I help?";
+const LOGO_ASSET: &str = "symbols/copilot_color.svg";
+const LOGO_BUTTON: f32 = 18.;
+const LOGO_TITLE: f32 = 20.;
+const INPUT_MIN_HEIGHT: f32 = 72.;
+const INPUT_RADIUS: f32 = 12.;
+const CHIP_RADIUS: f32 = 8.;
 const SUGGESTIONS: [&str; 3] = [
     "Summarize this chat",
     "What are open items?",
     "What decisions were made?",
 ];
-const PANE_WIDTH: f32 = 360.;
+const PANE_WIDTH: f32 = 400.;
+const ISLAND_RADIUS: f32 = 10.;
 const PANE_PADDING: f32 = 16.;
 const HEADER_HEIGHT: f32 = 48.;
 const BUTTON_SIZE: f32 = 32.;
@@ -67,7 +75,7 @@ impl ConversationView {
         let open = self.copilot.open;
         Some(
             Button::new("copilot-toggle")
-                .icon(IconName::Sparkles)
+                .child(copilot_logo(LOGO_BUTTON))
                 .ghost()
                 .size(px(BUTTON_SIZE))
                 .rounded(px(8.))
@@ -164,7 +172,10 @@ impl ConversationView {
         };
         turn.answer = match answer {
             Ok(text) => CopilotAnswer::Ready(text),
-            Err(error) => CopilotAnswer::Failed(error),
+            Err(error) => CopilotAnswer::Failed(format!(
+                "{FAILED} {}",
+                error.split(" (https://").next().unwrap_or_default()
+            )),
         };
         self.copilot.scroll.scroll_to_bottom();
         cx.notify();
@@ -175,56 +186,105 @@ impl ConversationView {
             return None;
         }
         self.copilot_chat_id()?;
-        let mut body = v_flex()
-            .w_full()
-            .px(px(PANE_PADDING))
-            .pb(px(PANE_PADDING))
-            .gap(px(12.));
-        if self.copilot.turns.is_empty() {
-            body = body.child(
-                div()
-                    .text_size(px(13.))
-                    .text_color(theme::text_muted())
-                    .child(INTRO),
-            );
-        }
-        for (index, turn) in self.copilot.turns.iter().enumerate() {
-            body = body.child(prompt_bubble(&turn.prompt)).child(answer_view(index, &turn.answer, cx));
-        }
         let busy = self
             .copilot
             .turns
             .last()
             .is_some_and(|turn| matches!(turn.answer, CopilotAnswer::Waiting));
-        let suggestions = h_flex().flex_wrap().gap(px(6.)).children(
-            SUGGESTIONS.iter().enumerate().map(|(index, prompt)| {
-                Button::new(("copilot-suggestion", index))
-                    .label(*prompt)
-                    .outline()
-                    .rounded(px(BUBBLE_RADIUS))
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ask_copilot((*prompt).to_owned(), cx)
-                    }))
-            }),
-        );
-        let footer = v_flex()
-            .flex_none()
-            .px(px(PANE_PADDING))
-            .py(px(12.))
-            .gap(px(8.))
-            .child(suggestions)
-            .children(self.copilot.input.as_ref().map(|input| Input::new(input)));
+        let input_box = self.copilot.input.as_ref().map(|input| {
+            div()
+                .w_full()
+                .min_h(px(INPUT_MIN_HEIGHT))
+                .px(px(12.))
+                .py(px(10.))
+                .rounded(px(INPUT_RADIUS))
+                .bg(theme::surface_raised())
+                .child(Input::new(input).appearance(false).bordered(false))
+        });
+        let content = if self.copilot.turns.is_empty() {
+            let suggestions = v_flex().w_full().gap(px(8.)).children(
+                SUGGESTIONS.iter().enumerate().map(|(index, prompt)| {
+                    div()
+                        .id(("copilot-suggestion", index))
+                        .w_full()
+                        .px(px(12.))
+                        .py(px(10.))
+                        .rounded(px(CHIP_RADIUS))
+                        .bg(theme::surface_raised())
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text())
+                        .cursor_pointer()
+                        .hover(|chip| chip.bg(theme::row_hover()))
+                        .child(*prompt)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.ask_copilot((*prompt).to_owned(), cx)
+                        }))
+                }),
+            );
+            v_flex()
+                .flex_1()
+                .min_h_0()
+                .px(px(PANE_PADDING))
+                .pb(px(PANE_PADDING))
+                .justify_center()
+                .gap(px(16.))
+                .child(
+                    div()
+                        .px(px(4.))
+                        .text_size(px(24.))
+                        .text_color(theme::text())
+                        .child(GREETING),
+                )
+                .children(input_box)
+                .child(suggestions)
+                .into_any_element()
+        } else {
+            let mut body = v_flex()
+                .w_full()
+                .px(px(PANE_PADDING))
+                .pb(px(PANE_PADDING))
+                .gap(px(12.));
+            for (index, turn) in self.copilot.turns.iter().enumerate() {
+                body = body
+                    .child(prompt_bubble(&turn.prompt))
+                    .child(answer_view(index, &turn.answer, cx));
+            }
+            v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(with_top_edge(
+                    div()
+                        .id("copilot-body")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scrollbar()
+                        .track_scroll(&self.copilot.scroll)
+                        .child(body),
+                    &self.copilot.scroll,
+                    COPILOT_SCROLL_DIVIDER,
+                ))
+                .child(
+                    div()
+                        .flex_none()
+                        .px(px(PANE_PADDING))
+                        .pb(px(PANE_PADDING))
+                        .when(busy, |footer| footer.opacity(0.6))
+                        .children(input_box),
+                )
+                .into_any_element()
+        };
         Some(
             h_flex()
                 .h_full()
                 .flex_none()
-                .child(div().w(px(1.)).h_full().flex_none().bg(theme::border()))
                 .child(
                     v_flex()
                         .debug_selector(|| COPILOT_PANE_TAG.into())
                         .w(px(PANE_WIDTH))
                         .h_full()
+                        .rounded(px(ISLAND_RADIUS))
+                        .overflow_hidden()
                         .bg(theme::surface())
                         .child(
                             h_flex()
@@ -234,11 +294,17 @@ impl ConversationView {
                                 .items_center()
                                 .justify_between()
                                 .child(
-                                    div()
-                                        .text_size(px(15.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(theme::text())
-                                        .child(TITLE),
+                                    h_flex()
+                                        .gap(px(8.))
+                                        .items_center()
+                                        .child(copilot_logo(LOGO_TITLE))
+                                        .child(
+                                            div()
+                                                .text_size(px(15.))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(theme::text())
+                                                .child(TITLE),
+                                        ),
                                 )
                                 .child(
                                     Button::new("copilot-close")
@@ -253,22 +319,15 @@ impl ConversationView {
                                         })),
                                 ),
                         )
-                        .child(with_top_edge(
-                            div()
-                                .id("copilot-body")
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_y_scrollbar()
-                                .track_scroll(&self.copilot.scroll)
-                                .child(body),
-                            &self.copilot.scroll,
-                            COPILOT_SCROLL_DIVIDER,
-                        ))
-                        .child(footer),
+                        .child(content),
                 )
                 .into_any_element(),
         )
     }
+}
+
+fn copilot_logo(size: f32) -> Img {
+    img(LOGO_ASSET).size(px(size)).flex_none()
 }
 
 fn prompt_bubble(prompt: &str) -> Div {

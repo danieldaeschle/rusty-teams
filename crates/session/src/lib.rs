@@ -13,6 +13,6 @@ pub use error::{Error, Result};
 pub use events::{TabChannel, TabCommand, TabControl, TabEvent, TabEvents};
 pub use page_script::token_acquirer_script;
 pub use request::{ApiResponse, BodyToken, Method, Request, SignalrExchange};
-pub use scope::{GRAPH, IC3, OUTLOOK, PRESENCE, SPACES, Scope};
+pub use scope::{GRAPH, IC3, NestedApp, OUTLOOK, PRESENCE, SPACES, Scope};
 pub use session::{DEFAULT_ENDPOINT, Session, SessionConfig, TabHold};
 pub use transport::{BoxFuture, CdpTransport, Diagnosis, OpenedTab, Transport};

@@ -238,6 +238,7 @@ impl Session {
             "requests": wire,
             "resource": scope.resource,
             "scope": scope.name,
+            "nestedApp": scope.nested_app_json(),
             "marginMs": self.config.refresh_margin.as_millis() as u64,
             "concurrency": DEFAULT_CONCURRENCY,
             "maxBytes": MAX_DOWNLOAD_BYTES,

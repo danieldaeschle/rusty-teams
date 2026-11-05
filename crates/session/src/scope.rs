@@ -12,6 +12,15 @@ pub const SPACES: &str = "https://api.spaces.skype.com";
 pub struct Scope {
     pub resource: Cow<'static, str>,
     pub name: Cow<'static, str>,
+    pub nested_app: Option<NestedApp>,
+}
+
+/// An app hosted inside the tab that gets its tokens through the tab's own sign-in (nested app auth).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NestedApp {
+    pub client_id: &'static str,
+    pub redirect_uri: &'static str,
+    pub broker_redirect_uri: &'static str,
 }
 
 impl Scope {
@@ -19,6 +28,23 @@ impl Scope {
         Scope {
             resource: resource.into(),
             name: name.into(),
+            nested_app: None,
+        }
+    }
+
+    pub fn for_nested_app(mut self, app: NestedApp) -> Self {
+        self.nested_app = Some(app);
+        self
+    }
+
+    pub(crate) fn nested_app_json(&self) -> serde_json::Value {
+        match self.nested_app {
+            Some(app) => serde_json::json!({
+                "clientId": app.client_id,
+                "redirectUri": app.redirect_uri,
+                "brokerRedirectUri": app.broker_redirect_uri,
+            }),
+            None => serde_json::Value::Null,
         }
     }
 

@@ -8,8 +8,9 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 76] = symbols![
+const SYMBOLS: [(&str, &[u8]); 77] = symbols![
     "bot",
+    "copilot_color",
     "done",
     "table",
     "done_all",

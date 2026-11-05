@@ -846,15 +846,7 @@ impl AppShell {
                 (None, None) => self
                     .conversation
                     .clone()
-                    .cached(
-                        StyleRefinement::default()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .rounded(px(10.))
-                            .bg(theme::surface())
-                            .overflow_hidden(),
-                    )
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
             })
     }

@@ -1,4 +1,4 @@
-(async ({requests, resource, scope, marginMs, concurrency, maxBytes, forceRefresh}) => {
+(async ({requests, resource, scope, marginMs, concurrency, maxBytes, forceRefresh, nestedApp}) => {
   const fresh = (expires) => expires > Date.now() + marginMs;
   const normalize = (value) => value.toLowerCase().replace(/\/\/+(?=[^/]*$)/, '/');
   const covers = (value, name) => value === name || value === name + '.all';
@@ -62,15 +62,17 @@
     const underResource = (name) => normalize(name).startsWith(base.toLowerCase() + '/');
     const grants = (scopes) => scopes.some(s => (scope === '.default' ? underResource(s) : covers(normalize(s), wanted))
       || (base === 'https://graph.microsoft.com' && covers(s.toLowerCase(), short)));
+    const cacheKey = nestedApp ? base + '|' + nestedApp.clientId : base;
     let token = null, expiresOn = 0;
     for (const entry of forceRefresh ? [] : entries) {
       if (entry.credentialType !== 'AccessToken' || (entry.tokenType && entry.tokenType !== 'Bearer')) continue;
+      if (nestedApp && entry.clientId !== nestedApp.clientId) continue;
       if (!ownAccount(entry) || (entry.realm && entry.realm !== homeTenant(entry))) continue;
       const expires = Number(entry.expiresOn) * 1000;
       if (!grants((entry.target || '').split(' ')) || !fresh(expires) || expires <= expiresOn) continue;
       token = entry.secret; expiresOn = expires;
     }
-    const cached = cache[base];
+    const cached = cache[cacheKey];
     if (!token && !forceRefresh && cached && fresh(cached.expires)) {
       if (grants(cached.scopes)) token = cached.token;
       else return {token: null, refreshError: `the app is not granted ${scope}`};
@@ -85,13 +87,19 @@
         client_id: refreshToken.clientId, grant_type: 'refresh_token', refresh_token: refreshToken.secret,
         scope: base + '/.default openid profile offline_access',
       });
+      if (nestedApp) {
+        form.set('client_id', nestedApp.clientId);
+        form.set('brk_client_id', refreshToken.clientId);
+        form.set('redirect_uri', nestedApp.redirectUri);
+        form.set('brk_redirect_uri', nestedApp.brokerRedirectUri);
+      }
       try {
         const response = await fetch(`https://login.microsoftonline.com/${homeTenant(refreshToken) || 'organizations'}/oauth2/v2.0/token`,
           {method: 'POST', body: form});
         const answer = await response.json();
         if (!response.ok) { refreshError = answer.error || `HTTP ${response.status}`; continue; }
         const scopes = (answer.scope || '').split(' ');
-        cache[base] = {token: answer.access_token, scopes, expires: Date.now() + answer.expires_in * 1000};
+        cache[cacheKey] = {token: answer.access_token, scopes, expires: Date.now() + answer.expires_in * 1000};
         if (grants(scopes)) { token = answer.access_token; break; }
         refreshError = `the app is not granted ${scope}`;
       } catch (error) {

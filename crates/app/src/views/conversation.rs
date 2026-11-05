@@ -3785,6 +3785,7 @@ impl Render for ConversationView {
             .h_full()
             .rounded(px(10.))
             .bg(background)
+            .overflow_hidden()
             .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
         if self.current.is_none() && !drafting {
@@ -4015,9 +4016,8 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
-        let channel_details = self
-            .render_channel_details(cx)
-            .or_else(|| self.render_copilot(cx));
+        let channel_details = self.render_channel_details(cx);
+        let copilot_island = self.render_copilot(cx);
         let find_panel = self.find_panel.clone().filter(|_| !drafting);
         let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
         let content = v_flex()
@@ -4064,7 +4064,7 @@ impl Render for ConversationView {
                 },
             )
             .child(self.render_drop_overlay(cx));
-        root.child(
+        let root = root.child(
             h_flex()
                 .relative()
                 .flex_1()
@@ -4100,8 +4100,17 @@ impl Render for ConversationView {
             } else if !this.on_escape(window, cx) {
                 cx.propagate();
             }
-        }))
-        .into_any_element()
+        }));
+        match copilot_island {
+            Some(island) => h_flex()
+                .size_full()
+                .min_w_0()
+                .gap(px(ISLAND_GAP))
+                .child(root)
+                .child(island)
+                .into_any_element(),
+            None => root.into_any_element(),
+        }
     }
 }
 
