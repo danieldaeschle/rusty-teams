@@ -123,7 +123,7 @@ impl ConversationView {
                 let index = this.rows.borrow().iter().position(|row| row.key() == root_id);
                 if let Some(index) = index {
                     this.scroller
-                        .update(cx, |scroller, cx| scroller.reveal_item(index, cx));
+                        .update(cx, |scroller, cx| scroller.reveal_item_bottom(index, cx));
                 }
             })
             .ok();

@@ -167,12 +167,20 @@ impl MessageScrollerState {
         true
     }
 
-    /// Scroll as little as needed to show the row at `index` in full.
-    pub fn reveal_item(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+    /// Scroll as little as needed to show the bottom of the row at `index`; a row taller than the viewport keeps its top out of view.
+    pub fn reveal_item_bottom(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
         if index >= self.list_state.item_count() {
             return false;
         }
-        self.list_state.scroll_to_reveal_item(index);
+        match self.list_state.bounds_for_item(index) {
+            Some(item) => {
+                let overflow = item.bottom() - self.list_state.viewport_bounds().bottom();
+                if overflow > px(0.) {
+                    self.list_state.scroll_by(overflow);
+                }
+            }
+            None => self.list_state.scroll_to_reveal_item(index),
+        }
         cx.notify();
         true
     }
