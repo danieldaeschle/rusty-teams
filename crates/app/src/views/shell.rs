@@ -875,6 +875,9 @@ impl Render for AppShell {
         .filter(|open| *open)
         .count();
         elevation::set_app_modal_layers(window, open_dialogs, cx);
+        if open_dialogs > 0 {
+            crate::inline_video::stop(cx);
+        }
         if let Some(dialog) = self
             .state
             .read(cx)

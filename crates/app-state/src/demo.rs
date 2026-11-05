@@ -1546,15 +1546,18 @@ fn standup_messages() -> Vec<MessageRecord> {
             ),
             r#"[{"content_type":"reference","name":"Standup-notes.docx","url":"https://example.com/files/standup-notes.docx","text":null,"size":38900}]"#,
         ),
-        message(
-            "demo-chat-meeting-standup",
-            "su2",
-            None,
-            jonas,
-            at(0, 9, 45),
-            "<p>Recording is available</p>",
-            "[]",
-            false,
+        with_attachments(
+            message(
+                "demo-chat-meeting-standup",
+                "su2",
+                None,
+                jonas,
+                at(0, 9, 45),
+                "<p>Recording is available</p>",
+                "[]",
+                false,
+            ),
+            r#"[{"content_type":"reference","name":"Standup-recording.mp4","url":"https://contoso-my.sharepoint.com/personal/jonas_contoso_com/Documents/Recordings/Standup-recording.mp4","text":null,"size":18400000}]"#,
         ),
         with_links(
             message(

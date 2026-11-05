@@ -225,9 +225,18 @@ mod probe {
     }
 
     fn find_container(parent: HWND) -> Option<HWND> {
-        unsafe { FindWindowExW(Some(parent), None, CONTAINER_CLASS, PCWSTR::null()) }
-            .ok()
-            .filter(|window| !window.is_invalid())
+        let mut after = None;
+        loop {
+            let window =
+                unsafe { FindWindowExW(None, after, CONTAINER_CLASS, PCWSTR::null()) }.ok()?;
+            if window.is_invalid() {
+                return None;
+            }
+            if unsafe { GetWindow(window, GW_OWNER) }.is_ok_and(|owner| owner == parent) {
+                return Some(window);
+            }
+            after = Some(window);
+        }
     }
 
     fn window_rect(window: HWND) -> RECT {

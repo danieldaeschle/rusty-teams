@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Once;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -10,12 +10,13 @@ use webview2_com::{
     NavigationCompletedEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
     take_pwstr,
 };
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, DeleteObject, HGDIOBJ, RGN_DIFF, SetWindowRgn,
+    ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, HGDIOBJ, RGN_DIFF, SetWindowRgn,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HRESULT, HSTRING, Interface, PCWSTR, PWSTR, w};
 
@@ -24,7 +25,12 @@ use crate::geometry::{EmbedBounds, local_cutouts};
 use crate::host::environment_options;
 
 const CONTAINER_CLASS: PCWSTR = w!("RustyTeamsEmbedContainer");
+const OWNER_SUBCLASS_ID: usize = 0x5254_4542;
 static REGISTER_CONTAINER_CLASS: Once = Once::new();
+
+thread_local! {
+    static OPEN_EMBEDS: RefCell<Vec<Weak<RefCell<EmbedState>>>> = const { RefCell::new(Vec::new()) };
+}
 
 enum Environment {
     Idle,
@@ -80,7 +86,9 @@ impl EmbedHost {
     }
 
     pub fn open(&self, spec: EmbedSpec) -> Option<(MainEmbed, UnboundedReceiver<EmbedEvent>)> {
-        let container = create_container(HWND(spec.parent as *mut _)).ok()?;
+        let owner = HWND(spec.parent as *mut _);
+        let container = create_container(owner).ok()?;
+        follow_owner(owner);
         let (events, receiver) = unbounded_channel();
         let state = Rc::new(RefCell::new(EmbedState {
             spec,
@@ -92,6 +100,11 @@ impl EmbedHost {
             closed: false,
             events,
         }));
+        OPEN_EMBEDS.with(|embeds| {
+            let mut embeds = embeds.borrow_mut();
+            embeds.retain(|embed| embed.strong_count() > 0);
+            embeds.push(Rc::downgrade(&state));
+        });
         self.request_controller(&state);
         Some((MainEmbed { state }, receiver))
     }
@@ -270,12 +283,13 @@ fn teardown(embed: &SharedEmbed) -> bool {
 }
 
 fn layout(embed: &SharedEmbed) {
-    let (container, bounds, visible, cutouts, controller) = {
+    let (owner, container, bounds, visible, cutouts, controller) = {
         let state = embed.borrow();
         if state.closed {
             return;
         }
         (
+            HWND(state.spec.parent as *mut _),
             state.container,
             state.bounds,
             state.visible,
@@ -287,12 +301,17 @@ fn layout(embed: &SharedEmbed) {
         return;
     };
     let shown = visible && bounds.has_area();
+    let mut origin = POINT {
+        x: bounds.x,
+        y: bounds.y,
+    };
     unsafe {
+        let _ = ClientToScreen(owner, &mut origin);
         let _ = SetWindowPos(
             container,
             None,
-            bounds.x,
-            bounds.y,
+            origin.x,
+            origin.y,
             bounds.width,
             bounds.height,
             SWP_NOZORDER | SWP_NOACTIVATE,
@@ -333,7 +352,41 @@ unsafe fn apply_region(container: HWND, content: EmbedBounds, cutouts: &[EmbedBo
     }
 }
 
-fn create_container(parent: HWND) -> windows::core::Result<HWND> {
+fn follow_owner(owner: HWND) {
+    unsafe {
+        let _ = SetWindowSubclass(owner, Some(owner_procedure), OWNER_SUBCLASS_ID, 0);
+    }
+}
+
+extern "system" fn owner_procedure(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass: usize,
+    _data: usize,
+) -> LRESULT {
+    if message == WM_WINDOWPOSCHANGED {
+        let moved: Vec<SharedEmbed> = OPEN_EMBEDS.with(|embeds| {
+            embeds
+                .borrow()
+                .iter()
+                .filter_map(Weak::upgrade)
+                .filter(|embed| {
+                    embed
+                        .try_borrow()
+                        .is_ok_and(|state| state.spec.parent == window.0 as isize)
+                })
+                .collect()
+        });
+        for embed in &moved {
+            layout(embed);
+        }
+    }
+    unsafe { DefSubclassProc(window, message, wparam, lparam) }
+}
+
+fn create_container(owner: HWND) -> windows::core::Result<HWND> {
     let instance = HINSTANCE(unsafe { GetModuleHandleW(None) }?.0);
     REGISTER_CONTAINER_CLASS.call_once(|| {
         let class = WNDCLASSW {
@@ -346,15 +399,15 @@ fn create_container(parent: HWND) -> windows::core::Result<HWND> {
     });
     unsafe {
         CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             CONTAINER_CLASS,
             w!(""),
-            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            WS_POPUP | WS_CLIPCHILDREN,
             0,
             0,
             0,
             0,
-            Some(parent),
+            Some(owner),
             None,
             Some(instance),
             None,

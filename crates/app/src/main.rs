@@ -38,6 +38,8 @@ const SINGLE_INSTANCE_NAME: &str = "rusty-teams";
 const DATABASE_FILE: &str = "cache.sqlite3";
 #[cfg(windows)]
 const WEBVIEW_FOLDER: &str = "WebView2";
+#[cfg(windows)]
+const DEMO_WEBVIEW_FOLDER: &str = "rusty-teams-demo-WebView2";
 
 #[derive(Default)]
 struct Arguments {
@@ -169,6 +171,10 @@ fn main() {
         read_only: arguments.read_only,
         demo_sync: arguments.demo_sync,
     };
+    #[cfg(windows)]
+    if arguments.demo {
+        inline_video::configure(std::env::temp_dir().join(DEMO_WEBVIEW_FOLDER));
+    }
     let store = if arguments.demo {
         let store = Store::open_in_memory().expect("in-memory store");
         demo::seed(&store);
