@@ -45,6 +45,10 @@ mod policy {
             self.reported = true;
             Some(age)
         }
+
+        pub fn ignore_current_stall(&mut self) {
+            self.reported = true;
+        }
     }
 
     pub fn dumps_to_delete(
@@ -139,7 +143,11 @@ mod windows_impl {
     fn watch_for_hangs() {
         let mut detector = StallDetector::new(HANG_THRESHOLD);
         loop {
+            let sleep_started = Instant::now();
             std::thread::sleep(WATCHDOG_INTERVAL);
+            if sleep_started.elapsed() >= HANG_THRESHOLD {
+                detector.ignore_current_stall();
+            }
             let Some(stalled_for) = detector.observe(heartbeat_age()) else {
                 continue;
             };
@@ -294,6 +302,15 @@ mod tests {
     fn rearms_after_heartbeats_resume() {
         let mut detector = StallDetector::new(Duration::from_secs(10));
         assert_eq!(detector.observe(seconds(12)), seconds(12));
+        assert_eq!(detector.observe(seconds(1)), None);
+        assert_eq!(detector.observe(seconds(15)), seconds(15));
+    }
+
+    #[test]
+    fn a_stall_over_a_system_sleep_is_not_reported() {
+        let mut detector = StallDetector::new(Duration::from_secs(10));
+        detector.ignore_current_stall();
+        assert_eq!(detector.observe(seconds(3600)), None);
         assert_eq!(detector.observe(seconds(1)), None);
         assert_eq!(detector.observe(seconds(15)), seconds(15));
     }
