@@ -67,7 +67,7 @@ jobs:
       - name: Build
         run: cargo build -p app --release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: teams-linux
           path: target/release/teams
@@ -124,7 +124,7 @@ jobs:
       - name: Build
         run: cargo build -p app --release --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: teams-windows
           path: target/release/teams.exe
