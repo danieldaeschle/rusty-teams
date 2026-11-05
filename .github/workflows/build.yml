@@ -110,10 +110,12 @@ jobs:
           echo "GPUI_PRE_WINDOWS_PATCHED=$patchedDir" >> "$GITHUB_ENV"
 
       # Background effects ship as an embedded DLL, see tools/onnxruntime-dll.
+      # The path must be absolute: the calling build script reads it from crates/calling,
+      # and `cygpath -m` leaves a relative path like tools/onnxruntime-dll unchanged.
       - name: Build the embedded onnxruntime.dll
         run: |
           (cd tools/onnxruntime-dll && RUSTFLAGS="-C target-feature=-crt-static" cargo build --release)
-          echo "CALLING_ONNXRUNTIME_DLL=$(cygpath -m tools/onnxruntime-dll)/target/release/onnxruntime.dll" >> "$GITHUB_ENV"
+          echo "CALLING_ONNXRUNTIME_DLL=$(cygpath -m "$GITHUB_WORKSPACE")/tools/onnxruntime-dll/target/release/onnxruntime.dll" >> "$GITHUB_ENV"
 
       - name: Tests
         run: cargo test --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
