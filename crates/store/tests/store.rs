@@ -589,11 +589,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 24);
+        assert_eq!(store.schema_version().unwrap(), 25);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 24);
+    assert_eq!(reopened.schema_version().unwrap(), 25);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -625,7 +625,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 24);
+    assert_eq!(store.schema_version().unwrap(), 25);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -691,7 +691,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 24);
+    assert_eq!(store.schema_version().unwrap(), 25);
 }
 
 #[test]
@@ -1579,7 +1579,7 @@ fn migration_to_v20_adds_the_call_event_column() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 24);
+    assert_eq!(store.schema_version().unwrap(), 25);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
@@ -1629,7 +1629,7 @@ fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 24);
+    assert_eq!(store.schema_version().unwrap(), 25);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_none());
     assert!(store.sync_state("other").unwrap().is_some());
@@ -1659,7 +1659,7 @@ fn migration_to_v22_adds_read_horizons_that_survive_a_reopen() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 24);
+    assert_eq!(store.schema_version().unwrap(), 25);
     assert!(store.read_horizons("c").unwrap().is_empty());
     let horizons = [
         horizon("8:orgid:ada", 3, Some(4)),
@@ -1727,4 +1727,26 @@ fn local_show_hide_and_channel_pin_writes_reach_the_sidebar() {
         .replace_pinned_channels(&["c2".to_owned(), "c1".to_owned()])
         .unwrap();
     assert_eq!(store.pinned_channel_ids().unwrap(), vec!["c2", "c1"]);
+}
+
+#[test]
+fn migration_to_v25_drops_copies_stored_under_a_float_id() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        store
+            .upsert_messages(&[message("c", "1793871826192.0", 1), message("c", "1793871826192", 1)])
+            .unwrap();
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", 24)
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let ids = ["1793871826192.0".to_owned(), "1793871826192".to_owned()];
+    let found = store.messages_by_id("c", &ids).unwrap();
+    assert_eq!(found.len(), 1);
+    assert!(found.contains_key("1793871826192"));
 }
