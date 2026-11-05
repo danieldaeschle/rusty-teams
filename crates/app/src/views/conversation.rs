@@ -3788,15 +3788,7 @@ impl Render for ConversationView {
                     }
                     None => div().into_any_element(),
                 };
-                if comfy {
-                    h_flex()
-                        .w_full()
-                        .justify_center()
-                        .child(div().w_full().max_w(px(COMFY_RUNWAY_WIDTH)).child(row))
-                        .into_any_element()
-                } else {
-                    row
-                }
+                runway(row, comfy)
             },
         )
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
@@ -3923,17 +3915,23 @@ impl Render for ConversationView {
                                 .right_0(),
                         )
                     })
-                    .children(pin_banner.map(pin_banner_overlay)),
+                    .children(pin_banner.map(|banner| pin_banner_overlay(runway(banner, comfy)))),
             )
-            .children(self.render_draft_error(cx))
+            .children(self.render_draft_error(cx).map(|error| runway(error, comfy)))
             .when(
                 !in_feed && !recap_active,
                 |column| match &forward_selection {
-                    Some(snapshot) => column.child(self.render_forward_footer(snapshot, cx)),
-                    None => column
-                        .child(self.render_typing_line(cx))
-                        .children(self.render_proposal_card(cx))
-                        .child(self.composer.clone()),
+                    Some(snapshot) => {
+                        column.child(runway(self.render_forward_footer(snapshot, cx), comfy))
+                    }
+                    None => column.child(runway(
+                        v_flex()
+                            .w_full()
+                            .child(self.render_typing_line(cx))
+                            .children(self.render_proposal_card(cx))
+                            .child(self.composer.clone()),
+                        comfy,
+                    )),
                 },
             )
             .child(self.render_drop_overlay(cx));
@@ -4055,6 +4053,18 @@ fn add_people_button(app: &Entity<AppState>, chat_id: &str) -> AnyElement {
         .tooltip("Add people")
         .on_click(move |_, window, cx| open_add_people(&app, &chat_id, true, window, cx))
         .into_any_element()
+}
+
+fn runway(content: impl IntoElement, comfy: bool) -> AnyElement {
+    if comfy {
+        h_flex()
+            .w_full()
+            .justify_center()
+            .child(div().w_full().max_w(px(COMFY_RUNWAY_WIDTH)).child(content))
+            .into_any_element()
+    } else {
+        content.into_any_element()
+    }
 }
 
 #[cfg(test)]
