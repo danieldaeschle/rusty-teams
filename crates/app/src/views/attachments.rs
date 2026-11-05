@@ -142,6 +142,7 @@ fn kind_style(kind: FileKind) -> KindStyle {
         FileKind::Pdf => ("PDF", "PDF document", 0xB91C1C),
         FileKind::Image => ("IMG", "Image", 0x7C3AED),
         FileKind::Archive => ("ZIP", "Archive", 0xB45309),
+        FileKind::Loop => ("", "Loop component", 0x7C3AED),
         FileKind::Other => ("", "File", 0x525252),
     };
     KindStyle {
@@ -252,7 +253,7 @@ fn file_view(
         .and_then(Option::as_ref);
     let progress = downloads::progress_fraction(state);
     let button = actions
-        .filter(|_| !card.open_url.is_empty())
+        .filter(|_| !card.open_url.is_empty() && card.kind != FileKind::Loop)
         .map(|actions| save_button(state, format!("{id}-save"), index, actions.activate.clone()));
     h_flex()
         .id(ElementId::Name(id.into()))
