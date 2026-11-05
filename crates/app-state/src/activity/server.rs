@@ -6,6 +6,12 @@ use crate::rows::reaction_glyph;
 
 const ORG_USER_PREFIX: &str = "8:orgid:";
 const CHANNEL_THREAD_TYPES: [&str; 2] = ["topic", "space"];
+const APP_TEMPLATES: [(&str, &str); 4] = [
+    ("recapIsReady", "Meeting recap is ready"),
+    ("recapIsReadyForFollowedMeetings", "Meeting recap is ready"),
+    ("recapIsReadyV2", "Recap ready: {subject}"),
+    ("recapIsReadyForFollowedMeetingsV2", "Recap ready: {subject}"),
+];
 
 pub fn feed_of(snapshot: &ActivitySnapshot, seen_locally_ms: i64) -> Feed {
     Feed::new(
@@ -60,7 +66,33 @@ fn entry_of(item: &ActivityItem) -> Entry {
         source_label: item.source_app_name.clone().or_else(|| item.thread_topic.clone()),
         link: item.tap_url.clone(),
         reply_id: channel_reply(item, kind),
+        title: app_title(item),
+        event_range: item
+            .event_start_ms
+            .zip(item.event_end_ms)
+            .and_then(|(start_ms, end_ms)| {
+                Some((
+                    DateTime::from_timestamp_millis(start_ms)?,
+                    DateTime::from_timestamp_millis(end_ms)?,
+                ))
+            }),
     }
+}
+
+fn app_title(item: &ActivityItem) -> Option<String> {
+    let (_, template) = APP_TEMPLATES
+        .iter()
+        .find(|(subtype, _)| *subtype == item.activity_subtype)?;
+    let mut title = String::new();
+    let mut rest = *template;
+    while let Some(open) = rest.find('{') {
+        let close = open + rest[open..].find('}')?;
+        title.push_str(&rest[..open]);
+        title.push_str(item.template_parameters.get(&rest[open + 1..close])?.trim());
+        rest = &rest[close + 1..];
+    }
+    title.push_str(rest);
+    Some(title.trim().to_owned())
 }
 
 pub fn kind_of(item: &ActivityItem) -> Kind {
@@ -142,6 +174,22 @@ mod tests {
             version_ms: 1791368000000,
             ..ActivityItem::default()
         }
+    }
+
+    #[test]
+    fn a_recap_activity_gets_the_app_title_and_meeting_time() {
+        let mut recap = item("msGraph", "recapIsReadyForFollowedMeetingsV2");
+        recap
+            .template_parameters
+            .insert("subject".into(), "Following: Sprint {Demo} ".into());
+        recap.event_start_ms = Some(1793865600000);
+        recap.event_end_ms = Some(1793869200000);
+        let entry = entry_of(&recap);
+        assert_eq!(entry.title.as_deref(), Some("Recap ready: Following: Sprint {Demo}"));
+        let (start, end) = entry.event_range.unwrap();
+        assert_eq!((end - start).num_minutes(), 60);
+        assert_eq!(entry_of(&item("msGraph", "recapIsReadyV2")).title, None);
+        assert_eq!(entry_of(&item("msGraph", "somethingElse")).title, None);
     }
 
     #[test]

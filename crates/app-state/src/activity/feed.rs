@@ -160,6 +160,8 @@ pub struct Entry {
     pub source_label: Option<String>,
     pub link: Option<String>,
     pub reply_id: Option<String>,
+    pub title: Option<String>,
+    pub event_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
 }
 
 impl Entry {

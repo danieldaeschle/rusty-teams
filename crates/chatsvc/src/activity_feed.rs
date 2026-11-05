@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -38,6 +40,10 @@ pub struct ActivityItem {
     pub read_flag: bool,
     pub tap_url: Option<String>,
     pub meeting_thread_id: Option<String>,
+    #[serde(default)]
+    pub template_parameters: BTreeMap<String, String>,
+    pub event_start_ms: Option<i64>,
+    pub event_end_ms: Option<i64>,
 }
 
 /// `seen_ms`: the bell horizon (`consumptionhorizon`), `bookmark_ms`: Mark all as read (`consumptionHorizonBookmark`).
@@ -201,6 +207,11 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
     }
     let activity = object_property(properties, "activity")?;
     let text = |key: &str| activity.get(key).and_then(text_of);
+    let context = activity.get("activityContext");
+    let location = context
+        .and_then(|context| object_property(context, "location"))
+        .and_then(|location| location.get("Custom").and_then(Value::as_str).map(str::to_owned))
+        .unwrap_or_default();
     let message_id = message.get("id").and_then(text_of)?;
     let version_ms = message
         .get("version")
@@ -234,7 +245,26 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
         read_flag: flag(properties.get(READ_PROPERTY)),
         tap_url: text("customTapAction"),
         meeting_thread_id: meeting_thread_in(&activity.to_string()),
+        template_parameters: context
+            .and_then(|context| object_property(context, "templateParameters"))
+            .and_then(|parameters| parameters.as_object().cloned())
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .filter_map(|(key, value)| Some((key.clone(), text_of(value)?)))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        event_start_ms: tag_time(&location, "StartDateTime"),
+        event_end_ms: tag_time(&location, "EndDateTime"),
     })
+}
+
+fn tag_time(text: &str, tag: &str) -> Option<i64> {
+    let open = format!("<{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = start + text[start..].find(&format!("</{tag}>"))?;
+    timestamp_ms(&Value::String(text[start..end].to_owned()))
 }
 
 fn meeting_thread_in(text: &str) -> Option<String> {
@@ -371,6 +401,7 @@ mod tests {
                 read_flag: false,
                 tap_url: None,
                 meeting_thread_id: None,
+                ..ActivityItem::default()
             }]
         );
     }
@@ -392,6 +423,24 @@ mod tests {
         assert_eq!(items[0].meeting_thread_id.as_deref(), Some("19:meeting_Zm9v@thread.v2"));
         assert_eq!(items[1].tap_url, None);
         assert_eq!(items[1].meeting_thread_id.as_deref(), Some("19:meeting_YmFy@thread.v2"));
+    }
+
+    #[test]
+    fn an_app_activity_keeps_its_template_parameters_and_time_range() {
+        let body = json!({"messages": [message("1", 1, json!({
+            "activityType": "msGraph", "activitySubtype": "recapIsReadyForFollowedMeetingsV2",
+            "activityContext": {
+                "location": "{\"Custom\":\"<DateTimeRange><StartDateTime>2026-11-05T08:00:00.0000000Z</StartDateTime><EndDateTime>2026-11-05T09:00:00.0000000Z</EndDateTime></DateTimeRange>\"}",
+                "templateParameters": "{\"subject\":\"Following: Sprint Demo \"}",
+            },
+        }), "false")]});
+        let item = &parse_page(&body).unwrap()[0];
+        assert_eq!(
+            item.template_parameters.get("subject").map(String::as_str),
+            Some("Following: Sprint Demo ")
+        );
+        assert_eq!(item.event_start_ms, Some(1793865600000));
+        assert_eq!(item.event_end_ms, Some(1793869200000));
     }
 
     #[test]
