@@ -25,7 +25,9 @@ use crate::data::Directory;
 use crate::importance::importance_label;
 use crate::render::Block;
 use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
-use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
+use crate::rows::{
+    Corners, Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners,
+};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
 use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ROW_PADDING};
@@ -71,6 +73,10 @@ pub(super) const BUBBLE_PADDING_X: f32 = 12.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
+pub const JUMP_HIGHLIGHT_PERIOD: Duration = Duration::from_millis(2400);
+const HIGHLIGHT_FADE_IN: f32 = 0.1;
+const HIGHLIGHT_FADE_OUT: f32 = 0.4;
+const HIGHLIGHT_TINT: f32 = 0.3;
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 pub const SELECT_BOX_SIZE: f32 = 16.;
 pub const SELECT_GAP: f32 = 12.;
@@ -277,6 +283,9 @@ fn bubble(
                 },
             )
         });
+    element = element.when(extras.highlighted, |bubble| {
+        bubble.child(jump_highlight(index, corners))
+    });
     let has_reactions = !row.reactions.is_empty();
     let saved = extras.saved;
     let mut content = v_flex().gap(px(6.));
@@ -405,6 +414,7 @@ struct BubbleExtras {
     reaction_proposal: Option<ReactionPill>,
     undo_delete: SharedRowAction,
     compact: bool,
+    highlighted: bool,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
@@ -508,6 +518,28 @@ fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> Ani
             .with_easing(pulsating_between(0.35, 1.)),
         |element, opacity| element.opacity(opacity),
     )
+}
+
+fn jump_highlight(index: usize, corners: Corners) -> AnimationElement<Div> {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_tl(px(corners.top_left))
+        .rounded_tr(px(corners.top_right))
+        .rounded_br(px(corners.bottom_right))
+        .rounded_bl(px(corners.bottom_left))
+        .bg(theme::accent().opacity(HIGHLIGHT_TINT))
+        .with_animation(
+            SharedString::from(format!("jump-highlight/{index}")),
+            Animation::new(JUMP_HIGHLIGHT_PERIOD),
+            |highlight, delta| highlight.opacity(highlight_opacity(delta)),
+        )
+}
+
+fn highlight_opacity(delta: f32) -> f32 {
+    let fade_in = (delta / HIGHLIGHT_FADE_IN).min(1.);
+    let fade_out = ((1. - delta) / HIGHLIGHT_FADE_OUT).min(1.);
+    ease_in_out(fade_in.min(fade_out))
 }
 
 fn receipt_fade_in(message_key: &str, check: Div) -> AnimationElement<Div> {
@@ -800,6 +832,7 @@ pub fn render_message_row(
         reaction_proposal,
         undo_delete,
         compact,
+        highlighted,
     };
     let own = row.own;
     let spacing = px(row_spacing(row.series.has_prev, compact));
@@ -833,9 +866,6 @@ pub fn render_message_row(
                     div()
                         .w_full()
                         .rounded(px(10.))
-                        .when(highlighted, |element| {
-                            element.bg(theme::accent().opacity(0.2))
-                        })
                         .when(checked && !highlighted, |element| {
                             element.bg(theme::accent().opacity(SELECTED_TINT))
                         })
@@ -890,6 +920,19 @@ pub fn select_box(checked: bool, blocked: bool, index: usize) -> Div {
             }
         })
         .when(blocked, |element| element.opacity(SELECT_BLOCKED_OPACITY))
+}
+
+#[cfg(test)]
+mod highlight_tests {
+    use super::highlight_opacity;
+
+    #[test]
+    fn jump_highlight_fades_in_holds_and_fades_out() {
+        assert_eq!(highlight_opacity(0.), 0.);
+        assert_eq!(highlight_opacity(0.5), 1.);
+        assert!(highlight_opacity(0.8) < 1.);
+        assert!(highlight_opacity(0.99) < 0.05);
+    }
 }
 
 #[cfg(test)]

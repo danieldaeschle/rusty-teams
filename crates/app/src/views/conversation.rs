@@ -57,7 +57,9 @@ use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPrevi
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::group_name_button;
 use super::message_actions::{Action, DelegateEntry, MessageMenu};
-use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
+use super::message_row::{
+    AVATAR_GAP, AVATAR_SIZE, JUMP_HIGHLIGHT_PERIOD, render_message_row, render_skeleton_row,
+};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
 use super::post_card::render_post;
@@ -126,7 +128,6 @@ const DEMO_DOWNLOAD_STEPS: u8 = 10;
 const DEMO_DOWNLOAD_STEP: Duration = Duration::from_millis(100);
 const JUMP_SCAN_LIMIT: usize = 5000;
 const JUMP_CONTEXT_MESSAGES: usize = 12;
-const HIGHLIGHT_DURATION: Duration = Duration::from_secs(2);
 const PROGRESS_DELAY: Duration = Duration::from_millis(400);
 const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
@@ -1248,7 +1249,7 @@ impl ConversationView {
         self.highlighted_message = Some(key.clone());
         cx.notify();
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(HIGHLIGHT_DURATION).await;
+            cx.background_executor().timer(JUMP_HIGHLIGHT_PERIOD).await;
             this.update(cx, |this, cx| {
                 if this.highlighted_message.as_deref() == Some(key.as_str()) {
                     this.highlighted_message = None;
