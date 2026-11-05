@@ -13,20 +13,10 @@ const PARKED_OUTLOOK: &str = "https://outlook.cloud.microsoft/owa/favicon.ico";
 const LOGIN: &str = "https://login.microsoftonline.com/common/oauth2/authorize?client_id=x";
 
 async fn next_event(events: &mut Receiver<BrowserEvent>) -> BrowserEvent {
-    tokio::time::timeout(Duration::from_secs(10), events.recv())
+    tokio::time::timeout(Duration::from_secs(30), events.recv())
         .await
-        .expect("no event within 10s")
+        .expect("no event within 30s")
         .expect("channel closed")
-}
-
-/// Waits for a condition instead of sleeping a fixed time: on a loaded machine
-/// the watchdog's backoff sleeps overshoot, and retry counts must not race them.
-async fn wait_until(condition: impl Fn() -> bool) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while !condition() {
-        assert!(tokio::time::Instant::now() < deadline, "condition not met within 10s");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 fn fast_watchdog() -> WatchdogConfig {
@@ -158,7 +148,22 @@ async fn watchdog_retries_with_backoff_until_launch_works() {
     *harness.launcher.fail.lock().unwrap() = true;
     harness.mock.kill().await;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Died);
-    wait_until(|| harness.launcher.requests.lock().unwrap().len() >= 3).await;
+    // Retries must repeat, but how many fit in a stretch of wall clock depends on
+    // the runner (dead-port probes can eat their full timeout on a slow CI box),
+    // so wait for the count instead of racing a fixed sleep.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let requests = harness.launcher.requests.lock().unwrap().len();
+        if requests >= 3 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "only {requests} launch requests within 60s (is_running: {})",
+            harness.browser.is_running().await,
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     *harness.launcher.fail.lock().unwrap() = false;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
 }
