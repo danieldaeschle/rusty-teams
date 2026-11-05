@@ -37,6 +37,15 @@ fn seed(target: Target, directory: &Path, contents: &str) -> PathBuf {
     path
 }
 
+/// Marks the agent as installed in the fake home: most targets with their config
+/// directory, Claude Code with ~/.claude. Without one of these install() falls
+/// back to the agent's binary on the host's PATH, and the test would depend on
+/// what happens to be installed on the machine running it.
+fn make_available(target: Target, home: &Path) {
+    fs::create_dir_all(config(target, home).parent().unwrap()).unwrap();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+}
+
 fn backup_of(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap().to_os_string();
     name.push(".bak-rusty-teams");
@@ -53,8 +62,7 @@ fn install_into_missing_file_creates_it() {
     ] {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path();
-        fs::create_dir_all(config(target, home).parent().unwrap()).unwrap();
-        fs::create_dir_all(home.join(".claude")).unwrap();
+        make_available(target, home);
         let homes = homes_in(home);
         let report = install(target, &endpoint("one"), &homes).unwrap();
         assert_eq!(report, InstallReport::Written(vec![Location::Native]));
@@ -153,7 +161,7 @@ fn token_change_is_stale_until_reinstall() {
     for target in [Target::ClaudeCode, Target::Codex, Target::Cursor] {
         let directory = tempfile::tempdir().unwrap();
         let homes = homes_in(directory.path());
-        fs::create_dir_all(config(target, directory.path()).parent().unwrap()).unwrap();
+        make_available(target, directory.path());
         install(target, &endpoint("one"), &homes).unwrap();
         assert!(status(target, &endpoint("two"), &homes).stale);
         let results = reinstall_all(&endpoint("two"), &homes);
