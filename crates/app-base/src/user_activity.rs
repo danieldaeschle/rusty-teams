@@ -98,6 +98,7 @@ pub fn track(input: Arc<UserInput>) -> watch::Receiver<bool> {
     let (sender, receiver) = watch::channel(false);
     crate::runtime::handle().spawn(async move {
         let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
             let now = Instant::now();
