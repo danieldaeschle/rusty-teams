@@ -3,6 +3,7 @@ mod activity_sync;
 mod adaptive_card;
 mod avatars;
 mod bot_partners;
+mod copilot;
 mod call_event;
 mod card_actions;
 mod card_chart;

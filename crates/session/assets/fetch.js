@@ -103,7 +103,48 @@
   const {token, refreshError} = await acquire(resource, scope);
   const page = {visibility: document.visibilityState, plain, sealed: sealed.length, opened};
   if (!token) return {noToken: true, refreshError, page};
+  const exchange = (request) => new Promise((resolve) => {
+    const separator = '\u001e';
+    const {handshake, invocations, doneTypes, timeoutMs} = request.signalr;
+    const received = [];
+    let socket = null, settled = false, shookHands = false;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket && socket.close(); } catch (error) {}
+      resolve({status, body: received});
+    };
+    const timer = setTimeout(() => finish(504), timeoutMs);
+    try {
+      socket = new WebSocket(request.url + (request.url.includes('?') ? '&' : '?') + 'access_token=' + encodeURIComponent(token));
+    } catch (error) {
+      clearTimeout(timer);
+      resolve({status: 0, body: String(error)});
+      return;
+    }
+    socket.onopen = () => socket.send(handshake + separator);
+    socket.onmessage = (event) => {
+      for (const part of String(event.data).split(separator)) {
+        let message;
+        try { message = part ? JSON.parse(part) : null; } catch (error) { message = null; }
+        if (!message) continue;
+        if (!shookHands) {
+          shookHands = true;
+          if (message.error) { received.push(message); finish(502); return; }
+          invocations.forEach((invocation) => socket.send(invocation + separator));
+          continue;
+        }
+        if (message.type === 6) { socket.send('{"type":6}' + separator); continue; }
+        received.push(message);
+        if (doneTypes.includes(message.type)) finish(200);
+      }
+    };
+    socket.onerror = () => finish(0);
+    socket.onclose = () => finish(received.length ? 200 : 0);
+  });
   const run = async (request) => {
+    if (request.signalr) return exchange(request);
     try {
       let requestBody = request.body;
       for (const extra of request.bodyTokens || []) {

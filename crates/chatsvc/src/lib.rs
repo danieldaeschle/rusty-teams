@@ -9,6 +9,7 @@ pub mod chat_notifications;
 pub mod chat_settings;
 pub mod channel_visibility;
 pub mod conversations;
+pub mod copilot;
 pub mod drafts;
 pub mod emotions;
 mod error;

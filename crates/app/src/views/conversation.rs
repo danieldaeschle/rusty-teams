@@ -22,6 +22,7 @@ use teams_core::{
 };
 
 mod channel_details;
+mod copilot;
 pub use channel_details::{
     CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
     CHANNEL_DETAILS_TAG,
@@ -245,6 +246,7 @@ pub struct ConversationView {
     fetched_jump: Option<String>,
     pin_index: usize,
     channel_details_open: bool,
+    copilot: copilot::CopilotPane,
     pinned_posts_expanded: bool,
     channel_details_scroll: ScrollHandle,
     scroller_watch: Option<(EntityId, Subscription)>,
@@ -594,6 +596,7 @@ impl ConversationView {
             fetched_jump: None,
             pin_index: 0,
             channel_details_open: false,
+            copilot: copilot::CopilotPane::default(),
             pinned_posts_expanded: false,
             channel_details_scroll: ScrollHandle::new(),
             scroller_watch: None,
@@ -915,6 +918,7 @@ impl ConversationView {
         self.feed_at_top = true;
         self.restore_subject(None, window, cx);
         self.toolbar_hovered = None;
+        self.reset_copilot();
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
         self.agent_layouts.clear();
@@ -3728,6 +3732,7 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.copilot_button(cx))
             .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
             .children(self.pop_in_button(current))
@@ -4001,7 +4006,9 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
-        let channel_details = self.render_channel_details(cx);
+        let channel_details = self
+            .render_channel_details(cx)
+            .or_else(|| self.render_copilot(cx));
         let find_panel = self.find_panel.clone().filter(|_| !drafting);
         let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
         let content = v_flex()

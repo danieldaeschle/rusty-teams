@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chatsvc::copilot::{Copilot, CopilotAsk};
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
@@ -479,6 +480,10 @@ pub trait Remote {
         _page_size: usize,
     ) -> Result<Vec<MessageLanguage>> {
         Err(Error::Unsupported("message languages"))
+    }
+
+    async fn ask_copilot(&self, _ask: &CopilotAsk) -> Result<String> {
+        Err(Error::Unsupported("Copilot"))
     }
 
     async fn translate_chat_messages(
@@ -1331,6 +1336,10 @@ impl Remote for Graph {
         Ok(Messages::new(self.session())
             .list_language_stamps(conversation, page_size)
             .await?)
+    }
+
+    async fn ask_copilot(&self, ask: &CopilotAsk) -> Result<String> {
+        Ok(Copilot::new(self.session()).ask(ask).await?)
     }
 
     async fn translate_chat_messages(
