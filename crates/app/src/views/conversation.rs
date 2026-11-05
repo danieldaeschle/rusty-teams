@@ -1664,7 +1664,7 @@ impl ConversationView {
         } else {
             rows.extend(local.into_iter().map(|row| Row::Message(Box::new(row))));
         }
-        let mut receipts = self.receipts(&records, cx);
+        let (mut receipts, receipt_labels) = self.receipts(&records, cx);
         if self.track_receipt_fades(&mut receipts) {
             self.schedule_fade_end(cx);
         }
@@ -1673,6 +1673,7 @@ impl ConversationView {
                 && message.own
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
+                message.receipt_label = receipt_labels.get(&message.key).cloned();
             }
         }
         if let Some(unread_id) = &first_unread {
@@ -1957,20 +1958,29 @@ impl ConversationView {
         self.start_fetch(cx);
     }
 
-    fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+    fn receipts(
+        &self,
+        records: &[MessageRecord],
+        cx: &App,
+    ) -> (HashMap<String, Receipt>, HashMap<String, String>) {
         let settings = self.app.read(cx).account_chat_settings();
-        let mut receipts = self.raw_receipts(records, cx);
+        let (mut receipts, mut labels) = self.raw_receipts(records, cx);
         for receipt in receipts.values_mut() {
             *receipt = shown_receipt(&settings, *receipt);
         }
-        receipts
+        labels.retain(|key, _| receipts.get(key).is_some_and(|receipt| *receipt != Receipt::Hidden));
+        (receipts, labels)
     }
 
-    fn raw_receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+    fn raw_receipts(
+        &self,
+        records: &[MessageRecord],
+        cx: &App,
+    ) -> (HashMap<String, Receipt>, HashMap<String, String>) {
         let state = self.app.read(cx);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
-            return records
+            let receipts: HashMap<String, Receipt> = records
                 .iter()
                 .map(|record| {
                     let receipt = if read_ids.contains(&record.message_id) {
@@ -1981,21 +1991,33 @@ impl ConversationView {
                     (record.message_id.clone(), receipt)
                 })
                 .collect();
+            let labels = receipts
+                .iter()
+                .map(|(key, receipt)| {
+                    let label = if *receipt == Receipt::Read { "Seen" } else { "Sent" };
+                    (key.clone(), label.to_owned())
+                })
+                .collect();
+            return (receipts, labels);
         }
         let Some(engine) = state.engine.as_ref() else {
-            return HashMap::new();
+            return (HashMap::new(), HashMap::new());
         };
-        records
-            .iter()
-            .map(|record| {
-                let receipt = match engine.receipt_state_for(record) {
-                    teams_core::ReceiptState::Read { .. } => Receipt::Read,
-                    teams_core::ReceiptState::Sent => Receipt::Sent,
-                    teams_core::ReceiptState::Unknown => Receipt::Hidden,
-                };
-                (record.message_id.clone(), receipt)
-            })
-            .collect()
+        let mut receipts = HashMap::new();
+        let mut labels = HashMap::new();
+        for record in records {
+            let receipt_state = engine.receipt_state_for(record);
+            if let Some(label) = crate::rows::receipt_label(&receipt_state) {
+                labels.insert(record.message_id.clone(), label);
+            }
+            let receipt = match receipt_state {
+                teams_core::ReceiptState::Read { .. } => Receipt::Read,
+                teams_core::ReceiptState::Sent => Receipt::Sent,
+                teams_core::ReceiptState::Unknown => Receipt::Hidden,
+            };
+            receipts.insert(record.message_id.clone(), receipt);
+        }
+        (receipts, labels)
     }
 
     fn track_receipt_fades(&mut self, receipts: &mut HashMap<String, Receipt>) -> bool {

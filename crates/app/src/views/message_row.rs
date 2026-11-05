@@ -460,18 +460,29 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
         })
         .when(
             own && row.delivery == Delivery::Delivered,
-            |meta| match row.receipt {
-                Receipt::Hidden => meta,
-                Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
-                Receipt::Read => meta.child(on_baseline(symbol(
-                    "done_all",
-                    META_CHECK_SIZE,
-                    theme::own_read(),
-                ))),
-                Receipt::ReadLive => meta.child(receipt_fade_in(
-                    &row.key,
-                    on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
-                )),
+            |meta| {
+                let check = match row.receipt {
+                    Receipt::Hidden => return meta,
+                    Receipt::Sent => on_baseline(symbol("done", META_CHECK_SIZE, tint)).into_any_element(),
+                    Receipt::Read => on_baseline(symbol(
+                        "done_all",
+                        META_CHECK_SIZE,
+                        theme::own_read(),
+                    ))
+                    .into_any_element(),
+                    Receipt::ReadLive => receipt_fade_in(
+                        &row.key,
+                        on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                    )
+                    .into_any_element(),
+                };
+                let holder = div().id(ElementId::Name(format!("{}-receipt", row.key).into())).child(check);
+                meta.child(match row.receipt_label.clone() {
+                    Some(label) => holder.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                    }),
+                    None => holder,
+                })
             },
         )
 }
