@@ -28,7 +28,7 @@ use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
 use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
-use app_ui_kit::layout::ROW_PADDING;
+use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ROW_PADDING};
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 pub type SharedRowAction = Option<std::rc::Rc<dyn Fn(&mut App)>>;
@@ -198,12 +198,21 @@ pub(super) fn deleted_tombstone(index: usize, undo_delete: SharedRowAction) -> D
     }
 }
 
-fn bubble_max_width(timeline: &TimelineBounds, reserved: f32) -> Length {
+fn bubble_max_width(timeline: &TimelineBounds, reserved: f32, compact: bool) -> Length {
     let Some(bounds) = timeline.get() else {
         return relative(MAX_WIDTH_RATIO).into();
     };
-    let row_width = (f32::from(bounds.size.width) - 2. * ROW_PADDING - reserved).max(0.);
+    let runway = runway_width(f32::from(bounds.size.width), compact);
+    let row_width = (runway - 2. * ROW_PADDING - reserved).max(0.);
     px((row_width * MAX_WIDTH_RATIO).max(row_width.min(NARROW_BUBBLE_WIDTH))).into()
+}
+
+pub fn runway_width(timeline_width: f32, compact: bool) -> f32 {
+    if compact {
+        timeline_width
+    } else {
+        timeline_width.min(COMFY_RUNWAY_WIDTH)
+    }
 }
 
 fn bubble(
@@ -652,7 +661,7 @@ fn others_row(
         .gap(px(2.))
         .flex_1()
         .min_w_0()
-        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP))
+        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP, extras.compact))
         .items_start();
     if first {
         column = column.child(
@@ -719,7 +728,7 @@ fn own_row(
         h_flex().w_full().justify_end().child(
             div()
                 .min_w_0()
-                .max_w(bubble_max_width(&extras.timeline, 0.))
+                .max_w(bubble_max_width(&extras.timeline, 0., extras.compact))
                 .child(bubble(row, index, true, directory, extras, cx)),
         ),
     );
@@ -885,7 +894,7 @@ pub fn select_box(checked: bool, blocked: bool, index: usize) -> Div {
 
 #[cfg(test)]
 mod density_tests {
-    use super::{META_BOTTOM_INSET, bubble_padding_y, row_spacing};
+    use super::{META_BOTTOM_INSET, bubble_padding_y, row_spacing, runway_width};
 
     #[test]
     fn compact_density_tightens_gaps_and_bubble_padding() {
@@ -893,5 +902,12 @@ mod density_tests {
         assert!(row_spacing(true, true) < row_spacing(true, false));
         assert!(bubble_padding_y(true) < bubble_padding_y(false));
         assert!(META_BOTTOM_INSET - bubble_padding_y(true) >= 0.);
+    }
+
+    #[test]
+    fn comfy_density_caps_the_runway_like_teams_and_compact_uses_the_full_width() {
+        assert_eq!(runway_width(2400., false), 1060.);
+        assert_eq!(runway_width(800., false), 800.);
+        assert_eq!(runway_width(2400., true), 2400.);
     }
 }

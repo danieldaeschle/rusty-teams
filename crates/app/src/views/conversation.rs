@@ -98,7 +98,7 @@ use crate::sidebar_model::{AvatarSpec, Face, channel_unread};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
-use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
+use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
 use mcp::ReactionProposal;
@@ -3692,13 +3692,15 @@ impl Render for ConversationView {
             .render_pin_banner(cx)
             .filter(|_| !drafting && !self.shared_active() && !self.recap_active());
         let timeline_top_inset = pin_banner_inset(pin_banner.is_some());
+        let comfy = self.app.read(cx).account_chat_settings().message_density
+            != teams_core::MessageDensity::Compact;
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
             move |index, window, cx| {
                 rows_seen.set(rows_seen.get().min(index));
                 let rows = rows.borrow();
-                match rows.get(index) {
+                let row = match rows.get(index) {
                     Some(Row::Message(message)) => {
                         let actions = env.message_actions(message, window, cx);
                         let state = env.app.read(cx);
@@ -3785,6 +3787,15 @@ impl Render for ConversationView {
                             .into_any_element()
                     }
                     None => div().into_any_element(),
+                };
+                if comfy {
+                    h_flex()
+                        .w_full()
+                        .justify_center()
+                        .child(div().w_full().max_w(px(COMFY_RUNWAY_WIDTH)).child(row))
+                        .into_any_element()
+                } else {
+                    row
                 }
             },
         )
