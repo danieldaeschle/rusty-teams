@@ -86,7 +86,7 @@ use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
-use crate::read_state::{ReadTrigger, plan_read};
+use crate::read_state::{ReadTrigger, missed_before_fetch, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
@@ -157,6 +157,7 @@ struct SyncProgress {
     receipts: bool,
     empty_cache: bool,
     newest_cached: Option<DateTime<Utc>>,
+    started_at: DateTime<Utc>,
     shown_at: Option<Instant>,
     slow: bool,
     failed: bool,
@@ -1826,6 +1827,7 @@ impl ConversationView {
             receipts: is_chat,
             empty_cache: newest_cached.is_none(),
             newest_cached,
+            started_at: Utc::now(),
             ..SyncProgress::default()
         };
         self.sync_generation += 1;
@@ -1919,9 +1921,9 @@ impl ConversationView {
             return;
         };
         sync.messages = false;
-        let newest_cached = sync.newest_cached;
+        let (newest_cached, started_at) = (sync.newest_cached, sync.started_at);
         match result {
-            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, cx),
+            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, started_at, cx),
             Ok(Err(error)) => self.fail_sync(generation, short_error(&error)),
             Err(error) => self.fail_sync(generation, short_error(&error)),
         }
@@ -1937,7 +1939,12 @@ impl ConversationView {
         self.notice = Some(format!("Could not refresh: {error}"));
     }
 
-    fn mark_fetched_new(&mut self, newest_cached: Option<DateTime<Utc>>, cx: &mut Context<Self>) {
+    fn mark_fetched_new(
+        &mut self,
+        newest_cached: Option<DateTime<Utc>>,
+        started_at: DateTime<Utc>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(newest_cached) = newest_cached else {
             return;
         };
@@ -1959,7 +1966,8 @@ impl ConversationView {
             .unwrap_or_default()
             .into_iter()
             .find(|record| {
-                record.created_at > newest_cached && record.sender_id.as_ref() != Some(&my_user_id)
+                missed_before_fetch(record.created_at, newest_cached, started_at)
+                    && record.sender_id.as_ref() != Some(&my_user_id)
             })
             .map(|record| record.message_id);
     }

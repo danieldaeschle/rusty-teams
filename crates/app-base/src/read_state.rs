@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadTrigger {
     Open,
@@ -17,6 +19,14 @@ pub fn plan_read(window_active: bool, chat_unread: bool, trigger: ReadTrigger) -
     Some(ReadPlan {
         clear_divider: trigger != ReadTrigger::Open,
     })
+}
+
+pub fn missed_before_fetch(
+    created_at: DateTime<Utc>,
+    newest_cached: DateTime<Utc>,
+    fetch_started_at: DateTime<Utc>,
+) -> bool {
+    created_at > newest_cached && created_at <= fetch_started_at
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +127,16 @@ mod tests {
         let mut state = unread_chat();
         state.apply(true, ReadTrigger::Incoming);
         assert!(state.first_unread.is_none());
+    }
+
+    #[test]
+    fn only_messages_missed_before_the_fetch_count_as_new() {
+        let at = |seconds| DateTime::<Utc>::from_timestamp(seconds, 0).unwrap();
+        let (newest_cached, fetch_started_at) = (at(100), at(200));
+        assert!(!missed_before_fetch(at(100), newest_cached, fetch_started_at));
+        assert!(missed_before_fetch(at(150), newest_cached, fetch_started_at));
+        assert!(missed_before_fetch(at(200), newest_cached, fetch_started_at));
+        assert!(!missed_before_fetch(at(201), newest_cached, fetch_started_at));
     }
 
     #[test]
