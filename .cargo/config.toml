@@ -5,3 +5,14 @@ rustflags = ["-C", "target-feature=+crt-static"]
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# libwebrtc's ObjC categories (NSString+StdString, RTCVideoCodecInfo, ...) live in unlinked
+# objects of the prebuilt static lib; without -ObjC the app aborts in a C++ static initializer
+# (RTCH264ProfileLevelId.mm) before main. webrtc-sys already passes -ObjC, but a dependency's
+# link flags never reach the final binary. The x86_64 prebuilt also autolinks a Swift runtime
+# dylib (@rpath/libswiftCoreMedia.dylib) that lives in the dyld shared cache only.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC", "-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC", "-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
