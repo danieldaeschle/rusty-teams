@@ -42,10 +42,13 @@ const REPLY_IN_THREAD: &str = "Reply in thread";
 const NEW_STRIPE_WIDTH: f32 = 3.;
 const NEW_BADGE_HEIGHT: f32 = 20.;
 const NEW_LABEL: &str = "New";
+const POST_IN_CHANNEL: &str = "Post in channel";
+const POST_LABEL: &str = "Post";
 pub const POST_CARD_TAG: &str = "post-card";
 pub const POST_AVATAR_TAG: &str = "post-card/avatar";
 pub const POST_BODY_TAG: &str = "post-card/body";
 pub const POST_FOOTER_AVATAR_TAG: &str = "post-card/footer-avatar";
+pub const POST_IN_CHANNEL_TAG: &str = "post-in-channel";
 
 pub type PostAction = Box<dyn Fn(&mut Window, &mut App)>;
 
@@ -438,6 +441,57 @@ fn reply_footer(
             ),
         ),
     )
+}
+
+pub fn post_in_channel_card(directory: &Directory, open: PostAction) -> AnyElement {
+    let own_avatar = directory.me.as_ref().map(|me| {
+        div().flex_none().child(person_avatar(
+            directory,
+            Some(&me.user_id),
+            &me.display_name,
+            ROOT_AVATAR,
+        ))
+    });
+    v_flex()
+        .id(POST_IN_CHANNEL_TAG)
+        .debug_selector(|| POST_IN_CHANNEL_TAG.into())
+        .w_full()
+        .p(px(CARD_PADDING))
+        .gap(px(CARD_GAP))
+        .rounded(px(CARD_RADIUS))
+        .bg(theme::row_hover())
+        .cursor_pointer()
+        .on_click(move |_, window, cx| open(window, cx))
+        .child(
+            h_flex()
+                .gap(px(AVATAR_GAP))
+                .items_center()
+                .children(own_avatar)
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_strong())
+                        .child(POST_IN_CHANNEL),
+                ),
+        )
+        .child(
+            h_flex().child(
+                h_flex()
+                    .h(px(32.))
+                    .px(px(12.))
+                    .gap(px(6.))
+                    .items_center()
+                    .rounded(px(6.))
+                    .bg(theme::reply_surface())
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::accent_text())
+                    .child(icon(IconName::MessageSquare, 14., theme::accent_text()))
+                    .child(POST_LABEL),
+            ),
+        )
+        .into_any_element()
 }
 
 fn new_post_badge() -> Div {

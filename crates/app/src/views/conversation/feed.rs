@@ -18,6 +18,7 @@ use crate::runtime;
 use crate::theme;
 use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
+use crate::views::post_card::{PostAction, post_in_channel_card};
 use crate::views::widgets::icon;
 
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
@@ -244,38 +245,22 @@ impl ConversationView {
         }
         let proposal_card = self.render_proposal_card(cx);
         if !self.new_post_open {
+            let view = cx.entity().downgrade();
+            let open: PostAction = Box::new(move |window, cx| {
+                view.update(cx, |this, cx| this.open_new_post(window, cx)).ok();
+            });
             return Some(
                 v_flex()
                     .w_full()
                     .flex_none()
                     .children(proposal_card)
                     .child(
-                        h_flex()
+                        div()
                             .w_full()
                             .flex_none()
                             .px(px(20.))
                             .pt(px(12.))
-                            .pb(px(12.))
-                            .child(
-                                h_flex()
-                                    .id("new-post")
-                                    .h(px(32.))
-                                    .px(px(12.))
-                                    .gap(px(6.))
-                                    .items_center()
-                                    .rounded(px(8.))
-                                    .bg(theme::accent())
-                                    .text_color(theme::on_accent())
-                                    .text_size(px(13.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .cursor_pointer()
-                                    .hover(|button| button.bg(theme::accent_text()))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_new_post(window, cx)
-                                    }))
-                                    .child(icon(IconName::Plus, 14., theme::on_accent()))
-                                    .child("New post"),
-                            ),
+                            .child(post_in_channel_card(&self.app.read(cx).directory, open)),
                     )
                     .into_any_element(),
             );
