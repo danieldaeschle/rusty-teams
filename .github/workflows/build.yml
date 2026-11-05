@@ -1,5 +1,6 @@
  # Build and test per README "Quick start": `cargo test`, then `cargo build -p app`.
-# Linux and Windows are the supported targets (README "Status"), macOS is a compile check only.
+# Linux and Windows are the supported targets (README "Status") and run the tests;
+# macOS only builds the universal binary (its Ctrl/Cmd bindings fail the key tests).
 name: Build
 
 on:
@@ -128,3 +129,25 @@ jobs:
         with:
           name: teams-windows
           path: target/release/teams.exe
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # scripts/build-macos.sh builds the arm64 and x86_64 slices and lipos them
+      # into one universal binary (README "Quick start"); it installs the x86_64
+      # rustup target itself and needs Xcode CLT only.
+      - name: Build
+        run: scripts/build-macos.sh crates/app teams
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-macos
+          path: target/universal/release/teams
