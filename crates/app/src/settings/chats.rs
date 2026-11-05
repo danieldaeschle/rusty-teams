@@ -8,6 +8,7 @@ use crate::app_state::AppState;
 use crate::theme;
 
 const MARKDOWN_DETAIL: &str = "Use mark-down language to define the structure and appearance of messages. Your formatting will take effect once you send your message. When this is on, the formatting options menu won't be visible.";
+const ACTIONS_DETAIL: &str = "Reactions and More options appear when you right click a message instead of when you point at it.";
 const RECEIPTS_DETAIL: &str = "Let people know when you've seen their messages and know when they've seen yours. Close and reopen any chat windows for the setting to take effect in those chats.";
 
 pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
@@ -15,7 +16,9 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
     let muted_section = state.directory.section_settings.enabled(ChatSection::Muted);
     let settings = state.account_chat_settings();
     let markdown_mode = state.markdown_mode;
-    let (section_app, markdown_app, receipts_app) = (app.clone(), app.clone(), app.clone());
+    let actions_on_right_click = state.actions_on_right_click;
+    let (section_app, markdown_app, receipts_app, actions_app) =
+        (app.clone(), app.clone(), app.clone(), app.clone());
     v_flex()
         .w_full()
         .child(caption("CHAT LIST"))
@@ -66,6 +69,20 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             )
             .on_click(move |_, _, cx| {
                 markdown_app.update(cx, |state, cx| state.set_markdown_mode(!markdown_mode, cx))
+            }),
+        )
+        .child(
+            toggle_row(
+                "settings-actions-on-right-click",
+                "Show message actions on right click",
+                ACTIONS_DETAIL,
+                theme::text_muted(),
+                actions_on_right_click,
+            )
+            .on_click(move |_, _, cx| {
+                actions_app.update(cx, |state, cx| {
+                    state.set_actions_on_right_click(!actions_on_right_click, cx)
+                })
             }),
         )
         .child(

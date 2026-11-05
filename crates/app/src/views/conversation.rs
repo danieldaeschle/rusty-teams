@@ -233,6 +233,7 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
+    toolbar_opened: Option<String>,
     timeline_bounds: TimelineBounds,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
@@ -581,6 +582,7 @@ impl ConversationView {
             downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
+            toolbar_opened: None,
             timeline_bounds: TimelineBounds::default(),
             header_width: Rc::default(),
             toolbar_pinned: None,
@@ -2690,6 +2692,9 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
+        if !hovered && matches!(slot, HoverSlot::Row) && self.toolbar_opened.as_deref() == Some(key) {
+            self.toolbar_opened = None;
+        }
         if hovered
             && matches!(slot, HoverSlot::Row)
             && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
@@ -2722,14 +2727,25 @@ impl ConversationView {
         cx.notify();
     }
 
-    fn toolbar_visible(&self, key: &str) -> bool {
+    fn toolbar_visible(&self, key: &str, cx: &App) -> bool {
+        let row_trigger = if self.app.read(cx).actions_on_right_click {
+            self.toolbar_opened.as_deref()
+        } else {
+            self.hovered_message.as_deref()
+        };
         self.toolbar_suppressed.as_deref() != Some(key)
             && self
                 .toolbar_pinned
                 .as_deref()
                 .or(self.toolbar_hovered.as_deref())
-                .or(self.hovered_message.as_deref())
+                .or(row_trigger)
                 == Some(key)
+    }
+
+    fn open_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.toolbar_opened = Some(key.to_owned());
+        self.toolbar_suppressed = None;
+        cx.notify();
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {

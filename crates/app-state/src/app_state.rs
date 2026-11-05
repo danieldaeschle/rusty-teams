@@ -156,6 +156,7 @@ pub struct AppState {
     pub account_sounds: Option<chatsvc::sound_settings::SoundSettings>,
     pub chat_settings: teams_core::ChatSettingsDocument,
     pub markdown_mode: bool,
+    pub actions_on_right_click: bool,
     pub demo_chat_desktop: HashMap<String, teams_core::DesktopNotifications>,
     pub own_tenant: Option<String>,
     pub call_share_motion: bool,
@@ -250,6 +251,8 @@ impl AppState {
         let sidebar = store.sidebar().unwrap_or_default();
         let chat_settings = teams_core::stored_chat_settings(&store);
         let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
+        let actions_on_right_click =
+            crate::chat_settings_actions::stored_actions_on_right_click(&store);
         let mut state = AppState {
             store,
             engine: None,
@@ -320,6 +323,7 @@ impl AppState {
             account_sounds: None,
             chat_settings,
             markdown_mode,
+            actions_on_right_click,
             demo_chat_desktop: HashMap::new(),
             own_tenant: None,
             call_share_motion: false,

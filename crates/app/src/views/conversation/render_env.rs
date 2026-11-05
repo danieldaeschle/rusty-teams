@@ -236,17 +236,22 @@ impl RenderEnv {
                         });
                 let menu = this.message_menu(message, mine, refresh, view.clone(), cx);
                 let react = menu.react.clone();
-                let visible = this.toolbar_visible(&message.key);
+                let visible = this.toolbar_visible(&message.key, cx);
                 let controls = (!message.reactions.is_empty())
                     .then(|| this.reaction_controls(&message.key, view.clone()));
                 let adder = (!message.reactions.is_empty()).then(|| menu.reaction_adder());
                 (visible.then_some(menu), Some(react), controls, adder)
             })
             .unwrap_or((None, None, None, None));
+        let right_click_opens_actions = self.app.read(cx).actions_on_right_click;
         let reply = (is_real && !message.deleted).then(|| {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
             boxed(move |cx| {
                 let (view, key) = (view.clone(), key.clone());
+                if right_click_opens_actions {
+                    view.update(cx, |this, cx| this.open_toolbar(&key, cx)).ok();
+                    return;
+                }
                 handle
                     .update(cx, move |_, window, cx| {
                         view.update(cx, |this, cx| this.begin_reply(&key, window, cx))
