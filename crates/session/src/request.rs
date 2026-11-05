@@ -29,6 +29,18 @@ pub struct BodyToken {
     pub placeholder: String,
 }
 
+/// A SignalR JSON-protocol exchange over a WebSocket opened in the page with the token in the query.
+/// The answer body is the list of received messages, up to the first whose type is in `done_types`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SignalrExchange {
+    pub handshake: String,
+    pub invocations: Vec<String>,
+    #[serde(rename = "doneTypes")]
+    pub done_types: Vec<u8>,
+    #[serde(rename = "timeoutMs")]
+    pub timeout_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
@@ -39,9 +51,17 @@ pub struct Request {
     pub anonymous: bool,
     pub body_base64: Option<String>,
     pub body_tokens: Vec<BodyToken>,
+    pub signalr: Option<SignalrExchange>,
 }
 
 impl Request {
+    pub fn signalr(url: impl Into<String>, exchange: SignalrExchange) -> Self {
+        Request {
+            signalr: Some(exchange),
+            ..Request::get(url)
+        }
+    }
+
     /// A successful answer carries `{"base64": .., "contentType": ..}` as its body.
     pub fn binary_get(url: impl Into<String>) -> Self {
         Request {
@@ -60,6 +80,7 @@ impl Request {
             anonymous: false,
             body_base64: None,
             body_tokens: Vec::new(),
+            signalr: None,
         }
     }
 
@@ -110,6 +131,7 @@ impl Request {
             anonymous: false,
             body_base64: None,
             body_tokens: Vec::new(),
+            signalr: None,
         }
     }
 }
@@ -139,6 +161,7 @@ pub(crate) struct WireRequest<'a> {
     pub anonymous: bool,
     #[serde(rename = "bodyTokens")]
     pub body_tokens: &'a [BodyToken],
+    pub signalr: Option<&'a SignalrExchange>,
 }
 
 impl<'a> From<&'a Request> for WireRequest<'a> {
@@ -160,6 +183,7 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             binary: request.binary,
             anonymous: request.anonymous,
             body_tokens: &request.body_tokens,
+            signalr: request.signalr.as_ref(),
         }
     }
 }

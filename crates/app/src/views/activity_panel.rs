@@ -13,7 +13,7 @@ use store::Sidebar;
 use super::avatar::person_avatar;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::sidebar::SIDEBAR_SCROLL_DIVIDER;
-use super::widgets::{Corner, corner_badge, dot, icon};
+use super::widgets::{Corner, corner_badge, dot, icon, symbol};
 use crate::activity::{ActivityCenter, Entry, Filter, Kind};
 use crate::agent_api::{
     self,
@@ -32,6 +32,10 @@ const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
 const ROW_HEIGHT: f32 = 58.;
 const EVENT_LINE_HEIGHT: f32 = 16.;
+const HEADLINE_LINE_HEIGHT: f32 = 18.;
+const ROW_CHROME_WIDTH: f32 = 12. + 20. + AVATAR_SIZE + 2. * 12. + 56.;
+const RECAP_TILE_RADIUS: f32 = 6.;
+const RECAP_GLYPH_SIZE: f32 = 20.;
 const HEADER_HEIGHT: f32 = 30.;
 const EMPTY_HEIGHT: f32 = 84.;
 const FALLBACK_VIEWPORT: f32 = 900.;
@@ -258,6 +262,7 @@ impl ActivityPanel {
     fn row(
         &self,
         entry: &Entry,
+        text: &RowText,
         sidebar: &Sidebar,
         directory: &crate::data::Directory,
         today: NaiveDate,
@@ -267,12 +272,16 @@ impl ActivityPanel {
         let activity = self.activity.clone();
         let id = entry.id.clone();
         let actor = entry.latest_actor();
-        let avatar = person_avatar(
-            directory,
-            actor.and_then(|actor| actor.user_id.as_deref()),
-            actor.map_or("", |actor| actor.display_name(&self.resolved_names)),
-            AVATAR_SIZE,
-        );
+        let avatar = if is_recap(entry) {
+            recap_tile().into_any_element()
+        } else {
+            person_avatar(
+                directory,
+                actor.and_then(|actor| actor.user_id.as_deref()),
+                actor.map_or("", |actor| actor.display_name(&self.resolved_names)),
+                AVATAR_SIZE,
+            )
+        };
         let group = SharedString::from(format!("activity-row-group-{id}"));
         row_frame(RowParts {
             element_id: format!("activity-row-{id}"),
@@ -280,10 +289,9 @@ impl ActivityPanel {
             marker: kind_marker(entry, group.clone()),
             group,
             headline: headline(entry, sidebar, &self.resolved_names),
+            headline_wraps: text.headline_wraps,
             detail: detail(entry),
-            event_line: entry
-                .event_range
-                .map(|(start, end)| event_line(start, end, &Local)),
+            lines: text.lines.clone(),
             unread: !entry.read,
             time: format::list_time_label(entry.updated_at, today, offset),
             mark_read: Rc::new({
@@ -313,8 +321,9 @@ impl ActivityPanel {
             marker: proposal_marker(pending, group.clone()),
             group,
             headline: pending.headline(label.as_deref()),
+            headline_wraps: false,
             detail: pending.detail(),
-            event_line: None,
+            lines: Vec::new(),
             unread: !pending.seen,
             time: format::list_time_label(pending.created_at, today, offset),
             mark_read: Rc::new(move |cx: &mut App| agent_api::mark_proposal_seen(&proposal_id, cx)),
@@ -339,8 +348,9 @@ struct RowParts {
     avatar: AnyElement,
     marker: Div,
     headline: String,
+    headline_wraps: bool,
     detail: String,
-    event_line: Option<String>,
+    lines: Vec<String>,
     unread: bool,
     time: String,
     mark_read: MarkRead,
@@ -355,13 +365,14 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
         avatar,
         marker,
         headline,
+        headline_wraps,
         detail,
-        event_line,
+        lines,
         unread,
         time,
         mark_read,
     } = parts;
-    let height = ROW_HEIGHT + event_line.as_ref().map_or(0., |_| EVENT_LINE_HEIGHT);
+    let height = row_height(headline_wraps, lines.len());
     let selector = element_id.clone();
     h_flex()
         .id(ElementId::Name(element_id.clone().into()))
@@ -392,8 +403,10 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                 .gap(px(2.))
                 .child(
                     div()
-                        .truncate()
+                        .when(headline_wraps, |headline| headline.line_clamp(2))
+                        .when(!headline_wraps, |headline| headline.truncate())
                         .text_size(px(13.))
+                        .line_height(px(HEADLINE_LINE_HEIGHT))
                         .font_weight(if unread {
                             FontWeight::SEMIBOLD
                         } else {
@@ -417,7 +430,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                         })
                         .child(detail),
                 )
-                .children(event_line.map(|line| {
+                .children(lines.into_iter().map(|line| {
                     div()
                         .truncate()
                         .text_size(px(12.))
@@ -591,10 +604,7 @@ fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, S
         },
         (Kind::Other, _) => actor,
     };
-    match conversation_label(sidebar, &entry.conversation_id) {
-        Some(label) => format!("{verb} in {label}"),
-        None => verb,
-    }
+    verb
 }
 
 fn event_line<Zone: TimeZone>(start: DateTime<Utc>, end: DateTime<Utc>, zone: &Zone) -> String
@@ -646,7 +656,11 @@ fn detail(entry: &Entry) -> String {
 
 fn conversation_label(sidebar: &Sidebar, conversation_id: &str) -> Option<String> {
     if let Some(chat) = sidebar.chats.iter().find(|chat| chat.id == conversation_id) {
-        return (!is_one_on_one(chat)).then(|| chat_title(chat));
+        return match (is_one_on_one(chat), chat.title.trim().is_empty()) {
+            (true, _) => None,
+            (false, true) => Some(format!("Chat with {}", chat_title(chat))),
+            (false, false) => Some(chat_title(chat)),
+        };
     }
     sidebar.teams.iter().find_map(|team| {
         team.channels
@@ -670,10 +684,79 @@ fn group_header(label: &'static str) -> Div {
         .child(label)
 }
 
+struct RowText {
+    headline_wraps: bool,
+    lines: Vec<String>,
+}
+
+impl RowText {
+    fn new(entry: &Entry, sidebar: &Sidebar, headline_wraps: bool) -> Self {
+        let lines = entry
+            .event_range
+            .map(|(start, end)| event_line(start, end, &Local))
+            .into_iter()
+            .chain(location_line(entry, sidebar))
+            .collect();
+        Self {
+            headline_wraps,
+            lines,
+        }
+    }
+
+    fn height(&self) -> f32 {
+        row_height(self.headline_wraps, self.lines.len())
+    }
+}
+
+fn row_height(headline_wraps: bool, extra_lines: usize) -> f32 {
+    let headline_extra = if headline_wraps { HEADLINE_LINE_HEIGHT } else { 0. };
+    ROW_HEIGHT + headline_extra + extra_lines as f32 * EVENT_LINE_HEIGHT
+}
+
+fn is_recap(entry: &Entry) -> bool {
+    entry.kind == Kind::App && entry.subtype.starts_with("recapIsReady")
+}
+
+fn recap_tile() -> Div {
+    div()
+        .size(px(AVATAR_SIZE))
+        .flex_none()
+        .rounded(px(RECAP_TILE_RADIUS))
+        .bg(theme::accent())
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(symbol("recap", RECAP_GLYPH_SIZE, theme::white()))
+}
+
+fn headline_wraps(entry: &Entry, text_width: f32, window: &mut Window) -> bool {
+    let Some(title) = entry.title.as_deref().filter(|_| entry.kind == Kind::App) else {
+        return false;
+    };
+    if text_width <= 0. {
+        return false;
+    }
+    let run = window.text_style().to_run(title.len());
+    let width = window
+        .text_system()
+        .shape_line(title.to_owned().into(), px(13.), &[run], None)
+        .width;
+    f32::from(width) > text_width
+}
+
+fn location_line(entry: &Entry, sidebar: &Sidebar) -> Option<String> {
+    match entry.kind {
+        Kind::Mention | Kind::Reply | Kind::Reaction | Kind::Posted => {
+            conversation_label(sidebar, &entry.conversation_id)
+        }
+        _ => None,
+    }
+}
+
 enum Slot<'a> {
     Proposals(Vec<PendingProposal>),
     Header(&'static str),
-    Row(&'a Entry),
+    Row(&'a Entry, RowText),
     Empty,
 }
 
@@ -682,8 +765,7 @@ impl Slot<'_> {
         match self {
             Slot::Proposals(proposals) => HEADER_HEIGHT + proposals.len() as f32 * ROW_HEIGHT,
             Slot::Header(_) => HEADER_HEIGHT,
-            Slot::Row(entry) if entry.event_range.is_some() => ROW_HEIGHT + EVENT_LINE_HEIGHT,
-            Slot::Row(_) => ROW_HEIGHT,
+            Slot::Row(_, text) => text.height(),
             Slot::Empty => EMPTY_HEIGHT,
         }
     }
@@ -737,6 +819,7 @@ impl Render for ActivityPanel {
             .read(cx)
             .feed()
             .sections(self.filter, today, offset);
+        let text_width = f32::from(self.scroll.bounds().size.width) - ROW_CHROME_WIDTH;
         let mut slots: Vec<Slot> = Vec::new();
         let proposals: Vec<PendingProposal> = agent_api::pending_proposals(cx)
             .into_iter()
@@ -747,7 +830,10 @@ impl Render for ActivityPanel {
         }
         for section in &sections {
             slots.push(Slot::Header(section.bucket.label()));
-            slots.extend(section.entries.iter().map(|entry| Slot::Row(entry)));
+            slots.extend(section.entries.iter().map(|entry| {
+                let wraps = headline_wraps(entry, text_width, window);
+                Slot::Row(entry, RowText::new(entry, &state.sidebar, wraps))
+            }));
         }
         if slots.is_empty() {
             slots.push(Slot::Empty);
@@ -765,7 +851,7 @@ impl Render for ActivityPanel {
         let unresolved: Vec<String> = visible_slots
             .iter()
             .filter_map(|slot| match slot {
-                Slot::Row(entry) => Some(entry.unresolved_user_ids()),
+                Slot::Row(entry, _) => Some(entry.unresolved_user_ids()),
                 _ => None,
             })
             .flatten()
@@ -791,8 +877,9 @@ impl Render for ActivityPanel {
                     }))
                     .into_any_element(),
                 Slot::Header(label) => group_header(label).into_any_element(),
-                Slot::Row(entry) => self.row(
+                Slot::Row(entry, text) => self.row(
                     entry,
+                    text,
                     &state.sidebar,
                     &state.directory,
                     today,
@@ -840,7 +927,8 @@ mod tests {
     use store::{ChatRecord, Sidebar, Store};
 
     use super::{
-        ActivityPanel, ROW_HEIGHT, VIEWPORT_MARGIN, VisibleSlots, detail, headline, visible_slots,
+        ActivityPanel, ROW_HEIGHT, VIEWPORT_MARGIN, VisibleSlots, detail, headline, location_line,
+        visible_slots,
     };
     use crate::activity::{ActivityCenter, Actor, Entry, Filter, Kind};
     use crate::app_state::{AppState, Mode};
@@ -967,11 +1055,15 @@ mod tests {
         };
         assert_eq!(
             headline(&with(Kind::Mention, "mention", "channel", 1), &sidebar, &HashMap::new()),
-            "Anna mentioned Releases in Platform > Releases"
+            "Anna mentioned Releases"
+        );
+        assert_eq!(
+            location_line(&with(Kind::Mention, "mention", "channel", 1), &sidebar).as_deref(),
+            Some("Platform > Releases")
         );
         assert_eq!(
             headline(&with(Kind::Mention, "mention", "team", 1), &sidebar, &HashMap::new()),
-            "Anna mentioned Platform in Platform > Releases"
+            "Anna mentioned Platform"
         );
         assert_eq!(
             headline(

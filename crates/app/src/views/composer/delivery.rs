@@ -17,7 +17,7 @@ use crate::importance::importance_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::symbol;
 
-pub const COMPOSER_DELIVERY_TAG: &str = "composer/leading/delivery";
+pub const COMPOSER_DELIVERY_TAG: &str = "composer/actions/delivery";
 pub const COMPOSER_IMPORTANCE_LABEL_TAG: &str = "composer/importance-label";
 pub const COMPOSER_URGENT_BANNER_TAG: &str = "composer-urgent-banner";
 pub const DELIVERY_MENU_TAG: &str = "delivery-menu";
@@ -123,7 +123,7 @@ impl Composer {
                 .debug_selector(|| DELIVERY_MENU_TAG.into())
                 .absolute()
                 .bottom(relative(1.))
-                .left_0()
+                .right_0()
                 .mb(px(6.))
                 .w(px(MENU_WIDTH))
                 .max_w(relative(1.))

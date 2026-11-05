@@ -10,9 +10,14 @@ use crate::rows::Receipt;
 use crate::runtime;
 
 const META_MARKDOWN_MODE: &str = "compose.markdown_mode";
+const META_ACTIONS_ON_RIGHT_CLICK: &str = "chat.message_actions_on_right_click";
 
 pub fn stored_markdown_mode(store: &Store) -> bool {
     store.meta(META_MARKDOWN_MODE).ok().flatten().as_deref() == Some("true")
+}
+
+pub fn stored_actions_on_right_click(store: &Store) -> bool {
+    store.meta(META_ACTIONS_ON_RIGHT_CLICK).ok().flatten().as_deref() == Some("true")
 }
 
 /// Teams shows no read state at all while the own read receipts setting is off.
@@ -88,6 +93,16 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn set_actions_on_right_click(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.actions_on_right_click = enabled;
+        let _ = self.store.set_meta(
+            META_ACTIONS_ON_RIGHT_CLICK,
+            if enabled { "true" } else { "false" },
+        );
+        cx.emit(AppEvent::ChatSettings);
+        cx.notify();
+    }
+
     pub fn chat_desktop_notifications(&self, chat_id: &str) -> DesktopNotifications {
         match &self.engine {
             Some(engine) => engine.chat_desktop_notifications(chat_id),
@@ -150,6 +165,14 @@ mod tests {
         settings.read_receipts = false;
         assert_eq!(shown_receipt(&settings, Receipt::Read), Receipt::Hidden);
         assert_eq!(shown_receipt(&settings, Receipt::Sent), Receipt::Hidden);
+    }
+
+    #[test]
+    fn right_click_actions_are_a_local_setting_that_starts_off() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(!stored_actions_on_right_click(&store));
+        store.set_meta(META_ACTIONS_ON_RIGHT_CLICK, "true").unwrap();
+        assert!(stored_actions_on_right_click(&store));
     }
 
     #[test]

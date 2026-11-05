@@ -445,6 +445,7 @@ pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc
         async move {
             let mut seeded: Option<AgentPolicy> = None;
             let mut ticker = tokio::time::interval(SEED_RETRY);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     _ = ticker.tick() => {}

@@ -206,6 +206,7 @@ async fn refresh_loop(
     mut nudges: mpsc::UnboundedReceiver<()>,
 ) {
     let mut interval = tokio::time::interval(REFRESH_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut forwards_healing = false;
     loop {
         tokio::select! {
@@ -338,6 +339,7 @@ async fn realtime_loop(
 
 async fn presence_resubscribe_loop(engine: Arc<Engine>) {
     let mut interval = tokio::time::interval(PRESENCE_RESUBSCRIBE);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     interval.tick().await;
     loop {
         interval.tick().await;
@@ -433,6 +435,7 @@ async fn calendar_loop(session: Session, events: EventSender) {
     let (nudge, mut nudges) = mpsc::unbounded_channel();
     let _ = events.send(BackendEvent::CalendarNudge(nudge));
     let mut interval = tokio::time::interval(CALENDAR_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_fetch: Option<tokio::time::Instant> = None;
     let mut deferred_fetch: Option<tokio::time::Instant> = None;
     loop {
@@ -472,6 +475,7 @@ async fn pins_loop(session: Session, events: EventSender) {
     let mut chat_ids: Vec<String> = Vec::new();
     let mut channel_ids: Vec<String> = Vec::new();
     let mut interval = tokio::time::interval(PINS_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         interval.tick().await;
         if let Ok(pinned) = pins.pinned_chats().await {

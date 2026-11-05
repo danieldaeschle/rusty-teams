@@ -10,7 +10,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
-use super::avatar::{person_avatar, with_presence, with_presence_badge};
+use super::avatar::{person_avatar, status_glyph, with_presence, with_presence_badge};
 use super::widgets::{menu_icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
@@ -109,15 +109,7 @@ fn version_tooltip() -> String {
 }
 
 fn status_icon(kind: PresenceKind) -> gpui_kit::component::Icon {
-    let (name, color) = match kind {
-        PresenceKind::Available => ("status_dot", theme::green()),
-        PresenceKind::Busy => ("status_dot", theme::red()),
-        PresenceKind::DoNotDisturb => ("status_dnd", theme::red()),
-        PresenceKind::Away => ("status_away", theme::amber()),
-        PresenceKind::OutOfOffice => ("status_dot", theme::out_of_office()),
-        PresenceKind::Offline => ("status_ring", theme::text_muted()),
-        PresenceKind::Unknown => ("status_ring", theme::text_faint()),
-    };
+    let (name, color) = status_glyph(kind).unwrap_or(("status_ring", theme::text_faint()));
     symbol(name, PRESENCE_ICON_SIZE, color)
 }
 

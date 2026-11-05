@@ -464,7 +464,7 @@ impl ConversationView {
         };
         let visible = view
             .upgrade()
-            .is_some_and(|entity| entity.read(cx).toolbar_visible(&row.key));
+            .is_some_and(|entity| entity.read(cx).toolbar_visible(&row.key, cx));
         Some(ScheduledRowActions {
             delivery: DeliveryActions {
                 retry,

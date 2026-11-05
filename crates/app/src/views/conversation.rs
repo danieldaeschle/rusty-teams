@@ -22,6 +22,8 @@ use teams_core::{
 };
 
 mod channel_details;
+mod chat_header_actions;
+mod copilot;
 pub use channel_details::{
     CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
     CHANNEL_DETAILS_TAG,
@@ -111,6 +113,11 @@ pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
+const QUIET_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+];
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
@@ -178,6 +185,7 @@ struct Current {
     has_older: bool,
     loading_older: bool,
     older_blocked: bool,
+    quiet_retries: usize,
     fetched: bool,
     first_unread: Option<String>,
     posts_new_after: Option<DateTime<Utc>>,
@@ -227,6 +235,7 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
+    toolbar_opened: Option<String>,
     timeline_bounds: TimelineBounds,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
@@ -238,6 +247,7 @@ pub struct ConversationView {
     fetched_jump: Option<String>,
     pin_index: usize,
     channel_details_open: bool,
+    copilot: copilot::CopilotPane,
     pinned_posts_expanded: bool,
     channel_details_scroll: ScrollHandle,
     scroller_watch: Option<(EntityId, Subscription)>,
@@ -575,6 +585,7 @@ impl ConversationView {
             downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
+            toolbar_opened: None,
             timeline_bounds: TimelineBounds::default(),
             header_width: Rc::default(),
             toolbar_pinned: None,
@@ -586,6 +597,7 @@ impl ConversationView {
             fetched_jump: None,
             pin_index: 0,
             channel_details_open: false,
+            copilot: copilot::CopilotPane::default(),
             pinned_posts_expanded: false,
             channel_details_scroll: ScrollHandle::new(),
             scroller_watch: None,
@@ -907,6 +919,7 @@ impl ConversationView {
         self.feed_at_top = true;
         self.restore_subject(None, window, cx);
         self.toolbar_hovered = None;
+        self.reset_copilot();
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
         self.agent_layouts.clear();
@@ -929,6 +942,7 @@ impl ConversationView {
             loading_older: false,
             older_blocked: false,
             fetched: false,
+            quiet_retries: 0,
             first_unread,
             posts_new_after,
             sync: SyncProgress::default(),
@@ -1217,9 +1231,23 @@ impl ConversationView {
         if in_channel {
             self.pane = ChannelPane::Posts;
             self.enter_feed_mode();
+            self.stop_typing(cx);
+            self.enter_thread_mode(row_key.clone(), cx);
         }
         self.reload_pending(cx);
         self.rebuild(true, cx);
+        if in_channel {
+            self.refresh_thread(row_key.clone(), cx);
+            let shown_alone = self
+                .rows
+                .borrow()
+                .iter()
+                .any(|row| row.key() == message_id);
+            if shown_alone {
+                self.reveal_row(message_id.to_owned(), message_id.to_owned(), cx);
+                return;
+            }
+        }
         self.reveal_row(row_key, message_id.to_owned(), cx);
     }
 
@@ -1923,15 +1951,38 @@ impl ConversationView {
         sync.messages = false;
         let (newest_cached, started_at) = (sync.newest_cached, sync.started_at);
         match result {
-            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, started_at, cx),
-            Ok(Err(error)) => self.fail_sync(generation, short_error(&error)),
-            Err(error) => self.fail_sync(generation, short_error(&error)),
+            Ok(Ok(_)) => {
+                if let Some(current) = self.current.as_mut() {
+                    current.quiet_retries = 0;
+                }
+                self.mark_fetched_new(newest_cached, started_at, cx)
+            }
+            Ok(Err(error)) => self.fail_sync(generation, short_error(&error), cx),
+            Err(error) => self.fail_sync(generation, short_error(&error), cx),
         }
         self.rebuild(false, cx);
         self.settle_progress(generation, cx);
     }
 
-    fn fail_sync(&mut self, generation: u64, error: String) {
+    fn fail_sync(&mut self, generation: u64, error: String, cx: &mut Context<Self>) {
+        let quiet_retry = self.current.as_mut().and_then(|current| {
+            let delay = QUIET_RETRY_DELAYS.get(current.quiet_retries).copied()?;
+            current.quiet_retries += 1;
+            Some(delay)
+        });
+        if let Some(delay) = quiet_retry {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                this.update(cx, |this, cx| {
+                    if this.sync_generation == generation {
+                        this.retry_fetch(cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
+            return;
+        }
         if let Some(sync) = self.sync_of(generation) {
             sync.failed = true;
             sync.receipts = false;
@@ -2660,6 +2711,9 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
+        if !hovered && matches!(slot, HoverSlot::Row) && self.toolbar_opened.as_deref() == Some(key) {
+            self.toolbar_opened = None;
+        }
         if hovered
             && matches!(slot, HoverSlot::Row)
             && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
@@ -2692,14 +2746,25 @@ impl ConversationView {
         cx.notify();
     }
 
-    fn toolbar_visible(&self, key: &str) -> bool {
+    fn toolbar_visible(&self, key: &str, cx: &App) -> bool {
+        let row_trigger = if self.app.read(cx).actions_on_right_click {
+            self.toolbar_opened.as_deref()
+        } else {
+            self.hovered_message.as_deref()
+        };
         self.toolbar_suppressed.as_deref() != Some(key)
             && self
                 .toolbar_pinned
                 .as_deref()
                 .or(self.toolbar_hovered.as_deref())
-                .or(self.hovered_message.as_deref())
+                .or(row_trigger)
                 == Some(key)
+    }
+
+    fn open_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.toolbar_opened = Some(key.to_owned());
+        self.toolbar_suppressed = None;
+        cx.notify();
     }
 
     fn toggle_reaction(&mut self, message_id: &str, glyph: &str, cx: &mut Context<Self>) {
@@ -3434,6 +3499,7 @@ impl ConversationView {
             return;
         };
         self.channel_details_open = false;
+        self.close_copilot();
         if let Some(panel) = &self.find_panel {
             panel.update(cx, |panel, cx| panel.focus(window, cx));
             return;
@@ -3496,6 +3562,7 @@ impl ConversationView {
         let mut subline = String::new();
         let mut stack: Option<AnyElement> = None;
         let mut rename: Option<AnyElement> = None;
+        let mut names_title: Option<Div> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3540,14 +3607,15 @@ impl ConversationView {
                         {
                             rename = Some(group_name_button(&self.app, chat_id, &chat.title));
                         }
+                        if chat.title.trim().is_empty() {
+                            names_title = Some(chat_header_actions::group_title(directory, &faces));
+                        }
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
-                        subline = format!("{} participants", chat.members.len());
-                        let shown: Vec<Face> = faces.iter().cloned().map(face).collect();
                         stack = Some(members_popover(
                             &self.app,
                             chat_id,
-                            member_stack(directory, &shown, shown.len(), false)
+                            chat_header_actions::member_count(chat.members.len())
                                 .debug_selector(|| MEMBERS_BUTTON.into()),
                         ));
                     }
@@ -3652,7 +3720,10 @@ impl ConversationView {
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
-                                    .child(current.title.clone()),
+                                    .map(|title| match names_title {
+                                        Some(names) => title.child(names),
+                                        None => title.child(current.title.clone()),
+                                    }),
                             )
                             .children(rename),
                     )
@@ -3666,10 +3737,13 @@ impl ConversationView {
                     }),
             )
             .children(inline_tabs)
-            .children(stack)
             .children(call_controls)
+            .children(stack)
+            .children(self.copilot_button(cx))
+            .children(self.chat_find_button(cx))
             .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
+            .children(self.pop_out_button())
             .children(self.pop_in_button(current))
     }
 
@@ -3941,7 +4015,9 @@ impl Render for ConversationView {
         } else {
             scroller.into_any_element()
         };
-        let channel_details = self.render_channel_details(cx);
+        let channel_details = self
+            .render_channel_details(cx)
+            .or_else(|| self.render_copilot(cx));
         let find_panel = self.find_panel.clone().filter(|_| !drafting);
         let find_overlays = self.header_width(window) < FIND_PANEL_WIDTH + FIND_MIN_TIMELINE_WIDTH;
         let content = v_flex()

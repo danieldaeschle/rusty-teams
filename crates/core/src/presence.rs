@@ -25,10 +25,10 @@ pub enum Availability {
 impl Availability {
     pub fn from_service(name: &str) -> Self {
         match name {
-            "Available" | "AvailableIdle" => Availability::Available,
+            "Available" => Availability::Available,
             "Busy" | "BusyIdle" => Availability::Busy,
             "DoNotDisturb" => Availability::DoNotDisturb,
-            "Away" | "BeRightBack" => Availability::Away,
+            "Away" | "BeRightBack" | "AvailableIdle" => Availability::Away,
             "Offline" => Availability::Offline,
             _ => Availability::Unknown,
         }
@@ -242,6 +242,12 @@ impl<R: Remote> SyncEngine<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_available_shows_as_away_like_teams() {
+        assert_eq!(Availability::from_service("AvailableIdle"), Availability::Away);
+        assert_eq!(Availability::from_service("BusyIdle"), Availability::Busy);
+    }
 
     #[test]
     fn activity_names_map_and_unknown_is_none() {

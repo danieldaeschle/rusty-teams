@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use scraper::{ElementRef, Html};
 use serde::{Deserialize, Serialize};
@@ -194,7 +196,16 @@ pub struct MentionInfo {
 }
 
 pub fn attachments(record: &MessageRecord) -> Vec<AttachmentInfo> {
-    serde_json::from_str(&record.attachments_json).unwrap_or_default()
+    let mut attachments: Vec<AttachmentInfo> =
+        serde_json::from_str(&record.attachments_json).unwrap_or_default();
+    let mut seen_ids = HashSet::new();
+    attachments.retain(|attachment| {
+        attachment
+            .id
+            .as_ref()
+            .is_none_or(|id| seen_ids.insert(id.clone()))
+    });
+    attachments
 }
 
 pub fn adaptive_cards(record: &MessageRecord) -> Vec<AdaptiveCard> {
@@ -1190,6 +1201,14 @@ mod tests {
         assert!(text.starts_with("Hi @Ada, look"), "{text}");
         assert!(text.contains("second link"), "{text}");
         assert!(text.contains('\n'));
+    }
+
+    #[test]
+    fn an_attachment_listed_twice_shows_once() {
+        let card = r#"{"content_type":"application/vnd.microsoft.card.adaptive","name":null,"url":null,"text":"Jira","id":"app-preview-card-1"}"#;
+        let file = r#"{"content_type":"reference","name":"a.pdf","url":"u","text":null}"#;
+        let parsed = attachments(&record("", &format!("[{card},{card},{file},{file}]")));
+        assert_eq!(parsed.len(), 3);
     }
 
     #[test]

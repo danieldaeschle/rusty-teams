@@ -2,6 +2,10 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
+use gpui_kit::component::fluent::{
+    MENU_ICON_GLYPH, MENU_ICON_LABEL_GAP, MENU_ICON_SLOT, MENU_ITEM_GAP, MENU_ITEM_HEIGHT,
+    MENU_ITEM_PADDING_X, MENU_LIST_PADDING,
+};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -27,8 +31,7 @@ const ROW_HEIGHT: f32 = 40.;
 const OWN_ROW_HEIGHT: f32 = 43.;
 const AVATAR_SIZE: f32 = 32.;
 const EDGE_PADDING: f32 = 12.;
-const ACTION_HEIGHT: f32 = 36.;
-const ACTION_ICON: f32 = 20.;
+const ACTION_RADIUS: f32 = 6.;
 const REMOVE_BUTTON: f32 = 24.;
 
 pub fn members_popover(app: &Entity<AppState>, chat_id: &str, trigger: Div) -> AnyElement {
@@ -105,7 +108,8 @@ fn members_panel(
                 )
                 .child(
                     v_flex()
-                        .py(px(4.))
+                        .p(MENU_LIST_PADDING)
+                        .gap(MENU_ITEM_GAP)
                         .child({
                             let (app, popover, chat_id) =
                                 (app.clone(), popover.clone(), chat_id.to_owned());
@@ -250,13 +254,22 @@ fn remove_button(
 fn action_row(id: &'static str, icon_name: IconName, label: &'static str) -> Stateful<Div> {
     h_flex()
         .id(id)
-        .h(px(ACTION_HEIGHT))
-        .px(px(EDGE_PADDING))
-        .gap(px(8.))
+        .h(MENU_ITEM_HEIGHT)
+        .px(MENU_ITEM_PADDING_X)
+        .gap(MENU_ICON_LABEL_GAP)
         .items_center()
+        .rounded(px(ACTION_RADIUS))
         .text_size(px(14.))
         .text_color(theme::text())
-        .child(icon(icon_name, ACTION_ICON, theme::text_soft()))
+        .child(
+            div()
+                .size(MENU_ICON_SLOT)
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(icon_name, f32::from(MENU_ICON_GLYPH), theme::text_soft())),
+        )
         .child(label)
 }
 
