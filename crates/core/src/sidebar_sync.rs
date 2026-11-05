@@ -17,6 +17,7 @@ use crate::remote::{ChatsPage, Remote};
 const META_CHATS_FULL_AT: &str = "chats_full_refreshed_at";
 const META_TEAMS_AT: &str = "teams_refreshed_at";
 const META_CHATS_NEXT_LINK: &str = "chats_next_link";
+const KEPT_PREVIEW_MESSAGES: usize = 5;
 const META_CHATS_EXHAUSTED: &str = "chats_exhausted";
 
 #[derive(Default)]
@@ -84,6 +85,7 @@ impl<R: Remote> SyncEngine<R> {
             let (records, hidden) = self.split_page(&page, &my_user_id)?;
             let any_changed = self.any_chat_changed(&records)?;
             self.store.upsert_chats(&records)?;
+            self.fill_kept_previews(&records)?;
             kept_ids.extend(records.iter().map(|record| record.id.clone()));
             hidden_ids.extend(hidden);
             let wants_more = full || any_changed;
@@ -296,9 +298,22 @@ impl<R: Remote> SyncEngine<R> {
         }
     }
 
+    /// A kept line that was never set (Graph sends no text for card-only bodies) comes from the cached messages.
+    fn fill_kept_previews(&self, records: &[ChatRecord]) -> Result<()> {
+        for record in records.iter().filter(|record| record.keeps_stored_preview) {
+            let stored = self.store.chat(&record.id)?;
+            if stored.is_some_and(|chat| chat.last_message_preview.is_none()) {
+                let recent = self.store.messages(&record.id, None, KEPT_PREVIEW_MESSAGES)?;
+                self.update_chat_preview(&recent)?;
+            }
+        }
+        Ok(())
+    }
+
     fn store_older_page(&self, my_user_id: &str, page: &ChatsPage) -> Result<()> {
         let (records, hidden) = self.split_page(page, my_user_id)?;
         self.store.upsert_chats(&records)?;
+        self.fill_kept_previews(&records)?;
         self.store.remove_chats(&hidden)?;
         let muted: Vec<(String, bool)> = {
             let states = self.chat_states.lock().unwrap();
