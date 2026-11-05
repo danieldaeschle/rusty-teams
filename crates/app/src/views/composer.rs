@@ -3724,6 +3724,7 @@ mod tests {
         use super::super::Composer;
         use crate::app_state::{AppState, Mode};
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn ctrl_a_selects_the_whole_draft(cx: &mut TestAppContext) {
             cx.update(gpui_kit::init);
@@ -3858,6 +3859,7 @@ mod tests {
             })
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn a_pasted_image_sits_at_the_cursor_and_is_sent_there(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -3914,6 +3916,7 @@ mod tests {
             assert!(caret_is_visible(&mut typist));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn deleting_the_token_drops_the_image_and_undo_brings_it_back(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -3932,6 +3935,7 @@ mod tests {
             assert_eq!(typist.outgoing().images.len(), 1);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn the_remove_button_drops_the_image_and_one_undo_brings_it_back(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -3957,6 +3961,7 @@ mod tests {
             assert_eq!(typist.outgoing().images.len(), 1);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn images_are_sent_in_the_order_they_appear_in_the_text(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -3982,6 +3987,7 @@ mod tests {
             );
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn an_image_alone_can_be_sent_and_never_leaks_into_copied_text(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -3997,6 +4003,7 @@ mod tests {
             assert_eq!(copied.as_deref(), Some("hi"));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn an_inserted_gif_alone_can_be_sent_and_undo_removes_it(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4045,6 +4052,7 @@ mod tests {
             assert_eq!(typist.value(), "a\u{1F44D}b");
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn pasted_text_loses_object_marks(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4236,6 +4244,7 @@ mod tests {
             assert!(typist.draft().marks().is_empty());
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn ctrl_z_takes_an_autolink_back(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4245,6 +4254,7 @@ mod tests {
             assert!(typist.draft().marks().is_empty());
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn pasted_url_is_linked_and_ctrl_z_restores_the_raw_text(cx: &mut TestAppContext) {
             use teams_core::{Mark, MarkKind};
@@ -4309,6 +4319,7 @@ mod tests {
             );
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn a_url_only_paste_links_without_the_paste_hint(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4428,6 +4439,7 @@ mod tests {
             );
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn pasted_markdown_converts_and_ctrl_z_restores_the_raw_text(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4449,6 +4461,7 @@ mod tests {
             assert!(typist.draft().marks().is_empty());
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn copy_and_paste_inside_the_composer_keeps_formatting(cx: &mut TestAppContext) {
             use teams_core::{FormatState, MarkKind};
@@ -4460,6 +4473,7 @@ mod tests {
             assert_eq!(typist.draft().state(5..9, &MarkKind::Code), FormatState::On);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn undo_brings_the_formatting_back_with_the_text(cx: &mut TestAppContext) {
             use teams_core::{FormatState, MarkKind};
@@ -4500,6 +4514,7 @@ mod tests {
             );
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn ctrl_z_takes_back_bold_before_the_typing_and_ctrl_y_redoes_it(cx: &mut TestAppContext) {
             use teams_core::{FormatState, MarkKind};
@@ -4514,6 +4529,7 @@ mod tests {
             assert_eq!(typist.draft().state(3..5, &MarkKind::Bold), FormatState::On);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn undo_after_typing_undoes_the_typing_not_an_older_bold(cx: &mut TestAppContext) {
             use teams_core::{FormatState, MarkKind};
@@ -4541,6 +4557,7 @@ mod tests {
             assert_eq!(typist.outgoing().html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>ab</code></pre>");
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn copied_code_has_no_padding_in_the_plain_text(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4578,6 +4595,7 @@ mod tests {
             }));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn undo_takes_back_a_list_toggle_then_the_bold_before_it(cx: &mut TestAppContext) {
             use teams_core::{FormatState, LineKind, MarkKind};
@@ -4600,6 +4618,7 @@ mod tests {
             assert_eq!(typist.draft().lines(), [LineKind::Text]);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn redo_brings_back_typing_and_bold_in_order(cx: &mut TestAppContext) {
             use teams_core::{FormatState, MarkKind};
@@ -4622,6 +4641,7 @@ mod tests {
                 .update(|cx| composer.read(cx).input.read(cx).cursor())
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn typing_elsewhere_is_its_own_undo_step_and_undo_puts_the_caret_there(
             cx: &mut TestAppContext,
@@ -4660,6 +4680,7 @@ mod tests {
             assert_eq!(scroll(&mut typist), before);
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn a_smiley_taken_back_with_ctrl_z_is_sent_as_typed(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4678,6 +4699,7 @@ mod tests {
             assert_eq!(typist.value(), "a");
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn code_blocks_take_markdown_and_smileys_literally(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4817,6 +4839,7 @@ mod tests {
             assert!(!format_bar_open(&mut typist));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn ctrl_alt_x_strikes_through_now_that_ctrl_shift_x_is_format(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
@@ -4907,6 +4930,7 @@ mod tests {
             assert_eq!(shape(&mut typist), (1, 1));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn ctrl_a_highlights_a_table_like_selected_text(cx: &mut TestAppContext) {
             use gpui_kit::VisualTestContext;
@@ -4942,6 +4966,7 @@ mod tests {
             assert!(typist.draft().lines().iter().all(|kind| !kind.is_table()));
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
         #[gpui_kit::test]
         fn a_pasted_markdown_table_becomes_a_table(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
