@@ -1,4 +1,5 @@
 use chrono::{Local, Offset, Utc};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
@@ -309,7 +310,7 @@ impl ConversationView {
                                 .id("channel-details-body")
                                 .flex_1()
                                 .min_h_0()
-                                .overflow_y_scroll()
+                                .overflow_y_scrollbar()
                                 .track_scroll(&self.channel_details_scroll)
                                 .child(body),
                             &self.channel_details_scroll,

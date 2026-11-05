@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -72,7 +73,7 @@ fn members_panel(
         v_flex()
             .id("chat-members-list")
             .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .py(px(4.))
             .child(
                 div()

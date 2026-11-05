@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -128,7 +129,7 @@ impl TransferPicker {
             .update(cx, |state, cx| state.close_transfer_picker(cx));
     }
 
-    fn list(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let directory = &self.app.read(cx).directory;
         let rows: Vec<AnyElement> = self
             .results
@@ -179,7 +180,7 @@ impl TransferPicker {
             .id("transfer-targets")
             .w_full()
             .max_h(px(ROW_HEIGHT * MAX_RESULTS as f32))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(rows)
     }
 

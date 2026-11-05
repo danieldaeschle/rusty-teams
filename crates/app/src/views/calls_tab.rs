@@ -1,5 +1,6 @@
 use chatsvc::{Reply, ResponseType};
 use chrono::{Local, Offset, Utc};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -509,7 +510,7 @@ pub fn calls_body(
                 .id("calls-scroll")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
                 .track_scroll(scroll)
                 .child(list),
             scroll,

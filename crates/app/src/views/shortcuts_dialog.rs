@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -147,7 +148,7 @@ impl Render for ShortcutsDialog {
                             .id("shortcuts-body")
                             .min_h_0()
                             .gap(px(SECTION_GAP))
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
                             .children(Group::ALL.into_iter().map(group_block)),
                     ),
             )

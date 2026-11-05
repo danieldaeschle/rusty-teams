@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -19,7 +18,6 @@ use crate::theme;
 use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::post_card::{PostAction, post_in_channel_card};
-use crate::views::widgets::icon;
 
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
 const SUBJECT_PLACEHOLDER: &str = "Add a subject";

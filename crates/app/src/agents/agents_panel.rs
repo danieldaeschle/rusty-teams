@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -147,7 +148,7 @@ impl Render for AgentsPanel {
             .flex_1()
             .min_h_0()
             .pb(px(12.))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .track_scroll(&self.scroll)
             .when(!running.is_empty(), |list| {
                 list.child(section_header("Running"))

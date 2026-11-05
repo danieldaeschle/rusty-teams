@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -124,7 +125,7 @@ pub fn render_nav(
                 .w_full()
                 .flex_1()
                 .min_h(px(0.))
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
                 .gap(px(ITEM_GAP))
                 .child(group(TEAMS_GROUP.into_iter().map(item).collect()))
                 .child(

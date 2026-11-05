@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::{Local, Offset, Utc};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -1433,7 +1434,7 @@ impl SidebarView {
             .id("chats-scroll")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .track_scroll(&self.chats_scroll)
             .child(list);
         with_top_edge(scroll_area, &self.chats_scroll, SIDEBAR_SCROLL_DIVIDER).into_any_element()
@@ -1844,7 +1845,7 @@ impl SidebarView {
             .id("channels-scroll")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .track_scroll(&self.channels_scroll)
             .child(list);
         with_top_edge(scroll_area, &self.channels_scroll, SIDEBAR_SCROLL_DIVIDER).into_any_element()

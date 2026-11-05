@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     Sizable as _,
@@ -441,7 +442,7 @@ pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall)
         .flex_1()
         .min_h_0()
         .w_full()
-        .overflow_y_scroll()
+        .overflow_y_scrollbar()
         .track_scroll(&call.people_scroll)
         .pb(px(12.))
         .children(model.can_admit().then(|| lobby_section(app, state, &sections)).flatten())

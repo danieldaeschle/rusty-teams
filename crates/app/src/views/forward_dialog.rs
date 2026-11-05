@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -308,7 +309,7 @@ impl ForwardDialog {
         }
     }
 
-    fn list(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn list(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let directory = &self.app.read(cx).directory;
         let selected_id = self
             .target
@@ -370,7 +371,7 @@ impl ForwardDialog {
             .id("forward-targets")
             .w_full()
             .max_h(px(ROW_HEIGHT * MAX_RESULTS as f32))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(rows)
     }
 
@@ -400,14 +401,14 @@ impl ForwardDialog {
         }
     }
 
-    fn preview(&self) -> Stateful<Div> {
+    fn preview(&self) -> impl IntoElement + use<> {
         let lines = preview_lines(self.source.messages.len());
         v_flex()
             .id("forward-preview")
             .debug_selector(|| FORWARD_PREVIEW_TAG.into())
             .w_full()
             .max_h(px(PREVIEW_MAX_HEIGHT))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .gap(px(PREVIEW_GAP))
             .children(
                 self.source

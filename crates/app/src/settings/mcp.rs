@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, h_flex,
@@ -854,7 +855,7 @@ impl McpView {
                     .id("mcp-picker-list")
                     .w_full()
                     .max_h(px(PICKER_ROW_HEIGHT * PICKER_MAX_ROWS as f32))
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
                     .children(rows),
             )
     }

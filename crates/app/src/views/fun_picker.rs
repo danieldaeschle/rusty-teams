@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::base::PopoverState;
 use gpui_kit::component::{
     h_flex,
@@ -616,7 +617,7 @@ impl FunPicker {
         div()
             .id("fun-picker-gifs")
             .size_full()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .child(body)
             .into_any_element()
     }

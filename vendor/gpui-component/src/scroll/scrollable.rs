@@ -68,6 +68,7 @@ pub struct Scrollable<E: InteractiveElement + Styled + ParentElement + Element> 
     id: ElementId,
     element: E,
     axis: ScrollbarAxis,
+    scroll_handle: Option<ScrollHandle>,
 }
 
 impl<E> Scrollable<E>
@@ -80,7 +81,15 @@ where
             id: caller_id(),
             element,
             axis: axis.into(),
+            scroll_handle: None,
         }
+    }
+
+    /// Scroll with the caller's handle instead of one kept per element id, so
+    /// the caller can read and set the offset.
+    pub fn track_scroll(mut self, scroll_handle: &ScrollHandle) -> Self {
+        self.scroll_handle = Some(scroll_handle.clone());
+        self
     }
 
     /// Set a specific element id, default is the [`std::panic::Location::caller`].
@@ -130,7 +139,10 @@ where
     E: InteractiveElement + Styled + ParentElement + Element + 'static,
 {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let scroll_handle = scroll_handle_for(&self.id, window, cx);
+        let scroll_handle = match self.scroll_handle.take() {
+            Some(scroll_handle) => scroll_handle,
+            None => scroll_handle_for(&self.id, window, cx),
+        };
 
         // Preserve the caller-requested size on the wrapper, while keeping the
         // caller's element as the actual scroll-tracked layout container.
