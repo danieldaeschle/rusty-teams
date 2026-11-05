@@ -580,11 +580,13 @@ mod tests {
             .iter()
             .position(|arg| arg == "--additional-mcp-config")
             .unwrap();
+        // copilot runs under WSL on Windows hosts and gets the /mnt/... form there;
+        // wsl_path leaves other platforms' paths alone.
         assert_eq!(
             plan.run.args[flag_position + 1],
             format!(
                 "@{}",
-                directory.path().join("mcp-sid.json").to_string_lossy()
+                wsl_path(&directory.path().join("mcp-sid.json").to_string_lossy())
             )
         );
     }
