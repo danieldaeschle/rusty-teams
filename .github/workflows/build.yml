@@ -37,14 +37,15 @@ jobs:
 
       # README: "Linux build needs clang + mold (set in .cargo/config.toml)".
       # The rest are headers the calling stack probes at build time: glib for webrtc-sys,
-      # alsa for cpal, v4l2 for nokhwa (bindgen wants libclang), xkbcommon for GPUI,
+      # alsa for cpal, v4l2 for nokhwa (bindgen wants libclang), xkbcommon and fontconfig
+      # for GPUI (font lookup via yeslogic-fontconfig-sys),
       # libva enables the hardware video codecs of webrtc-sys.
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             clang mold pkg-config libclang-dev \
-            libglib2.0-dev libasound2-dev libva-dev \
+            libglib2.0-dev libfontconfig-dev libasound2-dev libva-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libxcb1-dev libxext-dev libxfixes-dev libxdamage-dev \
             libxrandr-dev libxcomposite-dev libwayland-dev libpipewire-0.3-dev

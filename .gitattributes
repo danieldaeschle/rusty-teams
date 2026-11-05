@@ -1,0 +1,4 @@
+# `git apply` matches patches against LF crate sources byte for byte. Windows
+# checkouts default to core.autocrlf=true, which rewrote them to CRLF and made
+# every hunk fail to match. Keep patch files LF everywhere.
+*.patch text eol=lf
