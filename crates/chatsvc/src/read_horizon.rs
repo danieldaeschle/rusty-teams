@@ -35,6 +35,10 @@ impl ReadHorizon {
         }
     }
 
+    pub fn read_until_ms(&self, app_horizon_ms: i64) -> i64 {
+        self.consumed_until_ms.max(app_horizon_ms)
+    }
+
     pub fn is_unread(&self, my_user_id: &str) -> bool {
         self.is_unread_after(my_user_id, 0)
     }
@@ -47,7 +51,7 @@ impl ReadHorizon {
         if bookmark_ms != 0 && self.bookmark_message_set {
             return true;
         }
-        let consumed_until_ms = self.consumed_until_ms.max(app_horizon_ms);
+        let consumed_until_ms = self.read_until_ms(app_horizon_ms);
         let unread = bookmark_ms != 0 || self.last_message_ms > consumed_until_ms;
         let from_me = self
             .last_message_from

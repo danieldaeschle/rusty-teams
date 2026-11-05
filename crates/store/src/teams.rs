@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, Row, params};
 
 use crate::error::Result;
-use crate::models::{ChannelRecord, TeamRecord};
+use crate::models::{ChannelReadState, ChannelRecord, TeamRecord};
 use crate::store::{Store, json_ids};
 use crate::time::{optional_from_millis, optional_to_millis};
 
@@ -51,21 +51,23 @@ impl Store {
     /// Read state comes from chatsvc only; channel metadata refreshes leave it alone.
     pub fn apply_channel_read_states(
         &self,
-        states: &[(String, bool, Option<DateTime<Utc>>)],
+        states: &[ChannelReadState],
     ) -> Result<()> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction()?;
         {
             let mut update = transaction.prepare_cached(
                 "UPDATE channels SET unread = ?2,
-                    last_message_at = COALESCE(?3, last_message_at)
+                    last_message_at = COALESCE(?3, last_message_at),
+                    read_until = COALESCE(?4, read_until)
                  WHERE id = ?1",
             )?;
-            for (channel_id, unread, last_message_at) in states {
+            for state in states {
                 update.execute(params![
-                    channel_id,
-                    unread,
-                    optional_to_millis(*last_message_at)
+                    state.channel_id,
+                    state.unread,
+                    optional_to_millis(state.last_message_at),
+                    optional_to_millis(state.read_until)
                 ])?;
             }
         }
@@ -124,6 +126,18 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    pub fn channel_read_until(&self, channel_id: &str) -> Result<Option<DateTime<Utc>>> {
+        let connection = self.lock()?;
+        let read_until: Option<Option<i64>> = connection
+            .query_row(
+                "SELECT read_until FROM channels WHERE id = ?1",
+                [channel_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(optional_from_millis(read_until.flatten()))
     }
 
     pub fn channel(&self, channel_id: &str) -> Result<Option<ChannelRecord>> {

@@ -2835,6 +2835,35 @@ async fn a_newer_message_updates_the_preview_and_announces_the_sidebar() {
 }
 
 #[tokio::test]
+async fn a_card_line_survives_the_graph_chat_refresh() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, SyncConfig::default()).await;
+    let body = r#"<attachment id="a1"></attachment>"#;
+    let card: Message = serde_json::from_value(json!({
+        "id": "card", "messageType": "message",
+        "createdDateTime": (base() + Duration::minutes(5)).to_rfc3339(),
+        "from": {"user": {"id": "user-ada", "displayName": "Ada Example"}},
+        "body": {"contentType": "html", "content": body},
+        "attachments": [{
+            "id": "a1", "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": json!({"type": "AdaptiveCard", "body": [
+                {"type": "TextBlock", "text": "Ada edited Engine Notes"},
+            ]}).to_string(),
+        }],
+    }))
+    .unwrap();
+    fake.set_chat_messages(vec![card]);
+    engine.fetch_newer(CHAT).await.unwrap();
+    let line = |engine: &SyncEngine<Handle>| {
+        engine.sidebar().unwrap().chats.remove(0).last_message_preview
+    };
+    assert_eq!(line(&engine).as_deref(), Some("Ada edited Engine Notes"));
+    *fake.chats.lock().unwrap() = vec![chat_with_preview(CHAT, 5, "html", body, false)];
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(line(&engine).as_deref(), Some("Ada edited Engine Notes"));
+}
+
+#[tokio::test]
 async fn a_newer_call_event_keeps_the_line_and_moves_the_time() {
     let fake = Arc::new(Fake::default());
     let mut before = numbered(3);

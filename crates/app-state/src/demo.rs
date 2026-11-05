@@ -673,6 +673,10 @@ pub fn translations(message_ids: &[String]) -> Vec<Translation> {
         .collect()
 }
 
+pub fn channel_read_until(channel_id: &str) -> Option<DateTime<Utc>> {
+    (channel_id == PINNED_CHANNEL).then(|| at(0, 11, 0))
+}
+
 pub fn first_unread(conversation_id: &str) -> Option<String> {
     (conversation_id == UNREAD_CHAT).then(|| "u3".to_owned())
 }
@@ -805,6 +809,29 @@ pub fn activity_snapshot() -> ActivitySnapshot {
             at(1, 16, 0),
             true,
         ),
+        ActivityItem {
+            source_thread_id: String::new(),
+            source_message_id: Some("1".to_owned()),
+            source_reply_chain_id: None,
+            source_user_id: None,
+            source_app_name: Some("Meeting Recaps".to_owned()),
+            preview_template: "previewUnavailable".to_owned(),
+            template_parameters: [("subject".to_owned(), "Following: Sprint Review ".to_owned())].into(),
+            event_start_ms: Some(at(1, 10, 0).timestamp_millis()),
+            event_end_ms: Some(at(1, 11, 0).timestamp_millis()),
+            ..item(
+                "demo-activity-7",
+                "msGraph",
+                "recapIsReadyForFollowedMeetingsV2",
+                "",
+                "",
+                "",
+                ("", "Meeting Recaps"),
+                "You're following this meeting",
+                at(1, 11, 30),
+                true,
+            )
+        },
     ];
     ActivitySnapshot {
         items,

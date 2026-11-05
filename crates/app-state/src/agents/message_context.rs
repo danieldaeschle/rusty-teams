@@ -163,7 +163,7 @@ mod tests {
             last_message_sender_name: None,
             last_message_deleted: false,
             last_event_system: false,
-            last_event_call: false,
+            keeps_stored_preview: false,
         });
         state
     }

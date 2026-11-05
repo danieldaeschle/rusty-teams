@@ -9,6 +9,7 @@ use teams_core::FileKind;
 
 use super::{ChannelPane, ConversationView};
 use crate::app_state::Selection;
+use crate::find_in_chat::FIND_IN_CHANNEL;
 use crate::channel_files::{SharedContent, SharedItem};
 use crate::format;
 use crate::rows::reply_excerpt;
@@ -125,6 +126,20 @@ impl ConversationView {
             Selection::Channel(channel_id) => Some(channel_id.clone()),
             Selection::Chat(_) => None,
         }
+    }
+
+    pub(super) fn channel_find_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.details_channel_id()?;
+        Some(
+            Button::new("channel-find")
+                .icon(IconName::Search)
+                .ghost()
+                .size(px(BUTTON_SIZE))
+                .rounded(px(8.))
+                .tooltip(FIND_IN_CHANNEL)
+                .on_click(cx.listener(|this, _, window, cx| this.open_find(window, cx)))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn channel_details_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

@@ -127,7 +127,7 @@ impl ConversationView {
         });
         self.reload_pending(cx);
         self.rebuild(true, cx);
-        self.reveal_row(message_id, cx);
+        self.reveal_row(message_id.clone(), message_id, cx);
     }
 
     pub(super) fn leave_detached(&mut self, cx: &mut Context<Self>) {

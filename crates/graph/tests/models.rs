@@ -1,4 +1,4 @@
-use graph::{Chat, Message, User};
+use graph::{Chat, Member, Message, UNKNOWN_USER_NAME, User};
 use serde_json::Value;
 
 fn fixture(name: &str) -> Value {
@@ -18,6 +18,15 @@ fn parses_user() {
     .unwrap();
     assert_eq!(user.id, "user-me");
     assert!(user.mail.is_none());
+}
+
+#[test]
+fn a_deleted_member_is_an_unknown_user() {
+    let member: Member = serde_json::from_value(serde_json::json!({
+        "id": "m1", "userId": "gone", "displayName": "?", "email": null,
+    }))
+    .unwrap();
+    assert_eq!(member.name(), UNKNOWN_USER_NAME);
 }
 
 #[test]

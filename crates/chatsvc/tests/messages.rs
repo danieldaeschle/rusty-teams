@@ -396,7 +396,7 @@ impl chatsvc::messages::MessageTransport for &ArrivalMock {
         self.requests.lock().unwrap().push(request);
         Ok(ApiResponse {
             status: 201,
-            body: serde_json::json!({"OriginalArrivalTime": 1727203440000_i64}),
+            body: serde_json::json!({"OriginalArrivalTime": 1727203440000.0}),
             retry_after: None,
         })
     }

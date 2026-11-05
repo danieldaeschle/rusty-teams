@@ -321,6 +321,7 @@ pub struct PostRow {
     pub replies: Vec<MessageRow>,
     pub hidden_reply_count: usize,
     pub hidden_repliers: Vec<String>,
+    pub is_new: bool,
 }
 
 impl PostRow {
@@ -330,11 +331,17 @@ impl PostRow {
             replies: Vec::new(),
             hidden_reply_count: 0,
             hidden_repliers: Vec::new(),
+            is_new: false,
         }
     }
 
     pub fn messages(&self) -> impl Iterator<Item = &MessageRow> {
         std::iter::once(&self.root).chain(&self.replies)
+    }
+
+    /// Teams marks a post "New" when someone else posted it after the channel's read horizon.
+    pub fn mark_new_after(&mut self, read_until: DateTime<Utc>) {
+        self.is_new = !self.root.own && self.root.created_at > read_until;
     }
 
     pub fn hidden_replies_label(&self) -> Option<String> {
@@ -1049,6 +1056,7 @@ fn post_row(
             .iter()
             .map(|reply| post_message_row(reply, context, timeline))
             .collect(),
+        is_new: false,
     }
 }
 
@@ -2197,6 +2205,29 @@ mod tests {
             panic!("not a post")
         };
         post
+    }
+
+    #[test]
+    fn posts_from_others_after_the_read_horizon_are_new() {
+        let records = vec![
+            record_by("old", "u", 9, 0, 7),
+            record_by("fresh", "u", 11, 0, 7),
+            record_by("mine", "me", 12, 0, 7),
+        ];
+        let read_until = Utc.with_ymd_and_hms(2026, 10, 7, 10, 0, 0).unwrap();
+        let new: Vec<(String, bool)> = thread_list_rows(&records, &call_context(), false)
+            .into_iter()
+            .map(|row| {
+                let Row::Post(mut post) = row else {
+                    panic!("not a post")
+                };
+                post.mark_new_after(read_until);
+                (post.root.key.clone(), post.is_new)
+            })
+            .collect();
+        assert!(new.contains(&("fresh".to_owned(), true)));
+        assert!(new.contains(&("old".to_owned(), false)));
+        assert!(new.contains(&("mine".to_owned(), false)));
     }
 
     #[test]

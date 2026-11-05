@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -13,6 +15,8 @@ const MAX_PAGES: usize = 3;
 const READ_PROPERTY: &str = "isread";
 const SEEN_PROPERTY: &str = "consumptionhorizon";
 const BOOKMARK_PROPERTY: &str = "consumptionHorizonBookmark";
+const MEETING_THREAD_PREFIX: &str = "19:meeting_";
+const MEETING_THREAD_SUFFIX: &str = "@thread.v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ActivityItem {
@@ -34,6 +38,12 @@ pub struct ActivityItem {
     pub timestamp_ms: i64,
     pub version_ms: i64,
     pub read_flag: bool,
+    pub tap_url: Option<String>,
+    pub meeting_thread_id: Option<String>,
+    #[serde(default)]
+    pub template_parameters: BTreeMap<String, String>,
+    pub event_start_ms: Option<i64>,
+    pub event_end_ms: Option<i64>,
 }
 
 /// `seen_ms`: the bell horizon (`consumptionhorizon`), `bookmark_ms`: Mark all as read (`consumptionHorizonBookmark`).
@@ -197,6 +207,11 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
     }
     let activity = object_property(properties, "activity")?;
     let text = |key: &str| activity.get(key).and_then(text_of);
+    let context = activity.get("activityContext");
+    let location = context
+        .and_then(|context| object_property(context, "location"))
+        .and_then(|location| location.get("Custom").and_then(Value::as_str).map(str::to_owned))
+        .unwrap_or_default();
     let message_id = message.get("id").and_then(text_of)?;
     let version_ms = message
         .get("version")
@@ -228,7 +243,43 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
         timestamp_ms,
         version_ms,
         read_flag: flag(properties.get(READ_PROPERTY)),
+        tap_url: text("customTapAction"),
+        meeting_thread_id: meeting_thread_in(&activity.to_string()),
+        template_parameters: context
+            .and_then(|context| object_property(context, "templateParameters"))
+            .and_then(|parameters| parameters.as_object().cloned())
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .filter_map(|(key, value)| Some((key.clone(), text_of(value)?)))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        event_start_ms: tag_time(&location, "StartDateTime"),
+        event_end_ms: tag_time(&location, "EndDateTime"),
     })
+}
+
+fn tag_time(text: &str, tag: &str) -> Option<i64> {
+    let open = format!("<{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = start + text[start..].find(&format!("</{tag}>"))?;
+    timestamp_ms(&Value::String(text[start..end].to_owned()))
+}
+
+fn meeting_thread_in(text: &str) -> Option<String> {
+    let decoded = text
+        .replace("%3a", ":")
+        .replace("%3A", ":")
+        .replace("%40", "@");
+    let start = decoded.find(MEETING_THREAD_PREFIX)?;
+    let rest = &decoded[start..];
+    let end = rest.find(MEETING_THREAD_SUFFIX)? + MEETING_THREAD_SUFFIX.len();
+    let thread_id = &rest[..end];
+    thread_id
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "_:@.-=".contains(character))
+        .then(|| thread_id.to_owned())
 }
 
 fn object_property(properties: &Value, key: &str) -> Option<Value> {
@@ -242,11 +293,7 @@ fn object_property(properties: &Value, key: &str) -> Option<Value> {
 }
 
 fn text_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) if !text.is_empty() => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
+    crate::json_id::id_text(value)
 }
 
 fn flag(value: Option<&Value>) -> bool {
@@ -322,7 +369,7 @@ mod tests {
             message("1791368000001", 1791368000500, json!({
                 "activityId": 4711, "activityType": "reactionInChat", "activitySubtype": "heart",
                 "activityTimestamp": "1791368000000", "sourceThreadId": "19:a@thread.v2",
-                "sourceMessageId": 1791367000000_i64, "sourceReplyChainId": "1791367000000",
+                "sourceMessageId": 1791367000000.0, "sourceReplyChainId": "1791367000000",
                 "sourceUserId": "8:orgid:user-1", "sourceUserImDisplayName": "Ada Example",
                 "messagePreview": "Ship it", "messagePreviewTemplateOption": "hasText",
                 "sourceThreadTopic": "Release", "sourceThreadType": "chat", "count": "3"
@@ -352,8 +399,48 @@ mod tests {
                 timestamp_ms: 1791368000000,
                 version_ms: 1791368000500,
                 read_flag: false,
+                tap_url: None,
+                meeting_thread_id: None,
+                ..ActivityItem::default()
             }]
         );
+    }
+
+    #[test]
+    fn an_app_activity_keeps_its_tap_link_and_the_meeting_it_names() {
+        let body = json!({"messages": [
+            message("1", 1, json!({
+                "activityType": "msGraph", "activitySubtype": "recapIsReadyV2",
+                "customTapAction": "https://teams.microsoft.com/l/entity/x?context=%7B%22threadId%22%3A%2219%3Ameeting_Zm9v%40thread.v2%22%7D",
+            }), "false"),
+            message("2", 1, json!({
+                "activityType": "msGraph", "activitySubtype": "recapIsReadyV2",
+                "activityContext": {"templateParameters": "{\"threadId\":\"19:meeting_YmFy@thread.v2\"}"},
+            }), "false"),
+        ]});
+        let items = parse_page(&body).unwrap();
+        assert!(items[0].tap_url.as_deref().unwrap().starts_with("https://teams.microsoft.com/l/entity/"));
+        assert_eq!(items[0].meeting_thread_id.as_deref(), Some("19:meeting_Zm9v@thread.v2"));
+        assert_eq!(items[1].tap_url, None);
+        assert_eq!(items[1].meeting_thread_id.as_deref(), Some("19:meeting_YmFy@thread.v2"));
+    }
+
+    #[test]
+    fn an_app_activity_keeps_its_template_parameters_and_time_range() {
+        let body = json!({"messages": [message("1", 1, json!({
+            "activityType": "msGraph", "activitySubtype": "recapIsReadyForFollowedMeetingsV2",
+            "activityContext": {
+                "location": "{\"Custom\":\"<DateTimeRange><StartDateTime>2026-11-05T08:00:00.0000000Z</StartDateTime><EndDateTime>2026-11-05T09:00:00.0000000Z</EndDateTime></DateTimeRange>\"}",
+                "templateParameters": "{\"subject\":\"Following: Sprint Demo \"}",
+            },
+        }), "false")]});
+        let item = &parse_page(&body).unwrap()[0];
+        assert_eq!(
+            item.template_parameters.get("subject").map(String::as_str),
+            Some("Following: Sprint Demo ")
+        );
+        assert_eq!(item.event_start_ms, Some(1793865600000));
+        assert_eq!(item.event_end_ms, Some(1793869200000));
     }
 
     #[test]

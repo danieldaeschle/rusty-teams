@@ -6,6 +6,12 @@ use crate::rows::reaction_glyph;
 
 const ORG_USER_PREFIX: &str = "8:orgid:";
 const CHANNEL_THREAD_TYPES: [&str; 2] = ["topic", "space"];
+const APP_TEMPLATES: [(&str, &str); 4] = [
+    ("recapIsReady", "Meeting recap is ready"),
+    ("recapIsReadyForFollowedMeetings", "Meeting recap is ready"),
+    ("recapIsReadyV2", "Recap ready: {subject}"),
+    ("recapIsReadyForFollowedMeetingsV2", "Recap ready: {subject}"),
+];
 
 pub fn feed_of(snapshot: &ActivitySnapshot, seen_locally_ms: i64) -> Feed {
     Feed::new(
@@ -27,9 +33,13 @@ pub fn feed_of(snapshot: &ActivitySnapshot, seen_locally_ms: i64) -> Feed {
 
 fn entry_of(item: &ActivityItem) -> Entry {
     let kind = kind_of(item);
+    let conversation_id = match (&item.meeting_thread_id, item.source_thread_id.is_empty()) {
+        (Some(meeting_thread_id), true) => meeting_thread_id.clone(),
+        _ => item.source_thread_id.clone(),
+    };
     Entry {
         id: item.message_id.clone(),
-        conversation_id: item.source_thread_id.clone(),
+        conversation_id,
         kind,
         activity_type: item.activity_type.clone(),
         subtype: item.activity_subtype.clone(),
@@ -54,7 +64,35 @@ fn entry_of(item: &ActivityItem) -> Entry {
         read: false,
         counts_for_bell: false,
         source_label: item.source_app_name.clone().or_else(|| item.thread_topic.clone()),
+        link: item.tap_url.clone(),
+        reply_id: channel_reply(item, kind),
+        title: app_title(item),
+        event_range: item
+            .event_start_ms
+            .zip(item.event_end_ms)
+            .and_then(|(start_ms, end_ms)| {
+                Some((
+                    DateTime::from_timestamp_millis(start_ms)?,
+                    DateTime::from_timestamp_millis(end_ms)?,
+                ))
+            }),
     }
+}
+
+fn app_title(item: &ActivityItem) -> Option<String> {
+    let (_, template) = APP_TEMPLATES
+        .iter()
+        .find(|(subtype, _)| *subtype == item.activity_subtype)?;
+    let mut title = String::new();
+    let mut rest = *template;
+    while let Some(open) = rest.find('{') {
+        let close = open + rest[open..].find('}')?;
+        title.push_str(&rest[..open]);
+        title.push_str(item.template_parameters.get(&rest[open + 1..close])?.trim());
+        rest = &rest[close + 1..];
+    }
+    title.push_str(rest);
+    Some(title.trim().to_owned())
 }
 
 pub fn kind_of(item: &ActivityItem) -> Kind {
@@ -73,6 +111,13 @@ pub fn kind_of(item: &ActivityItem) -> Kind {
         "msGraph" | "thirdParty" => Kind::App,
         _ => Kind::Other,
     }
+}
+
+fn channel_reply(item: &ActivityItem, kind: Kind) -> Option<String> {
+    let target = jump_target(item, kind);
+    item.source_message_id
+        .clone()
+        .filter(|reply_id| !target.is_empty() && *reply_id != target)
 }
 
 fn jump_target(item: &ActivityItem, kind: Kind) -> String {
@@ -94,7 +139,7 @@ fn preview_of(item: &ActivityItem) -> String {
         "sentAFile" => "Sent a file",
         "sentAnImage" => "Sent an image",
         "sentACard" => "Sent a card",
-        "previewUnavailable" => "Preview Unavailable",
+        "previewUnavailable" if item.preview.is_empty() => "Preview Unavailable",
         "deleted" => "This message has been deleted.",
         "forwardedMessage" => "Forwarded message",
         "isMeeting" => "Teams Meeting",
@@ -132,6 +177,22 @@ mod tests {
     }
 
     #[test]
+    fn a_recap_activity_gets_the_app_title_and_meeting_time() {
+        let mut recap = item("msGraph", "recapIsReadyForFollowedMeetingsV2");
+        recap
+            .template_parameters
+            .insert("subject".into(), "Following: Sprint {Demo} ".into());
+        recap.event_start_ms = Some(1793865600000);
+        recap.event_end_ms = Some(1793869200000);
+        let entry = entry_of(&recap);
+        assert_eq!(entry.title.as_deref(), Some("Recap ready: Following: Sprint {Demo}"));
+        let (start, end) = entry.event_range.unwrap();
+        assert_eq!((end - start).num_minutes(), 60);
+        assert_eq!(entry_of(&item("msGraph", "recapIsReadyV2")).title, None);
+        assert_eq!(entry_of(&item("msGraph", "somethingElse")).title, None);
+    }
+
+    #[test]
     fn maps_the_teams_activity_types() {
         let cases = [
             ("mention", "person", Kind::Mention),
@@ -154,13 +215,28 @@ mod tests {
     fn a_channel_reply_jumps_to_its_root_and_a_chat_to_the_message() {
         let channel = entry_of(&item("replyToReply", ""));
         assert_eq!(channel.message_id, "1791367000001");
+        assert_eq!(channel.reply_id.as_deref(), Some("1791367000002"));
         let chat = entry_of(&ActivityItem {
             thread_type: Some("chat".into()),
             ..item("mentionInChat", "person")
         });
         assert_eq!(chat.message_id, "1791367000002");
+        assert_eq!(chat.reply_id, None);
         assert_eq!(entry_of(&item("call", "missedCall")).message_id, "");
         assert_eq!(chat.actors[0].user_id.as_deref(), Some("user-1"));
+    }
+
+    #[test]
+    fn a_recap_opens_the_meeting_chat_it_names() {
+        let recap = entry_of(&ActivityItem {
+            source_thread_id: String::new(),
+            meeting_thread_id: Some("19:meeting_Zm9v@thread.v2".into()),
+            tap_url: Some("https://teams.microsoft.com/l/entity/x".into()),
+            ..item("msGraph", "recapIsReadyV2")
+        });
+        assert_eq!(recap.conversation_id, "19:meeting_Zm9v@thread.v2");
+        assert_eq!(recap.message_id, "");
+        assert_eq!(recap.link.as_deref(), Some("https://teams.microsoft.com/l/entity/x"));
     }
 
     #[test]
@@ -170,6 +246,18 @@ mod tests {
             ..item("mention", "person")
         });
         assert_eq!(file.preview, "Sent a file");
+        let recap = entry_of(&ActivityItem {
+            preview: "You're following this meeting".into(),
+            preview_template: "previewUnavailable".into(),
+            ..item("msGraph", "recapIsReadyV2")
+        });
+        assert_eq!(recap.preview, "You're following this meeting");
+        let unavailable = entry_of(&ActivityItem {
+            preview: String::new(),
+            preview_template: "previewUnavailable".into(),
+            ..item("mention", "person")
+        });
+        assert_eq!(unavailable.preview, "Preview Unavailable");
         assert_eq!(entry_of(&item("mention", "person")).preview, "Ship it");
         assert_eq!(entry_of(&item("reactionInChat", "like")).glyphs.len(), 1);
     }

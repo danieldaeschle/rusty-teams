@@ -132,6 +132,7 @@ pub enum ComposerEvent {
     EditLast,
     FocusMessages,
     Typing(bool),
+    Edited,
 }
 
 struct MentionPopup {
@@ -530,6 +531,7 @@ impl Composer {
             self.update_slash(cx);
             self.update_link_preview(cx);
             self.schedule_draft_save(cx);
+            cx.emit(ComposerEvent::Edited);
         }
         let value = input.read(cx).value();
         if submitted_text(event, &value).is_some()

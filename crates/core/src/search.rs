@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use store::{ConversationHit, SearchHit};
 
 use crate::engine::{META_USER_ID, SyncEngine};
@@ -26,6 +27,10 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     /// First cached message from others after the chat's last read time, `None` for a read chat. Call before `mark_read`.
+    pub fn channel_read_until(&self, channel_id: &str) -> Option<DateTime<Utc>> {
+        self.store.channel_read_until(channel_id).ok().flatten()
+    }
+
     pub fn first_unread_message_id(&self, conversation_id: &str) -> Option<String> {
         let chat = self
             .store

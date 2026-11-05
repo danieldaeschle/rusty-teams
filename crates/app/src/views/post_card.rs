@@ -39,10 +39,16 @@ const FOOTER_AVATAR: f32 = 20.;
 const FOOTER_BUTTON_PADDING: f32 = 6.;
 const FOOTER_BUTTON_VERTICAL: f32 = 4.;
 const REPLY_IN_THREAD: &str = "Reply in thread";
+const NEW_STRIPE_WIDTH: f32 = 3.;
+const NEW_BADGE_HEIGHT: f32 = 20.;
+const NEW_LABEL: &str = "New";
+const POST_IN_CHANNEL: &str = "Post in channel";
+const POST_LABEL: &str = "Post";
 pub const POST_CARD_TAG: &str = "post-card";
 pub const POST_AVATAR_TAG: &str = "post-card/avatar";
 pub const POST_BODY_TAG: &str = "post-card/body";
 pub const POST_FOOTER_AVATAR_TAG: &str = "post-card/footer-avatar";
+pub const POST_IN_CHANNEL_TAG: &str = "post-in-channel";
 
 pub type PostAction = Box<dyn Fn(&mut Window, &mut App)>;
 
@@ -210,40 +216,6 @@ fn author_name(index: usize, author: String, profile_user: Option<&str>) -> Stat
     .child(author)
 }
 
-fn root_header(
-    row: &MessageRow,
-    index: usize,
-    author: String,
-    profile_user: Option<&str>,
-    saved: bool,
-    pinned: bool,
-) -> Div {
-    v_flex()
-        .min_w_0()
-        .child(
-            h_flex()
-                .gap(px(6.))
-                .items_center()
-                .child(author_name(index, author, profile_user))
-                .when(saved, |line| {
-                    line.child(icon(IconName::Bookmark, 12., theme::accent_text()))
-                })
-                .when(row.delivery == Delivery::Sending, |line| {
-                    line.child(symbol("schedule", 13., theme::text_muted()))
-                }),
-        )
-        .child(
-            h_flex()
-                .gap(px(6.))
-                .items_center()
-                .text_size(px(11.))
-                .text_color(theme::text_muted())
-                .child(row.time.clone())
-                .when(row.edited, |line| line.child(edited_marker()))
-                .when(pinned, |line| line.child(pinned_marker())),
-        )
-}
-
 fn message_block(
     row: &MessageRow,
     index: usize,
@@ -348,7 +320,7 @@ fn message_block(
                     .items_center()
                     .gap(px(AVATAR_GAP))
                     .child(avatar.debug_selector(|| POST_AVATAR_TAG.into()))
-                    .child(root_header(row, index, author, profile_user, saved, pinned)),
+                    .child(message_header(row, index, author, profile_user, saved, pinned)),
             )
             .child(details.debug_selector(|| POST_BODY_TAG.into())),
         Role::Reply => h_flex().items_start().gap(px(8.)).child(avatar).child(
@@ -471,6 +443,85 @@ fn reply_footer(
     )
 }
 
+pub fn post_in_channel_card(directory: &Directory, open: PostAction) -> AnyElement {
+    let own_avatar = directory.me.as_ref().map(|me| {
+        div().flex_none().child(person_avatar(
+            directory,
+            Some(&me.user_id),
+            &me.display_name,
+            ROOT_AVATAR,
+        ))
+    });
+    v_flex()
+        .id(POST_IN_CHANNEL_TAG)
+        .debug_selector(|| POST_IN_CHANNEL_TAG.into())
+        .w_full()
+        .p(px(CARD_PADDING))
+        .gap(px(CARD_GAP))
+        .rounded(px(CARD_RADIUS))
+        .bg(theme::row_hover())
+        .cursor_pointer()
+        .on_click(move |_, window, cx| open(window, cx))
+        .child(
+            h_flex()
+                .gap(px(AVATAR_GAP))
+                .items_center()
+                .children(own_avatar)
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_strong())
+                        .child(POST_IN_CHANNEL),
+                ),
+        )
+        .child(
+            h_flex().child(
+                h_flex()
+                    .h(px(32.))
+                    .px(px(12.))
+                    .gap(px(6.))
+                    .items_center()
+                    .rounded(px(6.))
+                    .bg(theme::reply_surface())
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::accent_text())
+                    .child(icon(IconName::MessageSquare, 14., theme::accent_text()))
+                    .child(POST_LABEL),
+            ),
+        )
+        .into_any_element()
+}
+
+fn new_post_badge() -> Div {
+    div()
+        .absolute()
+        .top(px(CARD_PADDING + (ROOT_AVATAR - NEW_BADGE_HEIGHT) / 2.))
+        .right(px(CARD_PADDING))
+        .h(px(NEW_BADGE_HEIGHT))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .rounded_full()
+        .bg(theme::mention_background(false))
+        .text_size(px(11.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::accent_text())
+        .child(NEW_LABEL)
+}
+
+fn new_post_stripe() -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left_0()
+        .w(px(NEW_STRIPE_WIDTH))
+        .rounded_l(px(CARD_RADIUS))
+        .bg(theme::accent())
+}
+
 pub fn render_post(
     post: &PostRow,
     index: usize,
@@ -487,6 +538,7 @@ pub fn render_post(
     } = actions;
     let mut card = v_flex()
         .debug_selector(|| POST_CARD_TAG.into())
+        .relative()
         .w_full()
         .rounded(px(CARD_RADIUS))
         .bg(theme::row_hover())
@@ -518,6 +570,9 @@ pub fn render_post(
         );
     }
     card = card.children(reply_footer(index, open_reply, reply_editor, directory));
+    if post.is_new {
+        card = card.child(new_post_stripe()).child(new_post_badge());
+    }
     div()
         .w_full()
         .px(px(20.))

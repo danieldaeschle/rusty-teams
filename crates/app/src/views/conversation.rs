@@ -86,7 +86,7 @@ use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
-use crate::read_state::{ReadTrigger, plan_read};
+use crate::read_state::{ReadTrigger, missed_before_fetch, plan_read};
 use crate::rows::{
     Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
@@ -157,6 +157,7 @@ struct SyncProgress {
     receipts: bool,
     empty_cache: bool,
     newest_cached: Option<DateTime<Utc>>,
+    started_at: DateTime<Utc>,
     shown_at: Option<Instant>,
     slow: bool,
     failed: bool,
@@ -179,6 +180,7 @@ struct Current {
     older_blocked: bool,
     fetched: bool,
     first_unread: Option<String>,
+    posts_new_after: Option<DateTime<Utc>>,
     sync: SyncProgress,
     detached: Option<DetachedWindow>,
     window_request: Option<String>,
@@ -233,6 +235,7 @@ pub struct ConversationView {
     picker: Entity<ReactionPicker>,
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
+    fetched_jump: Option<String>,
     pin_index: usize,
     channel_details_open: bool,
     pinned_posts_expanded: bool,
@@ -580,6 +583,7 @@ impl ConversationView {
             picker,
             reaction_details: None,
             highlighted_message: None,
+            fetched_jump: None,
             pin_index: 0,
             channel_details_open: false,
             pinned_posts_expanded: false,
@@ -772,6 +776,7 @@ impl ConversationView {
             ComposerEvent::EditLast => self.edit_last_own(window, cx),
             ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
+            ComposerEvent::Edited => {}
         }
     }
 
@@ -913,6 +918,7 @@ impl ConversationView {
             Selection::Channel(_) => ViewMode::ThreadList,
         };
         let first_unread = self.first_unread_id(&selection, cx);
+        let posts_new_after = self.channel_read_until(&selection, cx);
         self.current = Some(Current {
             loaded_limit: open_limit(&selection),
             selection,
@@ -924,6 +930,7 @@ impl ConversationView {
             older_blocked: false,
             fetched: false,
             first_unread,
+            posts_new_after,
             sync: SyncProgress::default(),
             detached: None,
             window_request: None,
@@ -1183,6 +1190,7 @@ impl ConversationView {
             }
         }
         let Some(record) = record else {
+            self.open_unloaded_post(message_id, cx);
             return;
         };
         let messages_from_target = store
@@ -1208,40 +1216,57 @@ impl ConversationView {
         let in_channel = matches!(current.selection, Selection::Channel(_));
         if in_channel {
             self.pane = ChannelPane::Posts;
-            match record.reply_to_id.clone() {
-                Some(root_id) => {
-                    self.enter_thread_mode(root_id.clone(), cx);
-                    self.refresh_thread(root_id, cx);
-                }
-                None => {
-                    self.enter_feed_mode();
-                }
-            }
+            self.enter_feed_mode();
         }
-        let in_thread = self
-            .current
-            .as_ref()
-            .is_some_and(|current| matches!(current.mode, ViewMode::Thread(_)));
-        let target_key = if in_thread {
-            message_id.to_owned()
-        } else {
-            row_key
-        };
         self.reload_pending(cx);
         self.rebuild(true, cx);
-        self.reveal_row(target_key, cx);
+        self.reveal_row(row_key, message_id.to_owned(), cx);
     }
 
-    fn reveal_row(&mut self, target_key: String, cx: &mut Context<Self>) {
+    fn open_unloaded_post(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let state = self.app.read(cx);
+        let (Some(engine), Some(current)) = (state.engine.clone(), self.current.as_ref()) else {
+            return;
+        };
+        if !matches!(current.selection, Selection::Channel(_))
+            || state.mode.demo
+            || self.fetched_jump.as_deref() == Some(message_id)
+        {
+            return;
+        }
+        self.fetched_jump = Some(message_id.to_owned());
+        let conversation_id = current.selection.conversation_id().to_owned();
+        let (task_conversation_id, task_message_id) = (conversation_id.clone(), message_id.to_owned());
+        let receiver = runtime::spawn(async move {
+            engine
+                .refresh_message(&task_conversation_id, &task_message_id)
+                .await
+        });
+        let message_id = message_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(_))) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if this.conversation_id().as_deref() == Some(conversation_id.as_str()) {
+                    this.jump_to_message(&conversation_id, &message_id, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn reveal_row(&mut self, row_key: String, message_key: String, cx: &mut Context<Self>) {
         let index = self
             .rows
             .borrow()
             .iter()
-            .position(|row| row.key() == target_key);
+            .position(|row| row.key() == row_key);
         if let Some(index) = index {
             self.scroller
                 .update(cx, |scroller, cx| scroller.scroll_to_item(index, cx));
-            self.highlight(target_key, cx);
+            self.highlight(message_key, cx);
         }
     }
 
@@ -1330,6 +1355,17 @@ impl ConversationView {
             composer.set_reply(Some(preview), cx);
             composer.focus(window, cx);
         });
+    }
+
+    fn channel_read_until(&self, selection: &Selection, cx: &App) -> Option<DateTime<Utc>> {
+        let Selection::Channel(channel_id) = selection else {
+            return None;
+        };
+        let state = self.app.read(cx);
+        if state.mode.demo {
+            return crate::demo::channel_read_until(channel_id);
+        }
+        state.engine.as_ref()?.channel_read_until(channel_id)
     }
 
     fn first_unread_id(&self, selection: &Selection, cx: &App) -> Option<String> {
@@ -1610,6 +1646,7 @@ impl ConversationView {
         let start = self.start_info(cx);
         let current = self.current.as_mut().expect("checked above");
         let first_unread = current.first_unread.clone();
+        let posts_new_after = current.posts_new_after;
         current.loaded_limit = limit;
         if thread_root.is_none() {
             current.loaded_count = records.len();
@@ -1675,6 +1712,13 @@ impl ConversationView {
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
                 message.receipt_label = receipt_labels.get(&message.key).cloned();
+            }
+        }
+        if let Some(read_until) = posts_new_after.filter(|_| in_feed) {
+            for row in rows.iter_mut() {
+                if let Row::Post(post) = row {
+                    post.mark_new_after(read_until);
+                }
             }
         }
         if let Some(unread_id) = &first_unread {
@@ -1783,6 +1827,7 @@ impl ConversationView {
             receipts: is_chat,
             empty_cache: newest_cached.is_none(),
             newest_cached,
+            started_at: Utc::now(),
             ..SyncProgress::default()
         };
         self.sync_generation += 1;
@@ -1876,9 +1921,9 @@ impl ConversationView {
             return;
         };
         sync.messages = false;
-        let newest_cached = sync.newest_cached;
+        let (newest_cached, started_at) = (sync.newest_cached, sync.started_at);
         match result {
-            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, cx),
+            Ok(Ok(_)) => self.mark_fetched_new(newest_cached, started_at, cx),
             Ok(Err(error)) => self.fail_sync(generation, short_error(&error)),
             Err(error) => self.fail_sync(generation, short_error(&error)),
         }
@@ -1894,7 +1939,12 @@ impl ConversationView {
         self.notice = Some(format!("Could not refresh: {error}"));
     }
 
-    fn mark_fetched_new(&mut self, newest_cached: Option<DateTime<Utc>>, cx: &mut Context<Self>) {
+    fn mark_fetched_new(
+        &mut self,
+        newest_cached: Option<DateTime<Utc>>,
+        started_at: DateTime<Utc>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(newest_cached) = newest_cached else {
             return;
         };
@@ -1916,7 +1966,8 @@ impl ConversationView {
             .unwrap_or_default()
             .into_iter()
             .find(|record| {
-                record.created_at > newest_cached && record.sender_id.as_ref() != Some(&my_user_id)
+                missed_before_fetch(record.created_at, newest_cached, started_at)
+                    && record.sender_id.as_ref() != Some(&my_user_id)
             })
             .map(|record| record.message_id);
     }
@@ -3617,6 +3668,7 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
             .children(self.pop_in_button(current))
     }

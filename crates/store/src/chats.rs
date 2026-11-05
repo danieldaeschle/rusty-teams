@@ -22,7 +22,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind,
-                    title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '(only you)', 'Unknown User')
+                    title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '?', '(only you)', 'Unknown User')
                         THEN chats.title ELSE excluded.title END,
                     member_summary = excluded.member_summary,
                     last_message_at = excluded.last_message_at,
@@ -56,7 +56,7 @@ impl Store {
                     chat.last_message_sender_name,
                     chat.last_message_deleted,
                     chat.last_event_system,
-                    chat.last_event_call,
+                    chat.keeps_stored_preview,
                 ])?;
                 clear_members.execute([&chat.id])?;
                 for (position, member) in chat.members.iter().enumerate() {
@@ -226,7 +226,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         last_message_deleted: row.get(10)?,
         muted: row.get(11)?,
         last_event_system: false,
-        last_event_call: false,
+        keeps_stored_preview: false,
     })
 }
 

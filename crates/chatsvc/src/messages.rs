@@ -244,13 +244,9 @@ impl<T: MessageTransport> Messages<T> {
             .send(Request::with_body(Method::Post, &url, body))
             .await?;
         ensure_success(&answer)?;
-        match &answer.body["OriginalArrivalTime"] {
-            Value::Number(number) => Ok(number.to_string()),
-            Value::String(text) => Ok(text.clone()),
-            _ => Err(Error::UnexpectedAnswer(
-                "message post has no OriginalArrivalTime".into(),
-            )),
-        }
+        crate::json_id::id_text(&answer.body["OriginalArrivalTime"]).ok_or_else(|| {
+            Error::UnexpectedAnswer("message post has no OriginalArrivalTime".into())
+        })
     }
 
     pub async fn send_typing(&self, conversation: &ConversationRef, active: bool) -> Result<()> {

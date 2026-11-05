@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
 
-use chrono::{DateTime, Local, NaiveDate, Offset};
+use chrono::{DateTime, Local, NaiveDate, Offset, TimeZone, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -30,6 +30,7 @@ const KIND_MARKER_SIZE: f32 = 16.;
 const BUTTON_SIZE: f32 = 32.;
 const MARK_READ_SIZE: f32 = 20.;
 const ROW_HEIGHT: f32 = 58.;
+const EVENT_LINE_HEIGHT: f32 = 16.;
 const HEADER_HEIGHT: f32 = 30.;
 const EMPTY_HEIGHT: f32 = 84.;
 const FALLBACK_VIEWPORT: f32 = 900.;
@@ -43,6 +44,7 @@ pub enum ActivityPanelEvent {
     Open {
         conversation_id: String,
         message_id: String,
+        link: Option<String>,
     },
 }
 
@@ -97,9 +99,17 @@ impl ActivityPanel {
         let Some(entry) = self.activity.read(cx).feed().get(id) else {
             return;
         };
+        let stored_reply = entry.reply_id.clone().filter(|reply_id| {
+            self.app
+                .read(cx)
+                .store
+                .messages_by_id(&entry.conversation_id, std::slice::from_ref(reply_id))
+                .is_ok_and(|found| !found.is_empty())
+        });
         let event = ActivityPanelEvent::Open {
             conversation_id: entry.conversation_id.clone(),
-            message_id: entry.message_id.clone(),
+            message_id: stored_reply.unwrap_or_else(|| entry.message_id.clone()),
+            link: entry.link.clone(),
         };
         self.activity
             .update(cx, |activity, cx| activity.mark_read(id, cx));
@@ -270,6 +280,9 @@ impl ActivityPanel {
             group,
             headline: headline(entry, sidebar, &self.resolved_names),
             detail: detail(entry),
+            event_line: entry
+                .event_range
+                .map(|(start, end)| event_line(start, end, &Local)),
             unread: !entry.read,
             time: format::list_time_label(entry.updated_at, today, offset),
             mark_read: Rc::new({
@@ -300,6 +313,7 @@ impl ActivityPanel {
             group,
             headline: pending.headline(label.as_deref()),
             detail: pending.detail(),
+            event_line: None,
             unread: !pending.seen,
             time: format::list_time_label(pending.created_at, today, offset),
             mark_read: Rc::new(move |cx: &mut App| agent_api::mark_proposal_seen(&proposal_id, cx)),
@@ -313,6 +327,7 @@ impl ActivityPanel {
         cx.emit(ActivityPanelEvent::Open {
             conversation_id: pending.conversation_id.clone(),
             message_id: pending.jump_message_id().to_owned(),
+            link: None,
         });
     }
 }
@@ -324,6 +339,7 @@ struct RowParts {
     marker: Div,
     headline: String,
     detail: String,
+    event_line: Option<String>,
     unread: bool,
     time: String,
     mark_read: MarkRead,
@@ -339,16 +355,18 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
         marker,
         headline,
         detail,
+        event_line,
         unread,
         time,
         mark_read,
     } = parts;
+    let height = ROW_HEIGHT + event_line.as_ref().map_or(0., |_| EVENT_LINE_HEIGHT);
     let selector = element_id.clone();
     h_flex()
         .id(ElementId::Name(element_id.clone().into()))
         .debug_selector(move || selector)
         .group(group.clone())
-        .h(px(ROW_HEIGHT))
+        .h(px(height))
         .flex_none()
         .mx(px(6.))
         .px(px(10.))
@@ -397,7 +415,14 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                             theme::text_muted()
                         })
                         .child(detail),
-                ),
+                )
+                .children(event_line.map(|line| {
+                    div()
+                        .truncate()
+                        .text_size(px(12.))
+                        .text_color(theme::text_muted())
+                        .child(line)
+                })),
         )
         .child(
             v_flex()
@@ -559,13 +584,29 @@ fn headline(entry: &Entry, sidebar: &Sidebar, resolved_names: &HashMap<String, S
         (Kind::Team, _) => {
             return format!("{actor} added you to {}", team_label(entry, channel));
         }
-        (Kind::App, _) => entry.source_label.clone().unwrap_or(actor),
+        (Kind::App, _) => match &entry.title {
+            Some(title) => return title.clone(),
+            None => entry.source_label.clone().unwrap_or(actor),
+        },
         (Kind::Other, _) => actor,
     };
     match conversation_label(sidebar, &entry.conversation_id) {
         Some(label) => format!("{verb} in {label}"),
         None => verb,
     }
+}
+
+fn event_line<Zone: TimeZone>(start: DateTime<Utc>, end: DateTime<Utc>, zone: &Zone) -> String
+where
+    Zone::Offset: std::fmt::Display,
+{
+    let (start, end) = (start.with_timezone(zone), end.with_timezone(zone));
+    let end_format = if end.date_naive() == start.date_naive() {
+        "%H:%M"
+    } else {
+        "%b %-d, %H:%M"
+    };
+    format!("{} - {}", start.format("%b %-d, %H:%M"), end.format(end_format))
 }
 
 fn reply_headline(entry: &Entry, names: &str) -> String {
@@ -640,6 +681,7 @@ impl Slot<'_> {
         match self {
             Slot::Proposals(proposals) => HEADER_HEIGHT + proposals.len() as f32 * ROW_HEIGHT,
             Slot::Header(_) => HEADER_HEIGHT,
+            Slot::Row(entry) if entry.event_range.is_some() => ROW_HEIGHT + EVENT_LINE_HEIGHT,
             Slot::Row(_) => ROW_HEIGHT,
             Slot::Empty => EMPTY_HEIGHT,
         }
@@ -861,6 +903,16 @@ mod tests {
         assert_eq!(detail(&entry(Kind::Reaction, 1)), "A B to: hello");
         assert_eq!(detail(&entry(Kind::MissedCall, 3)), "3 missed calls");
         assert_eq!(detail(&entry(Kind::Reply, 2)), "hello");
+    }
+
+    #[test]
+    fn event_line_shows_the_meeting_time_in_local_time() {
+        let start = chrono::DateTime::from_timestamp_millis(1793865600000).unwrap();
+        let end = chrono::DateTime::from_timestamp_millis(1793869200000).unwrap();
+        let berlin = chrono::FixedOffset::east_opt(3600).unwrap();
+        assert_eq!(super::event_line(start, end, &berlin), "Nov 5, 09:00 - 10:00");
+        let next_day = chrono::DateTime::from_timestamp_millis(1793955600000).unwrap();
+        assert_eq!(super::event_line(start, next_day, &berlin), "Nov 5, 09:00 - Nov 6, 10:00");
     }
 
     #[test]
