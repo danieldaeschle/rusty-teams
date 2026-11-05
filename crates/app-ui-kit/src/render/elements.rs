@@ -358,6 +358,31 @@ fn code_font(cx: &App) -> SharedString {
     cx.theme().mono_font_family.clone()
 }
 
+#[cfg(target_os = "windows")]
+const EMOJI_FONT_FAMILY: &str = "Segoe UI Emoji";
+#[cfg(target_os = "macos")]
+const EMOJI_FONT_FAMILY: &str = "Apple Color Emoji";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
+const KEYCAP: char = '\u{20e3}';
+const VARIATION_SELECTOR: char = '\u{fe0f}';
+
+/// Font fallback maps the keycap base digit to the text font and leaves the combining keycap as a box.
+pub fn keycap_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    for (keycap_at, _) in text.match_indices(KEYCAP) {
+        let before = &text[..keycap_at];
+        let before = before.strip_suffix(VARIATION_SELECTOR).unwrap_or(before);
+        let Some(base) = before.chars().next_back() else {
+            continue;
+        };
+        if base.is_ascii_digit() || base == '#' || base == '*' {
+            ranges.push(before.len() - base.len_utf8()..keycap_at + KEYCAP.len_utf8());
+        }
+    }
+    ranges
+}
+
 fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement {
     let highlights = inline
         .segments
@@ -371,6 +396,11 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .iter()
         .filter(|segment| segment.style.code)
         .map(|segment| (segment.range.clone(), mono.clone()))
+        .chain(
+            keycap_ranges(&inline.text)
+                .into_iter()
+                .map(|range| (range, SharedString::from(EMOJI_FONT_FAMILY))),
+        )
         .collect();
     let emoji = inline.emoji();
     let highlights = highlights
@@ -567,8 +597,15 @@ fn luminance(color: Rgba) -> f32 {
 mod tests {
     use gpui_kit::{Rgba, rgb};
 
-    use super::{MIN_CONTRAST, contrast, readable};
+    use super::{MIN_CONTRAST, contrast, keycap_ranges, readable};
     use app_base::theme;
+
+    #[test]
+    fn keycap_sequences_cover_the_base_the_selector_and_the_keycap() {
+        let text = "\u{1f522} 4\u{fe0f}\u{20e3} After #\u{20e3} x\u{20e3}";
+        let found: Vec<&str> = keycap_ranges(text).into_iter().map(|range| &text[range]).collect();
+        assert_eq!(found, ["4\u{fe0f}\u{20e3}", "#\u{20e3}"]);
+    }
 
     #[test]
     fn dark_text_color_is_lifted_to_readable_contrast() {
