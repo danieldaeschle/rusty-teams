@@ -99,7 +99,7 @@ cargo run -p app -- --demo
 
 | Task | Command |
 |---|---|
-| Linux build needs clang + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache` |
+| Linux build needs clang 21+ (libwebrtc's hermetic libc++) + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache`, clang from [apt.llvm.org](https://apt.llvm.org) if the distro one is older than 21 |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
 | macOS universal binary (arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |

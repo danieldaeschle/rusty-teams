@@ -23,6 +23,15 @@ jobs:
     name: Linux
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # webrtc-sys compiles its C++ against the hermetic libc++ inside the libwebrtc
+    # artifact, which needs a clang as new as that libc++ (clang 21 today, see
+    # check_clang_version in vendor/webrtc-sys/build.rs). The distro clang is older
+    # (18 on ubuntu-24.04), so the install step below takes the compiler from LLVM's
+    # apt repo and these point every compile and the final link at it.
+    env:
+      CC: clang-21
+      CXX: clang++-21
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang-21
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +48,13 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libxcb1-dev libxext-dev libxfixes-dev libxdamage-dev \
             libxrandr-dev libxcomposite-dev libwayland-dev libpipewire-0.3-dev
+
+          # apt.llvm.org's llvm.sh adds their apt repo and installs clang-21 (lld-21
+          # and friends alongside). The distro clang above stays: it carries
+          # libclang-dev, which bindgen loads for nokhwa, and mold is the linker.
+          curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
+          sudo bash "$RUNNER_TEMP/llvm.sh" 21
+          sudo apt-get install --no-install-recommends -y clang-21
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -75,8 +91,14 @@ jobs:
       # cross-compile, and it would hide fxc.exe from a native Windows build.
       - name: Stage the patched gpui-pre-windows
         run: |
-          sourceDir="$(cygpath "$(cargo metadata --format-version 1 --filter-platform x86_64-pc-windows-msvc |
-            jq -r '.packages[] | select(.name == "gpui-pre-windows") | .manifest_path' | xargs dirname)")"
+          set -euo pipefail
+          manifestPath="$(cargo metadata --format-version 1 --filter-platform x86_64-pc-windows-msvc |
+            jq -re '[.packages[] | select(.name == "gpui-pre-windows") | .manifest_path] | first')"
+          # cygpath first, then dirname: the old `jq | xargs dirname | cygpath` chain let
+          # xargs eat the backslashes of the Windows manifest path as escapes, which left
+          # sourceDir at the C: root and `cp -r` walked the whole system drive.
+          sourceDir="$(dirname "$(cygpath -u "$manifestPath")")"
+          [ -f "$sourceDir/Cargo.toml" ] || { echo "not the gpui-pre-windows crate dir: $sourceDir" >&2; exit 1; }
           patchedDir="$(cygpath -m "$RUNNER_TEMP")/gpui-pre-windows"
           rm -rf "$patchedDir"
           cp -r "$sourceDir" "$patchedDir"
