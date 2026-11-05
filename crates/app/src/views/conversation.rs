@@ -22,6 +22,7 @@ use teams_core::{
 };
 
 mod channel_details;
+mod chat_header_actions;
 mod copilot;
 pub use channel_details::{
     CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
@@ -3498,6 +3499,7 @@ impl ConversationView {
             return;
         };
         self.channel_details_open = false;
+        self.close_copilot();
         if let Some(panel) = &self.find_panel {
             panel.update(cx, |panel, cx| panel.focus(window, cx));
             return;
@@ -3560,6 +3562,7 @@ impl ConversationView {
         let mut subline = String::new();
         let mut stack: Option<AnyElement> = None;
         let mut rename: Option<AnyElement> = None;
+        let mut names_title: Option<Div> = None;
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3604,14 +3607,15 @@ impl ConversationView {
                         {
                             rename = Some(group_name_button(&self.app, chat_id, &chat.title));
                         }
+                        if chat.title.trim().is_empty() {
+                            names_title = Some(chat_header_actions::group_title(directory, &faces));
+                        }
                         let pair = AvatarSpec::Pair(face(faces[0].clone()), face(faces[1].clone()));
                         lead = Some(spec_avatar(directory, &pair, 36., theme::surface()));
-                        subline = format!("{} participants", chat.members.len());
-                        let shown: Vec<Face> = faces.iter().cloned().map(face).collect();
                         stack = Some(members_popover(
                             &self.app,
                             chat_id,
-                            member_stack(directory, &shown, shown.len(), false)
+                            chat_header_actions::member_count(chat.members.len())
                                 .debug_selector(|| MEMBERS_BUTTON.into()),
                         ));
                     }
@@ -3716,7 +3720,10 @@ impl ConversationView {
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
-                                    .child(current.title.clone()),
+                                    .map(|title| match names_title {
+                                        Some(names) => title.child(names),
+                                        None => title.child(current.title.clone()),
+                                    }),
                             )
                             .children(rename),
                     )
@@ -3730,11 +3737,13 @@ impl ConversationView {
                     }),
             )
             .children(inline_tabs)
-            .children(stack)
             .children(call_controls)
+            .children(stack)
             .children(self.copilot_button(cx))
+            .children(self.chat_find_button(cx))
             .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
+            .children(self.pop_out_button())
             .children(self.pop_in_button(current))
     }
 

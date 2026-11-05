@@ -96,11 +96,17 @@ impl ConversationView {
         }
         if self.copilot.open {
             self.channel_details_open = false;
+            self.find_panel = None;
+            self.find_subscription = None;
             if let Some(input) = &self.copilot.input {
                 input.update(cx, |input, cx| input.focus(window, cx));
             }
         }
         cx.notify();
+    }
+
+    pub(super) fn close_copilot(&mut self) {
+        self.copilot.open = false;
     }
 
     pub(super) fn reset_copilot(&mut self) {
