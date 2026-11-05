@@ -11,6 +11,7 @@ use super::widgets::{icon, symbol};
 use crate::data::Directory;
 use crate::downloads::{self, DownloadState};
 use crate::format;
+use crate::inline_video;
 use crate::remote_image;
 use crate::render::{Block, render_blocks};
 use crate::rows::LocalImage;
@@ -243,7 +244,7 @@ fn save_button(
     }
 }
 
-fn file_preview(card: &FileCard, directory: &Directory) -> Option<Div> {
+fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stateful<Div>> {
     let image = card
         .preview()
         .and_then(|preview| directory.image(&preview.url).map(|entry| entry.path.clone()));
@@ -251,6 +252,7 @@ fn file_preview(card: &FileCard, directory: &Directory) -> Option<Div> {
         return None;
     }
     let frame = div()
+        .id(SharedString::from(format!("{id}-preview")))
         .relative()
         .w_full()
         .h(px(FILE_PREVIEW_HEIGHT))
@@ -263,18 +265,33 @@ fn file_preview(card: &FileCard, directory: &Directory) -> Option<Div> {
         })),
         None => frame,
     };
+    let player_key = SharedString::from(format!("{id}-player"));
+    let content_url = card.open_url.clone();
     Some(frame.when(card.kind == FileKind::Video, |frame| {
-        frame.child(
-            h_flex().absolute().inset_0().items_center().justify_center().child(
+        let play_key = player_key.clone();
+        frame
+            .child(inline_video::slot(player_key))
+            .on_click(move |_, window, cx| {
+                if inline_video::play(play_key.clone(), &content_url, window, cx) {
+                    cx.stop_propagation();
+                }
+            })
+            .child(
                 h_flex()
-                    .size(px(PLAY_BUTTON_SIZE))
-                    .rounded_full()
+                    .absolute()
+                    .inset_0()
                     .items_center()
                     .justify_center()
-                    .bg(black().opacity(0.5))
-                    .child(icon(IconName::Play, 18., theme::white())),
-            ),
-        )
+                    .child(
+                        h_flex()
+                            .size(px(PLAY_BUTTON_SIZE))
+                            .rounded_full()
+                            .items_center()
+                            .justify_center()
+                            .bg(black().opacity(0.5))
+                            .child(icon(IconName::Play, 18., theme::white())),
+                    ),
+            )
     }))
 }
 
@@ -294,6 +311,7 @@ fn file_view(
     let button = actions
         .filter(|_| !card.open_url.is_empty() && card.kind != FileKind::Loop)
         .map(|actions| save_button(state, format!("{id}-save"), index, actions.activate.clone()));
+    let preview = file_preview(card, &id, directory);
     let row = h_flex()
         .w_full()
         .gap(px(12.))
@@ -332,7 +350,7 @@ fn file_view(
         .bg(theme::surface())
         .cursor_pointer()
         .hover(|card| card.bg(theme::row_hover()))
-        .children(file_preview(card, directory))
+        .children(preview)
         .child(row)
         .when_some(progress, |card, fraction| {
             card.child(
@@ -467,7 +485,13 @@ pub fn attachments_view(
                 }),
             )
             .children(files.iter().enumerate().map(|(index, card)| {
-                file_view(card, format!("{id}-file-{index}"), index, file_actions, directory)
+                file_view(
+                    card,
+                    format!("{id}-file-{index}"),
+                    index,
+                    file_actions,
+                    directory,
+                )
             })),
     )
 }

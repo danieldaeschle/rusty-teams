@@ -920,6 +920,7 @@ impl ConversationView {
         self.restore_subject(None, window, cx);
         self.toolbar_hovered = None;
         self.reset_copilot();
+        crate::inline_video::stop(cx);
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
         self.agent_layouts.clear();
@@ -4101,6 +4102,7 @@ impl Render for ConversationView {
                 cx.propagate();
             }
         }));
+        let root = root.child(crate::inline_video::sentinel());
         match copilot_island {
             Some(island) => h_flex()
                 .size_full()

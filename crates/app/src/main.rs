@@ -6,6 +6,7 @@
 mod active_appearance;
 pub mod agents;
 pub mod call;
+mod inline_video;
 #[cfg(test)]
 mod layout_guard;
 pub mod notify;
@@ -112,6 +113,7 @@ fn transport(
             Some(directory) => directory.join(WEBVIEW_FOLDER),
             None => data_path(WEBVIEW_FOLDER),
         };
+        inline_video::configure(user_data_folder.clone());
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),
