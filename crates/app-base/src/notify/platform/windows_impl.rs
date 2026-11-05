@@ -568,9 +568,41 @@ pub fn set_window_icon(window: &Window, png: &[u8]) {
     }
 }
 
+static SOUND_OUTPUT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_sound_output(device_key: Option<String>) {
+    *SOUND_OUTPUT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = device_key;
+}
+
+fn open_sound_sink() -> Option<rodio::MixerDeviceSink> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let chosen = SOUND_OUTPUT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let device = chosen.and_then(|device_key| {
+        rodio::cpal::default_host()
+            .output_devices()
+            .ok()?
+            .find(|device| {
+                device.id().is_ok_and(|id| id.1 == device_key)
+                    || device
+                        .description()
+                        .is_ok_and(|description| description.name() == device_key)
+            })
+    });
+    device
+        .and_then(|device| {
+            rodio::DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
+                .ok()
+        })
+        .or_else(|| rodio::DeviceSinkBuilder::open_default_sink().ok())
+}
+
 pub fn play_mp3_until(bytes: Vec<u8>, looped: bool, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+        let Some(mut sink) = open_sound_sink() else {
             return;
         };
         sink.log_on_drop(false);
@@ -594,7 +626,7 @@ pub fn play_mp3_until(bytes: Vec<u8>, looped: bool, stop: Arc<AtomicBool>) {
 
 pub fn play_mp3(bytes: Vec<u8>) {
     std::thread::spawn(move || {
-        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+        let Some(mut sink) = open_sound_sink() else {
             return;
         };
         sink.log_on_drop(false);
@@ -606,7 +638,7 @@ pub fn play_mp3(bytes: Vec<u8>) {
 
 pub fn play_sound() {
     std::thread::spawn(|| {
-        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
+        let Some(mut sink) = open_sound_sink() else {
             return;
         };
         sink.log_on_drop(false);

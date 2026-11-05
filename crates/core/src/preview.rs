@@ -7,7 +7,7 @@ use crate::external_image::is_giphy_url;
 use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::roster_event::{RosterChange, roster_event};
 use crate::spans::{Span, html_to_spans};
-use crate::stored::{AttachmentInfo, attachments};
+use crate::stored::{AttachmentInfo, LOOP_CARD_TYPE, attachments};
 
 const MAX_PREVIEW_CHARS: usize = 200;
 
@@ -35,7 +35,6 @@ const EVENT_PREVIEWS: [&str; 6] = [
 ];
 
 const AUDIO_CARD_TYPE: &str = "application/vnd.microsoft.card.audio";
-const LOOP_CARD_TYPE: &str = "application/vnd.microsoft.card.fluidEmbedCard";
 const FILE_CONTENT_TYPE: &str = "reference";
 const RECORDING_TYPE: &str = "#microsoft.graph.callRecordingEventMessageDetail";
 const TRANSCRIPT_TYPE: &str = "#microsoft.graph.callTranscriptEventMessageDetail";

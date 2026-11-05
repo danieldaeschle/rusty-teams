@@ -31,6 +31,19 @@ pub fn plan_for_chat(chat: &ChatRecord, me: Option<&Person>) -> Option<CallPlan>
     Some(CallPlan { title, callees })
 }
 
+/// Teams starts the Echo test call from the Echo chat's call buttons.
+pub fn is_echo_chat(chat: &ChatRecord) -> bool {
+    let echo_id = calling::signaling::ECHO_BOT_MRI;
+    let bare_id = echo_id.trim_start_matches("28:");
+    is_one_on_one(chat)
+        && (chat.id.contains(bare_id)
+            || chat
+                .members
+                .iter()
+                .filter_map(|member| member.user_id.as_deref())
+                .any(|user_id| user_id == echo_id || user_id == bare_id))
+}
+
 pub fn is_organizer(meeting: &LiveMeeting, me: Option<&Person>) -> bool {
     match (meeting.organizer_id.as_deref(), me) {
         (Some(organizer), Some(me)) => organizer.eq_ignore_ascii_case(&me.user_id),
@@ -113,6 +126,22 @@ mod tests {
         let mut notes = chat("oneOnOne", "Me (You)", &[(Some("me-id"), "Me")]);
         notes.id = teams_core::NOTES_CHAT_ID.into();
         assert!(plan_for_chat(&notes, Some(&me())).is_none());
+    }
+
+    #[test]
+    fn the_echo_chat_is_recognised_by_its_id_or_its_bot_member() {
+        let mut echo = chat(
+            "oneOnOne",
+            "Echo",
+            &[(Some("me-id"), "Me"), (Some(calling::signaling::ECHO_BOT_MRI), "Echo")],
+        );
+        assert!(is_echo_chat(&echo));
+        echo.members.truncate(1);
+        assert!(!is_echo_chat(&echo));
+        echo.id = "19:me-id_cf28171e-fcfd-47e4-a1d6-79460b0b3ca0@unq.gbl.spaces".into();
+        assert!(is_echo_chat(&echo));
+        let other = chat("oneOnOne", "", &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea")]);
+        assert!(!is_echo_chat(&other));
     }
 
     #[test]

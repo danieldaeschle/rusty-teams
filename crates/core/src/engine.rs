@@ -552,20 +552,25 @@ impl<R: Remote> SyncEngine<R> {
         Ok(delta)
     }
 
+    /// A call keeps the older line but moves the chat time to the call, like Teams.
     pub(crate) fn update_chat_preview(&self, records: &[MessageRecord]) -> Result<()> {
-        let Some(newest) = records
+        let (calls, lines): (Vec<&MessageRecord>, Vec<&MessageRecord>) = records
             .iter()
-            .filter(|record| !crate::preview::keeps_previous_line(record))
-            .max_by_key(|record| record.created_at)
-        else {
-            return Ok(());
-        };
-        let preview = OwnedPreview::from_record(newest);
-        let changed = self.store.update_chat_preview(
-            &newest.conversation_id,
-            newest.created_at,
-            &preview.as_store(),
-        )?;
+            .partition(|record| crate::preview::keeps_previous_line(record));
+        let mut changed = false;
+        if let Some(newest) = lines.into_iter().max_by_key(|record| record.created_at) {
+            let preview = OwnedPreview::from_record(newest);
+            changed |= self.store.update_chat_preview(
+                &newest.conversation_id,
+                newest.created_at,
+                &preview.as_store(),
+            )?;
+        }
+        if let Some(call) = calls.into_iter().max_by_key(|record| record.created_at) {
+            changed |= self
+                .store
+                .touch_chat_time(&call.conversation_id, call.created_at)?;
+        }
         if changed {
             self.preview_changed.store(true, Ordering::SeqCst);
         }

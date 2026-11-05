@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![GPUI](https://img.shields.io/badge/UI-GPUI-c4642d)](https://www.gpui.rs/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-3b3b3b)](#status)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-3b3b3b)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2ea043)](LICENSE)
 
 [Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Roadmap](ROADMAP.md)
@@ -85,6 +85,7 @@
 |---|---|
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
 | 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222`. Built-in login is planned |
+| 🍎 macOS | Experimental. Universal arm64 + x86_64 binary, connects to a Chrome like Linux |
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
@@ -101,6 +102,7 @@ cargo run -p app -- --demo
 | Linux build needs clang + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache` |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
+| macOS universal binary (arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
 | Tests | `cargo test` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 | Layout sweep before every UI deploy: 8 screens at 640x480 and 1920x1080, PNGs in `target/layout-sweep` (look at each) | `cargo build -p app && scripts/layout-sweep.sh` |

@@ -65,6 +65,7 @@ pub struct ActiveCall {
     pub consult: Option<ConsultCall>,
     pub push_to_talk: PushToTalk,
     pub report: Option<SharedRecorder>,
+    pub lobby_tone_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,6 +135,7 @@ impl ActiveCall {
             stage_size: Rc::default(),
             sent_wants: Vec::new(),
             share_stage: ShareStage::default(),
+            lobby_tone_at: None,
             bubbles: Vec::new(),
             share_menu_open: false,
             lobby_list_open: false,
@@ -692,6 +694,14 @@ impl CallModel {
             .iter()
             .filter(|tile| tile.state == TileState::InLobby)
             .collect()
+    }
+
+    pub fn lobby_mris(&self) -> Vec<String> {
+        self.lobby_guests().into_iter().map(|tile| tile.mri.clone()).collect()
+    }
+
+    pub fn someone_entered_the_lobby(&self, before: &[String]) -> bool {
+        self.can_admit() && self.lobby_guests().iter().any(|tile| !before.contains(&tile.mri))
     }
 
     pub fn can_admit(&self) -> bool {
@@ -1944,6 +1954,22 @@ mod tests {
         assert!(owner.can_admit());
         owner.apply(CallUpdate::Lobby(true));
         assert!(!owner.can_admit());
+    }
+
+    #[test]
+    fn only_a_new_lobby_guest_counts_as_an_arrival_for_an_admitting_organizer() {
+        let mut owner = CallModel::meeting("Standup", true);
+        owner.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
+        let empty = owner.lobby_mris();
+        owner.apply(CallUpdate::Roster(vec![entry("8:orgid:g1", "Gast Eins", false, true)]));
+        assert!(owner.someone_entered_the_lobby(&empty));
+        let waiting = owner.lobby_mris();
+        assert!(!owner.someone_entered_the_lobby(&waiting));
+        let mut guest = meeting_with_me();
+        guest.apply(CallUpdate::Roster(vec![entry("8:orgid:g1", "Gast Eins", false, true)]));
+        assert!(!guest.someone_entered_the_lobby(&empty));
     }
 
     #[test]

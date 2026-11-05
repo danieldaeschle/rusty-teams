@@ -26,6 +26,8 @@ const FILE_BADGE_SIZE: f32 = 34.;
 const SAVE_BUTTON_SIZE: f32 = 28.;
 const SAVE_BUTTON_RADIUS: f32 = 6.;
 const SAVE_PROGRESS_HEIGHT: f32 = 2.;
+const FILE_PREVIEW_HEIGHT: f32 = FILE_CARD_WIDTH * 9. / 16.;
+const PLAY_BUTTON_SIZE: f32 = 40.;
 const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
 const LOCAL_IMAGE_SUFFIX: &str = "/$value";
 
@@ -141,7 +143,9 @@ fn kind_style(kind: FileKind) -> KindStyle {
         FileKind::PowerPoint => ("PPT", "PowerPoint", 0xC2410C),
         FileKind::Pdf => ("PDF", "PDF document", 0xB91C1C),
         FileKind::Image => ("IMG", "Image", 0x7C3AED),
+        FileKind::Video => ("VID", "Video", 0xBE185D),
         FileKind::Archive => ("ZIP", "Archive", 0xB45309),
+        FileKind::Loop => ("", "Loop component", 0x7C3AED),
         FileKind::Other => ("", "File", 0x525252),
     };
     KindStyle {
@@ -239,11 +243,47 @@ fn save_button(
     }
 }
 
+fn file_preview(card: &FileCard, directory: &Directory) -> Option<Div> {
+    let image = card
+        .preview()
+        .and_then(|preview| directory.image(&preview.url).map(|entry| entry.path.clone()));
+    if image.is_none() && card.kind != FileKind::Video {
+        return None;
+    }
+    let frame = div()
+        .relative()
+        .w_full()
+        .h(px(FILE_PREVIEW_HEIGHT))
+        .overflow_hidden()
+        .bg(theme::code_surface());
+    let frame = match image {
+        Some(path) => frame.child(img(path).size_full().object_fit(match card.kind {
+            FileKind::Video => ObjectFit::Cover,
+            _ => ObjectFit::Contain,
+        })),
+        None => frame,
+    };
+    Some(frame.when(card.kind == FileKind::Video, |frame| {
+        frame.child(
+            h_flex().absolute().inset_0().items_center().justify_center().child(
+                h_flex()
+                    .size(px(PLAY_BUTTON_SIZE))
+                    .rounded_full()
+                    .items_center()
+                    .justify_center()
+                    .bg(black().opacity(0.5))
+                    .child(icon(IconName::Play, 18., theme::white())),
+            ),
+        )
+    }))
+}
+
 fn file_view(
     card: &FileCard,
     id: String,
     index: usize,
     actions: Option<&FileActions>,
+    directory: &Directory,
 ) -> AnyElement {
     let badge = file_badge(card.kind, FILE_BADGE_SIZE);
     let url = card.open_url.clone();
@@ -252,22 +292,14 @@ fn file_view(
         .and_then(Option::as_ref);
     let progress = downloads::progress_fraction(state);
     let button = actions
-        .filter(|_| !card.open_url.is_empty())
+        .filter(|_| !card.open_url.is_empty() && card.kind != FileKind::Loop)
         .map(|actions| save_button(state, format!("{id}-save"), index, actions.activate.clone()));
-    h_flex()
-        .id(ElementId::Name(id.into()))
-        .relative()
-        .overflow_hidden()
+    let row = h_flex()
         .w_full()
-        .max_w(px(FILE_CARD_WIDTH))
         .gap(px(12.))
         .px(px(8.))
         .py(px(8.))
         .items_center()
-        .rounded(px(10.))
-        .bg(theme::surface())
-        .cursor_pointer()
-        .hover(|card| card.bg(theme::row_hover()))
         .child(badge)
         .child(
             v_flex()
@@ -289,7 +321,19 @@ fn file_view(
                 ),
         )
         .child(icon(IconName::ExternalLink, 14., theme::text_muted()))
-        .children(button)
+        .children(button);
+    v_flex()
+        .id(ElementId::Name(id.into()))
+        .relative()
+        .overflow_hidden()
+        .w_full()
+        .max_w(px(FILE_CARD_WIDTH))
+        .rounded(px(10.))
+        .bg(theme::surface())
+        .cursor_pointer()
+        .hover(|card| card.bg(theme::row_hover()))
+        .children(file_preview(card, directory))
+        .child(row)
         .when_some(progress, |card, fraction| {
             card.child(
                 div()
@@ -423,7 +467,7 @@ pub fn attachments_view(
                 }),
             )
             .children(files.iter().enumerate().map(|(index, card)| {
-                file_view(card, format!("{id}-file-{index}"), index, file_actions)
+                file_view(card, format!("{id}-file-{index}"), index, file_actions, directory)
             })),
     )
 }

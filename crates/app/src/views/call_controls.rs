@@ -7,7 +7,7 @@ use gpui_kit::*;
 
 use super::widgets::icon;
 use crate::app_state::{AppState, Selection};
-use crate::call::plan_for_chat;
+use crate::call::{is_echo_chat, plan_for_chat};
 use crate::theme;
 
 const BUTTON_SIZE: f32 = 30.;
@@ -53,7 +53,9 @@ pub fn header_call_controls(
             .chats
             .iter()
             .find(|chat| &chat.id == chat_id)
-            .is_some_and(|chat| plan_for_chat(chat, state.directory.me.as_ref()).is_some()));
+            .is_some_and(|chat| {
+                is_echo_chat(chat) || plan_for_chat(chat, state.directory.me.as_ref()).is_some()
+            }));
     if callable {
         for (id, tooltip, glyph, with_video) in [
             ("header-video-call", "Video call", IconName::Video, true),

@@ -849,6 +849,12 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewed_call = self
+            .state
+            .read(cx)
+            .call
+            .as_ref()
+            .filter(|call| call.viewing);
         let open_dialogs = [
             self.state.read(cx).task_dialog.is_some(),
             self.forward_dialog.is_some(),
@@ -856,6 +862,9 @@ impl Render for AppShell {
             self.shortcuts_dialog.is_some(),
             self.agent_dialog.is_some(),
             self.settings_dialog.is_some(),
+            viewed_call.is_some() && self.state.read(cx).transfer_picker.is_some(),
+            viewed_call.is_some_and(|call| call.options_dialog.is_some()),
+            viewed_call.is_some_and(|call| call.model.consent_required),
         ]
         .into_iter()
         .filter(|open| *open)

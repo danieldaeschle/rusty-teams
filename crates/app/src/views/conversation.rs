@@ -57,7 +57,9 @@ use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPrevi
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::group_name_button;
 use super::message_actions::{Action, DelegateEntry, MessageMenu};
-use super::message_row::{AVATAR_GAP, AVATAR_SIZE, render_message_row, render_skeleton_row};
+use super::message_row::{
+    AVATAR_GAP, AVATAR_SIZE, JUMP_HIGHLIGHT_PERIOD, render_message_row, render_skeleton_row,
+};
 use super::new_chat::{NewChatDraft, NewChatEvent, Pick, composer_placeholder};
 use super::pin_banner::{pin_banner_inset, pin_banner_overlay};
 use super::post_card::render_post;
@@ -98,7 +100,7 @@ use crate::sidebar_model::{AvatarSpec, Face, channel_unread};
 use crate::theme;
 use crate::translation::TranslationLine;
 use crate::typing::typing_tooltip;
-use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
+use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use detached::DetachedWindow;
 use feed::{FeedStash, subject_input};
 use mcp::ReactionProposal;
@@ -126,7 +128,6 @@ const DEMO_DOWNLOAD_STEPS: u8 = 10;
 const DEMO_DOWNLOAD_STEP: Duration = Duration::from_millis(100);
 const JUMP_SCAN_LIMIT: usize = 5000;
 const JUMP_CONTEXT_MESSAGES: usize = 12;
-const HIGHLIGHT_DURATION: Duration = Duration::from_secs(2);
 const PROGRESS_DELAY: Duration = Duration::from_millis(400);
 const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
@@ -1248,7 +1249,7 @@ impl ConversationView {
         self.highlighted_message = Some(key.clone());
         cx.notify();
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(HIGHLIGHT_DURATION).await;
+            cx.background_executor().timer(JUMP_HIGHLIGHT_PERIOD).await;
             this.update(cx, |this, cx| {
                 if this.highlighted_message.as_deref() == Some(key.as_str()) {
                     this.highlighted_message = None;
@@ -1664,7 +1665,7 @@ impl ConversationView {
         } else {
             rows.extend(local.into_iter().map(|row| Row::Message(Box::new(row))));
         }
-        let mut receipts = self.receipts(&records, cx);
+        let (mut receipts, receipt_labels) = self.receipts(&records, cx);
         if self.track_receipt_fades(&mut receipts) {
             self.schedule_fade_end(cx);
         }
@@ -1673,6 +1674,7 @@ impl ConversationView {
                 && message.own
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
+                message.receipt_label = receipt_labels.get(&message.key).cloned();
             }
         }
         if let Some(unread_id) = &first_unread {
@@ -1957,20 +1959,29 @@ impl ConversationView {
         self.start_fetch(cx);
     }
 
-    fn receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+    fn receipts(
+        &self,
+        records: &[MessageRecord],
+        cx: &App,
+    ) -> (HashMap<String, Receipt>, HashMap<String, String>) {
         let settings = self.app.read(cx).account_chat_settings();
-        let mut receipts = self.raw_receipts(records, cx);
+        let (mut receipts, mut labels) = self.raw_receipts(records, cx);
         for receipt in receipts.values_mut() {
             *receipt = shown_receipt(&settings, *receipt);
         }
-        receipts
+        labels.retain(|key, _| receipts.get(key).is_some_and(|receipt| *receipt != Receipt::Hidden));
+        (receipts, labels)
     }
 
-    fn raw_receipts(&self, records: &[MessageRecord], cx: &App) -> HashMap<String, Receipt> {
+    fn raw_receipts(
+        &self,
+        records: &[MessageRecord],
+        cx: &App,
+    ) -> (HashMap<String, Receipt>, HashMap<String, String>) {
         let state = self.app.read(cx);
         if state.mode.demo {
             let read_ids = crate::demo::read_message_ids(records);
-            return records
+            let receipts: HashMap<String, Receipt> = records
                 .iter()
                 .map(|record| {
                     let receipt = if read_ids.contains(&record.message_id) {
@@ -1981,21 +1992,33 @@ impl ConversationView {
                     (record.message_id.clone(), receipt)
                 })
                 .collect();
+            let labels = receipts
+                .iter()
+                .map(|(key, receipt)| {
+                    let label = if *receipt == Receipt::Read { "Seen" } else { "Sent" };
+                    (key.clone(), label.to_owned())
+                })
+                .collect();
+            return (receipts, labels);
         }
         let Some(engine) = state.engine.as_ref() else {
-            return HashMap::new();
+            return (HashMap::new(), HashMap::new());
         };
-        records
-            .iter()
-            .map(|record| {
-                let receipt = match engine.receipt_state_for(record) {
-                    teams_core::ReceiptState::Read { .. } => Receipt::Read,
-                    teams_core::ReceiptState::Sent => Receipt::Sent,
-                    teams_core::ReceiptState::Unknown => Receipt::Hidden,
-                };
-                (record.message_id.clone(), receipt)
-            })
-            .collect()
+        let mut receipts = HashMap::new();
+        let mut labels = HashMap::new();
+        for record in records {
+            let receipt_state = engine.receipt_state_for(record);
+            if let Some(label) = crate::rows::receipt_label(&receipt_state) {
+                labels.insert(record.message_id.clone(), label);
+            }
+            let receipt = match receipt_state {
+                teams_core::ReceiptState::Read { .. } => Receipt::Read,
+                teams_core::ReceiptState::Sent => Receipt::Sent,
+                teams_core::ReceiptState::Unknown => Receipt::Hidden,
+            };
+            receipts.insert(record.message_id.clone(), receipt);
+        }
+        (receipts, labels)
     }
 
     fn track_receipt_fades(&mut self, receipts: &mut HashMap<String, Receipt>) -> bool {
@@ -3670,13 +3693,15 @@ impl Render for ConversationView {
             .render_pin_banner(cx)
             .filter(|_| !drafting && !self.shared_active() && !self.recap_active());
         let timeline_top_inset = pin_banner_inset(pin_banner.is_some());
+        let comfy = self.app.read(cx).account_chat_settings().message_density
+            != teams_core::MessageDensity::Compact;
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
             move |index, window, cx| {
                 rows_seen.set(rows_seen.get().min(index));
                 let rows = rows.borrow();
-                match rows.get(index) {
+                let row = match rows.get(index) {
                     Some(Row::Message(message)) => {
                         let actions = env.message_actions(message, window, cx);
                         let state = env.app.read(cx);
@@ -3763,7 +3788,8 @@ impl Render for ConversationView {
                             .into_any_element()
                     }
                     None => div().into_any_element(),
-                }
+                };
+                runway(row, comfy)
             },
         )
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
@@ -3890,17 +3916,23 @@ impl Render for ConversationView {
                                 .right_0(),
                         )
                     })
-                    .children(pin_banner.map(pin_banner_overlay)),
+                    .children(pin_banner.map(|banner| pin_banner_overlay(runway(banner, comfy)))),
             )
-            .children(self.render_draft_error(cx))
+            .children(self.render_draft_error(cx).map(|error| runway(error, comfy)))
             .when(
                 !in_feed && !recap_active,
                 |column| match &forward_selection {
-                    Some(snapshot) => column.child(self.render_forward_footer(snapshot, cx)),
-                    None => column
-                        .child(self.render_typing_line(cx))
-                        .children(self.render_proposal_card(cx))
-                        .child(self.composer.clone()),
+                    Some(snapshot) => {
+                        column.child(runway(self.render_forward_footer(snapshot, cx), comfy))
+                    }
+                    None => column.child(runway(
+                        v_flex()
+                            .w_full()
+                            .child(self.render_typing_line(cx))
+                            .children(self.render_proposal_card(cx))
+                            .child(self.composer.clone()),
+                        comfy,
+                    )),
                 },
             )
             .child(self.render_drop_overlay(cx));
@@ -4022,6 +4054,18 @@ fn add_people_button(app: &Entity<AppState>, chat_id: &str) -> AnyElement {
         .tooltip("Add people")
         .on_click(move |_, window, cx| open_add_people(&app, &chat_id, true, window, cx))
         .into_any_element()
+}
+
+fn runway(content: impl IntoElement, comfy: bool) -> AnyElement {
+    if comfy {
+        h_flex()
+            .w_full()
+            .justify_center()
+            .child(div().w_full().max_w(px(COMFY_RUNWAY_WIDTH)).child(content))
+            .into_any_element()
+    } else {
+        content.into_any_element()
+    }
 }
 
 #[cfg(test)]

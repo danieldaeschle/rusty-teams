@@ -118,6 +118,22 @@ pub enum Receipt {
     ReadLive,
 }
 
+pub fn receipt_label(state: &teams_core::ReceiptState) -> Option<String> {
+    match state {
+        teams_core::ReceiptState::Sent => Some("Sent".to_owned()),
+        teams_core::ReceiptState::Read { readers, total_others } if *total_others > 1 => {
+            if readers.len() >= *total_others {
+                Some("Seen by everyone".to_owned())
+            } else {
+                let names: Vec<&str> = readers.iter().map(|reader| reader.name.as_str()).collect();
+                Some(format!("Seen by {}", names.join(", ")))
+            }
+        }
+        teams_core::ReceiptState::Read { .. } => Some("Seen".to_owned()),
+        teams_core::ReceiptState::Unknown => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduledState {
     Waiting,
@@ -169,6 +185,7 @@ pub struct MessageRow {
     pub delivery: Delivery,
     pub own: bool,
     pub receipt: Receipt,
+    pub receipt_label: Option<String>,
     pub forwarded: bool,
     pub translation: Option<TranslationLine>,
     pub call: Option<CallCard>,
@@ -742,6 +759,7 @@ fn event_row(
         reply_root: None,
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
+        receipt_label: None,
         own: author.own,
         forwarded: false,
         translation: None,
@@ -881,6 +899,7 @@ fn message_row_with(
         reply_root: record.reply_to_id.clone(),
         delivery: Delivery::Delivered,
         receipt: Receipt::Hidden,
+        receipt_label: None,
         own,
         forwarded: is_forwarded(record),
         translation: translation.line,
@@ -1190,6 +1209,22 @@ mod tests {
     use teams_core::CallType;
 
     use super::*;
+
+    #[test]
+    fn the_receipt_label_names_who_saw_a_group_message() {
+        let reader = |name: &str| teams_core::ReceiptReader {
+            name: name.into(),
+            at: Utc::now(),
+        };
+        let read = |readers: Vec<teams_core::ReceiptReader>, total_others| {
+            receipt_label(&teams_core::ReceiptState::Read { readers, total_others })
+        };
+        assert_eq!(read(vec![reader("Bea")], 1).as_deref(), Some("Seen"));
+        assert_eq!(read(vec![reader("Bea"), reader("Cy")], 2).as_deref(), Some("Seen by everyone"));
+        assert_eq!(read(vec![reader("Bea")], 3).as_deref(), Some("Seen by Bea"));
+        assert_eq!(receipt_label(&teams_core::ReceiptState::Sent).as_deref(), Some("Sent"));
+        assert_eq!(receipt_label(&teams_core::ReceiptState::Unknown), None);
+    }
 
     fn record(id: &str, reply_to: Option<&str>, hour: u32, day: u32) -> MessageRecord {
         MessageRecord {

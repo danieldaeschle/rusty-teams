@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::{Value, json};
 
 use crate::app::App;
@@ -7,6 +9,8 @@ use crate::request::Outcome;
 use crate::scope::Scope;
 use crate::session::{FETCH_SCRIPT, NOT_GRANTED_PREFIX, Session};
 
+const LOADING_DOCUMENT_DENIAL: &str = "Access is denied for this document";
+const LOADING_DOCUMENT_WAIT: Duration = Duration::from_secs(1);
 const TOKEN_MARKER: &str = "if (!token) return {noToken: true, refreshError, page};";
 const ACQUIRE_CALL: &str = "const {token, refreshError} = await acquire(resource, scope);";
 
@@ -56,10 +60,15 @@ impl Session {
             head = &FETCH_SCRIPT[..marker_at]
         );
         let expression = format!("({script})({payload})");
-        let outcome = self
-            .evaluate_in(app, &expression)
-            .await?
-            .ok_or(Error::NoAppTab)?;
+        // Right after launch the app tab can still hold a document without storage access; it settles within a second.
+        let outcome = match self.evaluate_in(app, &expression).await {
+            Err(Error::Cdp(text)) if text.contains(LOADING_DOCUMENT_DENIAL) => {
+                tokio::time::sleep(LOADING_DOCUMENT_WAIT).await;
+                self.evaluate_in(app, &expression).await
+            }
+            outcome => outcome,
+        }?
+        .ok_or(Error::NoAppTab)?;
         if outcome.get("noToken").and_then(Value::as_bool) == Some(true) {
             let outcome: Outcome = serde_json::from_value(outcome)
                 .map_err(|error| Error::Cdp(format!("unexpected page answer: {error}")))?;

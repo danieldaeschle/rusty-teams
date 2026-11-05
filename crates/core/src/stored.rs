@@ -14,6 +14,8 @@ const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
 const REPLY_ITEMTYPE: &str = "schema.skype.com/Reply";
 const LINK_UNFURL_APP_ID: &str = "4623DD0C-D55C-4C95-9290-AD31619B577A";
 const LINK_UNFURL_CARD_PREFIX: &str = "app-preview-card";
+pub(crate) const LOOP_CARD_TYPE: &str = "application/vnd.microsoft.card.fluidEmbedCard";
+const LOOP_CARD_NAME: &str = "Loop component";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentInfo {
@@ -44,7 +46,9 @@ pub enum FileKind {
     PowerPoint,
     Pdf,
     Image,
+    Video,
     Archive,
+    Loop,
     Other,
 }
 
@@ -61,6 +65,7 @@ impl FileKind {
             "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "heic" | "tif" | "tiff" => {
                 FileKind::Image
             }
+            "mp4" | "mov" | "webm" | "mkv" | "avi" | "m4v" => FileKind::Video,
             "zip" | "rar" | "7z" | "tar" | "gz" | "tgz" => FileKind::Archive,
             _ => FileKind::Other,
         }
@@ -152,6 +157,18 @@ impl AttachmentInfo {
 
     pub fn is_file(&self) -> bool {
         self.content_type.as_deref() == Some("reference") && self.url.is_some()
+    }
+
+    fn loop_component_url(&self) -> Option<String> {
+        if self.content_type.as_deref() != Some(LOOP_CARD_TYPE) {
+            return None;
+        }
+        let from_content = self
+            .content
+            .as_deref()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
+            .and_then(|content| content.get("componentUrl")?.as_str().map(str::to_owned));
+        from_content.or_else(|| self.url.clone()).filter(|url| !url.is_empty())
     }
 }
 
@@ -390,11 +407,26 @@ pub struct FileCard {
     pub open_url: String,
 }
 
+impl FileCard {
+    pub fn preview(&self) -> Option<ImageRef> {
+        if !matches!(self.kind, FileKind::Image | FileKind::Video) {
+            return None;
+        }
+        Some(ImageRef {
+            id: format!("file-preview-{}", self.open_url),
+            url: crate::call_event::sharepoint_thumbnail_url(&self.open_url)?,
+            width: None,
+            height: None,
+            alt: Some(self.name.clone()),
+        })
+    }
+}
+
 /// File attachments (`reference` type) with a name and a URL. `size` is rarely known; Graph does not send it for these.
 pub fn files(record: &MessageRecord) -> Vec<FileCard> {
-    attachments(record)
-        .into_iter()
-        .filter(AttachmentInfo::is_file)
+    let all = attachments(record);
+    all.iter()
+        .filter(|attachment| attachment.is_file())
         .map(|attachment| FileCard {
             kind: attachment.file_kind(),
             name: attachment.name.clone().unwrap_or_default(),
@@ -402,6 +434,15 @@ pub fn files(record: &MessageRecord) -> Vec<FileCard> {
             size: attachment.size,
             open_url: attachment.url.clone().unwrap_or_default(),
         })
+        .chain(all.iter().filter_map(|attachment| {
+            Some(FileCard {
+                open_url: attachment.loop_component_url()?,
+                kind: FileKind::Loop,
+                name: attachment.name.clone().unwrap_or_else(|| LOOP_CARD_NAME.to_owned()),
+                content_type: attachment.content_type.clone(),
+                size: None,
+            })
+        }))
         .collect()
 }
 
@@ -1073,6 +1114,24 @@ mod tests {
     }
 
     #[test]
+    fn sharepoint_videos_and_images_get_a_graph_thumbnail() {
+        let card = |name: &str, url: &str| FileCard {
+            name: name.to_owned(),
+            kind: FileKind::from_name(name),
+            content_type: Some("reference".to_owned()),
+            size: None,
+            open_url: url.to_owned(),
+        };
+        let sharepoint = "https://contoso.sharepoint.com/personal/a/Documents/clip.mp4";
+        let preview = card("clip.mp4", sharepoint).preview().unwrap();
+        assert!(preview.url.starts_with("https://graph.microsoft.com/v1.0/shares/u!"));
+        assert!(preview.url.ends_with("/driveItem/thumbnails/0/large/content"));
+        assert!(card("shot.PNG", sharepoint).preview().is_some());
+        assert_eq!(card("plan.docx", sharepoint).preview(), None);
+        assert_eq!(card("clip.mov", "https://example.com/clip.mov").preview(), None);
+    }
+
+    #[test]
     fn file_kind_follows_the_extension_then_the_content_type() {
         let kind = |name: Option<&str>, content_type: &str| {
             AttachmentInfo {
@@ -1111,6 +1170,17 @@ mod tests {
         );
         assert_eq!(found[0].open_url, "https://x/Plan.docx");
         assert_eq!(found[0].size, None);
+    }
+
+    #[test]
+    fn a_loop_component_opens_its_component_url() {
+        let json = r#"[{"content_type":"application/vnd.microsoft.card.fluidEmbedCard","name":null,"url":null,"text":null,"id":"placeholder","content":"{\"componentUrl\":\"https://x/loop.fluid\",\"sourceType\":\"Compose\"}"}]"#;
+        let found = files(&record("", json));
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (found[0].name.as_str(), found[0].kind, found[0].open_url.as_str()),
+            ("Loop component", FileKind::Loop, "https://x/loop.fluid")
+        );
     }
 
     #[test]

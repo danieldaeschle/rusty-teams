@@ -25,7 +25,9 @@ pub use app_call_model::{
     recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
 };
 
-pub use actions::{load_camera, load_camera_effects, load_input, load_output, load_share_sound};
+pub use actions::{
+    apply_sound_output, load_camera, load_camera_effects, load_input, load_output, load_share_sound,
+};
 pub use mic::load_mic;
 pub use agenda::{AgendaRow, fetch_window, join_available, response_label};
 pub use caption_style::{CaptionPosition, CaptionSize};
@@ -66,6 +68,6 @@ pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use record_rights::{RecordBlock, RecordFeature};
 pub use recording_menu::{RecordAction, RecordingChip, record_actions, recording_chip};
 pub use report::load_enabled as load_report_enabled;
-pub use target::plan_for_chat;
+pub use target::{is_echo_chat, plan_for_chat};
 pub use transcript::clock_label;
 pub use view_settings::{CallLayout, ViewSettings};

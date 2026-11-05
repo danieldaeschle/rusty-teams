@@ -25,10 +25,12 @@ use crate::data::Directory;
 use crate::importance::importance_label;
 use crate::render::Block;
 use crate::restorable_deletes::{DELETED_TOMBSTONE, UNDO_DELETE_LABEL};
-use crate::rows::{Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners};
+use crate::rows::{
+    Corners, Delivery, MessageRow, Receipt, ScheduledState, Skeleton, bubble_corners,
+};
 use crate::sidebar_model::DELETED_PREVIEW;
 use crate::theme;
-use app_ui_kit::layout::ROW_PADDING;
+use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ROW_PADDING};
 
 pub type RowAction = Option<Box<dyn Fn(&mut App)>>;
 pub type SharedRowAction = Option<std::rc::Rc<dyn Fn(&mut App)>>;
@@ -71,6 +73,10 @@ pub(super) const BUBBLE_PADDING_X: f32 = 12.;
 const FIGURE_SPACE_WIDTH: f32 = 7.4;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
+pub const JUMP_HIGHLIGHT_PERIOD: Duration = Duration::from_millis(2400);
+const HIGHLIGHT_FADE_IN: f32 = 0.1;
+const HIGHLIGHT_FADE_OUT: f32 = 0.4;
+const HIGHLIGHT_TINT: f32 = 0.3;
 const SKELETON_LINE_HEIGHT: f32 = 20.;
 pub const SELECT_BOX_SIZE: f32 = 16.;
 pub const SELECT_GAP: f32 = 12.;
@@ -198,12 +204,21 @@ pub(super) fn deleted_tombstone(index: usize, undo_delete: SharedRowAction) -> D
     }
 }
 
-fn bubble_max_width(timeline: &TimelineBounds, reserved: f32) -> Length {
+fn bubble_max_width(timeline: &TimelineBounds, reserved: f32, compact: bool) -> Length {
     let Some(bounds) = timeline.get() else {
         return relative(MAX_WIDTH_RATIO).into();
     };
-    let row_width = (f32::from(bounds.size.width) - 2. * ROW_PADDING - reserved).max(0.);
+    let runway = runway_width(f32::from(bounds.size.width), compact);
+    let row_width = (runway - 2. * ROW_PADDING - reserved).max(0.);
     px((row_width * MAX_WIDTH_RATIO).max(row_width.min(NARROW_BUBBLE_WIDTH))).into()
+}
+
+pub fn runway_width(timeline_width: f32, compact: bool) -> f32 {
+    if compact {
+        timeline_width
+    } else {
+        timeline_width.min(COMFY_RUNWAY_WIDTH)
+    }
 }
 
 fn bubble(
@@ -268,6 +283,9 @@ fn bubble(
                 },
             )
         });
+    element = element.when(extras.highlighted, |bubble| {
+        bubble.child(jump_highlight(index, corners))
+    });
     let has_reactions = !row.reactions.is_empty();
     let saved = extras.saved;
     let mut content = v_flex().gap(px(6.));
@@ -396,6 +414,7 @@ struct BubbleExtras {
     reaction_proposal: Option<ReactionPill>,
     undo_delete: SharedRowAction,
     compact: bool,
+    highlighted: bool,
 }
 
 fn agent_chip(run: Option<AgentRun>) -> Option<Div> {
@@ -460,18 +479,29 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
         })
         .when(
             own && row.delivery == Delivery::Delivered,
-            |meta| match row.receipt {
-                Receipt::Hidden => meta,
-                Receipt::Sent => meta.child(on_baseline(symbol("done", META_CHECK_SIZE, tint))),
-                Receipt::Read => meta.child(on_baseline(symbol(
-                    "done_all",
-                    META_CHECK_SIZE,
-                    theme::own_read(),
-                ))),
-                Receipt::ReadLive => meta.child(receipt_fade_in(
-                    &row.key,
-                    on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
-                )),
+            |meta| {
+                let check = match row.receipt {
+                    Receipt::Hidden => return meta,
+                    Receipt::Sent => on_baseline(symbol("done", META_CHECK_SIZE, tint)).into_any_element(),
+                    Receipt::Read => on_baseline(symbol(
+                        "done_all",
+                        META_CHECK_SIZE,
+                        theme::own_read(),
+                    ))
+                    .into_any_element(),
+                    Receipt::ReadLive => receipt_fade_in(
+                        &row.key,
+                        on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                    )
+                    .into_any_element(),
+                };
+                let holder = div().id(ElementId::Name(format!("{}-receipt", row.key).into())).child(check);
+                meta.child(match row.receipt_label.clone() {
+                    Some(label) => holder.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                    }),
+                    None => holder,
+                })
             },
         )
 }
@@ -488,6 +518,28 @@ fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> Ani
             .with_easing(pulsating_between(0.35, 1.)),
         |element, opacity| element.opacity(opacity),
     )
+}
+
+fn jump_highlight(index: usize, corners: Corners) -> AnimationElement<Div> {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_tl(px(corners.top_left))
+        .rounded_tr(px(corners.top_right))
+        .rounded_br(px(corners.bottom_right))
+        .rounded_bl(px(corners.bottom_left))
+        .bg(theme::accent().opacity(HIGHLIGHT_TINT))
+        .with_animation(
+            SharedString::from(format!("jump-highlight/{index}")),
+            Animation::new(JUMP_HIGHLIGHT_PERIOD),
+            |highlight, delta| highlight.opacity(highlight_opacity(delta)),
+        )
+}
+
+fn highlight_opacity(delta: f32) -> f32 {
+    let fade_in = (delta / HIGHLIGHT_FADE_IN).min(1.);
+    let fade_out = ((1. - delta) / HIGHLIGHT_FADE_OUT).min(1.);
+    ease_in_out(fade_in.min(fade_out))
 }
 
 fn receipt_fade_in(message_key: &str, check: Div) -> AnimationElement<Div> {
@@ -641,7 +693,7 @@ fn others_row(
         .gap(px(2.))
         .flex_1()
         .min_w_0()
-        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP))
+        .max_w(bubble_max_width(&extras.timeline, AVATAR_SIZE + AVATAR_GAP, extras.compact))
         .items_start();
     if first {
         column = column.child(
@@ -708,7 +760,7 @@ fn own_row(
         h_flex().w_full().justify_end().child(
             div()
                 .min_w_0()
-                .max_w(bubble_max_width(&extras.timeline, 0.))
+                .max_w(bubble_max_width(&extras.timeline, 0., extras.compact))
                 .child(bubble(row, index, true, directory, extras, cx)),
         ),
     );
@@ -780,6 +832,7 @@ pub fn render_message_row(
         reaction_proposal,
         undo_delete,
         compact,
+        highlighted,
     };
     let own = row.own;
     let spacing = px(row_spacing(row.series.has_prev, compact));
@@ -813,9 +866,6 @@ pub fn render_message_row(
                     div()
                         .w_full()
                         .rounded(px(10.))
-                        .when(highlighted, |element| {
-                            element.bg(theme::accent().opacity(0.2))
-                        })
                         .when(checked && !highlighted, |element| {
                             element.bg(theme::accent().opacity(SELECTED_TINT))
                         })
@@ -873,8 +923,21 @@ pub fn select_box(checked: bool, blocked: bool, index: usize) -> Div {
 }
 
 #[cfg(test)]
+mod highlight_tests {
+    use super::highlight_opacity;
+
+    #[test]
+    fn jump_highlight_fades_in_holds_and_fades_out() {
+        assert_eq!(highlight_opacity(0.), 0.);
+        assert_eq!(highlight_opacity(0.5), 1.);
+        assert!(highlight_opacity(0.8) < 1.);
+        assert!(highlight_opacity(0.99) < 0.05);
+    }
+}
+
+#[cfg(test)]
 mod density_tests {
-    use super::{META_BOTTOM_INSET, bubble_padding_y, row_spacing};
+    use super::{META_BOTTOM_INSET, bubble_padding_y, row_spacing, runway_width};
 
     #[test]
     fn compact_density_tightens_gaps_and_bubble_padding() {
@@ -882,5 +945,12 @@ mod density_tests {
         assert!(row_spacing(true, true) < row_spacing(true, false));
         assert!(bubble_padding_y(true) < bubble_padding_y(false));
         assert!(META_BOTTOM_INSET - bubble_padding_y(true) >= 0.);
+    }
+
+    #[test]
+    fn comfy_density_caps_the_runway_like_teams_and_compact_uses_the_full_width() {
+        assert_eq!(runway_width(2400., false), 1060.);
+        assert_eq!(runway_width(800., false), 800.);
+        assert_eq!(runway_width(2400., true), 2400.);
     }
 }

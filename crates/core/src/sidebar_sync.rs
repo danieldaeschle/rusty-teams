@@ -317,7 +317,7 @@ impl<R: Remote> SyncEngine<R> {
         my_user_id: &str,
     ) -> Result<(Vec<ChatRecord>, Vec<String>)> {
         let now = Utc::now();
-        self.with_locally_hidden(|locally| {
+        let (mut records, hidden) = self.with_locally_hidden(|locally| {
             split_hidden(
                 page,
                 my_user_id,
@@ -326,7 +326,9 @@ impl<R: Remote> SyncEngine<R> {
                 locally,
                 now,
             )
-        })
+        })?;
+        self.name_departed_partners(&page.items, &mut records, my_user_id);
+        Ok((records, hidden))
     }
 
     fn any_chat_changed(&self, records: &[ChatRecord]) -> Result<bool> {

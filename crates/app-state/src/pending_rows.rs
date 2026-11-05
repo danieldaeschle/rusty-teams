@@ -84,6 +84,7 @@ pub fn pending_row(
         reply_root: None,
         delivery,
         receipt: Receipt::Hidden,
+        receipt_label: None,
         own: true,
         forwarded: false,
         translation: None,

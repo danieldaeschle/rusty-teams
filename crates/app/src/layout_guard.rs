@@ -156,7 +156,7 @@ mod frames {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use app_ui_kit::layout::ROW_PADDING;
+    use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, ROW_PADDING};
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{
         AppContext as _, Bounds, Pixels, ScrollDelta, ScrollWheelEvent, TestAppContext,
@@ -236,6 +236,10 @@ mod frames {
         ITEMS_SELECTOR, icon_selector, item_selector as menu_item_selector,
         label_selector as menu_label_selector,
     };
+
+    fn runway_margin(width: f32) -> f32 {
+        ((width - COMFY_RUNWAY_WIDTH) / 2.).max(0.)
+    }
 
     const GUARDED: &[&str] = &[
         "shell",
@@ -1614,11 +1618,12 @@ mod frames {
             if checks.is_empty() {
                 found.push(format!("forward@{width}x{height}: no checkbox rendered"));
             }
+            let expected_left = ROW_PADDING + runway_margin(f32::from(main.size.width));
             for check in &checks {
                 let left = inset(main, *check, Edge::Left);
-                if (left - ROW_PADDING).abs() > TOLERANCE {
+                if (left - expected_left).abs() > TOLERANCE {
                     found.push(format!(
-                        "forward@{width}x{height}: checkbox {} starts {left} from the island, not {ROW_PADDING}",
+                        "forward@{width}x{height}: checkbox {} starts {left} from the island, not {expected_left}",
                         describe(*check)
                     ));
                 }
@@ -2021,12 +2026,14 @@ mod frames {
                 ("right", f32::from(timeline.right() - banner.right())),
                 ("below divider", f32::from(banner.top() - divider.bottom())),
             ];
-            let side = gaps[1].1;
-            if (side - BANNER_INSET).abs() > INSET_TOLERANCE
-                || gaps
-                    .iter()
-                    .any(|(_, gap)| (gap - side).abs() > INSET_TOLERANCE)
-            {
+            let runway = runway_margin(f32::from(timeline.size.width) - 2. * BANNER_INSET);
+            let sides_ok = gaps[1..3]
+                .iter()
+                .all(|(_, gap)| (gap - BANNER_INSET - runway).abs() <= INSET_TOLERANCE);
+            let vertical_ok = [gaps[0].1, gaps[3].1]
+                .iter()
+                .all(|gap| (gap - BANNER_INSET).abs() <= INSET_TOLERANCE);
+            if !sides_ok || !vertical_ok {
                 found.push(format!(
                     "pin banner@{width}x{height}: gaps {gaps:?} must all be {BANNER_INSET}"
                 ));

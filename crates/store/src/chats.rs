@@ -22,7 +22,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind,
-                    title = CASE WHEN excluded.title = '(only you)' AND chats.title NOT IN ('', '(only you)')
+                    title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '(only you)', 'Unknown User')
                         THEN chats.title ELSE excluded.title END,
                     member_summary = excluded.member_summary,
                     last_message_at = excluded.last_message_at,
@@ -172,6 +172,16 @@ impl Store {
                 preview.sender_name,
                 preview.deleted
             ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn touch_chat_time(&self, chat_id: &str, at: DateTime<Utc>) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE chats SET last_message_at = ?2
+             WHERE id = ?1 AND (last_message_at IS NULL OR last_message_at < ?2)",
+            params![chat_id, to_millis(at)],
         )?;
         Ok(changed > 0)
     }

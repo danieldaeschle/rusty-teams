@@ -366,6 +366,7 @@ impl AppState {
         state.call_camera = crate::call::load_camera(&state.store);
         state.call_input = crate::call::load_input(&state.store);
         state.call_output = crate::call::load_output(&state.store);
+        crate::call::apply_sound_output(&state.call_output);
         state.call_mic = crate::call::load_mic(&state.store);
         state.call_effects = crate::call::load_camera_effects(&state.store);
         state.join_options = crate::call::load_join_options(&state.store);

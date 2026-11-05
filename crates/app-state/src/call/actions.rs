@@ -24,10 +24,11 @@ use super::report::{
     CallRecorder, OwnIdentity, SETTING_META_KEY, SharedRecorder, report_directory, save_report, shared,
 };
 use super::ring::{MissedCall, RingOutcome};
-use super::target::{is_organizer, plan_for_chat};
+use super::target::{is_echo_chat, is_organizer, plan_for_chat};
 use crate::app_state::{AppEvent, AppState, Selection, chat_title, selection_for};
 use crate::notice::NoticeAction;
 
+const LOBBY_TONE_THROTTLE: Duration = Duration::from_secs(30);
 const TIMER_REFRESH: Duration = Duration::from_millis(500);
 const SHARE_SOURCES_EVERY_TICKS: u32 = 10;
 pub(super) const NOT_CONNECTED_NOTICE: &str = "Not connected to Teams yet";
@@ -46,6 +47,14 @@ const ORGID_PREFIX: &str = "8:orgid:";
 pub const SHARE_SOUND_META_KEY: &str = "call_share_sound";
 const CAMERA_META_KEY: &str = "call_camera";
 const INPUT_META_KEY: &str = "call_input";
+pub fn apply_sound_output(choice: &DeviceChoice) {
+    let device_key = match choice {
+        DeviceChoice::SystemDefault => None,
+        DeviceChoice::Device(device_key) => Some(device_key.clone()),
+    };
+    app_base::notify::platform::set_sound_output(device_key);
+}
+
 const OUTPUT_META_KEY: &str = "call_output";
 const EFFECTS_META_KEY: &str = "call_camera_effects";
 const DEFAULT_DEVICE_META: &str = "default";
@@ -134,12 +143,12 @@ impl AppState {
             self.show_call(true, cx);
             return;
         }
-        let plan = self
-            .sidebar
-            .chats
-            .iter()
-            .find(|chat| chat.id == conversation_id)
-            .and_then(|chat| plan_for_chat(chat, self.directory.me.as_ref()));
+        let chat = self.sidebar.chats.iter().find(|chat| chat.id == conversation_id);
+        if chat.is_some_and(is_echo_chat) {
+            self.start_test_call(cx);
+            return;
+        }
+        let plan = chat.and_then(|chat| plan_for_chat(chat, self.directory.me.as_ref()));
         let Some(plan) = plan else {
             self.raise_notice(NOT_CALLABLE_NOTICE.to_owned(), None, cx);
             return;
@@ -517,7 +526,16 @@ impl AppState {
             crate::agent_api::note_caption(thread, &entry.id, speaker, &entry.text, cx);
         }
         let sharer_before = call.model.screen_sharer.clone();
+        let lobby_before = call.model.lobby_mris();
         call.model.apply(update);
+        if call.model.someone_entered_the_lobby(&lobby_before)
+            && call
+                .lobby_tone_at
+                .is_none_or(|played_at| played_at.elapsed() >= LOBBY_TONE_THROTTLE)
+        {
+            call.lobby_tone_at = Some(Instant::now());
+            cx.emit(AppEvent::CallTone(chatsvc::sounds::CallTone::MeetingReminder));
+        }
         if call.model.screen_sharer != sharer_before {
             call.pictures.forget(&VideoKey::Screen, cx);
         }
@@ -691,6 +709,7 @@ impl AppState {
     pub fn select_call_output(&mut self, choice: DeviceChoice, _cx: &mut Context<Self>) {
         let _ = self.store.set_meta(OUTPUT_META_KEY, device_meta(&choice));
         self.call_output = choice.clone();
+        apply_sound_output(&choice);
         self.send_call_command(CallCommand::SelectOutput(choice));
     }
 
