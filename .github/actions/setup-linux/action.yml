@@ -1,0 +1,33 @@
+name: Set up the Linux build
+description: >-
+  Build dependencies plus clang 21. webrtc-sys compiles its C++ against the
+  hermetic libc++ inside the libwebrtc artifact, which needs a clang as new as
+  that libc++ (clang 21 today, see check_clang_version in
+  vendor/webrtc-sys/build.rs); the distro clang is older (18 on ubuntu-24.04).
+  The caller must point CC, CXX and the rustc linker at clang-21 (see the linux
+  jobs in .github/workflows).
+runs:
+  using: composite
+  steps:
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        # README: "Linux build needs clang + mold (set in .cargo/config.toml)".
+        # The rest are headers the calling stack probes at build time: glib for webrtc-sys,
+        # alsa for cpal, v4l2 for nokhwa (bindgen wants libclang), xkbcommon and fontconfig
+        # for GPUI (font lookup via yeslogic-fontconfig-sys),
+        # libva enables the hardware video codecs of webrtc-sys.
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          clang mold pkg-config libclang-dev \
+          libglib2.0-dev libfontconfig-dev libasound2-dev libva-dev \
+          libxkbcommon-dev libxkbcommon-x11-dev \
+          libx11-dev libxcb1-dev libxext-dev libxfixes-dev libxdamage-dev \
+          libxrandr-dev libxcomposite-dev libwayland-dev libpipewire-0.3-dev
+
+        # apt.llvm.org's llvm.sh adds their apt repo and installs clang-21 (lld-21
+        # and friends alongside). The distro clang above stays: it carries
+        # libclang-dev, which bindgen loads for nokhwa, and mold is the linker.
+        curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
+        sudo bash "$RUNNER_TEMP/llvm.sh" 21
+        sudo apt-get install --no-install-recommends -y clang-21

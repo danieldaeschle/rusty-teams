@@ -1,6 +1,6 @@
- # Build and test per README "Quick start": `cargo test`, then `cargo build -p app`.
-# Linux and Windows are the supported targets (README "Status") and run the tests;
-# macOS only builds the universal binary (its Ctrl/Cmd bindings fail the key tests).
+# Builds per README "Quick start": `cargo build -p app`, plus the universal macOS
+# binary from scripts/build-macos.sh. Tests live in test.yml; this file only
+# packages the artifacts.
 name: Build
 
 on:
@@ -27,8 +27,8 @@ jobs:
     # webrtc-sys compiles its C++ against the hermetic libc++ inside the libwebrtc
     # artifact, which needs a clang as new as that libc++ (clang 21 today, see
     # check_clang_version in vendor/webrtc-sys/build.rs). The distro clang is older
-    # (18 on ubuntu-24.04), so the install step below takes the compiler from LLVM's
-    # apt repo and these point every compile and the final link at it.
+    # (18 on ubuntu-24.04), so setup-linux installs clang 21 and these point every
+    # compile and the final link at it.
     env:
       CC: clang-21
       CXX: clang++-21
@@ -36,34 +36,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # README: "Linux build needs clang + mold (set in .cargo/config.toml)".
-      # The rest are headers the calling stack probes at build time: glib for webrtc-sys,
-      # alsa for cpal, v4l2 for nokhwa (bindgen wants libclang), xkbcommon and fontconfig
-      # for GPUI (font lookup via yeslogic-fontconfig-sys),
-      # libva enables the hardware video codecs of webrtc-sys.
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            clang mold pkg-config libclang-dev \
-            libglib2.0-dev libfontconfig-dev libasound2-dev libva-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev \
-            libx11-dev libxcb1-dev libxext-dev libxfixes-dev libxdamage-dev \
-            libxrandr-dev libxcomposite-dev libwayland-dev libpipewire-0.3-dev
-
-          # apt.llvm.org's llvm.sh adds their apt repo and installs clang-21 (lld-21
-          # and friends alongside). The distro clang above stays: it carries
-          # libclang-dev, which bindgen loads for nokhwa, and mold is the linker.
-          curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
-          sudo bash "$RUNNER_TEMP/llvm.sh" 21
-          sudo apt-get install --no-install-recommends -y clang-21
+      - uses: ./.github/actions/setup-linux
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Tests
-        run: cargo test
+        with:
+          key: build
 
       - name: Build
         run: cargo build -p app --release
@@ -86,40 +65,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: build
 
-      # scripts/build-windows.sh stages a copy of gpui-pre-windows with the patches from
-      # scripts/gpui-windows-patches and points `patch.crates-io` at it. Same here, except the
-      # build.rs rewrite of that script is left out: it only exists so a Linux host can
-      # cross-compile, and it would hide fxc.exe from a native Windows build.
-      - name: Stage the patched gpui-pre-windows
-        run: |
-          set -euo pipefail
-          manifestPath="$(cargo metadata --format-version 1 --filter-platform x86_64-pc-windows-msvc |
-            jq -re '[.packages[] | select(.name == "gpui-pre-windows") | .manifest_path] | first')"
-          # cygpath first, then dirname: the old `jq | xargs dirname | cygpath` chain let
-          # xargs eat the backslashes of the Windows manifest path as escapes, which left
-          # sourceDir at the C: root and `cp -r` walked the whole system drive.
-          sourceDir="$(dirname "$(cygpath -u "$manifestPath")")"
-          [ -f "$sourceDir/Cargo.toml" ] || { echo "not the gpui-pre-windows crate dir: $sourceDir" >&2; exit 1; }
-          patchedDir="$(cygpath -m "$RUNNER_TEMP")/gpui-pre-windows"
-          rm -rf "$patchedDir"
-          cp -r "$sourceDir" "$patchedDir"
-          chmod -R u+w "$patchedDir"
-          for patchFile in scripts/gpui-windows-patches/*.patch; do
-            git -C "$patchedDir" apply -p1 "$(cygpath -m "$GITHUB_WORKSPACE/$patchFile")"
-          done
-          echo "GPUI_PRE_WINDOWS_PATCHED=$patchedDir" >> "$GITHUB_ENV"
-
-      # Background effects ship as an embedded DLL, see tools/onnxruntime-dll.
-      # The path must be absolute: the calling build script reads it from crates/calling,
-      # and `cygpath -m` leaves a relative path like tools/onnxruntime-dll unchanged.
-      - name: Build the embedded onnxruntime.dll
-        run: |
-          (cd tools/onnxruntime-dll && RUSTFLAGS="-C target-feature=-crt-static" cargo build --release)
-          echo "CALLING_ONNXRUNTIME_DLL=$(cygpath -m "$GITHUB_WORKSPACE")/tools/onnxruntime-dll/target/release/onnxruntime.dll" >> "$GITHUB_ENV"
-
-      - name: Tests
-        run: cargo test --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
+      # After the toolchain: staging runs `cargo metadata`.
+      - uses: ./.github/actions/setup-windows
 
       # fxc.exe comes from the Windows SDK, gpui-pre-windows finds it through the registry.
       - name: Build
@@ -140,6 +90,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: build
 
       # scripts/build-macos.sh builds the arm64 and x86_64 slices and lipos them
       # into one universal binary (README "Quick start"); it installs the x86_64
