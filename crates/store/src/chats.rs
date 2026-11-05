@@ -22,7 +22,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind,
-                    title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '(only you)', 'Unknown User')
+                    title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '?', '(only you)', 'Unknown User')
                         THEN chats.title ELSE excluded.title END,
                     member_summary = excluded.member_summary,
                     last_message_at = excluded.last_message_at,

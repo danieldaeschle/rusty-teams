@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 pub const UNKNOWN_USER_NAME: &str = "Unknown User";
+/// Graph names a deleted account "?" in chat members.
+const DELETED_USER_NAME: &str = "?";
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +32,7 @@ impl Member {
             .into_iter()
             .flatten()
             .map(|name| name.trim())
-            .find(|name| !name.is_empty())
+            .find(|name| !name.is_empty() && *name != DELETED_USER_NAME)
             .unwrap_or(UNKNOWN_USER_NAME)
     }
 }

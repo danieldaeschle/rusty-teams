@@ -283,6 +283,13 @@ fn chat_upsert_keeps_a_real_title_over_the_only_you_fallback() {
         .upsert_chats(&[chat("chat-2", "Sample Bot", Some(at(3)))])
         .unwrap();
     assert_eq!(store.chat("chat-2").unwrap().unwrap().title, "Sample Bot");
+    store
+        .upsert_chats(&[chat("chat-3", "?", Some(at(1)))])
+        .unwrap();
+    store
+        .upsert_chats(&[chat("chat-3", UNKNOWN_USER_NAME, Some(at(2)))])
+        .unwrap();
+    assert_eq!(store.chat("chat-3").unwrap().unwrap().title, UNKNOWN_USER_NAME);
 }
 
 #[test]
