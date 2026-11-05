@@ -3668,6 +3668,7 @@ impl ConversationView {
             .children(inline_tabs)
             .children(stack)
             .children(call_controls)
+            .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
             .children(self.pop_in_button(current))
     }
