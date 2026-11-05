@@ -19,6 +19,16 @@ async fn next_event(events: &mut Receiver<BrowserEvent>) -> BrowserEvent {
         .expect("channel closed")
 }
 
+/// Waits for a condition instead of sleeping a fixed time: on a loaded machine
+/// the watchdog's backoff sleeps overshoot, and retry counts must not race them.
+async fn wait_until(condition: impl Fn() -> bool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !condition() {
+        assert!(tokio::time::Instant::now() < deadline, "condition not met within 10s");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 fn fast_watchdog() -> WatchdogConfig {
     WatchdogConfig {
         poll_interval: Duration::from_millis(50),
@@ -148,8 +158,7 @@ async fn watchdog_retries_with_backoff_until_launch_works() {
     *harness.launcher.fail.lock().unwrap() = true;
     harness.mock.kill().await;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Died);
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    assert!(harness.launcher.requests.lock().unwrap().len() >= 3);
+    wait_until(|| harness.launcher.requests.lock().unwrap().len() >= 3).await;
     *harness.launcher.fail.lock().unwrap() = false;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
 }
