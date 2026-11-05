@@ -86,9 +86,10 @@ const COMPOSER_ICON_SIZE: f32 = 20.;
 const COMPOSER_BUTTON_SIZE: f32 = 32.;
 const COMPOSER_BUTTON_INSET: f32 = 6.;
 pub const COMPOSER_BOX_TAG: &str = "composer";
-pub const COMPOSER_LEADING_TAG: &str = "composer/leading";
+pub const COMPOSER_ACTIONS_TAG: &str = "composer/actions";
+pub const COMPOSER_INPUT_TAG: &str = "composer/input";
 pub const COMPOSER_SEND_TAG: &str = "composer/send";
-pub const COMPOSER_FORMAT_TAG: &str = "composer/leading/format";
+pub const COMPOSER_FORMAT_TAG: &str = "composer/actions/format";
 pub const COMPOSER_FORMAT_BAR_TAG: &str = "composer/format-bar";
 pub const COMPOSER_FORMAT_DIVIDER_TAG: &str = "composer/format-bar/divider";
 /// gpui-kit draws a `Size::Size` button's icon at this fraction of the button size.
@@ -2877,7 +2878,7 @@ impl Render for Composer {
             let picker = self.fun_picker.clone();
             let reset_picker = self.fun_picker.clone();
             Popover::new("composer-fun-popover")
-                .anchor(Anchor::BottomLeft)
+                .anchor(Anchor::BottomRight)
                 .offset(px(10.))
                 .p_0()
                 .trigger(
@@ -3411,17 +3412,8 @@ impl Render for Composer {
                                     .py(px(COMPOSER_BUTTON_INSET))
                                     .px(px(COMPOSER_BUTTON_INSET))
                                     .child(
-                                        h_flex()
-                                            .debug_selector(|| COMPOSER_LEADING_TAG.into())
-                                            .flex_none()
-                                            .gap(px(COMPOSER_BUTTON_INSET))
-                                            .children(format_toggle)
-                                            .children(self.render_delivery_button(cx))
-                                            .children(fun)
-                                            .children(attach),
-                                    )
-                                    .child(
                                         div()
+                                            .debug_selector(|| COMPOSER_INPUT_TAG.into())
                                             .flex_1()
                                             .min_w_0()
                                             .capture_any_mouse_down(cx.listener(
@@ -3445,6 +3437,17 @@ impl Render for Composer {
                                                 }),
                                             )
                                             .child(input),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .debug_selector(|| COMPOSER_ACTIONS_TAG.into())
+                                            .flex_none()
+                                            .ml(px(COMPOSER_BUTTON_INSET))
+                                            .gap(px(COMPOSER_BUTTON_INSET))
+                                            .children(format_toggle)
+                                            .children(self.render_delivery_button(cx))
+                                            .children(fun)
+                                            .children(attach),
                                     )
                                     .child(send),
                             ),

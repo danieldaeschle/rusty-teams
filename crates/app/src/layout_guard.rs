@@ -184,7 +184,7 @@ mod frames {
     };
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
-        COMPOSER_FORMAT_TAG, COMPOSER_LEADING_TAG, COMPOSER_SEND_TAG,
+        COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
     };
     use crate::views::conversation::{
         CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
@@ -2211,12 +2211,13 @@ mod frames {
                 .unwrap_or_else(|| panic!("{path} rendered"))
         };
         let composer = bounds_of(COMPOSER_BOX_TAG);
-        let leading = bounds_of(COMPOSER_LEADING_TAG);
+        let input = bounds_of(COMPOSER_INPUT_TAG);
+        let actions = bounds_of(COMPOSER_ACTIONS_TAG);
         let send = bounds_of(COMPOSER_SEND_TAG);
         [
-            f32::from(leading.left() - composer.left()),
-            f32::from(leading.top() - composer.top()),
-            f32::from(composer.bottom() - leading.bottom()),
+            f32::from(input.left() - composer.left()),
+            f32::from(actions.top() - composer.top()),
+            f32::from(composer.bottom() - actions.bottom()),
             f32::from(composer.right() - send.right()),
             f32::from(send.top() - composer.top()),
             f32::from(composer.bottom() - send.bottom()),
@@ -2234,16 +2235,11 @@ mod frames {
             single_line
                 .iter()
                 .all(|inset| (inset - left).abs() < TOLERANCE),
-            "single line: insets left, top, bottom of the first button and right, top, bottom of send {single_line:?}"
+            "single line: insets of the input left, the actions top and bottom, send right, top and bottom {single_line:?}"
         );
-        let leading = visual
-            .debug_bounds(COMPOSER_LEADING_TAG)
-            .expect("leading buttons");
+        let input = visual.debug_bounds(COMPOSER_INPUT_TAG).expect("input");
         let send = visual.debug_bounds(COMPOSER_SEND_TAG).expect("send button");
-        visual.simulate_click(
-            point((leading.right() + send.left()) / 2., send.center().y),
-            Default::default(),
-        );
+        visual.simulate_click(point(input.center().x, send.center().y), Default::default());
         visual.simulate_keystrokes("o n e shift-enter t w o shift-enter t h r e e");
         let three_lines = composer_button_insets(&mut visual);
         assert!(
@@ -2258,7 +2254,7 @@ mod frames {
         ] {
             assert!(
                 (inset - left).abs() < TOLERANCE,
-                "three lines: insets left, top, bottom of the first button and right, top, bottom of send {three_lines:?}, expected {left}"
+                "three lines: insets of the input left, the actions top and bottom, send right, top and bottom {three_lines:?}, expected {left}"
             );
         }
     }
@@ -2269,7 +2265,7 @@ mod frames {
             COMPOSER_BOX_TAG,
             COMPOSER_FORMAT_BAR_TAG,
             COMPOSER_FORMAT_DIVIDER_TAG,
-            COMPOSER_LEADING_TAG,
+            COMPOSER_ACTIONS_TAG,
             COMPOSER_FORMAT_TAG,
             COMPOSER_SEND_TAG,
         ];
@@ -2296,7 +2292,7 @@ mod frames {
                 .map(|(key, message)| format!("format@{width}x{height}:{key}: {message}"))
                 .collect();
             let bar = visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).expect("bar");
-            let leading = visual.debug_bounds(COMPOSER_LEADING_TAG).expect("leading");
+            let actions = visual.debug_bounds(COMPOSER_ACTIONS_TAG).expect("actions");
             let toggle = visual
                 .debug_bounds(COMPOSER_FORMAT_TAG)
                 .expect("format button");
@@ -2304,8 +2300,8 @@ mod frames {
             collect(&mut visual, None);
             assert!(found.is_empty(), "{}", found.join("\n"));
             assert!(
-                bar.bottom() <= leading.top(),
-                "bar {bar:?} over the buttons {leading:?}"
+                bar.bottom() <= actions.top(),
+                "bar {bar:?} over the buttons {actions:?}"
             );
             assert!(visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).is_none());
         }
@@ -2337,13 +2333,13 @@ mod frames {
     fn delivery_options_label_and_banner_line_up_with_the_composer(cx: &mut TestAppContext) {
         const DELIVERY_TAGS: [&str; 5] = [
             COMPOSER_BOX_TAG,
-            COMPOSER_LEADING_TAG,
+            COMPOSER_ACTIONS_TAG,
             COMPOSER_DELIVERY_TAG,
             COMPOSER_IMPORTANCE_LABEL_TAG,
             COMPOSER_URGENT_BANNER_TAG,
         ];
         const URGENT_OPTION: &str = "urgent-delivery-option";
-        const BUTTON_ICON_INSET: f32 = 6.;
+        const TEXT_INSET: f32 = 6.;
         let (handle, _) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
         for (width, height) in SIZES {
@@ -2384,7 +2380,7 @@ mod frames {
             let label = visual
                 .debug_bounds(COMPOSER_IMPORTANCE_LABEL_TAG)
                 .expect("label");
-            let leading = visual.debug_bounds(COMPOSER_LEADING_TAG).expect("leading");
+            let input = visual.debug_bounds(COMPOSER_INPUT_TAG).expect("input");
             assert!(
                 (f32::from(banner.left() - composer.left())).abs() <= TOLERANCE
                     && (f32::from(banner.right() - composer.right())).abs() <= TOLERANCE,
@@ -2400,13 +2396,13 @@ mod frames {
             );
             assert!(
                 (inset(composer, label, Edge::Left)
-                    - inset(composer, leading, Edge::Left)
-                    - BUTTON_ICON_INSET)
+                    - inset(composer, input, Edge::Left)
+                    - TEXT_INSET)
                     .abs()
                     <= TOLERANCE,
-                "label {} not on the icon edge of {}",
+                "label {} not on the text edge of {}",
                 describe(label),
-                describe(leading)
+                describe(input)
             );
             let close = visual
                 .debug_bounds(COMPOSER_URGENT_BANNER_TAG)
