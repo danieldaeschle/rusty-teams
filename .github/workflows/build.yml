@@ -33,7 +33,7 @@ jobs:
       CXX: clang++-21
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang-21
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # README: "Linux build needs clang + mold (set in .cargo/config.toml)".
       # The rest are headers the calling stack probes at build time: glib for webrtc-sys,
@@ -80,7 +80,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
