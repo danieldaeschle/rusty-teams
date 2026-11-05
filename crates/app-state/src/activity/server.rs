@@ -107,7 +107,7 @@ fn preview_of(item: &ActivityItem) -> String {
         "sentAFile" => "Sent a file",
         "sentAnImage" => "Sent an image",
         "sentACard" => "Sent a card",
-        "previewUnavailable" => "Preview Unavailable",
+        "previewUnavailable" if item.preview.is_empty() => "Preview Unavailable",
         "deleted" => "This message has been deleted.",
         "forwardedMessage" => "Forwarded message",
         "isMeeting" => "Teams Meeting",
@@ -198,6 +198,18 @@ mod tests {
             ..item("mention", "person")
         });
         assert_eq!(file.preview, "Sent a file");
+        let recap = entry_of(&ActivityItem {
+            preview: "You're following this meeting".into(),
+            preview_template: "previewUnavailable".into(),
+            ..item("msGraph", "recapIsReadyV2")
+        });
+        assert_eq!(recap.preview, "You're following this meeting");
+        let unavailable = entry_of(&ActivityItem {
+            preview: String::new(),
+            preview_template: "previewUnavailable".into(),
+            ..item("mention", "person")
+        });
+        assert_eq!(unavailable.preview, "Preview Unavailable");
         assert_eq!(entry_of(&item("mention", "person")).preview, "Ship it");
         assert_eq!(entry_of(&item("reactionInChat", "like")).glyphs.len(), 1);
     }

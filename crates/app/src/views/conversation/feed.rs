@@ -114,6 +114,9 @@ impl ConversationView {
         let Some(root_id) = self.reply_root.clone() else {
             return;
         };
+        if !self.in_feed() {
+            return;
+        }
         let view = cx.entity().downgrade();
         window.on_next_frame(move |_, cx| {
             view.update(cx, |this, cx| {
