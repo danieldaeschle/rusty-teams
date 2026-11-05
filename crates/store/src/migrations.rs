@@ -109,6 +109,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0025_float_message_ids.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0026_channel_read_until.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

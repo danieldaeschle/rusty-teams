@@ -673,6 +673,10 @@ pub fn translations(message_ids: &[String]) -> Vec<Translation> {
         .collect()
 }
 
+pub fn channel_read_until(channel_id: &str) -> Option<DateTime<Utc>> {
+    (channel_id == PINNED_CHANNEL).then(|| at(0, 11, 0))
+}
+
 pub fn first_unread(conversation_id: &str) -> Option<String> {
     (conversation_id == UNREAD_CHAT).then(|| "u3".to_owned())
 }

@@ -179,6 +179,7 @@ struct Current {
     older_blocked: bool,
     fetched: bool,
     first_unread: Option<String>,
+    posts_new_after: Option<DateTime<Utc>>,
     sync: SyncProgress,
     detached: Option<DetachedWindow>,
     window_request: Option<String>,
@@ -916,6 +917,7 @@ impl ConversationView {
             Selection::Channel(_) => ViewMode::ThreadList,
         };
         let first_unread = self.first_unread_id(&selection, cx);
+        let posts_new_after = self.channel_read_until(&selection, cx);
         self.current = Some(Current {
             loaded_limit: open_limit(&selection),
             selection,
@@ -927,6 +929,7 @@ impl ConversationView {
             older_blocked: false,
             fetched: false,
             first_unread,
+            posts_new_after,
             sync: SyncProgress::default(),
             detached: None,
             window_request: None,
@@ -1353,6 +1356,17 @@ impl ConversationView {
         });
     }
 
+    fn channel_read_until(&self, selection: &Selection, cx: &App) -> Option<DateTime<Utc>> {
+        let Selection::Channel(channel_id) = selection else {
+            return None;
+        };
+        let state = self.app.read(cx);
+        if state.mode.demo {
+            return crate::demo::channel_read_until(channel_id);
+        }
+        state.engine.as_ref()?.channel_read_until(channel_id)
+    }
+
     fn first_unread_id(&self, selection: &Selection, cx: &App) -> Option<String> {
         let Selection::Chat(chat_id) = selection else {
             return None;
@@ -1631,6 +1645,7 @@ impl ConversationView {
         let start = self.start_info(cx);
         let current = self.current.as_mut().expect("checked above");
         let first_unread = current.first_unread.clone();
+        let posts_new_after = current.posts_new_after;
         current.loaded_limit = limit;
         if thread_root.is_none() {
             current.loaded_count = records.len();
@@ -1696,6 +1711,13 @@ impl ConversationView {
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
                 message.receipt_label = receipt_labels.get(&message.key).cloned();
+            }
+        }
+        if let Some(read_until) = posts_new_after.filter(|_| in_feed) {
+            for row in rows.iter_mut() {
+                if let Row::Post(post) = row {
+                    post.mark_new_after(read_until);
+                }
             }
         }
         if let Some(unread_id) = &first_unread {

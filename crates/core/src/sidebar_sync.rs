@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chatsvc::{ConversationState, MentionActivity};
 use chrono::{DateTime, Duration, Utc};
-use store::{ChatRecord, Store};
+use store::{ChannelReadState, ChatRecord, Store};
 
 use crate::bot_partners::BotPartners;
 use crate::channel_mentions::channel_mentions;
@@ -199,12 +199,13 @@ impl<R: Remote> SyncEngine<R> {
         };
         let read_states: Vec<_> = states
             .iter()
-            .map(|state| {
-                (
-                    state.id.clone(),
-                    state.read.is_unread_after(my_user_id, app_horizon_ms),
-                    state.read.last_message_at(),
-                )
+            .map(|state| ChannelReadState {
+                channel_id: state.id.clone(),
+                unread: state.read.is_unread_after(my_user_id, app_horizon_ms),
+                last_message_at: state.read.last_message_at(),
+                read_until: Some(state.read.read_until_ms(app_horizon_ms))
+                    .filter(|read_until_ms| *read_until_ms > 0)
+                    .and_then(DateTime::from_timestamp_millis),
             })
             .collect();
         if let Err(error) = self.store.apply_channel_read_states(&read_states) {

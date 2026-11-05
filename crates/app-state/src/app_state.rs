@@ -842,12 +842,17 @@ impl AppState {
         let Some(engine_or_demo) = self.chat_action_engine(cx) else {
             return;
         };
-        let previous_unread: Vec<(String, bool, Option<DateTime<Utc>>)> = self
+        let previous_unread: Vec<store::ChannelReadState> = self
             .sidebar
             .teams
             .iter()
             .flat_map(|team| team.channels.iter())
-            .map(|channel| (channel.id.clone(), channel.unread, None))
+            .map(|channel| store::ChannelReadState {
+                channel_id: channel.id.clone(),
+                unread: channel.unread,
+                last_message_at: None,
+                read_until: None,
+            })
             .collect();
         let previous_mentions: Vec<(String, store::ChannelMentions)> = self
             .sidebar

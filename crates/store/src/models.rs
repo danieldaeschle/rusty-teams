@@ -76,6 +76,14 @@ pub struct TeamRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ChannelReadState {
+    pub channel_id: String,
+    pub unread: bool,
+    pub last_message_at: Option<DateTime<Utc>>,
+    pub read_until: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChannelRecord {
     pub id: String,
     pub team_id: String,

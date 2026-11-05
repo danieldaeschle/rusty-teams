@@ -28,7 +28,7 @@ pub use image_files::ImageFileCache;
 pub use models::{
     ActivityRecord, AgentProposalMention, AgentProposalRecord, AgentReactionRecord,
     AttachmentImage, AvatarRecord, BOT_MRI_PREFIX, ChannelLayoutRecord, ChannelMentions,
-    ChannelNotificationLevel, ChannelNotifications, ChannelRecord, ChannelTabRecord, ChatPreview,
+    ChannelNotificationLevel, ChannelNotifications, ChannelReadState, ChannelRecord, ChannelTabRecord, ChatPreview,
     ChatRecord, ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord,
     MessageImportance, MessageRecord, OutboxRecord, OutboxState, OutboxTarget, ReadHorizonRecord,
     RecentScope, SearchHit, Sidebar, SidebarTeam, SyncState, TeamLayoutRecord, TeamRecord,
