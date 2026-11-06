@@ -1,10 +1,14 @@
-pub const BADGE_SIZE: usize = 32;
-const GLYPH_WIDTH: usize = 5;
-const GLYPH_HEIGHT: usize = 7;
-const GLYPH_SCALE: usize = 2;
-const GLYPH_GAP: usize = 1;
-const RED: [u8; 3] = [0xef, 0x44, 0x44];
-const INK: [u8; 3] = [0xff, 0xff, 0xff];
+use std::sync::{Arc, OnceLock};
+
+use resvg::{tiny_skia, usvg};
+
+const FILL: &str = "#C4314B";
+const INK: &str = "#FFFFFF";
+const FONT: &[u8] = include_bytes!("../../../app/assets/fonts/GoogleSansFlex-SemiBold.ttf");
+const FONT_FAMILY: &str = "Google Sans Flex";
+const SINGLE_GLYPH_SCALE: f32 = 0.62;
+const WIDE_TEXT_SCALE: f32 = 0.5;
+const BASELINE_SHIFT: f32 = 0.36;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Badge {
@@ -23,107 +27,46 @@ pub fn badge_for(unread_chats: usize) -> Option<Badge> {
     Some(Badge { text })
 }
 
-const GLYPHS: [[u8; GLYPH_HEIGHT]; 11] = [
-    [
-        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
-    ],
-    [
-        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
-    ],
-    [
-        0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
-    ],
-    [
-        0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
-    ],
-    [
-        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
-    ],
-    [
-        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
-    ],
-    [
-        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
-    ],
-    [
-        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
-    ],
-    [
-        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
-    ],
-    [
-        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
-    ],
-    [
-        0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
-    ],
-];
-
-fn glyph_for(character: char) -> Option<&'static [u8; GLYPH_HEIGHT]> {
-    match character {
-        '0'..='9' => GLYPHS.get(character as usize - '0' as usize),
-        '+' => GLYPHS.get(10),
-        _ => None,
-    }
-}
-
-pub fn text_width(text: &str) -> usize {
-    let glyphs = text.chars().count();
-    if glyphs == 0 {
-        return 0;
-    }
-    glyphs * GLYPH_WIDTH * GLYPH_SCALE + (glyphs - 1) * GLYPH_GAP * GLYPH_SCALE
-}
-
-/// BGRA, premultiplied, top-down, `BADGE_SIZE` square.
-pub fn render_badge(badge: &Badge) -> Vec<u8> {
-    let mut pixels = vec![0u8; BADGE_SIZE * BADGE_SIZE * 4];
-    let center = (BADGE_SIZE as f32 - 1.) / 2.;
-    let radius = BADGE_SIZE as f32 / 2.;
-    for row in 0..BADGE_SIZE {
-        for column in 0..BADGE_SIZE {
-            let distance =
-                ((column as f32 - center).powi(2) + (row as f32 - center).powi(2)).sqrt();
-            if distance <= radius - 0.5 {
-                put(&mut pixels, column, row, RED);
-            }
+fn options() -> &'static usvg::Options<'static> {
+    static OPTIONS: OnceLock<usvg::Options<'static>> = OnceLock::new();
+    OPTIONS.get_or_init(|| {
+        let mut fonts = usvg::fontdb::Database::new();
+        fonts.load_font_data(FONT.to_vec());
+        usvg::Options {
+            font_family: FONT_FAMILY.to_owned(),
+            fontdb: Arc::new(fonts),
+            ..usvg::Options::default()
         }
-    }
-    let width = text_width(&badge.text);
-    let left = (BADGE_SIZE - width.min(BADGE_SIZE)) / 2;
-    let top = (BADGE_SIZE - GLYPH_HEIGHT * GLYPH_SCALE) / 2;
-    for (index, character) in badge.text.chars().enumerate() {
-        let Some(glyph) = glyph_for(character) else {
-            continue;
+    })
+}
+
+fn badge_svg(text: &str, size: u32) -> String {
+    let size = size as f32;
+    let radius = size / 2.;
+    let font_size = size
+        * if text.chars().count() > 1 {
+            WIDE_TEXT_SCALE
+        } else {
+            SINGLE_GLYPH_SCALE
         };
-        let origin = left + index * (GLYPH_WIDTH + GLYPH_GAP) * GLYPH_SCALE;
-        for (glyph_row, bits) in glyph.iter().enumerate() {
-            for glyph_column in 0..GLYPH_WIDTH {
-                if bits & (1 << (GLYPH_WIDTH - 1 - glyph_column)) == 0 {
-                    continue;
-                }
-                for dy in 0..GLYPH_SCALE {
-                    for dx in 0..GLYPH_SCALE {
-                        put(
-                            &mut pixels,
-                            origin + glyph_column * GLYPH_SCALE + dx,
-                            top + glyph_row * GLYPH_SCALE + dy,
-                            INK,
-                        );
-                    }
-                }
-            }
-        }
+    let baseline = radius + font_size * BASELINE_SHIFT;
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><circle cx="{radius}" cy="{radius}" r="{radius}" fill="{FILL}"/><text x="{radius}" y="{baseline}" text-anchor="middle" font-family="{FONT_FAMILY}" font-weight="600" font-size="{font_size}" fill="{INK}">{text}</text></svg>"#
+    )
+}
+
+/// BGRA, premultiplied, top-down, `size` square.
+pub fn render_badge(badge: &Badge, size: u32) -> Vec<u8> {
+    let size = size.max(1);
+    let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("badge size is not zero");
+    if let Ok(tree) = usvg::Tree::from_str(&badge_svg(&badge.text, size), options()) {
+        resvg::render(&tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+    }
+    let mut pixels = pixmap.take();
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
     }
     pixels
-}
-
-fn put(pixels: &mut [u8], column: usize, row: usize, rgb: [u8; 3]) {
-    if column >= BADGE_SIZE || row >= BADGE_SIZE {
-        return;
-    }
-    let offset = (row * BADGE_SIZE + column) * 4;
-    pixels[offset..offset + 4].copy_from_slice(&[rgb[2], rgb[1], rgb[0], 0xff]);
 }
 
 #[cfg(test)]
@@ -143,23 +86,43 @@ mod tests {
         assert_eq!(badge_for(250).unwrap().text, "9+");
     }
 
+    fn rendered(text: &str, size: u32) -> Vec<u8> {
+        render_badge(
+            &Badge {
+                text: text.to_owned(),
+            },
+            size,
+        )
+    }
+
     #[test]
     fn rendered_badge_has_fill_ink_and_transparent_corner() {
-        let badge = badge_for(3).unwrap();
-        let pixels = render_badge(&badge);
-        assert_eq!(pixels.len(), BADGE_SIZE * BADGE_SIZE * 4);
+        let pixels = rendered("3", 32);
+        assert_eq!(pixels.len(), 32 * 32 * 4);
         assert_eq!(pixels[3], 0);
         let has = |blue: u8, green: u8, red: u8| {
             pixels
                 .chunks(4)
                 .any(|pixel| pixel == [blue, green, red, 0xff])
         };
-        assert!(has(0x44, 0x44, 0xef));
+        assert!(has(0x4b, 0x31, 0xc4));
         assert!(has(0xff, 0xff, 0xff));
     }
 
     #[test]
-    fn two_glyphs_fit_the_badge() {
-        assert!(text_width("9+") < BADGE_SIZE);
+    fn nine_plus_stays_inside_the_circle() {
+        let size = 32;
+        let pixels = rendered("9+", size);
+        let ink_columns: Vec<u32> = (0..size)
+            .filter(|column| {
+                (0..size).any(|row| {
+                    let offset = ((row * size + column) * 4) as usize;
+                    pixels[offset..offset + 3] == [0xff, 0xff, 0xff]
+                })
+            })
+            .collect();
+        assert!(ink_columns.len() > 8);
+        assert!(ink_columns.first().is_some_and(|column| *column >= 4));
+        assert!(ink_columns.last().is_some_and(|column| *column <= size - 5));
     }
 }

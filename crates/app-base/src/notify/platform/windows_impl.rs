@@ -21,7 +21,9 @@ use windows::Win32::Graphics::Gdi::{
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, MonitorFromWindow,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::HiDpi::{
+    GetDpiForMonitor, GetDpiForWindow, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
+};
 use windows::Win32::UI::Shell::{
     ITaskbarList3, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME,
     QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState, TaskbarList,
@@ -30,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO,
     FlashWindowEx, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
     GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, ICONINFO, IsIconic,
-    IsWindowVisible, LWA_ALPHA, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
+    IsWindowVisible, LWA_ALPHA, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
     SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetForegroundWindow,
     SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
@@ -41,7 +43,7 @@ use windows::core::{BOOL, PCWSTR, w};
 
 use super::stack_plan::{StackPlan, stack_plan};
 use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
-use crate::notify::badge::{BADGE_SIZE, Badge, render_badge};
+use crate::notify::badge::{Badge, render_badge};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
 const TRAY_ICON_SIZE: u32 = 32;
@@ -492,7 +494,7 @@ pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
                 let _ = taskbar.SetOverlayIcon(hwnd(handle), HICON::default(), w!(""));
             }
             Some(badge) => {
-                let Some(icon) = icon_from_badge(badge) else {
+                let Some(icon) = icon_from_badge(badge, handle) else {
                     return;
                 };
                 let _ = taskbar.SetOverlayIcon(hwnd(handle), icon, w!("Unread chats"));
@@ -502,8 +504,12 @@ pub fn set_badge(handle: NativeHandle, badge: Option<&Badge>) {
     }
 }
 
-unsafe fn icon_from_badge(badge: &Badge) -> Option<HICON> {
-    unsafe { icon_from_bgra(&render_badge(badge), BADGE_SIZE as u32) }
+unsafe fn icon_from_badge(badge: &Badge, handle: NativeHandle) -> Option<HICON> {
+    unsafe {
+        let dpi = GetDpiForWindow(hwnd(handle));
+        let size = GetSystemMetricsForDpi(SM_CXSMICON, dpi).max(16) as u32;
+        icon_from_bgra(&render_badge(badge, size), size)
+    }
 }
 
 unsafe fn icon_from_bgra(pixels: &[u8], size: u32) -> Option<HICON> {

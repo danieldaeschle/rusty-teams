@@ -28,6 +28,7 @@ teams-core.workspace = true
 tokio.workspace = true
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 raw-window-handle = "0.6"
+resvg = { version = "0.46", default-features = false, features = ["text"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", features = ["shape"] }
