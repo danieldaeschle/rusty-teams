@@ -789,6 +789,7 @@ impl ConversationView {
             ComposerEvent::FocusMessages => window.focus(&self.focus_handle, cx),
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
             ComposerEvent::Edited => {}
+            ComposerEvent::ClosePost => self.cancel_new_post(window, cx),
         }
     }
 
@@ -914,7 +915,7 @@ impl ConversationView {
         }
         self.stop_typing(cx);
         self.stop_reply_typing(cx);
-        self.new_post_open = false;
+        self.close_new_post(cx);
         self.feed_stash = None;
         self.feed_at_top = true;
         self.restore_subject(None, window, cx);
@@ -3991,7 +3992,7 @@ impl Render for ConversationView {
         }
         let recap_active = self.recap_active();
         let empty_channel = in_feed && self.rows.borrow().is_empty();
-        let new_post = self.render_new_post(window, cx);
+        let new_post = self.render_new_post(cx);
         self.watch_feed_scroll(cx);
         let feed_scrolled = new_post.is_some() && self.scroller.read(cx).is_scrolled_from_top();
         let body = if drafting && self.current.is_none() && self.rows.borrow().is_empty() {

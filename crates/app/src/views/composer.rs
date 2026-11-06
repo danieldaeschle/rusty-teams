@@ -33,6 +33,11 @@ use teams_core::{
 pub(crate) mod delivery;
 mod drafts;
 mod format_menus;
+mod post;
+pub use post::{
+    POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
+    POST_CARD_SUBJECT_TAG,
+};
 mod rule;
 mod schedule;
 mod slash;
@@ -134,6 +139,7 @@ pub enum ComposerEvent {
     FocusMessages,
     Typing(bool),
     Edited,
+    ClosePost,
 }
 
 struct MentionPopup {
@@ -240,6 +246,7 @@ pub struct Composer {
     format_popup: Option<FormatPopup>,
     format_overflow: bool,
     format_bar: HashSet<String>,
+    post_subject: Option<Entity<InputState>>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
     caret_text: String,
@@ -508,6 +515,7 @@ impl Composer {
             format_popup: None,
             format_overflow: false,
             format_bar: HashSet::new(),
+            post_subject: None,
             active_cell: None,
             caret_before_table: 0,
             caret_text: String::new(),
@@ -2925,8 +2933,9 @@ impl Render for Composer {
                 .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
         });
         let markdown_mode = self.app.read(cx).markdown_mode;
-        let format_open = self.format_bar_open() && !markdown_mode;
-        let format_toggle = (!markdown_mode).then(|| {
+        let post_layout = self.post_layout();
+        let format_open = (self.format_bar_open() || post_layout) && !markdown_mode;
+        let format_toggle = (!markdown_mode && !post_layout).then(|| {
             div()
                 .id("composer-format")
                 .debug_selector(|| COMPOSER_FORMAT_TAG.into())
@@ -2958,6 +2967,20 @@ impl Render for Composer {
                 .on_click(cx.listener(|this, _, window, cx| this.toggle_format_bar(window, cx)))
         });
         let format_bar = format_open.then(|| self.render_format_bar(window, cx));
+        let actions = h_flex()
+            .debug_selector(|| COMPOSER_ACTIONS_TAG.into())
+            .flex_none()
+            .gap(px(COMPOSER_BUTTON_INSET))
+            .children(format_toggle)
+            .children(self.render_delivery_button(cx))
+            .children(fun)
+            .children(attach);
+        let (row_actions, post_footer) = if post_layout {
+            (None, Some(self.render_post_footer(actions, can_send, cx)))
+        } else {
+            (Some(actions.ml(px(COMPOSER_BUTTON_INSET))), None)
+        };
+        let post_header = self.render_post_header(cx);
         let composer = cx.weak_entity();
         let tokens_composer = composer.clone();
         let input = Textarea::new(&self.input)
@@ -3396,6 +3419,7 @@ impl Render for Composer {
                                 .absolute()
                                 .size_full(),
                             )
+                            .children(post_header)
                             .children(format_bar)
                             .children(self.render_importance_label(cx))
                             .children(tray)
@@ -3438,19 +3462,10 @@ impl Render for Composer {
                                             )
                                             .child(input),
                                     )
-                                    .child(
-                                        h_flex()
-                                            .debug_selector(|| COMPOSER_ACTIONS_TAG.into())
-                                            .flex_none()
-                                            .ml(px(COMPOSER_BUTTON_INSET))
-                                            .gap(px(COMPOSER_BUTTON_INSET))
-                                            .children(format_toggle)
-                                            .children(self.render_delivery_button(cx))
-                                            .children(fun)
-                                            .children(attach),
-                                    )
-                                    .child(send),
-                            ),
+                                    .children(row_actions)
+                                    .when(!post_layout, |row| row.child(send)),
+                            )
+                            .children(post_footer),
                     ),
             )
             .children(self.render_paste_hint())

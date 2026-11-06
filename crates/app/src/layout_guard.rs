@@ -185,6 +185,8 @@ mod frames {
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
+        POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
+        POST_CARD_SUBJECT_TAG,
     };
     use crate::views::conversation::{
         CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
@@ -2077,6 +2079,53 @@ mod frames {
         });
         collect(&mut visual, Some(awaited));
         visual
+    }
+
+    #[gpui_kit::test]
+    fn the_new_post_is_one_card_with_subject_divider_format_bar_and_post_button(
+        cx: &mut TestAppContext,
+    ) {
+        let mut visual = open_channel(cx, crate::views::post_card::POST_IN_CHANNEL_TAG);
+        let open = visual
+            .debug_bounds(crate::views::post_card::POST_IN_CHANNEL_TAG)
+            .expect("post in channel card");
+        visual.simulate_click(open.center(), Default::default());
+        collect(&mut visual, Some(POST_CARD_SEND_TAG));
+        let mut bounds_of = |path: &'static str| {
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} missing"))
+        };
+        let card = bounds_of(COMPOSER_BOX_TAG);
+        let header = bounds_of(POST_CARD_HEADER_TAG);
+        let subject = bounds_of(POST_CARD_SUBJECT_TAG);
+        let divider = bounds_of(POST_CARD_DIVIDER_TAG);
+        let format_bar = bounds_of(COMPOSER_FORMAT_BAR_TAG);
+        let footer = bounds_of(POST_CARD_FOOTER_TAG);
+        let send = bounds_of(POST_CARD_SEND_TAG);
+        assert!(
+            visual.debug_bounds(COMPOSER_SEND_TAG).is_none(),
+            "chat send button shown in a post"
+        );
+        assert!(
+            visual.debug_bounds(COMPOSER_FORMAT_TAG).is_none(),
+            "format toggle shown although the bar stays open"
+        );
+        assert!(header.bottom() <= subject.top() && subject.bottom() <= divider.top());
+        assert!(divider.bottom() <= format_bar.top() && format_bar.bottom() <= footer.top());
+        assert!(
+            f32::from(divider.left() - card.left()).abs() < 1.5
+                && f32::from(card.right() - divider.right()).abs() < 1.5,
+            "subject divider {} does not run edge to edge in {}",
+            describe(divider),
+            describe(card)
+        );
+        let side = f32::from(card.right() - send.right());
+        let bottom = f32::from(card.bottom() - send.bottom());
+        assert!(
+            (side - bottom).abs() < TOLERANCE,
+            "Post button insets: side {side}, bottom {bottom}"
+        );
     }
 
     #[gpui_kit::test]

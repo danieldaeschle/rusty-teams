@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     message_scroller::MessageScrollerState,
     v_flex,
 };
@@ -14,7 +14,6 @@ use super::{ConversationView, ViewMode};
 use crate::notice::short_error;
 use crate::rows::Row;
 use crate::runtime;
-use crate::theme;
 use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::post_card::{PostAction, post_in_channel_card};
@@ -45,13 +44,22 @@ impl ConversationView {
     }
 
     pub(super) fn open_new_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.new_post_open = true;
+        self.mark_new_post_open(cx);
         self.composer
             .update(cx, |composer, cx| composer.focus(window, cx));
+    }
+
+    fn mark_new_post_open(&mut self, cx: &mut Context<Self>) {
+        self.new_post_open = true;
+        let subject = self.subject.clone();
+        self.composer
+            .update(cx, |composer, cx| composer.set_post_layout(Some(subject), cx));
         cx.notify();
     }
 
     pub(super) fn close_new_post(&mut self, cx: &mut Context<Self>) {
+        self.composer
+            .update(cx, |composer, cx| composer.set_post_layout(None, cx));
         if self.new_post_open {
             self.new_post_open = false;
             cx.notify();
@@ -212,7 +220,8 @@ impl ConversationView {
             ComposerEvent::Edited => self.keep_reply_editor_in_view(window, cx),
             ComposerEvent::Schedule { .. }
             | ComposerEvent::EditLast
-            | ComposerEvent::FocusMessages => {}
+            | ComposerEvent::FocusMessages
+            | ComposerEvent::ClosePost => {}
         }
     }
 
@@ -228,16 +237,11 @@ impl ConversationView {
 
     pub(super) fn show_main_composer(&mut self, cx: &mut Context<Self>) {
         if self.in_feed() {
-            self.new_post_open = true;
-            cx.notify();
+            self.mark_new_post_open(cx);
         }
     }
 
-    pub(super) fn render_new_post(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_new_post(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.in_feed() || self.pane != ChannelPane::Posts {
             return None;
         }
@@ -264,57 +268,29 @@ impl ConversationView {
             );
         }
         let editing = self.composer.read(cx).is_editing();
-        let focused = self
-            .subject
-            .read(cx)
-            .focus_handle(cx)
-            .contains_focused(window, cx);
-        let subject = (!editing).then(|| {
-            div().w_full().px(px(20.)).pt(px(12.)).child(
-                div()
-                    .w_full()
-                    .h(px(36.))
-                    .px(px(12.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(10.))
-                    .bg(theme::surface_raised())
-                    .border_1()
-                    .border_color(if focused {
-                        theme::accent()
-                    } else {
-                        transparent_black()
-                    })
-                    .child(
-                        div()
-                            .w_full()
-                            .child(Input::new(&self.subject).appearance(false).bordered(false)),
-                    ),
-            )
+        let cancel = editing.then(|| {
+            h_flex()
+                .w_full()
+                .px(px(20.))
+                .pb(px(12.))
+                .justify_end()
+                .child(
+                    Button::new("cancel-new-post")
+                        .ghost()
+                        .compact()
+                        .label("Cancel")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_new_post(window, cx)
+                        })),
+                )
         });
         Some(
             v_flex()
                 .w_full()
                 .flex_none()
-                .children(subject)
                 .children(proposal_card)
-                .child(self.composer.clone())
-                .child(
-                    h_flex()
-                        .w_full()
-                        .px(px(20.))
-                        .pb(px(12.))
-                        .justify_end()
-                        .child(
-                            Button::new("cancel-new-post")
-                                .ghost()
-                                .compact()
-                                .label("Cancel")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.cancel_new_post(window, cx)
-                                })),
-                        ),
-                )
+                .child(div().w_full().pt(px(12.)).child(self.composer.clone()))
+                .children(cancel)
                 .into_any_element(),
         )
     }
