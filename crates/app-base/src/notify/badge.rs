@@ -2,12 +2,12 @@ use std::sync::{Arc, OnceLock};
 
 use resvg::{tiny_skia, usvg};
 
-const FILL: &str = "#C4314B";
+const FILL: &str = "#C42B1C";
 const INK: &str = "#FFFFFF";
-const FONT: &[u8] = include_bytes!("../../../app/assets/fonts/GoogleSansFlex-SemiBold.ttf");
+const FONT: &[u8] = include_bytes!("../../../app/assets/fonts/GoogleSansFlex-Bold.ttf");
 const FONT_FAMILY: &str = "Google Sans Flex";
-const SINGLE_GLYPH_SCALE: f32 = 0.62;
-const WIDE_TEXT_SCALE: f32 = 0.5;
+const SINGLE_GLYPH_SCALE: f32 = 0.68;
+const WIDE_TEXT_SCALE: f32 = 0.58;
 const BASELINE_SHIFT: f32 = 0.36;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +51,7 @@ fn badge_svg(text: &str, size: u32) -> String {
         };
     let baseline = radius + font_size * BASELINE_SHIFT;
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><circle cx="{radius}" cy="{radius}" r="{radius}" fill="{FILL}"/><text x="{radius}" y="{baseline}" text-anchor="middle" font-family="{FONT_FAMILY}" font-weight="600" font-size="{font_size}" fill="{INK}">{text}</text></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"><circle cx="{radius}" cy="{radius}" r="{radius}" fill="{FILL}"/><text x="{radius}" y="{baseline}" text-anchor="middle" font-family="{FONT_FAMILY}" font-weight="700" font-size="{font_size}" fill="{INK}">{text}</text></svg>"#
     )
 }
 
@@ -105,7 +105,7 @@ mod tests {
                 .chunks(4)
                 .any(|pixel| pixel == [blue, green, red, 0xff])
         };
-        assert!(has(0x4b, 0x31, 0xc4));
+        assert!(has(0x1c, 0x2b, 0xc4));
         assert!(has(0xff, 0xff, 0xff));
     }
 

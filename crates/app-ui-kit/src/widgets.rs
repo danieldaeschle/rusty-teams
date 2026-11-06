@@ -79,6 +79,7 @@ pub fn badge_pill(count: u32, metrics: BadgeMetrics, background: Hsla, foregroun
     let text = format::badge_text(count);
     div()
         .debug_selector(|| badge_selector(&text))
+        .relative()
         .min_w(px(metrics.height))
         .h(px(metrics.height))
         .px(px(metrics.padding_x))
@@ -88,48 +89,77 @@ pub fn badge_pill(count: u32, metrics: BadgeMetrics, background: Hsla, foregroun
         .justify_center()
         .rounded(px(metrics.height / 2.))
         .bg(background)
-        .text_color(foreground)
         .text_size(px(metrics.font_size))
         .line_height(px(metrics.height))
         .font_weight(FontWeight::BOLD)
-        .child(BadgeText {
-            text,
-            font_size: metrics.font_size,
-            line_height: metrics.height,
-        })
+        .child(
+            div()
+                .debug_selector(|| badge_text_selector(&text))
+                .flex_none()
+                .text_color(transparent_black())
+                .child(text.clone()),
+        )
+        .child(badge_ink(text, metrics.font_size, foreground))
 }
 
-#[derive(IntoElement)]
-struct BadgeText {
-    text: String,
-    font_size: f32,
-    line_height: f32,
+fn badge_ink(text: String, font_size: f32, color: Hsla) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let run = TextRun {
+                len: text.len(),
+                font: badge_font(window),
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line =
+                window
+                    .text_system()
+                    .shape_line(text.clone().into(), px(font_size), &[run], None);
+            let origin = badge_text_origin(window, &text, font_size, bounds);
+            let _ = line.paint(
+                point(origin.x, origin.y - line.ascent),
+                line.ascent + line.descent,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
+        },
+    )
+    .absolute()
+    .inset_0()
 }
 
-impl RenderOnce for BadgeText {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
-        let (shift_x, shift_y) = badge_ink_offset(window, &self.text, self.font_size);
-        div()
-            .debug_selector(|| badge_text_selector(&self.text))
-            .relative()
-            .left(px(-shift_x))
-            .top(px(-shift_y))
-            .flex_none()
-            .h(px(self.line_height))
-            .child(self.text)
-    }
-}
-
-pub fn badge_ink_offset(window: &Window, text: &str, font_size: f32) -> (f32, f32) {
+fn badge_font(window: &Window) -> Font {
     let mut font = window.text_style().font();
     font.weight = FontWeight::BOLD;
+    font
+}
+
+/// Pen origin on the baseline that puts the ink centre of `text` on the centre of `bounds`.
+pub fn badge_text_origin(
+    window: &Window,
+    text: &str,
+    font_size: f32,
+    bounds: Bounds<Pixels>,
+) -> Point<Pixels> {
+    let (ink_centre, cap_height) = badge_ink_centre(window, text, font_size);
+    let centre = bounds.center();
+    point(
+        px(f32::from(centre.x) - ink_centre),
+        px(f32::from(centre.y) + cap_height / 2.),
+    )
+}
+
+/// Horizontal ink centre from the pen origin, and the cap height.
+pub fn badge_ink_centre(window: &Window, text: &str, font_size: f32) -> (f32, f32) {
     let text_system = window.text_system();
-    let font_id = text_system.resolve_font(&font);
+    let font_id = text_system.resolve_font(&badge_font(window));
     let size = px(font_size);
-    let ascent = f32::from(text_system.ascent(font_id, size));
-    let descent = f32::from(text_system.descent(font_id, size)).abs();
     let cap_height = f32::from(text_system.cap_height(font_id, size));
-    let shift_y = (ascent - descent - cap_height) / 2.;
     let mut pen = 0.;
     let mut ink_left = None;
     let mut ink_right = 0.;
@@ -137,15 +167,15 @@ pub fn badge_ink_offset(window: &Window, text: &str, font_size: f32) -> (f32, f3
         let advance = text_system
             .advance(font_id, size, character)
             .map_or(0., |advance| f32::from(advance.width));
-        if let Ok(bounds) = text_system.typographic_bounds(font_id, size, character) {
-            let left = pen + f32::from(bounds.origin.x);
+        if let Ok(ink) = text_system.typographic_bounds(font_id, size, character) {
+            let left = pen + f32::from(ink.origin.x);
             ink_left.get_or_insert(left);
-            ink_right = left + f32::from(bounds.size.width);
+            ink_right = left + f32::from(ink.size.width);
         }
         pen += advance;
     }
-    let shift_x = ink_left.map_or(0., |left| (left + ink_right) / 2. - pen / 2.);
-    (shift_x, shift_y)
+    let ink_centre = ink_left.map_or(pen / 2., |left| (left + ink_right) / 2.);
+    (ink_centre, cap_height)
 }
 
 pub fn count_badge(count: u32, muted: bool) -> Div {

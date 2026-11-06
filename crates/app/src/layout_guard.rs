@@ -224,8 +224,8 @@ mod frames {
     };
     use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
     use crate::views::widgets::{
-        COUNT_BADGE, RAIL_BADGE, badge_ink_offset, badge_pill, badge_selector, badge_text_selector,
-        count_badge,
+        COUNT_BADGE, RAIL_BADGE, badge_ink_centre, badge_pill, badge_selector, badge_text_origin,
+        badge_text_selector, count_badge,
     };
     use gpui_kit::MouseButton;
     use gpui_kit::component::fluent::{
@@ -1994,7 +1994,14 @@ mod frames {
             } else {
                 COUNT_BADGE.font_size
             };
-            let offset = visual.update(|window, _| badge_ink_offset(window, &text, font_size));
+            let offset = visual.update(|window, _| {
+                let origin = badge_text_origin(window, &text, font_size, pill);
+                let (ink_centre, cap_height) = badge_ink_centre(window, &text, font_size);
+                (
+                    f32::from(origin.x) + ink_centre - f32::from(label.center().x),
+                    f32::from(origin.y) - cap_height / 2. - f32::from(label.center().y),
+                )
+            });
             found.extend(badge_violation(&text, pill, label, offset));
         }
         let found: Vec<String> = found
