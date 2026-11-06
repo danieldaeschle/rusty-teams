@@ -457,7 +457,10 @@ fn layout_blocks_with(spans: &[Span], split_images: bool, frame_code: bool) -> V
                 flush(&mut current, &mut blocks, frame_code);
                 let items: Vec<Vec<Block>> = items
                     .iter()
-                    .map(|item| layout_blocks_with(item, false, frame_code))
+                    // The bullet shares the item's line, so code alone in an item is
+                    // not "alone on its line": it stays an inline chip instead of
+                    // becoming a framed code line.
+                    .map(|item| layout_blocks_with(item, false, false))
                     .filter(|item| !item.is_empty())
                     .collect();
                 if !items.is_empty() {
@@ -1152,6 +1155,19 @@ mod tests {
             layout_card_blocks(&[Span::Code("mono".into())]).as_slice(),
             [Block::Paragraph(_)]
         ));
+    }
+
+    #[test]
+    fn code_alone_in_a_list_item_stays_inline() {
+        let blocks = layout_blocks(&[Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![vec![Span::Code("mono".into())]],
+        }]);
+        let [Block::List { items, .. }] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(matches!(items[0].as_slice(), [Block::Paragraph(_)]));
     }
 
     #[test]

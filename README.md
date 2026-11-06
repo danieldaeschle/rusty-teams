@@ -99,10 +99,10 @@ cargo run -p app -- --demo
 
 | Task | Command |
 |---|---|
-| Linux build needs clang + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache` |
+| Linux build needs clang 21+ (libwebrtc's hermetic libc++) + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache`, clang from [apt.llvm.org](https://apt.llvm.org) if the distro one is older than 21 |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
-| macOS universal binary (arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
+| macOS .app (universal arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
 | Tests | `cargo test` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 | Layout sweep before every UI deploy: 8 screens at 640x480 and 1920x1080, PNGs in `target/layout-sweep` (look at each) | `cargo build -p app && scripts/layout-sweep.sh` |

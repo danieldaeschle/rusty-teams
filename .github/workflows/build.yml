@@ -1,0 +1,107 @@
+# Builds per README "Quick start": `cargo build -p app`, plus the universal macOS
+# binary from scripts/build-macos.sh. Tests live in test.yml; this file only
+# packages the artifacts.
+name: Build
+
+# Builds run for tags (the release assets); pushes are tested in test.yml.
+on:
+  push:
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # webrtc-sys compiles its C++ against the hermetic libc++ inside the libwebrtc
+    # artifact, which needs a clang as new as that libc++ (clang 21 today, see
+    # check_clang_version in vendor/webrtc-sys/build.rs). The distro clang is older
+    # (18 on ubuntu-24.04), so setup-linux installs clang 21 and these point every
+    # compile and the final link at it.
+    env:
+      CC: clang-21
+      CXX: clang++-21
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang-21
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-linux
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build
+
+      - name: Build
+        run: cargo build -p app --release
+
+      # The runner is x86_64; the artifact name carries the architecture.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-linux-amd64
+          path: target/release/teams
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build
+
+      # After the toolchain: staging runs `cargo metadata`.
+      - uses: ./.github/actions/setup-windows
+
+      # fxc.exe comes from the Windows SDK, gpui-pre-windows finds it through the registry.
+      - name: Build
+        run: cargo build -p app --release --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
+
+      # The runner is x86_64; the artifact name carries the architecture.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-windows-amd64
+          path: target/release/teams.exe
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build
+
+      # scripts/build-macos.sh builds the arm64 and x86_64 slices, lipos them into
+      # one universal binary and wraps it in a .app with the icon (README "Quick
+      # start"); it installs the x86_64 rustup target itself and needs Xcode CLT only.
+      - name: Build
+        run: scripts/build-macos.sh crates/app teams
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-macos
+          path: target/universal/release/teams-macos.zip

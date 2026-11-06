@@ -580,11 +580,13 @@ mod tests {
             .iter()
             .position(|arg| arg == "--additional-mcp-config")
             .unwrap();
+        // copilot runs under WSL on Windows hosts and gets the /mnt/... form there;
+        // wsl_path leaves other platforms' paths alone.
         assert_eq!(
             plan.run.args[flag_position + 1],
             format!(
                 "@{}",
-                directory.path().join("mcp-sid.json").to_string_lossy()
+                wsl_path(&directory.path().join("mcp-sid.json").to_string_lossy())
             )
         );
     }
@@ -848,6 +850,7 @@ mod tests {
             child.try_wait().unwrap().is_none()
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "the stop script reads /proc cmdline")]
         #[test]
         fn the_app_stop_matches_by_the_role_of_the_session_id() {
             let session = uuid::Uuid::new_v4().to_string();
@@ -919,6 +922,7 @@ mod tests {
                 .unwrap();
         }
 
+        #[cfg_attr(target_os = "macos", ignore = "the stop script reads /proc cmdline")]
         #[test]
         fn kills_a_process_whose_command_line_has_the_session_id() {
             let mut child = spawn_sleeper("fake-session-1");

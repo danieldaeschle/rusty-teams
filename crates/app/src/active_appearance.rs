@@ -113,6 +113,8 @@ pub fn set_zoom(zoom: f32, store: &Store, cx: &mut App) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard};
+
     use gpui_kit::{TestAppContext, WindowAppearance};
     use store::Store;
 
@@ -123,8 +125,21 @@ mod tests {
     use crate::appearance::{self, AppIcon, AppearanceSettings, ThemeChoice};
     use crate::theme::{self, Shade};
 
+    /// The active scheme and shade are process-wide (`theme::set_active_scheme` and
+    /// friends), and every test here writes and reads them end to end. The harness
+    /// runs tests in parallel threads, so without this lock a sibling `install()`
+    /// resets the scheme to the default between one test's write and its assertion.
+    static THEME_STATE: Mutex<()> = Mutex::new(());
+
+    fn theme_state() -> MutexGuard<'static, ()> {
+        THEME_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[gpui_kit::test]
     fn switching_saves_and_applies_live(cx: &mut TestAppContext) {
+        let _theme_state = theme_state();
         let store = Store::open_in_memory().expect("in-memory store");
         cx.update(|cx| {
             gpui_kit::init(cx);
@@ -152,6 +167,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn follow_os_tracks_the_window_appearance_at_runtime(cx: &mut TestAppContext) {
+        let _theme_state = theme_state();
         let store = Store::open_in_memory().expect("in-memory store");
         cx.update(|cx| {
             gpui_kit::init(cx);
@@ -169,6 +185,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn zoom_is_saved_and_unchanged_steps_report_nothing(cx: &mut TestAppContext) {
+        let _theme_state = theme_state();
         let store = Store::open_in_memory().expect("in-memory store");
         cx.update(|cx| {
             gpui_kit::init(cx);

@@ -15,7 +15,7 @@ use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use serde_json::{Value, json};
-use store::{ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord};
+use store::{ChannelReadState, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -1026,11 +1026,12 @@ async fn recent_messages_unread_only_covers_chats_and_channels() {
 
     harness
         .store
-        .apply_channel_read_states(&[(
-            CHANNEL.to_owned(),
-            true,
-            Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 6, 0).unwrap()),
-        )])
+        .apply_channel_read_states(&[ChannelReadState {
+            channel_id: CHANNEL.to_owned(),
+            unread: true,
+            last_message_at: Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 6, 0).unwrap()),
+            read_until: None,
+        }])
         .unwrap();
     let (_, body) = call(&client, "recent_messages", arguments()).await;
     assert_eq!(

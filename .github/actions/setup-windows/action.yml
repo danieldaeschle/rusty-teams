@@ -1,0 +1,41 @@
+name: Set up the Windows build
+description: >-
+  Stages a copy of gpui-pre-windows with the patches from
+  scripts/gpui-windows-patches and builds the onnxruntime.dll that ships
+  embedded in the app. Exports GPUI_PRE_WINDOWS_PATCHED and
+  CALLING_ONNXRUNTIME_DLL for the cargo steps that follow.
+runs:
+  using: composite
+  steps:
+    # scripts/build-windows.sh stages a copy of gpui-pre-windows with the patches from
+    # scripts/gpui-windows-patches and points `patch.crates-io` at it. Same here, except the
+    # build.rs rewrite of that script is left out: it only exists so a Linux host can
+    # cross-compile, and it would hide fxc.exe from a native Windows build.
+    - name: Stage the patched gpui-pre-windows
+      shell: bash
+      run: |
+        set -euo pipefail
+        manifestPath="$(cargo metadata --format-version 1 --filter-platform x86_64-pc-windows-msvc |
+          jq -re '[.packages[] | select(.name == "gpui-pre-windows") | .manifest_path] | first')"
+        # cygpath first, then dirname: the old `jq | xargs dirname | cygpath` chain let
+        # xargs eat the backslashes of the Windows manifest path as escapes, which left
+        # sourceDir at the C: root and `cp -r` walked the whole system drive.
+        sourceDir="$(dirname "$(cygpath -u "$manifestPath")")"
+        [ -f "$sourceDir/Cargo.toml" ] || { echo "not the gpui-pre-windows crate dir: $sourceDir" >&2; exit 1; }
+        patchedDir="$(cygpath -m "$RUNNER_TEMP")/gpui-pre-windows"
+        rm -rf "$patchedDir"
+        cp -r "$sourceDir" "$patchedDir"
+        chmod -R u+w "$patchedDir"
+        for patchFile in scripts/gpui-windows-patches/*.patch; do
+          git -C "$patchedDir" apply -p1 "$(cygpath -m "$GITHUB_WORKSPACE/$patchFile")"
+        done
+        echo "GPUI_PRE_WINDOWS_PATCHED=$patchedDir" >> "$GITHUB_ENV"
+
+    # Background effects ship as an embedded DLL, see tools/onnxruntime-dll.
+    # The path must be absolute: the calling build script reads it from crates/calling,
+    # and `cygpath -m` leaves a relative path like tools/onnxruntime-dll unchanged.
+    - name: Build the embedded onnxruntime.dll
+      shell: bash
+      run: |
+        (cd tools/onnxruntime-dll && RUSTFLAGS="-C target-feature=-crt-static" cargo build --release)
+        echo "CALLING_ONNXRUNTIME_DLL=$(cygpath -m "$GITHUB_WORKSPACE")/tools/onnxruntime-dll/target/release/onnxruntime.dll" >> "$GITHUB_ENV"

@@ -93,7 +93,9 @@ impl Config {
                 Config {
                     platform,
                     port,
-                    profile: path_text(&data_dir.join(PROFILE_NAME)),
+                    // Built with the platform's '/' like with_profile_name, not the
+                    // host's separator: the string is a Linux path whoever builds it.
+                    profile: format!("{}/{}", path_text(&data_dir), PROFILE_NAME),
                     mode_file: data_dir.join(format!("{PROFILE_NAME}.mode")),
                     profile_parent: path_text(&data_dir),
                     mode_parent: data_dir,
@@ -351,7 +353,8 @@ mod tests {
     #[test]
     fn finds_named_chrome_on_path_in_name_priority_per_directory() {
         let search = ChromeSearch::Named(vec!["google-chrome".into(), "chromium".into()]);
-        let path = OsString::from("/usr/local/bin:/usr/bin");
+        // join_paths picks the host's PATH separator so split_paths splits it here too.
+        let path = std::env::join_paths(["/usr/local/bin", "/usr/bin"]).unwrap();
         let found = find_chrome(&search, &path, &|candidate| {
             candidate == Path::new("/usr/bin/chromium") || candidate == Path::new("/usr/bin/google-chrome")
         })

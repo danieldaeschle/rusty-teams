@@ -297,6 +297,7 @@ mod tests {
         assert_eq!(count_badge_for(usize::MAX), RailBadge::Count(u32::MAX));
     }
 
+    #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
     #[test]
     fn every_item_shows_its_shortcut_in_the_tooltip() {
         let items = rail_items(0, 0, false, None);

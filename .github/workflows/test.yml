@@ -1,0 +1,70 @@
+# Tests per README "Quick start": `cargo test`. Linux and Windows are the supported
+# targets (README "Status"); macOS runs no tests here (its Ctrl/Cmd bindings fail the
+# key tests), it only builds - see build.yml.
+name: Test
+
+# Tests gate pushes to main; releases build from tags in build.yml.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # webrtc-sys compiles its C++ against the hermetic libc++ inside the libwebrtc
+    # artifact, which needs a clang as new as that libc++ (clang 21 today, see
+    # check_clang_version in vendor/webrtc-sys/build.rs). The distro clang is older
+    # (18 on ubuntu-24.04), so setup-linux installs clang 21 and these point every
+    # compile and the final link at it.
+    env:
+      CC: clang-21
+      CXX: clang++-21
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang-21
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-linux
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+
+      - name: Tests
+        run: cargo test
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+
+      # After the toolchain: staging runs `cargo metadata`.
+      - uses: ./.github/actions/setup-windows
+
+      - name: Tests
+        run: cargo test --config "patch.crates-io.gpui-pre-windows.path=\"$GPUI_PRE_WINDOWS_PATCHED\""
