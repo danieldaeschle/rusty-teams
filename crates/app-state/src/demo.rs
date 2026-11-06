@@ -11,6 +11,7 @@ use store::{
     Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
+    ANNOUNCEMENT_BANNER_TYPE,
     Activity, ActivityHorizons, ActivityItem, ActivitySnapshot, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
     LanguageSettings, LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource,
     PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior,
@@ -2215,6 +2216,27 @@ fn code_post(channel: &str, tobias: (&str, &str)) -> Vec<MessageRecord> {
             "<p>Add <code>-UseBasicParsing</code> to the call, that fixes it.</p>",
             "[]",
             false,
+        ),
+        with_attachments(
+            with_subject(
+                message(
+                    channel,
+                    "t9",
+                    None,
+                    tobias,
+                    at(0, 12, 10),
+                    "<attachment id=\"announcement-card-demo\"></attachment><p>Please merge your last changes by Thursday 18:00. Anything later goes into release 44.</p>",
+                    "[]",
+                    false,
+                ),
+                "Code freeze starts Thursday",
+            ),
+            &format!(
+                r#"[{{"content_type":"{ANNOUNCEMENT_BANNER_TYPE}","id":"announcement-card-demo","name":null,"url":null,"text":null,"content":{}}}]"#,
+                serde_json::Value::String(
+                    r#"{"title":"Release 43 ships Friday","cardImageType":"colorTheme","cardImageDetails":{"colorTheme":"periwinkleBlue"}}"#.to_owned()
+                )
+            ),
         ),
     ]
 }

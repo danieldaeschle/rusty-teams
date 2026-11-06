@@ -4,6 +4,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::adaptive_card::cards_view;
+use super::announcement_banner::announcement_banner;
 use super::attachments::{attachments_view, message_body};
 use super::avatar::{bot_avatar, person_avatar, with_presence};
 use super::call_card::{CallActions, post_call_card};
@@ -294,10 +295,16 @@ fn message_block(
                 .text_color(theme::text())
                 .child(subject)
         });
+    let banner = row
+        .banner
+        .as_ref()
+        .filter(|_| role == Role::Root && !row.deleted)
+        .map(|banner| announcement_banner(banner, directory));
     let details = v_flex()
         .w_full()
         .min_w_0()
         .gap(px(6.))
+        .children(banner)
         .children(subject)
         .child(content)
         .children(translation)

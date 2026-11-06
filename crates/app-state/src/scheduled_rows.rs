@@ -27,6 +27,7 @@ pub fn draft_id_of(key: &str) -> Option<&str> {
 
 pub fn scheduled_outgoing(html: &str) -> Outgoing {
     Outgoing {
+        banner: None,
         draft: Draft::from_spans(&html_to_spans(html)).trimmed(),
         subject: None,
         mentions: Vec::new(),

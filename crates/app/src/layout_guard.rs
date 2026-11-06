@@ -185,7 +185,7 @@ mod frames {
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
-        POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
+        POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
         POST_CARD_SUBJECT_TAG,
     };
     use crate::views::conversation::{
@@ -2126,6 +2126,36 @@ mod frames {
             (side - bottom).abs() < TOLERANCE,
             "Post button insets: side {side}, bottom {bottom}"
         );
+    }
+
+    #[gpui_kit::test]
+    fn announcement_mode_puts_the_banner_between_author_and_subheading(cx: &mut TestAppContext) {
+        let mut visual = open_channel(cx, crate::views::post_card::POST_IN_CHANNEL_TAG);
+        let open = visual
+            .debug_bounds(crate::views::post_card::POST_IN_CHANNEL_TAG)
+            .expect("post in channel card");
+        visual.simulate_click(open.center(), Default::default());
+        collect(&mut visual, Some(POST_ANNOUNCEMENT_TOGGLE_TAG));
+        let toggle = visual
+            .debug_bounds(POST_ANNOUNCEMENT_TOGGLE_TAG)
+            .expect("announcement toggle in the format bar");
+        let format_bar = visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).expect("format bar");
+        assert!(format_bar.contains(&toggle.center()), "toggle outside the format bar");
+        visual.simulate_click(toggle.center(), Default::default());
+        collect(&mut visual, Some(POST_ANNOUNCEMENT_TAG));
+        let mut bounds_of = |path: &'static str| {
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} missing"))
+        };
+        let card = bounds_of(COMPOSER_BOX_TAG);
+        let header = bounds_of(POST_CARD_HEADER_TAG);
+        let banner = bounds_of(POST_ANNOUNCEMENT_TAG);
+        let subject = bounds_of(POST_CARD_SUBJECT_TAG);
+        assert!(header.bottom() <= banner.top() && banner.bottom() <= subject.top());
+        let left = f32::from(banner.left() - card.left());
+        let right = f32::from(card.right() - banner.right());
+        assert!((left - right).abs() < TOLERANCE, "banner insets: left {left}, right {right}");
     }
 
     #[gpui_kit::test]

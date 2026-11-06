@@ -79,6 +79,7 @@ pub fn pending_row(
             })
             .collect(),
         subject: outgoing.subject.clone(),
+        banner: outgoing.banner.clone(),
         importance: outgoing.importance,
         new_marker: false,
         reply_root: None,
@@ -102,6 +103,7 @@ mod tests {
     #[test]
     fn a_pending_reply_shows_its_quote_before_the_server_echo() {
         let outgoing = Outgoing {
+            banner: None,
             draft: Draft::plain("agreed"),
             subject: None,
             mentions: Vec::new(),

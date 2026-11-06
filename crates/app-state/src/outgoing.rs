@@ -4,11 +4,13 @@ use chrono::{DateTime, Utc};
 use gpui_kit::Image;
 use serde::{Deserialize, Serialize};
 use teams_core::{
+    AnnouncementBanner,
     Draft, FileKind, FileReference, HostedImage, LinkPreview, MentionInput, MessageExtras,
     OBJECT_MARK, UploadedFile,
 };
 
 use store::MessageImportance;
+use uuid::Uuid;
 
 use crate::remote_image::RemoteImage;
 
@@ -60,6 +62,7 @@ pub struct Outgoing {
     pub files: Vec<OutgoingFile>,
     pub link_preview: Option<LinkPreview>,
     pub importance: MessageImportance,
+    pub banner: Option<AnnouncementBanner>,
 }
 
 impl Outgoing {
@@ -99,7 +102,11 @@ impl Outgoing {
     pub fn extras(&self) -> MessageExtras {
         MessageExtras {
             importance: self.importance.stored(),
-            kept: Vec::new(),
+            kept: self
+                .banner
+                .iter()
+                .map(|banner| banner.attachment(format!("announcement-card-{}", Uuid::new_v4().simple())))
+                .collect(),
             images: self
                 .images
                 .iter()

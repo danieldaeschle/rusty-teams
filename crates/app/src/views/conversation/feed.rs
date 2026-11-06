@@ -19,7 +19,6 @@ use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::post_card::{PostAction, post_in_channel_card};
 
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
-const SUBJECT_PLACEHOLDER: &str = "Add a subject";
 
 pub(super) struct FeedStash {
     scroller: Entity<MessageScrollerState>,
@@ -31,7 +30,7 @@ pub(super) fn subject_input(
     window: &mut Window,
     cx: &mut Context<ConversationView>,
 ) -> Entity<InputState> {
-    cx.new(|cx| InputState::new(window, cx).placeholder(SUBJECT_PLACEHOLDER))
+    cx.new(|cx| InputState::new(window, cx).placeholder(crate::views::composer::SUBJECT_PLACEHOLDER))
 }
 
 impl ConversationView {

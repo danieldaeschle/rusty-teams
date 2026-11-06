@@ -1,4 +1,5 @@
 mod actions;
+mod announcement;
 mod activity_sync;
 mod adaptive_card;
 mod avatars;
@@ -70,6 +71,9 @@ mod translation;
 mod youtube;
 
 pub use activity_sync::stored_activity_feed;
+pub use announcement::{
+    ANNOUNCEMENT_APP_ID, ANNOUNCEMENT_BANNER_TYPE, AnnouncementBanner, BannerBackground,
+};
 pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,

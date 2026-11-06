@@ -7,6 +7,7 @@ use gpui_kit::Image;
 use store::{MessageImportance, MessageRecord};
 use teams_core::roster_event::{RosterEvent, roster_event};
 use teams_core::{
+    AnnouncementBanner, attachments,
     JumboEmoji, jumbo_emoji,
     AdaptiveCard, CallEvent, CallPhase, Draft, FileCard, ForwardHeader, ForwardInfo,
     ImageRef, LinkPreview, forwards,
@@ -179,6 +180,7 @@ pub struct MessageRow {
     pub meeting_link: Option<String>,
     pub adaptive_cards: Vec<AdaptiveCard>,
     pub subject: Option<String>,
+    pub banner: Option<AnnouncementBanner>,
     pub importance: MessageImportance,
     pub new_marker: bool,
     pub reply_root: Option<String>,
@@ -761,6 +763,7 @@ fn event_row(
         meeting_link: None,
         adaptive_cards: Vec::new(),
         subject: None,
+        banner: None,
         importance: MessageImportance::Normal,
         new_marker: false,
         reply_root: None,
@@ -897,6 +900,7 @@ fn message_row_with(
             _ => adaptive_cards(record),
         },
         subject: record.subject.clone(),
+        banner: AnnouncementBanner::from_attachments(&attachments(record)),
         importance: if record.deleted {
             MessageImportance::Normal
         } else {

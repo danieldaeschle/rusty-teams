@@ -35,8 +35,9 @@ mod drafts;
 mod format_menus;
 mod post;
 pub use post::{
+    POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG,
     POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
-    POST_CARD_SUBJECT_TAG,
+    POST_CARD_SUBJECT_TAG, SUBJECT_PLACEHOLDER,
 };
 mod rule;
 mod schedule;
@@ -247,6 +248,7 @@ pub struct Composer {
     format_overflow: bool,
     format_bar: HashSet<String>,
     post_subject: Option<Entity<InputState>>,
+    announcement: Option<post::AnnouncementDraft>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
     caret_text: String,
@@ -516,6 +518,7 @@ impl Composer {
             format_overflow: false,
             format_bar: HashSet::new(),
             post_subject: None,
+            announcement: None,
             active_cell: None,
             caret_before_table: 0,
             caret_text: String::new(),
@@ -1886,6 +1889,7 @@ impl Composer {
                 Vec::new()
             },
             importance: self.sendable_importance(cx),
+            banner: self.announcement_banner(cx),
         }
     }
 
@@ -2363,6 +2367,7 @@ impl Composer {
         self.link.reset();
         self.close_popup();
         self.reset_importance();
+        self.close_announcement(window, cx);
         cx.emit(ComposerEvent::Submit(Box::new(outgoing)));
         cx.notify();
     }
@@ -2415,6 +2420,9 @@ impl Composer {
         self.reply = outgoing.reply.clone();
         self.editing = outgoing.edit.clone();
         self.link.restore(outgoing.link_preview.clone());
+        if outgoing.edit.is_none() {
+            self.restore_announcement(outgoing.banner.as_ref(), window, cx);
+        }
         self.close_popup();
         self.schedule_draft_save(cx);
         cx.notify();
@@ -2656,8 +2664,9 @@ impl Composer {
     }
 
     fn format_bar_fit(&self) -> format_toolbar::BarFit {
+        let toggle_width = if self.post_layout() { COMPOSER_BUTTON_SIZE } else { 0. };
         let available = self.composer_bounds.get().map_or(f32::INFINITY, |bounds| {
-            f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.)
+            f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.) - toggle_width
         });
         format_toolbar::fit_groups(available, &format_toolbar::BAR_GROUPS)
     }
@@ -2708,7 +2717,13 @@ impl Composer {
         v_flex()
             .debug_selector(|| COMPOSER_FORMAT_BAR_TAG.into())
             .w_full()
-            .child(row.w_full().p(px(COMPOSER_BUTTON_INSET)))
+            .child(
+                h_flex()
+                    .w_full()
+                    .p(px(COMPOSER_BUTTON_INSET))
+                    .child(row.flex_1().min_w_0())
+                    .children(self.render_announcement_toggle(cx)),
+            )
             .child(
                 div()
                     .debug_selector(|| COMPOSER_FORMAT_DIVIDER_TAG.into())
@@ -3593,6 +3608,7 @@ mod tests {
         use crate::outgoing::{Outgoing, OutgoingFile, OutgoingImage};
 
         let outgoing = Outgoing {
+            banner: None,
             draft: teams_core::Draft::default(),
             subject: None,
             mentions: Vec::new(),
@@ -3651,6 +3667,7 @@ mod tests {
         images: Vec<crate::outgoing::OutgoingImage>,
     ) -> crate::outgoing::Outgoing {
         crate::outgoing::Outgoing {
+            banner: None,
             draft: teams_core::Draft::plain(text),
             subject: None,
             mentions: Vec::new(),
@@ -5147,6 +5164,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     let draft = Outgoing {
+                        banner: None,
                         draft: teams_core::Draft::plain("old"),
                         subject: None,
                         mentions: Vec::new(),

@@ -403,6 +403,7 @@ pub fn edit_preserved(record: &MessageRecord) -> EditPreserved {
                 content: attachment.content,
                 content_url: attachment.url,
                 name: attachment.name,
+                teams_app_id: attachment.teams_app_id,
             });
         }
     }

@@ -2975,6 +2975,7 @@ impl ConversationView {
             Vec::new()
         };
         let draft = Outgoing {
+            banner: None,
             draft: message_draft(&record),
             subject: None,
             mentions,

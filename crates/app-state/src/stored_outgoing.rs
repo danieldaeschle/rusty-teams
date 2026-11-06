@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui_kit::{Image, ImageFormat};
 use serde::{Deserialize, Serialize};
 use store::{AttachmentImage, MessageImportance};
-use teams_core::{Draft, DraftLine, LinkPreview, MentionInput};
+use teams_core::{AnnouncementBanner, Draft, DraftLine, LinkPreview, MentionInput};
 
 use crate::remote_image::{RemoteImage, RemoteKind};
 use crate::outgoing::{InlineImage, Outgoing, OutgoingFile, OutgoingImage, ReplyPreview};
@@ -57,6 +57,8 @@ struct Payload {
     preview: Option<StoredPreview>,
     #[serde(default)]
     importance: Option<String>,
+    #[serde(default)]
+    banner: Option<String>,
 }
 
 pub struct StoredOutgoing {
@@ -109,6 +111,7 @@ pub fn encode(outgoing: &Outgoing) -> Option<StoredOutgoing> {
             image_height: preview.image_height,
         }),
         importance: outgoing.importance.stored().map(str::to_owned),
+        banner: outgoing.banner.as_ref().map(AnnouncementBanner::content),
     })
     .ok()?;
     Some(StoredOutgoing { payload, images })
@@ -145,6 +148,7 @@ pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
         objects,
         preview,
         importance,
+        banner,
     } = serde_json::from_str(payload).ok()?;
     let mut inline = images.iter();
     let images = objects
@@ -172,6 +176,7 @@ pub fn decode(payload: &str, images: &[AttachmentImage]) -> Option<Outgoing> {
             image_height: preview.image_height,
         }),
         importance: MessageImportance::from_stored(importance.as_deref()),
+        banner: banner.as_deref().and_then(AnnouncementBanner::parse),
     })
 }
 
@@ -229,7 +234,21 @@ mod tests {
                 image_height: None,
             }),
             importance: Default::default(),
+            banner: Some(AnnouncementBanner {
+                title: "Ship it".to_owned(),
+                background: teams_core::BannerBackground::Color("rose".to_owned()),
+            }),
         }
+    }
+
+    #[test]
+    fn an_announcement_is_sent_as_a_banner_attachment_first() {
+        let extras = outgoing().extras();
+        let banner = &extras.kept[0];
+        assert!(banner.id.starts_with("announcement-card-"));
+        assert_eq!(banner.content_type.as_deref(), Some(teams_core::ANNOUNCEMENT_BANNER_TYPE));
+        assert_eq!(banner.teams_app_id.as_deref(), Some(teams_core::ANNOUNCEMENT_APP_ID));
+        assert!(extras.kept_html().starts_with("<attachment id=\"announcement-card-"));
     }
 
     #[test]

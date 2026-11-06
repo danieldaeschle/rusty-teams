@@ -8,7 +8,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 use mcp::ReactionProposal;
-use teams_core::{FileCard, ImageRef, LinkPreview};
+use teams_core::{AnnouncementBanner, FileCard, ImageRef, LinkPreview};
 
 use super::forward_select::SelectionSnapshot;
 use super::{ConversationView, HoverSlot, PENDING_KEY_PREFIX};
@@ -79,6 +79,7 @@ impl RenderEnv {
                     .and_then(|call| call.recap.as_ref()?.recording.thumbnail.clone()),
             )
             .chain(message.files.iter().filter_map(FileCard::preview))
+            .chain(message.banner.as_ref().and_then(AnnouncementBanner::image))
             .chain(
                 message
                     .reactions

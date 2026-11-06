@@ -4,6 +4,7 @@ use store::{
     ChannelRecord, ChatRecord, MemberRecord, MessageImportance, MessageRecord, TeamRecord,
 };
 
+use crate::announcement::ANNOUNCEMENT_BANNER_TYPE;
 use crate::adaptive_card::card_content_text;
 use crate::call_event::CallEvent;
 use crate::forwarded::FORWARDED_CONTENT_TYPE;
@@ -244,7 +245,7 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
                 is_card
                     || matches!(
                         attachment.content_type.as_deref(),
-                        Some("messageReference" | FORWARDED_CONTENT_TYPE)
+                        Some("messageReference" | FORWARDED_CONTENT_TYPE | ANNOUNCEMENT_BANNER_TYPE)
                     )
             }),
         unavailable: false,

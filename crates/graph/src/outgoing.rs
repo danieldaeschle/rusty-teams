@@ -67,6 +67,7 @@ pub struct KeptAttachment {
     pub content: Option<String>,
     pub content_url: Option<String>,
     pub name: Option<String>,
+    pub teams_app_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -159,13 +160,17 @@ pub(crate) fn message_body(
     }
     if !extras.files.is_empty() || !extras.kept.is_empty() {
         let kept = extras.kept.iter().map(|kept| {
-            json!({
+            let mut attachment = json!({
                 "id": kept.id,
                 "contentType": kept.content_type,
                 "content": kept.content,
                 "contentUrl": kept.content_url,
                 "name": kept.name,
-            })
+            });
+            if let Some(app_id) = &kept.teams_app_id {
+                attachment["teamsAppId"] = json!(app_id);
+            }
+            attachment
         });
         let files = extras.files.iter().map(|file| {
             json!({
@@ -412,6 +417,7 @@ mod tests {
                 content: Some("{\"messageId\":\"Q1\"}".into()),
                 content_url: None,
                 name: None,
+                teams_app_id: None,
             }],
             importance: None,
         };

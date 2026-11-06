@@ -98,6 +98,7 @@ pub fn outgoing_for(entry: &ProposalEntry, reply: Option<ReplyPreview>) -> Outgo
         markdown.push(OBJECT_MARK);
     }
     Outgoing {
+        banner: None,
         draft: Draft::from_markdown(&markdown),
         subject: None,
         mentions: entry
