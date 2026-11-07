@@ -4,6 +4,7 @@ mod markdown;
 mod scrub;
 mod series;
 mod storage;
+mod web_shadow;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,6 +15,7 @@ use chrono::{DateTime, Utc};
 
 pub use document::Document;
 pub use storage::{report_directory, save_report};
+pub use web_shadow::WebShadow;
 
 use super::model::CallKind;
 use series::StatsSeries;

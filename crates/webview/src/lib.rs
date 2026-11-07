@@ -19,7 +19,7 @@ mod park;
 mod transport;
 
 #[cfg(windows)]
-pub use dialog::{DialogEvent, DialogHandle, DialogMode, DialogSpec};
+pub use dialog::{DialogEvent, DialogHandle, DialogMode, DialogSpec, NEW_WINDOW_KIND};
 #[cfg(windows)]
 pub use embed::{EmbedEvent, EmbedSpec};
 pub use geometry::{EmbedBounds, local_cutouts};

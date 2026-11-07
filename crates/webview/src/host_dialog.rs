@@ -3,7 +3,8 @@ use std::rc::Rc;
 use tokio::sync::mpsc::UnboundedSender;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
+    AcceleratorKeyPressedEventHandler, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
+    CreateCoreWebView2ControllerCompletedHandler,
     NewWindowRequestedEventHandler, PermissionRequestedEventHandler, WebMessageReceivedEventHandler,
     WebResourceRequestedEventHandler, take_pwstr,
 };
@@ -18,7 +19,7 @@ use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, PWSTR, w};
 
-use crate::dialog::{DialogCommand, DialogEvent, DialogMode, DialogSpec};
+use crate::dialog::{DialogCommand, DialogEvent, DialogMode, DialogSpec, NEW_WINDOW_KIND};
 use crate::host::{Shared, fit, shared as running_host};
 
 const DIALOG_CLASS: windows::core::PCWSTR = w!("RustyTeamsDialog");
@@ -33,7 +34,7 @@ const BASE_DPI: u32 = 96;
 const VIRTUAL_KEY_ESCAPE: u32 = 0x1B;
 const PAGE_HEADERS: windows::core::PCWSTR =
     w!("Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store");
-const NEW_WINDOW_KIND: &str = "newWindow";
+const CALL_SHADOW_SCRIPT: &str = include_str!("call_shadow.js");
 
 struct DialogView {
     controller: ICoreWebView2Controller,
@@ -316,10 +317,15 @@ fn attach(
     match page.mode {
         DialogMode::Hosted => {
             serve_host_page(&webview, environment, &page)?;
-            forward_messages(&webview, id, &page.url)?;
+            let page_url = page.url.clone();
+            forward_messages(&webview, id, move |source| source == page_url)?;
             close_on_escape(&controller, window)?;
         }
-        DialogMode::Call => allow_teams_media(&webview)?,
+        DialogMode::Call => {
+            allow_teams_media(&webview)?;
+            shadow_calls(&webview)?;
+            forward_messages(&webview, id, is_media_origin)?;
+        }
     }
     forward_new_windows(&webview, id)?;
     unsafe {
@@ -376,15 +382,18 @@ fn serve_host_page(
     unsafe { webview.add_WebResourceRequested(&handler, &mut token) }
 }
 
-fn forward_messages(webview: &ICoreWebView2, id: u64, page_url: &str) -> windows::core::Result<()> {
-    let page_url = page_url.to_owned();
+fn forward_messages(
+    webview: &ICoreWebView2,
+    id: u64,
+    accepts: impl Fn(&str) -> bool + 'static,
+) -> windows::core::Result<()> {
     let handler = WebMessageReceivedEventHandler::create(Box::new(move |_, arguments| {
         let Some(arguments) = arguments else {
             return Ok(());
         };
         let mut source = PWSTR::null();
         unsafe { arguments.Source(&mut source) }?;
-        if take_pwstr(source) != page_url {
+        if !accepts(&take_pwstr(source)) {
             return Ok(());
         }
         let mut message = PWSTR::null();
@@ -411,13 +420,24 @@ fn allow_teams_media(webview: &ICoreWebView2) -> windows::core::Result<()> {
         let origin = take_pwstr(origin);
         let media = kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
             || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA;
-        if media && MEDIA_ORIGINS.iter().any(|allowed| origin.starts_with(allowed)) {
+        if media && is_media_origin(&origin) {
             unsafe { arguments.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) }?;
         }
         Ok(())
     }));
     let mut token = 0;
     unsafe { webview.add_PermissionRequested(&handler, &mut token) }
+}
+
+fn is_media_origin(origin: &str) -> bool {
+    MEDIA_ORIGINS.iter().any(|allowed| origin.starts_with(allowed))
+}
+
+fn shadow_calls(webview: &ICoreWebView2) -> windows::core::Result<()> {
+    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
+    unsafe {
+        webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(CALL_SHADOW_SCRIPT), &handler)
+    }
 }
 
 fn forward_new_windows(webview: &ICoreWebView2, id: u64) -> windows::core::Result<()> {

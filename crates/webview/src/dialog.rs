@@ -2,6 +2,8 @@ use std::sync::{Arc, mpsc};
 
 use crate::transport::UiRequest;
 
+pub const NEW_WINDOW_KIND: &str = "newWindow";
+
 /// `Hosted` serves `page_html` at `page_url` for an app dialog; `Call` loads Teams on the web itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogMode {

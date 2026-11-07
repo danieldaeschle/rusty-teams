@@ -1,9 +1,10 @@
 use std::sync::{Arc, OnceLock};
 
+use app_call_model::report::{WebShadow, report_directory, save_report};
 use gpui_kit::*;
 use serde_json::json;
 use teams_core::DialogIdentity;
-use webview::{DialogEvent, DialogHandle, DialogMode, DialogSpec, WebViewTransport};
+use webview::{DialogEvent, DialogHandle, DialogMode, DialogSpec, NEW_WINDOW_KIND, WebViewTransport};
 
 use super::sdk::{self, Effect, HostContext, HostPage};
 use super::{UrlDialog, UrlDialogNext};
@@ -53,13 +54,29 @@ pub fn open_call_window(url: String, title: String, cx: &mut App) -> bool {
         page_html: String::new(),
     });
     cx.spawn(async move |cx| {
+        let mut shadow = WebShadow::new(chrono::Utc::now());
         while let Some(DialogEvent::Message(raw)) = events.recv().await {
+            if shadow.observe(&raw) {
+                continue;
+            }
             let link = serde_json::from_str::<serde_json::Value>(&raw)
                 .ok()
+                .filter(|message| message.get("kind").and_then(serde_json::Value::as_str) == Some(NEW_WINDOW_KIND))
                 .and_then(|message| message.get("url")?.as_str().map(str::to_owned));
             if let Some(link) = link {
                 cx.update(|cx| cx.open_url(&link));
             }
+        }
+        if shadow.is_empty() {
+            return;
+        }
+        let document = shadow.document();
+        let saved = cx
+            .background_executor()
+            .spawn(async move { save_report(&report_directory(), &document) })
+            .await;
+        if let Err(error) = saved {
+            log::warn!("web call report not saved: {error}");
         }
     })
     .detach();
