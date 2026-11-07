@@ -148,6 +148,10 @@ impl AppState {
             self.start_test_call(cx);
             return;
         }
+        if self.try_web_call(super::web_call::chat_web_url(conversation_id), cx) {
+            return;
+        }
+        let chat = self.sidebar.chats.iter().find(|chat| chat.id == conversation_id);
         let plan = chat.and_then(|chat| plan_for_chat(chat, self.directory.me.as_ref()));
         let Some(plan) = plan else {
             self.raise_notice(NOT_CALLABLE_NOTICE.to_owned(), None, cx);
@@ -195,6 +199,9 @@ impl AppState {
             self.raise_notice(MEETING_UNAVAILABLE_NOTICE.to_owned(), None, cx);
             return;
         };
+        if self.try_web_call(super::web_call::meeting_web_url(&target), cx) {
+            return;
+        }
         let demo = DemoMeeting {
             guests: if conversation_id == DEMO_LOBBY_MEETING {
                 DEMO_SMALL_MEETING

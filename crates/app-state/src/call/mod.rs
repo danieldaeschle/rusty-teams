@@ -18,6 +18,7 @@ pub mod share_overlay;
 pub mod schedule;
 pub mod target;
 pub mod view_actions;
+pub mod web_call;
 
 pub use app_call_model::{
     agenda, background, bubbles, caption_style, demo, end_screen, fullscreen, health, media, mic,

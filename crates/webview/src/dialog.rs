@@ -2,8 +2,16 @@ use std::sync::{Arc, mpsc};
 
 use crate::transport::UiRequest;
 
+/// `Hosted` serves `page_html` at `page_url` for an app dialog; `Call` loads Teams on the web itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogMode {
+    Hosted,
+    Call,
+}
+
 #[derive(Debug, Clone)]
 pub struct DialogSpec {
+    pub mode: DialogMode,
     pub title: String,
     pub width: u32,
     pub height: u32,

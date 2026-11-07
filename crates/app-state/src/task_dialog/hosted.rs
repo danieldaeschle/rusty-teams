@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use gpui_kit::*;
 use serde_json::json;
 use teams_core::DialogIdentity;
-use webview::{DialogEvent, DialogHandle, DialogSpec, WebViewTransport};
+use webview::{DialogEvent, DialogHandle, DialogMode, DialogSpec, WebViewTransport};
 
 use super::sdk::{self, Effect, HostContext, HostPage};
 use super::{UrlDialog, UrlDialogNext};
@@ -12,6 +12,8 @@ use crate::backend::Engine;
 use crate::{notify, runtime, theme};
 
 static HOST: OnceLock<Arc<WebViewTransport>> = OnceLock::new();
+const CALL_WINDOW_WIDTH: u32 = 1100;
+const CALL_WINDOW_HEIGHT: u32 = 760;
 
 pub fn install_host(transport: Arc<WebViewTransport>) {
     let _ = HOST.set(transport);
@@ -33,6 +35,35 @@ pub fn open(dialog: UrlDialog, engine: Option<Arc<Engine>>, cx: &mut App) {
         .flatten();
     cx.spawn(async move |cx| run(host, dialog, state, engine, owner, cx).await)
         .detach();
+}
+
+/// Teams on the web in its own window, signed in through the shared WebView2 profile.
+pub fn open_call_window(url: String, title: String, cx: &mut App) -> bool {
+    let Some(host) = HOST.get().cloned() else {
+        return false;
+    };
+    let (_handle, mut events) = host.open_dialog(DialogSpec {
+        mode: DialogMode::Call,
+        title,
+        width: CALL_WINDOW_WIDTH,
+        height: CALL_WINDOW_HEIGHT,
+        background: theme::background_hex(),
+        owner: None,
+        page_url: url,
+        page_html: String::new(),
+    });
+    cx.spawn(async move |cx| {
+        while let Some(DialogEvent::Message(raw)) = events.recv().await {
+            let link = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|message| message.get("url")?.as_str().map(str::to_owned));
+            if let Some(link) = link {
+                cx.update(|cx| cx.open_url(&link));
+            }
+        }
+    })
+    .detach();
+    true
 }
 
 async fn run(
@@ -61,6 +92,7 @@ async fn run(
     }
     .html();
     let (handle, mut events) = host.open_dialog(DialogSpec {
+        mode: DialogMode::Hosted,
         title: dialog.title.clone(),
         width: dialog.width,
         height: dialog.height,

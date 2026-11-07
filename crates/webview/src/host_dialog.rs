@@ -4,7 +4,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
-    NewWindowRequestedEventHandler, WebMessageReceivedEventHandler,
+    NewWindowRequestedEventHandler, PermissionRequestedEventHandler, WebMessageReceivedEventHandler,
     WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -18,11 +18,17 @@ use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, PWSTR, w};
 
-use crate::dialog::{DialogCommand, DialogEvent, DialogSpec};
+use crate::dialog::{DialogCommand, DialogEvent, DialogMode, DialogSpec};
 use crate::host::{Shared, fit, shared as running_host};
 
 const DIALOG_CLASS: windows::core::PCWSTR = w!("RustyTeamsDialog");
 const DIALOG_STYLE: WINDOW_STYLE = WINDOW_STYLE(WS_CAPTION.0 | WS_SYSMENU.0);
+const CALL_STYLE: WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
+const MEDIA_ORIGINS: [&str; 3] = [
+    "https://teams.microsoft.com/",
+    "https://teams.cloud.microsoft/",
+    "https://teams.live.com/",
+];
 const BASE_DPI: u32 = 96;
 const VIRTUAL_KEY_ESCAPE: u32 = 0x1B;
 const PAGE_HEADERS: windows::core::PCWSTR =
@@ -41,6 +47,7 @@ pub(crate) struct Dialog {
 }
 
 struct HostPage {
+    mode: DialogMode,
     url: String,
     html: String,
 }
@@ -72,6 +79,7 @@ pub(crate) fn open(
         let _ = SetForegroundWindow(window);
     }
     let page = HostPage {
+        mode: spec.mode,
         url: spec.page_url,
         html: spec.page_html,
     };
@@ -234,7 +242,10 @@ fn create_window(spec: &DialogSpec) -> windows::core::Result<HWND> {
             WINDOW_EX_STYLE::default(),
             DIALOG_CLASS,
             &HSTRING::from(spec.title.as_str()),
-            DIALOG_STYLE,
+            match spec.mode {
+                DialogMode::Hosted => DIALOG_STYLE,
+                DialogMode::Call => CALL_STYLE,
+            },
             left,
             top,
             width,
@@ -302,10 +313,15 @@ fn attach(
             })?;
         webview.Settings()?.SetIsStatusBarEnabled(false)?;
     }
-    serve_host_page(&webview, environment, &page)?;
-    forward_messages(&webview, id, &page.url)?;
+    match page.mode {
+        DialogMode::Hosted => {
+            serve_host_page(&webview, environment, &page)?;
+            forward_messages(&webview, id, &page.url)?;
+            close_on_escape(&controller, window)?;
+        }
+        DialogMode::Call => allow_teams_media(&webview)?,
+    }
     forward_new_windows(&webview, id)?;
-    close_on_escape(&controller, window)?;
     unsafe {
         controller.SetIsVisible(true)?;
         webview.Navigate(&HSTRING::from(page.url.as_str()))?;
@@ -379,6 +395,29 @@ fn forward_messages(webview: &ICoreWebView2, id: u64, page_url: &str) -> windows
     }));
     let mut token = 0;
     unsafe { webview.add_WebMessageReceived(&handler, &mut token) }
+}
+
+fn allow_teams_media(webview: &ICoreWebView2) -> windows::core::Result<()> {
+    let handler = PermissionRequestedEventHandler::create(Box::new(move |_, arguments| {
+        let Some(arguments) = arguments else {
+            return Ok(());
+        };
+        let mut origin = PWSTR::null();
+        let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+        unsafe {
+            arguments.Uri(&mut origin)?;
+            arguments.PermissionKind(&mut kind)?;
+        }
+        let origin = take_pwstr(origin);
+        let media = kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+            || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA;
+        if media && MEDIA_ORIGINS.iter().any(|allowed| origin.starts_with(allowed)) {
+            unsafe { arguments.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) }?;
+        }
+        Ok(())
+    }));
+    let mut token = 0;
+    unsafe { webview.add_PermissionRequested(&handler, &mut token) }
 }
 
 fn forward_new_windows(webview: &ICoreWebView2, id: u64) -> windows::core::Result<()> {

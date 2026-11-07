@@ -157,6 +157,7 @@ pub struct AppState {
     pub chat_settings: teams_core::ChatSettingsDocument,
     pub markdown_mode: bool,
     pub actions_on_right_click: bool,
+    pub web_calls: bool,
     pub demo_chat_desktop: HashMap<String, teams_core::DesktopNotifications>,
     pub own_tenant: Option<String>,
     pub call_share_motion: bool,
@@ -253,6 +254,7 @@ impl AppState {
         let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
         let actions_on_right_click =
             crate::chat_settings_actions::stored_actions_on_right_click(&store);
+        let web_calls = crate::call::web_call::stored_web_calls(&store);
         let mut state = AppState {
             store,
             engine: None,
@@ -324,6 +326,7 @@ impl AppState {
             chat_settings,
             markdown_mode,
             actions_on_right_click,
+            web_calls,
             demo_chat_desktop: HashMap::new(),
             own_tenant: None,
             call_share_motion: false,

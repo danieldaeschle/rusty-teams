@@ -140,7 +140,7 @@ impl SettingsDialog {
             }
             SettingsSection::Appearance => appearance::render(&self.app, cx).into_any_element(),
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
-            SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
+            SettingsSection::Calls => calls::render(&self.center, &self.app, cx).into_any_element(),
             SettingsSection::Devices => self
                 .devices
                 .clone()

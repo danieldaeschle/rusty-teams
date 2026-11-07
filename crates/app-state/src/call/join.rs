@@ -46,6 +46,9 @@ impl AppState {
             self.show_call(true, cx);
             return;
         }
+        if self.try_web_call(super::web_call::meeting_web_url(&target), cx) {
+            return;
+        }
         let title = selection_for(&self.sidebar, &target.thread_id)
             .map(|selection| selection_title(&self.sidebar, &selection))
             .unwrap_or_else(|| MEETING_TITLE.to_owned());
