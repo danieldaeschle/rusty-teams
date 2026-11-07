@@ -9,6 +9,12 @@ use crate::remote::Remote;
 const AVATAR_MAX_AGE_DAYS: i64 = 7;
 const AVATAR_BATCH: usize = 60;
 const PHOTO_RENDITION_SINCE: &str = "2026-10-17T17:00:00Z";
+const TEAM_AVATAR_PREFIX: &str = "team:";
+
+/// Team pictures share the avatar cache under this key; Teams serves a lettered tile for teams without one.
+pub fn team_avatar_key(team_id: &str) -> String {
+    format!("{TEAM_AVATAR_PREFIX}{team_id}")
+}
 
 fn avatar_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
     let since = DateTime::parse_from_rfc3339(PHOTO_RENDITION_SINCE)
@@ -66,8 +72,21 @@ impl<R: Remote> SyncEngine<R> {
                 }
             }
         }
-        for chunk in people.chunks(AVATAR_BATCH) {
-            let photos = match self.remote.user_photos(chunk).await {
+        let (teams, people): (Vec<String>, Vec<String>) = people
+            .into_iter()
+            .partition(|key| key.starts_with(TEAM_AVATAR_PREFIX));
+        for chunk in teams.chunks(AVATAR_BATCH).chain(people.chunks(AVATAR_BATCH)) {
+            let photos = match chunk.first() {
+                Some(key) if key.starts_with(TEAM_AVATAR_PREFIX) => {
+                    let team_ids: Vec<String> = chunk
+                        .iter()
+                        .map(|key| key.trim_start_matches(TEAM_AVATAR_PREFIX).to_owned())
+                        .collect();
+                    self.remote.team_photos(&team_ids).await
+                }
+                _ => self.remote.user_photos(chunk).await,
+            };
+            let photos = match photos {
                 Ok(photos) => photos,
                 Err(error) => {
                     first_error.get_or_insert(error);

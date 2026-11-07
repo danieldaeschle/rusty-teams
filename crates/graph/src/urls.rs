@@ -29,6 +29,10 @@ pub fn user_photo_original(user_id: &str) -> String {
     format!("{GRAPH}/v1.0/users/{}/photo/$value", segment(user_id))
 }
 
+pub fn team_photo(team_id: &str) -> String {
+    format!("{GRAPH}/v1.0/teams/{}/photo/$value", segment(team_id))
+}
+
 pub fn user_profile(user_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/users/{}?$select=id,displayName,jobTitle,department,companyName,\

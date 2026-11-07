@@ -281,6 +281,10 @@ pub trait Remote {
         Err(Error::Unsupported("profile photos"))
     }
 
+    async fn team_photos(&self, _team_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
+        Err(Error::Unsupported("team pictures"))
+    }
+
     async fn presences(&self, _user_ids: &[String]) -> Result<Vec<Presence>> {
         Err(Error::Unsupported("presence"))
     }
@@ -1075,6 +1079,14 @@ impl Remote for Graph {
 
     async fn user_photos(&self, user_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
         let photos = Graph::user_photos(self, user_ids).await?;
+        Ok(photos
+            .into_iter()
+            .map(|photo| photo.map_err(Into::into))
+            .collect())
+    }
+
+    async fn team_photos(&self, team_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
+        let photos = Graph::team_photos(self, team_ids).await?;
         Ok(photos
             .into_iter()
             .map(|photo| photo.map_err(Into::into))

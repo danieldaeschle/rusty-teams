@@ -81,6 +81,19 @@ pub fn initials(name: &str) -> String {
     letters.into_iter().flat_map(char::to_uppercase).collect()
 }
 
+/// Teams letters a team tile from the first and last word, split at spaces and underscores, in their own case.
+pub fn team_initials(name: &str) -> String {
+    let words: Vec<&str> = name
+        .split([' ', '_'])
+        .filter(|word| word.chars().next().is_some_and(char::is_alphanumeric))
+        .collect();
+    match words.as_slice() {
+        [] => "?".to_owned(),
+        [single] => single.chars().take(1).collect(),
+        [first, .., last] => first.chars().take(1).chain(last.chars().take(1)).collect(),
+    }
+}
+
 pub fn first_name(name: &str) -> &str {
     name.split_whitespace().next().unwrap_or(name)
 }
@@ -222,6 +235,16 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn team_tiles_letter_first_and_last_word_like_teams() {
+        assert_eq!(team_initials("e_IT-Support"), "eI");
+        assert_eq!(team_initials("e_ComponentLibrary"), "eC");
+        assert_eq!(team_initials("e_Human Resources"), "eR");
+        assert_eq!(team_initials("e_NLP / AI"), "eA");
+        assert_eq!(team_initials("Platform"), "P");
+        assert_eq!(team_initials(""), "?");
+    }
 
     #[test]
     fn the_clock_follows_the_display_language() {

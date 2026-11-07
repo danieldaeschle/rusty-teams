@@ -83,7 +83,7 @@ pub use adaptive_card::{
     InvokePayload, SubmitAction, TextColor, TextSize, ToggleTarget, VerticalAlignment,
     card_content_text, split_overflow, task_value,
 };
-pub use avatars::Avatar;
+pub use avatars::{Avatar, team_avatar_key};
 pub use call_event::{
     CallEvent, CallPhase, CallType, Recording, call_event, format_duration, parse_duration_seconds,
 };

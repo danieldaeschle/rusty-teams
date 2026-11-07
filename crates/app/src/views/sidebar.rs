@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::{Local, Offset, Utc};
@@ -15,10 +15,10 @@ use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, MessageImportance, SidebarTeam,
     Store,
 };
-use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat};
+use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat, team_avatar_key};
 
 use super::activity_panel::ActivityPanel;
-use super::avatar::{spec_avatar, square_avatar, with_presence};
+use super::avatar::{spec_avatar, team_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::chat_pop_out;
 use super::saved_panel::SavedPanel;
@@ -33,7 +33,7 @@ use crate::channel_menu::{
 };
 use crate::chat_actions::TITLE_LIMIT;
 use crate::chat_filter::{ChatFilter, filtered_sections, has_no_matches};
-use crate::data::{Directory, is_pending_folder};
+use crate::data::{AvatarState, Directory, is_pending_folder};
 use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
@@ -1473,6 +1473,7 @@ impl SidebarView {
         entry: &SidebarTeam,
         channel: &ChannelRecord,
         selected: bool,
+        team_photo: Option<&AvatarState>,
     ) -> AnyElement {
         let team = &entry.team;
         let unread = channel_shows_unread(entry, channel);
@@ -1495,7 +1496,7 @@ impl SidebarView {
             .cursor_pointer()
             .when(selected, |row| row.bg(theme::surface_raised()))
             .when(!selected, |row| row.hover(|row| row.bg(theme::row_hover())))
-            .child(square_avatar(&team.name, &team.id, 28., 7.))
+            .child(team_avatar(team_photo, &team.name, &team.id, 28., 7.))
             .child(
                 v_flex()
                     .flex_1()
@@ -1580,6 +1581,7 @@ impl SidebarView {
         entry: &SidebarTeam,
         hoisted_only: bool,
         selected: Option<&Selection>,
+        team_photo: Option<&AvatarState>,
         cx: &mut Context<Self>,
     ) -> Div {
         let team_id = entry.team.id.clone();
@@ -1610,7 +1612,8 @@ impl SidebarView {
                     14.,
                     theme::text_muted(),
                 ))
-                .child(square_avatar(
+                .child(team_avatar(
+                    team_photo,
                     &entry.team.name,
                     &entry.team.id,
                     TEAM_ICON_SIZE,
@@ -1823,14 +1826,29 @@ impl SidebarView {
     }
 
     fn channels_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (sidebar, pinned_ids, selected) = {
+        let (sidebar, pinned_ids, selected, team_photos) = {
             let state = self.state.read(cx);
+            let team_photos: HashMap<String, AvatarState> = state
+                .sidebar
+                .teams
+                .iter()
+                .filter_map(|entry| {
+                    let photo = state.directory.avatar(&team_avatar_key(&entry.team.id))?;
+                    Some((entry.team.id.clone(), photo.clone()))
+                })
+                .collect();
             (
                 state.sidebar.clone(),
                 state.directory.pinned_channels.clone(),
                 state.selection.clone().filter(|_| !state.new_chat),
+                team_photos,
             )
         };
+        let team_keys = sidebar
+            .teams
+            .iter()
+            .map(|entry| team_avatar_key(&entry.team.id))
+            .collect();
         let mut list = v_flex().w_full().pb(px(12.));
         let pinned: Vec<(&SidebarTeam, &ChannelRecord)> = pinned_ids
             .iter()
@@ -1848,7 +1866,13 @@ impl SidebarView {
             list = list.child(self.plain_header(PINNED_LABEL));
             for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
-                list = list.child(self.channel_row(&channel.id, entry, channel, is_selected));
+                list = list.child(self.channel_row(
+                    &channel.id,
+                    entry,
+                    channel,
+                    is_selected,
+                    team_photos.get(&entry.team.id),
+                ));
             }
         }
         list = list.child(self.plain_header(TEAMS_LABEL));
@@ -1859,7 +1883,8 @@ impl SidebarView {
             .iter()
             .filter(|entry| !entry.hidden || team_hoisted(entry))
         {
-            list = self.team_block(list, entry, entry.hidden, selected.as_ref(), cx);
+            let team_photo = team_photos.get(&entry.team.id);
+            list = self.team_block(list, entry, entry.hidden, selected.as_ref(), team_photo, cx);
         }
         if !hidden_teams.is_empty() {
             let holds_selection = hidden_teams
@@ -1878,10 +1903,12 @@ impl SidebarView {
             ));
             if open {
                 for entry in hidden_teams {
-                    list = self.team_block(list, entry, false, selected.as_ref(), cx);
+                    let team_photo = team_photos.get(&entry.team.id);
+                    list = self.team_block(list, entry, false, selected.as_ref(), team_photo, cx);
                 }
             }
         }
+        self.request_lazy_data(team_keys, Vec::new(), cx);
         let scroll_area = div()
             .id("channels-scroll")
             .flex_1()

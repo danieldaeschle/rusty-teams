@@ -49,7 +49,7 @@ mod shared;
 use super::add_people_dialog::open_add_people;
 use super::attachments::FileActions;
 use super::avatar::{
-    bot_tile, member_stack, person_avatar, spec_avatar, square_avatar, with_presence,
+    bot_tile, member_stack, person_avatar, spec_avatar, team_avatar, with_presence,
 };
 use super::call_controls::header_call_controls;
 use super::channel_tabs::{ChannelPane, HEADER_TITLE_MAX_WIDTH};
@@ -3700,7 +3700,11 @@ impl ConversationView {
                     .map_or((current.title.as_str(), current.title.as_str()), |entry| {
                         (entry.team.name.as_str(), entry.team.id.as_str())
                     });
-                lead = Some(square_avatar(name, key, 36., 9.).into_any_element());
+                let photo = team.and_then(|entry| {
+                    app.directory
+                        .avatar(&teams_core::team_avatar_key(&entry.team.id))
+                });
+                lead = Some(team_avatar(photo, name, key, 36., 9.));
             }
         }
         let mut header = h_flex()

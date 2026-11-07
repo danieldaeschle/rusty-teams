@@ -44,6 +44,10 @@ impl Graph {
         Ok(photos)
     }
 
+    pub async fn team_photos(&self, team_ids: &[String]) -> Result<Vec<Result<Option<Photo>>>> {
+        self.photo_batch(team_ids, urls::team_photo).await
+    }
+
     async fn photo_batch(
         &self,
         user_ids: &[String],

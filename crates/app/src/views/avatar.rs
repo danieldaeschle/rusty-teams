@@ -331,7 +331,19 @@ pub fn square_avatar(name: &str, key: &str, size: f32, radius: f32) -> Div {
         .text_color(theme::text())
         .text_size(px((size * 0.4).round()))
         .font_weight(FontWeight::SEMIBOLD)
-        .child(format::initials(name))
+        .child(format::team_initials(name))
+}
+
+pub fn team_avatar(photo: Option<&AvatarState>, name: &str, key: &str, size: f32, radius: f32) -> AnyElement {
+    match photo {
+        Some(AvatarState::Ready(photo)) => div()
+            .size(px(size))
+            .flex_none()
+            .rounded(px(radius))
+            .child(photo_disc(photo, size, radius))
+            .into_any_element(),
+        _ => square_avatar(name, key, size, radius).into_any_element(),
+    }
 }
 
 pub fn member_stack(

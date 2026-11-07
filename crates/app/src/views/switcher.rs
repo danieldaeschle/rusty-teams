@@ -13,7 +13,7 @@ use gpui_kit::*;
 use store::SearchHit;
 use teams_core::{HIGHLIGHT_END, HIGHLIGHT_START};
 
-use super::avatar::{person_avatar, spec_avatar, square_avatar};
+use super::avatar::{person_avatar, spec_avatar, team_avatar};
 use super::widgets::icon;
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::data::{Directory, is_one_on_one};
@@ -173,7 +173,8 @@ pub fn candidate_avatar(
     match avatar {
         CandidateAvatar::Chat(spec) => spec_avatar(directory, spec, size, ring),
         CandidateAvatar::Team { name, key } => {
-            square_avatar(name, key, size, size / 4.).into_any_element()
+            let photo = directory.avatar(&teams_core::team_avatar_key(key));
+            team_avatar(photo, name, key, size, size / 4.)
         }
     }
 }
