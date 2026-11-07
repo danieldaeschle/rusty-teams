@@ -521,7 +521,7 @@ impl FindPanel {
                 div()
                     .text_size(px(13.))
                     .text_color(theme::text_soft())
-                    .line_clamp(2)
+                    .line_clamp(2).text_ellipsis()
                     .child(StyledText::new(hit.text.clone()).with_highlights(marks)),
             )
             .on_click(cx.listener(move |panel, _, _, cx| panel.pick(index, cx)))

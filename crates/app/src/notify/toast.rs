@@ -176,7 +176,7 @@ fn highlighted_preview(text: &str, mention: bool) -> AnyElement {
         .text_size(px(PREVIEW_SIZE))
         .line_height(px(18.))
         .text_color(theme::text())
-        .line_clamp(PREVIEW_MAX_LINES)
+        .line_clamp(PREVIEW_MAX_LINES).text_ellipsis()
         .child(styled)
         .into_any_element()
 }

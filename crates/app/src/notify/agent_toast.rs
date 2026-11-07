@@ -116,7 +116,7 @@ pub(super) fn agent_toast_content(
                 .text_size(px(PREVIEW_SIZE))
                 .line_height(px(18.))
                 .text_color(theme::text_soft())
-                .line_clamp(PREVIEW_MAX_LINES)
+                .line_clamp(PREVIEW_MAX_LINES).text_ellipsis()
                 .child(agent.body.clone()),
         )
         .child(

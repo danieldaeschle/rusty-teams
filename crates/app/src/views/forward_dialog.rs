@@ -462,7 +462,7 @@ fn preview_quote(item: &ForwardItem, lines: usize) -> Div {
         )
         .child(
             div()
-                .line_clamp(lines)
+                .line_clamp(lines).text_ellipsis()
                 .text_size(px(12.5))
                 .text_color(theme::text_muted())
                 .child(text),

@@ -79,5 +79,5 @@ pub fn headline_style(text: Div) -> Div {
 pub fn announcement_banner(banner: &AnnouncementBanner, directory: &Directory) -> Div {
     banner_frame(&banner.background, directory)
         .debug_selector(|| ANNOUNCEMENT_BANNER_TAG.into())
-        .child(headline_style(div().line_clamp(2)).child(banner.title.clone()))
+        .child(headline_style(div().line_clamp(2).text_ellipsis()).child(banner.title.clone()))
 }

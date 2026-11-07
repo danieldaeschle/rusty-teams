@@ -403,7 +403,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                 .gap(px(2.))
                 .child(
                     div()
-                        .when(headline_wraps, |headline| headline.line_clamp(2))
+                        .when(headline_wraps, |headline| headline.line_clamp(2).text_ellipsis())
                         .when(!headline_wraps, |headline| headline.truncate())
                         .text_size(px(13.))
                         .line_height(px(HEADLINE_LINE_HEIGHT))

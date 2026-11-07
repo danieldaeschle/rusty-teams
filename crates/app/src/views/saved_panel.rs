@@ -142,7 +142,7 @@ impl SavedPanel {
                     )
                     .child(
                         div()
-                            .line_clamp(PREVIEW_LINES)
+                            .line_clamp(PREVIEW_LINES).text_ellipsis()
                             .text_size(px(13.))
                             .line_height(relative(1.4))
                             .text_color(theme::text_soft())
