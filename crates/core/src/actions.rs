@@ -373,6 +373,57 @@ impl<R: Remote> SyncEngine<R> {
         Ok(Some(record))
     }
 
+    pub async fn open_post(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Result<Option<OpenedPost>> {
+        let Conversation::Channel { team_id } = self.resolve(conversation_id).await? else {
+            return Err(Error::Unsupported("opening a post of a chat"));
+        };
+        let root_ids = [message_id.to_owned()];
+        let (fetched, replies) = tokio::join!(
+            self.fetch_channel_message(&team_id, conversation_id, message_id),
+            self.remote
+                .channel_replies(&team_id, conversation_id, &root_ids)
+        );
+        let message = match fetched {
+            Ok(message) => message,
+            Err(error) => {
+                self.report(format!("cannot open a post: {error}"));
+                return Err(error);
+            }
+        };
+        let Some(record) = message_record(conversation_id, &message) else {
+            return Ok(None);
+        };
+        let replies_loaded = record.reply_to_id.is_none()
+            && replies
+                .as_ref()
+                .is_ok_and(|listings| listings.iter().all(Result::is_ok));
+        let mut records = vec![record];
+        if replies_loaded {
+            records.extend(
+                replies
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|reply| message_record(conversation_id, &reply)),
+            );
+        }
+        self.apply_chat_emotions(conversation_id, &mut records).await;
+        let mut record = records[0].clone();
+        let delta = self.ingest(conversation_id, records)?;
+        self.announce_stored_late(conversation_id, &delta);
+        let links_changed = self.attach_links(conversation_id, &mut [&mut record]).await;
+        self.announce(conversation_id, !delta.is_empty() || links_changed);
+        Ok(Some(OpenedPost {
+            record,
+            replies_loaded,
+        }))
+    }
+
     pub async fn attach_link_preview(
         &self,
         conversation_id: &str,
@@ -891,6 +942,12 @@ impl<R: Remote> SyncEngine<R> {
             }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenedPost {
+    pub record: MessageRecord,
+    pub replies_loaded: bool,
 }
 
 fn outgoing(

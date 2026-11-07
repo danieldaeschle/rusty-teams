@@ -2036,6 +2036,24 @@ async fn refreshing_a_thread_stores_every_reply_of_that_root() {
 }
 
 #[tokio::test]
+async fn opening_an_uncached_post_stores_it_with_its_replies_in_one_go() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    let root_id = fake.channel_pages.lock().unwrap()[0][0].id.clone();
+    let reply = |id: u32, minute: i64| -> Message {
+        let mut reply = message(id, minute, &format!("<p>reply {id}</p>"));
+        reply.reply_to_id = Some(root_id.clone());
+        reply
+    };
+    *fake.thread_replies.lock().unwrap() = vec![reply(7001, 90), reply(7002, 91)];
+    let post = engine.open_post(CHANNEL, &root_id).await.unwrap().unwrap();
+    assert_eq!(post.record.message_id, root_id);
+    assert!(post.replies_loaded);
+    let thread = engine.store().thread_messages(CHANNEL, &root_id).unwrap();
+    assert_eq!(thread.len(), 3);
+}
+
+#[tokio::test]
 async fn channel_delta_picks_up_new_and_edited_posts_and_stores_the_link() {
     let fake = Arc::new(Fake::default());
     let engine = channel_engine(&fake).await;

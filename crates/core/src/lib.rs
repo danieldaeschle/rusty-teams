@@ -70,6 +70,7 @@ mod translate_sync;
 mod translation;
 mod youtube;
 
+pub use actions::OpenedPost;
 pub use activity_sync::stored_activity_feed;
 pub use announcement::{
     ANNOUNCEMENT_APP_ID, ANNOUNCEMENT_BANNER_TYPE, AnnouncementBanner, BannerBackground,

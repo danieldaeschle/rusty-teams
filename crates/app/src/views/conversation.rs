@@ -245,6 +245,7 @@ pub struct ConversationView {
     reaction_details: Option<ReactionDetails>,
     highlighted_message: Option<String>,
     fetched_jump: Option<String>,
+    loading_post: Option<String>,
     pin_index: usize,
     channel_details_open: bool,
     copilot: copilot::CopilotPane,
@@ -595,6 +596,7 @@ impl ConversationView {
             reaction_details: None,
             highlighted_message: None,
             fetched_jump: None,
+            loading_post: None,
             pin_index: 0,
             channel_details_open: false,
             copilot: copilot::CopilotPane::default(),
@@ -1190,6 +1192,16 @@ impl ConversationView {
     }
 
     fn jump_to_message(&mut self, conversation_id: &str, message_id: &str, cx: &mut Context<Self>) {
+        self.jump_to_post(conversation_id, message_id, true, cx);
+    }
+
+    fn jump_to_post(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        refresh_replies: bool,
+        cx: &mut Context<Self>,
+    ) {
         let store = self.app.read(cx).store.clone();
         let record = store
             .messages_by_id(conversation_id, &[message_id.to_owned()])
@@ -1246,7 +1258,9 @@ impl ConversationView {
         self.reload_pending(cx);
         self.rebuild(true, cx);
         if in_channel {
-            self.refresh_thread(row_key.clone(), cx);
+            if refresh_replies {
+                self.refresh_thread(row_key.clone(), cx);
+            }
             let shown_alone = self
                 .rows
                 .borrow()
@@ -1276,22 +1290,66 @@ impl ConversationView {
         let (task_conversation_id, task_message_id) = (conversation_id.clone(), message_id.to_owned());
         let receiver = runtime::spawn(async move {
             engine
-                .refresh_message(&task_conversation_id, &task_message_id)
+                .open_post(&task_conversation_id, &task_message_id)
                 .await
         });
         let message_id = message_id.to_owned();
+        self.show_loading_post(message_id.clone(), cx);
         cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(_))) = receiver.await else {
-                return;
-            };
+            let result = receiver.await;
             this.update(cx, |this, cx| {
-                if this.conversation_id().as_deref() == Some(conversation_id.as_str()) {
-                    this.jump_to_message(&conversation_id, &message_id, cx);
-                }
+                this.finish_loading_post(&conversation_id, &message_id, result, cx)
             })
             .ok();
         })
         .detach();
+    }
+
+    fn show_loading_post(&mut self, message_id: String, cx: &mut Context<Self>) {
+        self.pane = ChannelPane::Posts;
+        self.enter_feed_mode();
+        self.stop_typing(cx);
+        self.enter_thread_mode(message_id.clone(), cx);
+        self.loading_post = Some(message_id);
+        self.rebuild(true, cx);
+    }
+
+    fn finish_loading_post(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        result: Result<
+            teams_core::Result<Option<teams_core::OpenedPost>>,
+            tokio::sync::oneshot::error::RecvError,
+        >,
+        cx: &mut Context<Self>,
+    ) {
+        if self.loading_post.as_deref() != Some(message_id) {
+            return;
+        }
+        self.loading_post = None;
+        if self.conversation_id().as_deref() != Some(conversation_id) {
+            return;
+        }
+        let still_waiting = self.current.as_ref().is_some_and(|current| {
+            current.mode == ViewMode::Thread(message_id.to_owned())
+        });
+        match result {
+            Ok(Ok(Some(post))) if still_waiting => {
+                self.jump_to_post(conversation_id, message_id, !post.replies_loaded, cx)
+            }
+            Ok(Ok(Some(_))) => self.rebuild(true, cx),
+            failure => {
+                if let Ok(Err(error)) = &failure {
+                    self.notice = Some(format!("Could not load the post: {}", short_error(error)));
+                }
+                if still_waiting {
+                    self.back_to_threads(cx);
+                } else {
+                    cx.notify();
+                }
+            }
+        }
     }
 
     fn reveal_row(&mut self, row_key: String, message_key: String, cx: &mut Context<Self>) {
@@ -1632,6 +1690,7 @@ impl ConversationView {
             ViewMode::Thread(root_id) => Some(root_id.clone()),
             ViewMode::Flat | ViewMode::ThreadList => None,
         };
+        let loading_post = thread_root.is_some() && thread_root == self.loading_post;
         let sync_state = store.sync_state(&conversation_id).ok().flatten();
         let window = current.detached.as_ref().map(|detached| {
             (
@@ -1689,9 +1748,8 @@ impl ConversationView {
             current.loaded_count = records.len();
         }
         let has_older = sync_has_more && !current.older_blocked && can_load_older;
-        let placeholders = current.sync.messages
-            && records.is_empty()
-            && !matches!(current.mode, ViewMode::Thread(_));
+        let placeholders = records.is_empty()
+            && (loading_post || current.sync.messages && thread_root.is_none());
         let in_feed = current.mode == ViewMode::ThreadList;
         let mut rows = match &current.mode {
             _ if placeholders => {
