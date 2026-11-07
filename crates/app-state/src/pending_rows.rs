@@ -36,7 +36,10 @@ pub fn pending_row(
         application_id: None,
         created_at,
         series: Series::default(),
-        time: created_at.with_timezone(&Local).format("%H:%M").to_string(),
+        time: created_at
+            .with_timezone(&Local)
+            .format(app_base::format::clock_format())
+            .to_string(),
         day_header: None,
         blocks: pending_blocks(outgoing),
         jumbo: (outgoing.reply.is_none() && outgoing.images.is_empty() && outgoing.files.is_empty())

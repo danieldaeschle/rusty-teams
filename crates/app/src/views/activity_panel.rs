@@ -612,12 +612,14 @@ where
     Zone::Offset: std::fmt::Display,
 {
     let (start, end) = (start.with_timezone(zone), end.with_timezone(zone));
+    let clock = crate::format::clock_format();
+    let dated = format!("%b %-d, {clock}");
     let end_format = if end.date_naive() == start.date_naive() {
-        "%H:%M"
+        clock
     } else {
-        "%b %-d, %H:%M"
+        dated.as_str()
     };
-    format!("{} - {}", start.format("%b %-d, %H:%M"), end.format(end_format))
+    format!("{} - {}", start.format(&dated), end.format(end_format))
 }
 
 fn reply_headline(entry: &Entry, names: &str) -> String {

@@ -9,8 +9,7 @@ use crate::format;
 
 const MAX_AVATARS: usize = 4;
 const RECAP_FALLBACK_TITLE: &str = "Meeting";
-const RECAP_DATE_FORMAT: &str = "%A, %-d %B %Y %H:%M";
-const RECAP_TIME_FORMAT: &str = "%H:%M";
+const RECAP_DATE_FORMAT: &str = "%A, %-d %B %Y";
 const AUTO_STOP_SECONDS: i64 = 5;
 const WEEKDAY_STAMP_DAYS: i64 = 6;
 const OWN_NAME: &str = "You";
@@ -324,10 +323,10 @@ fn recap_date_line(
         "{} - {}",
         slot.start
             .with_timezone(&clock.offset)
-            .format(RECAP_DATE_FORMAT),
+            .format(&format!("{RECAP_DATE_FORMAT} {}", app_base::format::clock_format())),
         slot.end
             .with_timezone(&clock.offset)
-            .format(RECAP_TIME_FORMAT)
+            .format(app_base::format::clock_format())
     )
 }
 
@@ -336,7 +335,11 @@ fn notice_stamp(time: DateTime<Utc>, clock: &CallClock) -> String {
     let local = time.with_timezone(&clock.offset);
     let days_ago = (clock.today - local.date_naive()).num_days();
     if (2..=WEEKDAY_STAMP_DAYS).contains(&days_ago) {
-        local.format("%A %H:%M").to_string()
+        format!(
+            "{} {}",
+            local.format("%A"),
+            local.format(app_base::format::clock_format())
+        )
     } else {
         format::post_time_label(time, clock.today, clock.offset)
     }

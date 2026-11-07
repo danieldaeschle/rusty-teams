@@ -88,7 +88,7 @@ pub fn presets(now: DateTime<Local>) -> Vec<Preset> {
         presets.push(Preset {
             kind: PresetKind::LaterToday,
             label: "Later today",
-            time_label: at.format("%H:%M").to_string(),
+            time_label: at.format(crate::format::clock_format()).to_string(),
             at,
         });
     }
@@ -111,7 +111,7 @@ pub fn presets(now: DateTime<Local>) -> Vec<Preset> {
             presets.push(Preset {
                 kind,
                 label,
-                time_label: at.format("%a %H:%M").to_string(),
+                time_label: weekday_clock(at),
                 at,
             });
         }
@@ -175,10 +175,18 @@ pub fn format_time(time: NaiveTime) -> String {
 pub fn describe(at: DateTime<Local>, now: DateTime<Local>) -> String {
     let days_ahead = (at.date_naive() - now.date_naive()).num_days();
     match days_ahead {
-        0 => at.format("today %H:%M").to_string(),
-        1..=6 => at.format("%a %H:%M").to_string(),
-        _ => at.format("%a %-d %b %H:%M").to_string(),
+        0 => format!("today {}", at.format(crate::format::clock_format())),
+        1..=6 => weekday_clock(at),
+        _ => format!(
+            "{} {}",
+            at.format("%a %-d %b"),
+            at.format(crate::format::clock_format())
+        ),
     }
+}
+
+fn weekday_clock(at: DateTime<Local>) -> String {
+    format!("{} {}", at.format("%a"), at.format(crate::format::clock_format()))
 }
 
 #[cfg(test)]

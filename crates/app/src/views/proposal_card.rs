@@ -199,7 +199,7 @@ fn header_text(entry: &ProposalEntry, now: DateTime<Utc>) -> (String, Hsla, Opti
         ProposalStatus::Stale { answered_at } => (
             format!(
                 "{agent}'s reply is outdated - you answered at {}",
-                answered_at.format("%H:%M")
+                answered_at.format(crate::format::clock_format())
             ),
             theme::text_muted(),
             None,

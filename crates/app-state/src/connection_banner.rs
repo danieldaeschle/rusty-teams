@@ -58,7 +58,7 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
         BannerKind::Reconnecting => text("Reconnecting..."),
         BannerKind::Offline => BannerText {
             detail: last_sync
-                .map(|time| format!("Last synced {}", time.with_timezone(&Local).format("%H:%M"))),
+                .map(|time| format!("Last synced {}", time.with_timezone(&Local).format(app_base::format::clock_format()))),
             ..text(OFFLINE_TEXT)
         },
         BannerKind::SignIn => text("Sign-in required. Sign in to Teams in the window that opened."),

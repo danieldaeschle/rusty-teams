@@ -29,6 +29,10 @@ fn current_date_style() -> Option<DateStyle> {
     DATE_STYLE.with(Cell::get)
 }
 
+pub fn clock_format() -> &'static str {
+    current_date_style().map_or("%H:%M", |style| style.clock)
+}
+
 /// Numeric day and month in the order of the account's display language, as `Intl.DateTimeFormat` does in Teams.
 pub fn date_style(locale: &str) -> DateStyle {
     let locale = locale.to_ascii_lowercase();
@@ -218,6 +222,16 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn the_clock_follows_the_display_language() {
+        set_date_locale(Some("en-US"));
+        assert_eq!(clock_format(), "%-I:%M %p");
+        set_date_locale(Some("de-DE"));
+        assert_eq!(clock_format(), "%H:%M");
+        set_date_locale(None);
+        assert_eq!(clock_format(), "%H:%M");
+    }
 
     fn utc(day: u32, hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, day, hour, 5, 0).unwrap()

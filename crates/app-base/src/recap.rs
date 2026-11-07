@@ -78,7 +78,7 @@ pub fn occurrence_label(
             format!(
                 "{}, {}",
                 format::day_label(local.date_naive(), today),
-                local.format("%H:%M")
+                local.format(format::clock_format())
             )
         },
     )
@@ -87,7 +87,11 @@ pub fn occurrence_label(
 pub fn time_label(time: Option<DateTime<Utc>>, offset: FixedOffset) -> String {
     time.map_or_else(
         || "-".to_owned(),
-        |time| time.with_timezone(&offset).format("%H:%M").to_string(),
+        |time| {
+            time.with_timezone(&offset)
+                .format(format::clock_format())
+                .to_string()
+        },
     )
 }
 

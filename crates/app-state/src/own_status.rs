@@ -160,9 +160,13 @@ where
 {
     let local = expires_at.with_timezone(&now.timezone());
     if local.date_naive() == now.date_naive() {
-        format!("until {}", local.format("%H:%M"))
+        format!("until {}", local.format(app_base::format::clock_format()))
     } else {
-        format!("until {}", local.format("%a %H:%M"))
+        format!(
+            "until {} {}",
+            local.format("%a"),
+            local.format(app_base::format::clock_format())
+        )
     }
 }
 

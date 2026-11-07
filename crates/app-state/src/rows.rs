@@ -381,7 +381,9 @@ pub struct Thread {
 }
 
 pub fn clock_label(time: DateTime<Utc>, offset: FixedOffset) -> String {
-    time.with_timezone(&offset).format("%H:%M").to_string()
+    time.with_timezone(&offset)
+        .format(app_base::format::clock_format())
+        .to_string()
 }
 
 pub fn reaction_label(reaction_type: &str) -> String {

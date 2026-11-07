@@ -497,7 +497,9 @@ impl NotificationCenter {
         let now = Instant::now();
         let outcome = self.stack.push(incoming, now);
         if let Some(model) = self.stack.get_mut(outcome.id) {
-            model.time = chrono::Local::now().format("%H:%M").to_string();
+            model.time = chrono::Local::now()
+                .format(crate::format::clock_format())
+                .to_string();
         }
         let throttle_allows = self.throttle.allow(&incoming.conversation_id, now);
         let audible =
@@ -534,7 +536,9 @@ impl NotificationCenter {
             .stack
             .push_status_change(user_id, &name, text, &conversation_id, Instant::now());
         if let Some(model) = self.stack.get_mut(id) {
-            model.time = chrono::Local::now().format("%H:%M").to_string();
+            model.time = chrono::Local::now()
+                .format(crate::format::clock_format())
+                .to_string();
         }
         let user_id = user_id.to_owned();
         self.app
@@ -577,7 +581,9 @@ impl NotificationCenter {
             .stack
             .push_agent(toast, &run.conversation_id, &run.message_id, now);
         if let Some(model) = self.stack.get_mut(id) {
-            model.time = chrono::Local::now().format("%H:%M").to_string();
+            model.time = chrono::Local::now()
+                .format(crate::format::clock_format())
+                .to_string();
         }
         let quiet = self.settings.do_not_disturb || self.app.read(cx).mode.demo;
         if self.settings.sounds.notification_sound && !quiet {
@@ -664,7 +670,9 @@ impl NotificationCenter {
             Instant::now(),
         );
         if let Some(model) = self.stack.get_mut(id) {
-            model.time = chrono::Local::now().format("%H:%M").to_string();
+            model.time = chrono::Local::now()
+                .format(crate::format::clock_format())
+                .to_string();
         }
         if decision.sound && !self.demo_mode {
             self.play_notification_sound(cx);

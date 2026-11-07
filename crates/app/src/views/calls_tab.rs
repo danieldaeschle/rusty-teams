@@ -380,12 +380,12 @@ fn agenda_row(
         .cursor_pointer()
         .hover(|row| row.bg(theme::row_hover()))
         .child(
-            div()
+            v_flex()
                 .w(px(TIME_COLUMN_WIDTH))
                 .flex_none()
                 .text_size(px(12.))
                 .text_color(theme::text_muted())
-                .child(row.time_label.clone()),
+                .children(time_lines(&row.time_label)),
         )
         .child(
             v_flex()
@@ -517,4 +517,12 @@ pub fn calls_body(
             SIDEBAR_SCROLL_DIVIDER,
         ))
         .into_any_element()
+}
+
+fn time_lines(label: &str) -> Vec<String> {
+    let twelve_hour = crate::format::clock_format().contains(['p', 'P']);
+    match label.split_once(" - ") {
+        Some((start, end)) if twelve_hour => vec![start.to_owned(), end.to_owned()],
+        _ => vec![label.to_owned()],
+    }
 }

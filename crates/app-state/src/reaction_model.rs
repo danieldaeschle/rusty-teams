@@ -67,7 +67,7 @@ where
     let local = time.with_timezone(&now.timezone());
     let day = local.date_naive();
     let today = now.date_naive();
-    let clock = local.format("%H:%M");
+    let clock = local.format(app_base::format::clock_format());
     if day == today {
         format!("today at {clock}")
     } else if today.pred_opt() == Some(day) {
