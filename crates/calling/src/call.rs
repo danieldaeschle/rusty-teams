@@ -780,7 +780,7 @@ async fn drive(
     let mut local_video = LocalVideo::new(&factory, options.video, control.video.clone(), control.updates());
     let mut camera_choice = options.camera.clone();
     let mut media_description_request = 1u32;
-    control.send(CallUpdate::Cameras(camera_devices(options.video).await));
+    refresh_cameras(control.updates(), options.video, timeline.clone());
     refresh_share_sources(control.updates(), options.video);
 
     let wants_data_channel = options.data_channel && spec.as_ref().is_some_and(CallSpec::is_meeting);
@@ -834,7 +834,11 @@ async fn drive(
     let conversation = match (spec, incoming_media) {
         (Some(spec), None) => {
             let direct_invite = spec.target().is_one_to_one() && !options.concurrent;
-            let media = create_offer(&current.peer, &factory, &track, layout, direct_invite.then_some(&current.gathered)).await?;
+            let offer_started = Instant::now();
+            let media = control
+                .until_hangup(create_offer(&current.peer, &factory, &track, layout, direct_invite.then_some(&current.gathered)))
+                .await??;
+            timeline.record("offer created", format!("{} ms", offer_started.elapsed().as_millis()));
             layout_plan = media.plan.clone();
             if layout == Layout::OneToOne {
                 direct_video_mid = Some(CAMERA_MID.to_owned());
@@ -2589,6 +2593,15 @@ async fn camera_devices(mode: VideoMode) -> Vec<CameraDevice> {
         VideoMode::Off => Vec::new(),
         VideoMode::Platform => tokio::task::spawn_blocking(list_cameras).await.unwrap_or_default(),
     }
+}
+
+fn refresh_cameras(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode, timeline: Timeline) {
+    tokio::spawn(async move {
+        let started = Instant::now();
+        let cameras = camera_devices(mode).await;
+        timeline.record("camera list", format!("{} camera(s) in {} ms", cameras.len(), started.elapsed().as_millis()));
+        let _ = updates.send(CallUpdate::Cameras(cameras));
+    });
 }
 
 fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode) {
