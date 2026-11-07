@@ -67,7 +67,15 @@ impl ConversationView {
     }
 
     pub(super) fn shared_active(&self) -> bool {
-        self.pane == ChannelPane::Shared && self.in_feed()
+        self.pane == ChannelPane::Shared && (self.in_feed() || self.in_chat())
+    }
+
+    pub(super) fn in_chat(&self) -> bool {
+        !self.draft_active
+            && self
+                .current
+                .as_ref()
+                .is_some_and(|current| matches!(current.selection, Selection::Chat(_)))
     }
 
     pub(super) fn reset_channel_tabs(&mut self, cx: &mut Context<Self>) {
@@ -185,7 +193,9 @@ impl ConversationView {
         self.pane = pane;
         if pane == ChannelPane::Shared {
             self.refresh_shared_items(cx);
-            if self.shared.path.is_none() {
+            if self.in_chat() {
+                self.shared.scope = SharedScope::Messages;
+            } else if self.shared.path.is_none() {
                 self.load_library(cx);
             }
         }
@@ -282,6 +292,7 @@ impl ConversationView {
                     items: &self.shared.items,
                     filter: self.shared.filter,
                     download_states: self.item_download_states(),
+                    has_library: !self.in_chat(),
                 },
                 &run,
             ),

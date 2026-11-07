@@ -3954,7 +3954,7 @@ impl Render for ConversationView {
             Some(current) => {
                 let tab_bar = self
                     .render_tab_bar(window, cx)
-                    .or_else(|| self.render_meeting_tab_bar(cx));
+                    .or_else(|| self.render_chat_tab_bar(cx));
                 let (inline_tabs, tabs_row) = match tab_bar {
                     Some(tabs) if self.tabs_below_title(window) => (None, Some(tabs)),
                     tabs => (tabs, None),
@@ -4058,7 +4058,7 @@ impl Render for ConversationView {
             )
             .children(self.render_draft_error(cx).map(|error| runway(error, comfy)))
             .when(
-                !in_feed && !recap_active,
+                !in_feed && !recap_active && !self.shared_active(),
                 |column| match &forward_selection {
                     Some(snapshot) => {
                         column.child(runway(self.render_forward_footer(snapshot, cx), comfy))

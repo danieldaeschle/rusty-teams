@@ -23,7 +23,7 @@ use crate::downloads::{self, DownloadState};
 use crate::notice::short_error;
 use crate::recap::{DELETE_QUESTION, Load, save_name};
 use crate::runtime;
-use crate::views::channel_tabs::{ChannelPane, render_meeting_bar};
+use crate::views::channel_tabs::{ChannelPane, render_chat_bar};
 use crate::views::recap_tab::{RecapCommand, RecapDownload, RecapRun, RecapView, render_recap};
 use crate::views::shared_tab::{SharedCommand, SharedRun};
 
@@ -356,15 +356,16 @@ impl ConversationView {
         .detach();
     }
 
-    pub(super) fn render_meeting_tab_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.occurrences().is_empty() || !self.is_meeting_chat(cx) {
+    pub(super) fn render_chat_tab_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.in_chat() {
             return None;
         }
+        let with_recap = !self.occurrences().is_empty() && self.is_meeting_chat(cx);
         let view = cx.weak_entity();
         let select = Rc::new(move |pane, cx: &mut App| {
             view.update(cx, |this, cx| this.select_pane(pane, cx)).ok();
         });
-        Some(render_meeting_bar(self.pane, select))
+        Some(render_chat_bar(self.pane, with_recap, select))
     }
 
     pub(super) fn render_recap(&self, cx: &mut Context<Self>) -> AnyElement {

@@ -27,6 +27,7 @@ pub const POSTS_LABEL: &str = "Posts";
 pub const SHARED_LABEL: &str = "Shared";
 pub const CHAT_LABEL: &str = "Chat";
 pub const RECAP_LABEL: &str = "Recap";
+pub const CHAT_SHARED_TAB_TAG: &str = "shell/islands/main/chat-shared-tab";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelPane {
@@ -213,9 +214,10 @@ pub fn render_tab_bar(
         .into_any_element()
 }
 
-pub fn render_meeting_bar(pane: ChannelPane, select: SelectPane) -> AnyElement {
+/// Chat, Shared and, for meeting chats with a recording, Recap.
+pub fn render_chat_bar(pane: ChannelPane, with_recap: bool, select: SelectPane) -> AnyElement {
     let chat = tab_label(
-        "meeting-tab-chat".into(),
+        "chat-tab-chat".into(),
         CHAT_LABEL,
         pane == ChannelPane::Posts,
         false,
@@ -224,15 +226,32 @@ pub fn render_meeting_bar(pane: ChannelPane, select: SelectPane) -> AnyElement {
             move |_, cx| select(ChannelPane::Posts, cx)
         },
     );
-    let recap = tab_label(
-        "meeting-tab-recap".into(),
-        RECAP_LABEL,
-        pane == ChannelPane::Recap,
+    let shared = tab_label(
+        "chat-tab-shared".into(),
+        SHARED_LABEL,
+        pane == ChannelPane::Shared,
         false,
-        move |_, cx| select(ChannelPane::Recap, cx),
+        {
+            let select = select.clone();
+            move |_, cx| select(ChannelPane::Shared, cx)
+        },
     )
-    .debug_selector(|| "shell/islands/main/recap-tab".into());
-    header_tab_row().child(chat).child(recap).into_any_element()
+    .debug_selector(|| CHAT_SHARED_TAB_TAG.into());
+    let recap = with_recap.then(|| {
+        tab_label(
+            "chat-tab-recap".into(),
+            RECAP_LABEL,
+            pane == ChannelPane::Recap,
+            false,
+            move |_, cx| select(ChannelPane::Recap, cx),
+        )
+        .debug_selector(|| "shell/islands/main/recap-tab".into())
+    });
+    header_tab_row()
+        .child(chat)
+        .child(shared)
+        .children(recap)
+        .into_any_element()
 }
 
 #[cfg(test)]

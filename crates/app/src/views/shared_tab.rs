@@ -78,6 +78,7 @@ pub struct MessagesView<'a> {
     pub items: &'a [SharedItem],
     pub filter: MessageFilter,
     pub download_states: Vec<Option<DownloadState>>,
+    pub has_library: bool,
 }
 
 pub fn download_label(state: Option<&DownloadState>) -> Option<String> {
@@ -156,7 +157,12 @@ fn tool_button(
         .on_click(move |_, window, cx| run(command, window, cx))
 }
 
-fn header(scope: SharedScope, trailing: Option<AnyElement>, run: &SharedRun) -> Div {
+fn header(
+    scope: SharedScope,
+    has_library: bool,
+    trailing: Option<AnyElement>,
+    run: &SharedRun,
+) -> Div {
     h_flex()
         .w_full()
         .flex_none()
@@ -164,7 +170,7 @@ fn header(scope: SharedScope, trailing: Option<AnyElement>, run: &SharedRun) -> 
         .py(px(8.))
         .gap(px(12.))
         .items_center()
-        .child(switch(scope, run))
+        .when(has_library, |row| row.child(switch(scope, run)))
         .children(trailing)
 }
 
@@ -484,7 +490,7 @@ pub fn render_library(view: LibraryView, run: &SharedRun) -> AnyElement {
     };
     v_flex()
         .size_full()
-        .child(header(SharedScope::Library, toolbar, run))
+        .child(header(SharedScope::Library, true, toolbar, run))
         .children(view.new_folder.map(new_folder_row))
         .children(view.status.map(|status| {
             div()
@@ -674,6 +680,7 @@ pub fn render_messages(view: MessagesView, run: &SharedRun) -> AnyElement {
         .size_full()
         .child(header(
             SharedScope::Messages,
+            view.has_library,
             Some(chips(view.filter, run)),
             run,
         ))
