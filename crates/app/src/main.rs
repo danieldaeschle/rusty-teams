@@ -145,6 +145,9 @@ fn open_store(path: &std::path::Path) -> Store {
 
 fn main() {
     app_base::version::set_build_version(VERSION_MARKER.trim_start_matches("teams-build:"));
+    if let Some(tag) = option_env!("TEAMS_RELEASE_TAG") {
+        app_base::version::set_release_tag(tag);
+    }
     crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
     app_base::native_dumps::install(
         data_path("native-dumps"),

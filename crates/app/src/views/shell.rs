@@ -121,6 +121,31 @@ fn jump_to_quoted(message_id: String, cx: &mut App) {
     });
 }
 
+#[cfg(windows)]
+fn watch_releases(running_tag: &'static str, cx: &mut App) {
+    use app_base::release_feed;
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(release_feed::FIRST_CHECK_DELAY)
+            .await;
+        loop {
+            let Some(paths) = updater::current_paths() else {
+                return;
+            };
+            let fetch = cx.update(|cx| release_feed::fetch_update(running_tag, paths, cx));
+            match fetch.await {
+                Ok(Some(tag)) => log::info!("release {tag} downloaded for the next restart"),
+                Ok(None) => {}
+                Err(error) => log::warn!("release check failed: {error}"),
+            }
+            cx.background_executor()
+                .timer(release_feed::CHECK_INTERVAL)
+                .await;
+        }
+    })
+    .detach();
+}
+
 const DEMO_UPDATE_VARIABLE: &str = "TEAMS_DEMO_UPDATE";
 
 pub struct AppShell {
@@ -414,6 +439,10 @@ impl AppShell {
             }
         })
         .detach();
+        #[cfg(windows)]
+        if let Some(running_tag) = app_base::version::release_tag() {
+            watch_releases(running_tag, cx);
+        }
         shell
     }
 

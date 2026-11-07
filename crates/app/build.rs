@@ -14,6 +14,15 @@ fn main() {
     let timestamp = git(&["log", "-1", "--format=%cd", "--date=format-local:%Y%m%dT%H%M%SZ"])
         .unwrap_or_else(|| chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string());
     println!("cargo:rustc-env=TEAMS_BUILD_VERSION={commit}-{timestamp}");
+    println!("cargo:rerun-if-env-changed=GITHUB_REF_NAME");
+    println!("cargo:rerun-if-env-changed=GITHUB_REF_TYPE");
+    let release_tag = std::env::var("GITHUB_REF_NAME")
+        .ok()
+        .filter(|_| std::env::var("GITHUB_REF_TYPE").as_deref() == Ok("tag"))
+        .filter(|tag| tag.starts_with('v'));
+    if let Some(tag) = release_tag {
+        println!("cargo:rustc-env=TEAMS_RELEASE_TAG={tag}");
+    }
     // Rerun only when HEAD moves, so an unchanged tree does not recompile the whole app crate.
     if let Some(head) = git(&["rev-parse", "--path-format=absolute", "--git-path", "HEAD"]) {
         println!("cargo:rerun-if-changed={head}");

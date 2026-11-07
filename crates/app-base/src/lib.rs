@@ -27,6 +27,7 @@ pub mod notify;
 pub mod presence_link;
 pub mod read_state;
 pub mod recap;
+pub mod release_feed;
 pub mod remote_image;
 pub mod runtime;
 pub mod schedule_time;
