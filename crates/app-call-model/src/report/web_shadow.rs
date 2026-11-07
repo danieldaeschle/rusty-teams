@@ -53,6 +53,15 @@ struct ShadowReport<'a> {
 }
 
 #[derive(Default)]
+struct RequestGroup {
+    first_ms: i64,
+    count: usize,
+    failed: usize,
+    total_ms: i64,
+    statuses: BTreeSet<i64>,
+}
+
+#[derive(Default)]
 struct PeerSummary {
     connected_ms: Option<i64>,
     final_state: String,
@@ -166,7 +175,10 @@ impl WebShadow {
         let _ = writeln!(markdown, "\n## Media, last sample\n");
         let _ = writeln!(markdown, "| Peer | Direction | Kind | Codec | Packets | Lost | Jitter | Fps | Size | Limited by |\n|---|---|---|---|---|---|---|---|---|---|");
         for (peer, summary) in &peers {
-            for row in summary.last_rows.iter().filter(|row| text(row, "type") != "pair") {
+            let active = |row: &&Value| {
+                text(row, "type") != "pair" && row.get("packets").and_then(Value::as_f64).unwrap_or(0.) > 0.
+            };
+            for row in summary.last_rows.iter().filter(active) {
                 let size = match (row.get("frameWidth").and_then(Value::as_i64), row.get("frameHeight").and_then(Value::as_i64)) {
                     (Some(width), Some(height)) => format!("{width}x{height}"),
                     _ => String::new(),
@@ -200,22 +212,33 @@ impl WebShadow {
     }
 
     fn write_requests(&self, markdown: &mut String) {
-        let requests: Vec<&ShadowEvent> = self.events.iter().filter(|event| event.event == REQUEST_EVENT).collect();
-        let failed = requests
-            .iter()
-            .filter(|event| !(200..400).contains(&event.data.get("status").and_then(Value::as_i64).unwrap_or(0)))
-            .count();
-        let _ = writeln!(markdown, "\n## Signaling\n\n{} requests, {failed} failed\n", requests.len());
-        let _ = writeln!(markdown, "| At | Method | Path | Status | Took |\n|---|---|---|---|---|");
-        for event in requests.iter().take(MAX_TIMELINE_ROWS) {
+        let mut groups: BTreeMap<(String, String), RequestGroup> = BTreeMap::new();
+        for event in self.events.iter().filter(|event| event.event == REQUEST_EVENT) {
+            let key = (text(&event.data, "method"), text(&event.data, "path"));
+            let group = groups.entry(key).or_insert_with(|| RequestGroup { first_ms: event.at_ms, ..RequestGroup::default() });
+            let status = event.data.get("status").and_then(Value::as_i64).unwrap_or(0);
+            group.count += 1;
+            group.total_ms += event.data.get("ms").and_then(Value::as_i64).unwrap_or(0);
+            group.statuses.insert(status);
+            if !(200..400).contains(&status) {
+                group.failed += 1;
+            }
+        }
+        let total: usize = groups.values().map(|group| group.count).sum();
+        let failed: usize = groups.values().map(|group| group.failed).sum();
+        let mut ordered: Vec<_> = groups.into_iter().collect();
+        ordered.sort_by_key(|(_, group)| group.first_ms);
+        let _ = writeln!(markdown, "\n## Requests\n\n{total} requests, {failed} failed\n");
+        let _ = writeln!(markdown, "| First at | Method | Path | Count | Failed | Status | Avg took |\n|---|---|---|---|---|---|---|");
+        for ((method, path), group) in ordered.iter().take(MAX_TIMELINE_ROWS) {
+            let statuses = group.statuses.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
             let _ = writeln!(
                 markdown,
-                "| {} | {} | {} | {} | {} ms |",
-                seconds(event.at_ms),
-                text(&event.data, "method"),
-                text(&event.data, "path"),
-                text(&event.data, "status"),
-                text(&event.data, "ms"),
+                "| {} | {method} | {path} | {} | {} | {statuses} | {} ms |",
+                seconds(group.first_ms),
+                group.count,
+                group.failed,
+                group.total_ms / group.count as i64,
             );
         }
     }
