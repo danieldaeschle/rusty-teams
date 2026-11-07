@@ -23,6 +23,7 @@ const ALLOWED_PATHS: &[(&str, &str)] = &[
     ("calling/src/meeting_options.rs", "meeting options MT"),
     ("calling/src/whiteboard.rs", "meeting whiteboard MT"),
     ("calling/src/breakout.rs", "breakout room join link parsing"),
+    ("app-state/src/call/web_call.rs", "Teams on the web call and meeting links"),
     ("calling/assets/", "in-page caption bot command"),
     (
         "session/",
