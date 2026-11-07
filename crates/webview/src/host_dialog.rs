@@ -324,6 +324,7 @@ fn attach(
         DialogMode::Call => {
             allow_teams_media(&webview)?;
             shadow_calls(&webview)?;
+            block_app_launch(&webview)?;
             forward_messages(&webview, id, is_media_origin)?;
         }
     }
@@ -438,6 +439,20 @@ fn shadow_calls(webview: &ICoreWebView2) -> windows::core::Result<()> {
     unsafe {
         webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(CALL_SHADOW_SCRIPT), &handler)
     }
+}
+
+fn block_app_launch(webview: &ICoreWebView2) -> windows::core::Result<()> {
+    let Ok(webview) = webview.cast::<ICoreWebView2_18>() else {
+        return Ok(());
+    };
+    let handler = LaunchingExternalUriSchemeEventHandler::create(Box::new(|_, arguments| {
+        if let Some(arguments) = arguments {
+            unsafe { arguments.SetCancel(true) }?;
+        }
+        Ok(())
+    }));
+    let mut token = 0;
+    unsafe { webview.add_LaunchingExternalUriScheme(&handler, &mut token) }
 }
 
 fn forward_new_windows(webview: &ICoreWebView2, id: u64) -> windows::core::Result<()> {

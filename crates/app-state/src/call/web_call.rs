@@ -7,6 +7,7 @@ use crate::app_state::AppState;
 pub const META_WEB_CALLS: &str = "calls.teams_web";
 const TEAMS_WEB: &str = "https://teams.microsoft.com/l";
 const WEB_CALL_TITLE: &str = "Teams call";
+const STAY_IN_BROWSER: &str = "directDl=true&msLaunch=false&enableMobilePage=false&suppressPrompt=true";
 
 pub fn stored_web_calls(store: &store::Store) -> bool {
     store.meta(META_WEB_CALLS).ok().flatten().as_deref() == Some("true")
@@ -15,7 +16,7 @@ pub fn stored_web_calls(store: &store::Store) -> bool {
 pub fn meeting_web_url(target: &MeetingTarget) -> String {
     let context = json!({"Tid": target.tenant_id, "Oid": target.organizer_id}).to_string();
     format!(
-        "{TEAMS_WEB}/meetup-join/{}/0?context={}",
+        "{TEAMS_WEB}/meetup-join/{}/0?context={}&{STAY_IN_BROWSER}",
         encode(&target.thread_id),
         encode(&context)
     )
@@ -23,7 +24,7 @@ pub fn meeting_web_url(target: &MeetingTarget) -> String {
 
 /// Teams on the web has no call link for a chat id, so the chat opens and the call starts there.
 pub fn chat_web_url(thread_id: &str) -> String {
-    format!("{TEAMS_WEB}/chat/{}/0", encode(thread_id))
+    format!("{TEAMS_WEB}/chat/{}/0?{STAY_IN_BROWSER}", encode(thread_id))
 }
 
 fn encode(text: &str) -> String {
@@ -83,7 +84,7 @@ mod tests {
         };
         assert_eq!(
             meeting_web_url(&target),
-            "https://teams.microsoft.com/l/meetup-join/19%3Ameeting_abc%40thread.v2/0?context=%7B%22Tid%22%3A%22tenant-1%22%2C%22Oid%22%3A%22organizer-1%22%7D"
+            "https://teams.microsoft.com/l/meetup-join/19%3Ameeting_abc%40thread.v2/0?context=%7B%22Tid%22%3A%22tenant-1%22%2C%22Oid%22%3A%22organizer-1%22%7D&directDl=true&msLaunch=false&enableMobilePage=false&suppressPrompt=true"
         );
     }
 
@@ -91,7 +92,7 @@ mod tests {
     fn a_chat_opens_its_teams_chat_link() {
         assert_eq!(
             chat_web_url("19:abc@thread.v2"),
-            "https://teams.microsoft.com/l/chat/19%3Aabc%40thread.v2/0"
+            "https://teams.microsoft.com/l/chat/19%3Aabc%40thread.v2/0?directDl=true&msLaunch=false&enableMobilePage=false&suppressPrompt=true"
         );
     }
 }
