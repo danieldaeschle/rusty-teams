@@ -142,6 +142,28 @@ pub fn list_time_label_in(
     }
 }
 
+/// The last activity next to a channel name: the time today, else day and month, with the year once older.
+pub fn channel_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+    channel_time_label_in(current_date_style(), time, today, offset)
+}
+
+pub fn channel_time_label_in(
+    style: Option<DateStyle>,
+    time: DateTime<Utc>,
+    today: NaiveDate,
+    offset: FixedOffset,
+) -> String {
+    let local = time.with_timezone(&offset);
+    let pattern = if local.date_naive() >= today {
+        style.map_or("%H:%M", |style| style.clock)
+    } else if local.year() == today.year() {
+        style.map_or("%b %-d", |style| style.day_month)
+    } else {
+        style.map_or("%b %-d, %Y", |style| style.day_month_year)
+    };
+    local.format(pattern).to_string()
+}
+
 pub fn post_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
     post_time_label_in(current_date_style(), time, today, offset)
 }
@@ -207,6 +229,18 @@ mod tests {
 
     fn zero() -> FixedOffset {
         FixedOffset::east_opt(0).unwrap()
+    }
+
+    #[test]
+    fn channel_times_show_the_clock_today_then_day_and_month_then_the_year() {
+        let style = Some(date_style("en-gb"));
+        let label = |time| channel_time_label_in(style, time, today(), zero());
+        assert_eq!(label(utc(7, 8)), "08:05");
+        assert_eq!(label(utc(1, 8)), "01/10");
+        assert_eq!(
+            label(Utc.with_ymd_and_hms(2025, 10, 23, 8, 0, 0).unwrap()),
+            "23/10/2025"
+        );
     }
 
     #[test]

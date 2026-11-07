@@ -68,7 +68,16 @@ const PINNED_LABEL: &str = "Pinned";
 const TEAMS_LABEL: &str = "Teams";
 const MARK_ALL_READ_LABEL: &str = "Mark all as read";
 const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
-const TEAM_ROW_HEIGHT: f32 = 40.;
+const TEAM_ROW_HEIGHT: f32 = 36.;
+const CHANNEL_ROW_HEIGHT: f32 = 32.;
+const TEAM_ICON_SIZE: f32 = 20.;
+const TEAM_ICON_RADIUS: f32 = 4.;
+const CHANNEL_INDENT: f32 = 60.;
+pub const CHANNEL_ROW_TAG: &str = "sidebar/channel-row";
+pub const SEE_ALL_CHANNELS_TAG: &str = "sidebar/see-all-channels";
+const SEE_ALL_CHANNELS: &str = "See all channels";
+const SEE_FEWER_CHANNELS: &str = "See fewer channels";
+const PRIVATE_MEMBERSHIP: &str = "private";
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
 const NOTIFICATION_ICON_SIZE: f32 = 13.;
@@ -1474,14 +1483,7 @@ impl SidebarView {
         let menu_state = self.state.clone();
         let menu_channel_id = channel_id.to_owned();
         let selection = Selection::Channel(channel_id.to_owned());
-        let now = Utc::now();
-        let offset = Local::now().offset().fix();
-        let time = channel
-            .last_message_at
-            .map(|time| {
-                format::list_time_label(time, now.with_timezone(&offset).date_naive(), offset)
-            })
-            .unwrap_or_default();
+        let time = channel_activity(channel);
         h_flex()
             .id(SharedString::from(format!("pinned-{channel_id}")))
             .mx(px(6.))
@@ -1608,7 +1610,12 @@ impl SidebarView {
                     14.,
                     theme::text_muted(),
                 ))
-                .child(square_avatar(&entry.team.name, &entry.team.id, 28., 7.))
+                .child(square_avatar(
+                    &entry.team.name,
+                    &entry.team.id,
+                    TEAM_ICON_SIZE,
+                    TEAM_ICON_RADIUS,
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -1655,11 +1662,9 @@ impl SidebarView {
             return list;
         }
         let toggle_id = team_id.clone();
-        list = list.child(self.reveal_row(
+        list = list.child(self.see_all_channels_row(
             SharedString::from(format!("hidden-channels-{team_id}")),
-            hidden_channels_label(rows.hidden_count),
             revealed,
-            40.,
             cx.listener(move |this, _, _, cx| {
                 if !this.revealed_channel_teams.remove(&toggle_id) {
                     this.revealed_channel_teams.insert(toggle_id.clone());
@@ -1677,6 +1682,30 @@ impl SidebarView {
             ));
         }
         list
+    }
+
+    fn see_all_channels_row(
+        &self,
+        id: SharedString,
+        open: bool,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> impl IntoElement {
+        h_flex()
+            .id(id)
+            .debug_selector(|| SEE_ALL_CHANNELS_TAG.into())
+            .mx(px(6.))
+            .h(px(CHANNEL_ROW_HEIGHT))
+            .flex_none()
+            .pl(px(CHANNEL_INDENT))
+            .pr(px(10.))
+            .items_center()
+            .rounded(px(8.))
+            .cursor_pointer()
+            .hover(|row| row.bg(theme::row_hover()))
+            .text_size(px(13.5))
+            .text_color(theme::accent_text())
+            .child(if open { SEE_FEWER_CHANNELS } else { SEE_ALL_CHANNELS })
+            .on_click(on_click)
     }
 
     fn reveal_row(
@@ -1731,10 +1760,11 @@ impl SidebarView {
         let selection = Selection::Channel(channel.id.clone());
         h_flex()
             .id(SharedString::from(format!("channel-{}", channel.id)))
+            .debug_selector(|| CHANNEL_ROW_TAG.into())
             .mx(px(6.))
-            .h(px(TEAM_ROW_HEIGHT))
+            .h(px(CHANNEL_ROW_HEIGHT))
             .flex_none()
-            .pl(px(40.))
+            .pl(px(CHANNEL_INDENT))
             .pr(px(10.))
             .gap(px(8.))
             .items_center()
@@ -1745,25 +1775,36 @@ impl SidebarView {
                 row.hover(|row| row.bg(theme::row_hover()))
             })
             .child(
-                div()
-                    .w(px(14.))
-                    .flex()
-                    .justify_center()
-                    .text_size(px(15.))
-                    .text_color(theme::text_faint())
-                    .child("#"),
-            )
-            .child(
-                div()
+                h_flex()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_size(px(13.5))
-                    .font_weight(name_weight(name_style))
-                    .text_color(name_color(name_style))
-                    .child(channel.name.clone()),
+                    .gap(px(4.))
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(13.5))
+                            .font_weight(name_weight(name_style))
+                            .text_color(name_color(name_style))
+                            .child(channel.name.clone()),
+                    )
+                    .when(is_private_channel(channel), |name| {
+                        name.child(
+                            div()
+                                .flex_none()
+                                .child(symbol("lock", 14., theme::text_muted())),
+                        )
+                    }),
             )
             .children(notification_badge(notifications.level))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.))
+                    .text_color(theme::text_muted())
+                    .child(channel_activity(channel)),
+            )
             .children(badge.map(mention_badge))
             .on_click(move |_, _, cx| {
                 let selection = selection.clone();
@@ -2079,12 +2120,21 @@ fn team_holds(entry: &SidebarTeam, selected: Option<&Selection>) -> bool {
         .any(|channel| selected == Some(&Selection::Channel(channel.id.clone())))
 }
 
-fn hidden_channels_label(count: usize) -> String {
-    if count == 1 {
-        "1 hidden channel".to_owned()
-    } else {
-        format!("{count} hidden channels")
-    }
+fn is_private_channel(channel: &ChannelRecord) -> bool {
+    channel
+        .membership_type
+        .as_deref()
+        .is_some_and(|membership| membership.eq_ignore_ascii_case(PRIVATE_MEMBERSHIP))
+}
+
+fn channel_activity(channel: &ChannelRecord) -> String {
+    let offset = Local::now().offset().fix();
+    channel
+        .last_message_at
+        .map(|time| {
+            format::channel_time_label(time, Utc::now().with_timezone(&offset).date_naive(), offset)
+        })
+        .unwrap_or_default()
 }
 
 fn collect_faces(spec: &AvatarSpec, faces: &mut Vec<String>) {

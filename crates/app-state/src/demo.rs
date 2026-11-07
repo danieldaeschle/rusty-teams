@@ -114,6 +114,7 @@ pub const PRIYA_ID: &str = "demo-priya";
 pub const LEA_ID: &str = "demo-lea";
 pub const TOBIAS_ID: &str = "demo-tobias";
 
+const DEMO_PRIVATE_CHANNEL: &str = "Runbooks";
 const DEMO_TEAMS: [(&str, &str, [&str; 3]); 4] = [
     (
         "demo-team-1",
@@ -881,7 +882,7 @@ pub fn seed(store: &Store) {
                 id: format!("demo-channel-{}-{}", team_index + 1, channel_index + 1),
                 team_id: (*team_id).to_owned(),
                 name: (*name).to_owned(),
-                membership_type: None,
+                membership_type: (*name == DEMO_PRIVATE_CHANNEL).then(|| "private".to_owned()),
                 last_message_at: Some(at(channel_index as i64, 12, 10)),
                 unread: (team_index == 0 && channel_index == 1)
                     || (team_index == 1 && channel_index == 0),
