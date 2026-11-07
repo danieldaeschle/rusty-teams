@@ -222,6 +222,10 @@ pub trait Remote {
         Err(Error::Unsupported("a channel tab link"))
     }
 
+    async fn channel_member_count(&self, _team_id: &str, _channel_id: &str) -> Result<usize> {
+        Err(Error::Unsupported("a channel member count"))
+    }
+
     async fn list_children(&self, _folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
         Err(Error::Unsupported("a folder listing"))
     }
@@ -1005,6 +1009,10 @@ impl Remote for Graph {
         tab_id: &str,
     ) -> Result<Option<String>> {
         Ok(Graph::channel_tab_web_url(self, team_id, channel_id, tab_id).await?)
+    }
+
+    async fn channel_member_count(&self, team_id: &str, channel_id: &str) -> Result<usize> {
+        Ok(Graph::channel_member_count(self, team_id, channel_id).await?)
     }
 
     async fn list_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {

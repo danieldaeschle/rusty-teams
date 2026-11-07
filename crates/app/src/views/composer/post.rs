@@ -1,4 +1,4 @@
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, Size, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -7,6 +7,7 @@ use gpui_kit::*;
 use teams_core::{AnnouncementBanner, BannerBackground};
 
 use super::{COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer, ComposerEvent};
+use crate::runtime;
 use crate::theme;
 use crate::views::announcement_banner::{
     BANNER_COLORS, banner_fill, banner_frame, color_label, headline_style,
@@ -21,11 +22,16 @@ pub const POST_CARD_FOOTER_TAG: &str = "composer/post/footer";
 pub const POST_CARD_SEND_TAG: &str = "composer/post/send";
 pub const POST_ANNOUNCEMENT_TAG: &str = "composer/post/announcement";
 pub const POST_ANNOUNCEMENT_TOGGLE_TAG: &str = "composer/post/announcement-toggle";
+pub const POST_AUDIENCE_TAG: &str = "composer/post/audience";
+const DEMO_AUDIENCE: usize = 24;
+const AUDIENCE_HEIGHT: f32 = 32.;
 const ANNOUNCEMENT_TOOLTIP: &str = "Announcement";
-const HEADLINE_PLACEHOLDER: &str = "Add a headline";
+const HEADLINE_PLACEHOLDER: &str = "Type a headline";
 pub const SUBJECT_PLACEHOLDER: &str = "Add a subject";
 const SUBHEADING_PLACEHOLDER: &str = "Add a subheading";
-const HEADLINE_SIZE: f32 = 24.;
+const HEADLINE_SIZE: f32 = 32.;
+const COMPOSER_BANNER_HEIGHT: f32 = 240.;
+const HEADLINE_LINE: f32 = 1.25;
 const SWATCH_SIZE: f32 = 18.;
 const SWATCH_RING: f32 = 2.;
 const SWATCH_GAP: f32 = 6.;
@@ -40,8 +46,16 @@ const SUBJECT_INSET: f32 = 8.;
 const TEXT_INSET: f32 = 16.;
 
 pub(super) struct AnnouncementDraft {
-    headline: Entity<InputState>,
+    pub(super) headline: Entity<InputState>,
     color: &'static str,
+    _changes: Subscription,
+}
+
+pub fn audience_hint(count: usize) -> String {
+    match count {
+        1 => "1 person will see your message.".to_owned(),
+        count => format!("{count} people will see your message."),
+    }
 }
 
 impl Composer {
@@ -54,12 +68,27 @@ impl Composer {
             self.announcement = None;
         }
         if changed {
+            self.schedule_draft_save(cx);
             cx.notify();
         }
     }
 
     pub(super) fn post_layout(&self) -> bool {
         self.post_subject.is_some() && self.editing.is_none()
+    }
+
+    pub(super) fn post_subject_text(&self, cx: &App) -> Option<String> {
+        let subject = self.post_subject.as_ref().filter(|_| self.post_layout())?;
+        let text = subject.read(cx).value().trim().to_owned();
+        (!text.is_empty()).then_some(text)
+    }
+
+    /// Saves the draft with its post subject and banner before the post card closes.
+    pub fn leave_conversation(&mut self, next_conversation_id: &str, cx: &mut Context<Self>) {
+        if self.conversation_id.as_deref() != Some(next_conversation_id) {
+            self.save_draft_now(cx);
+            self.conversation_id = None;
+        }
     }
 
     pub(super) fn announcement_banner(&self, cx: &App) -> Option<AnnouncementBanner> {
@@ -98,7 +127,7 @@ impl Composer {
         }
     }
 
-    fn toggle_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.announcement.is_some() {
             self.close_announcement(window, cx);
             self.focus(window, cx);
@@ -119,16 +148,92 @@ impl Composer {
         cx: &mut Context<Self>,
     ) {
         let headline = cx.new(|cx| InputState::new(window, cx).placeholder(HEADLINE_PLACEHOLDER));
-        self.announcement = Some(AnnouncementDraft { headline, color });
+        let changes = cx.subscribe(&headline, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.schedule_draft_save(cx);
+            }
+        });
+        self.announcement = Some(AnnouncementDraft {
+            headline,
+            color,
+            _changes: changes,
+        });
         self.set_subject_placeholder(SUBHEADING_PLACEHOLDER, window, cx);
+        self.load_audience(cx);
+        self.schedule_draft_save(cx);
         cx.notify();
     }
 
     pub(super) fn close_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.announcement.take().is_some() {
             self.set_subject_placeholder(SUBJECT_PLACEHOLDER, window, cx);
+            self.schedule_draft_save(cx);
             cx.notify();
         }
+    }
+
+    fn load_audience(&mut self, cx: &mut Context<Self>) {
+        let Some(channel_id) = self.conversation_id.clone() else {
+            return;
+        };
+        if self
+            .audience
+            .as_ref()
+            .is_some_and(|(id, _)| *id == channel_id)
+        {
+            return;
+        }
+        let state = self.app.read(cx);
+        if state.mode.demo {
+            self.audience = Some((channel_id, DEMO_AUDIENCE));
+            return;
+        }
+        let Some(engine) = state.engine.clone() else {
+            return;
+        };
+        let lookup = channel_id.clone();
+        let receiver = runtime::spawn(async move { engine.channel_member_count(&lookup).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(count)) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                if this.conversation_id.as_deref() == Some(channel_id.as_str()) {
+                    this.audience = Some((channel_id, count));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub(super) fn render_audience_hint(&self) -> Option<Div> {
+        self.announcement.as_ref().filter(|_| self.post_layout())?;
+        let (channel_id, count) = self.audience.as_ref()?;
+        (self.conversation_id.as_ref() == Some(channel_id)).then(|| {
+            h_flex()
+                .debug_selector(|| POST_AUDIENCE_TAG.into())
+                .w_full()
+                .h(px(AUDIENCE_HEIGHT))
+                .mb(px(8.))
+                .px(px(CARD_INSET))
+                .items_center()
+                .rounded(px(10.))
+                .bg(theme::surface_raised())
+                .text_size(px(12.))
+                .text_color(theme::text_muted())
+                .child(audience_hint(*count))
+        })
+    }
+
+    pub fn sync_subject_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let placeholder = if self.announcement.is_some() {
+            SUBHEADING_PLACEHOLDER
+        } else {
+            SUBJECT_PLACEHOLDER
+        };
+        self.set_subject_placeholder(placeholder, window, cx);
     }
 
     fn set_subject_placeholder(
@@ -209,6 +314,7 @@ impl Composer {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(draft) = this.announcement.as_mut() {
                             draft.color = color;
+                            this.schedule_draft_save(cx);
                             cx.notify();
                         }
                     }))
@@ -221,11 +327,15 @@ impl Composer {
                 .pt(px(CARD_INSET))
                 .child(
                     banner_frame(&BannerBackground::Color(draft.color.to_owned()), directory)
+                        .h(px(COMPOSER_BANNER_HEIGHT))
                         .child(
                             headline_style(div().w_full()).child(
                                 Input::new(&draft.headline)
                                     .appearance(false)
                                     .bordered(false)
+                                    .text_center()
+                                    .h(px(HEADLINE_SIZE * HEADLINE_LINE))
+                                    .line_height(px(HEADLINE_SIZE * HEADLINE_LINE))
                                     .with_size(Size::Size(px(HEADLINE_SIZE / INPUT_TEXT_SCALE))),
                             ),
                         )

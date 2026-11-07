@@ -6,6 +6,7 @@ use crate::error::Result;
 use crate::urls;
 
 const TABS_SCOPE: &str = "TeamsTab.ReadWrite.All";
+const MEMBERS_SCOPE: &str = "ChannelMember.Read.All";
 
 fn web_url(tab: &Value) -> Option<String> {
     tab.get("webUrl")
@@ -28,6 +29,16 @@ impl Graph {
             )
             .await?;
         Ok(web_url(&tab))
+    }
+
+    pub async fn channel_member_count(&self, team_id: &str, channel_id: &str) -> Result<usize> {
+        let members: Vec<Value> = self
+            .get_all(
+                &urls::channel_members(team_id, channel_id),
+                Scope::graph(MEMBERS_SCOPE),
+            )
+            .await?;
+        Ok(members.len())
     }
 }
 

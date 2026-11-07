@@ -38,9 +38,13 @@ fn draft_preview(outgoing: &Outgoing) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    if text.is_empty() {
+    let text = Some(text)
+        .filter(|text| !text.is_empty())
+        .or_else(|| outgoing.subject.clone())
+        .or_else(|| outgoing.banner.as_ref().map(|banner| banner.title.clone()));
+    let Some(text) = text else {
         return IMAGE_ONLY_PREVIEW.to_owned();
-    }
+    };
     truncated(&text, DRAFT_PREVIEW_CHARS)
 }
 
@@ -99,7 +103,7 @@ impl DraftWrites {
 }
 
 impl Composer {
-    pub(super) fn schedule_draft_save(&mut self, cx: &mut Context<Self>) {
+    pub fn schedule_draft_save(&mut self, cx: &mut Context<Self>) {
         self.draft_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DRAFT_SAVE_DELAY).await;
             let Ok(Some((write, fingerprint, store, landed, sequence))) =
@@ -150,7 +154,11 @@ impl Composer {
     fn storable_draft(&self, cx: &App) -> Option<Outgoing> {
         let mut outgoing = self.compose(cx);
         outgoing.files.clear();
-        (!outgoing.draft.is_blank() || !outgoing.images.is_empty()).then_some(outgoing)
+        (!outgoing.draft.is_blank()
+            || !outgoing.images.is_empty()
+            || outgoing.subject.is_some()
+            || outgoing.banner.is_some())
+        .then_some(outgoing)
     }
 
     fn pending_draft_write(&self, cx: &App) -> Option<(DraftWrite, Option<ImageFingerprint>)> {

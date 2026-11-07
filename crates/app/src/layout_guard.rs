@@ -185,7 +185,7 @@ mod frames {
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
-        POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
+        POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
         POST_CARD_SUBJECT_TAG,
     };
     use crate::views::conversation::{
@@ -2153,6 +2153,8 @@ mod frames {
         let banner = bounds_of(POST_ANNOUNCEMENT_TAG);
         let subject = bounds_of(POST_CARD_SUBJECT_TAG);
         assert!(header.bottom() <= banner.top() && banner.bottom() <= subject.top());
+        let audience = bounds_of(POST_AUDIENCE_TAG);
+        assert!(audience.bottom() <= card.top(), "audience hint not above the card");
         let left = f32::from(banner.left() - card.left());
         let right = f32::from(card.right() - banner.right());
         assert!((left - right).abs() < TOLERANCE, "banner insets: left {left}, right {right}");

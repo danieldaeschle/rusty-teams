@@ -184,6 +184,14 @@ pub fn channel_files_folder(team_id: &str, channel_id: &str) -> String {
     )
 }
 
+pub fn channel_members(team_id: &str, channel_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/channels/{}/members?$select=id&$top=999",
+        segment(team_id),
+        segment(channel_id)
+    )
+}
+
 pub fn channel_tab(team_id: &str, channel_id: &str, tab_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/teams/{}/channels/{}/tabs/{}",
@@ -364,6 +372,16 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn channel_members_ask_for_ids_only_in_large_pages() {
+        assert_eq!(
+            channel_members("t 1", "19:c@thread.tacv2"),
+            format!(
+                "{GRAPH}/v1.0/teams/t%201/channels/19%3Ac%40thread.tacv2/members?$select=id&$top=999"
+            )
+        );
+    }
 
     #[test]
     fn photos_ask_for_the_240_rendition_then_the_original() {

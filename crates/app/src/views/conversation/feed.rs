@@ -51,9 +51,26 @@ impl ConversationView {
     fn mark_new_post_open(&mut self, cx: &mut Context<Self>) {
         self.new_post_open = true;
         let subject = self.subject.clone();
-        self.composer
-            .update(cx, |composer, cx| composer.set_post_layout(Some(subject), cx));
+        self.composer.update(cx, |composer, cx| {
+            composer.set_post_layout(Some(subject), cx)
+        });
         cx.notify();
+    }
+
+    pub(super) fn restore_new_post(
+        &mut self,
+        subject: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.in_feed() {
+            return;
+        }
+        self.restore_subject(subject.as_deref(), window, cx);
+        self.mark_new_post_open(cx);
+        self.composer.update(cx, |composer, cx| {
+            composer.sync_subject_placeholder(window, cx)
+        });
     }
 
     pub(super) fn close_new_post(&mut self, cx: &mut Context<Self>) {
@@ -98,9 +115,14 @@ impl ConversationView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(event, InputEvent::PressEnter { .. }) {
-            self.composer
-                .update(cx, |composer, cx| composer.focus(window, cx));
+        match event {
+            InputEvent::PressEnter { .. } => self
+                .composer
+                .update(cx, |composer, cx| composer.focus(window, cx)),
+            InputEvent::Change => self
+                .composer
+                .update(cx, |composer, cx| composer.schedule_draft_save(cx)),
+            _ => {}
         }
     }
 
@@ -220,7 +242,8 @@ impl ConversationView {
             ComposerEvent::Schedule { .. }
             | ComposerEvent::EditLast
             | ComposerEvent::FocusMessages
-            | ComposerEvent::ClosePost => {}
+            | ComposerEvent::ClosePost
+            | ComposerEvent::RestorePost(_) => {}
         }
     }
 

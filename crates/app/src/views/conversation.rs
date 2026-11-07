@@ -790,6 +790,9 @@ impl ConversationView {
             ComposerEvent::Typing(active) => self.send_typing(*active, cx),
             ComposerEvent::Edited => {}
             ComposerEvent::ClosePost => self.cancel_new_post(window, cx),
+            ComposerEvent::RestorePost(subject) => {
+                self.restore_new_post(subject.clone(), window, cx)
+            }
         }
     }
 
@@ -915,6 +918,10 @@ impl ConversationView {
         }
         self.stop_typing(cx);
         self.stop_reply_typing(cx);
+        let next_conversation_id = selection.conversation_id().to_owned();
+        self.composer.update(cx, |composer, cx| {
+            composer.leave_conversation(&next_conversation_id, cx)
+        });
         self.close_new_post(cx);
         self.feed_stash = None;
         self.feed_at_top = true;

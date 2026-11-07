@@ -25,6 +25,13 @@ impl<R: Remote> SyncEngine<R> {
             .await
     }
 
+    pub async fn channel_member_count(&self, channel_id: &str) -> Result<usize> {
+        let Conversation::Channel { team_id } = self.resolve(channel_id).await? else {
+            return Err(Error::Unsupported("a member count for a chat"));
+        };
+        self.remote.channel_member_count(&team_id, channel_id).await
+    }
+
     pub async fn library_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
         self.remote.list_children(folder).await
     }

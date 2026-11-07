@@ -35,9 +35,9 @@ mod drafts;
 mod format_menus;
 mod post;
 pub use post::{
-    POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG,
-    POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
-    POST_CARD_SUBJECT_TAG, SUBJECT_PLACEHOLDER,
+    POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG,
+    POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG, POST_CARD_SUBJECT_TAG,
+    SUBJECT_PLACEHOLDER,
 };
 mod rule;
 mod schedule;
@@ -141,6 +141,7 @@ pub enum ComposerEvent {
     Typing(bool),
     Edited,
     ClosePost,
+    RestorePost(Option<String>),
 }
 
 struct MentionPopup {
@@ -249,6 +250,7 @@ pub struct Composer {
     format_bar: HashSet<String>,
     post_subject: Option<Entity<InputState>>,
     announcement: Option<post::AnnouncementDraft>,
+    audience: Option<(String, usize)>,
     active_cell: Option<(String, teams_core::Cell)>,
     caret_before_table: usize,
     caret_text: String,
@@ -519,6 +521,7 @@ impl Composer {
             format_bar: HashSet::new(),
             post_subject: None,
             announcement: None,
+            audience: None,
             active_cell: None,
             caret_before_table: 0,
             caret_text: String::new(),
@@ -1873,7 +1876,7 @@ impl Composer {
         }
         Outgoing {
             draft,
-            subject: None,
+            subject: self.post_subject_text(cx),
             mentions,
             reply: self.reply.clone(),
             edit: self.editing.clone(),
@@ -2422,6 +2425,9 @@ impl Composer {
         self.link.restore(outgoing.link_preview.clone());
         if outgoing.edit.is_none() {
             self.restore_announcement(outgoing.banner.as_ref(), window, cx);
+            if !self.inline && (outgoing.subject.is_some() || outgoing.banner.is_some()) {
+                cx.emit(ComposerEvent::RestorePost(outgoing.subject.clone()));
+            }
         }
         self.close_popup();
         self.schedule_draft_save(cx);
@@ -3394,6 +3400,7 @@ impl Render for Composer {
             .children(self.render_reply_strip(cx))
             .children(self.render_edit_strip(cx))
             .children(self.render_urgent_banner(cx))
+            .children(self.render_audience_hint())
             .children(self.render_meeting_chip())
             .children(self.render_link_preview(cx))
             .child(
@@ -5275,6 +5282,49 @@ mod tests {
                         .unwrap()
                         .is_some()
                 );
+            });
+        }
+
+        #[gpui_kit::test]
+        fn a_post_draft_keeps_subject_and_banner_across_a_channel_switch(cx: &mut TestAppContext) {
+            use std::cell::RefCell;
+            use std::rc::Rc;
+
+            use gpui_kit::component::input::InputState;
+
+            use super::super::ComposerEvent;
+
+            let (handle, composer) = demo_composer(cx);
+            let restored = Rc::new(RefCell::new(Vec::new()));
+            cx.update_window(handle, |_, window, cx| {
+                let seen = restored.clone();
+                cx.subscribe(&composer, move |_, event: &ComposerEvent, _| {
+                    if let ComposerEvent::RestorePost(subject) = event {
+                        seen.borrow_mut().push(subject.clone());
+                    }
+                })
+                .detach();
+                let subject = cx.new(|cx| InputState::new(window, cx));
+                subject.update(cx, |input, cx| input.set_value("Code freeze", window, cx));
+                composer.update(cx, |composer, cx| {
+                    composer.set_conversation("channel-a", "A", window, cx);
+                    composer.set_post_layout(Some(subject), cx);
+                    composer.toggle_announcement(window, cx);
+                    let headline = composer.announcement.as_ref().unwrap().headline.clone();
+                    headline.update(cx, |input, cx| input.set_value("Release 43", window, cx));
+                    composer.leave_conversation("channel-b", cx);
+                    composer.set_post_layout(None, cx);
+                    composer.set_conversation("channel-b", "B", window, cx);
+                    composer.set_conversation("channel-a", "A", window, cx);
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update(|cx| {
+                let composer = composer.read(cx);
+                let draft = composer.announcement.as_ref().unwrap();
+                assert_eq!(draft.headline.read(cx).value().as_ref(), "Release 43");
+                assert_eq!(*restored.borrow(), vec![Some("Code freeze".to_owned())]);
             });
         }
 
