@@ -71,17 +71,33 @@ function runProbe(...args) {
 
 const speechDataUrl = () => `data:audio/wav;base64,${readFileSync(PROBE_DIR + '/web.wav').toString('base64')}`;
 
-const INBOUND_AUDIO = `(async () => {
-  let energy = 0, duration = 0, packets = 0;
-  for (const peer of window.__pcs || []) {
-    if (peer.connectionState === 'closed') continue;
-    (await peer.getStats()).forEach((entry) => {
-      if (entry.type !== 'inbound-rtp' || entry.kind !== 'audio') return;
-      energy += entry.totalAudioEnergy || 0; duration += entry.totalSamplesDuration || 0; packets += entry.packetsReceived || 0;
-    });
-  }
-  return { energy, duration, packets };
-})()`;
+// Taps every received audio track, so the level does not depend on headless Chrome playing it out.
+const REMOTE_AUDIO_TAP = `(() => {
+  window.__remoteAudio = { sum: 0, count: 0, packets: 0 };
+  const tapped = new WeakSet();
+  const tap = async (track) => {
+    tapped.add(track);
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      const samples = new Float32Array(value.numberOfFrames);
+      value.copyTo(samples, { planeIndex: 0, format: 'f32-planar' });
+      value.close();
+      for (const sample of samples) window.__remoteAudio.sum += sample * sample;
+      window.__remoteAudio.count += samples.length;
+    }
+  };
+  setInterval(() => {
+    for (const peer of window.__pcs || []) {
+      for (const receiver of peer.getReceivers()) {
+        if (receiver.track && receiver.track.kind === 'audio' && !tapped.has(receiver.track)) tap(receiver.track).catch(() => {});
+      }
+    }
+  }, 500);
+})();`;
+
+const INBOUND_AUDIO = `({ ...window.__remoteAudio })`;
 
 const GUEST_SENDING = `(async () => {
   let energy = 0, duration = 0, packets = 0;
@@ -122,6 +138,7 @@ class GuestTab {
     await this.browser.send('Page.enable', {}, sessionId);
     await this.browser.send('Runtime.enable', {}, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: PEER_HOOK }, sessionId);
+    await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: REMOTE_AUDIO_TAP }, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_MEDIA(speechDataUrl()) }, sessionId);
     for (const origin of TEAMS_ORIGINS) {
       await this.browser.send('Browser.grantPermissions', { permissions: ['audioCapture', 'videoCapture'], origin, ...context }).catch(() => {});
@@ -186,8 +203,8 @@ async function sampleWeb(tab, seconds) {
   while (Date.now() < end) {
     await delay(WINDOW_MS);
     const current = await tab.evaluate(INBOUND_AUDIO);
-    const duration = current.duration - previous.duration;
-    levels.push(duration > 0 ? Math.sqrt(Math.max(0, current.energy - previous.energy) / duration) : 0);
+    const count = current.count - previous.count;
+    levels.push(count > 0 ? Math.sqrt((current.sum - previous.sum) / count) : 0);
     previous = current;
   }
   return levels;
