@@ -344,6 +344,7 @@ mod tests {
             organizer_address: None,
             ical_uid: None,
             show_as: Default::default(),
+            dial_in: None,
             response: ResponseType::Accepted,
         }
     }

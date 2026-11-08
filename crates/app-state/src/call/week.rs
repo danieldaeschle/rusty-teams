@@ -199,6 +199,7 @@ fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
                 organizer_address: None,
                 ical_uid: None,
                 show_as: demo_show_as(subject, *response),
+                dial_in: None,
                 response: *response,
             }
         })

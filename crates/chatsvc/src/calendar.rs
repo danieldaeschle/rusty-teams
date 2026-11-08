@@ -52,6 +52,38 @@ pub struct CalendarEvent {
     pub ical_uid: Option<String>,
     pub response: ResponseType,
     pub show_as: ShowAs,
+    pub dial_in: Option<DialIn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DialIn {
+    pub toll_number: String,
+    pub conference_id: String,
+}
+
+const JOIN_INFO_TITLE: &str = "Microsoft Teams meeting";
+
+/// The plain text Teams puts on the clipboard for "Copy join info".
+pub fn join_info_text(join_url: &str, dial_in: Option<&DialIn>) -> String {
+    let mut lines = vec![JOIN_INFO_TITLE.to_owned(), format!("Join: {join_url}")];
+    if let Some(dial_in) = dial_in {
+        lines.push(String::new());
+        lines.push("Dial in by phone".to_owned());
+        lines.push(format!(
+            "{},,{}#",
+            dial_in.toll_number, dial_in.conference_id
+        ));
+        lines.push(format!("Phone conference ID: {}#", dial_in.conference_id));
+    }
+    lines.join("\n")
+}
+
+fn dial_in(entry: &Value) -> Option<DialIn> {
+    Some(DialIn {
+        toll_number: text(entry, "onlineMeetingTollNumber").filter(|value| !value.is_empty())?,
+        conference_id: text(entry, "onlineMeetingConferenceId")
+            .filter(|value| !value.is_empty())?,
+    })
 }
 
 pub struct Calendar<T: CardTransport = SessionCardTransport> {
@@ -239,11 +271,30 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         ical_uid: text(entry, "iCalUid").or_else(|| text(entry, "iCalUId")),
         response: response_type(entry),
         show_as: show_as(entry),
+        dial_in: dial_in(entry),
     })
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn join_info_carries_the_phone_dial_in_like_teams() {
+        let entry = serde_json::json!({
+            "onlineMeetingTollNumber": "+49 30 123456",
+            "onlineMeetingConferenceId": "987654321",
+        });
+        let parsed = dial_in(&entry).expect("dial in");
+        assert_eq!(
+            join_info_text("https://teams.microsoft.com/l/meetup-join/x", Some(&parsed)),
+            "Microsoft Teams meeting\nJoin: https://teams.microsoft.com/l/meetup-join/x\n\nDial in by phone\n+49 30 123456,,987654321#\nPhone conference ID: 987654321#"
+        );
+        assert_eq!(dial_in(&serde_json::json!({"onlineMeetingTollNumber": ""})), None);
+        assert_eq!(
+            join_info_text("https://x", None),
+            "Microsoft Teams meeting\nJoin: https://x"
+        );
+    }
+
     #[test]
     fn meet_now_join_url_prefers_the_join_link() {
         let body = serde_json::json!({"value": {

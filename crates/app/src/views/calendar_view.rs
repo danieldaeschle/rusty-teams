@@ -1,5 +1,5 @@
 use app_base::format::clock_format;
-use chatsvc::{CalendarEvent, ResponseType};
+use chatsvc::{CalendarEvent, ResponseType, join_info_text};
 use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
@@ -31,6 +31,7 @@ const ALL_DAY_HEIGHT: f32 = 26.;
 const BLOCK_GAP: f32 = 2.;
 const FIRST_VISIBLE_HOUR: f32 = 8.;
 const CANCELED_PREFIX: &str = "Canceled: ";
+const COPY_JOIN_INFO: &str = "Copy join info";
 const COMPACT_HEADER_WIDTH: f32 = 960.;
 const BUSY_FILL_OPACITY: f32 = 0.28;
 const FREE_FILL_OPACITY: f32 = 0.12;
@@ -503,6 +504,16 @@ fn event_menu(
                 })
             },
         ));
+    }
+    if let Some(join_url) = event.join_url.as_deref().filter(|_| event.online) {
+        let info = join_info_text(join_url, event.dial_in.as_ref());
+        menu = menu.item(
+            PopupMenuItem::new(COPY_JOIN_INFO)
+                .icon(IconName::Copy)
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(info.clone()))
+                }),
+        );
     }
     if let Some(thread_id) = event.thread_id.clone() {
         let chat_state = state.clone();

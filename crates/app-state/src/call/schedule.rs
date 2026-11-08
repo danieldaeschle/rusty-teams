@@ -127,6 +127,7 @@ fn demo_event(draft: &MeetingDraft, serial: u64) -> CalendarEvent {
         organizer_address: None,
         ical_uid: None,
         show_as: Default::default(),
+        dial_in: None,
         response: ResponseType::Organizer,
     }
 }
