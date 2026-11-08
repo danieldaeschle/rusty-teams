@@ -81,6 +81,7 @@ pub mod skin_tone_choices;
 pub mod shell;
 pub mod shortcuts;
 pub mod shortcuts_dialog;
+mod last_views;
 pub mod sidebar;
 pub mod status_menu;
 pub mod status_message_dialog;

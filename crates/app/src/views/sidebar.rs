@@ -30,6 +30,7 @@ use super::create_channel_dialog::open_create_channel_dialog;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
+use super::last_views::LastViews;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 use crate::channel_menu::{
@@ -695,6 +696,7 @@ pub struct SidebarView {
     more_filters_open: bool,
     filter_input: Option<Entity<InputState>>,
     filter_subscription: Option<Subscription>,
+    last_views: LastViews,
     _activity_observation: Subscription,
     _subscription: Subscription,
     _state_observation: Subscription,
@@ -753,6 +755,9 @@ impl SidebarView {
     ) -> Self {
         let subscription = cx.subscribe(&state, |this, state, event: &AppEvent, cx| {
             if matches!(event, AppEvent::Selection) {
+                if let Some(selection) = &state.read(cx).selection {
+                    this.last_views.remember(selection);
+                }
                 if state.read(cx).new_chat {
                     this.tab = SidebarTab::Chats;
                 }
@@ -829,6 +834,7 @@ impl SidebarView {
             more_filters_open: false,
             filter_input: None,
             filter_subscription: None,
+            last_views: LastViews::default(),
             _activity_observation: activity_observation,
             _subscription: subscription,
             _state_observation: state_observation,
@@ -876,6 +882,7 @@ impl SidebarView {
         let changed = self.tab != tab;
         self.tab = tab;
         if changed {
+            self.restore_last_view(tab, cx);
             cx.emit(SidebarEvent::TabChanged);
         }
         match tab {
@@ -892,6 +899,27 @@ impl SidebarView {
             _ => {}
         }
         cx.notify();
+    }
+
+    fn restore_last_view(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
+        let first_channel_id = self.first_channel_id(cx);
+        let state = self.state.read(cx);
+        if let Some(current) = &state.selection {
+            self.last_views.remember(current);
+        }
+        let first_chat_id = state.sidebar.chats.first().map(|chat| chat.id.as_str());
+        if let Some(selection) =
+            self.last_views
+                .restore(
+                    tab,
+                    state.selection.as_ref(),
+                    first_chat_id,
+                    first_channel_id.as_deref(),
+                )
+        {
+            self.state
+                .update(cx, |state, cx| state.select(selection, cx));
+        }
     }
 
     pub fn select_adjacent(&mut self, step: Step, cx: &mut Context<Self>) {
@@ -920,15 +948,28 @@ impl SidebarView {
             Some(Selection::Channel(channel_id)) => Some(channel_id.as_str()),
             _ => None,
         };
-        let input = ChannelOrderInput {
+        let input = self.channel_order_input(state, selected_channel);
+        step_id(&visible_channel_ids(&input), selected_channel, step)
+    }
+
+    fn first_channel_id(&self, cx: &App) -> Option<String> {
+        let input = self.channel_order_input(self.state.read(cx), None);
+        visible_channel_ids(&input).first().map(|id| (*id).to_owned())
+    }
+
+    fn channel_order_input<'a>(
+        &'a self,
+        state: &'a AppState,
+        selected_channel: Option<&'a str>,
+    ) -> ChannelOrderInput<'a> {
+        ChannelOrderInput {
             teams: &state.sidebar.teams,
             pinned_ids: &state.directory.pinned_channels,
             collapsed_teams: &self.collapsed_teams,
             revealed_channel_teams: &self.revealed_channel_teams,
             hidden_teams_open: self.hidden_teams_open,
             selected_channel,
-        };
-        step_id(&visible_channel_ids(&input), selected_channel, step)
+        }
     }
 
     fn expand_team_of_selection(&mut self, cx: &mut Context<Self>) {
