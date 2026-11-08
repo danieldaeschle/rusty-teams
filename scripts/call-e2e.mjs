@@ -137,6 +137,38 @@ const LOCATE = (step) => `(() => {
   target.click();
   return label(target).slice(0, 80);
 })()`;
+
+// Teams web offers audio/L16 109 first; headless Chrome decodes none of it, so the guest is held to Opus.
+const NO_L16 = `(() => {
+  const strip = (sdp) => {
+    if (!sdp) return sdp;
+    const payload = (sdp.match(/a=rtpmap:(\\d+) L16\\//) || [])[1];
+    if (!payload) return sdp;
+    return sdp.split('\\r\\n').filter((line) => !line.startsWith('a=rtpmap:' + payload + ' ') && !line.startsWith('a=fmtp:' + payload + ' ') && !line.startsWith('a=rtcp-fb:' + payload + ' '))
+      .map((line) => line.startsWith('m=audio') ? line.split(' ').filter((part, index) => index < 3 || part !== payload).join(' ') : line).join('\\r\\n');
+  };
+  const prototype = RTCPeerConnection.prototype;
+  for (const name of ['createOffer', 'createAnswer']) {
+    const original = prototype[name];
+    prototype[name] = async function (...args) { const description = await original.apply(this, args); return { type: description.type, sdp: strip(description.sdp) }; };
+  }
+  const setLocal = prototype.setLocalDescription;
+  prototype.setLocalDescription = function (description) { return description && description.sdp ? setLocal.call(this, { type: description.type, sdp: strip(description.sdp) }) : setLocal.apply(this, arguments); };
+})();`;
+
+const AUDIO_DECODER = `(async () => {
+    const out = [];
+    for (const peer of window.__pcs || []) {
+      const stats = await peer.getStats();
+      stats.forEach((entry) => {
+        if (entry.type !== 'inbound-rtp' || entry.kind !== 'audio') return;
+        const codec = entry.codecId && stats.get(entry.codecId);
+        out.push({ ssrc: entry.ssrc, mid: entry.mid, packets: entry.packetsReceived, discarded: entry.packetsDiscarded, lost: entry.packetsLost, samples: entry.totalSamplesReceived, concealed: entry.concealedSamples, emitted: entry.jitterBufferEmittedCount, decoder: entry.decoderImplementation, codec: codec ? codec.mimeType + '/' + codec.payloadType : null, bytes: entry.bytesReceived });
+      });
+      out.push({ transforms: peer.getReceivers().map((receiver) => receiver.track && receiver.track.kind + ':' + Boolean(receiver.transform)) });
+    }
+    return out;
+  })()`;
 const CONNECTED = `(window.__pcs || []).some((peer) => peer.connectionState === 'connected')`;
 const TEAMS_ORIGINS = ['https://teams.cloud.microsoft', 'https://teams.microsoft.com'];
 
@@ -152,6 +184,7 @@ class GuestTab {
     await this.browser.send('Page.enable', {}, sessionId);
     await this.browser.send('Runtime.enable', {}, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: PEER_HOOK }, sessionId);
+    await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_L16 }, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: REMOTE_AUDIO_TAP }, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_MEDIA(speechDataUrl()) }, sessionId);
     for (const origin of TEAMS_ORIGINS) {
@@ -357,6 +390,7 @@ const restoreCapture = () => defaultAudio('set', 'capture', savedCapture);
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { restoreCapture(); process.exit(130); });
 const browser = await new Browser(OWN_ENDPOINT).connect();
 const tab = new GuestTab(browser);
+const secondTab = process.env.SECOND_GUEST ? new GuestTab(browser) : null;
 try {
   if (!teamsProcessId()) {
     log(`starting the app, waiting ${APP_START_WAIT_MS / 1000}s`);
@@ -373,9 +407,21 @@ try {
   runTeams('--join', link);
   log(`app joining, waiting ${APP_JOIN_WAIT_MS / 1000}s`);
   await delay(APP_JOIN_WAIT_MS);
+  const joined = await appStats(workDir).catch(() => ({ inCall: false }));
+  if (!joined.inCall) throw new Error('the app is not in the call after --join');
   await tab.open(link);
   const admitting = setInterval(() => runTeams('--admit-all'), ADMIT_INTERVAL_MS);
   report.webJoined = await tab.join().finally(() => clearInterval(admitting));
+  if (secondTab) {
+    await secondTab.open(link);
+    const admittingSecond = setInterval(() => runTeams('--admit-all'), ADMIT_INTERVAL_MS);
+    report.secondJoined = await secondTab.join().finally(() => clearInterval(admittingSecond));
+    log(`second guest joined: ${report.secondJoined}`);
+    runTeams('--call', 'mute');
+    await delay(10_000);
+    report.secondHearsFirstOnly = await secondTab.evaluate(AUDIO_DECODER).catch((error) => error.message);
+    report.firstWhileAppMuted = await tab.evaluate(AUDIO_DECODER).catch((error) => error.message);
+  }
   log(`web guest joined: ${report.webJoined}`);
   if (!report.webJoined) {
     await tab.shot(workDir + '/web-join.png');
@@ -392,6 +438,12 @@ try {
   ]);
   report.guestSending = await tab.evaluate(GUEST_SENDING).catch((error) => error.message);
   report.guestPlayback = await tab.playbackState();
+  report.guestAudioDecoder = await tab.evaluate(AUDIO_DECODER).catch((error) => error.message);
+  report.guestSourceLevels = [];
+  for (let sample = 0; sample < 10; sample++) {
+    report.guestSourceLevels.push(await tab.evaluate(`(window.__pcs || []).flatMap((peer) => peer.getReceivers().filter((receiver) => receiver.track && receiver.track.kind === 'audio').flatMap((receiver) => receiver.getSynchronizationSources().map((source) => Number((source.audioLevel || 0).toFixed(3)))))`).catch((error) => error.message));
+    await delay(500);
+  }
   report.guestReceiving = await tab.evaluate(PEER_STATS).then((stats) => ({ peers: stats.peers, audioIn: stats.audioIn })).catch((error) => error.message);
   report.appToWeb = judge(webLevels, WEB_THRESHOLD);
   report.webToApp = judge(JSON.parse(recorded).rms, APP_THRESHOLD);
@@ -405,6 +457,7 @@ try {
 } finally {
   if (teamsProcessId()) runTeams('--hang-up');
   await tab.close();
+  if (secondTab) await secondTab.close();
   restoreCapture();
   log('default mic restored');
   browser.socket.close();
@@ -413,5 +466,5 @@ const scenariosPass = Object.values(report.scenarios ?? {}).every((entry) => ent
 report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass && scenariosPass);
 writeFileSync(workDir + '/report.json', JSON.stringify(report, null, 2));
 const scenarioSummary = Object.fromEntries(Object.entries(report.scenarios ?? {}).map(([name, entry]) => [name, entry.pass ? 'pass' : `FAIL ${entry.error ?? ''}`.trim()]));
-console.log(JSON.stringify({ pass: report.pass, guestPlayback: report.guestPlayback, guestReceiving: report.guestReceiving, appToWeb: report.appToWeb, webToApp: report.webToApp, scenarios: scenarioSummary, guestSending: report.guestSending, error: report.error }));
+console.log(JSON.stringify({ pass: report.pass, secondHearsFirstOnly: report.secondHearsFirstOnly, firstWhileAppMuted: report.firstWhileAppMuted, guestAudioDecoder: report.guestAudioDecoder, guestPlayback: report.guestPlayback, guestReceiving: report.guestReceiving, appToWeb: report.appToWeb, webToApp: report.webToApp, scenarios: scenarioSummary, guestSending: report.guestSending, error: report.error }));
 process.exit(report.pass ? 0 : 1);
