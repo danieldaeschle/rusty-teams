@@ -302,6 +302,7 @@ impl AppState {
                 HistoryShare::All => SharedHistory::All,
             },
             topic: None,
+            app_name: None,
         };
         self.store_demo_roster_line(chat_id, &event, cx);
     }
@@ -371,6 +372,7 @@ impl AppState {
                 member_names: Vec::new(),
                 history: SharedHistory::None,
                 topic: (!topic.is_empty()).then(|| topic.clone()),
+                app_name: None,
             };
             self.store_demo_roster_line(chat_id, &event, cx);
             return;

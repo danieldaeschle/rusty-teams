@@ -7,8 +7,10 @@ const MEMBERS_ADDED_TYPE: &str = "#microsoft.graph.membersAddedEventMessageDetai
 const MEMBERS_DELETED_TYPE: &str = "#microsoft.graph.membersDeletedEventMessageDetail";
 const MEMBERS_LEFT_TYPE: &str = "#microsoft.graph.membersLeftEventMessageDetail";
 const CHAT_RENAMED_TYPE: &str = "#microsoft.graph.chatRenamedEventMessageDetail";
+const APP_INSTALLED_TYPE: &str = "#microsoft.graph.teamsAppInstalledEventMessageDetail";
 const UNRESOLVED_NAME_PREFIX: &str = "orgid:";
 const DAY_SECONDS: i64 = 86_400;
+const UNNAMED_APP: &str = "an app";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RosterChange {
@@ -16,6 +18,7 @@ pub enum RosterChange {
     Removed,
     Left,
     Renamed,
+    AppAdded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -37,6 +40,8 @@ pub struct RosterEvent {
     pub history: SharedHistory,
     #[serde(default)]
     pub topic: Option<String>,
+    #[serde(default)]
+    pub app_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,6 +77,7 @@ impl RosterEvent {
             MEMBERS_DELETED_TYPE if only_initiator => RosterChange::Left,
             MEMBERS_DELETED_TYPE => RosterChange::Removed,
             CHAT_RENAMED_TYPE => RosterChange::Renamed,
+            APP_INSTALLED_TYPE => RosterChange::AppAdded,
             _ => return None,
         };
         let history = match change {
@@ -96,6 +102,12 @@ impl RosterEvent {
                 .flatten()
                 .map(str::trim)
                 .filter(|topic| !topic.is_empty())
+                .map(str::to_owned),
+            app_name: (change == RosterChange::AppAdded)
+                .then(|| detail.get("teamsAppDisplayName").and_then(Value::as_str))
+                .flatten()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
                 .map(str::to_owned),
         })
     }
@@ -130,6 +142,10 @@ impl RosterEvent {
                 None => format!("{initiator} removed the group name for this conversation."),
             },
             RosterChange::Removed => format!("{initiator} removed {targets} from the chat."),
+            RosterChange::AppAdded => {
+                let app = self.app_name.as_deref().unwrap_or(UNNAMED_APP);
+                format!("{initiator} added {app} to the chat.")
+            }
             RosterChange::Added => match self.history {
                 SharedHistory::None => format!("{initiator} added {targets} to the chat."),
                 SharedHistory::All => {
@@ -339,5 +355,19 @@ mod tests {
             .filter_map(|record| record.user_id.clone())
             .collect();
         assert_eq!(ids, ["me", "ann", "bob"]);
+    }
+
+    #[test]
+    fn an_installed_app_reads_like_teams() {
+        let detail = json!({
+            "@odata.type": APP_INSTALLED_TYPE,
+            "teamsAppId": "app-1",
+            "teamsAppDisplayName": "Jira",
+            "initiator": {"user": {"id": "ann", "displayName": "Ann Example"}},
+        });
+        let event = RosterEvent::from_graph(&detail, created()).unwrap();
+        assert_eq!(event.change, RosterChange::AppAdded);
+        assert!(event.member_ids.is_empty());
+        assert_eq!(event.text(plain_names), "Ann Example added Jira to the chat.");
     }
 }
