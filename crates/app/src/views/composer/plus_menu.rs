@@ -8,6 +8,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer};
+use crate::app_state::AppState;
 use crate::delivery_options::DELIVERY_BUTTON_TITLE;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::new_chat::Pick;
@@ -171,34 +172,33 @@ impl Composer {
             PlusAction::ScheduleMessage => self.open_schedule_picker(cx),
             PlusAction::DeliveryOptions => self.delivery_menu = true,
             PlusAction::ScheduleMeeting => {
-                let invitees = self.meeting_invitees(cx);
+                let invitees = self
+                    .conversation_id
+                    .as_deref()
+                    .map(|chat_id| chat_invitees(self.app.read(cx), chat_id))
+                    .unwrap_or_default();
                 open_new_meeting_with(self.app.clone(), invitees, window, cx);
             }
         }
         cx.notify();
     }
+}
 
-    fn meeting_invitees(&self, cx: &App) -> Vec<Pick> {
-        let state = self.app.read(cx);
-        let me = state.directory.me.as_ref().map(|me| me.user_id.as_str());
-        let Some(chat) = self
-            .conversation_id
-            .as_deref()
-            .and_then(|id| state.sidebar.chats.iter().find(|chat| chat.id == id))
-        else {
-            return Vec::new();
-        };
-        chat.members
-            .iter()
-            .filter(|member| !member.is_bot())
-            .filter_map(|member| {
-                let user_id = member.user_id.clone()?;
-                (Some(user_id.as_str()) != me).then(|| Pick {
-                    user_id,
-                    name: member.display_name.clone(),
-                    mail: None,
-                })
+pub(crate) fn chat_invitees(state: &AppState, chat_id: &str) -> Vec<Pick> {
+    let me = state.directory.me.as_ref().map(|me| me.user_id.as_str());
+    let Some(chat) = state.sidebar.chats.iter().find(|chat| chat.id == chat_id) else {
+        return Vec::new();
+    };
+    chat.members
+        .iter()
+        .filter(|member| !member.is_bot())
+        .filter_map(|member| {
+            let user_id = member.user_id.clone()?;
+            (Some(user_id.as_str()) != me).then(|| Pick {
+                user_id,
+                name: member.display_name.clone(),
+                mail: None,
             })
-            .collect()
-    }
+        })
+        .collect()
 }

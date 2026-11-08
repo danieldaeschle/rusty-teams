@@ -11,7 +11,7 @@ use super::Composer;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::actions::OpenSwitcher;
 use crate::views::shortcuts::{OpenSettings, ShowShortcuts};
-use crate::views::sidebar::confirm_leave;
+use crate::views::chat_menu::confirm_leave;
 
 const GROUP_KIND: &str = "group";
 const WIDTH: f32 = 380.;

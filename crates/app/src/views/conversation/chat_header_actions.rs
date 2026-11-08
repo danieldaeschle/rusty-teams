@@ -1,18 +1,25 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+use teams_core::is_notes_chat;
 
 use super::ConversationView;
 use crate::app_state::Selection;
 use crate::data::Directory;
 use crate::find_in_chat::FIND_IN_CHAT;
 use crate::theme;
-use crate::views::chat_pop_out::{self, POP_OUT_CHAT_LABEL};
+use crate::views::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
+use crate::views::composer::plus_menu::chat_invitees;
+use crate::views::new_meeting_dialog::open_new_meeting_with;
 use crate::views::avatar::status_glyph;
-use crate::views::widgets::{icon, symbol};
+use crate::views::widgets::{icon, menu_icon, symbol};
 
+pub const CHAT_HEADER_MORE_TAG: &str = "chat-header-more";
+const SCHEDULE_MEETING_LABEL: &str = "Schedule meeting";
 const BUTTON_SIZE: f32 = 32.;
 const COUNT_GLYPH: f32 = 16.;
 
@@ -38,23 +45,45 @@ impl ConversationView {
         )
     }
 
-    pub(super) fn pop_out_button(&self) -> Option<AnyElement> {
+    pub(super) fn chat_more_button(&self, cx: &App) -> Option<AnyElement> {
         let chat_id = self
             .header_chat_id()
-            .filter(|_| !self.popped_out && !self.pinned)?
-            .to_owned();
-        let app = self.app.clone();
+            .filter(|_| !self.popped_out && !self.pinned)?;
+        let target = ChatMenuTarget::for_chat(self.app.read(cx), chat_id)?;
+        let context = MenuContext::new(&self.app, cx);
         Some(
-            Button::new("chat-pop-out")
-                .icon(IconName::ExternalLink)
+            Button::new(CHAT_HEADER_MORE_TAG)
+                .icon(IconName::Ellipsis)
                 .ghost()
                 .size(px(BUTTON_SIZE))
                 .rounded(px(8.))
-                .tooltip(POP_OUT_CHAT_LABEL)
-                .on_click(move |_, _, cx| chat_pop_out::pop_out_chat(&app, &chat_id, cx))
+                .tooltip("More chat options")
+                .debug_selector(|| CHAT_HEADER_MORE_TAG.into())
+                .dropdown_menu(move |popup, window, cx| {
+                    let popup = if is_notes_chat(&target.id) {
+                        popup
+                    } else {
+                        schedule_meeting_item(popup, &context, &target.id)
+                    };
+                    chat_menu(popup, window, cx, &context, &target)
+                })
                 .into_any_element(),
         )
     }
+}
+
+fn schedule_meeting_item(popup: PopupMenu, context: &MenuContext, chat_id: &str) -> PopupMenu {
+    let (state, chat_id) = (context.state.clone(), chat_id.to_owned());
+    popup
+        .item(
+            PopupMenuItem::new(SCHEDULE_MEETING_LABEL)
+                .icon(menu_icon(IconName::Calendar))
+                .on_click(move |_, window, cx| {
+                    let invitees = chat_invitees(state.read(cx), &chat_id);
+                    open_new_meeting_with(state.clone(), invitees, window, cx);
+                }),
+        )
+        .separator()
 }
 
 pub fn member_count(count: usize) -> Div {

@@ -14,7 +14,7 @@ use gpui_kit::*;
 use super::add_people_dialog::open_add_people;
 use super::avatar::{person_avatar, with_presence};
 use super::profile_card::opens_profile;
-use super::sidebar::confirm_leave;
+use super::chat_menu::confirm_leave;
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::chat_actions::TITLE_LIMIT;

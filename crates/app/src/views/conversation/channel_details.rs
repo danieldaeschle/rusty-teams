@@ -26,6 +26,9 @@ pub const CHANNEL_DETAILS_SHARED_TAG: &str = "shell/islands/main/channel-details
 const CHANNEL_DETAILS_SCROLL_DIVIDER: &str = "shell/islands/main/channel-details/divider-scroll";
 const OPEN_LABEL: &str = "Open channel details";
 const CLOSE_LABEL: &str = "Close channel details";
+const OPEN_CHAT_LABEL: &str = "Open chat details";
+const CLOSE_CHAT_LABEL: &str = "Close chat details";
+const CHAT_DETAILS_TITLE: &str = "In this chat";
 const PINNED_TITLE: &str = "Pinned";
 const SHARED_TITLE: &str = "Shared";
 const SEE_ALL_SHARED_ARIA: &str = "See all shared files";
@@ -129,6 +132,24 @@ impl ConversationView {
         }
     }
 
+    fn details_conversation_id(&self) -> Option<String> {
+        match &self.current.as_ref()?.selection {
+            Selection::Channel(channel_id) => Some(channel_id.clone()),
+            Selection::Chat(chat_id) if !self.draft_active && !self.pinned => {
+                Some(chat_id.clone())
+            }
+            Selection::Chat(_) => None,
+        }
+    }
+
+    fn details_labels(&self) -> (&'static str, &'static str) {
+        if self.details_channel_id().is_some() {
+            (OPEN_LABEL, CLOSE_LABEL)
+        } else {
+            (OPEN_CHAT_LABEL, CLOSE_CHAT_LABEL)
+        }
+    }
+
     pub(super) fn channel_find_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.details_channel_id()?;
         Some(
@@ -144,8 +165,9 @@ impl ConversationView {
     }
 
     pub(super) fn channel_details_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.details_channel_id()?;
+        self.details_conversation_id()?;
         let open = self.channel_details_open;
+        let (open_label, close_label) = self.details_labels();
         Some(
             Button::new("channel-details-toggle")
                 .debug_selector(|| CHANNEL_DETAILS_BUTTON.into())
@@ -157,7 +179,7 @@ impl ConversationView {
                 .ghost()
                 .size(px(BUTTON_SIZE))
                 .rounded(px(8.))
-                .tooltip(if open { CLOSE_LABEL } else { OPEN_LABEL })
+                .tooltip(if open { close_label } else { open_label })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.channel_details_open = !this.channel_details_open;
                     this.pinned_posts_expanded = false;
@@ -176,7 +198,9 @@ impl ConversationView {
         if !self.channel_details_open {
             return None;
         }
-        let channel_id = self.details_channel_id()?;
+        let channel_id = self.details_conversation_id()?;
+        let (_, close_label) = self.details_labels();
+        let is_chat = self.details_channel_id().is_none();
         let state = self.app.read(cx);
         let ids: Vec<String> = state
             .pinned_messages(&channel_id)
@@ -194,11 +218,14 @@ impl ConversationView {
         let expanded = self.pinned_posts_expanded;
         let shown = shown_pin_count(items.len(), expanded);
         let has_more = items.len() > shown;
-        let title = self
-            .current
-            .as_ref()
-            .map(|current| current.title.clone())
-            .unwrap_or_default();
+        let title = if is_chat {
+            CHAT_DETAILS_TITLE.to_owned()
+        } else {
+            self.current
+                .as_ref()
+                .map(|current| current.title.clone())
+                .unwrap_or_default()
+        };
         let directory = &state.directory;
         let mut body = v_flex()
             .w_full()
@@ -297,7 +324,7 @@ impl ConversationView {
                                         .ghost()
                                         .size(px(BUTTON_SIZE))
                                         .rounded(px(8.))
-                                        .tooltip(CLOSE_LABEL)
+                                        .tooltip(close_label)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.channel_details_open = false;
                                             this.pinned_posts_expanded = false;

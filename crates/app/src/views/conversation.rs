@@ -3757,6 +3757,8 @@ impl ConversationView {
             .to_owned();
         }
         let inline_tabs = tabs.map(|tabs| h_flex().h_full().flex_1().child(tabs));
+        let divided = matches!(current.selection, Selection::Chat(_))
+            && (!call_controls.is_empty() || stack.is_some());
         header
             .relative()
             .child(record_width(&self.header_width))
@@ -3803,11 +3805,12 @@ impl ConversationView {
             .children(inline_tabs)
             .children(call_controls)
             .children(stack)
+            .when(divided, |header| header.child(header_divider()))
             .children(self.copilot_button(cx))
             .children(self.chat_find_button(cx))
             .children(self.channel_find_button(cx))
             .children(self.channel_details_button(cx))
-            .children(self.pop_out_button())
+            .children(self.chat_more_button(cx))
             .children(self.pop_in_button(current))
     }
 
@@ -3835,6 +3838,16 @@ impl ConversationView {
 }
 
 const GROUP_KIND: &str = "group";
+const HEADER_DIVIDER_HEIGHT: f32 = 20.;
+
+fn header_divider() -> Div {
+    div()
+        .w(px(1.))
+        .h(px(HEADER_DIVIDER_HEIGHT))
+        .mx(px(4.))
+        .flex_none()
+        .bg(theme::border())
+}
 
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
