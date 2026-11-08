@@ -24,6 +24,77 @@ const ITEM_GAP: f32 = 2.;
 const ITEM_RADIUS: f32 = 6.;
 const ITEM_ICON: f32 = 16.;
 const NAV_PADDING_X: f32 = 12.;
+const NO_RESULTS: &str = "No settings found";
+
+fn search_terms(section: SettingsSection) -> &'static [&'static str] {
+    match section {
+        SettingsSection::General => &[
+            "Auto-start Teams",
+            "Open application in background",
+            "On close, keep the application running",
+            "Up arrow key behaviour in compose box",
+            "Translate messages into this language",
+            "How to handle messages in other languages",
+            "Never translate messages in these languages",
+        ],
+        SettingsSection::Notifications => &[
+            "Chat message notifications",
+            "Meeting chat notifications",
+            "Likes and reactions",
+            "Teams and channels",
+            "Show message preview",
+            "Notification sound",
+            "Urgent sound",
+            "Position on the screen",
+            "Flash taskbar when notifications are received",
+            "Hide notifications during calls and meetings",
+            "Send test notification",
+        ],
+        SettingsSection::Appearance => &["Theme", "Color scheme", "App icon"],
+        SettingsSection::Chats => &[
+            "Message density",
+            "Read receipts",
+            "Show message actions on right click",
+            "Show muted items in their own section",
+            "When writing a message, press Enter to",
+            "Format messages using mark-down",
+        ],
+        SettingsSection::Calls => &["Use Teams on the web for calls and meetings", "Ringtones"],
+        SettingsSection::Devices => &[
+            "Speaker",
+            "Microphone",
+            "Noise suppression",
+            "Music mode",
+            "Camera",
+            "Background",
+            "Soft focus",
+            "Adjust brightness",
+            "Mirror my video",
+            "Make a test call",
+            "Save a test report after each call",
+        ],
+        SettingsSection::Agents => &["Claude", "Agent runs"],
+        SettingsSection::Mcp => &["Model Context Protocol", "Conversation access"],
+        SettingsSection::About => &["Version", "Build"],
+    }
+}
+
+pub fn matches(section: SettingsSection, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || std::iter::once(label(section))
+            .chain(search_terms(section).iter().copied())
+            .any(|text| text.to_lowercase().contains(&query))
+}
+
+pub fn first_match(query: &str, agents_available: bool) -> Option<SettingsSection> {
+    TEAMS_GROUP
+        .into_iter()
+        .chain(RUSTY_GROUP)
+        .chain([SettingsSection::About])
+        .filter(|section| agents_available || *section != SettingsSection::Agents)
+        .find(|section| matches(*section, query))
+}
 
 pub fn label(section: SettingsSection) -> &'static str {
     match section {
@@ -80,18 +151,33 @@ pub struct NavLayout {
     pub padding_y: f32,
 }
 
+pub struct NavSearch<'a> {
+    pub input: AnyElement,
+    pub query: &'a str,
+}
+
 pub fn render_nav(
     active: SettingsSection,
     agents_available: bool,
     layout: NavLayout,
+    search: NavSearch<'_>,
     on_select: impl Fn(SettingsSection, &mut Window, &mut App) + Clone + 'static,
 ) -> Div {
     let item = |section: SettingsSection| nav_item(section, section == active, on_select.clone());
+    let query = search.query;
+    let teams: Vec<Stateful<Div>> = TEAMS_GROUP
+        .into_iter()
+        .filter(|section| matches(*section, query))
+        .map(item)
+        .collect();
     let rusty: Vec<Stateful<Div>> = RUSTY_GROUP
         .into_iter()
         .filter(|section| agents_available || *section != SettingsSection::Agents)
+        .filter(|section| matches(*section, query))
         .map(item)
         .collect();
+    let about_shown = matches(SettingsSection::About, query);
+    let nothing_found = teams.is_empty() && rusty.is_empty() && !about_shown;
     let group = |items: Vec<Stateful<Div>>| {
         v_flex()
             .w_full()
@@ -120,6 +206,14 @@ pub fn render_nav(
                 .child("Settings"),
         )
         .child(
+            div()
+                .debug_selector(|| "settings/nav/search".into())
+                .w_full()
+                .px(px(NAV_PADDING_X))
+                .pb(px(10.))
+                .child(search.input),
+        )
+        .child(
             v_flex()
                 .id("settings-nav-groups")
                 .w_full()
@@ -127,8 +221,18 @@ pub fn render_nav(
                 .min_h(px(0.))
                 .overflow_y_scrollbar()
                 .gap(px(ITEM_GAP))
-                .child(group(TEAMS_GROUP.into_iter().map(item).collect()))
-                .child(
+                .child(group(teams))
+                .when(nothing_found, |groups| {
+                    groups.child(
+                        div()
+                            .px(px(2. * NAV_PADDING_X))
+                            .py(px(ITEM_PADDING_Y))
+                            .text_size(px(13.))
+                            .text_color(theme::text_muted())
+                            .child(NO_RESULTS),
+                    )
+                })
+                .when(!rusty.is_empty(), |groups| groups.child(
                     div()
                         .debug_selector(|| "settings/nav/divider".into())
                         .w_full()
@@ -146,15 +250,15 @@ pub fn render_nav(
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_muted())
                         .child("RUSTY TEAMS"),
-                )
-                .child(group(rusty)),
+                ).child(group(rusty))),
         )
-        .child(
-            div()
-                .w_full()
-                .px(px(NAV_PADDING_X))
-                .child(item(SettingsSection::About).debug_selector(|| "settings/nav/about".into())),
-        )
+        .when(about_shown, |nav| {
+            nav.child(
+                div().w_full().px(px(NAV_PADDING_X)).child(
+                    item(SettingsSection::About).debug_selector(|| "settings/nav/about".into()),
+                ),
+            )
+        })
 }
 
 fn nav_item(
@@ -200,4 +304,37 @@ fn nav_item(
                 .child(label(section)),
         )
         .on_click(move |_, window, cx| on_select(section, window, cx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SettingsSection, first_match, label, matches, search_terms};
+
+    #[test]
+    fn search_finds_sections_by_name_and_by_setting() {
+        assert!(matches(SettingsSection::Chats, "read receipts"));
+        assert!(matches(SettingsSection::Devices, "MICRO"));
+        assert!(matches(SettingsSection::Calls, "calls"));
+        assert!(!matches(SettingsSection::Appearance, "receipts"));
+        assert!(matches(SettingsSection::Appearance, "  "));
+        assert_eq!(first_match("noise", true), Some(SettingsSection::Devices));
+        assert_eq!(first_match("claude", false), None);
+        assert_eq!(first_match("xyz", true), None);
+    }
+
+    #[test]
+    fn every_search_term_names_a_setting_on_its_page() {
+        let pages = [
+            (SettingsSection::General, include_str!("general.rs")),
+            (SettingsSection::Notifications, include_str!("notifications.rs")),
+            (SettingsSection::Appearance, include_str!("appearance.rs")),
+            (SettingsSection::Chats, include_str!("chats.rs")),
+            (SettingsSection::Devices, include_str!("devices.rs")),
+        ];
+        for (section, source) in pages {
+            for term in search_terms(section) {
+                assert!(source.contains(term), "{term} is not on {}", label(section));
+            }
+        }
+    }
 }

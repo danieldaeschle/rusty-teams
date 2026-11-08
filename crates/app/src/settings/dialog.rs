@@ -1,12 +1,13 @@
 use app_ui_kit::settings_controls::PAGE_PADDING;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 use super::devices::DevicesView;
 use super::mcp::McpView;
-use super::nav::{NavLayout, label, render_nav};
+use super::nav::{NavLayout, NavSearch, first_match, label, matches, render_nav};
 use super::rows::ROW_INSET;
 use super::{about, appearance, calls, chats, general, notifications};
 use crate::agents::AgentsSettings;
@@ -26,6 +27,8 @@ const COMPACT_BELOW_WIDTH: f32 = 1100.;
 const COMPACT_BELOW_HEIGHT: f32 = 720.;
 const NAV_WIDTH: f32 = 280.;
 const PADDING: f32 = 24.;
+const SEARCH_HEIGHT: f32 = 32.;
+const SEARCH_PLACEHOLDER: &str = "Find in Settings";
 
 pub enum SettingsDialogEvent {
     Close,
@@ -64,7 +67,8 @@ pub struct SettingsDialog {
     agents: Option<Entity<AgentsSettings>>,
     body_scroll: ScrollHandle,
     focus_handle: FocusHandle,
-    _subscriptions: [Subscription; 2],
+    search: Entity<InputState>,
+    _subscriptions: [Subscription; 3],
 }
 
 impl EventEmitter<SettingsDialogEvent> for SettingsDialog {}
@@ -77,9 +81,15 @@ impl SettingsDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(SEARCH_PLACEHOLDER));
         let subscriptions = [
             cx.observe(&center, |_, _, cx| cx.notify()),
             cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.follow_search(window, cx);
+                }
+            }),
         ];
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
@@ -92,6 +102,7 @@ impl SettingsDialog {
             agents: None,
             body_scroll: ScrollHandle::new(),
             focus_handle,
+            search,
             _subscriptions: subscriptions,
         };
         dialog.show(section, window, cx);
@@ -121,6 +132,36 @@ impl SettingsDialog {
                 .map(|runs| cx.new(|cx| AgentsSettings::new(runs, cx)));
         }
         cx.notify();
+    }
+
+    fn follow_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.search.read(cx).value().to_string();
+        if !matches(self.section, &query) {
+            let agents_available = crate::agents::runs_handle(cx).is_some();
+            if let Some(section) = first_match(&query, agents_available) {
+                self.show(section, window, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    fn search_input(&self) -> AnyElement {
+        h_flex()
+            .h(px(SEARCH_HEIGHT))
+            .w_full()
+            .px(px(10.))
+            .gap(px(8.))
+            .items_center()
+            .rounded(px(6.))
+            .bg(theme::popup())
+            .child(icon(IconName::Search, 14., theme::text_muted()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.search).appearance(false).bordered(false)),
+            )
+            .into_any_element()
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -201,12 +242,17 @@ impl Render for SettingsDialog {
         let viewport = window.viewport_size();
         let metrics = metrics(f32::from(viewport.width), f32::from(viewport.height));
         let dialog = cx.entity();
+        let query = self.search.read(cx).value().to_string();
         let nav = render_nav(
             self.section,
             crate::agents::runs_handle(cx).is_some(),
             NavLayout {
                 width: metrics.nav_width,
                 padding_y: metrics.padding,
+            },
+            NavSearch {
+                input: self.search_input(),
+                query: &query,
             },
             move |section, window, cx| {
                 dialog.update(cx, |dialog, cx| dialog.show(section, window, cx))
