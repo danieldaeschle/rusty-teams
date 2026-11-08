@@ -28,7 +28,7 @@ struct ChatRefresh {
 }
 
 #[derive(Default)]
-struct TeamsRefresh {
+pub(crate) struct TeamsRefresh {
     refreshed: bool,
     teams: usize,
     channels: usize,
@@ -356,7 +356,7 @@ impl<R: Remote> SyncEngine<R> {
         }))
     }
 
-    async fn refresh_teams(&self, force: bool) -> TeamsRefresh {
+    pub(crate) async fn refresh_teams(&self, force: bool) -> TeamsRefresh {
         let mut refresh = TeamsRefresh::default();
         match self.store.meta_time(META_TEAMS_AT) {
             Ok(last) if !force && !is_due(last, self.config.teams_refresh_interval) => {

@@ -12,7 +12,7 @@ use store::{
     ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Availability, BoxFuture, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
+    Availability, BoxFuture, ChannelPrivacy, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
     DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
     MentionTarget, NOTES_CHAT_ID, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
     substrate_search,
@@ -3406,6 +3406,26 @@ impl FolderSource for FakeFolders {
             Ok(())
         })
     }
+
+    fn create_channel<'a>(
+        &'a self,
+        channel: chatsvc::NewChannel<'a>,
+        mailbox: chatsvc::Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!(
+                "create {} {} {} '{}' {:?} {}@{}",
+                channel.team_thread_id,
+                channel.group_id,
+                channel.name,
+                channel.description,
+                channel.privacy,
+                mailbox.object_id,
+                mailbox.tenant_id
+            ));
+            Ok(())
+        })
+    }
 }
 
 fn store_alpha_team(engine: &SyncEngine<Handle>) {
@@ -3620,9 +3640,11 @@ async fn a_failing_folder_list_still_stores_the_team_layout_and_tabs() {
     let source_mut = Arc::get_mut(&mut source).unwrap();
     source_mut.folders_fail = true;
     source_mut.layout = vec![TeamLayoutRecord {
+        rights: Default::default(),
         team_id: "alpha".into(),
         hidden: false,
         channels: vec![ChannelLayoutRecord {
+            substrate_group_id: None,
             channel_id: "alpha-general".into(),
             general: true,
             hidden: false,
@@ -3672,6 +3694,7 @@ async fn team_order_follows_teams_order_and_survives_a_failing_order_lookup() {
     let fake = Arc::new(Fake::default());
     let mut source = FakeFolders::new();
     let team = |id: &str| TeamLayoutRecord {
+        rights: Default::default(),
         team_id: id.into(),
         hidden: false,
         channels: Vec::new(),
@@ -3719,9 +3742,11 @@ async fn team_layout_from_teams_orders_and_hides_the_sidebar() {
     let mut source = FakeFolders::new();
     Arc::get_mut(&mut source).unwrap().layout = vec![
         TeamLayoutRecord {
+            rights: Default::default(),
             team_id: "zeta".into(),
             hidden: false,
             channels: vec![ChannelLayoutRecord {
+                substrate_group_id: None,
                 channel_id: "zeta-old".into(),
                 general: false,
                 hidden: true,
@@ -3730,6 +3755,7 @@ async fn team_layout_from_teams_orders_and_hides_the_sidebar() {
             }],
         },
         TeamLayoutRecord {
+            rights: Default::default(),
             team_id: "alpha".into(),
             hidden: true,
             channels: Vec::new(),
@@ -5841,4 +5867,31 @@ async fn a_quoted_channel_reply_is_written_through_chatsvc_in_the_teams_quote_sh
     assert_eq!(sent.message_id, "1727203440000");
     assert_eq!(sent.reply_to_id.as_deref(), Some("m0030"));
     assert!(sent.body_html.starts_with(&quote));
+}
+
+#[tokio::test]
+async fn create_channel_sends_the_team_thread_and_own_mailbox_then_refreshes() {
+    let fake = Arc::new(Fake::default());
+    let source = FakeFolders::new();
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    store_alpha_team(&engine);
+    engine.store().set_meta("me_tenant_id", "tenant-1").unwrap();
+    let mut events = engine.subscribe();
+
+    engine
+        .create_channel("alpha", "  Planning ", " Roadmap ", ChannelPrivacy::Private)
+        .await
+        .unwrap();
+    let calls = source.calls.lock().unwrap().clone();
+    assert_eq!(
+        calls[0],
+        format!("create 19:general@thread.tacv2 alpha Planning 'Roadmap' Private {ME}@tenant-1")
+    );
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| event == CoreEvent::SidebarChanged));
+    assert!(
+        engine
+            .create_channel("alpha", "   ", "", ChannelPrivacy::Standard)
+            .await
+            .is_err()
+    );
 }

@@ -52,6 +52,7 @@ pub mod sidebar_model;
 pub mod sound_actions;
 pub mod stored_outgoing;
 pub mod task_dialog;
+pub mod team_admin;
 pub mod translation_actions;
 pub mod typing;
 pub mod urgent_ack;

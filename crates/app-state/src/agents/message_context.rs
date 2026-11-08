@@ -203,6 +203,7 @@ mod tests {
         let mut state = state_with(&records);
         state.sidebar.chats.clear();
         state.sidebar.teams.push(store::SidebarTeam {
+            rights: Default::default(),
             team: store::TeamRecord {
                 id: "team".to_owned(),
                 name: "Platform".to_owned(),

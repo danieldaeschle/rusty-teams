@@ -31,7 +31,7 @@ pub use models::{
     ChannelNotificationLevel, ChannelNotifications, ChannelReadState, ChannelRecord, ChannelTabRecord, ChatPreview,
     ChatRecord, ConversationHit, DraftRecord, FolderRecord, ImageRecord, MemberRecord,
     MessageImportance, MessageRecord, OutboxRecord, OutboxState, OutboxTarget, ReadHorizonRecord,
-    RecentScope, SearchHit, Sidebar, SidebarTeam, SyncState, TeamLayoutRecord, TeamRecord,
+    RecentScope, SearchHit, Sidebar, SidebarTeam, SyncState, TeamLayoutRecord, TeamRecord, TeamRights,
     UNKNOWN_USER_NAME, is_bot_id,
 };
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};

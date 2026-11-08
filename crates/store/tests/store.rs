@@ -4,7 +4,7 @@ use store::{
     AvatarRecord, ChannelLayoutRecord, ChannelMentions, ChannelNotificationLevel,
     ChannelNotifications, ChannelReadState, ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord,
     MemberRecord, MessageImportance, MessageRecord, ReadHorizonRecord, RecentScope, Store,
-    SyncState, TeamLayoutRecord, TeamRecord, UNKNOWN_USER_NAME,
+    SyncState, TeamLayoutRecord, TeamRecord, TeamRights, UNKNOWN_USER_NAME,
 };
 
 #[test]
@@ -608,11 +608,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 26);
+        assert_eq!(store.schema_version().unwrap(), 27);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 26);
+    assert_eq!(reopened.schema_version().unwrap(), 27);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -628,7 +628,7 @@ fn newer_schema_is_refused() {
     drop(Store::open(&path).unwrap());
     let connection = rusqlite_open(&path);
     connection
-        .execute_batch("PRAGMA user_version = 99")
+        .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; PRAGMA user_version = 99")
         .unwrap();
     drop(connection);
     let error = Store::open(&path).err().expect("must refuse");
@@ -641,10 +641,10 @@ fn old_schema_is_upgraded_in_place() {
     let path = directory.path().join("cache.sqlite3");
     drop(Store::open(&path).unwrap());
     let connection = rusqlite_open(&path);
-    connection.execute_batch("DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
+    connection.execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 26);
+    assert_eq!(store.schema_version().unwrap(), 27);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -710,7 +710,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 26);
+    assert_eq!(store.schema_version().unwrap(), 27);
 }
 
 #[test]
@@ -723,7 +723,7 @@ fn migration_to_v13_clears_channel_delta_links_only() {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
-                "INSERT INTO teams (id, name) VALUES ('t', 'T');
+                "ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; INSERT INTO teams (id, name) VALUES ('t', 'T');
                  INSERT INTO channels (id, team_id, name) VALUES ('ch', 't', 'C');
                  INSERT INTO sync_state (conversation_id, delta_link) VALUES ('ch', 'link'), ('chat', 'link');
                  ALTER TABLE messages DROP COLUMN subject;
@@ -1019,7 +1019,7 @@ fn migration_indexes_rows_that_predate_search() {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
-                "DROP TRIGGER chats_title_insert; DROP TRIGGER chats_title_update; DROP TRIGGER chats_title_delete;
+                "ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; DROP TRIGGER chats_title_insert; DROP TRIGGER chats_title_update; DROP TRIGGER chats_title_delete;
                  DROP TRIGGER channels_title_insert; DROP TRIGGER channels_title_update; DROP TRIGGER channels_title_delete;
                  DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search;
                  DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals;
@@ -1302,9 +1302,11 @@ fn channel_tabs_keep_their_saved_order_and_are_replaced_on_refresh() {
     };
     let layout = |tabs: Vec<ChannelTabRecord>| {
         vec![TeamLayoutRecord {
+            rights: Default::default(),
             team_id: "team".to_owned(),
             hidden: false,
             channels: vec![ChannelLayoutRecord {
+                substrate_group_id: None,
                 channel_id: "channel".to_owned(),
                 general: false,
                 hidden: false,
@@ -1369,9 +1371,11 @@ fn channel_notifications_default_to_feed_and_survive_layout_and_local_writes() {
     };
     store
         .replace_team_layout(&[TeamLayoutRecord {
+            rights: Default::default(),
             team_id: "t1".to_owned(),
             hidden: false,
             channels: vec![ChannelLayoutRecord {
+                substrate_group_id: None,
                 channel_id: "c2".to_owned(),
                 general: false,
                 hidden: false,
@@ -1453,9 +1457,11 @@ fn the_team_thread_id_is_the_general_channel_id() {
         .unwrap();
     store
         .replace_team_layout(&[TeamLayoutRecord {
+            rights: Default::default(),
             team_id: "group-b".to_owned(),
             hidden: false,
             channels: vec![ChannelLayoutRecord {
+                substrate_group_id: None,
                 channel_id: "19:b-renamed".to_owned(),
                 general: true,
                 hidden: false,
@@ -1595,12 +1601,12 @@ fn migration_to_v20_adds_the_call_event_column() {
         Connection::open(&path)
             .unwrap()
             .execute_batch(
-                "ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN call_event_json; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 19",
+                "ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN call_event_json; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 19",
             )
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 26);
+    assert_eq!(store.schema_version().unwrap(), 27);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
@@ -1646,11 +1652,11 @@ fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 20")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 20")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 26);
+    assert_eq!(store.schema_version().unwrap(), 27);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_none());
     assert!(store.sync_state("other").unwrap().is_some());
@@ -1676,11 +1682,11 @@ fn migration_to_v22_adds_read_horizons_that_survive_a_reopen() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE channels DROP COLUMN read_until; DROP TABLE read_horizons; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 21")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; DROP TABLE read_horizons; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 21")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 26);
+    assert_eq!(store.schema_version().unwrap(), 27);
     assert!(store.read_horizons("c").unwrap().is_empty());
     let horizons = [
         horizon("8:orgid:ada", 3, Some(4)),
@@ -1762,7 +1768,7 @@ fn migration_to_v25_drops_copies_stored_under_a_float_id() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE channels DROP COLUMN read_until; PRAGMA user_version = 24")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; PRAGMA user_version = 24")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
@@ -1770,4 +1776,32 @@ fn migration_to_v25_drops_copies_stored_under_a_float_id() {
     let found = store.messages_by_id("c", &ids).unwrap();
     assert_eq!(found.len(), 1);
     assert!(found.contains_key("1793871826192"));
+}
+
+#[test]
+fn team_rights_come_back_with_the_sidebar() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .upsert_teams(&[TeamRecord {
+            id: "team".to_owned(),
+            name: "Team".to_owned(),
+        }])
+        .unwrap();
+    assert_eq!(store.sidebar().unwrap().teams[0].rights, TeamRights::default());
+    let rights = TeamRights {
+        owner: false,
+        add_channel: true,
+        add_private_channel: true,
+        edit_channel: false,
+        delete_channel: true,
+    };
+    store
+        .replace_team_layout(&[TeamLayoutRecord {
+            team_id: "team".to_owned(),
+            hidden: false,
+            rights,
+            channels: Vec::new(),
+        }])
+        .unwrap();
+    assert_eq!(store.sidebar().unwrap().teams[0].rights, rights);
 }

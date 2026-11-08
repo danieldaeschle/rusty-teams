@@ -40,6 +40,7 @@ pub mod chat_pop_out;
 pub mod composer;
 pub mod connection_banner;
 pub mod conversation;
+pub mod create_channel_dialog;
 pub mod customize_reactions;
 pub mod dialog_overlay;
 pub mod emoji_popup;

@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 const TEAMS_QUERY: &str = "isPrefetch=false&enableMembershipSummary=true";
 const WIKI_DEFINITION_ID: &str = "com.microsoft.teamspace.tab.wiki";
 const TAB_URL_KEYS: [&str; 3] = ["websiteUrl", "componentUrl", "url"];
+const OWNER_ROLE: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelTab {
@@ -28,6 +29,16 @@ pub struct ChannelLayout {
     pub tabs: Vec<ChannelTab>,
     pub notifications: Option<ChannelNotifications>,
     pub followed: bool,
+    pub substrate_group_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TeamRights {
+    pub owner: bool,
+    pub add_channel: bool,
+    pub add_private_channel: bool,
+    pub edit_channel: bool,
+    pub delete_channel: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +46,7 @@ pub struct TeamLayout {
     pub team_id: String,
     pub group_id: Option<String>,
     pub hidden: bool,
+    pub rights: TeamRights,
     pub channels: Vec<ChannelLayout>,
 }
 
@@ -107,6 +119,22 @@ pub fn parse_channel_tabs(channel: &Value) -> Vec<ChannelTab> {
     tabs.into_iter().map(|(_, tab)| tab).collect()
 }
 
+pub fn parse_team_rights(team: &Value) -> TeamRights {
+    if flag(team, "channelOnlyMember") == Some(true) || flag(team, "isArchived") == Some(true) {
+        return TeamRights::default();
+    }
+    let owner = team.get("memberRole").and_then(Value::as_i64) == Some(OWNER_ROLE);
+    let settings = team.get("teamSettings").unwrap_or(&Value::Null);
+    let allowed = |key: &str| owner || flag(settings, key) == Some(true);
+    TeamRights {
+        owner,
+        add_channel: allowed("createTopic"),
+        add_private_channel: allowed("isPrivateChannelCreationEnabled"),
+        edit_channel: allowed("updateTopic"),
+        delete_channel: allowed("deleteTopic"),
+    }
+}
+
 fn parse_team(team: &Value) -> Option<TeamLayout> {
     if flag(team, "isDeleted") == Some(true) {
         return None;
@@ -136,6 +164,10 @@ fn parse_team(team: &Value) -> Option<TeamLayout> {
                             .and_then(Value::as_str)
                             .and_then(parse_property),
                         followed: flag(channel, "isFollowed").unwrap_or(false),
+                        substrate_group_id: channel
+                            .get("substrateGroupId")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
                     })
                 })
                 .collect()
@@ -149,6 +181,7 @@ fn parse_team(team: &Value) -> Option<TeamLayout> {
             .and_then(Value::as_str)
             .map(str::to_owned),
         hidden: flag(team, "isFavorite") == Some(false),
+        rights: parse_team_rights(team),
         channels,
     })
 }
@@ -176,6 +209,30 @@ mod tests {
         assert!(layout[0].channels[0].hidden);
         assert!(!layout[1].channels[0].hidden);
         assert!(!layout[2].channels[0].hidden);
+    }
+
+    #[test]
+    fn members_get_the_rights_the_team_settings_grant() {
+        let settings = json!({"createTopic": true, "isPrivateChannelCreationEnabled": false,
+            "updateTopic": true, "deleteTopic": false});
+        let member = json!({"memberRole": 1, "teamSettings": settings});
+        assert_eq!(
+            parse_team_rights(&member),
+            TeamRights {
+                owner: false,
+                add_channel: true,
+                add_private_channel: false,
+                edit_channel: true,
+                delete_channel: false,
+            }
+        );
+        let owner = json!({"memberRole": 2, "teamSettings": {}});
+        let owner_rights = parse_team_rights(&owner);
+        assert!(owner_rights.owner && owner_rights.add_private_channel && owner_rights.delete_channel);
+        let archived = json!({"memberRole": 2, "isArchived": true});
+        assert_eq!(parse_team_rights(&archived), TeamRights::default());
+        let channel_only = json!({"memberRole": 1, "channelOnlyMember": true, "teamSettings": settings});
+        assert_eq!(parse_team_rights(&channel_only), TeamRights::default());
     }
 
     #[test]
@@ -217,6 +274,7 @@ mod tests {
                     tabs: Vec::new(),
                     notifications: None,
                     followed: false,
+                    substrate_group_id: None,
                 },
                 ChannelLayout {
                     channel_id: "19:b@thread.tacv2".into(),
@@ -225,6 +283,7 @@ mod tests {
                     tabs: Vec::new(),
                     notifications: None,
                     followed: false,
+                    substrate_group_id: None,
                 },
             ]
         );

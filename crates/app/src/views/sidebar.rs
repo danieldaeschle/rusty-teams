@@ -23,13 +23,15 @@ use super::calls_tab::calls_body;
 use super::chat_pop_out;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::{scroll_offset, with_top_edge};
+use super::create_channel_dialog::open_create_channel_dialog;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
 use crate::app_state::{AppEvent, AppState, Selection};
 use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 use crate::channel_menu::{
-    ChannelMenuItem, MenuEntry, TeamMenuItem, channel_menu_entries, team_menu_entries,
+    ChannelMenuItem, MenuEntry, TeamMenuItem, TeamMenuState, channel_menu_entries,
+    team_menu_entries,
 };
 use crate::chat_actions::TITLE_LIMIT;
 use crate::chat_filter::{ChatFilter, filtered_sections, has_no_matches};
@@ -1589,8 +1591,11 @@ impl SidebarView {
         let name_style = team_name_style(entry, expanded);
         let badge = team_badge(entry, expanded);
         let toggle_id = team_id.clone();
-        let (team_menu_state, team_menu_id, team_hidden) =
-            (self.state.clone(), team_id.clone(), entry.hidden);
+        let (team_menu_state, team_menu_id) = (self.state.clone(), team_id.clone());
+        let team_menu_flags = TeamMenuState {
+            hidden: entry.hidden,
+            can_add_channel: entry.rights.add_channel,
+        };
         list = list.child(
             h_flex()
                 .id(SharedString::from(format!("team-{team_id}")))
@@ -1638,7 +1643,7 @@ impl SidebarView {
                     cx.notify();
                 }))
                 .context_menu(move |popup, _, _| {
-                    team_menu(popup, team_menu_state.clone(), &team_menu_id, team_hidden)
+                    team_menu(popup, team_menu_state.clone(), &team_menu_id, team_menu_flags)
                 }),
         );
         if !expanded {
@@ -2024,9 +2029,14 @@ fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
     }
 }
 
-fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: bool) -> PopupMenu {
+fn team_menu(
+    popup: PopupMenu,
+    state: Entity<AppState>,
+    team_id: &str,
+    flags: TeamMenuState,
+) -> PopupMenu {
     let mut popup = popup;
-    for entry in team_menu_entries(hidden) {
+    for entry in team_menu_entries(flags) {
         let MenuEntry::Item(item) = entry else {
             popup = popup.separator();
             continue;
@@ -2035,13 +2045,19 @@ fn team_menu(popup: PopupMenu, state: Entity<AppState>, team_id: &str, hidden: b
         popup = popup.item(
             PopupMenuItem::new(item.label())
                 .icon(menu_icon(match item {
+                    TeamMenuItem::AddChannel => IconName::Plus,
                     TeamMenuItem::Show => IconName::Eye,
                     TeamMenuItem::Hide => IconName::EyeOff,
                     TeamMenuItem::ManageTeam => IconName::Settings,
                     TeamMenuItem::CopyLink => IconName::Link,
                 }))
-                .on_click(move |_, _, cx| {
+                .on_click(move |_, window, cx| {
+                    if item == TeamMenuItem::AddChannel {
+                        open_create_channel_dialog(action_state.clone(), &action_id, window, cx);
+                        return;
+                    }
                     action_state.update(cx, |state, cx| match item {
+                        TeamMenuItem::AddChannel => {}
                         TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
                         TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
                         TeamMenuItem::ManageTeam => state.manage_team_in_browser(&action_id, cx),

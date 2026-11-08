@@ -21,6 +21,7 @@ pub enum ChannelMenuItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TeamMenuItem {
+    AddChannel,
     Show,
     Hide,
     ManageTeam,
@@ -50,6 +51,7 @@ impl ChannelMenuItem {
 impl TeamMenuItem {
     pub fn label(self) -> &'static str {
         match self {
+            TeamMenuItem::AddChannel => "Add channel",
             TeamMenuItem::Show => "Show",
             TeamMenuItem::Hide => "Hide",
             TeamMenuItem::ManageTeam => "Manage team",
@@ -104,9 +106,19 @@ pub fn channel_menu_entries(state: ChannelMenuState) -> Vec<MenuEntry<ChannelMen
     ]
 }
 
-pub fn team_menu_entries(hidden: bool) -> Vec<MenuEntry<TeamMenuItem>> {
-    vec![
-        MenuEntry::Item(if hidden {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TeamMenuState {
+    pub hidden: bool,
+    pub can_add_channel: bool,
+}
+
+pub fn team_menu_entries(state: TeamMenuState) -> Vec<MenuEntry<TeamMenuItem>> {
+    let mut entries = Vec::new();
+    if state.can_add_channel {
+        entries.push(MenuEntry::Item(TeamMenuItem::AddChannel));
+    }
+    entries.extend([
+        MenuEntry::Item(if state.hidden {
             TeamMenuItem::Show
         } else {
             TeamMenuItem::Hide
@@ -114,7 +126,8 @@ pub fn team_menu_entries(hidden: bool) -> Vec<MenuEntry<TeamMenuItem>> {
         MenuEntry::Separator,
         MenuEntry::Item(TeamMenuItem::ManageTeam),
         MenuEntry::Item(TeamMenuItem::CopyLink),
-    ]
+    ]);
+    entries
 }
 
 pub fn pin_failure(pinned: bool) -> &'static str {
@@ -409,9 +422,9 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChannelMenuItem, ChannelMenuState, MenuEntry, TeamMenuItem, channel_menu_entries,
-        channel_visibility_failure, pin_failure, post_pin_dialog, post_pin_failure,
-        post_pin_notice, team_menu_entries, team_visibility_failure,
+        ChannelMenuItem, ChannelMenuState, MenuEntry, TeamMenuItem, TeamMenuState,
+        channel_menu_entries, channel_visibility_failure, pin_failure, post_pin_dialog,
+        post_pin_failure, post_pin_notice, team_menu_entries, team_visibility_failure,
     };
 
     fn labels<Item: Copy>(
@@ -464,13 +477,30 @@ mod tests {
 
     #[test]
     fn team_menu_switches_between_show_and_hide() {
+        let shown = TeamMenuState::default();
         assert_eq!(
-            labels(&team_menu_entries(false), TeamMenuItem::label),
+            labels(&team_menu_entries(shown), TeamMenuItem::label),
             ["Hide", "-", "Manage team", "Copy link"]
         );
+        let hidden = TeamMenuState {
+            hidden: true,
+            ..shown
+        };
         assert_eq!(
-            labels(&team_menu_entries(true), TeamMenuItem::label),
+            labels(&team_menu_entries(hidden), TeamMenuItem::label),
             ["Show", "-", "Manage team", "Copy link"]
+        );
+    }
+
+    #[test]
+    fn add_channel_leads_the_team_menu_when_the_team_allows_it() {
+        let state = TeamMenuState {
+            hidden: false,
+            can_add_channel: true,
+        };
+        assert_eq!(
+            labels(&team_menu_entries(state), TeamMenuItem::label),
+            ["Add channel", "Hide", "-", "Manage team", "Copy link"]
         );
     }
 

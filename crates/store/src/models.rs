@@ -193,6 +193,7 @@ pub struct SidebarTeam {
     pub team: TeamRecord,
     pub channels: Vec<ChannelRecord>,
     pub hidden: bool,
+    pub rights: TeamRights,
     pub hidden_channel_ids: Vec<String>,
     pub notifications: HashMap<String, ChannelNotifications>,
     pub mentions: HashMap<String, ChannelMentions>,
@@ -272,12 +273,23 @@ pub struct ChannelLayoutRecord {
     pub hidden: bool,
     pub tabs: Vec<ChannelTabRecord>,
     pub notifications: ChannelNotifications,
+    pub substrate_group_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TeamRights {
+    pub owner: bool,
+    pub add_channel: bool,
+    pub add_private_channel: bool,
+    pub edit_channel: bool,
+    pub delete_channel: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamLayoutRecord {
     pub team_id: String,
     pub hidden: bool,
+    pub rights: TeamRights,
     pub channels: Vec<ChannelLayoutRecord>,
 }
 

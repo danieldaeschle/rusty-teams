@@ -8,7 +8,8 @@ use chatsvc::settings::{
 };
 use chatsvc::{
     ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
-    ChannelVisibility, ChatSection, ChatSectionSettings, Pins, UserSettings,
+    ChannelVisibility, ChatSection, ChatSectionSettings, Mailbox, NewChannel, Pins, TeamAdmin,
+    UserSettings,
     pins::SessionTransport,
 };
 use chrono::Utc;
@@ -124,10 +125,18 @@ pub trait FolderSource: Send + Sync {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Err(Error::Unsupported("team visibility without chatsvc")) })
     }
+    fn create_channel<'a>(
+        &'a self,
+        _channel: NewChannel<'a>,
+        _mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("channel creation without chatsvc")) })
+    }
 }
 
 pub struct ChatsvcFolderSource {
     pins: Pins<SessionTransport>,
+    team_admin: TeamAdmin,
     visibility: ChannelVisibility,
     settings: UserSettings,
     channel_settings: ChannelSettings,
@@ -141,6 +150,7 @@ impl ChatsvcFolderSource {
     pub fn new(session: &Session) -> Self {
         ChatsvcFolderSource {
             pins: Pins::new(session),
+            team_admin: TeamAdmin::new(session),
             visibility: ChannelVisibility::new(session),
             settings: UserSettings::new(session),
             channel_settings: ChannelSettings::new(session),
@@ -202,6 +212,14 @@ impl FolderSource for ChatsvcFolderSource {
                 .set_team_shown(team_thread_id, shown)
                 .await?)
         })
+    }
+
+    fn create_channel<'a>(
+        &'a self,
+        channel: NewChannel<'a>,
+        mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { Ok(self.team_admin.create_channel(&channel, mailbox).await?) })
     }
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
@@ -448,6 +466,13 @@ fn layout_record(
     TeamLayoutRecord {
         team_id: team.group_id.unwrap_or(team.team_id),
         hidden: team.hidden,
+        rights: store::TeamRights {
+            owner: team.rights.owner,
+            add_channel: team.rights.add_channel,
+            add_private_channel: team.rights.add_private_channel,
+            edit_channel: team.rights.edit_channel,
+            delete_channel: team.rights.delete_channel,
+        },
         channels: team
             .channels
             .into_iter()
@@ -456,6 +481,7 @@ fn layout_record(
                 channel_id: channel.channel_id,
                 general: channel.general,
                 hidden: channel.hidden,
+                substrate_group_id: channel.substrate_group_id,
                 tabs: channel
                     .tabs
                     .into_iter()
@@ -562,7 +588,7 @@ impl<R: Remote> SyncEngine<R> {
             Err(error) => Err(error),
         };
         self.refresh_section_settings(source).await;
-        let layout = self.refresh_team_layout(source).await;
+        let layout = self.refresh_team_layout(source, false).await;
         match (folders, layout) {
             (Err(folders_error), Err(layout_error)) => {
                 Err(Error::Folders(format!("{folders_error}; {layout_error}")))
@@ -625,9 +651,15 @@ impl<R: Remote> SyncEngine<R> {
             .await
     }
 
-    async fn refresh_team_layout(&self, source: &Arc<dyn FolderSource>) -> Result<()> {
+    pub(crate) async fn refresh_team_layout(
+        &self,
+        source: &Arc<dyn FolderSource>,
+        force: bool,
+    ) -> Result<()> {
         let last = self.store.meta_time(META_TEAM_LAYOUT_AT)?;
-        if last.is_some_and(|last| Utc::now() - last < self.config.team_layout_refresh_interval) {
+        let fresh =
+            last.is_some_and(|last| Utc::now() - last < self.config.team_layout_refresh_interval);
+        if !force && fresh {
             return Ok(());
         }
         let mut layout = source.team_layout().await?;
@@ -704,6 +736,7 @@ mod tests {
         followed: bool,
     ) -> chatsvc::ChannelLayout {
         chatsvc::ChannelLayout {
+            substrate_group_id: None,
             channel_id: "19:a".into(),
             general: false,
             hidden: false,
@@ -722,6 +755,7 @@ mod tests {
 
     fn team(team_id: &str) -> TeamLayoutRecord {
         TeamLayoutRecord {
+            rights: Default::default(),
             team_id: team_id.into(),
             hidden: false,
             channels: Vec::new(),

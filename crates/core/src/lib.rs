@@ -58,6 +58,7 @@ mod remote;
 pub mod roster_event;
 mod scheduled;
 mod search;
+mod team_admin;
 mod server_search;
 mod sidebar_sync;
 mod skin_tone;
@@ -121,7 +122,8 @@ pub use chatsvc::{
     ChatSettingsDocument, DesktopNotifications, EnterKeyBehavior, MeetingChatNotifications,
     MessageDensity, NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
 };
-pub use chatsvc::{ChatSection, ChatSectionSettings, RecordingPolicy};
+pub use chatsvc::{ChannelPrivacy, ChatSection, ChatSectionSettings, RecordingPolicy};
+pub use team_admin::{MAX_CHANNEL_DESCRIPTION_LENGTH, MAX_CHANNEL_NAME_LENGTH};
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,

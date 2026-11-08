@@ -913,6 +913,7 @@ mod tests {
         hidden_channel_ids: &[&str],
     ) -> SidebarTeam {
         SidebarTeam {
+            rights: Default::default(),
             team: store::TeamRecord {
                 id: id.into(),
                 name: id.into(),

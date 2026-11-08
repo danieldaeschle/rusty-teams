@@ -55,6 +55,7 @@ mod tests {
                 chat("chat-read", false, false),
             ],
             teams: vec![SidebarTeam {
+                rights: Default::default(),
                 team: TeamRecord {
                     id: "team".into(),
                     name: "Team".into(),

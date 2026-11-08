@@ -144,7 +144,7 @@ impl MeetingForm {
     }
 }
 
-fn labeled(label: &str, field: impl IntoElement) -> Div {
+pub(super) fn labeled(label: &str, field: impl IntoElement) -> Div {
     v_flex()
         .gap(px(4.))
         .child(

@@ -1632,6 +1632,7 @@ mod tests {
                 },
             ],
             teams: vec![SidebarTeam {
+                rights: Default::default(),
                 team: TeamRecord {
                     id: "t".into(),
                     name: "Team".into(),

@@ -6,7 +6,7 @@ use rusqlite::params;
 use crate::error::Result;
 use crate::models::{
     ChannelMentions, ChannelNotificationLevel, ChannelNotifications, ChannelRecord,
-    ChannelTabRecord, Sidebar, SidebarTeam, TeamLayoutRecord, TeamRecord,
+    ChannelTabRecord, Sidebar, SidebarTeam, TeamLayoutRecord, TeamRecord, TeamRights,
 };
 use crate::store::Store;
 use crate::teams::channel_from_row;
@@ -17,6 +17,7 @@ struct TeamRow {
     team: TeamRecord,
     position: Option<i64>,
     hidden: bool,
+    rights: TeamRights,
 }
 
 struct ChannelRow {
@@ -32,7 +33,10 @@ impl Store {
         let connection = self.lock()?;
         let mut team_rows: Vec<TeamRow> = connection
             .prepare_cached(
-                "SELECT teams.id, teams.name, team_layout.position, COALESCE(team_layout.hidden, 0)
+                "SELECT teams.id, teams.name, team_layout.position, COALESCE(team_layout.hidden, 0),
+                        COALESCE(team_layout.owner, 0), COALESCE(team_layout.add_channel, 0),
+                        COALESCE(team_layout.add_private_channel, 0),
+                        COALESCE(team_layout.edit_channel, 0), COALESCE(team_layout.delete_channel, 0)
                  FROM teams LEFT JOIN team_layout ON team_layout.team_id = teams.id",
             )?
             .query_map([], |row| {
@@ -43,6 +47,13 @@ impl Store {
                     },
                     position: row.get(2)?,
                     hidden: row.get(3)?,
+                    rights: TeamRights {
+                        owner: row.get(4)?,
+                        add_channel: row.get(5)?,
+                        add_private_channel: row.get(6)?,
+                        edit_channel: row.get(7)?,
+                        delete_channel: row.get(8)?,
+                    },
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -102,6 +113,7 @@ impl Store {
                 team: row.team,
                 channels: Vec::new(),
                 hidden: row.hidden,
+                rights: row.rights,
                 hidden_channel_ids: Vec::new(),
                 notifications: HashMap::new(),
                 mentions: HashMap::new(),
@@ -136,26 +148,38 @@ impl Store {
         transaction.execute("DELETE FROM channel_tabs", [])?;
         {
             let mut team_insert = transaction.prepare_cached(
-                "INSERT OR REPLACE INTO team_layout (team_id, position, hidden) VALUES (?1, ?2, ?3)",
+                "INSERT OR REPLACE INTO team_layout
+                    (team_id, position, hidden, owner, add_channel, add_private_channel, edit_channel, delete_channel)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             let mut channel_insert = transaction.prepare_cached(
                 "INSERT OR REPLACE INTO channel_layout
-                    (channel_id, general, hidden, notification_level, include_replies)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                    (channel_id, general, hidden, notification_level, include_replies, substrate_group_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             let mut tab_insert = transaction.prepare_cached(
                 "INSERT OR REPLACE INTO channel_tabs (channel_id, position, tab_id, name, definition_id, open_url)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for (position, team) in layout.iter().enumerate() {
-                team_insert.execute(params![team.team_id, position as i64, team.hidden])?;
+                team_insert.execute(params![
+                    team.team_id,
+                    position as i64,
+                    team.hidden,
+                    team.rights.owner,
+                    team.rights.add_channel,
+                    team.rights.add_private_channel,
+                    team.rights.edit_channel,
+                    team.rights.delete_channel
+                ])?;
                 for channel in &team.channels {
                     channel_insert.execute(params![
                         channel.channel_id,
                         channel.general,
                         channel.hidden,
                         channel.notifications.level.key(),
-                        channel.notifications.include_replies
+                        channel.notifications.include_replies,
+                        channel.substrate_group_id
                     ])?;
                     for (tab_position, tab) in channel.tabs.iter().enumerate() {
                         tab_insert.execute(params![

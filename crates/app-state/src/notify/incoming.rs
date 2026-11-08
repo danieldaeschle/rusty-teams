@@ -352,6 +352,7 @@ mod tests {
         hidden_channel_ids: &[&str],
     ) -> SidebarTeam {
         SidebarTeam {
+            rights: Default::default(),
             team: TeamRecord {
                 id: team_id.into(),
                 name: "Team".into(),

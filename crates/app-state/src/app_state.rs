@@ -1185,6 +1185,7 @@ mod tests {
         Sidebar {
             chats: vec![chat("c1", "First", true), chat("c2", "", false)],
             teams: vec![SidebarTeam {
+                rights: Default::default(),
                 team: TeamRecord {
                     id: "t".into(),
                     name: "Team".into(),

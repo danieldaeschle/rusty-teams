@@ -2046,12 +2046,18 @@ fn demo_team_layout(channels: &[ChannelRecord]) -> Vec<TeamLayoutRecord> {
     DEMO_TEAM_ORDER
         .iter()
         .map(|team_id| TeamLayoutRecord {
+            rights: store::TeamRights {
+                add_channel: true,
+                add_private_channel: true,
+                ..Default::default()
+            },
             team_id: (*team_id).to_owned(),
             hidden: *team_id == DEMO_HIDDEN_TEAM,
             channels: channels
                 .iter()
                 .filter(|channel| channel.team_id == *team_id)
                 .map(|channel| ChannelLayoutRecord {
+                    substrate_group_id: None,
                     channel_id: channel.id.clone(),
                     general: channel.name == "General",
                     hidden: channel.id == DEMO_HIDDEN_CHANNEL,

@@ -1037,6 +1037,7 @@ mod tests {
         let sidebar = Sidebar {
             chats: Vec::new(),
             teams: vec![store::SidebarTeam {
+                rights: Default::default(),
                 team: store::TeamRecord {
                     id: "team".into(),
                     name: "Platform".into(),

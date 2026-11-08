@@ -13,7 +13,7 @@ pub use folders::{Folder, FolderKind, Folders};
 pub use pinbar::PinnedMessage;
 pub use posts::{PINNED_POSTS_PAGE_SIZE, PinnedPostsPage, parse_pinned_posts};
 pub use state::{PinnedChannels, PinnedChats};
-pub use teams::{ChannelLayout, ChannelTab, TeamLayout, parse_team_layout};
+pub use teams::{ChannelLayout, ChannelTab, TeamLayout, TeamRights, parse_team_layout, parse_team_rights};
 pub use transport::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, SessionTransport, SkypeTokenTransport};
 
 pub const DEFAULT_REGION: &str = "emea";

@@ -36,6 +36,7 @@ pub mod settings;
 pub mod sound_settings;
 pub mod sounds;
 pub mod substrate_search;
+pub mod team_admin;
 pub mod teams_cdn;
 pub mod transcripts;
 pub mod translate;
@@ -74,6 +75,7 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
+pub use team_admin::{ChannelPrivacy, Mailbox, NewChannel, TeamAdmin};
 pub use members::{
     HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
     TopicProblem, topic_problem,
@@ -82,7 +84,7 @@ pub use messages::{ConversationRef, Messages};
 pub use post_follow::{PostFollowState, parse_post_follow_states};
 pub use pins::{
     ChannelLayout, ChannelTab, Folder, FolderKind, Folders, PinnedChannels, PinnedChats,
-    PinnedMessage, Pins, TeamLayout,
+    PinnedMessage, Pins, TeamLayout, TeamRights,
 };
 pub use presence::{
     ActivityReporting, ForcedAvailability, ForcedKind, PresenceLookup, PresenceService,
