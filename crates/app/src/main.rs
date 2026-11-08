@@ -25,7 +25,7 @@ use gpui_kit::*;
 use store::Store;
 
 use crate::app_state::{AppState, Mode};
-use crate::call::remote_command::{ADMIT_ALL_FLAG, HANG_UP_FLAG, JOIN_FLAG, RemoteCommand};
+use crate::call::remote_command::{ADMIT_ALL_FLAG, HANG_UP_FLAG, JOIN_FLAG, RemoteCommand, UNMUTE_FLAG};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
 const LINUX_APP_ID: &str = "rusty-teams";
@@ -83,6 +83,7 @@ fn parse_arguments() -> Arguments {
             JOIN_FLAG => arguments.remote_command = input.next().map(RemoteCommand::Join),
             HANG_UP_FLAG => arguments.remote_command = Some(RemoteCommand::HangUp),
             ADMIT_ALL_FLAG => arguments.remote_command = Some(RemoteCommand::AdmitAll),
+            UNMUTE_FLAG => arguments.remote_command = Some(RemoteCommand::Unmute),
             "--database" => arguments.database = input.next().map(PathBuf::from),
             "--endpoint" => arguments.endpoint = input.next(),
             "--open" => {

@@ -233,6 +233,7 @@ try {
     throw new Error('Teams web guest did not join, see web-join.png');
   }
   await tab.activate();
+  runTeams('--unmute');
   const processId = teamsProcessId();
   if (!processId) throw new Error('teams.exe is not running');
   log(`measuring ${MEASURE_SECONDS}s (teams.exe pid ${processId})`);

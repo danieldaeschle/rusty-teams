@@ -1,3 +1,4 @@
+use calling::{CallCommand, MuteCommand};
 use gpui_kit::*;
 
 use super::join::JoinMode;
@@ -6,15 +7,18 @@ use crate::app_state::AppState;
 pub const JOIN_FLAG: &str = "--join";
 pub const HANG_UP_FLAG: &str = "--hang-up";
 pub const ADMIT_ALL_FLAG: &str = "--admit-all";
+pub const UNMUTE_FLAG: &str = "--unmute";
 const JOIN_COMMAND: &str = "join ";
 const HANG_UP_COMMAND: &str = "hang-up";
 const ADMIT_ALL_COMMAND: &str = "admit-all";
+const UNMUTE_COMMAND: &str = "unmute";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteCommand {
     Join(String),
     HangUp,
     AdmitAll,
+    Unmute,
 }
 
 impl RemoteCommand {
@@ -23,6 +27,7 @@ impl RemoteCommand {
             RemoteCommand::Join(link) => format!("{JOIN_COMMAND}{link}"),
             RemoteCommand::HangUp => HANG_UP_COMMAND.to_owned(),
             RemoteCommand::AdmitAll => ADMIT_ALL_COMMAND.to_owned(),
+            RemoteCommand::Unmute => UNMUTE_COMMAND.to_owned(),
         }
     }
 
@@ -30,6 +35,7 @@ impl RemoteCommand {
         match text {
             HANG_UP_COMMAND => return Some(RemoteCommand::HangUp),
             ADMIT_ALL_COMMAND => return Some(RemoteCommand::AdmitAll),
+            UNMUTE_COMMAND => return Some(RemoteCommand::Unmute),
             _ => {}
         }
         let link = text.strip_prefix(JOIN_COMMAND)?.trim();
@@ -48,6 +54,7 @@ impl AppState {
             }
             Some(RemoteCommand::HangUp) => self.leave_call(cx),
             Some(RemoteCommand::AdmitAll) => self.admit_all_call_guests(cx),
+            Some(RemoteCommand::Unmute) => self.send_call_command(CallCommand::Mute(MuteCommand::Unmute)),
             None => {}
         }
     }
@@ -63,6 +70,7 @@ mod tests {
             RemoteCommand::Join("https://teams.microsoft.com/l/meetup-join/x".to_owned()),
             RemoteCommand::HangUp,
             RemoteCommand::AdmitAll,
+            RemoteCommand::Unmute,
         ] {
             assert_eq!(RemoteCommand::decode(&command.encode()), Some(command));
         }
