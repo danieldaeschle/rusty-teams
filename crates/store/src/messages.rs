@@ -401,9 +401,9 @@ impl Store {
         let mut statement = connection.prepare_cached(
             "SELECT value, COALESCE(
                  (SELECT display_name FROM chat_members
-                  WHERE user_id = value AND display_name NOT IN ('', ?2) LIMIT 1),
+                  WHERE user_id = value AND display_name NOT IN ('', '?', ?2) LIMIT 1),
                  (SELECT sender_name FROM messages
-                  WHERE sender_id = value AND sender_name <> ''
+                  WHERE sender_id = value AND sender_name NOT IN ('', '?', ?2)
                   ORDER BY created_at DESC LIMIT 1))
              FROM json_each(?1)",
         )?;

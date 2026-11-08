@@ -608,11 +608,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 28);
+        assert_eq!(store.schema_version().unwrap(), 29);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 28);
+    assert_eq!(reopened.schema_version().unwrap(), 29);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -644,7 +644,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -710,7 +710,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
 }
 
 #[test]
@@ -1621,7 +1621,7 @@ fn migration_to_v20_adds_the_call_event_column() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
@@ -1671,7 +1671,7 @@ fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_none());
     assert!(store.sync_state("other").unwrap().is_some());
@@ -1701,7 +1701,7 @@ fn migration_to_v22_adds_read_horizons_that_survive_a_reopen() {
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     assert!(store.read_horizons("c").unwrap().is_empty());
     let horizons = [
         horizon("8:orgid:ada", 3, Some(4)),
@@ -1819,4 +1819,33 @@ fn team_rights_come_back_with_the_sidebar() {
         }])
         .unwrap();
     assert_eq!(store.sidebar().unwrap().teams[0].rights, rights);
+}
+
+#[test]
+fn migration_to_v29_names_departed_people_from_their_messages() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("old.sqlite3");
+    {
+        let store = Store::open(&path).unwrap();
+        store.upsert_chats(&[chat("c", "?", Some(at(1)))]).unwrap();
+        store.upsert_chats(&[chat("gone", "?", Some(at(2)))]).unwrap();
+        store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
+        store.set_meta("me_user_id", "user-me").unwrap();
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "UPDATE chats SET kind = 'oneOnOne', member_summary = '?';
+                 DELETE FROM chat_members;
+                 INSERT INTO chat_members VALUES ('c', 0, 'user-me', 'Me'), ('c', 1, 'user-ada', '?');
+                 INSERT INTO chat_members VALUES ('gone', 0, 'user-me', 'Me'), ('gone', 1, 'user-zed', '?');
+                 PRAGMA user_version = 28",
+            )
+            .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let named = store.chat("c").unwrap().unwrap();
+    assert_eq!(named.title, "Ada Example");
+    assert_eq!(named.member_summary, "Ada Example");
+    assert_eq!(store.chat("gone").unwrap().unwrap().title, UNKNOWN_USER_NAME);
 }

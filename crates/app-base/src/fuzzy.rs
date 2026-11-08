@@ -46,7 +46,11 @@ fn score_plain(query: &[char], candidate: &[char], prefer_word_starts: bool) -> 
     Some(score)
 }
 
+/// Without a query the items keep their order, so callers decide what comes first.
 pub fn rank<T: Clone>(query: &str, items: &[(String, T)], limit: usize) -> Vec<T> {
+    if query.trim().is_empty() {
+        return items.iter().take(limit).map(|(_, item)| item.clone()).collect();
+    }
     let mut scored: Vec<(i64, usize, usize)> = items
         .iter()
         .enumerate()
@@ -71,6 +75,17 @@ pub fn rank<T: Clone>(query: &str, items: &[(String, T)], limit: usize) -> Vec<T
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_query_keeps_the_given_order() {
+        let items = vec![
+            ("Longer recent chat".to_owned(), 1),
+            ("?".to_owned(), 2),
+            ("fme".to_owned(), 3),
+        ];
+        assert_eq!(rank("", &items, 2), [1, 2]);
+        assert_eq!(rank("  ", &items, 5), [1, 2, 3]);
+    }
 
     #[test]
     fn subsequence_matches_and_misses() {

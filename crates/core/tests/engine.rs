@@ -3016,6 +3016,26 @@ async fn a_departed_partner_keeps_their_name_from_the_chat_history() {
 }
 
 #[tokio::test]
+async fn a_partner_graph_lists_as_question_mark_keeps_their_name_from_the_chat_history() {
+    let fake = Arc::new(Fake::default());
+    let departed = "19:user-ada_user-me@unq.gbl.spaces";
+    let mut unnamed = chat(departed, None, 5, 5, ME, false);
+    for member in &mut unnamed.members {
+        if member.user_id.as_deref() == Some("user-ada") {
+            member.display_name = Some("?".to_owned());
+        }
+    }
+    *fake.chats.lock().unwrap() = vec![unnamed];
+    let engine = engine_with(&fake, SyncConfig::default());
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats[0].title, "Unknown User");
+    fake.set_chat_messages(numbered(1));
+    engine.fetch_newer(departed).await.unwrap();
+    engine.refresh_sidebar().await.unwrap();
+    assert_eq!(engine.sidebar().unwrap().chats[0].title, "Ada Example");
+}
+
+#[tokio::test]
 async fn an_edited_old_message_leaves_the_preview_alone() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(3));

@@ -61,6 +61,21 @@ impl BotPartners {
     }
 }
 
+/// Graph either drops a departed person from a 1:1 chat or keeps them without a name.
+fn departed_partner_id<'a>(chat: &'a Chat, my_user_id: &str) -> Option<&'a str> {
+    if let Some(partner_id) = chat.memberless_partner_id(my_user_id) {
+        return Some(partner_id);
+    }
+    if !chat.chat_type.eq_ignore_ascii_case("oneOnOne") {
+        return None;
+    }
+    let partner = chat
+        .members
+        .iter()
+        .find(|member| member.user_id.as_deref() != Some(my_user_id))?;
+    (partner.name() == UNKNOWN_USER_NAME).then_some(partner.user_id.as_deref()?)
+}
+
 impl<R: Remote> SyncEngine<R> {
     pub(crate) async fn resolve_bot_partners(&self, chats: &[Chat], my_user_id: &str) {
         let unknown = self.bot_partners().unknown_ids(chats, my_user_id);
@@ -99,12 +114,12 @@ impl<R: Remote> SyncEngine<R> {
     ) {
         let partner_ids: HashMap<&str, &str> = chats
             .iter()
-            .filter_map(|chat| Some((chat.id.as_str(), chat.memberless_partner_id(my_user_id)?)))
+            .filter_map(|chat| Some((chat.id.as_str(), departed_partner_id(chat, my_user_id)?)))
             .collect();
         let departed: Vec<(usize, String)> = records
             .iter()
             .enumerate()
-            .filter(|(_, record)| record.title == ALONE_TITLE)
+            .filter(|(_, record)| record.title == ALONE_TITLE || record.title == UNKNOWN_USER_NAME)
             .filter_map(|(index, record)| {
                 Some((index, (*partner_ids.get(record.id.as_str())?).to_owned()))
             })
