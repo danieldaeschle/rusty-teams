@@ -92,6 +92,7 @@ struct Fake {
     channel_pages: Mutex<Vec<Vec<Message>>>,
     teams: Mutex<Vec<Team>>,
     failing_team: Mutex<Option<String>>,
+    failing_cards: Mutex<bool>,
     sent: Mutex<Vec<String>>,
     chat_calls: Mutex<usize>,
     chat_page_calls: Mutex<usize>,
@@ -567,6 +568,9 @@ impl Remote for Handle {
             "cards {} {message_id} {cards}",
             conversation.conversation_id()
         ));
+        if *self.failing_cards.lock().unwrap() {
+            return Err(teams_core::Error::Folders("cards refused".to_owned()));
+        }
         Ok(())
     }
 
@@ -2183,6 +2187,25 @@ async fn an_announcement_posts_through_graph_then_adds_the_banner_card() {
             "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize".to_owned()
         ))
     );
+}
+
+#[tokio::test]
+async fn a_refused_banner_card_still_keeps_the_post() {
+    let fake = Arc::new(Fake::default());
+    *fake.failing_cards.lock().unwrap() = true;
+    let engine = channel_engine(&fake).await;
+    let banner = teams_core::AnnouncementBanner {
+        title: "Ship it".to_owned(),
+        background: teams_core::BannerBackground::Color("rose".to_owned()),
+    };
+    let posted = engine
+        .post_announcement(CHANNEL, "<p>hi</p>", None, &[], &MessageExtras::default(), &banner)
+        .await;
+    assert!(matches!(posted, Err(teams_core::Error::PostedWithoutBanner)));
+    let tries = fake.calls().iter().filter(|call| call.starts_with("cards ")).count();
+    assert_eq!(tries, 3);
+    let cached = engine.store().messages(CHANNEL, None, 10).unwrap();
+    assert!(cached.iter().any(|record| record.message_id == "m9001"));
 }
 
 #[tokio::test]

@@ -84,7 +84,7 @@ use crate::emoji;
 use crate::emoticons;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
-use crate::outbox::{deliver, new_outbox_id, outbox_record, outgoing_of};
+use crate::outbox::{Delivered, deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
 use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
@@ -113,6 +113,7 @@ pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
+const POSTED_WITHOUT_BANNER: &str = "Posted, but Teams did not take the banner.";
 const QUIET_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
     Duration::from_secs(5),
@@ -3406,11 +3407,14 @@ impl ConversationView {
     fn finish_send(
         &mut self,
         key: &str,
-        result: Result<teams_core::Result<()>, tokio::sync::oneshot::error::RecvError>,
+        result: Result<teams_core::Result<Delivered>, tokio::sync::oneshot::error::RecvError>,
         cx: &mut Context<Self>,
     ) {
+        if matches!(result, Ok(Ok(Delivered::WithoutBanner))) {
+            self.notice = Some(POSTED_WITHOUT_BANNER.to_owned());
+        }
         let failure = match result {
-            Ok(Ok(())) => None,
+            Ok(Ok(_)) => None,
             Ok(Err(error)) => Some(short_error(&error)),
             Err(error) => Some(short_error(&error)),
         };

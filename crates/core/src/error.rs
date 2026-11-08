@@ -16,6 +16,11 @@ pub enum Error {
     GifsDisabled,
     #[error("{0} is not supported yet")]
     Unsupported(&'static str),
+    #[error("banner image: {0}")]
+    BannerImage(&'static str),
+    /// The post is out; only its banner card could not be set.
+    #[error("posted without the banner")]
+    PostedWithoutBanner,
 }
 
 impl From<chatsvc::Error> for Error {

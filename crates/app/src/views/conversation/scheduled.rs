@@ -402,7 +402,7 @@ impl ConversationView {
         });
         cx.spawn(async move |_, cx| {
             let failure = match receiver.await {
-                Ok(Ok(())) => None,
+                Ok(Ok(_)) => None,
                 Ok(Err(error)) => Some(short_error(&error)),
                 Err(error) => Some(short_error(&error)),
             };

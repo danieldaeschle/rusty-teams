@@ -51,13 +51,20 @@ pub fn outgoing_of(record: &OutboxRecord) -> Option<Outgoing> {
     decode(&record.payload, &record.images)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivered {
+    Complete,
+    /// The post went out but its announcement banner could not be set.
+    WithoutBanner,
+}
+
 pub async fn deliver(
     engine: &Engine,
     conversation_id: &str,
     target: OutboxTarget,
     thread_root_id: Option<&str>,
     outgoing: &Outgoing,
-) -> teams_core::Result<()> {
+) -> teams_core::Result<Delivered> {
     let extras = outgoing.extras();
     let html = outgoing.html();
     let mentions = &outgoing.mentions;
@@ -74,7 +81,7 @@ pub async fn deliver(
         }
         (OutboxTarget::Post, None) => match &outgoing.banner {
             Some(banner) => {
-                engine
+                let posted = engine
                     .post_announcement(
                         conversation_id,
                         &html,
@@ -83,7 +90,14 @@ pub async fn deliver(
                         &extras,
                         banner,
                     )
-                    .await
+                    .await;
+                if matches!(posted, Ok(_) | Err(teams_core::Error::PostedWithoutBanner)) {
+                    discard_banner_image(banner);
+                }
+                match posted {
+                    Err(teams_core::Error::PostedWithoutBanner) => return Ok(Delivered::WithoutBanner),
+                    other => other,
+                }
             }
             None => {
                 engine
@@ -108,7 +122,13 @@ pub async fn deliver(
             .attach_link_preview(conversation_id, &record.message_id, preview)
             .await;
     }
-    Ok(())
+    Ok(Delivered::Complete)
+}
+
+fn discard_banner_image(banner: &teams_core::AnnouncementBanner) {
+    if let teams_core::BannerBackground::LocalImage(path) = &banner.background {
+        crate::banner_image::discard_banner_image(std::path::Path::new(path));
+    }
 }
 
 fn is_permanent(error: &teams_core::Error) -> bool {
@@ -118,6 +138,7 @@ fn is_permanent(error: &teams_core::Error) -> bool {
         }
         teams_core::Error::Graph(graph::Error::NotAMember)
         | teams_core::Error::Unsupported(_)
+        | teams_core::Error::BannerImage(_)
         | teams_core::Error::UnknownConversation(_) => true,
         _ => false,
     }
@@ -170,10 +191,10 @@ async fn attempt(
     engine: &Engine,
     record: &OutboxRecord,
     outgoing: &Outgoing,
-) -> teams_core::Result<()> {
+) -> teams_core::Result<Delivered> {
     // Graph has no idempotency key: a send cut off by the quit may have gone through.
     if already_sent(engine, record, outgoing).await? {
-        return Ok(());
+        return Ok(Delivered::Complete);
     }
     deliver(
         engine,
@@ -195,7 +216,7 @@ async fn resend(engine: &Engine, record: &OutboxRecord, outgoing: &Outgoing) -> 
             tokio::time::sleep(delay).await;
         }
         match attempt(engine, record, outgoing).await {
-            Ok(()) => return Ok(()),
+            Ok(_) => return Ok(()),
             Err(error) if is_permanent(&error) => return Err(short_error(&error)),
             Err(error) => failure = short_error(&error),
         }

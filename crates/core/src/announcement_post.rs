@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chatsvc::ConversationRef;
 use graph::MessageExtras;
 use store::MessageRecord;
@@ -11,6 +13,11 @@ use crate::remote::Remote;
 
 const BANNER_FILE_NAME: &str = "MicrosoftTeams-image.png";
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+const CARD_RETRY_DELAYS: [Duration; 3] = [
+    Duration::ZERO,
+    Duration::from_secs(1),
+    Duration::from_secs(3),
+];
 
 fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     if !bytes.starts_with(PNG_SIGNATURE) || bytes.get(12..16)? != b"IHDR" {
@@ -51,12 +58,8 @@ impl<R: Remote> SyncEngine<R> {
         let target = ConversationRef::ChannelRoot {
             channel_id: channel_id.to_owned(),
         };
-        if self
-            .remote
-            .set_message_cards(&target, &sent.id, &cards)
-            .await
-            .is_ok()
-        {
+        let attached = self.set_cards_with_retry(&target, &sent.id, &cards).await;
+        if attached {
             let shown = match &image {
                 Some(image) => AnnouncementBanner {
                     title: banner.title.clone(),
@@ -67,14 +70,34 @@ impl<R: Remote> SyncEngine<R> {
             sent.attachments
                 .insert(0, shown.attachment(format!("announcement-card-{}", sent.id)));
         }
-        self.cache_sent(channel_id, &sent, &html, extras)
+        let record = self.cache_sent(channel_id, &sent, &html, extras)?;
+        if attached {
+            Ok(record)
+        } else {
+            Err(Error::PostedWithoutBanner)
+        }
+    }
+
+    async fn set_cards_with_retry(&self, target: &ConversationRef, message_id: &str, cards: &str) -> bool {
+        for delay in CARD_RETRY_DELAYS {
+            tokio::time::sleep(delay).await;
+            if self
+                .remote
+                .set_message_cards(target, message_id, cards)
+                .await
+                .is_ok()
+            {
+                return true;
+            }
+        }
+        false
     }
 
     async fn upload_banner_image(&self, channel_id: &str, path: &str) -> Result<TeamsBannerImage> {
         let bytes = std::fs::read(path)
-            .map_err(|_| Error::Unsupported("a banner image that is no longer on disk"))?;
+            .map_err(|_| Error::BannerImage("the picked file is gone"))?;
         let (width, height) =
-            png_size(&bytes).ok_or(Error::Unsupported("a banner image that is not a PNG"))?;
+            png_size(&bytes).ok_or(Error::BannerImage("not a PNG"))?;
         let uploaded = self
             .remote
             .upload_ams_image(channel_id, &bytes, BANNER_FILE_NAME)
