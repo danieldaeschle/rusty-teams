@@ -1,4 +1,4 @@
-use chrono::Local;
+use chrono::{Local, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     Side,
@@ -13,6 +13,7 @@ use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKin
 use super::avatar::{person_avatar, status_glyph, with_presence, with_presence_badge};
 use super::widgets::{menu_icon, symbol};
 use crate::app_state::AppState;
+use crate::notify::pause;
 use crate::data::{Person, PresenceKind};
 use crate::own_status::{
     STATUS_CHOICES, STATUS_DURATIONS, StateSummary, StatusDuration, choice_label, duration_target,
@@ -24,6 +25,10 @@ use crate::theme;
 pub const MENU_WIDTH: f32 = 250.;
 pub(crate) const TITLE_AVATAR_SIZE: f32 = 28.;
 pub(crate) const OWN_AVATAR_DISC: &str = "shell/title-bar/own-status/avatar/disc";
+pub(crate) const SETTINGS_MORE_TAG: &str = "shell/title-bar/settings-more";
+const SETTINGS_MORE_TITLE: &str = "Settings and more";
+const VIEW_ACCOUNT_LABEL: &str = "View account";
+const VIEW_ACCOUNT_URL: &str = "https://myaccount.microsoft.com";
 const TITLE_PRESENCE_SIZE: f32 = 14.;
 const HEADER_AVATAR_SIZE: f32 = 40.;
 const PRESENCE_OVERHANG: f32 = 2.;
@@ -156,6 +161,19 @@ fn header(context: &MenuContext, cx: &App) -> Div {
                         .child(context.person.display_name.clone()),
                 )
                 .child(line(context.email.clone(), theme::text_muted()))
+                .child(
+                    h_flex()
+                        .id("status-menu-view-account")
+                        .gap(px(4.))
+                        .items_center()
+                        .cursor_pointer()
+                        .text_size(px(12.))
+                        .text_color(theme::text_soft())
+                        .hover(|link| link.text_color(theme::accent_text()))
+                        .child(VIEW_ACCOUNT_LABEL)
+                        .child(menu_icon(IconName::ExternalLink).size(px(12.)))
+                        .on_click(|_, _, cx| cx.open_url(VIEW_ACCOUNT_URL)),
+                )
                 .children(
                     context
                         .note
@@ -173,20 +191,12 @@ fn status_menu(
 ) -> PopupMenu {
     let header_context = context.clone();
     let message_app = context.app.clone();
-    let settings_app = context.app.clone();
-    let chat_list_app = context.app.clone();
-    let translation_app = context.app.clone();
-    let general_app = context.app.clone();
-    let call_app = context.app.clone();
-    let zoom_app = context.app.clone();
     let row_label = match &context.summary.until {
         Some(until) => format!("{} {until}", context.summary.label),
         None => context.summary.label.to_owned(),
     };
     let submenu_context = context.clone();
-    let ring_app = context.app.clone();
-    let demo = context.app.read(cx).mode.demo;
-    let popup = popup
+    popup
         .min_w(px(MENU_WIDTH))
         .item(PopupMenuItem::element(move |_, cx| {
             header(&header_context, cx)
@@ -199,12 +209,94 @@ fn status_menu(
             cx,
             move |submenu, window, cx| state_menu(submenu, window, cx, &submenu_context),
         )
+        .item(pause_item(&context.app, window, cx))
         .item(work_location_item(context, window, cx))
         .item(
             PopupMenuItem::new("Set status message")
                 .icon(menu_icon(IconName::Pencil))
                 .on_click(move |_, _, cx| {
                     message_app.update(cx, |state, cx| state.request_status_message(cx));
+                }),
+        )
+}
+
+fn pause_item(
+    app: &Entity<AppState>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenuItem {
+    let paused_until = app.read(cx).notifications_paused_until;
+    let paused = pause::is_paused(paused_until, Utc::now());
+    let label = pause::menu_label(paused_until, Local::now());
+    let app = app.clone();
+    let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
+        let resume_app = app.clone();
+        let menu = STATUS_DURATIONS.iter().fold(menu, |menu, duration| {
+            let app = app.clone();
+            let duration = *duration;
+            menu.item(PopupMenuItem::new(duration.label()).on_click(move |_, _, cx| {
+                let until = duration.expires_at(Local::now());
+                app.update(cx, |state, cx| state.pause_notifications(until, cx));
+            }))
+        });
+        if !paused {
+            return menu;
+        }
+        menu.separator().item(
+            PopupMenuItem::new("Resume notifications")
+                .icon(menu_icon(IconName::BellRing))
+                .on_click(move |_, _, cx| {
+                    resume_app.update(cx, |state, cx| state.resume_notifications(cx));
+                }),
+        )
+    });
+    PopupMenuItem::submenu(label, submenu).icon(menu_icon(if paused {
+        IconName::BellOff
+    } else {
+        IconName::Bell
+    }))
+}
+
+pub fn settings_more_button(app: &Entity<AppState>) -> AnyElement {
+    let app = app.clone();
+    div()
+        .debug_selector(|| SETTINGS_MORE_TAG.into())
+        .flex_none()
+        .child(
+            Button::new("title-settings-more")
+                .ghost()
+                .icon(IconName::Ellipsis)
+                .tooltip(SETTINGS_MORE_TITLE)
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
+                    settings_more_menu(popup, window, cx, &app)
+                }),
+        )
+        .into_any_element()
+}
+
+fn settings_more_menu(
+    popup: PopupMenu,
+    _window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    app: &Entity<AppState>,
+) -> PopupMenu {
+    let settings_app = app.clone();
+    let chat_list_app = app.clone();
+    let translation_app = app.clone();
+    let notification_app = app.clone();
+    let call_app = app.clone();
+    let zoom_app = app.clone();
+    let ring_app = app.clone();
+    let demo = app.read(cx).mode.demo;
+    let popup = popup
+        .min_w(px(MENU_WIDTH))
+        .item(
+            PopupMenuItem::new("Settings")
+                .icon(menu_icon(IconName::Settings))
+                .on_click(move |_, _, cx| {
+                    settings_app.update(cx, |state, cx| {
+                        state.open_settings(SettingsSection::General, cx)
+                    });
                 }),
         )
         .separator()
@@ -227,28 +319,19 @@ fn status_menu(
                 }),
         )
         .item(
-            PopupMenuItem::new("Make a test call")
-                .icon(menu_icon(IconName::Phone))
-                .on_click(move |_, _, cx| {
-                    call_app.update(cx, |state, cx| state.start_test_call(cx));
-                }),
-        )
-        .item(
             PopupMenuItem::new("Notification settings")
                 .icon(menu_icon(IconName::Bell))
                 .on_click(move |_, _, cx| {
-                    settings_app.update(cx, |state, cx| {
+                    notification_app.update(cx, |state, cx| {
                         state.open_settings(SettingsSection::Notifications, cx)
                     });
                 }),
         )
         .item(
-            PopupMenuItem::new("Settings")
-                .icon(menu_icon(IconName::Settings))
+            PopupMenuItem::new("Make a test call")
+                .icon(menu_icon(IconName::Phone))
                 .on_click(move |_, _, cx| {
-                    general_app.update(cx, |state, cx| {
-                        state.open_settings(SettingsSection::General, cx)
-                    });
+                    call_app.update(cx, |state, cx| state.start_test_call(cx));
                 }),
         )
         .item(PopupMenuItem::element(move |_, cx| {

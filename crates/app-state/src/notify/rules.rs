@@ -156,6 +156,7 @@ pub struct Environment {
     pub chat_in_foreground: bool,
     pub system_quiet: bool,
     pub own_do_not_disturb: bool,
+    pub paused: bool,
     pub own_busy: bool,
     pub in_call: bool,
 }
@@ -260,6 +261,7 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
         || environment.chat_in_foreground
         || environment.system_quiet
         || (environment.own_do_not_disturb && !urgent)
+        || environment.paused
         || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call)
         || (!urgent && !account_toasts(&settings.account, incoming));
@@ -284,6 +286,7 @@ pub fn decide_proposal(
         || environment.chat_in_foreground
         || environment.system_quiet
         || environment.own_do_not_disturb
+        || environment.paused
         || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call);
     if suppressed {
@@ -370,6 +373,17 @@ mod tests {
 
     fn group() -> Incoming {
         incoming(ChatKind::Group { member_count: 5 })
+    }
+
+    #[test]
+    fn paused_notifications_stay_silent_even_when_urgent() {
+        let mut incoming = incoming(ChatKind::Direct);
+        incoming.importance = MessageImportance::Urgent;
+        let paused = Environment {
+            paused: true,
+            ..Environment::default()
+        };
+        assert_eq!(decide(&Settings::default(), &incoming, paused), SILENT);
     }
 
     #[test]

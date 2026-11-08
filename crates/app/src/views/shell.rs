@@ -40,7 +40,7 @@ use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use super::connection_banner::render_connection_banner;
 use super::notice_toast::NoticeToasts;
-use super::status_menu::own_status_button;
+use super::status_menu::{own_status_button, settings_more_button};
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::{mode_label, render_title_bar, update_button};
@@ -1069,6 +1069,7 @@ impl Render for AppShell {
                     &self.update,
                     cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
                 ),
+                Some(settings_more_button(&self.state)),
                 own_status_button(&self.state, state),
             ]
             .into_iter()

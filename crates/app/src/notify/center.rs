@@ -439,10 +439,12 @@ impl NotificationCenter {
             _ => false,
         };
         let in_call = in_call(server_in_call, state.call.as_ref().map(|call| &call.model));
+        let paused = state.notifications_paused(chrono::Utc::now());
         Environment {
             chat_in_foreground: selected && self.main_window_active(cx),
             system_quiet: platform::system_quiet(),
             own_do_not_disturb,
+            paused,
             own_busy,
             in_call,
         }

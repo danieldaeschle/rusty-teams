@@ -1,5 +1,6 @@
 pub mod incoming;
 pub mod layout;
+pub mod pause;
 pub mod rules;
 pub mod settings;
 pub mod stack;

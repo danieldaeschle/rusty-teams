@@ -164,6 +164,7 @@ pub struct AppState {
     pub forward_selection: Option<ForwardSelection>,
     pub image_viewer_request: Option<ViewerRequest>,
     pub own_status: PresenceStatus,
+    pub notifications_paused_until: Option<chrono::DateTime<chrono::Utc>>,
     pub own_email: String,
     pub own_time_zone: Option<String>,
     pub own_time_zone_requested: bool,
@@ -264,6 +265,7 @@ impl AppState {
     pub fn new(store: Arc<Store>, mode: Mode) -> Self {
         let sidebar = store.sidebar().unwrap_or_default();
         let speed_dial = crate::call::speed_dial::load(&store);
+        let notifications_paused_until = crate::notify::pause::load(&store);
         let chat_settings = teams_core::stored_chat_settings(&store);
         let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
         let actions_on_right_click =
@@ -322,6 +324,7 @@ impl AppState {
             forward_selection: None,
             image_viewer_request: None,
             own_status: PresenceStatus::default(),
+            notifications_paused_until,
             own_email: String::new(),
             own_time_zone: None,
             own_time_zone_requested: false,
