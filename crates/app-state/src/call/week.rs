@@ -31,8 +31,8 @@ impl AppState {
     }
 
     pub fn shift_calendar_week(&mut self, steps: i32, cx: &mut Context<Self>) {
-        let step = self.calendar_week.span.step() * steps;
-        self.calendar_week.start = Some(self.calendar_start() + step);
+        let span = self.calendar_week.span;
+        self.calendar_week.start = Some(span.shifted(self.calendar_start(), steps));
         self.load_calendar_week(cx);
     }
 
@@ -49,6 +49,16 @@ impl AppState {
         self.calendar_week.span = span;
         self.calendar_week.start = Some(span.start_for(if shown { today } else { start }));
         self.load_calendar_week(cx);
+    }
+
+    pub fn show_calendar_date(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
+        self.calendar_week.start = Some(self.calendar_week.span.start_for(date));
+        self.load_calendar_week(cx);
+    }
+
+    pub fn show_calendar_day(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
+        self.calendar_week.span = CalendarSpan::Day;
+        self.show_calendar_date(date, cx);
     }
 
     fn load_calendar_week(&mut self, cx: &mut Context<Self>) {

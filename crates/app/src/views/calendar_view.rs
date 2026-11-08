@@ -9,13 +9,15 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::calendar_date_picker::date_picker_button;
+use super::calendar_month::month_grid;
 use super::rsvp_menu::rsvp_menu;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
 use crate::app_state::AppState;
 use crate::call::join_available;
 use crate::call::week_grid::{
-    CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, range_label, week_days,
+    CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
 };
 use crate::theme;
 
@@ -93,10 +95,10 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronLeft)
-                    .tooltip(if span == CalendarSpan::Day {
-                        "Go to previous day"
-                    } else {
-                        "Go to previous week"
+                    .tooltip(match span {
+                        CalendarSpan::Day => "Go to previous day",
+                        CalendarSpan::Month => "Go to previous month",
+                        _ => "Go to previous week",
                     })
                     .on_click(move |_, _, cx| {
                         back.update(cx, |state, cx| state.shift_calendar_week(-1, cx))
@@ -107,23 +109,27 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronRight)
-                    .tooltip(if span == CalendarSpan::Day {
-                        "Go to next day"
-                    } else {
-                        "Go to next week"
+                    .tooltip(match span {
+                        CalendarSpan::Day => "Go to next day",
+                        CalendarSpan::Month => "Go to next month",
+                        _ => "Go to next week",
                     })
                     .on_click(move |_, _, cx| {
                         forward.update(cx, |state, cx| state.shift_calendar_week(1, cx))
                     }),
             )
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(range_label(start, span.days())),
+                h_flex().flex_1().min_w_0().child(date_picker_button(
+                    &self.state,
+                    span.title(start),
+                    start,
+                    span.days(),
+                    if span == CalendarSpan::Month {
+                        month_shown(start)
+                    } else {
+                        start
+                    },
+                )),
             )
             .child(
                 Button::new("calendar-span")
@@ -579,8 +585,15 @@ impl Render for CalendarView {
             .bg(theme::surface())
             .overflow_hidden()
             .child(self.header(start, span, compact))
-            .child(self.day_headers(&days, today))
-            .children(self.all_day_row(&days, &events))
-            .child(self.grid(&days, &events, today, now, send_response))
+            .map(|calendar| {
+                if span == CalendarSpan::Month {
+                    calendar.child(month_grid(&self.state, start, &days, &events, today, offset))
+                } else {
+                    calendar
+                        .child(self.day_headers(&days, today))
+                        .children(self.all_day_row(&days, &events))
+                        .child(self.grid(&days, &events, today, now, send_response))
+                }
+            })
     }
 }

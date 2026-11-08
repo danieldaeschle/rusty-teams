@@ -1,8 +1,9 @@
 use chatsvc::{CalendarEvent, ResponseType, ShowAs};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, Months, NaiveDate, Utc, Weekday};
 
 pub const WORK_WEEK_DAYS: i64 = 5;
 pub const MINUTES_PER_DAY: i64 = 24 * 60;
+pub const MONTH_GRID_DAYS: i64 = 42;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WeekBlock {
@@ -30,13 +31,15 @@ pub enum CalendarSpan {
     #[default]
     WorkWeek,
     Week,
+    Month,
 }
 
 impl CalendarSpan {
-    pub const ALL: [CalendarSpan; 3] = [
+    pub const ALL: [CalendarSpan; 4] = [
         CalendarSpan::Day,
         CalendarSpan::WorkWeek,
         CalendarSpan::Week,
+        CalendarSpan::Month,
     ];
 
     pub fn label(self) -> &'static str {
@@ -44,6 +47,7 @@ impl CalendarSpan {
             CalendarSpan::Day => "Day",
             CalendarSpan::WorkWeek => "Work week",
             CalendarSpan::Week => "Week",
+            CalendarSpan::Month => "Month",
         }
     }
 
@@ -52,6 +56,7 @@ impl CalendarSpan {
             CalendarSpan::Day => 1,
             CalendarSpan::WorkWeek => WORK_WEEK_DAYS,
             CalendarSpan::Week => 7,
+            CalendarSpan::Month => MONTH_GRID_DAYS,
         }
     }
 
@@ -60,15 +65,45 @@ impl CalendarSpan {
             CalendarSpan::Day => date,
             CalendarSpan::WorkWeek => work_week_for(date),
             CalendarSpan::Week => week_start(date),
+            CalendarSpan::Month => month_grid_start(date),
         }
     }
 
-    pub fn step(self) -> Duration {
+    pub fn shifted(self, start: NaiveDate, steps: i32) -> NaiveDate {
         match self {
-            CalendarSpan::Day => Duration::days(1),
-            CalendarSpan::WorkWeek | CalendarSpan::Week => Duration::weeks(1),
+            CalendarSpan::Day => start + Duration::days(i64::from(steps)),
+            CalendarSpan::WorkWeek | CalendarSpan::Week => start + Duration::weeks(i64::from(steps)),
+            CalendarSpan::Month => {
+                let month = month_shown(start);
+                let moved = if steps >= 0 {
+                    month.checked_add_months(Months::new(steps.unsigned_abs()))
+                } else {
+                    month.checked_sub_months(Months::new(steps.unsigned_abs()))
+                };
+                month_grid_start(moved.unwrap_or(month))
+            }
         }
     }
+
+    pub fn title(self, start: NaiveDate) -> String {
+        match self {
+            CalendarSpan::Month => month_shown(start).format("%B %Y").to_string(),
+            _ => range_label(start, self.days()),
+        }
+    }
+}
+
+pub fn first_of_month(date: NaiveDate) -> NaiveDate {
+    date.with_day(1).unwrap_or(date)
+}
+
+pub fn month_grid_start(date: NaiveDate) -> NaiveDate {
+    week_start(first_of_month(date))
+}
+
+/// The grid starts up to six days before the 1st, so a week in is always inside the shown month.
+pub fn month_shown(grid_start: NaiveDate) -> NaiveDate {
+    first_of_month(grid_start + Duration::weeks(1))
 }
 
 /// On a weekend the work week view shows the coming week, as Outlook does.
@@ -246,6 +281,20 @@ mod tests {
     }
 
     #[test]
+    fn month_view_steps_whole_months_from_a_monday_grid() {
+        let date = |day| NaiveDate::from_ymd_opt(2026, 11, day).unwrap();
+        let start = CalendarSpan::Month.start_for(date(18));
+        assert_eq!(start, NaiveDate::from_ymd_opt(2026, 10, 26).unwrap());
+        assert_eq!(CalendarSpan::Month.title(start), "November 2026");
+        let next = CalendarSpan::Month.shifted(start, 1);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
+        assert_eq!(CalendarSpan::Month.title(next), "December 2026");
+        let back = CalendarSpan::Month.shifted(start, -11);
+        assert_eq!(CalendarSpan::Month.title(back), "December 2025");
+        assert_eq!(CalendarSpan::Week.shifted(date(2), -1), date(2) - Duration::weeks(1));
+    }
+
+    #[test]
     fn the_week_starts_on_monday() {
         let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         assert_eq!(
@@ -312,7 +361,7 @@ mod tests {
         assert_eq!(CalendarSpan::Week.start_for(wednesday), monday);
         let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         assert_eq!(CalendarSpan::Week.start_for(sunday), monday);
-        assert_eq!(CalendarSpan::Day.step(), Duration::days(1));
+        assert_eq!(CalendarSpan::Day.shifted(wednesday, 1), wednesday + Duration::days(1));
         assert_eq!(CalendarSpan::Week.days(), 7);
     }
 
