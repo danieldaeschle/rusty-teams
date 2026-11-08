@@ -283,7 +283,7 @@ impl ConversationView {
                             .w_full()
                             .flex_none()
                             .px(px(20.))
-                            .pt(px(12.))
+                            .py(px(12.))
                             .child(post_in_channel_card(&self.app.read(cx).directory, open)),
                     )
                     .into_any_element(),
