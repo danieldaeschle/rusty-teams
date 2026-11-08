@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -469,9 +469,14 @@ pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc
     drop(runtime::spawn(async move {
         let mut receiver = engine.subscribe();
         let mut watermarks: HashMap<String, DateTime<Utc>> = HashMap::new();
+        let mut stored_late: HashMap<String, HashSet<String>> = HashMap::new();
         loop {
             let conversation_id = match receiver.recv().await {
                 Ok(CoreEvent::MessagesChanged { conversation_id }) => conversation_id,
+                Ok(CoreEvent::MessagesStoredLate { conversation_id, message_ids }) => {
+                    stored_late.entry(conversation_id).or_default().extend(message_ids);
+                    continue;
+                }
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     rescan.store(true, Ordering::SeqCst);
@@ -487,6 +492,7 @@ pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc
             let watermark = watermarks
                 .entry(conversation_id.clone())
                 .or_insert(started_at);
+            let late = stored_late.remove(&conversation_id).unwrap_or_default();
             loop {
                 let Ok(messages) =
                     store.messages_after(&conversation_id, *watermark, NEW_MESSAGE_BATCH)
@@ -496,7 +502,7 @@ pub fn spawn_message_bridge(engine: Arc<Engine>, hub: Arc<AgentHub>, source: Arc
                 let batch_full = messages.len() == NEW_MESSAGE_BATCH;
                 for message in messages {
                     *watermark = (*watermark).max(message.created_at);
-                    if message.deleted {
+                    if message.deleted || late.contains(&message.message_id) {
                         continue;
                     }
                     let sender_is_me = my_id.is_some() && message.sender_id == my_id;
