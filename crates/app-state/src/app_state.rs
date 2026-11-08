@@ -157,6 +157,7 @@ pub struct AppState {
     pub calendar_events: Vec<chatsvc::CalendarEvent>,
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
+    pub speed_dial: Vec<crate::call::SpeedDialEntry>,
     pub pins: HashMap<String, Vec<PinnedMessage>>,
     pub post_follows: crate::post_follow::PostFollows,
     pub forward_request: Option<ForwardSource>,
@@ -262,6 +263,7 @@ pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
 impl AppState {
     pub fn new(store: Arc<Store>, mode: Mode) -> Self {
         let sidebar = store.sidebar().unwrap_or_default();
+        let speed_dial = crate::call::speed_dial::load(&store);
         let chat_settings = teams_core::stored_chat_settings(&store);
         let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
         let actions_on_right_click =
@@ -313,6 +315,7 @@ impl AppState {
             calendar_events: Vec::new(),
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
+            speed_dial,
             pins: HashMap::new(),
             post_follows: Default::default(),
             forward_request: None,

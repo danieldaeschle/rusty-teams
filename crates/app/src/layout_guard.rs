@@ -276,7 +276,9 @@ mod frames {
     const CALLS_TAGS: &[&str] = &[
         "shell/islands/main/calls-dial",
         "shell/islands/main/calls-history",
+        CALLS_SPEED_DIAL,
     ];
+    const CALLS_SPEED_DIAL: &str = "shell/islands/main/calls-speed-dial";
     const PREJOIN_TAGS: &[&str] = &[
         "shell/islands/main/prejoin",
         "shell/islands/main/prejoin/preview",
@@ -995,6 +997,9 @@ mod frames {
                     "calls" => {
                         expected.retain(|path| *path != "shell/islands/sidebar");
                         expected.extend(CALLS_TAGS);
+                        if !crate::views::calls_page::shows_speed_dial(width) {
+                            expected.retain(|path| *path != CALLS_SPEED_DIAL);
+                        }
                     }
                     "agents" => expected.push(AGENTS_LIST),
                     "calendar" => {

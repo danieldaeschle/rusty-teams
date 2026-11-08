@@ -12,16 +12,26 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::new_chat::NewChatDraft;
 use super::scroll_edge::{scroll_offset, with_top_edge};
-use super::widgets::{icon, menu_icon};
+use super::widgets::{icon, menu_icon, symbol};
 use crate::app_state::AppState;
-use crate::call::{CALL_ROW_HEIGHT, CallRow, EMPTY_HEIGHT, HistoryFilter, ListEntry};
+use crate::call::{
+    CALL_ROW_HEIGHT, CallRow, EMPTY_HEIGHT, HistoryFilter, ListEntry, SpeedDialEntry,
+};
 use crate::theme;
 
 pub const CALLS_DIAL_TAG: &str = "shell/islands/main/calls-dial";
 pub const CALLS_HISTORY_TAG: &str = "shell/islands/main/calls-history";
+pub const CALLS_SPEED_DIAL_TAG: &str = "shell/islands/main/calls-speed-dial";
 const CALLS_SCROLL_DIVIDER: &str = "shell/islands/main/calls-history/divider-scroll";
 const CALLS_TITLE: &str = "Calls";
 const HISTORY_TITLE: &str = "History";
+const SPEED_DIAL_TITLE: &str = "Speed dial";
+const SPEED_DIAL_EMPTY: &str = "Add people to speed dial for quick access.";
+const SPEED_DIAL_ADD_TITLE: &str = "Add to speed dial";
+const ADD_LABEL: &str = "Add";
+const CANCEL_LABEL: &str = "Cancel";
+const SPEED_DIAL_WIDTH: f32 = 340.;
+const SPEED_DIAL_MIN_WINDOW_WIDTH: f32 = 1100.;
 const CALL_LABEL: &str = "Call";
 const CALL_ONE_PERSON_HINT: &str = "Pick one person to call";
 const HEADER_HEIGHT: f32 = 60.;
@@ -50,6 +60,7 @@ fn call_row(
     state: &Entity<AppState>,
     row: &CallRow,
     can_open_chat: bool,
+    on_speed_dial: bool,
     directory: &crate::data::Directory,
 ) -> AnyElement {
     let avatar = if row.meeting {
@@ -67,6 +78,7 @@ fn call_row(
     let menu_state = state.clone();
     let menu_row = row.clone();
     let can_call_back = !row.meeting && row.user_id.is_some();
+    let can_add_to_speed_dial = can_call_back && !on_speed_dial;
     h_flex()
         .id(SharedString::from(format!("call-{}", row.key)))
         .h(px(CALL_ROW_HEIGHT))
@@ -124,6 +136,8 @@ fn call_row(
             let call_row = menu_row.clone();
             let chat_state = menu_state.clone();
             let chat_row = menu_row.clone();
+            let dial_state = menu_state.clone();
+            let dial_row = menu_row.clone();
             popup
                 .when(can_call_back, |popup| {
                     popup.item(
@@ -143,6 +157,20 @@ fn call_row(
                             .on_click(move |_, _, cx| {
                                 chat_state.update(cx, |state, cx| {
                                     state.open_chat_of_call_row(&chat_row, cx)
+                                });
+                            }),
+                    )
+                })
+                .when(can_add_to_speed_dial, |popup| {
+                    popup.item(
+                        PopupMenuItem::new(SPEED_DIAL_ADD_TITLE)
+                            .icon(menu_icon(IconName::Star))
+                            .on_click(move |_, _, cx| {
+                                let Some(user_id) = dial_row.user_id.as_deref() else {
+                                    return;
+                                };
+                                dial_state.update(cx, |state, cx| {
+                                    state.add_to_speed_dial(user_id, &dial_row.title, cx)
                                 });
                             }),
                     )
@@ -193,20 +221,95 @@ fn empty_row(text: &'static str) -> AnyElement {
         .into_any_element()
 }
 
+fn speed_dial_row(
+    state: &Entity<AppState>,
+    entry: &SpeedDialEntry,
+    directory: &crate::data::Directory,
+) -> AnyElement {
+    let click_state = state.clone();
+    let user_id = entry.user_id.clone();
+    let menu_state = state.clone();
+    let menu_user_id = entry.user_id.clone();
+    h_flex()
+        .id(SharedString::from(format!("speed-dial-{}", entry.user_id)))
+        .h(px(CALL_ROW_HEIGHT))
+        .flex_none()
+        .px(px(10.))
+        .gap(px(12.))
+        .items_center()
+        .rounded(px(8.))
+        .cursor_pointer()
+        .hover(|row| row.bg(theme::row_hover()))
+        .child(person_avatar(
+            directory,
+            Some(&entry.user_id),
+            &entry.name,
+            AVATAR_SIZE,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(14.))
+                .text_color(theme::text())
+                .child(entry.name.clone()),
+        )
+        .on_click(move |_, _, cx| {
+            click_state.update(cx, |state, cx| state.call_person(&user_id, false, cx));
+        })
+        .context_menu(move |popup, _, _| {
+            let video_state = menu_state.clone();
+            let video_user_id = menu_user_id.clone();
+            let remove_state = menu_state.clone();
+            let remove_user_id = menu_user_id.clone();
+            popup
+                .item(
+                    PopupMenuItem::new("Video call")
+                        .icon(menu_icon(IconName::Video))
+                        .on_click(move |_, _, cx| {
+                            video_state.update(cx, |state, cx| {
+                                state.call_person(&video_user_id, true, cx)
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("Remove from speed dial")
+                        .icon(menu_icon(IconName::Delete))
+                        .on_click(move |_, _, cx| {
+                            remove_state.update(cx, |state, cx| {
+                                state.remove_from_speed_dial(&remove_user_id, cx)
+                            });
+                        }),
+                )
+        })
+        .into_any_element()
+}
+
+pub fn shows_speed_dial(window_width: f32) -> bool {
+    window_width >= SPEED_DIAL_MIN_WINDOW_WIDTH
+}
+
 pub struct CallsPage {
     app: Entity<AppState>,
     people: Entity<NewChatDraft>,
+    speed_dial_people: Entity<NewChatDraft>,
+    adding_speed_dial: bool,
     scroll: ScrollHandle,
-    _observations: [Subscription; 2],
+    _observations: [Subscription; 3],
 }
 
 impl CallsPage {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let people_app = app.clone();
         let people = cx.new(|cx| NewChatDraft::new(people_app, window, cx).compact());
+        let speed_dial_app = app.clone();
+        let speed_dial_people =
+            cx.new(|cx| NewChatDraft::new(speed_dial_app, window, cx).compact());
         let observations = [
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.observe(&people, |_, _, cx| cx.notify()),
+            cx.observe(&speed_dial_people, |_, _, cx| cx.notify()),
         ];
         cx.spawn(async move |this, cx| {
             loop {
@@ -220,6 +323,8 @@ impl CallsPage {
         CallsPage {
             app,
             people,
+            speed_dial_people,
+            adding_speed_dial: false,
             scroll: ScrollHandle::new(),
             _observations: observations,
         }
@@ -235,6 +340,149 @@ impl CallsPage {
             .update(cx, |state, cx| state.call_person(&user_id, false, cx));
         self.people
             .update(cx, |people, cx| people.reset(window, cx));
+    }
+
+    fn open_speed_dial_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.adding_speed_dial = true;
+        self.speed_dial_people
+            .update(cx, |people, cx| people.focus_query(window, cx));
+        cx.notify();
+    }
+
+    fn close_speed_dial_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.adding_speed_dial = false;
+        self.speed_dial_people
+            .update(cx, |people, cx| people.reset(window, cx));
+        cx.notify();
+    }
+
+    fn confirm_speed_dial_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = self.speed_dial_people.read(cx).chips().to_vec();
+        self.app.update(cx, |state, cx| {
+            for person in &picked {
+                state.add_to_speed_dial(&person.user_id, &person.name, cx);
+            }
+        });
+        self.close_speed_dial_add(window, cx);
+    }
+
+    fn speed_dial_adder(&self, cx: &mut Context<Self>) -> Div {
+        let picked = !self.speed_dial_people.read(cx).chips().is_empty();
+        v_flex()
+            .gap(px(12.))
+            .child(self.speed_dial_people.clone())
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .justify_end()
+                    .child(
+                        Button::new("speed-dial-cancel")
+                            .label(CANCEL_LABEL)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_speed_dial_add(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("speed-dial-confirm")
+                            .label(ADD_LABEL)
+                            .when(picked, |button| button.primary())
+                            .disabled(!picked)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.confirm_speed_dial_add(window, cx)
+                            })),
+                    ),
+            )
+    }
+
+    fn speed_dial_empty(&self, cx: &mut Context<Self>) -> Div {
+        v_flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .gap(px(12.))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(theme::text_muted())
+                    .child(SPEED_DIAL_EMPTY),
+            )
+            .child(
+                Button::new("speed-dial-empty-add")
+                    .label(ADD_LABEL)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_speed_dial_add(window, cx)
+                    })),
+            )
+    }
+
+    fn speed_dial_column(&self, cx: &mut Context<Self>) -> Div {
+        let state = self.app.read(cx);
+        let rows = state
+            .speed_dial
+            .iter()
+            .map(|entry| speed_dial_row(&self.app, entry, &state.directory))
+            .collect::<Vec<_>>();
+        let body = if self.adding_speed_dial {
+            div()
+                .p(px(PAGE_PADDING))
+                .child(self.speed_dial_adder(cx))
+        } else if rows.is_empty() {
+            self.speed_dial_empty(cx)
+        } else {
+            div().child(
+                div()
+                    .id("calls-speed-dial-scroll")
+                    .size_full()
+                    .overflow_y_scrollbar()
+                    .child(
+                        v_flex()
+                            .px(px(PAGE_PADDING - 10.))
+                            .py(px(8.))
+                            .children(rows),
+                    ),
+            )
+        };
+        v_flex()
+            .debug_selector(|| CALLS_SPEED_DIAL_TAG.into())
+            .w(px(SPEED_DIAL_WIDTH))
+            .h_full()
+            .flex_none()
+            .child(
+                h_flex()
+                    .h(px(HISTORY_HEADER_HEIGHT))
+                    .flex_none()
+                    .pl(px(PAGE_PADDING))
+                    .pr(px(PAGE_PADDING - 6.))
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::text())
+                            .child(SPEED_DIAL_TITLE),
+                    )
+                    .child(
+                        div()
+                            .id("speed-dial-add")
+                            .size(px(28.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(theme::row_hover()))
+                            .tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(SPEED_DIAL_ADD_TITLE)
+                                    .build(window, cx)
+                            })
+                            .child(symbol("fluent_person_add", 18., theme::text_soft()))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_speed_dial_add(window, cx)
+                            })),
+                    ),
+            )
+            .child(body.flex_1().min_h_0())
     }
 
     fn dial_column(&self, cx: &mut Context<Self>) -> Div {
@@ -290,6 +538,9 @@ impl CallsPage {
                     &self.app,
                     row,
                     state.can_open_chat_of_call_row(row),
+                    row.user_id
+                        .as_deref()
+                        .is_some_and(|user_id| state.on_speed_dial(user_id)),
                     &state.directory,
                 ),
             });
@@ -340,6 +591,7 @@ impl CallsPage {
 impl Render for CallsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let window_height = f32::from(window.viewport_size().height);
+        let window_width = f32::from(window.viewport_size().width);
         v_flex()
             .debug_selector(|| "shell/islands/main".into())
             .flex_1()
@@ -371,7 +623,12 @@ impl Render for CallsPage {
                     .w_full()
                     .child(self.dial_column(cx))
                     .child(div().w(px(1.)).h_full().flex_none().bg(theme::border()))
-                    .child(self.history_column(window_height, cx)),
+                    .child(self.history_column(window_height, cx))
+                    .when(shows_speed_dial(window_width), |columns| {
+                        columns
+                            .child(div().w(px(1.)).h_full().flex_none().bg(theme::border()))
+                            .child(self.speed_dial_column(cx))
+                    }),
             )
     }
 }
