@@ -267,7 +267,10 @@ async function measure(tab, workDir) {
   };
 }
 
+const ONLY = process.env.SCENARIOS?.split(',');
+
 async function scenario(name, report, tab, workDir, act, check) {
+  if (ONLY && !ONLY.includes(name)) return;
   log(`scenario: ${name}`);
   try {
     await act();
@@ -276,7 +279,10 @@ async function scenario(name, report, tab, workDir, act, check) {
     const pass = Boolean(check(measured));
     report.scenarios[name] = { pass, ...measured, app: undefined, appState: measured.app };
     log(`scenario ${name}: ${pass ? 'PASS' : 'FAIL'}`);
-    if (!pass) await tab.shot(`${workDir}/${name}.png`).catch(() => {});
+    if (!pass) {
+      await tab.shot(`${workDir}/${name}.png`).catch(() => {});
+      report.scenarios[name].guestVideoStreams = (await tab.evaluate(PEER_STATS).catch(() => ({}))).videoIn;
+    }
   } catch (error) {
     report.scenarios[name] = { pass: false, error: error.message };
     log(`scenario ${name}: ERROR ${error.message}`);
@@ -290,15 +296,22 @@ async function guestClick(tab, labels) {
   throw new Error(`guest found none of ${labels.join(', ')}`);
 }
 
+async function guestCamera(tab, on) {
+  const sending = (await guestVideo(tab)).sentFrames;
+  await delay(2_000);
+  const isOn = (await guestVideo(tab)).sentFrames > sending;
+  if (isOn !== on) await guestClick(tab, [on ? '=Turn camera on' : '=Turn camera off', '=Camera']);
+}
+
 async function runScenarios(report, tab, workDir) {
   report.scenarios = {};
   await scenario('app-camera-on', report, tab, workDir, () => runTeams('--call', 'camera on'),
     (m) => m.app.cameraOn && m.appVideoOut >= MIN_FRAMES && m.guestVideoIn >= MIN_FRAMES);
-  await scenario('guest-camera-on', report, tab, workDir, () => guestClick(tab, ['=Turn camera on', 'Turn camera on', '=Camera']),
+  await scenario('guest-camera-on', report, tab, workDir, () => guestCamera(tab, true),
     (m) => m.guestVideoOut >= MIN_FRAMES && m.appVideoIn >= MIN_FRAMES && m.appVideoShown >= MIN_FRAMES);
   await scenario('app-camera-off', report, tab, workDir, () => runTeams('--call', 'camera off'),
     (m) => !m.app.cameraOn && m.appVideoOut < MIN_FRAMES && m.appVideoIn >= MIN_FRAMES);
-  await scenario('guest-camera-off', report, tab, workDir, () => guestClick(tab, ['=Turn camera off', 'Turn camera off', '=Camera']),
+  await scenario('guest-camera-off', report, tab, workDir, () => guestCamera(tab, false),
     (m) => m.appVideoIn < MIN_FRAMES);
   await scenario('app-share', report, tab, workDir, async () => {
     runTeams('--call', 'share-sources');

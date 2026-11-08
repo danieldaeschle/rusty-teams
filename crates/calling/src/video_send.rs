@@ -133,7 +133,12 @@ struct Outgoing {
     track: RtcVideoTrack,
     capture: Option<Capture>,
     frame_size: Arc<AtomicU64>,
-    limits: Option<EncoderLimits>,
+    requested: Option<RequestedLimits>,
+}
+
+struct RequestedLimits {
+    limits: Vec<SendLimit>,
+    applied_for: Option<(u32, u32)>,
 }
 
 impl Outgoing {
@@ -141,7 +146,7 @@ impl Outgoing {
         let (width, height) = kind.size();
         let source = NativeVideoSource::new(VideoResolution { width, height }, screencast);
         let track = factory.create_video_track(label, source.clone());
-        Outgoing { source, track, capture: None, frame_size: Arc::new(AtomicU64::new(0)), limits: None }
+        Outgoing { source, track, capture: None, frame_size: Arc::new(AtomicU64::new(0)), requested: None }
     }
 }
 
@@ -218,6 +223,7 @@ impl LocalVideo {
             SendSource::Screen => &mut self.screen,
         };
         let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
+        outgoing.requested = Some(RequestedLimits { limits: limits.to_vec(), applied_for: frame });
         let rids: Vec<String> = sender.parameters().encodings.into_iter().map(|encoding| encoding.rid).collect();
         if rids.len() > 1 {
             let plans = plan_layers(limits, frame, &rids);
@@ -229,12 +235,29 @@ impl LocalVideo {
         }
         let Some(limit) = limits.first() else { return Ok(None) };
         let encoder = encoder_limits(limit, frame);
-        outgoing.limits = Some(encoder);
         if limit.keyframe {
             Self::set_limits(&sender, &encoder, KEYFRAME_NUDGE)?;
         }
         Self::set_limits(&sender, &encoder, 1.0)?;
         Ok(Some(vec![LayerPlan { rid: rids.into_iter().next().unwrap_or_default(), active: true, limits: Some(encoder), keyframe: limit.keyframe }]))
+    }
+
+    /// The mixer sends its limits once, often before the first frame tells the size to scale from.
+    pub fn refresh_send_limits(&mut self) -> Vec<(SendSource, Result<Option<Vec<LayerPlan>>>)> {
+        let mut refreshed = Vec::new();
+        for source in [SendSource::Camera, SendSource::Screen] {
+            let outgoing = match source {
+                SendSource::Camera => &self.camera,
+                SendSource::Screen => &self.screen,
+            };
+            let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
+            let Some(requested) = outgoing.requested.as_ref().filter(|requested| frame.is_some() && requested.applied_for != frame) else {
+                continue;
+            };
+            let limits = requested.limits.clone();
+            refreshed.push((source, self.apply_send_limit(source, &limits)));
+        }
+        refreshed
     }
 
     fn set_layers(sender: &RtpSender, plans: &[LayerPlan], nudge: f64) -> Result<()> {

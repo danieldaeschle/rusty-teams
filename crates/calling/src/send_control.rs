@@ -264,6 +264,8 @@ mod tests {
         let scale = scale_for(960, 720, 920);
         assert!(macroblocks(960.0 / scale, 720.0 / scale) <= 920);
         assert_eq!(scale_for(1280, 720, 0), 1.0);
+        let screen = scale_for(1920, 1200, 8160);
+        assert!(screen > 1.0 && macroblocks(1920.0 / screen, 1200.0 / screen) <= 8160, "{screen}");
     }
 
     #[test]

@@ -63,7 +63,7 @@ export const PEER_STATS = `(async () => {
     report.peers++;
     (await peer.getStats()).forEach((entry) => {
       if (entry.type === 'inbound-rtp' && entry.kind === 'audio') report.audioIn.push({ energy: entry.totalAudioEnergy, level: entry.audioLevel, packets: entry.packetsReceived });
-      if (entry.type === 'inbound-rtp' && entry.kind === 'video') report.videoIn.push({ mid: entry.mid, decoded: entry.framesDecoded || 0, width: entry.frameWidth, height: entry.frameHeight });
+      if (entry.type === 'inbound-rtp' && entry.kind === 'video') report.videoIn.push({ mid: entry.mid, decoded: entry.framesDecoded || 0, width: entry.frameWidth, height: entry.frameHeight, packets: entry.packetsReceived, received: entry.framesReceived, keyFrames: entry.keyFramesDecoded, ssrc: entry.ssrc, codec: entry.codecId, pli: entry.pliCount, nack: entry.nackCount, lost: entry.packetsLost });
       if (entry.type === 'outbound-rtp') report[entry.kind + 'Out'].push({ mid: entry.mid, packets: entry.packetsSent, frames: entry.framesEncoded, width: entry.frameWidth, height: entry.frameHeight });
     });
   }

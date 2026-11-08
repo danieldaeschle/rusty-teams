@@ -2259,6 +2259,13 @@ async fn drive(
                         }
                     });
                 }
+                for (source, refreshed) in local_video.refresh_send_limits() {
+                    match refreshed {
+                        Ok(Some(plans)) => timeline.record("send limits", format!("{source:?} {plans:?} after a frame size change")),
+                        Ok(None) => {}
+                        Err(error) => timeline.record("send limits failed", error.to_string()),
+                    }
+                }
                 if ticks.is_multiple_of(BLUR_TIMING_EVERY_TICKS)
                     && let Some(average_ms) = local_video.blur_average_ms()
                 {
