@@ -8,6 +8,7 @@ use image::{Frame, ImageFormat, ImageReader, RgbaImage};
 const MAX_TEXTURES: usize = 8;
 const SOURCE_SIDE: u32 = 240;
 const SOURCE_LIMIT: u32 = 2 * SOURCE_SIDE;
+pub const TEXTURE_MARGIN: u32 = 2;
 
 pub struct AvatarPhoto {
     bytes: Vec<u8>,
@@ -51,7 +52,7 @@ impl AvatarPhoto {
                 evicted: None,
             });
         }
-        let pixels = square_texture(&self.bytes, side)?;
+        let pixels = with_edge_margin(&square_texture(&self.bytes, side)?, TEXTURE_MARGIN);
         let image = Arc::new(RenderImage::new(vec![Frame::new(pixels)]));
         let evicted = (textures.len() >= MAX_TEXTURES).then(|| textures.remove(0).1);
         textures.push((side, image.clone()));
@@ -79,6 +80,17 @@ pub fn device_span(start: f32, end: f32, scale_factor: f32) -> u32 {
 
 fn round_half_toward_zero(value: f32) -> f32 {
     value.signum() * (value.abs() - 0.5).ceil()
+}
+
+/// The sprite atlas packs images without gaps and samples linearly, so the outer texels
+/// of a photo blend with its neighbour. Repeated edge texels keep that blend inside the photo.
+pub fn with_edge_margin(texture: &RgbaImage, margin: u32) -> RgbaImage {
+    let (width, height) = texture.dimensions();
+    RgbaImage::from_fn(width + 2 * margin, height + 2 * margin, |x, y| {
+        let source_x = x.saturating_sub(margin).min(width - 1);
+        let source_y = y.saturating_sub(margin).min(height - 1);
+        *texture.get_pixel(source_x, source_y)
+    })
 }
 
 pub fn square_texture(bytes: &[u8], side: u32) -> Option<RgbaImage> {
@@ -127,6 +139,17 @@ mod tests {
     }
 
     #[test]
+    fn the_margin_repeats_the_edge_texels() {
+        let mut texture = RgbaImage::from_pixel(3, 3, Rgba([1, 2, 3, 255]));
+        texture.put_pixel(0, 0, Rgba([9, 9, 9, 255]));
+        let padded = with_edge_margin(&texture, 2);
+        assert_eq!(padded.dimensions(), (7, 7));
+        assert_eq!(*padded.get_pixel(0, 0), Rgba([9, 9, 9, 255]));
+        assert_eq!(*padded.get_pixel(1, 2), Rgba([9, 9, 9, 255]));
+        assert_eq!(*padded.get_pixel(6, 6), Rgba([1, 2, 3, 255]));
+    }
+
+    #[test]
     fn non_square_photos_are_center_cropped() {
         assert_eq!(
             square_texture(&solid_jpeg(64, 40), 60)
@@ -171,7 +194,10 @@ mod tests {
         assert_eq!(dimensions, (SOURCE_SIDE, SOURCE_SIDE));
         let texture = photo.texture(20).unwrap().image;
         let raw = texture.as_bytes(0).unwrap().to_vec();
-        let Rgba([blue, _, red, _]) = *RgbaImage::from_raw(20, 20, raw).unwrap().get_pixel(10, 10);
+        let padded_side = 20 + 2 * TEXTURE_MARGIN;
+        let Rgba([blue, _, red, _]) = *RgbaImage::from_raw(padded_side, padded_side, raw)
+            .unwrap()
+            .get_pixel(10, 10);
         assert!(
             blue.abs_diff(50) <= 3 && red.abs_diff(200) <= 3,
             "{blue} {red}"

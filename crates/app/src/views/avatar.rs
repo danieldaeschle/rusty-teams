@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName;
 
-use crate::avatar_image::{AvatarPhoto, device_span};
+use crate::avatar_image::{AvatarPhoto, TEXTURE_MARGIN, device_span};
 use crate::card_state::BotIdentity;
 use crate::data::{AvatarState, Directory, Presence, PresenceKind};
 use crate::format;
@@ -89,9 +89,10 @@ fn photo_disc(photo: &Arc<AvatarPhoto>, size: f32, radius: f32) -> AnyElement {
             if let Some(evicted) = texture.evicted {
                 cx.drop_image(evicted, Some(window));
             }
+            let margin = px(TEXTURE_MARGIN as f32 / scale_factor);
             let _ = window.paint_image(
                 bounds,
-                bounds,
+                bounds.dilate(margin),
                 Corners::all(px(radius)),
                 texture.image,
                 0,
