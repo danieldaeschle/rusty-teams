@@ -73,12 +73,6 @@ fn faces_width(count: usize) -> f32 {
     diameter + count.saturating_sub(1) as f32 * (diameter - FACE_OVERLAP)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PillLook {
-    Faces,
-    Count,
-}
-
 fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) -> AnyElement {
     let Some(image) = custom_emoji_image(glyph) else {
         return div()
@@ -99,14 +93,14 @@ fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) ->
     }
 }
 
-fn pill_content(chip: &ReactionChip, look: PillLook, background: Hsla, directory: &Directory) -> Div {
+fn pill_content(chip: &ReactionChip, background: Hsla, directory: &Directory) -> Div {
     let content = h_flex().items_center().child(reaction_emoji(
         &chip.glyph(),
         &chip.label,
         PILL_EMOJI_SIZE,
         directory,
     ));
-    if look == PillLook::Faces && shows_faces(chip.reactors.len()) {
+    if shows_faces(chip.reactors.len()) {
         content.child(
             div()
                 .relative()
@@ -124,7 +118,6 @@ fn pill_content(chip: &ReactionChip, look: PillLook, background: Hsla, directory
     } else {
         content
             .gap(px(PILL_GAP))
-            .pr(px(1.))
             .child(chip.count.to_string())
     }
 }
@@ -133,7 +126,6 @@ fn pill(
     chip: &ReactionChip,
     index: usize,
     own: bool,
-    look: PillLook,
     directory: &Directory,
     react: Option<PickHandler>,
     controls: Option<&ReactionControls>,
@@ -166,14 +158,14 @@ fn pill(
         .h(px(PILL_HEIGHT))
         .flex_none()
         .pl(px(5.))
-        .pr(px(if look == PillLook::Count { 4. } else { 2. }))
+        .pr(px(if shows_faces(chip.reactors.len()) { 2. } else { 8. }))
         .items_center()
         .rounded(px(PILL_HEIGHT / 2.))
         .bg(background)
         .text_size(px(PILL_TEXT_SIZE))
         .line_height(px(PILL_HEIGHT))
         .text_color(foreground)
-        .child(pill_content(chip, look, background, directory))
+        .child(pill_content(chip, background, directory))
         .tooltip(move |window, cx| Tooltip::new(tooltip_text.clone()).build(window, cx))
         .when_some(toggle, |pill, (open, close, glyph, is_open)| {
             pill.on_mouse_down(MouseButton::Right, move |_, _, cx| {
@@ -335,7 +327,6 @@ pub fn reaction_pills(
     chips: &[ReactionChip],
     index: usize,
     own: bool,
-    look: PillLook,
     directory: &Directory,
     react: Option<PickHandler>,
     controls: Option<&ReactionControls>,
@@ -350,7 +341,7 @@ pub fn reaction_pills(
             div()
                 .relative()
                 .flex_none()
-                .child(pill(chip, index, own, look, directory, react.clone(), controls))
+                .child(pill(chip, index, own, directory, react.clone(), controls))
                 .when_some(open_here, |wrapper, (controls, state)| {
                     wrapper.child(popover(chips, state.tab.as_deref(), directory, controls))
                 })

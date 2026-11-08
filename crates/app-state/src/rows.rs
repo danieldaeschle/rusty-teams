@@ -34,6 +34,7 @@ pub const LOAD_OLDER_KEY: &str = "load-older";
 pub const LOAD_NEWER_KEY: &str = "load-newer";
 const UNKNOWN_AUTHOR: &str = "Unknown";
 const DELETED_TEXT: &str = "Message deleted";
+const TEAMS_EMOTICON_SIZE: &str = "50";
 const SERIES_GAP_MINUTES: i64 = 5;
 const CORNER_RADIUS: f32 = 14.;
 const CORNER_SERIES: f32 = 4.;
@@ -67,13 +68,30 @@ pub fn reaction_text(reaction_type: &str) -> String {
 }
 
 pub fn custom_emoji_image(reaction_type: &str) -> Option<ImageRef> {
-    let emoji = chatsvc::custom_emoji(reaction_type)?;
+    let Some(emoji) = chatsvc::custom_emoji(reaction_type) else {
+        return teams_emoticon_image(reaction_type);
+    };
     Some(ImageRef {
         id: emoji.object_id.to_owned(),
         url: emoji.image_url(),
         width: None,
         height: None,
         alt: Some(emoji.name.to_owned()),
+    })
+}
+
+fn teams_emoticon_image(reaction_type: &str) -> Option<ImageRef> {
+    let glyph = reaction_glyph(reaction_type);
+    if !(glyph.starts_with('(') && glyph.ends_with(')')) {
+        return None;
+    }
+    let tag = app_base::emoticons::send_tag(&glyph)?;
+    Some(ImageRef {
+        id: format!("emoticon-{}", tag.id),
+        url: tag.image_url.replace("{size}", TEAMS_EMOTICON_SIZE),
+        width: None,
+        height: None,
+        alt: Some(tag.title),
     })
 }
 
@@ -1353,6 +1371,13 @@ mod tests {
         let image = custom_emoji_image(key).expect("image");
         assert!(image.url.ends_with("/0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8/views/imgt2_anim"));
         assert_eq!(custom_emoji_image("like"), None);
+    }
+
+    #[test]
+    fn teams_only_emoticon_loads_its_cdn_image() {
+        let image = custom_emoji_image("oreoyum").expect("image");
+        assert!(image.url.ends_with("/oreoyum/default/50_f.png"), "{}", image.url);
+        assert_eq!(custom_emoji_image("(oreoyum)").map(|image| image.url), Some(image.url));
     }
 
     #[test]

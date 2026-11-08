@@ -15,7 +15,7 @@ use super::message_row::{
     BODY_SIZE, RowActions, deleted_tombstone, delivery_note, forwarded_header, has_text,
 };
 use super::profile_card::opens_profile;
-use super::reaction_pills::{PILL_HEIGHT, PillLook, reaction_pills};
+use super::reaction_pills::{PILL_HEIGHT, reaction_pills};
 use super::reaction_proposal_pill::reaction_pill;
 use super::scheduled_toolbar::scheduled_toolbar;
 use super::toolbar_placement::placed_toolbar;
@@ -162,7 +162,6 @@ fn message_content(
                     &row.reactions,
                     index,
                     false,
-                    PillLook::Count,
                     directory,
                     actions.react.clone(),
                     actions.reaction_controls.as_ref(),

@@ -13,7 +13,7 @@ use super::link_preview::{link_preview_card, meeting_join_chip};
 use super::message_actions::{MessageMenu, ReactionAdder, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
-use super::reaction_pills::{PillLook, ReactionControls, reaction_pills};
+use super::reaction_pills::{ReactionControls, reaction_pills};
 use super::reaction_proposal_pill::{ReactionPill, reaction_pill};
 use super::scheduled_toolbar::{ScheduledMenu, scheduled_toolbar};
 use super::toolbar_placement::{HoverChange, TimelineBounds, placed_toolbar};
@@ -354,7 +354,6 @@ fn bubble(
                         &row.reactions,
                         index,
                         own,
-                        PillLook::Faces,
                         directory,
                         extras.react.clone(),
                         extras.controls.as_ref(),
