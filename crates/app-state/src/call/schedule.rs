@@ -194,6 +194,18 @@ impl AppState {
         cx.notify();
     }
 
+    fn set_event_response(&mut self, event_id: &str, response: ResponseType) {
+        for event in self
+            .calendar_events
+            .iter_mut()
+            .chain(self.calendar_week.events.iter_mut())
+            .filter(|event| event.object_id == event_id)
+        {
+            event.response = response;
+        }
+        self.calls_list.invalidate();
+    }
+
     pub fn respond_to_event(&mut self, event_key: &str, reply: Reply, cx: &mut Context<Self>) {
         if self.mode.read_only {
             self.raise_notice(RESPONSE_FAILED_NOTICE.to_owned(), None, cx);
@@ -201,15 +213,15 @@ impl AppState {
         }
         let Some(event) = self
             .calendar_events
-            .iter_mut()
+            .iter()
+            .chain(&self.calendar_week.events)
             .find(|event| event.object_id == event_key)
         else {
             return;
         };
         let previous = event.response;
         let (event_id, ical_uid) = (event.object_id.clone(), event.ical_uid.clone());
-        event.response = response_for(reply);
-        self.calls_list.invalidate();
+        self.set_event_response(&event_id, response_for(reply));
         cx.notify();
         let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);
         let Some(launcher) = launcher else {
@@ -231,14 +243,7 @@ impl AppState {
                     state.refresh_calendar(cx);
                     return;
                 }
-                if let Some(event) = state
-                    .calendar_events
-                    .iter_mut()
-                    .find(|event| event.object_id == event_id)
-                {
-                    event.response = previous;
-                }
-                state.calls_list.invalidate();
+                state.set_event_response(&event_id, previous);
                 state.raise_notice(RESPONSE_FAILED_NOTICE.to_owned(), None, cx);
             })
             .ok();

@@ -4,7 +4,7 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -303,6 +303,45 @@ fn rsvp_menu_item(
         })
 }
 
+pub(super) fn rsvp_menu(
+    menu: PopupMenu,
+    state: &Entity<AppState>,
+    key: &str,
+    response: ResponseType,
+    send_response: bool,
+) -> PopupMenu {
+    let toggle_state = state.clone();
+    menu.item(rsvp_menu_item(
+        state,
+        key,
+        "Accept",
+        Reply::Accept,
+        response == ResponseType::Accepted,
+    ))
+    .item(rsvp_menu_item(
+        state,
+        key,
+        "Tentative",
+        Reply::Tentative,
+        response == ResponseType::Tentative,
+    ))
+    .item(rsvp_menu_item(
+        state,
+        key,
+        "Decline",
+        Reply::Decline,
+        response == ResponseType::Declined,
+    ))
+    .separator()
+    .item(
+        PopupMenuItem::new("Send a response")
+            .checked(send_response)
+            .on_click(move |_, _, cx| {
+                toggle_state.update(cx, |state, cx| state.toggle_rsvp_send_response(cx));
+            }),
+    )
+}
+
 fn rsvp_control(state: &Entity<AppState>, row: &AgendaRow, send_response: bool) -> AnyElement {
     let menu_state = state.clone();
     let key = row.key.clone();
@@ -321,37 +360,7 @@ fn rsvp_control(state: &Entity<AppState>, row: &AgendaRow, send_response: bool) 
             .label(response_label(response))
             .icon(IconName::ChevronDown)
             .dropdown_menu(move |menu, _, _| {
-                let toggle_state = menu_state.clone();
-                menu.item(rsvp_menu_item(
-                    &menu_state,
-                    &key,
-                    "Accept",
-                    Reply::Accept,
-                    response == ResponseType::Accepted,
-                ))
-                .item(rsvp_menu_item(
-                    &menu_state,
-                    &key,
-                    "Tentative",
-                    Reply::Tentative,
-                    response == ResponseType::Tentative,
-                ))
-                .item(rsvp_menu_item(
-                    &menu_state,
-                    &key,
-                    "Decline",
-                    Reply::Decline,
-                    response == ResponseType::Declined,
-                ))
-                .separator()
-                .item(
-                    PopupMenuItem::new("Send a response")
-                        .checked(send_response)
-                        .on_click(move |_, _, cx| {
-                            toggle_state
-                                .update(cx, |state, cx| state.toggle_rsvp_send_response(cx));
-                        }),
-                )
+                rsvp_menu(menu, &menu_state, &key, response, send_response)
             }),
         )
         .into_any_element()

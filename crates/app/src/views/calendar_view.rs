@@ -3,10 +3,12 @@ use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::calls_tab::rsvp_menu;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
 use crate::app_state::AppState;
@@ -214,6 +216,7 @@ impl CalendarView {
         block: &WeekBlock,
         event: &CalendarEvent,
         now: DateTime<Utc>,
+        send_response: bool,
     ) -> impl IntoElement {
         let top = block.start_minute as f32 / 60. * HOUR_HEIGHT;
         let height = ((block.end_minute - block.start_minute) as f32 / 60. * HOUR_HEIGHT
@@ -231,6 +234,7 @@ impl CalendarView {
             event.end.with_timezone(&Local).format("%-I:%M %p")
         );
         let (open_state, thread_id) = (self.state.clone(), event.thread_id.clone());
+        let (menu_state, menu_event) = (self.state.clone(), event.clone());
         let (join_state, join_url, subject) = (
             self.state.clone(),
             event.join_url.clone(),
@@ -312,6 +316,9 @@ impl CalendarView {
                     state.open_meeting_chat(thread_id.as_deref(), cx)
                 });
             })
+            .context_menu(move |menu, _, _| {
+                event_menu(menu, &menu_state, &menu_event, send_response)
+            })
     }
 
     fn grid(
@@ -320,6 +327,7 @@ impl CalendarView {
         events: &[CalendarEvent],
         today: NaiveDate,
         now: DateTime<Utc>,
+        send_response: bool,
     ) -> impl IntoElement {
         let total_height = 24. * HOUR_HEIGHT;
         let now_minute = {
@@ -369,7 +377,12 @@ impl CalendarView {
                                     .bg(theme::border())
                             }))
                             .children(day.blocks.iter().map(|block| {
-                                self.event_block(block, &events[block.event_index], now)
+                                self.event_block(
+                                    block,
+                                    &events[block.event_index],
+                                    now,
+                                    send_response,
+                                )
                             }))
                             .when(day.date == today, |column| {
                                 column.child(
@@ -385,6 +398,51 @@ impl CalendarView {
                     })),
             )
     }
+}
+
+fn event_menu(
+    menu: PopupMenu,
+    state: &Entity<AppState>,
+    event: &CalendarEvent,
+    send_response: bool,
+) -> PopupMenu {
+    let mut menu = menu;
+    if let Some(join_url) = event
+        .join_url
+        .clone()
+        .filter(|_| event.online && !event.cancelled)
+    {
+        let (join_state, subject) = (state.clone(), event.subject.clone());
+        menu = menu.item(PopupMenuItem::new("Join").icon(IconName::Video).on_click(
+            move |_, _, cx| {
+                join_state.update(cx, |state, cx| {
+                    state.join_calendar_meeting(Some(&join_url), &subject, cx)
+                })
+            },
+        ));
+    }
+    if let Some(thread_id) = event.thread_id.clone() {
+        let chat_state = state.clone();
+        menu = menu.item(
+            PopupMenuItem::new("Chat with participants")
+                .icon(IconName::MessageSquare)
+                .on_click(move |_, _, cx| {
+                    chat_state.update(cx, |state, cx| {
+                        state.open_meeting_chat(Some(&thread_id), cx)
+                    })
+                }),
+        );
+    }
+    if event.response == ResponseType::Organizer || event.organizer_name.is_none() {
+        return menu;
+    }
+    rsvp_menu(
+        menu.separator(),
+        state,
+        &event.object_id,
+        event.response,
+        send_response,
+    )
 }
 
 fn event_fill(response: ResponseType) -> Hsla {
@@ -414,6 +472,7 @@ impl Render for CalendarView {
         let state = self.state.read(cx);
         let start = state.calendar_start();
         let events = state.calendar_week.events.clone();
+        let send_response = state.rsvp_send_response;
         let offset = Local::now().offset().fix();
         let days = week_days(&events, start, WORK_WEEK_DAYS, offset);
         let today = Local::now().date_naive();
@@ -430,6 +489,6 @@ impl Render for CalendarView {
             .child(self.header(start, compact))
             .child(self.day_headers(&days, today))
             .children(self.all_day_row(&days, &events))
-            .child(self.grid(&days, &events, today, now))
+            .child(self.grid(&days, &events, today, now, send_response))
     }
 }
