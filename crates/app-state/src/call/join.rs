@@ -70,7 +70,10 @@ impl AppState {
         };
         match mode {
             JoinMode::Prejoin => self.stage_meeting_join(join, cx),
-            JoinMode::Direct => self.start_meeting(join, None, cx),
+            JoinMode::Direct => {
+                let options = self.join_options.clone();
+                self.start_meeting(join, Some(&options), cx)
+            }
         }
     }
 
@@ -136,7 +139,7 @@ impl AppState {
                 organizer_id: "demo-organizer".to_owned(),
                 meeting_data: None,
             };
-            self.join_resolved_meeting(target, JoinMode::Direct, cx);
+            self.join_resolved_meeting(target, JoinMode::Prejoin, cx);
             return;
         }
         let Some(launcher) = self.call_launcher.clone() else {
@@ -152,7 +155,7 @@ impl AppState {
             this.update(cx, |state, cx| {
                 state.meet_now_pending = false;
                 match created {
-                    Some(url) => state.join_link(&url, JoinMode::Direct, cx),
+                    Some(url) => state.join_link(&url, JoinMode::Prejoin, cx),
                     None => state.raise_notice(MEET_NOW_FAILED_NOTICE.to_owned(), None, cx),
                 }
                 cx.notify();
@@ -183,5 +186,31 @@ impl AppState {
             meeting_code_from_id(meeting_id, passcode).ok_or_else(|| BAD_ID_MESSAGE.to_owned())?;
         self.join_meeting_code(code, JoinMode::Prejoin, cx);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui_kit::{AppContext as _, TestAppContext};
+    use store::Store;
+
+    use crate::app_state::{AppState, Mode};
+
+    #[gpui_kit::test]
+    fn meet_now_opens_the_prejoin_like_teams(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mode = Mode {
+            demo: true,
+            ..Mode::default()
+        };
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, mode)));
+        app.update(cx, |state, cx| state.start_meet_now(cx));
+        app.read_with(cx, |state, _| {
+            assert!(state.prejoin.is_some());
+            assert!(state.call.is_none());
+        });
     }
 }
