@@ -21,6 +21,7 @@ use crate::rows::reaction_glyph;
 use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
 use crate::theme::{self, ElevatedSurface as _};
 
+const TRANSLATION_LABEL: &str = "Translation";
 const BAR_BUTTON: f32 = 30.;
 const BAR_PADDING: f32 = 3.;
 const BAR_ICON: f32 = 16.;
@@ -193,7 +194,6 @@ pub fn add_reaction_pill(adder: ReactionAdder, height: f32, cx: &App) -> AnyElem
 fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     let forward_multiple = menu.forward_multiple.clone();
     let (
-        reply,
         forward,
         copy_link,
         copy,
@@ -208,7 +208,6 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         share_to_outlook,
         pin,
     ) = (
-        menu.reply.clone(),
         menu.forward.clone(),
         menu.copy_link.clone(),
         menu.copy.clone(),
@@ -237,9 +236,6 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
                     .on_click(move |_, window, cx| action(window, cx))
             };
             let mut popup = popup;
-            if let Some(reply) = reply.clone() {
-                popup = popup.item(item("Reply with quote", IconName::Reply, reply));
-            }
             match (forward.clone(), forward_multiple.clone()) {
                 (Some(forward), Some(forward_multiple)) => {
                     popup = popup.submenu_with_icon(
@@ -269,33 +265,23 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
             if let Some(copy_link) = copy_link.clone() {
                 popup = popup.item(item("Copy link", IconName::Link, copy_link));
             }
-            if let Some(refresh_card) = refresh_card.clone() {
-                popup = popup.item(item("Refresh card", IconName::RefreshCw, refresh_card));
-            }
             popup = popup.item(item("Copy text", IconName::Copy, copy.clone()));
-            if let Some(translate) = translate.clone() {
-                popup = popup.item(item(translate_label, IconName::Languages, translate));
-            }
-            if let Some(share_to_outlook) = share_to_outlook.clone() {
-                popup = popup.item(item(
-                    SHARE_TO_OUTLOOK_LABEL,
-                    IconName::Mail,
-                    share_to_outlook,
-                ));
-            }
             if let Some(save) = save.clone() {
                 popup = popup.item(if saved {
-                    item("Unsave message", IconName::BookmarkOff, save)
+                    item("Unsave this message", IconName::BookmarkOff, save)
                 } else {
-                    item("Save message", IconName::Bookmark, save)
+                    item("Save this message", IconName::Bookmark, save)
                 });
             }
             if let Some(toggle_pinned) = toggle_pinned.clone() {
                 popup = popup.item(if pinned {
                     item("Unpin", IconName::PinOff, toggle_pinned)
                 } else {
-                    item("Pin", IconName::Pin, toggle_pinned)
+                    item("Pin for everyone", IconName::Pin, toggle_pinned)
                 });
+            }
+            if let Some(edit) = edit.clone() {
+                popup = popup.item(item("Edit", IconName::Pencil, edit));
             }
             if let Some(toggle_follow) = toggle_follow.clone() {
                 popup = popup.item(if followed {
@@ -304,17 +290,39 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
                     item(follow_label(false), IconName::Bell, toggle_follow)
                 });
             }
-            if let Some(edit) = edit.clone() {
-                popup = popup.item(item("Edit", IconName::Pencil, edit));
+            if let Some(refresh_card) = refresh_card.clone() {
+                popup = popup.item(item("Refresh card", IconName::RefreshCw, refresh_card));
+            }
+            popup = popup.separator();
+            if let Some(mark_unread) = mark_unread.clone() {
+                popup = popup.item(item("Mark as unread", IconName::EyeOff, mark_unread));
+            }
+            if let Some(share_to_outlook) = share_to_outlook.clone() {
+                popup = popup.item(item(
+                    SHARE_TO_OUTLOOK_LABEL,
+                    IconName::Mail,
+                    share_to_outlook,
+                ));
+            }
+            if let Some(translate) = translate.clone() {
+                popup = popup.submenu_with_icon(
+                    Some(IconName::Languages.into()),
+                    TRANSLATION_LABEL,
+                    window,
+                    cx,
+                    move |submenu, _, _| {
+                        let translate = translate.clone();
+                        submenu.item(
+                            PopupMenuItem::new(translate_label)
+                                .on_click(move |_, window, cx| translate(window, cx)),
+                        )
+                    },
+                );
             }
             if let Some(delete) = delete.clone() {
                 popup = popup
                     .separator()
                     .item(item("Delete", IconName::Trash, delete));
-            }
-            if let Some(mark_unread) = mark_unread.clone() {
-                let entry = item("Mark as unread", IconName::EyeOff, mark_unread);
-                popup = popup.separator().item(entry);
             }
             popup
         })

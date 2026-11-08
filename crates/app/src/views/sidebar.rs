@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -8,14 +8,16 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{Icon, WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
+use gpui_kit::component::{Icon, Sizable as _, WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{
     ChannelNotificationLevel, ChannelNotifications, ChannelRecord, MessageImportance, SidebarTeam,
     Store,
 };
-use teams_core::{ChatNotificationMode, DesktopNotifications, is_notes_chat, team_avatar_key};
+use teams_core::{
+    ChatNotificationMode, DesktopNotifications, chat_link, is_notes_chat, team_avatar_key,
+};
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, team_avatar, with_presence};
@@ -56,6 +58,8 @@ pub(crate) mod chat_filter_bar;
 pub const SIDEBAR_SCROLL_DIVIDER: &str = "shell/islands/sidebar/divider-scroll";
 const COLLAPSED_TEAMS_META_KEY: &str = "sidebar_collapsed_teams";
 const ROW_HEIGHT: f32 = 54.;
+const ROW_MORE_TOP: f32 = 6.;
+const ROW_MORE_RIGHT: f32 = 6.;
 const PROPOSAL_DOT_SIZE: f32 = 8.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
@@ -70,6 +74,7 @@ const AVATAR_SIZE: f32 = 36.;
 const PINNED_LABEL: &str = "Pinned";
 const TEAMS_LABEL: &str = "Teams";
 const MARK_ALL_READ_LABEL: &str = "Mark all as read";
+const COLLAPSE_ALL_LABEL: &str = "Collapse all sections";
 const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 36.;
 const CHANNEL_ROW_HEIGHT: f32 = 32.;
@@ -141,6 +146,7 @@ impl Render for DragGhost {
     }
 }
 
+#[derive(Clone)]
 struct ChatMenuTarget {
     id: String,
     title: String,
@@ -165,6 +171,36 @@ fn chat_menu(
     target: &ChatMenuTarget,
 ) -> PopupMenu {
     let mut popup = popup;
+    let read_state = context.state.clone();
+    let read_id = target.id.clone();
+    let unread = target.unread;
+    let mute_state = context.state.clone();
+    let mute_id = target.id.clone();
+    let muted = target.muted;
+    let hide_state = context.state.clone();
+    let hide_id = target.id.clone();
+    let notes = is_notes_chat(&target.id);
+    popup = popup.item(
+        PopupMenuItem::new(if unread {
+            "Mark as read"
+        } else {
+            "Mark as unread"
+        })
+        .icon(menu_icon(if unread {
+            IconName::MailOpen
+        } else {
+            IconName::Mail
+        }))
+        .on_click(move |_, _, cx| {
+            read_state.update(cx, |state, cx| {
+                if unread {
+                    state.mark_chat_read(&read_id, cx);
+                } else {
+                    state.mark_chat_unread(&read_id, cx);
+                }
+            });
+        }),
+    );
     let current = target.folder_id.clone();
     let folders: Vec<(String, String)> = context
         .folders
@@ -204,36 +240,6 @@ fn chat_menu(
                 }),
         );
     }
-    let read_state = context.state.clone();
-    let read_id = target.id.clone();
-    let unread = target.unread;
-    let mute_state = context.state.clone();
-    let mute_id = target.id.clone();
-    let muted = target.muted;
-    let hide_state = context.state.clone();
-    let hide_id = target.id.clone();
-    let notes = is_notes_chat(&target.id);
-    popup = popup.separator().item(
-        PopupMenuItem::new(if unread {
-            "Mark as read"
-        } else {
-            "Mark as unread"
-        })
-        .icon(menu_icon(if unread {
-            IconName::MailOpen
-        } else {
-            IconName::Mail
-        }))
-        .on_click(move |_, _, cx| {
-            read_state.update(cx, |state, cx| {
-                if unread {
-                    state.mark_chat_read(&read_id, cx);
-                } else {
-                    state.mark_chat_unread(&read_id, cx);
-                }
-            });
-        }),
-    );
     let hide_item = PopupMenuItem::new("Hide")
         .icon(menu_icon(IconName::EyeOff))
         .on_click(move |_, _, cx| {
@@ -281,7 +287,18 @@ fn chat_menu(
             }),
         );
     }
+    let (link_state, link_id) = (context.state.clone(), target.id.clone());
     popup = popup
+        .item(
+            PopupMenuItem::new("Copy link")
+                .icon(menu_icon(IconName::Link))
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(chat_link(&link_id)));
+                    link_state.update(cx, |state, cx| {
+                        state.raise_notice("Link copied".to_owned(), None, cx)
+                    });
+                }),
+        )
         .item(pop_out_item(context, target))
         .separator()
         .item(hide_item);
@@ -670,6 +687,7 @@ pub struct SidebarView {
     chats_scroll: ScrollHandle,
     older_chats_trigger_top: Cell<Option<f32>>,
     older_chats_seen: Cell<(bool, bool)>,
+    section_ids: RefCell<Vec<String>>,
     channels_scroll: ScrollHandle,
     calls_scroll: ScrollHandle,
     chat_filter: ChatFilter,
@@ -803,6 +821,7 @@ impl SidebarView {
             chats_scroll: ScrollHandle::new(),
             older_chats_trigger_top: Cell::new(None),
             older_chats_seen: Cell::new((false, false)),
+            section_ids: RefCell::new(Vec::new()),
             channels_scroll: ScrollHandle::new(),
             calls_scroll: ScrollHandle::new(),
             chat_filter: ChatFilter::default(),
@@ -958,6 +977,7 @@ impl SidebarView {
 
     fn chat_list_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
+        let section_ids = self.section_ids.borrow().clone();
         let read_only = self.state.read(cx).mode.read_only;
         Button::new("chat-list-more")
             .icon(IconName::Ellipsis)
@@ -965,7 +985,29 @@ impl SidebarView {
             .size(px(NEW_CHAT_BUTTON_SIZE))
             .rounded(px(8.))
             .tooltip("More options")
-            .dropdown_menu(move |menu, _, _| menu.item(new_section_item(&state, read_only)))
+            .dropdown_menu(move |menu, _, _| {
+                let (read_state, collapse_state) = (state.clone(), state.clone());
+                let section_ids = section_ids.clone();
+                menu.item(
+                    PopupMenuItem::new(MARK_ALL_READ_LABEL)
+                        .icon(menu_icon(IconName::CheckCheck))
+                        .disabled(read_only)
+                        .on_click(move |_, _, cx| {
+                            read_state.update(cx, |state, cx| state.mark_all_chats_read(cx));
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(COLLAPSE_ALL_LABEL)
+                        .icon(menu_icon(IconName::ChevronsDownUp))
+                        .on_click(move |_, _, cx| {
+                            let ids = section_ids.clone();
+                            collapse_state
+                                .update(cx, |state, cx| state.collapse_sections(&ids, cx));
+                        }),
+                )
+                .separator()
+                .item(new_section_item(&state, read_only))
+            })
     }
 
     fn channel_list_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1168,6 +1210,7 @@ impl SidebarView {
             })
             .text_color(theme::text())
             .child(item.title.clone());
+        let row_group = SharedString::from(format!("chat-row-{}", item.id));
         let time = h_flex()
             .flex_none()
             .gap(px(4.))
@@ -1178,6 +1221,7 @@ impl SidebarView {
             } else {
                 theme::text_muted()
             })
+            .group_hover(row_group.clone(), |time| time.invisible())
             .child(item.time_label.clone());
         let preview_color = if matches!(item.preview, Preview::Typing(_)) {
             theme::accent_text()
@@ -1261,9 +1305,30 @@ impl SidebarView {
             is_group: item.is_group,
             member_count: item.member_count,
         };
+        let more_context = menu.clone();
+        let more_target = target.clone();
+        let more_button = div()
+            .absolute()
+            .top(px(ROW_MORE_TOP))
+            .right(px(ROW_MORE_RIGHT))
+            .invisible()
+            .group_hover(row_group.clone(), |button| button.visible())
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                Button::new(SharedString::from(format!("chat-more-{}", item.id)))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Ellipsis)
+                    .tooltip("More options")
+                    .dropdown_menu(move |popup, window, cx| {
+                        chat_menu(popup, window, cx, &more_context, &more_target)
+                    }),
+            );
         h_flex()
             .id(SharedString::from(format!("chat-{}", item.id)))
             .debug_selector(|| chat_row_selector(&item.id))
+            .group(row_group)
+            .relative()
             .mx(px(6.))
             .h(px(ROW_HEIGHT))
             .flex_none()
@@ -1289,6 +1354,7 @@ impl SidebarView {
             })
             .child(avatar)
             .child(lines)
+            .child(more_button)
             .on_click(move |_, _, cx| {
                 let selection = Selection::Chat(chat_id.clone());
                 state.update(cx, |state, cx| state.select(selection, cx));
@@ -1332,6 +1398,8 @@ impl SidebarView {
             };
             let section_menus =
                 section_menu_targets(&sections, &state.directory, state.mode.read_only);
+            *self.section_ids.borrow_mut() =
+                sections.iter().map(|section| section.id.clone()).collect();
             (sections, section_menus, menu, state.local_previews.clone())
         };
 

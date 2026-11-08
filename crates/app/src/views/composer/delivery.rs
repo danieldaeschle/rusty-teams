@@ -2,22 +2,20 @@ use gpui_kit::component::fluent::{
     MENU_ICON_LABEL_GAP, MENU_ICON_SLOT, MENU_ITEM_GAP, MENU_ITEM_HEIGHT, MENU_ITEM_PADDING_X,
     MENU_LIST_PADDING, OPTION_CHECK_SIZE,
 };
-use gpui_kit::component::tooltip::{PopupTriggerTooltip as _, Tooltip};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::MessageImportance;
 
 use super::{COMPOSER_BUTTON_INSET, COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer};
 use crate::delivery_options::{
-    DELIVERY_BUTTON_TITLE, DeliveryOption, URGENT_TOO_MANY_MEMBERS, UrgentAvailability,
+    DeliveryOption, URGENT_TOO_MANY_MEMBERS, UrgentAvailability,
     allowed_importance, delivery_options, urgent_banner,
 };
 use crate::importance::importance_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::symbol;
 
-pub const COMPOSER_DELIVERY_TAG: &str = "composer/actions/delivery";
 pub const COMPOSER_IMPORTANCE_LABEL_TAG: &str = "composer/importance-label";
 pub const COMPOSER_URGENT_BANNER_TAG: &str = "composer-urgent-banner";
 pub const DELIVERY_MENU_TAG: &str = "delivery-menu";
@@ -64,46 +62,6 @@ impl Composer {
         self.delivery_menu = false;
         self.focus(window, cx);
         cx.notify();
-    }
-
-    pub(super) fn render_delivery_button(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        if self.editing.is_some() {
-            return None;
-        }
-        let open = self.delivery_menu;
-        let marked = self.importance.is_marked();
-        Some(
-            div()
-                .id("composer-delivery")
-                .debug_selector(|| COMPOSER_DELIVERY_TAG.into())
-                .size(px(COMPOSER_BUTTON_SIZE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                .cursor_pointer()
-                .when(open, |button| button.bg(theme::popup_hover()))
-                .hover(|button| button.bg(theme::popup_hover()))
-                .popup_trigger_tooltip_text(open, DELIVERY_BUTTON_TITLE)
-                .child(symbol(
-                    "fluent_important",
-                    COMPOSER_ICON_SIZE,
-                    if marked {
-                        theme::red()
-                    } else {
-                        theme::text_muted()
-                    },
-                ))
-                .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.delivery_menu = !this.delivery_menu;
-                    cx.notify();
-                })),
-        )
     }
 
     pub(super) fn render_delivery_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

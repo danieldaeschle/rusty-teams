@@ -2,10 +2,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gpui_kit::component::{
-    button::{Button, ButtonVariants as _},
-    h_flex, v_flex,
-};
 use gpui_kit::*;
 use mcp::ReactionProposal;
 use teams_core::{AnnouncementBanner, FileCard, ImageRef, LinkPreview};
@@ -517,23 +513,7 @@ impl RenderEnv {
     }
 
     fn inline_reply_editor(&self, composer: &Entity<Composer>) -> AnyElement {
-        let view = self.view.clone();
-        v_flex()
-            .w_full()
-            .gap(px(6.))
-            .child(composer.clone())
-            .child(
-                h_flex().justify_end().child(
-                    Button::new("cancel-inline-reply")
-                        .ghost()
-                        .compact()
-                        .label("Cancel")
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| this.close_reply_editor(cx)).ok();
-                        }),
-                ),
-            )
-            .into_any_element()
+        composer.clone().into_any_element()
     }
 }
 

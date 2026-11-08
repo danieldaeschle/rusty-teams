@@ -212,22 +212,6 @@ pub fn chat_title(chat: &ChatRecord) -> String {
     chat.display_title()
 }
 
-pub fn composer_name(sidebar: &Sidebar, selection: &Selection) -> String {
-    let unnamed_group = match selection {
-        Selection::Chat(id) => sidebar.chats.iter().any(|chat| {
-            &chat.id == id
-                && chat.title.trim().is_empty()
-                && !chat.kind.eq_ignore_ascii_case("oneOnOne")
-        }),
-        Selection::Channel(_) => false,
-    };
-    if unnamed_group {
-        String::new()
-    } else {
-        selection_title(sidebar, selection)
-    }
-}
-
 pub fn selection_title(sidebar: &Sidebar, selection: &Selection) -> String {
     match selection {
         Selection::Chat(id) => sidebar
@@ -417,6 +401,37 @@ impl AppState {
         self.sync_folder_expanded(section_id, !now_collapsed);
         cx.emit(AppEvent::Sidebar);
         cx.notify();
+    }
+
+    pub fn collapse_sections(&mut self, section_ids: &[String], cx: &mut Context<Self>) {
+        let newly_collapsed: Vec<String> = section_ids
+            .iter()
+            .filter(|id| !data::is_pending_folder(id) && !self.collapsed.contains(*id))
+            .cloned()
+            .collect();
+        if newly_collapsed.is_empty() {
+            return;
+        }
+        for id in &newly_collapsed {
+            self.collapsed.insert(id.clone());
+            self.sync_folder_expanded(id, false);
+        }
+        self.save_collapsed();
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn mark_all_chats_read(&mut self, cx: &mut Context<Self>) {
+        let unread: Vec<String> = self
+            .sidebar
+            .chats
+            .iter()
+            .filter(|chat| chat.unread)
+            .map(|chat| chat.id.clone())
+            .collect();
+        for conversation_id in unread {
+            self.mark_chat_read(&conversation_id, cx);
+        }
     }
 
     pub fn older_chats(&self) -> (bool, bool) {

@@ -57,6 +57,14 @@ pub fn chat_message_link(
     )
 }
 
+pub fn chat_link(conversation_id: &str) -> String {
+    let context = json!({"contextType": "chat"});
+    format!(
+        "{LINK_HOST}/l/chat/{conversation_id}/conversations?context={}",
+        encode(&context.to_string())
+    )
+}
+
 pub fn channel_message_link(input: &ChannelLinkInput) -> String {
     format!(
         "{LINK_HOST}/l/message/{}/{}?tenantId={}&groupId={}&parentMessageId={}&teamName={}&channelName={}&createdTime={}",
@@ -120,6 +128,14 @@ mod tests {
         assert_eq!(
             chat_message_link("19:abc@thread.v2", "1791368000000", None),
             "https://teams.microsoft.com/l/message/19:abc@thread.v2/1791368000000?context=%7B%22contextType%22%3A%22chat%22%7D"
+        );
+    }
+
+    #[test]
+    fn chat_link_opens_the_conversation() {
+        assert_eq!(
+            chat_link("19:abc@thread.v2"),
+            "https://teams.microsoft.com/l/chat/19:abc@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D"
         );
     }
 

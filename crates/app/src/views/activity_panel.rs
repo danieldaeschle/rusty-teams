@@ -731,17 +731,15 @@ fn recap_tile() -> Div {
         .child(symbol("recap", RECAP_GLYPH_SIZE, theme::white()))
 }
 
-fn headline_wraps(entry: &Entry, text_width: f32, window: &mut Window) -> bool {
-    let Some(title) = entry.title.as_deref().filter(|_| entry.kind == Kind::App) else {
-        return false;
-    };
+fn headline_wraps(headline: String, text_width: f32, window: &mut Window) -> bool {
     if text_width <= 0. {
         return false;
     }
-    let run = window.text_style().to_run(title.len());
+    let mut run = window.text_style().to_run(headline.len());
+    run.font.weight = FontWeight::SEMIBOLD;
     let width = window
         .text_system()
-        .shape_line(title.to_owned().into(), px(13.), &[run], None)
+        .shape_line(headline.into(), px(13.), &[run], None)
         .width;
     f32::from(width) > text_width
 }
@@ -833,7 +831,8 @@ impl Render for ActivityPanel {
         for section in &sections {
             slots.push(Slot::Header(section.bucket.label()));
             slots.extend(section.entries.iter().map(|entry| {
-                let wraps = headline_wraps(entry, text_width, window);
+                let text = headline(entry, &state.sidebar, &self.resolved_names);
+                let wraps = headline_wraps(text, text_width, window);
                 Slot::Row(entry, RowText::new(entry, &state.sidebar, wraps))
             }));
         }

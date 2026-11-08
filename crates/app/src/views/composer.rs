@@ -33,6 +33,7 @@ use teams_core::{
 pub(crate) mod delivery;
 mod drafts;
 mod format_menus;
+pub(crate) mod plus_menu;
 mod post;
 pub use post::{
     POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG,
@@ -88,6 +89,8 @@ const MENTION_QUERY_MAX_WORDS: usize = 3;
 const POPUP_WIDTH: f32 = 380.;
 const POPUP_ROW_HEIGHT: f32 = 44.;
 const DEMO_UPLOAD_STEPS: u8 = 10;
+const COMPOSER_PLACEHOLDER: &str = "Type a message";
+const SEND_DIVIDER_HEIGHT: f32 = 20.;
 const COMPOSER_ICON_SIZE: f32 = 20.;
 const COMPOSER_BUTTON_SIZE: f32 = 32.;
 const COMPOSER_BUTTON_INSET: f32 = 6.;
@@ -256,6 +259,7 @@ pub struct Composer {
     caret_text: String,
     importance: store::MessageImportance,
     delivery_menu: bool,
+    plus_menu: bool,
     _subscriptions: [Subscription; 4],
 }
 
@@ -527,6 +531,7 @@ impl Composer {
             caret_text: String::new(),
             importance: store::MessageImportance::Normal,
             delivery_menu: false,
+            plus_menu: false,
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
         }
     }
@@ -1759,16 +1764,10 @@ impl Composer {
     pub fn set_conversation(
         &mut self,
         conversation_id: &str,
-        name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let placeholder = if name.is_empty() {
-            "Type a message".to_owned()
-        } else {
-            format!("Message {name}")
-        };
-        self.set_placeholder(&placeholder, window, cx);
+        self.set_placeholder(COMPOSER_PLACEHOLDER, window, cx);
         if self.conversation_id.as_deref() != Some(conversation_id) {
             self.save_draft_now(cx);
             self.draft_save = None;
@@ -2891,7 +2890,7 @@ impl Render for Composer {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .child(symbol("keyboard_return", 20., theme::text()))
+            .child(symbol("fluent_send", COMPOSER_ICON_SIZE, theme::text()))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| this.open_schedule_menu(cx)),
@@ -2993,9 +2992,9 @@ impl Render for Composer {
             .flex_none()
             .gap(px(COMPOSER_BUTTON_INSET))
             .children(format_toggle)
-            .children(self.render_delivery_button(cx))
             .children(fun)
-            .children(attach);
+            .children(attach)
+            .children(self.render_plus_button(cx));
         let (row_actions, post_footer) = if post_layout {
             (None, Some(self.render_post_footer(actions, can_send, cx)))
         } else {
@@ -3413,6 +3412,7 @@ impl Render for Composer {
                     .children(self.render_toolbar(focused, cx))
                     .children(self.render_schedule(cx))
                     .children(self.render_delivery_menu(cx))
+                    .children(self.render_plus_menu(cx))
                     .child(
                         v_flex()
                             .debug_selector(|| COMPOSER_BOX_TAG.into())
@@ -3485,7 +3485,17 @@ impl Render for Composer {
                                             .child(input),
                                     )
                                     .children(row_actions)
-                                    .when(!post_layout, |row| row.child(send)),
+                                    .when(!post_layout, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .w(px(1.))
+                                                .h(px(SEND_DIVIDER_HEIGHT))
+                                                .ml(px(COMPOSER_BUTTON_INSET))
+                                                .bg(theme::border()),
+                                        )
+                                        .child(send)
+                                    }),
                             )
                             .children(post_footer),
                     ),
@@ -4864,7 +4874,7 @@ mod tests {
                 let composer = composer.clone();
                 typist.act(|window, cx| {
                     composer.update(cx, |composer, cx| {
-                        composer.set_conversation(id, "", window, cx);
+                        composer.set_conversation(id, window, cx);
                         composer.focus(window, cx);
                     })
                 });
@@ -5061,7 +5071,7 @@ mod tests {
             std::fs::write(&path, b"%PDF-1.7").unwrap();
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.set_conversation("demo-chat", window, cx);
                     composer.add_paths(vec![path], window, cx);
                 });
             })
@@ -5108,7 +5118,7 @@ mod tests {
             std::fs::write(&path, b"%PDF-1.7").unwrap();
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.set_conversation("demo-chat", window, cx);
                     composer.add_paths(vec![path], window, cx);
                 });
             })
@@ -5116,7 +5126,7 @@ mod tests {
             cx.run_until_parked();
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("other-chat", "Other", window, cx)
+                    composer.set_conversation("other-chat", window, cx)
                 });
             })
             .unwrap();
@@ -5159,7 +5169,7 @@ mod tests {
             std::fs::write(&path, b"%PDF-1.7").unwrap();
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("demo-chat", "Demo", window, cx);
+                    composer.set_conversation("demo-chat", window, cx);
                     composer.add_paths(vec![path], window, cx);
                 });
             })
@@ -5220,7 +5230,7 @@ mod tests {
             ] {
                 cx.update_window(handle, |_, window, cx| {
                     composer.update(cx, |composer, cx| {
-                        composer.set_conversation("", "", window, cx);
+                        composer.set_conversation("", window, cx);
                         composer.add_paths(vec![path.clone()], window, cx);
                     });
                 })
@@ -5231,7 +5241,7 @@ mod tests {
                         if let Some(chat) = carry {
                             composer.carry_images_into(chat.to_owned());
                         }
-                        composer.set_conversation(chosen, "Chat", window, cx);
+                        composer.set_conversation(chosen, window, cx);
                     });
                 })
                 .unwrap();
@@ -5244,9 +5254,9 @@ mod tests {
             let (handle, composer) = demo_composer(cx);
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("chat-a", "A", window, cx);
+                    composer.set_conversation("chat-a", window, cx);
                     composer.set_text("**hello** there", window, cx);
-                    composer.set_conversation("chat-b", "B", window, cx);
+                    composer.set_conversation("chat-b", window, cx);
                 });
             })
             .unwrap();
@@ -5265,7 +5275,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.set_text("other", window, cx);
-                    composer.set_conversation("chat-a", "A", window, cx);
+                    composer.set_conversation("chat-a", window, cx);
                 });
             })
             .unwrap();
@@ -5307,15 +5317,15 @@ mod tests {
                 let subject = cx.new(|cx| InputState::new(window, cx));
                 subject.update(cx, |input, cx| input.set_value("Code freeze", window, cx));
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("channel-a", "A", window, cx);
+                    composer.set_conversation("channel-a", window, cx);
                     composer.set_post_layout(Some(subject), cx);
                     composer.toggle_announcement(window, cx);
                     let headline = composer.announcement.as_ref().unwrap().headline.clone();
                     headline.update(cx, |input, cx| input.set_value("Release 43", window, cx));
                     composer.leave_conversation("channel-b", cx);
                     composer.set_post_layout(None, cx);
-                    composer.set_conversation("channel-b", "B", window, cx);
-                    composer.set_conversation("channel-a", "A", window, cx);
+                    composer.set_conversation("channel-b", window, cx);
+                    composer.set_conversation("channel-a", window, cx);
                 });
             })
             .unwrap();
@@ -5335,7 +5345,7 @@ mod tests {
             let (handle, composer) = demo_composer(cx);
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("chat-a", "A", window, cx);
+                    composer.set_conversation("chat-a", window, cx);
                     composer.set_text("hi", window, cx);
                     composer.save_draft_now(cx);
                 });
@@ -5382,7 +5392,7 @@ mod tests {
             std::fs::write(&pdf, b"%PDF-1.7").unwrap();
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_conversation("bob-chat", "Bob", window, cx);
+                    composer.set_conversation("bob-chat", window, cx);
                     composer.add_paths(vec![png, pdf], window, cx);
                 });
             })
@@ -5392,7 +5402,7 @@ mod tests {
             cx.update_window(handle, |_, window, cx| {
                 composer.update(cx, |composer, cx| {
                     composer.carry_images_into(String::new());
-                    composer.set_conversation("", "", window, cx);
+                    composer.set_conversation("", window, cx);
                 });
             })
             .unwrap();

@@ -166,7 +166,7 @@ impl ConversationView {
             return;
         };
         composer.update(cx, |composer, cx| {
-            composer.set_conversation(&conversation_id, "", window, cx);
+            composer.set_conversation(&conversation_id, window, cx);
             composer.set_placeholder(REPLY_PLACEHOLDER, window, cx);
             composer.set_text("", window, cx);
             composer.set_reply(None, cx);

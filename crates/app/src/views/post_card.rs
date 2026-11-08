@@ -408,10 +408,6 @@ fn reply_footer(
         .px(px(CARD_PADDING - FOOTER_BUTTON_PADDING))
         .rounded_b(px(CARD_RADIUS))
         .bg(theme::reply_surface());
-    if let Some(editor) = editor {
-        return Some(footer.px(px(CARD_PADDING)).py(px(8.)).child(editor));
-    }
-    let open = open?;
     let own_avatar = directory.me.as_ref().map(|me| {
         div()
             .debug_selector(|| POST_FOOTER_AVATAR_TAG.into())
@@ -423,6 +419,19 @@ fn reply_footer(
                 FOOTER_AVATAR,
             ))
     });
+    if let Some(editor) = editor {
+        return Some(
+            footer.px(px(CARD_PADDING)).py(px(8.)).child(
+                h_flex()
+                    .w_full()
+                    .gap(px(8.))
+                    .items_center()
+                    .children(own_avatar)
+                    .child(div().flex_1().min_w_0().child(editor)),
+            ),
+        );
+    }
+    let open = open?;
     Some(
         footer.py(px(CARD_PADDING - FOOTER_BUTTON_VERTICAL)).child(
             h_flex().child(

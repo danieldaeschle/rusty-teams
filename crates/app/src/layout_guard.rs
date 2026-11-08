@@ -179,9 +179,10 @@ mod frames {
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
     use crate::views::composer::delivery::{
-        COMPOSER_DELIVERY_TAG, COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG,
+        COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG,
         DELIVERY_MENU_TAG,
     };
+    use crate::views::composer::plus_menu::{COMPOSER_PLUS_TAG, PlusAction};
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
         COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
@@ -2452,7 +2453,7 @@ mod frames {
         const DELIVERY_TAGS: [&str; 5] = [
             COMPOSER_BOX_TAG,
             COMPOSER_ACTIONS_TAG,
-            COMPOSER_DELIVERY_TAG,
+            COMPOSER_PLUS_TAG,
             COMPOSER_IMPORTANCE_LABEL_TAG,
             COMPOSER_URGENT_BANNER_TAG,
         ];
@@ -2466,11 +2467,13 @@ mod frames {
                 origin: point(px(0.), px(0.)),
                 size: size(px(width), px(height)),
             };
-            collect(&mut visual, Some(COMPOSER_DELIVERY_TAG));
-            let button = visual
-                .debug_bounds(COMPOSER_DELIVERY_TAG)
-                .expect("delivery button");
+            collect(&mut visual, Some(COMPOSER_PLUS_TAG));
+            let button = visual.debug_bounds(COMPOSER_PLUS_TAG).expect("plus button");
             visual.simulate_click(button.center(), Default::default());
+            let delivery_tag = PlusAction::DeliveryOptions.tag();
+            collect(&mut visual, Some(delivery_tag));
+            let delivery = visual.debug_bounds(delivery_tag).expect("delivery item");
+            visual.simulate_click(delivery.center(), Default::default());
             collect(&mut visual, Some(URGENT_OPTION));
             let menu = visual.debug_bounds(DELIVERY_MENU_TAG).expect("menu");
             assert!(
