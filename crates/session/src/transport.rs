@@ -1,12 +1,13 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::json;
 
 use crate::app::{App, find_app_tab, has_login_tab};
 use crate::error::Result;
 use crate::events::{TabControl, TabEvents, open};
-use crate::http::list_targets;
+use crate::http::{list_targets, new_tab};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type OpenedTab = (TabControl, Option<TabEvents>);
@@ -35,14 +36,21 @@ pub trait Transport: Send + Sync {
 
 pub struct CdpTransport {
     endpoint: String,
+    outlook_requested: AtomicBool,
 }
 
 impl CdpTransport {
     pub fn new(endpoint: &str) -> Self {
         CdpTransport {
             endpoint: endpoint.trim_end_matches('/').to_owned(),
+            outlook_requested: AtomicBool::new(false),
         }
     }
+}
+
+/// Some tenants grant the Teams web client no Graph chat scopes; Outlook on the web has them and signs in silently next to a signed-in Teams.
+fn wants_outlook_tab(targets: &[crate::app::Target], app: App) -> bool {
+    app == App::Outlook && find_app_tab(targets, App::Teams).is_some() && !has_login_tab(targets)
 }
 
 impl Transport for CdpTransport {
@@ -54,6 +62,9 @@ impl Transport for CdpTransport {
         Box::pin(async move {
             let targets = list_targets(&self.endpoint).await?;
             let Some(websocket_url) = find_app_tab(&targets, app).and_then(|target| target.websocket_url.clone()) else {
+                if wants_outlook_tab(&targets, app) && !self.outlook_requested.swap(true, Ordering::SeqCst) {
+                    new_tab(&self.endpoint, App::Outlook.start_url()).await?;
+                }
                 return Ok(None);
             };
             open(&websocket_url, with_events).await.map(Some)
@@ -85,5 +96,25 @@ impl Transport for CdpTransport {
                 app_tab_open: App::ALL.iter().any(|&app| find_app_tab(&targets, app).is_some()),
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Target;
+
+    fn page(url: &str) -> Target {
+        Target { kind: "page".to_owned(), url: url.to_owned(), websocket_url: Some("ws://tab".to_owned()) }
+    }
+
+    #[test]
+    fn outlook_opens_only_next_to_a_signed_in_teams_tab() {
+        let teams = page("https://teams.cloud.microsoft/");
+        let login = page("https://login.microsoftonline.com/common/oauth2");
+        assert!(wants_outlook_tab(&[teams.clone()], App::Outlook));
+        assert!(!wants_outlook_tab(&[teams.clone()], App::Teams));
+        assert!(!wants_outlook_tab(&[], App::Outlook));
+        assert!(!wants_outlook_tab(&[teams, login], App::Outlook));
     }
 }

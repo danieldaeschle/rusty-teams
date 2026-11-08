@@ -27,6 +27,7 @@ use store::Store;
 use crate::app_state::{AppState, Mode};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
+const LINUX_APP_ID: &str = "rusty-teams";
 const VERSION_MARKER: &str = concat!("teams-build:", env!("TEAMS_BUILD_VERSION"));
 const HTTP_USER_AGENT: &str = "teams-linux";
 const WINDOW_WIDTH: f32 = 1240.;
@@ -240,6 +241,7 @@ fn main() {
         let mut options = TitleBar::window_options();
         options.window_bounds = Some(WindowBounds::Windowed(bounds));
         options.window_min_size = Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)));
+        options.app_id = Some(LINUX_APP_ID.to_owned());
         if let Some(titlebar) = options.titlebar.as_mut() {
             titlebar.title = Some(APP_NAME.into());
         }

@@ -200,7 +200,7 @@ impl Session {
         let payload = self.payload(requests, scope);
         let expression = format!("({FETCH_SCRIPT})({payload})");
         let has_write = requests.iter().any(|request| request.method != Method::Get);
-        for app in scope.tab_order() {
+        for app in tab_order(requests, scope) {
             let outcome = match self.evaluate_in(app, &expression).await {
                 Ok(Some(value)) => value,
                 Ok(None) => continue,
@@ -299,6 +299,15 @@ pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
+/// Requests without a token go to the Teams tab first: the Outlook mail page's CSP blocks cross-origin fetches.
+fn tab_order(requests: &[&Request], scope: &Scope) -> [App; 2] {
+    if requests.iter().all(|request| request.anonymous) {
+        [App::Teams, App::Outlook]
+    } else {
+        scope.tab_order()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex as StdMutex;
@@ -356,5 +365,14 @@ mod tests {
         assert_eq!(retry_wait(None, default), default);
         assert_eq!(retry_wait(Some("Wed, 21 Oct 2026 07:28:00 GMT"), default), default);
         assert_eq!(retry_wait(Some("-3"), default), default);
+    }
+
+    #[test]
+    fn anonymous_requests_try_the_teams_tab_first() {
+        let chat_scope = Scope::graph("Chat.Read");
+        let image = Request::anonymous_binary_get("https://media.giphy.com/media/x/giphy.gif", Vec::new());
+        let chats = Request::get("https://graph.microsoft.com/v1.0/me/chats");
+        assert_eq!(tab_order(&[&image], &chat_scope), [App::Teams, App::Outlook]);
+        assert_eq!(tab_order(&[&chats], &chat_scope), [App::Outlook, App::Teams]);
     }
 }

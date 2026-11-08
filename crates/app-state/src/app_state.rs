@@ -629,7 +629,14 @@ impl AppState {
                 None => {
                     let done = data::fetch_image(&engine, image.clone());
                     cx.spawn(async move |this, cx| {
-                        if !matches!(done.await, Ok(Ok(()))) {
+                        let failure = match done.await {
+                            Ok(Ok(())) => None,
+                            Ok(Err(error)) => Some(error),
+                            Err(_) => Some("cancelled".to_owned()),
+                        };
+                        if let Some(failure) = failure {
+                            let host = image.url.split("://").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or_default();
+                            log::warn!("image from {host} not loaded: {failure}");
                             this.update(cx, |state, cx| {
                                 state.directory.mark_image_failed(&image.url);
                                 cx.notify();

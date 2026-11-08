@@ -10,12 +10,16 @@ use crate::error::{Error, Result};
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
 async fn get(endpoint: &str, path: &str) -> std::result::Result<Vec<u8>, String> {
+    exchange(endpoint, "GET", path).await
+}
+
+async fn exchange(endpoint: &str, method: &str, path: &str) -> std::result::Result<Vec<u8>, String> {
     let parsed = Url::parse(endpoint).map_err(|error| error.to_string())?;
     let host = parsed.host_str().ok_or("endpoint has no host")?;
     let port = parsed.port_or_known_default().unwrap_or(80);
     let exchange = async {
         let mut stream = TcpStream::connect((host, port)).await.map_err(|error| error.to_string())?;
-        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
+        let request = format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
         stream.write_all(request.as_bytes()).await.map_err(|error| error.to_string())?;
         read_response(&mut stream).await
     };
@@ -74,6 +78,14 @@ pub async fn list_targets(endpoint: &str) -> Result<Vec<Target>> {
     };
     let body = get(endpoint, "/json/list").await.map_err(no_browser)?;
     serde_json::from_slice(&body).map_err(|error| no_browser(error.to_string()))
+}
+
+/// Opens a background tab; Chrome 111+ only accepts PUT here.
+pub async fn new_tab(endpoint: &str, url: &str) -> Result<()> {
+    exchange(endpoint, "PUT", &format!("/json/new?{url}"))
+        .await
+        .map(drop)
+        .map_err(|reason| Error::NoBrowser { endpoint: endpoint.to_owned(), reason })
 }
 
 #[cfg(test)]

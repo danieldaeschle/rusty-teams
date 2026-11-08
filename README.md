@@ -84,7 +84,7 @@
 | Platform | State |
 |---|---|
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
-| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222`. Built-in login is planned |
+| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222` and signed in to Teams on the web. The app opens an Outlook on the web tab next to it when missing (some tenants grant chat scopes only to Outlook). Built-in login is planned |
 | 🍎 macOS | Experimental. Universal arm64 + x86_64 binary, connects to a Chrome like Linux |
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
