@@ -24,6 +24,8 @@ export const FAKE_MEDIA = (speechUrl) => `(() => {
   let audioContext;
   const speechTrack = async () => {
     audioContext = audioContext || new AudioContext();
+    addEventListener('pointerdown', () => audioContext.resume(), true);
+    audioContext.resume().catch(() => {});
     const destination = audioContext.createMediaStreamDestination();
     try {
       const data = await (await fetch('${speechUrl}')).arrayBuffer();

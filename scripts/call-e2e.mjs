@@ -1,16 +1,14 @@
 // Call end-to-end test with Daniel's real account and the deployed Windows app, no second person needed.
-// Teams web as Daniel hosts a fresh Meet now and admits an anonymous Teams web guest whose mic is a looped speech file.
-// The Windows app joins through `teams.exe --join`; its mic is VB-CABLE fed with a second speech file,
+// The Windows app hosts a fresh Meet now without lobby through `teams.exe --join`; its mic is VB-CABLE fed with a speech file.
+// An anonymous Teams web guest (own incognito context) joins with a second speech file as its mic,
 // and process loopback records what the app plays. Both directions must show speech with pauses.
 // Usage: node scripts/call-e2e.mjs <work dir> [meeting link]
 import { spawn, execFileSync } from 'node:child_process';
-import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Browser, CLICK, FAKE_MEDIA, PEER_HOOK } from './teams-web-cdp.mjs';
+import { Browser, FAKE_MEDIA, PEER_HOOK } from './teams-web-cdp.mjs';
 
 const [workDir, givenLink] = process.argv.slice(2);
 const OWN_ENDPOINT = process.env.OWN_CDP ?? 'http://127.0.0.1:9222';
-const PORT = Number(process.env.E2E_PORT ?? 9475);
 const PROBE_DIR = process.env.PROBE_DIR ?? '/mnt/c/Users/dd/AppData/Local/Temp/call-e2e';
 const TEAMS_EXE = process.env.TEAMS_EXE ?? '/mnt/c/Users/dd/AppData/Local/Programs/ms-teams-linux/teams.exe';
 const POWERSHELL = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
@@ -22,7 +20,9 @@ const WEB_JOIN_TIMEOUT_MS = 90_000;
 const APP_JOIN_WAIT_MS = 25_000;
 const MEASURE_SECONDS = 30;
 const WINDOW_MS = 250;
-const WEB_JOIN_STEPS = ['Continue on this browser', 'Not now', 'Join now'];
+const STEP_REPEAT_MS = 15_000;
+const ADMIT_INTERVAL_MS = 5_000;
+const WEB_JOIN_STEPS = ['Continue on this browser', 'Not now', '=Join now', '=Join'];
 const GUEST_NAME = 'Call e2e guest';
 const LOBBY_TEXTS = ['let you in shortly', 'should let you in soon'];
 const WEB_THRESHOLD = { speech: 0.005, floor: 0.0005 };
@@ -69,23 +69,7 @@ function runProbe(...args) {
   });
 }
 
-function silentWav(seconds) {
-  const dataBytes = seconds * 48000 * 2;
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0); header.writeUInt32LE(36 + dataBytes, 4); header.write('WAVEfmt ', 8);
-  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22); header.writeUInt32LE(48000, 24);
-  header.writeUInt32LE(96000, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(dataBytes, 40);
-  return Buffer.concat([header, Buffer.alloc(dataBytes)]);
-}
-
-function serveSpeech() {
-  const files = { '/speech.wav': readFileSync(PROBE_DIR + '/web.wav'), '/silence.wav': silentWav(1) };
-  const server = createServer((request, response) => {
-    response.writeHead(200, { 'content-type': 'audio/wav', 'access-control-allow-origin': '*', 'access-control-allow-private-network': 'true' }).end(files[request.url] ?? files['/silence.wav']);
-  });
-  server.listen(PORT, '127.0.0.1');
-  return server;
-}
+const speechDataUrl = () => `data:audio/wav;base64,${readFileSync(PROBE_DIR + '/web.wav').toString('base64')}`;
 
 const INBOUND_AUDIO = `(async () => {
   let energy = 0, duration = 0, packets = 0;
@@ -110,13 +94,26 @@ const GUEST_SENDING = `(async () => {
   }
   return { level: duration > 0 ? Math.sqrt(energy / duration) : 0, packets };
 })()`;
+const LOCATE = (step) => `(() => {
+  const onlyExact = ${JSON.stringify(step.startsWith('='))};
+  const wanted = ${JSON.stringify(step.replace(/^=/, ''))}.toLowerCase();
+  const nodes = [...document.querySelectorAll('button, [role=button], [role=menuitem], a')];
+  const label = (node) => ((node.getAttribute('aria-label') || '') + ' ' + (node.innerText || '') + ' ' + (node.getAttribute('title') || '')).trim().toLowerCase();
+  const visible = nodes.filter((node) => node.getClientRects().length && !node.disabled && node.getAttribute('aria-disabled') !== 'true');
+  const exact = visible.find((node) => (node.innerText || '').trim().toLowerCase() === wanted || (node.getAttribute('aria-label') || '').trim().toLowerCase() === wanted);
+  const target = exact || (onlyExact ? null : visible.find((node) => label(node).includes(wanted)));
+  if (!target) return null;
+  target.scrollIntoView({ block: 'center' });
+  target.click();
+  return label(target).slice(0, 80);
+})()`;
 const CONNECTED = `(window.__pcs || []).some((peer) => peer.connectionState === 'connected')`;
 const TEAMS_ORIGINS = ['https://teams.cloud.microsoft', 'https://teams.microsoft.com'];
 
-class WebTab {
-  constructor(browser, { guest }) { this.browser = browser; this.guest = guest; }
+class GuestTab {
+  constructor(browser) { this.browser = browser; }
   async open(link) {
-    if (this.guest) this.contextId = (await this.browser.send('Target.createBrowserContext', { disposeOnDetach: false })).browserContextId;
+    this.contextId = (await this.browser.send('Target.createBrowserContext', { disposeOnDetach: false })).browserContextId;
     const context = this.contextId ? { browserContextId: this.contextId } : {};
     const { targetId } = await this.browser.send('Target.createTarget', { url: 'about:blank', ...context });
     this.targetId = targetId;
@@ -125,7 +122,7 @@ class WebTab {
     await this.browser.send('Page.enable', {}, sessionId);
     await this.browser.send('Runtime.enable', {}, sessionId);
     await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: PEER_HOOK }, sessionId);
-    await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_MEDIA(`http://127.0.0.1:${PORT}/${this.guest ? 'speech' : 'silence'}.wav`) }, sessionId);
+    await this.browser.send('Page.addScriptToEvaluateOnNewDocument', { source: FAKE_MEDIA(speechDataUrl()) }, sessionId);
     for (const origin of TEAMS_ORIGINS) {
       await this.browser.send('Browser.grantPermissions', { permissions: ['audioCapture', 'videoCapture'], origin, ...context }).catch(() => {});
     }
@@ -139,17 +136,30 @@ class WebTab {
   }
   async join() {
     const deadline = Date.now() + WEB_JOIN_TIMEOUT_MS;
+    const clickedAt = new Map();
     while (Date.now() < deadline) {
       const inLobby = await this.evaluate(`${JSON.stringify(LOBBY_TEXTS)}.some((text) => document.body.innerText.includes(text))`).catch(() => false);
       if (!inLobby && (await this.evaluate(CONNECTED).catch(() => false))) return true;
-      if (this.guest) await this.typeName();
+      await this.activate();
+      await this.typeName();
       for (const step of WEB_JOIN_STEPS) {
-        const click = await this.evaluate(CLICK(step)).catch(() => null);
-        if (click?.clicked) log(`web: clicked "${step}"`);
+        if (Date.now() - (clickedAt.get(step) ?? 0) < STEP_REPEAT_MS) continue;
+        if (await this.click(step)) {
+          clickedAt.set(step, Date.now());
+          log(`web: clicked "${step}"`);
+        }
       }
       await delay(2000);
     }
     return false;
+  }
+  async click(step) {
+    return this.evaluate(LOCATE(step)).catch(() => null);
+  }
+  async activate() {
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await this.browser.send('Input.dispatchMouseEvent', { type, x: 5, y: 5, button: 'left', clickCount: 1 }, this.sessionId).catch(() => {});
+    }
   }
   async typeName() {
     const focused = await this.evaluate(`(() => {
@@ -158,11 +168,6 @@ class WebTab {
       input.focus(); return true;
     })()`).catch(() => false);
     if (focused) await this.browser.send('Input.insertText', { text: GUEST_NAME }, this.sessionId);
-  }
-  async admitGuests() {
-    const click = await this.evaluate(CLICK('Admit')).catch(() => null);
-    if (click?.clicked) log(`web: clicked "${click.label}"`);
-    else if (!this.peopleOpen) this.peopleOpen = (await this.evaluate(CLICK('People')).catch(() => null))?.clicked;
   }
   async shot(path) {
     const { data } = await this.browser.send('Page.captureScreenshot', { format: 'png' }, this.sessionId);
@@ -201,10 +206,8 @@ const report = { started: new Date().toISOString() };
 const savedCapture = defaultAudio('get', 'capture');
 const restoreCapture = () => defaultAudio('set', 'capture', savedCapture);
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { restoreCapture(); process.exit(130); });
-const server = serveSpeech();
 const browser = await new Browser(OWN_ENDPOINT).connect();
-const host = new WebTab(browser, { guest: false });
-const tab = new WebTab(browser, { guest: true });
+const tab = new GuestTab(browser);
 try {
   if (!teamsProcessId()) {
     log(`starting the app, waiting ${APP_START_WAIT_MS / 1000}s`);
@@ -214,28 +217,22 @@ try {
   const link = givenLink ?? createMeeting();
   report.link = link;
   log('meeting ready');
-  await host.open(link);
-  if (!(await host.join())) {
-    await host.shot(workDir + '/host-join.png');
-    throw new Error('Teams web host did not join, see host-join.png');
-  }
-  log('web host joined');
-  await tab.open(link);
-  const admitting = setInterval(() => host.admitGuests(), 2000);
-  report.webJoined = await tab.join().finally(() => clearInterval(admitting));
-  log(`web guest joined: ${report.webJoined}`);
-  if (!report.webJoined) {
-    await tab.shot(workDir + '/web-join.png');
-    await host.shot(workDir + '/host-admit.png');
-    throw new Error('Teams web guest did not join, see web-join.png and host-admit.png');
-  }
   defaultAudio('set', 'capture', 'CABLE Output');
   log('default mic: CABLE Output');
-  const playSeconds = Math.ceil(APP_JOIN_WAIT_MS / 1000) + MEASURE_SECONDS + 10;
+  const playSeconds = Math.ceil((APP_JOIN_WAIT_MS + WEB_JOIN_TIMEOUT_MS) / 1000) + MEASURE_SECONDS + 10;
   const playing = runProbe('play', 'CABLE Input', windowsPath(PROBE_DIR + '/app.wav'), String(playSeconds));
   runTeams('--join', link);
   log(`app joining, waiting ${APP_JOIN_WAIT_MS / 1000}s`);
   await delay(APP_JOIN_WAIT_MS);
+  await tab.open(link);
+  const admitting = setInterval(() => runTeams('--admit-all'), ADMIT_INTERVAL_MS);
+  report.webJoined = await tab.join().finally(() => clearInterval(admitting));
+  log(`web guest joined: ${report.webJoined}`);
+  if (!report.webJoined) {
+    await tab.shot(workDir + '/web-join.png');
+    throw new Error('Teams web guest did not join, see web-join.png');
+  }
+  await tab.activate();
   const processId = teamsProcessId();
   if (!processId) throw new Error('teams.exe is not running');
   log(`measuring ${MEASURE_SECONDS}s (teams.exe pid ${processId})`);
@@ -255,10 +252,8 @@ try {
 } finally {
   if (teamsProcessId()) runTeams('--hang-up');
   await tab.close();
-  await host.close();
   restoreCapture();
   log('default mic restored');
-  server.close();
   browser.socket.close();
 }
 report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass);

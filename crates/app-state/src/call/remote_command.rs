@@ -5,13 +5,16 @@ use crate::app_state::AppState;
 
 pub const JOIN_FLAG: &str = "--join";
 pub const HANG_UP_FLAG: &str = "--hang-up";
+pub const ADMIT_ALL_FLAG: &str = "--admit-all";
 const JOIN_COMMAND: &str = "join ";
 const HANG_UP_COMMAND: &str = "hang-up";
+const ADMIT_ALL_COMMAND: &str = "admit-all";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteCommand {
     Join(String),
     HangUp,
+    AdmitAll,
 }
 
 impl RemoteCommand {
@@ -19,12 +22,15 @@ impl RemoteCommand {
         match self {
             RemoteCommand::Join(link) => format!("{JOIN_COMMAND}{link}"),
             RemoteCommand::HangUp => HANG_UP_COMMAND.to_owned(),
+            RemoteCommand::AdmitAll => ADMIT_ALL_COMMAND.to_owned(),
         }
     }
 
     pub fn decode(text: &str) -> Option<RemoteCommand> {
-        if text == HANG_UP_COMMAND {
-            return Some(RemoteCommand::HangUp);
+        match text {
+            HANG_UP_COMMAND => return Some(RemoteCommand::HangUp),
+            ADMIT_ALL_COMMAND => return Some(RemoteCommand::AdmitAll),
+            _ => {}
         }
         let link = text.strip_prefix(JOIN_COMMAND)?.trim();
         (!link.is_empty()).then(|| RemoteCommand::Join(link.to_owned()))
@@ -41,6 +47,7 @@ impl AppState {
                 self.own_engine_next_call = false;
             }
             Some(RemoteCommand::HangUp) => self.leave_call(cx),
+            Some(RemoteCommand::AdmitAll) => self.admit_all_call_guests(cx),
             None => {}
         }
     }
@@ -55,6 +62,7 @@ mod tests {
         for command in [
             RemoteCommand::Join("https://teams.microsoft.com/l/meetup-join/x".to_owned()),
             RemoteCommand::HangUp,
+            RemoteCommand::AdmitAll,
         ] {
             assert_eq!(RemoteCommand::decode(&command.encode()), Some(command));
         }

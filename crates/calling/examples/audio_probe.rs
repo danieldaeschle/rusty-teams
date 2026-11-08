@@ -1,6 +1,7 @@
 //! Windows tool for the call end-to-end test.
 //! `audio_probe play <render device name part> <mono 16-bit 48 kHz wav> <seconds>` loops the file into that endpoint.
 //! `audio_probe record-process <pid> <seconds> <out.wav>` records only what that process plays and prints loudness per 250 ms as JSON.
+//! `audio_probe record-mic <seconds> <out.wav>` records the default communications mic the way a call does.
 
 #[cfg(windows)]
 fn main() {
@@ -13,7 +14,8 @@ fn main() {
             seconds.parse().expect("seconds"),
             out,
         ),
-        _ => Err("usage: play DEVICE WAV SECONDS | record-process PID SECONDS OUT.wav".to_owned()),
+        ["record-mic", seconds, out] => probe::record_mic(seconds.parse().expect("seconds"), out),
+        _ => Err("usage: play DEVICE WAV SECONDS | record-process PID SECONDS OUT.wav | record-mic SECONDS OUT.wav".to_owned()),
     };
     if let Err(error) = outcome {
         eprintln!("{error}");
@@ -151,6 +153,18 @@ mod probe {
     pub fn record_process(process_id: u32, seconds: u64, out: &str) -> Result<(), String> {
         let queue = SampleQueue::default();
         let _capture = calling::start_process_capture(queue.clone(), process_id).map_err(|error| failed("capture", error))?;
+        record(&queue, seconds, out)
+    }
+
+    pub fn record_mic(seconds: u64, out: &str) -> Result<(), String> {
+        let queue = SampleQueue::default();
+        let started = calling::sound_capture::start_microphone(&calling::DeviceChoice::SystemDefault, queue.clone())
+            .map_err(|error| failed("microphone", error))?;
+        eprintln!("{}", started.source);
+        record(&queue, seconds, out)
+    }
+
+    fn record(queue: &SampleQueue, seconds: u64, out: &str) -> Result<(), String> {
         let mut dump = WavDump::create(std::path::Path::new(out)).map_err(|error| failed("wav", error))?;
         let frames_per_window = WINDOW_MS * SAMPLE_RATE as usize / 1000 / FRAME_SAMPLES;
         let mut window = Vec::new();
