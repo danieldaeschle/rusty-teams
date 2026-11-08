@@ -122,6 +122,7 @@ const QUIET_RETRY_DELAYS: [Duration; 3] = [
 const HEADER_HEIGHT: f32 = 60.;
 const HEADER_PADDING: f32 = 20.;
 const HEADER_GAP: f32 = 12.;
+const HEADER_COMPACT_GAP: f32 = 4.;
 const POP_IN_BUTTON_SIZE: f32 = 32.;
 const HEADER_LEAD_SIZE: f32 = 36.;
 const TABS_INLINE_MIN_WIDTH: f32 = 560.;
@@ -3761,7 +3762,9 @@ impl ConversationView {
             .to_owned();
         }
         let inline_tabs = tabs.map(|tabs| h_flex().h_full().flex_1().child(tabs));
-        let divided = matches!(current.selection, Selection::Chat(_))
+        let overflow = self.header_overflows();
+        let divided = !overflow
+            && matches!(current.selection, Selection::Chat(_))
             && (!call_controls.is_empty() || stack.is_some());
         header
             .relative()
@@ -3769,7 +3772,8 @@ impl ConversationView {
             .when(sync.shown_at.is_some() || loading_window, |header| {
                 header.child(progress_bar())
             })
-            .children(lead)
+            .when(overflow, |header| header.gap(px(HEADER_COMPACT_GAP)))
+            .when(!overflow, |header| header.children(lead))
             .child(
                 v_flex()
                     .map(|column| match inline_tabs {
@@ -3810,11 +3814,14 @@ impl ConversationView {
             .children(call_controls)
             .children(stack)
             .when(divided, |header| header.child(header_divider()))
-            .children(self.copilot_button(cx))
-            .children(self.chat_find_button(cx))
+            .when(!overflow, |header| {
+                header
+                    .children(self.copilot_button(cx))
+                    .children(self.chat_find_button(cx))
+            })
             .children(self.channel_find_button(cx))
-            .children(self.channel_details_button(cx))
-            .children(self.chat_more_button(cx))
+            .when(!overflow, |header| header.children(self.channel_details_button(cx)))
+            .children(self.chat_more_button(overflow, cx))
             .children(self.pop_in_button(current))
     }
 

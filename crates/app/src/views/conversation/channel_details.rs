@@ -142,7 +142,7 @@ impl ConversationView {
         }
     }
 
-    fn details_labels(&self) -> (&'static str, &'static str) {
+    pub(super) fn details_labels(&self) -> (&'static str, &'static str) {
         if self.details_channel_id().is_some() {
             (OPEN_LABEL, CLOSE_LABEL)
         } else {
@@ -180,18 +180,20 @@ impl ConversationView {
                 .size(px(BUTTON_SIZE))
                 .rounded(px(8.))
                 .tooltip(if open { close_label } else { open_label })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.channel_details_open = !this.channel_details_open;
-                    this.pinned_posts_expanded = false;
-                    if this.channel_details_open {
-                        this.find_panel = None;
-                        this.find_subscription = None;
-                        this.refresh_shared_items(cx);
-                    }
-                    cx.notify();
-                }))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_details(cx)))
                 .into_any_element(),
         )
+    }
+
+    pub(super) fn toggle_details(&mut self, cx: &mut Context<Self>) {
+        self.channel_details_open = !self.channel_details_open;
+        self.pinned_posts_expanded = false;
+        if self.channel_details_open {
+            self.find_panel = None;
+            self.find_subscription = None;
+            self.refresh_shared_items(cx);
+        }
+        cx.notify();
     }
 
     pub(super) fn render_channel_details(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

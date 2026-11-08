@@ -70,6 +70,10 @@ impl ConversationView {
         }
     }
 
+    pub(super) fn copilot_label(&self) -> &'static str {
+        if self.copilot.open { CLOSE_LABEL } else { OPEN_LABEL }
+    }
+
     pub(super) fn copilot_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.copilot_chat_id()?;
         let open = self.copilot.open;
@@ -86,7 +90,7 @@ impl ConversationView {
         )
     }
 
-    fn toggle_copilot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_copilot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.copilot.open = !self.copilot.open;
         if self.copilot.open && self.copilot.input.is_none() {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));

@@ -21,6 +21,7 @@ use crate::views::widgets::{icon, menu_icon, symbol};
 pub const CHAT_HEADER_MORE_TAG: &str = "chat-header-more";
 const SCHEDULE_MEETING_LABEL: &str = "Schedule meeting";
 const BUTTON_SIZE: f32 = 32.;
+const HEADER_COMPACT_WIDTH: f32 = 480.;
 const COUNT_GLYPH: f32 = 16.;
 
 impl ConversationView {
@@ -45,12 +46,29 @@ impl ConversationView {
         )
     }
 
-    pub(super) fn chat_more_button(&self, cx: &App) -> Option<AnyElement> {
+    pub(super) fn header_overflows(&self) -> bool {
+        let width = self.header_width.get();
+        width > 0.
+            && width < HEADER_COMPACT_WIDTH
+            && !self.popped_out
+            && !self.pinned
+            && self.header_chat_id().is_some()
+    }
+
+    pub(super) fn chat_more_button(&self, overflow: bool, cx: &Context<Self>) -> Option<AnyElement> {
         let chat_id = self
             .header_chat_id()
             .filter(|_| !self.popped_out && !self.pinned)?;
         let target = ChatMenuTarget::for_chat(self.app.read(cx), chat_id)?;
         let context = MenuContext::new(&self.app, cx);
+        let view = cx.entity().downgrade();
+        let (open_details, close_details) = self.details_labels();
+        let details_label = if self.channel_details_open {
+            close_details
+        } else {
+            open_details
+        };
+        let copilot_label = self.copilot_label();
         Some(
             Button::new(CHAT_HEADER_MORE_TAG)
                 .icon(IconName::Ellipsis)
@@ -60,6 +78,11 @@ impl ConversationView {
                 .tooltip("More chat options")
                 .debug_selector(|| CHAT_HEADER_MORE_TAG.into())
                 .dropdown_menu(move |popup, window, cx| {
+                    let popup = if overflow {
+                        overflow_items(popup, view.clone(), copilot_label, details_label)
+                    } else {
+                        popup
+                    };
                     let popup = if is_notes_chat(&target.id) {
                         popup
                     } else {
@@ -70,6 +93,41 @@ impl ConversationView {
                 .into_any_element(),
         )
     }
+}
+
+fn overflow_items(
+    popup: PopupMenu,
+    view: WeakEntity<ConversationView>,
+    copilot_label: &'static str,
+    details_label: &'static str,
+) -> PopupMenu {
+    let (find_view, details_view) = (view.clone(), view.clone());
+    popup
+        .item(
+            PopupMenuItem::new(FIND_IN_CHAT)
+                .icon(menu_icon(IconName::Search))
+                .on_click(move |_, window, cx| {
+                    find_view
+                        .update(cx, |this, cx| this.open_find(window, cx))
+                        .ok();
+                }),
+        )
+        .item(
+            PopupMenuItem::new(copilot_label)
+                .icon(menu_icon(IconName::Bot))
+                .on_click(move |_, window, cx| {
+                    view.update(cx, |this, cx| this.toggle_copilot(window, cx))
+                        .ok();
+                }),
+        )
+        .item(
+            PopupMenuItem::new(details_label)
+                .icon(menu_icon(IconName::PanelRight))
+                .on_click(move |_, _, cx| {
+                    details_view.update(cx, |this, cx| this.toggle_details(cx)).ok();
+                }),
+        )
+        .separator()
 }
 
 fn schedule_meeting_item(popup: PopupMenu, context: &MenuContext, chat_id: &str) -> PopupMenu {
