@@ -2340,11 +2340,11 @@ async fn drive(
                     timeline.record(
                         "stats",
                         format!(
-                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms){}",
+                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms) out bytes={} sources={:?}{}",
                             snapshot.inbound_packets, snapshot.inbound_bytes, snapshot.audio_level, snapshot.outbound_packets, snapshot.local_level, snapshot.echo_return_loss_enhancement, snapshot.dtls_state,
                             snapshot.video.inbound_packets, snapshot.video.inbound_frames_decoded, snapshot.video.inbound_width, snapshot.video.inbound_height,
                             snapshot.video.outbound_packets, snapshot.video.outbound_frames_encoded, snapshot.video.outbound_width, snapshot.video.outbound_height,
-                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms,
+                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms, snapshot.outbound_bytes, snapshot.source_levels,
                             snapshot.share_receive.as_ref().filter(|_| snapshot.share_inbound_packets > 0).map(ShareReceive::summary).unwrap_or_default()
                         ),
                     );
@@ -3409,6 +3409,8 @@ struct StatsSnapshot {
     inbound_packets: u64,
     inbound_bytes: u64,
     outbound_packets: u64,
+    outbound_bytes: u64,
+    source_levels: Vec<String>,
     audio_level: f64,
     local_level: f64,
     echo_return_loss_enhancement: f64,
@@ -3462,10 +3464,12 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
             }
             RtcStats::MediaSource(source) if source.source.kind == "audio" => {
                 snapshot.local_level = snapshot.local_level.max(source.audio.audio_level);
+                snapshot.source_levels.push(format!("{}={:.3}", source.source.track_identifier, source.audio.audio_level));
                 snapshot.echo_return_loss_enhancement = source.audio.echo_return_loss_enhancement;
             }
             RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "audio" => {
                 snapshot.outbound_packets += outbound.sent.packets_sent;
+                snapshot.outbound_bytes += outbound.sent.bytes_sent;
             }
             RtcStats::InboundRtp(inbound) if inbound.stream.kind == "video" => {
                 snapshot.video.inbound_packets += inbound.received.packets_received;

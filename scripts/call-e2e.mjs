@@ -102,7 +102,16 @@ const REMOTE_AUDIO_TAP = `(() => {
   }, 500);
 })();`;
 
-const INBOUND_AUDIO = `({ ...window.__remoteAudio })`;
+const INBOUND_AUDIO = `(async () => {
+  let energy = 0, duration = 0;
+  for (const peer of window.__pcs || []) {
+    if (peer.connectionState === 'closed') continue;
+    (await peer.getStats()).forEach((entry) => {
+      if (entry.type === 'inbound-rtp' && entry.kind === 'audio') { energy += entry.totalAudioEnergy || 0; duration += entry.totalSamplesDuration || 0; }
+    });
+  }
+  return { ...window.__remoteAudio, energy, duration };
+})()`;
 
 const GUEST_SENDING = `(async () => {
   let energy = 0, duration = 0, packets = 0;
@@ -183,6 +192,9 @@ class GuestTab {
       await this.browser.send('Input.dispatchMouseEvent', { type, x: 5, y: 5, button: 'left', clickCount: 1 }, this.sessionId).catch(() => {});
     }
   }
+  async playbackState() {
+    return this.evaluate(`[...document.querySelectorAll('audio, video')].map((element) => ({ tag: element.tagName, paused: element.paused, muted: element.muted, volume: element.volume, tracks: element.srcObject ? element.srcObject.getTracks().map((track) => track.kind + ':' + track.readyState + ':' + (track.muted ? 'muted' : 'live')) : [] }))`).catch((error) => error.message);
+  }
   async typeName() {
     const focused = await this.evaluate(`(() => {
       const input = document.querySelector('input[placeholder*="name" i]');
@@ -209,7 +221,9 @@ async function sampleWeb(tab, seconds) {
     await delay(WINDOW_MS);
     const current = await tab.evaluate(INBOUND_AUDIO);
     const count = current.count - previous.count;
-    levels.push(count > 0 ? Math.sqrt((current.sum - previous.sum) / count) : 0);
+    const duration = current.duration - previous.duration;
+    if (count > 0) levels.push(Math.sqrt((current.sum - previous.sum) / count));
+    else levels.push(duration > 0 ? Math.sqrt((current.energy - previous.energy) / duration) : 0);
     previous = current;
   }
   return levels;
@@ -377,6 +391,8 @@ try {
     sampleWeb(tab, MEASURE_SECONDS),
   ]);
   report.guestSending = await tab.evaluate(GUEST_SENDING).catch((error) => error.message);
+  report.guestPlayback = await tab.playbackState();
+  report.guestReceiving = await tab.evaluate(PEER_STATS).then((stats) => ({ peers: stats.peers, audioIn: stats.audioIn })).catch((error) => error.message);
   report.appToWeb = judge(webLevels, WEB_THRESHOLD);
   report.webToApp = judge(JSON.parse(recorded).rms, APP_THRESHOLD);
   report.webLevels = webLevels.map((level) => Number(level.toFixed(4)));
@@ -397,5 +413,5 @@ const scenariosPass = Object.values(report.scenarios ?? {}).every((entry) => ent
 report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass && scenariosPass);
 writeFileSync(workDir + '/report.json', JSON.stringify(report, null, 2));
 const scenarioSummary = Object.fromEntries(Object.entries(report.scenarios ?? {}).map(([name, entry]) => [name, entry.pass ? 'pass' : `FAIL ${entry.error ?? ''}`.trim()]));
-console.log(JSON.stringify({ pass: report.pass, appToWeb: report.appToWeb, webToApp: report.webToApp, scenarios: scenarioSummary, guestSending: report.guestSending, error: report.error }));
+console.log(JSON.stringify({ pass: report.pass, guestPlayback: report.guestPlayback, guestReceiving: report.guestReceiving, appToWeb: report.appToWeb, webToApp: report.webToApp, scenarios: scenarioSummary, guestSending: report.guestSending, error: report.error }));
 process.exit(report.pass ? 0 : 1);
