@@ -9,7 +9,7 @@ use crate::store::{Store, json_ids};
 use crate::time::{optional_from_millis, optional_to_millis, to_millis};
 
 const CHAT_COLUMNS: &str = "id, kind, title, member_summary, last_message_at, last_read_at, unread, \
-     last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted, muted";
+     last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted, muted, preview_at";
 
 impl Store {
     pub fn upsert_chats(&self, chats: &[ChatRecord]) -> Result<()> {
@@ -18,8 +18,8 @@ impl Store {
         {
             let mut upsert = transaction.prepare_cached(
                 "INSERT INTO chats (id, kind, title, member_summary, last_message_at, last_read_at, unread,
-                    last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    last_message_preview, last_message_sender_id, last_message_sender_name, last_message_deleted, preview_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?14)
                  ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind,
                     title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '?', '(only you)', 'Unknown User')
@@ -35,7 +35,8 @@ impl Store {
                     last_message_preview = CASE WHEN ?13 THEN chats.last_message_preview ELSE excluded.last_message_preview END,
                     last_message_sender_id = CASE WHEN ?13 THEN chats.last_message_sender_id ELSE excluded.last_message_sender_id END,
                     last_message_sender_name = CASE WHEN ?13 THEN chats.last_message_sender_name ELSE excluded.last_message_sender_name END,
-                    last_message_deleted = CASE WHEN ?13 THEN chats.last_message_deleted ELSE excluded.last_message_deleted END",
+                    last_message_deleted = CASE WHEN ?13 THEN chats.last_message_deleted ELSE excluded.last_message_deleted END,
+                    preview_at = CASE WHEN ?13 THEN chats.preview_at ELSE excluded.preview_at END",
             )?;
             let mut clear_members =
                 transaction.prepare_cached("DELETE FROM chat_members WHERE chat_id = ?1")?;
@@ -57,6 +58,7 @@ impl Store {
                     chat.last_message_deleted,
                     chat.last_event_system,
                     chat.keeps_stored_preview,
+                    optional_to_millis(chat.preview_at),
                 ])?;
                 clear_members.execute([&chat.id])?;
                 for (position, member) in chat.members.iter().enumerate() {
@@ -159,10 +161,10 @@ impl Store {
     ) -> Result<bool> {
         let connection = self.lock()?;
         let changed = connection.execute(
-            "UPDATE chats SET last_message_at = ?2, last_message_preview = ?3, last_message_sender_id = ?4,
+            "UPDATE chats SET last_message_at = ?2, preview_at = ?2, last_message_preview = ?3, last_message_sender_id = ?4,
                 last_message_sender_name = ?5, last_message_deleted = ?6
              WHERE id = ?1 AND (last_message_at IS NULL OR last_message_at <= ?2)
-               AND (last_message_at IS NOT ?2 OR last_message_preview IS NOT ?3 OR last_message_sender_id IS NOT ?4
+               AND (last_message_at IS NOT ?2 OR preview_at IS NOT ?2 OR last_message_preview IS NOT ?3 OR last_message_sender_id IS NOT ?4
                     OR last_message_sender_name IS NOT ?5 OR last_message_deleted IS NOT ?6)",
             params![
                 chat_id,
@@ -225,6 +227,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         last_message_sender_name: row.get(9)?,
         last_message_deleted: row.get(10)?,
         muted: row.get(11)?,
+        preview_at: optional_from_millis(row.get(12)?),
         last_event_system: false,
         keeps_stored_preview: false,
     })

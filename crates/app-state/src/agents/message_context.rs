@@ -154,6 +154,7 @@ mod tests {
             title: "Ops".to_owned(),
             member_summary: String::new(),
             last_message_at: None,
+            preview_at: None,
             last_read_at: None,
             unread: false,
             muted: false,

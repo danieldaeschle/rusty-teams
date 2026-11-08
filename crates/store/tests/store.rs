@@ -608,11 +608,11 @@ fn file_database_uses_wal_persists_and_migrates_once() {
     let path = directory.path().join("nested").join("cache.sqlite3");
     {
         let store = Store::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 27);
+        assert_eq!(store.schema_version().unwrap(), 28);
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
     }
     let reopened = Store::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 27);
+    assert_eq!(reopened.schema_version().unwrap(), 28);
     assert_eq!(reopened.message_count("c").unwrap(), 1);
     drop(reopened);
     let mode: String = rusqlite_open(&path)
@@ -644,7 +644,7 @@ fn old_schema_is_upgraded_in_place() {
     connection.execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; DROP TABLE messages; DROP TABLE sync_state; DROP TABLE chats; DROP TABLE chat_members; DROP TABLE channels; DROP TABLE teams; DROP TABLE meta; DROP TABLE avatars; DROP TABLE folder_items; DROP TABLE folders; DROP TABLE pinned_channels; DROP TABLE images; DROP TABLE search_keys; DROP TABLE message_search; DROP TABLE title_search; DROP TABLE team_layout; DROP TABLE channel_layout; DROP TABLE channel_tabs; DROP TABLE presence; DROP TABLE activity; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE attachment_images; DROP TABLE agent_reaction_proposals; DROP TABLE agent_proposals; PRAGMA user_version = 0").unwrap();
     drop(connection);
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 27);
+    assert_eq!(store.schema_version().unwrap(), 28);
     store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
 }
 
@@ -710,7 +710,7 @@ fn migration_to_v2_keeps_existing_sync_state() {
     let store = Store::open(&path).unwrap();
     let state = store.sync_state("c").unwrap().unwrap();
     assert_eq!(state.delta_link, None);
-    assert_eq!(store.schema_version().unwrap(), 27);
+    assert_eq!(store.schema_version().unwrap(), 28);
 }
 
 #[test]
@@ -735,7 +735,7 @@ fn migration_to_v13_clears_channel_delta_links_only() {
                  ALTER TABLE channel_layout DROP COLUMN notification_level;
                  ALTER TABLE channel_layout DROP COLUMN include_replies;
                  ALTER TABLE channels DROP COLUMN read_until;
-                 PRAGMA user_version = 12",
+                 ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 12",
             )
             .unwrap();
     }
@@ -798,6 +798,21 @@ fn a_call_moves_the_chat_time_and_keeps_the_line() {
     let record = store.chat("a").unwrap().unwrap();
     assert_eq!(record.last_message_at, Some(at(7)));
     assert_eq!(record.last_message_preview, before);
+}
+
+#[test]
+fn the_kept_line_keeps_its_own_time_after_a_call() {
+    let store = Store::open_in_memory().unwrap();
+    let mut line = chat("a", "A", Some(at(5)));
+    line.preview_at = Some(at(5));
+    store.upsert_chats(&[line]).unwrap();
+    store.touch_chat_time("a", at(7)).unwrap();
+    let mut call_sync = chat("a", "A", Some(at(9)));
+    call_sync.keeps_stored_preview = true;
+    store.upsert_chats(&[call_sync]).unwrap();
+    let record = store.chat("a").unwrap().unwrap();
+    assert_eq!(record.last_message_at, Some(at(9)));
+    assert_eq!(record.preview_at, Some(at(5)));
 }
 
 #[test]
@@ -1032,7 +1047,7 @@ fn migration_indexes_rows_that_predate_search() {
                  ALTER TABLE chats DROP COLUMN muted;
                  ALTER TABLE folders DROP COLUMN expanded;
                  ALTER TABLE channels DROP COLUMN read_until;
-                 PRAGMA user_version = 3;",
+                 ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 3;",
             )
             .unwrap();
     }
@@ -1601,12 +1616,12 @@ fn migration_to_v20_adds_the_call_event_column() {
         Connection::open(&path)
             .unwrap()
             .execute_batch(
-                "ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN call_event_json; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 19",
+                "ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN call_event_json; ALTER TABLE messages DROP COLUMN importance; ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 19",
             )
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 27);
+    assert_eq!(store.schema_version().unwrap(), 28);
     let old = store.messages("c", None, 10).unwrap();
     assert_eq!(old[0].call_event_json, None);
     assert!(store.sync_state("c").unwrap().is_none());
@@ -1652,11 +1667,11 @@ fn migration_to_v21_refetches_chats_and_channels_for_recordings() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 20")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE messages DROP COLUMN importance; ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 20")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 27);
+    assert_eq!(store.schema_version().unwrap(), 28);
     assert!(store.sync_state("c").unwrap().is_none());
     assert!(store.sync_state("channel").unwrap().is_none());
     assert!(store.sync_state("other").unwrap().is_some());
@@ -1682,11 +1697,11 @@ fn migration_to_v22_adds_read_horizons_that_survive_a_reopen() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; DROP TABLE read_horizons; ALTER TABLE messages DROP COLUMN importance; PRAGMA user_version = 21")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; DROP TABLE read_horizons; ALTER TABLE messages DROP COLUMN importance; ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 21")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 27);
+    assert_eq!(store.schema_version().unwrap(), 28);
     assert!(store.read_horizons("c").unwrap().is_empty());
     let horizons = [
         horizon("8:orgid:ada", 3, Some(4)),
@@ -1768,7 +1783,7 @@ fn migration_to_v25_drops_copies_stored_under_a_float_id() {
         drop(store);
         Connection::open(&path)
             .unwrap()
-            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; PRAGMA user_version = 24")
+            .execute_batch("ALTER TABLE team_layout DROP COLUMN owner; ALTER TABLE team_layout DROP COLUMN add_channel; ALTER TABLE team_layout DROP COLUMN add_private_channel; ALTER TABLE team_layout DROP COLUMN edit_channel; ALTER TABLE team_layout DROP COLUMN delete_channel; ALTER TABLE channel_layout DROP COLUMN substrate_group_id; ALTER TABLE channels DROP COLUMN read_until; ALTER TABLE chats DROP COLUMN preview_at; PRAGMA user_version = 24")
             .unwrap();
     }
     let store = Store::open(&path).unwrap();

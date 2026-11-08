@@ -198,7 +198,8 @@ pub fn chat_item(chat: &ChatRecord, input: &SectionInput<'_>, folder_id: Option<
         id: chat.id.clone(),
         title: chat_title(chat),
         time_label: chat
-            .last_message_at
+            .preview_at
+            .or(chat.last_message_at)
             .map(|time| {
                 format::list_time_label(
                     time,

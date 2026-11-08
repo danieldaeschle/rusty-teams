@@ -117,6 +117,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0027_team_rights.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0028_chat_preview_at.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

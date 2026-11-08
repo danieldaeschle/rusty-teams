@@ -28,6 +28,7 @@ pub struct ChatRecord {
     pub title: String,
     pub member_summary: String,
     pub last_message_at: Option<DateTime<Utc>>,
+    pub preview_at: Option<DateTime<Utc>>,
     pub last_read_at: Option<DateTime<Utc>>,
     pub unread: bool,
     pub muted: bool,

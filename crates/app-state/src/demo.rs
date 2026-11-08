@@ -534,6 +534,7 @@ pub fn send_in_chat(
 ) -> (ChatRecord, MessageRecord) {
     let mut chat = chat.clone();
     chat.last_message_at = Some(now);
+    chat.preview_at = Some(now);
     chat.last_message_preview = Some(preview.to_owned());
     chat.last_message_sender_id = Some(DEMO_USER_ID.to_owned());
     chat.last_message_sender_name = Some(DEMO_USER_NAME.to_owned());

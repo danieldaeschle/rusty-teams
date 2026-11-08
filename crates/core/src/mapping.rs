@@ -58,6 +58,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
             .collect::<Vec<_>>()
             .join(", "),
         last_message_at,
+        preview_at: last_message_at.filter(|_| !keeps_stored_preview),
         last_read_at,
         unread: !last_event_system
             && is_unread(chat.last_message_time(), last_read_at, last_from_me),
