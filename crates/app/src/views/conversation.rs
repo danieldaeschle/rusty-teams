@@ -982,7 +982,9 @@ impl ConversationView {
             composer.set_conversation(&conversation_id, window, cx);
         });
         self.sync_reply_composer(window, cx);
-        if !self.draft_active && !self.in_feed() {
+        if self.in_feed() {
+            window.focus(&self.focus_handle, cx);
+        } else if !self.draft_active {
             self.composer
                 .update(cx, |composer, cx| composer.focus(window, cx));
         }

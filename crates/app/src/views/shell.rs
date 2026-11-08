@@ -154,7 +154,6 @@ pub struct AppShell {
     rail: Entity<RailView>,
     sidebar: Entity<SidebarView>,
     calendar: Entity<CalendarView>,
-    shown_selection: Option<Selection>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
     prejoin: Option<Entity<PrejoinView>>,
@@ -213,14 +212,10 @@ impl AppShell {
     }
 
     fn leave_calendar_on_selection(&mut self, cx: &mut Context<Self>) {
-        let selection = self.state.read(cx).selection.clone();
-        if selection == self.shown_selection {
-            return;
-        }
-        self.shown_selection = selection.clone();
         if self.sidebar.read(cx).tab() != SidebarTab::Calendar {
             return;
         }
+        let selection = self.state.read(cx).selection.clone();
         let sidebar = self.sidebar.clone();
         cx.defer(move |cx| {
             sidebar.update(cx, |sidebar, cx| match selection {
@@ -340,6 +335,9 @@ impl AppShell {
                 if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
                     this.apply_open_target(cx);
                 }
+                if matches!(event, AppEvent::Selection) {
+                    this.leave_calendar_on_selection(cx);
+                }
                 if matches!(event, AppEvent::Forward) {
                     this.open_forward_dialog(window, cx);
                 }
@@ -389,7 +387,6 @@ impl AppShell {
             rail,
             sidebar,
             calendar,
-            shown_selection: None,
             conversation,
             call_chat: None,
             prejoin: None,
@@ -978,7 +975,6 @@ impl Render for AppShell {
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         self.sync_prejoin(window, cx);
-        self.leave_calendar_on_selection(cx);
         let notice = self.state.read(cx).notice.clone();
         self.toasts.sync(&self.state, notice.as_ref(), window, cx);
         let update_failure = match &self.update {
