@@ -2270,7 +2270,11 @@ async fn drive(
                         audio_out_packets: snapshot.outbound_packets,
                         audio_in_level: snapshot.audio_level,
                         audio_out_level: snapshot.local_level,
-                        video: snapshot.video.clone(),
+                        video: VideoReport {
+                            frames_received: live.video_counters.received.load(Ordering::Relaxed),
+                            frames_published: live.video_counters.published.load(Ordering::Relaxed),
+                            ..snapshot.video.clone()
+                        },
                         share_in_packets: snapshot.share_inbound_packets,
                         share_out_packets: snapshot.share_outbound_packets,
                     }));

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use calling::{
     AttendeeLimits, CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
     DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingCapability, MeetingRole,
-    MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, ShareSource, SpeakingDetector, VideoHub,
+    MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, ShareSource, SpeakingDetector, StatsSample, VideoHub,
     VideoWant,
 };
 use teams_core::RecordingPolicy;
@@ -298,6 +298,7 @@ pub struct CallModel {
     pub camera: DeviceChoice,
     pub local_share: Option<String>,
     pub share_sources: Vec<ShareSource>,
+    pub last_sample: Option<StatsSample>,
     pub share_sound: bool,
     pub own_hand: Option<u64>,
     pub own_spotlight: Option<u64>,
@@ -365,6 +366,7 @@ impl CallModel {
             camera: DeviceChoice::SystemDefault,
             local_share: None,
             share_sources: Vec::new(),
+            last_sample: None,
             share_sound: false,
             own_hand: None,
             own_spotlight: None,
@@ -526,8 +528,8 @@ impl CallModel {
             CallUpdate::Whiteboard(share) => self.whiteboard = share,
             CallUpdate::Capability(capability) => self.capability = capability,
             CallUpdate::BreakoutRoom { main } => self.main_meeting = Some(main),
+            CallUpdate::Sample(sample) => self.last_sample = Some(sample),
             CallUpdate::BlurTiming(_)
-            | CallUpdate::Sample(_)
             | CallUpdate::Diagnostics(_)
             | CallUpdate::Organizer { .. }
             | CallUpdate::MeetingOptions(_)

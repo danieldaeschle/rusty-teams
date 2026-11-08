@@ -2,10 +2,11 @@
 // The Windows app hosts a fresh Meet now without lobby through `teams.exe --join`; its mic is VB-CABLE fed with a speech file.
 // An anonymous Teams web guest (own incognito context) joins with a second speech file as its mic,
 // and process loopback records what the app plays. Both directions must show speech with pauses.
+// After audio it runs the video, screen share, mute and rejoin scenarios and judges each from both sides' stats.
 // Usage: node scripts/call-e2e.mjs <work dir> [meeting link]
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Browser, FAKE_MEDIA, PEER_HOOK } from './teams-web-cdp.mjs';
+import { Browser, FAKE_MEDIA, PEER_HOOK, PEER_STATS } from './teams-web-cdp.mjs';
 
 const [workDir, givenLink] = process.argv.slice(2);
 const OWN_ENDPOINT = process.env.OWN_CDP ?? 'http://127.0.0.1:9222';
@@ -28,6 +29,10 @@ const LOBBY_TEXTS = ['let you in shortly', 'should let you in soon'];
 const WEB_THRESHOLD = { speech: 0.005, floor: 0.0005 };
 const APP_THRESHOLD = { speech: 200, floor: 20 };
 const SPEECH_TO_PAUSE = 4;
+const SCENARIO_SETTLE_MS = 8_000;
+const SCENARIO_MEASURE_MS = 8_000;
+const STATS_WAIT_MS = 1_500;
+const MIN_FRAMES = 30;
 
 const windowsPath = (path) => execFileSync('wslpath', ['-w', path]).toString().trim();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,6 +224,106 @@ function judge(levels, threshold) {
   return { pass: speech && pauses, p10, p90, windows: levels.length };
 }
 
+
+async function appStats(workDir) {
+  const path = workDir + '/app-stats.json';
+  writeFileSync(path, '');
+  runTeams('--call', `stats ${windowsPath(path)}`);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    await delay(STATS_WAIT_MS);
+    const text = readFileSync(path, 'utf8');
+    if (text) return JSON.parse(text);
+  }
+  throw new Error('the app wrote no stats');
+}
+
+const sum = (entries, key) => entries.reduce((total, entry) => total + (entry[key] || 0), 0);
+
+async function guestVideo(tab) {
+  const stats = await tab.evaluate(PEER_STATS);
+  return {
+    decoded: sum(stats.videoIn, 'decoded'),
+    widest: Math.max(0, ...stats.videoIn.map((entry) => entry.width || 0)),
+    sentFrames: sum(stats.videoOut, 'frames'),
+  };
+}
+
+async function measure(tab, workDir) {
+  const [appBefore, guestBefore] = [await appStats(workDir), await guestVideo(tab)];
+  await delay(SCENARIO_MEASURE_MS);
+  const [appAfter, guestAfter] = [await appStats(workDir), await guestVideo(tab)];
+  const grew = (after, before, key) => (after[key] || 0) - (before[key] || 0);
+  return {
+    app: appAfter,
+    appVideoOut: grew(appAfter, appBefore, 'videoOutFramesEncoded'),
+    appVideoIn: grew(appAfter, appBefore, 'videoInFramesDecoded'),
+    appVideoShown: grew(appAfter, appBefore, 'videoFramesPublished'),
+    appShareOut: grew(appAfter, appBefore, 'shareOutPackets'),
+    appShareIn: grew(appAfter, appBefore, 'shareInPackets'),
+    guestVideoIn: guestAfter.decoded - guestBefore.decoded,
+    guestWidest: guestAfter.widest,
+    guestVideoOut: guestAfter.sentFrames - guestBefore.sentFrames,
+  };
+}
+
+async function scenario(name, report, tab, workDir, act, check) {
+  log(`scenario: ${name}`);
+  try {
+    await act();
+    await delay(SCENARIO_SETTLE_MS);
+    const measured = await measure(tab, workDir);
+    const pass = Boolean(check(measured));
+    report.scenarios[name] = { pass, ...measured, app: undefined, appState: measured.app };
+    log(`scenario ${name}: ${pass ? 'PASS' : 'FAIL'}`);
+    if (!pass) await tab.shot(`${workDir}/${name}.png`).catch(() => {});
+  } catch (error) {
+    report.scenarios[name] = { pass: false, error: error.message };
+    log(`scenario ${name}: ERROR ${error.message}`);
+  }
+}
+
+async function guestClick(tab, labels) {
+  for (const label of labels) {
+    if (await tab.click(label)) return label;
+  }
+  throw new Error(`guest found none of ${labels.join(', ')}`);
+}
+
+async function runScenarios(report, tab, workDir) {
+  report.scenarios = {};
+  await scenario('app-camera-on', report, tab, workDir, () => runTeams('--call', 'camera on'),
+    (m) => m.app.cameraOn && m.appVideoOut >= MIN_FRAMES && m.guestVideoIn >= MIN_FRAMES);
+  await scenario('guest-camera-on', report, tab, workDir, () => guestClick(tab, ['=Turn camera on', 'Turn camera on', '=Camera']),
+    (m) => m.guestVideoOut >= MIN_FRAMES && m.appVideoIn >= MIN_FRAMES && m.appVideoShown >= MIN_FRAMES);
+  await scenario('app-camera-off', report, tab, workDir, () => runTeams('--call', 'camera off'),
+    (m) => !m.app.cameraOn && m.appVideoOut < MIN_FRAMES && m.appVideoIn >= MIN_FRAMES);
+  await scenario('guest-camera-off', report, tab, workDir, () => guestClick(tab, ['=Turn camera off', 'Turn camera off', '=Camera']),
+    (m) => m.appVideoIn < MIN_FRAMES);
+  await scenario('app-share', report, tab, workDir, async () => {
+    runTeams('--call', 'share-sources');
+    await delay(3_000);
+    runTeams('--call', 'share');
+  }, (m) => m.app.localShare && m.appShareOut > 50 && m.guestVideoIn >= MIN_FRAMES);
+  await scenario('app-stop-share', report, tab, workDir, () => runTeams('--call', 'stop-share'),
+    (m) => !m.app.localShare && m.appShareOut < 20);
+  await scenario('guest-share', report, tab, workDir, async () => {
+    await guestClick(tab, ['=Share', 'Share content', 'Share']);
+    await delay(2_000);
+    await guestClick(tab, ['=Screen', 'Share screen', 'Screen', 'Entire screen']).catch(() => null);
+  }, (m) => m.app.screenSharer && m.appShareIn > 50);
+  await scenario('guest-stop-share', report, tab, workDir, () => guestClick(tab, ['=Stop sharing', 'Stop sharing', 'Stop presenting']),
+    (m) => !m.app.screenSharer && m.appShareIn < 20);
+  await scenario('app-mute', report, tab, workDir, () => runTeams('--call', 'mute'), (m) => m.app.muted);
+  const muted = await sampleWeb(tab, 6);
+  report.scenarios['app-mute'].guestHeardWhileMuted = judge(muted, WEB_THRESHOLD);
+  if (report.scenarios['app-mute'].guestHeardWhileMuted.p90 >= WEB_THRESHOLD.speech) report.scenarios['app-mute'].pass = false;
+  await scenario('app-unmute', report, tab, workDir, () => runTeams('--call', 'unmute'), (m) => !m.app.muted);
+  const unmuted = await sampleWeb(tab, 8);
+  report.scenarios['app-unmute'].guestHears = judge(unmuted, WEB_THRESHOLD);
+  if (!report.scenarios['app-unmute'].guestHears.pass) report.scenarios['app-unmute'].pass = false;
+}
+
 const report = { started: new Date().toISOString() };
 const savedCapture = defaultAudio('get', 'capture');
 const restoreCapture = () => defaultAudio('set', 'capture', savedCapture);
@@ -236,7 +341,7 @@ try {
   log('meeting ready');
   defaultAudio('set', 'capture', 'CABLE Output');
   log('default mic: CABLE Output');
-  const playSeconds = Math.ceil((APP_JOIN_WAIT_MS + WEB_JOIN_TIMEOUT_MS) / 1000) + MEASURE_SECONDS + 10;
+  const playSeconds = Math.ceil((APP_JOIN_WAIT_MS + WEB_JOIN_TIMEOUT_MS) / 1000) + MEASURE_SECONDS + 10 + (process.env.AUDIO_ONLY ? 0 : 240);
   const playing = runProbe('play', 'CABLE Input', windowsPath(PROBE_DIR + '/app.wav'), String(playSeconds));
   runTeams('--join', link);
   log(`app joining, waiting ${APP_JOIN_WAIT_MS / 1000}s`);
@@ -264,6 +369,7 @@ try {
   report.webLevels = webLevels.map((level) => Number(level.toFixed(4)));
   report.appLevels = JSON.parse(recorded).rms;
   await tab.shot(workDir + '/web-in-call.png');
+  if (!process.env.AUDIO_ONLY) await runScenarios(report, tab, workDir);
   await playing.catch((error) => (report.playError = error.message));
 } catch (error) {
   report.error = error.message;
@@ -274,7 +380,9 @@ try {
   log('default mic restored');
   browser.socket.close();
 }
-report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass);
+const scenariosPass = Object.values(report.scenarios ?? {}).every((entry) => entry.pass);
+report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass && scenariosPass);
 writeFileSync(workDir + '/report.json', JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ pass: report.pass, appToWeb: report.appToWeb, webToApp: report.webToApp, guestSending: report.guestSending, error: report.error }));
+const scenarioSummary = Object.fromEntries(Object.entries(report.scenarios ?? {}).map(([name, entry]) => [name, entry.pass ? 'pass' : `FAIL ${entry.error ?? ''}`.trim()]));
+console.log(JSON.stringify({ pass: report.pass, appToWeb: report.appToWeb, webToApp: report.webToApp, scenarios: scenarioSummary, guestSending: report.guestSending, error: report.error }));
 process.exit(report.pass ? 0 : 1);
