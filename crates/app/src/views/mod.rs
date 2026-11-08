@@ -85,6 +85,7 @@ pub mod sidebar;
 pub mod status_menu;
 pub mod status_message_dialog;
 pub mod switcher;
+mod switcher_server;
 pub mod title_bar;
 pub mod toolbar_placement;
 pub mod transfer_picker;

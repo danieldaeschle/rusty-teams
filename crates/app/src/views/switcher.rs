@@ -4,21 +4,27 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     v_flex,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::time::Duration;
 
 use chrono::{Local, Offset};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::SearchHit;
+use teams_core::substrate_search::{SearchSession, Suggestions};
 use teams_core::{HIGHLIGHT_END, HIGHLIGHT_START};
 
 use super::avatar::{person_avatar, spec_avatar, team_avatar};
+use super::switcher_server::{
+    PersonResult, merge_messages, people_results, server_message_results,
+};
 use super::widgets::icon;
 use crate::app_state::{AppState, Selection, chat_title};
 use crate::data::{Directory, is_one_on_one};
 use crate::format;
 use crate::fuzzy;
+use crate::runtime;
 use crate::sidebar_model::{AvatarSpec, avatar_for};
 use crate::theme::{self, ElevatedSurface as _};
 
@@ -26,7 +32,11 @@ const MAX_RESULTS: usize = 9;
 const MAX_RESULTS_WITH_MESSAGES: usize = 5;
 const MAX_MESSAGE_RESULTS: usize = 5;
 const MIN_MESSAGE_QUERY_CHARS: usize = 2;
+const MAX_PEOPLE_RESULTS: usize = 4;
+const MIN_SERVER_QUERY_CHARS: usize = 2;
+const SERVER_DEBOUNCE: Duration = Duration::from_millis(200);
 const MESSAGE_GROUP: &str = "Messages";
+const PEOPLE_GROUP: &str = "People";
 const CARD_WIDTH: f32 = 520.;
 
 pub enum SwitcherEvent {
@@ -34,6 +44,9 @@ pub enum SwitcherEvent {
     PickMessage {
         selection: Selection,
         message_id: String,
+    },
+    PickPerson {
+        user_id: String,
     },
     Close,
 }
@@ -120,7 +133,12 @@ pub struct Switcher {
     candidates: Vec<(String, Candidate)>,
     conversations: HashMap<String, (String, Selection)>,
     results: Vec<Candidate>,
+    people: Vec<PersonResult>,
+    local_messages: Vec<MessageResult>,
     messages: Vec<MessageResult>,
+    search_session: SearchSession,
+    generation: u64,
+    rows_scroll: ScrollHandle,
     highlighted: usize,
     _subscription: Subscription,
 }
@@ -195,7 +213,7 @@ impl Switcher {
         cx: &mut Context<Self>,
     ) -> Self {
         let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Jump to a chat, channel or message")
+            InputState::new(window, cx).placeholder("Jump to a chat, channel, person or message")
         });
         if !initial_query.is_empty() {
             let query = initial_query.to_owned();
@@ -218,7 +236,12 @@ impl Switcher {
             candidates,
             conversations,
             results: Vec::new(),
+            people: Vec::new(),
+            local_messages: Vec::new(),
             messages: Vec::new(),
+            search_session: SearchSession::new(),
+            generation: 0,
+            rows_scroll: ScrollHandle::new(),
             highlighted: 0,
             _subscription: subscription,
         };
@@ -226,7 +249,7 @@ impl Switcher {
         switcher
     }
 
-    fn refresh(&mut self, query: &str, cx: &App) {
+    fn refresh(&mut self, query: &str, cx: &mut Context<Self>) {
         let wants_messages = query.trim().chars().count() >= MIN_MESSAGE_QUERY_CHARS;
         let limit = if wants_messages {
             MAX_RESULTS_WITH_MESSAGES
@@ -236,7 +259,7 @@ impl Switcher {
         self.results = fuzzy::rank(query, &self.candidates, limit);
         self.results
             .sort_by_key(|candidate| candidate.group() != "Chats");
-        self.messages = if wants_messages {
+        self.local_messages = if wants_messages {
             let hits = self
                 .app
                 .read(cx)
@@ -253,11 +276,80 @@ impl Switcher {
         } else {
             Vec::new()
         };
+        self.messages = self.local_messages.clone();
+        self.people.clear();
         self.highlighted = 0;
+        self.generation += 1;
+        if query.trim().chars().count() >= MIN_SERVER_QUERY_CHARS {
+            self.schedule_server_search(query.trim().to_owned(), cx);
+        }
+    }
+
+    fn schedule_server_search(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(engine) = self.app.read(cx).engine.clone() else {
+            return;
+        };
+        let generation = self.generation;
+        let search_session = self.search_session.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SERVER_DEBOUNCE).await;
+            let still_current = this
+                .update(cx, |switcher, _| switcher.generation == generation)
+                .unwrap_or(false);
+            if !still_current {
+                return;
+            }
+            let receiver = runtime::spawn(async move {
+                engine.server_suggestions(&search_session, &query).await
+            });
+            let suggestions = match receiver.await {
+                Ok(Ok(suggestions)) => suggestions,
+                _ => return,
+            };
+            this.update(cx, |switcher, cx| {
+                switcher.apply_server(generation, suggestions, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn apply_server(&mut self, generation: u64, suggestions: Suggestions, cx: &mut Context<Self>) {
+        if generation != self.generation {
+            return;
+        }
+        let shown_titles: HashSet<String> = self
+            .results
+            .iter()
+            .map(|candidate| candidate.title.clone())
+            .collect();
+        let my_user_id = self
+            .app
+            .read(cx)
+            .directory
+            .me
+            .as_ref()
+            .map(|me| me.user_id.clone());
+        self.people = people_results(
+            &suggestions.people,
+            &shown_titles,
+            my_user_id.as_deref(),
+            MAX_PEOPLE_RESULTS,
+        );
+        let now = Local::now();
+        let server = server_message_results(
+            &suggestions.messages,
+            &self.conversations,
+            now.date_naive(),
+            now.offset().fix(),
+        );
+        self.messages = merge_messages(&self.local_messages, server, MAX_MESSAGE_RESULTS);
+        self.highlighted = self.highlighted.min(self.result_count().saturating_sub(1));
+        cx.notify();
     }
 
     fn result_count(&self) -> usize {
-        self.results.len() + self.messages.len()
+        self.results.len() + self.people.len() + self.messages.len()
     }
 
     fn on_input_event(
@@ -279,12 +371,15 @@ impl Switcher {
     }
 
     fn pick(&mut self, cx: &mut Context<Self>) {
+        let person_index = self.highlighted.checked_sub(self.results.len());
+        let message_index = person_index.and_then(|index| index.checked_sub(self.people.len()));
         if let Some(candidate) = self.results.get(self.highlighted) {
             cx.emit(SwitcherEvent::Pick(candidate.selection.clone()));
-        } else if let Some(message) = self
-            .highlighted
-            .checked_sub(self.results.len())
-            .and_then(|index| self.messages.get(index))
+        } else if let Some(person) = person_index.and_then(|index| self.people.get(index)) {
+            cx.emit(SwitcherEvent::PickPerson {
+                user_id: person.user_id.clone(),
+            });
+        } else if let Some(message) = message_index.and_then(|index| self.messages.get(index))
         {
             cx.emit(SwitcherEvent::PickMessage {
                 selection: message.selection.clone(),
@@ -302,8 +397,35 @@ impl Switcher {
             "escape" => cx.emit(SwitcherEvent::Close),
             _ => return,
         }
+        self.rows_scroll.scroll_to_item(row_position(
+            &self.results,
+            self.people.len(),
+            self.highlighted,
+        ));
         cx.notify();
     }
+}
+
+fn row_position(results: &[Candidate], people: usize, highlighted: usize) -> usize {
+    let groups = |candidates: &[Candidate]| {
+        candidates
+            .iter()
+            .enumerate()
+            .filter(|(index, candidate)| {
+                *index == 0 || candidates[index - 1].group() != candidate.group()
+            })
+            .count()
+    };
+    if highlighted < results.len() {
+        return groups(&results[..=highlighted]) + highlighted;
+    }
+    let before_people = groups(results) + results.len();
+    let person = highlighted - results.len();
+    if person < people {
+        return before_people + 1 + person;
+    }
+    let before_messages = before_people + if people > 0 { 1 + people } else { 0 };
+    before_messages + 1 + (person - people)
 }
 
 fn group_header(label: &'static str) -> AnyElement {
@@ -374,11 +496,65 @@ impl Render for Switcher {
                     .into_any_element(),
             );
         }
+        if !self.people.is_empty() {
+            rows.push(group_header(PEOPLE_GROUP));
+        }
+        for (offset, person) in self.people.iter().enumerate() {
+            let index = self.results.len() + offset;
+            let user_id = person.user_id.clone();
+            rows.push(
+                h_flex()
+                    .id(ElementId::Name(format!("switch-person-{index}").into()))
+                    .mx(px(6.))
+                    .px(px(6.))
+                    .h(px(44.))
+                    .gap(px(10.))
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .when(index == highlighted, |row| row.bg(theme::popup_hover()))
+                    .hover(|row| row.bg(theme::popup_hover()))
+                    .child(person_avatar(
+                        directory,
+                        Some(&person.user_id),
+                        &person.name,
+                        28.,
+                    ))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(14.))
+                                    .text_color(theme::text())
+                                    .child(person.name.clone()),
+                            )
+                            .when(!person.subtitle.is_empty(), |column| {
+                                column.child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(12.))
+                                        .text_color(theme::text_muted())
+                                        .child(person.subtitle.clone()),
+                                )
+                            }),
+                    )
+                    .child(icon(IconName::User, 14., theme::text_muted()))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(SwitcherEvent::PickPerson {
+                            user_id: user_id.clone(),
+                        });
+                    }))
+                    .into_any_element(),
+            );
+        }
         if !self.messages.is_empty() {
             rows.push(group_header(MESSAGE_GROUP));
         }
         for (offset, message) in self.messages.iter().enumerate() {
-            let index = self.results.len() + offset;
+            let index = self.results.len() + self.people.len() + offset;
             let (selection, message_id) = (message.selection.clone(), message.message_id.clone());
             let marks = message
                 .matches
@@ -498,7 +674,17 @@ impl Render for Switcher {
                             .p(px(8.))
                             .child(Input::new(&self.input).appearance(false).bordered(false)),
                     )
-                    .child(v_flex().w_full().py_1().children(rows))
+                    .child(
+                        v_flex()
+                            .id("switcher-rows")
+                            .track_scroll(&self.rows_scroll)
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .py_1()
+                            .children(rows),
+                    )
                     .child(footer),
             )
     }
@@ -506,7 +692,8 @@ impl Render for Switcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_highlight, parse_snippet};
+    use super::{Candidate, CandidateAvatar, clamp_highlight, parse_snippet, row_position};
+    use crate::app_state::Selection;
     use teams_core::{HIGHLIGHT_END, HIGHLIGHT_START};
 
     #[test]
@@ -529,5 +716,31 @@ mod tests {
         assert_eq!(clamp_highlight(2, 1, 3), 2);
         assert_eq!(clamp_highlight(1, 1, 3), 2);
         assert_eq!(clamp_highlight(0, 1, 0), 0);
+    }
+
+    fn candidate(selection: Selection) -> Candidate {
+        Candidate {
+            title: String::new(),
+            subtitle: String::new(),
+            avatar: CandidateAvatar::Team {
+                name: String::new(),
+                key: String::new(),
+            },
+            selection,
+        }
+    }
+
+    #[test]
+    fn row_positions_count_the_group_headers() {
+        let results = [
+            candidate(Selection::Chat("a".into())),
+            candidate(Selection::Chat("b".into())),
+            candidate(Selection::Channel("c".into())),
+        ];
+        assert_eq!(row_position(&results, 2, 0), 1);
+        assert_eq!(row_position(&results, 2, 2), 4);
+        assert_eq!(row_position(&results, 2, 3), 6);
+        assert_eq!(row_position(&results, 2, 5), 9);
+        assert_eq!(row_position(&results, 0, 3), 6);
     }
 }

@@ -593,6 +593,11 @@ impl AppShell {
                             state.jump_to_message(selection, message_id, cx)
                         });
                     }
+                    SwitcherEvent::PickPerson { user_id } => {
+                        let user_id = user_id.clone();
+                        this.state
+                            .update(cx, |state, cx| state.open_chat_with(&user_id, cx));
+                    }
                     SwitcherEvent::Close => {}
                 }
                 this.switcher = None;
