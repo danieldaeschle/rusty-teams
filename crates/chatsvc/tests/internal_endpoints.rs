@@ -44,6 +44,8 @@ const ALLOWED_PATHS: &[(&str, &str)] = &[
     ("app/src/layout_guard.rs", "layout test fixture"),
     ("graph/src/tabs.rs", "channel tab web links"),
     ("app/src/inline_video.rs", "SharePoint video player link"),
+    ("app/src/views/status_menu.rs", "View account web link"),
+    ("app-state/src/call/week.rs", "demo join link"),
 ];
 
 #[test]

@@ -35,7 +35,10 @@ impl CsaTransport for SessionTransport {
     }
 }
 
-const SKYPE_FETCH_BODY: &str = include_str!("../../assets/csa_skype_fetch.js");
+const SKYPE_FETCH_BODY: &str = concat!(
+    include_str!("../../assets/skype_token.js"),
+    include_str!("../../assets/csa_skype_fetch.js")
+);
 
 /// Teams sends the skype token and the chat service endpoint next to the CSA bearer on the pinned post routes.
 pub struct SkypeTokenTransport {

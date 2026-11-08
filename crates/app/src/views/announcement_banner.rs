@@ -49,6 +49,16 @@ pub fn banner_frame(background: &BannerBackground, directory: &Directory) -> Div
         .overflow_hidden();
     match background {
         BannerBackground::Color(color) => frame.bg(banner_fill(color)),
+        BannerBackground::LocalImage(path) => frame
+            .bg(banner_fill(""))
+            .child(
+                img(std::path::PathBuf::from(path))
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            )
+            .child(div().absolute().inset_0().bg(black().opacity(IMAGE_SHADE))),
         BannerBackground::Image(url) => {
             let frame = frame.bg(banner_fill(""));
             match directory.image(url) {

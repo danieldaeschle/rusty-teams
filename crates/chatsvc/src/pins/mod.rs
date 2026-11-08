@@ -5,7 +5,7 @@ mod pinbar;
 mod posts;
 mod state;
 mod teams;
-mod transport;
+pub(crate) mod transport;
 
 use session::Session;
 

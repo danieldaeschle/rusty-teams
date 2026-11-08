@@ -1,4 +1,5 @@
 pub mod activity_feed;
+pub mod ams;
 pub mod activity_mentions;
 pub mod bot_profiles;
 pub mod calendar;

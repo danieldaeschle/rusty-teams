@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod banner_image;
 pub mod agent_api;
 pub mod agents;
 pub mod app_state;

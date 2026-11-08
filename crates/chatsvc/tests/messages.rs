@@ -440,3 +440,26 @@ async fn post_message_sends_rich_text_to_the_reply_thread_and_returns_the_arriva
             .all(|character| character.is_ascii_digit())
     );
 }
+
+#[tokio::test]
+async fn cards_go_to_the_cards_property_of_the_post() {
+    let mock = Mock::new(&[404, 200]);
+    messages(&mock)
+        .set_cards(
+            &ConversationRef::ChannelRoot {
+                channel_id: "19:c@thread.skype".into(),
+            },
+            "17",
+            "[]",
+        )
+        .await
+        .unwrap();
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].method, Method::Put);
+    assert_eq!(
+        requests[1].url,
+        format!("{BASE}/19%3Ac%40thread.skype/messages/17/properties?name=cards")
+    );
+    assert_eq!(requests[1].body.as_ref().unwrap()["cards"], "[]");
+}

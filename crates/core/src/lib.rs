@@ -1,5 +1,6 @@
 mod actions;
 mod announcement;
+mod announcement_post;
 mod activity_sync;
 mod adaptive_card;
 mod avatars;
@@ -75,6 +76,7 @@ pub use actions::OpenedPost;
 pub use activity_sync::stored_activity_feed;
 pub use announcement::{
     ANNOUNCEMENT_APP_ID, ANNOUNCEMENT_BANNER_TYPE, AnnouncementBanner, BannerBackground,
+    TeamsBannerImage, teams_theme,
 };
 pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
 pub use adaptive_card::{

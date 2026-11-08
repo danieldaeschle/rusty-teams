@@ -151,6 +151,26 @@ impl<T: MessageTransport> Messages<T> {
         ensure_success(&answer)
     }
 
+    /// `cards` is the JSON text of the cards array; Teams web reads each card's `content` as an object.
+    pub async fn set_cards(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        cards: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/properties?name=cards",
+            self.message_url(conversation, message_id)
+        );
+        let body = json!({ "cards": cards });
+        let mut answer = self.put(&url, &body).await?;
+        if answer.status == 404 {
+            tokio::time::sleep(self.retry_delay).await;
+            answer = self.put(&url, &body).await?;
+        }
+        ensure_success(&answer)
+    }
+
     pub async fn soft_delete_message(
         &self,
         conversation: &ConversationRef,

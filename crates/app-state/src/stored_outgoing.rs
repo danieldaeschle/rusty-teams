@@ -242,13 +242,10 @@ mod tests {
     }
 
     #[test]
-    fn an_announcement_is_sent_as_a_banner_attachment_first() {
+    fn an_announcement_stays_out_of_the_graph_body() {
         let extras = outgoing().extras();
-        let banner = &extras.kept[0];
-        assert!(banner.id.starts_with("announcement-card-"));
-        assert_eq!(banner.content_type.as_deref(), Some(teams_core::ANNOUNCEMENT_BANNER_TYPE));
-        assert_eq!(banner.teams_app_id.as_deref(), Some(teams_core::ANNOUNCEMENT_APP_ID));
-        assert!(extras.kept_html().starts_with("<attachment id=\"announcement-card-"));
+        assert!(extras.kept.is_empty());
+        assert_eq!(extras.kept_html(), "");
     }
 
     #[test]

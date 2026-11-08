@@ -72,17 +72,31 @@ pub async fn deliver(
                 .send_message_with_extras(conversation_id, &html, None, mentions, &extras)
                 .await
         }
-        (OutboxTarget::Post, None) => {
-            engine
-                .post_to_channel_with_extras(
-                    conversation_id,
-                    &html,
-                    outgoing.subject.as_deref(),
-                    mentions,
-                    &extras,
-                )
-                .await
-        }
+        (OutboxTarget::Post, None) => match &outgoing.banner {
+            Some(banner) => {
+                engine
+                    .post_announcement(
+                        conversation_id,
+                        &html,
+                        outgoing.subject.as_deref(),
+                        mentions,
+                        &extras,
+                        banner,
+                    )
+                    .await
+            }
+            None => {
+                engine
+                    .post_to_channel_with_extras(
+                        conversation_id,
+                        &html,
+                        outgoing.subject.as_deref(),
+                        mentions,
+                        &extras,
+                    )
+                    .await
+            }
+        },
         (OutboxTarget::Thread, None) => {
             engine
                 .send_message_with_extras(conversation_id, &html, thread_root_id, mentions, &extras)

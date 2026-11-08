@@ -893,7 +893,7 @@ impl<R: Remote> SyncEngine<R> {
         Ok(Some((sent, cached_html)))
     }
 
-    fn cache_sent(
+    pub(crate) fn cache_sent(
         &self,
         conversation_id: &str,
         sent: &graph::Message,
@@ -950,7 +950,7 @@ pub struct OpenedPost {
     pub replies_loaded: bool,
 }
 
-fn outgoing(
+pub(crate) fn outgoing(
     conversation: &Conversation,
     html: &str,
     mentions: &[MentionInput],

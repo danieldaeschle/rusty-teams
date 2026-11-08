@@ -10,7 +10,6 @@ use teams_core::{
 };
 
 use store::MessageImportance;
-use uuid::Uuid;
 
 use crate::remote_image::RemoteImage;
 
@@ -102,11 +101,7 @@ impl Outgoing {
     pub fn extras(&self) -> MessageExtras {
         MessageExtras {
             importance: self.importance.stored(),
-            kept: self
-                .banner
-                .iter()
-                .map(|banner| banner.attachment(format!("announcement-card-{}", Uuid::new_v4().simple())))
-                .collect(),
+            kept: Vec::new(),
             images: self
                 .images
                 .iter()

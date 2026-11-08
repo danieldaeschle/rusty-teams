@@ -4,6 +4,7 @@ use gpui_kit::component::{Sizable as _, Size, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::banner_image::prepare_banner_image;
 use teams_core::{AnnouncementBanner, BannerBackground};
 
 use super::{COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer, ComposerEvent};
@@ -26,6 +27,7 @@ pub const POST_AUDIENCE_TAG: &str = "composer/post/audience";
 const DEMO_AUDIENCE: usize = 24;
 const AUDIENCE_HEIGHT: f32 = 32.;
 const ANNOUNCEMENT_TOOLTIP: &str = "Announcement";
+const BANNER_IMAGE_TOOLTIP: &str = "Upload an image";
 const HEADLINE_PLACEHOLDER: &str = "Type a headline";
 pub const SUBJECT_PLACEHOLDER: &str = "Add a subject";
 const SUBHEADING_PLACEHOLDER: &str = "Add a subheading";
@@ -48,7 +50,17 @@ const TEXT_INSET: f32 = 16.;
 pub(super) struct AnnouncementDraft {
     pub(super) headline: Entity<InputState>,
     color: &'static str,
+    image: Option<String>,
     _changes: Subscription,
+}
+
+impl AnnouncementDraft {
+    fn background(&self) -> BannerBackground {
+        match &self.image {
+            Some(path) => BannerBackground::LocalImage(path.clone()),
+            None => BannerBackground::Color(self.color.to_owned()),
+        }
+    }
 }
 
 pub fn audience_hint(count: usize) -> String {
@@ -96,7 +108,7 @@ impl Composer {
         let title = draft.headline.read(cx).value().trim().to_owned();
         (!title.is_empty()).then(|| AnnouncementBanner {
             title,
-            background: BannerBackground::Color(draft.color.to_owned()),
+            background: draft.background(),
         })
     }
 
@@ -113,10 +125,15 @@ impl Composer {
                         .into_iter()
                         .find(|known| known == color)
                         .unwrap_or(BANNER_COLORS[0]),
-                    BannerBackground::Image(_) => BANNER_COLORS[0],
+                    BannerBackground::Image(_) | BannerBackground::LocalImage(_) => {
+                        BANNER_COLORS[0]
+                    }
                 };
                 self.open_announcement(color, window, cx);
-                if let Some(draft) = &self.announcement {
+                if let Some(draft) = self.announcement.as_mut() {
+                    if let BannerBackground::LocalImage(path) = &banner.background {
+                        draft.image = Some(path.clone());
+                    }
                     let title = banner.title.clone();
                     draft
                         .headline
@@ -156,12 +173,46 @@ impl Composer {
         self.announcement = Some(AnnouncementDraft {
             headline,
             color,
+            image: None,
             _changes: changes,
         });
         self.set_subject_placeholder(SUBHEADING_PLACEHOLDER, window, cx);
         self.load_audience(cx);
         self.schedule_draft_save(cx);
         cx.notify();
+    }
+
+    fn pick_banner_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(source) = paths.into_iter().next() else {
+                return;
+            };
+            let prepared = cx
+                .background_executor()
+                .spawn(async move { prepare_banner_image(&source) })
+                .await;
+            this.update(cx, |this, cx| match prepared {
+                Ok(path) => {
+                    if let Some(draft) = this.announcement.as_mut() {
+                        draft.image = Some(path.to_string_lossy().into_owned());
+                        this.schedule_draft_save(cx);
+                        cx.notify();
+                    }
+                }
+                Err(error) => log::warn!("banner image: {error}"),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(super) fn close_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -297,7 +348,7 @@ impl Composer {
             .bottom(px(SWATCH_INSET))
             .gap(px(SWATCH_GAP))
             .children(BANNER_COLORS.into_iter().map(|color| {
-                let selected = color == draft.color;
+                let selected = color == draft.color && draft.image.is_none();
                 div()
                     .id(ElementId::Name(format!("composer-banner-{color}").into()))
                     .size(px(SWATCH_SIZE))
@@ -314,11 +365,33 @@ impl Composer {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(draft) = this.announcement.as_mut() {
                             draft.color = color;
+                            draft.image = None;
                             this.schedule_draft_save(cx);
                             cx.notify();
                         }
                     }))
-            }));
+            }))
+            .child({
+                let selected = draft.image.is_some();
+                div()
+                    .id("composer-banner-image")
+                    .size(px(SWATCH_SIZE))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .border(px(SWATCH_RING))
+                    .border_color(if selected {
+                        white()
+                    } else {
+                        white().opacity(0.4)
+                    })
+                    .bg(black().opacity(0.35))
+                    .cursor_pointer()
+                    .tooltip(|window, cx| Tooltip::new(BANNER_IMAGE_TOOLTIP).build(window, cx))
+                    .child(symbol("image", SWATCH_SIZE - 6., white()))
+                    .on_click(cx.listener(|this, _, window, cx| this.pick_banner_image(window, cx)))
+            });
         Some(
             div()
                 .debug_selector(|| POST_ANNOUNCEMENT_TAG.into())
@@ -326,7 +399,7 @@ impl Composer {
                 .px(px(CARD_INSET))
                 .pt(px(CARD_INSET))
                 .child(
-                    banner_frame(&BannerBackground::Color(draft.color.to_owned()), directory)
+                    banner_frame(&draft.background(), directory)
                         .h(px(COMPOSER_BANNER_HEIGHT))
                         .child(
                             headline_style(div().w_full()).child(

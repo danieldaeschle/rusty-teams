@@ -7,11 +7,38 @@ pub const ANNOUNCEMENT_BANNER_TYPE: &str =
 pub const ANNOUNCEMENT_APP_ID: &str = "announcement-card";
 const DEFAULT_BANNER_COLOR: &str = "periwinkleBlue";
 const COLOR_THEME: &str = "colorTheme";
+const UPLOADED_IMAGE: &str = "uploadedImage";
+const LOCAL_IMAGE: &str = "localImage";
+const TEAMS_THEMES: [&str; 12] = [
+    "periwinkleBlue",
+    "lavender",
+    "rose",
+    "orangeSherbet",
+    "flaxYellow",
+    "teal",
+    "navyBlue",
+    "indigo",
+    "mulberryRed",
+    "fireOrange",
+    "rawUmber",
+    "oceanGreen",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BannerBackground {
     Color(String),
     Image(String),
+    /// A picked file that is uploaded when the post is sent.
+    LocalImage(String),
+}
+
+/// Teams web stores the color theme as its index.
+pub fn teams_theme(color: &str) -> String {
+    TEAMS_THEMES
+        .iter()
+        .position(|known| *known == color)
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +60,12 @@ impl AnnouncementBanner {
     pub fn parse(content: &str) -> Option<AnnouncementBanner> {
         let content: Value = serde_json::from_str(content).ok()?;
         let title = content.get("title")?.as_str()?.trim().to_owned();
+        if let Some(path) = content.get(LOCAL_IMAGE).and_then(Value::as_str) {
+            return Some(AnnouncementBanner {
+                title,
+                background: BannerBackground::LocalImage(path.to_owned()),
+            });
+        }
         let details = content.get("cardImageDetails");
         let image = details
             .filter(|_| content.get("cardImageType").and_then(Value::as_str) != Some(COLOR_THEME))
@@ -66,31 +99,69 @@ impl AnnouncementBanner {
         })
     }
 
-    /// `id` must be unique per message; Teams uses `announcement-card-<guid>`.
-    pub fn attachment(&self, id: String) -> graph::KeptAttachment {
-        graph::KeptAttachment {
-            id,
+    /// Graph shape, as Graph returns it for a post.
+    pub fn attachment(&self, id: String) -> graph::Attachment {
+        graph::Attachment {
+            id: Some(id),
             content_type: Some(ANNOUNCEMENT_BANNER_TYPE.to_owned()),
-            content: Some(self.content()),
             content_url: None,
             name: None,
+            content: Some(self.content()),
             teams_app_id: Some(ANNOUNCEMENT_APP_ID.to_owned()),
         }
     }
 
-    /// Only color banners can be sent; uploaded images need the Teams image service.
+    /// Graph shape; a local image keeps its path so a queued post survives a restart.
     pub fn content(&self) -> String {
-        let color = match &self.background {
-            BannerBackground::Color(color) => color.as_str(),
-            BannerBackground::Image(_) => DEFAULT_BANNER_COLOR,
+        let mut content = json!({ "title": self.title });
+        match &self.background {
+            BannerBackground::Color(color) => {
+                content["cardImageType"] = json!(COLOR_THEME);
+                content["cardImageDetails"] = json!({ COLOR_THEME: color });
+            }
+            BannerBackground::Image(url) => {
+                content["cardImageType"] = json!(UPLOADED_IMAGE);
+                content["cardImageDetails"] = json!({ "uploadedImageDetail": {
+                    "originalImage": { "source": url },
+                    "croppedImage": { "source": url },
+                }});
+            }
+            BannerBackground::LocalImage(path) => content[LOCAL_IMAGE] = json!(path),
+        }
+        content.to_string()
+    }
+
+    /// The chat service `cards` property Teams web renders; `image` is the uploaded background.
+    pub fn teams_cards(&self, image: Option<&TeamsBannerImage>) -> String {
+        let content = match (image, &self.background) {
+            (Some(image), _) => json!({ "imageData": {
+                "origImage": { "id": image.object_id, "src": image.url },
+                "croppedImage": {
+                    "id": image.object_id,
+                    "src": image.url,
+                    "imageWidth": image.width,
+                    "imageHeight": image.height,
+                    "imageAltText": "",
+                },
+            }}),
+            (None, BannerBackground::Color(color)) => json!({ COLOR_THEME: teams_theme(color) }),
+            (None, _) => json!({ COLOR_THEME: teams_theme(DEFAULT_BANNER_COLOR) }),
         };
-        json!({
-            "title": self.title,
-            "cardImageType": COLOR_THEME,
-            "cardImageDetails": { COLOR_THEME: color },
-        })
+        json!([{
+            "appId": ANNOUNCEMENT_APP_ID,
+            "contentType": ANNOUNCEMENT_BANNER_TYPE,
+            "content": content,
+        }])
         .to_string()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamsBannerImage {
+    pub object_id: String,
+    pub url: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 fn image_source(details: &Value, key: &str) -> Option<String> {
@@ -148,6 +219,44 @@ mod tests {
             background: BannerBackground::Color("teal".into()),
         };
         assert_eq!(AnnouncementBanner::parse(&banner.content()), Some(banner));
+    }
+
+    #[test]
+    fn teams_cards_carry_the_theme_index_or_the_uploaded_image() {
+        let banner = AnnouncementBanner {
+            title: "Ship it".into(),
+            background: BannerBackground::Color("indigo".into()),
+        };
+        let cards: Value = serde_json::from_str(&banner.teams_cards(None)).unwrap();
+        assert_eq!(cards[0]["appId"], ANNOUNCEMENT_APP_ID);
+        assert_eq!(cards[0]["contentType"], ANNOUNCEMENT_BANNER_TYPE);
+        assert_eq!(cards[0]["content"], json!({"colorTheme": "7"}));
+        let image = TeamsBannerImage {
+            object_id: "0-a".into(),
+            url: "https://ams.test/0-a".into(),
+            width: 1200,
+            height: 300,
+        };
+        let cards: Value = serde_json::from_str(&banner.teams_cards(Some(&image))).unwrap();
+        let cropped = &cards[0]["content"]["imageData"]["croppedImage"];
+        assert_eq!(cropped["src"], "https://ams.test/0-a");
+        assert_eq!(cropped["imageHeight"], 300);
+        assert_eq!(cards[0]["content"]["imageData"]["origImage"]["id"], "0-a");
+        assert_eq!(teams_theme("unknown"), "0");
+    }
+
+    #[test]
+    fn local_and_uploaded_images_round_trip() {
+        for background in [
+            BannerBackground::LocalImage("/home/a/b.png".into()),
+            BannerBackground::Image("https://ams.test/0-a".into()),
+        ] {
+            let banner = AnnouncementBanner {
+                title: "Hi".into(),
+                background,
+            };
+            assert_eq!(AnnouncementBanner::parse(&banner.content()), Some(banner));
+        }
     }
 
     #[test]

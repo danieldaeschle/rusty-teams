@@ -132,6 +132,19 @@ pub trait Remote {
         display_name: &str,
         properties: &serde_json::Value,
     ) -> Result<String>;
+    /// Readable by the members of `conversation_id`; returns the object id and its full size url.
+    async fn upload_ams_image(
+        &self,
+        conversation_id: &str,
+        bytes: &[u8],
+        filename: &str,
+    ) -> Result<chatsvc::ams::AmsImage>;
+    async fn set_message_cards(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        cards: &str,
+    ) -> Result<()>;
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()>;
     async fn mark_chat_unread(
         &self,
@@ -794,6 +807,28 @@ impl Remote for Graph {
     ) -> Result<String> {
         Ok(Messages::new(self.session())
             .post_message(conversation, html, display_name, properties)
+            .await?)
+    }
+
+    async fn upload_ams_image(
+        &self,
+        conversation_id: &str,
+        bytes: &[u8],
+        filename: &str,
+    ) -> Result<chatsvc::ams::AmsImage> {
+        Ok(chatsvc::ams::Ams::new(self.session())
+            .upload_image(conversation_id, bytes, filename)
+            .await?)
+    }
+
+    async fn set_message_cards(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        cards: &str,
+    ) -> Result<()> {
+        Ok(Messages::new(self.session())
+            .set_cards(conversation, message_id, cards)
             .await?)
     }
 

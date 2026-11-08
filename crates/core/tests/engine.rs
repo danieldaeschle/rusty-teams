@@ -544,6 +544,32 @@ impl Remote for Handle {
         Ok("1727203440000".to_owned())
     }
 
+    async fn upload_ams_image(
+        &self,
+        conversation_id: &str,
+        bytes: &[u8],
+        filename: &str,
+    ) -> Result<chatsvc::ams::AmsImage> {
+        self.record(format!("ams upload {conversation_id} {filename} {}", bytes.len()));
+        Ok(chatsvc::ams::AmsImage {
+            object_id: "0-ams".to_owned(),
+            url: "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize".to_owned(),
+        })
+    }
+
+    async fn set_message_cards(
+        &self,
+        conversation: &chatsvc::ConversationRef,
+        message_id: &str,
+        cards: &str,
+    ) -> Result<()> {
+        self.record(format!(
+            "cards {} {message_id} {cards}",
+            conversation.conversation_id()
+        ));
+        Ok(())
+    }
+
     async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
         self.record(format!("mark_read {chat_id} {user_id} {tenant_id}"));
         Ok(())
@@ -2119,6 +2145,43 @@ async fn channel_delta_failure_falls_back_to_the_first_page() {
             .unwrap()
             .delta_link,
         None
+    );
+}
+
+#[tokio::test]
+async fn an_announcement_posts_through_graph_then_adds_the_banner_card() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("banner.png");
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend_from_slice(&1317u32.to_be_bytes());
+    png.extend_from_slice(&366u32.to_be_bytes());
+    std::fs::write(&path, &png).unwrap();
+    let banner = teams_core::AnnouncementBanner {
+        title: "Ship it".to_owned(),
+        background: teams_core::BannerBackground::LocalImage(path.to_string_lossy().into_owned()),
+    };
+    let record = engine
+        .post_announcement(CHANNEL, "<p>hi</p>", Some("Topic"), &[], &MessageExtras::default(), &banner)
+        .await
+        .unwrap();
+    let calls: Vec<String> = fake
+        .calls()
+        .into_iter()
+        .filter(|call| !call.starts_with("channel_delta"))
+        .collect();
+    assert_eq!(calls.len(), 3);
+    assert!(calls[0].starts_with(&format!("ams upload {CHANNEL} MicrosoftTeams-image.png")));
+    assert_eq!(calls[1], "post subject=Some(\"Topic\")");
+    assert!(calls[2].starts_with(&format!("cards {CHANNEL} m9001 ")));
+    assert!(calls[2].contains("\"imageHeight\":366"));
+    let shown = teams_core::AnnouncementBanner::from_attachments(&teams_core::attachments(&record));
+    assert_eq!(
+        shown.map(|banner| banner.background),
+        Some(teams_core::BannerBackground::Image(
+            "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize".to_owned()
+        ))
     );
 }
 
