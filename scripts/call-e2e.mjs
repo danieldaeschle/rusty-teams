@@ -379,9 +379,26 @@ async function runScenarios(report, tab, workDir) {
   report.scenarios['app-mute'].guestHeardWhileMuted = judge(muted, WEB_THRESHOLD);
   if (report.scenarios['app-mute'].guestHeardWhileMuted.p90 >= WEB_THRESHOLD.speech) report.scenarios['app-mute'].pass = false;
   await scenario('app-unmute', report, tab, workDir, () => runTeams('--call', 'unmute'), (m) => !m.app.muted);
-  const unmuted = await sampleWeb(tab, 8);
-  report.scenarios['app-unmute'].guestHears = judge(unmuted, WEB_THRESHOLD);
-  if (!report.scenarios['app-unmute'].guestHears.pass) report.scenarios['app-unmute'].pass = false;
+  await audioCheck(report, 'app-unmute', tab, true);
+  await scenario('mic-to-other-device', report, tab, workDir, () => runTeams('--call', 'input microphone array'),
+    (m) => m.app.inCall && /Device/.test(m.app.input ?? ''));
+  await scenario('mic-back-to-cable', report, tab, workDir, () => runTeams('--call', 'input cable output'), (m) => m.app.inCall);
+  await audioCheck(report, 'mic-back-to-cable', tab, true);
+  await scenario('leave-and-rejoin', report, tab, workDir, async () => {
+    runTeams('--hang-up');
+    await delay(8_000);
+    runTeams('--join', report.link);
+    await delay(APP_JOIN_WAIT_MS);
+    runTeams('--unmute');
+  }, (m) => m.app.inCall);
+  await audioCheck(report, 'leave-and-rejoin', tab, true);
+}
+
+async function audioCheck(report, name, tab, expectSpeech) {
+  const entry = report.scenarios[name];
+  if (!entry) return;
+  entry.guestHears = judge(await sampleWeb(tab, 8), WEB_THRESHOLD);
+  if (entry.guestHears.pass !== expectSpeech) entry.pass = false;
 }
 
 const report = { started: new Date().toISOString() };
@@ -402,7 +419,7 @@ try {
   log('meeting ready');
   defaultAudio('set', 'capture', 'CABLE Output');
   log('default mic: CABLE Output');
-  const playSeconds = Math.ceil((APP_JOIN_WAIT_MS + WEB_JOIN_TIMEOUT_MS) / 1000) + MEASURE_SECONDS + 10 + (process.env.AUDIO_ONLY ? 0 : 240);
+  const playSeconds = Math.ceil((APP_JOIN_WAIT_MS + WEB_JOIN_TIMEOUT_MS) / 1000) + MEASURE_SECONDS + 10 + (process.env.AUDIO_ONLY ? 0 : 360);
   const playing = runProbe('play', 'CABLE Input', windowsPath(PROBE_DIR + '/app.wav'), String(playSeconds));
   runTeams('--join', link);
   log(`app joining, waiting ${APP_JOIN_WAIT_MS / 1000}s`);

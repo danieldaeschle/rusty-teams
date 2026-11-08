@@ -1,4 +1,4 @@
-use calling::{CallCommand, MuteCommand, ShareKind};
+use calling::{CallCommand, DeviceChoice, MuteCommand, ShareKind};
 use gpui_kit::*;
 use serde_json::json;
 
@@ -21,6 +21,8 @@ const SHARE_SOURCES_COMMAND: &str = "share-sources";
 const SHARE_COMMAND: &str = "share";
 const STOP_SHARE_COMMAND: &str = "stop-share";
 const STATS_COMMAND: &str = "stats ";
+const INPUT_COMMAND: &str = "input ";
+const DEFAULT_DEVICE: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteCommand {
@@ -34,6 +36,7 @@ pub enum RemoteCommand {
     ShareScreen,
     StopShare,
     Stats(String),
+    Input(String),
 }
 
 impl RemoteCommand {
@@ -50,6 +53,7 @@ impl RemoteCommand {
             RemoteCommand::ShareScreen => SHARE_COMMAND.to_owned(),
             RemoteCommand::StopShare => STOP_SHARE_COMMAND.to_owned(),
             RemoteCommand::Stats(path) => format!("{STATS_COMMAND}{path}"),
+            RemoteCommand::Input(name) => format!("{INPUT_COMMAND}{name}"),
         }
     }
 
@@ -65,6 +69,9 @@ impl RemoteCommand {
             SHARE_COMMAND => return Some(RemoteCommand::ShareScreen),
             STOP_SHARE_COMMAND => return Some(RemoteCommand::StopShare),
             _ => {}
+        }
+        if let Some(name) = text.strip_prefix(INPUT_COMMAND).map(str::trim) {
+            return (!name.is_empty()).then(|| RemoteCommand::Input(name.to_owned()));
         }
         if let Some(path) = text.strip_prefix(STATS_COMMAND).map(str::trim) {
             return (!path.is_empty()).then(|| RemoteCommand::Stats(path.to_owned()));
@@ -91,6 +98,7 @@ impl AppState {
             Some(RemoteCommand::RefreshShareSources) => self.send_call_command(CallCommand::RefreshShareSources),
             Some(RemoteCommand::ShareScreen) => self.share_first_screen(),
             Some(RemoteCommand::StopShare) => self.send_call_command(CallCommand::StopShare),
+            Some(RemoteCommand::Input(name)) => self.switch_input_for_test(&name),
             Some(RemoteCommand::Stats(path)) => {
                 let _ = std::fs::write(path, self.call_stats().to_string());
             }
@@ -111,6 +119,26 @@ impl AppState {
         }
     }
 
+    /// Switches the call's microphone without saving it as the user's choice.
+    fn switch_input_for_test(&self, name: &str) {
+        if name == DEFAULT_DEVICE {
+            self.send_call_command(CallCommand::SelectInput(DeviceChoice::SystemDefault));
+            return;
+        }
+        let wanted = name.to_lowercase();
+        let device = self.call.as_ref().and_then(|call| {
+            call.model
+                .devices
+                .inputs
+                .iter()
+                .find(|device| device.name.to_lowercase().contains(&wanted))
+                .map(|device| device.key())
+        });
+        if let Some(key) = device {
+            self.send_call_command(CallCommand::SelectInput(DeviceChoice::Device(key)));
+        }
+    }
+
     fn call_stats(&self) -> serde_json::Value {
         let Some(call) = self.call.as_ref() else {
             return json!({ "inCall": false });
@@ -121,6 +149,7 @@ impl AppState {
             "inCall": true,
             "state": format!("{:?}", model.state),
             "muted": model.muted,
+            "input": format!("{:?}", model.input),
             "cameraOn": model.camera_on,
             "localShare": model.local_share,
             "screenSharer": model.screen_sharer,
@@ -162,6 +191,7 @@ mod tests {
             RemoteCommand::ShareScreen,
             RemoteCommand::StopShare,
             RemoteCommand::Stats("C:\\temp\\stats.json".to_owned()),
+            RemoteCommand::Input("cable output".to_owned()),
         ] {
             assert_eq!(RemoteCommand::decode(&command.encode()), Some(command));
         }
