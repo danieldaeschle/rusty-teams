@@ -24,6 +24,53 @@ pub fn week_start(date: NaiveDate) -> NaiveDate {
     date - Duration::days(i64::from(date.weekday().num_days_from_monday()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CalendarSpan {
+    Day,
+    #[default]
+    WorkWeek,
+    Week,
+}
+
+impl CalendarSpan {
+    pub const ALL: [CalendarSpan; 3] = [
+        CalendarSpan::Day,
+        CalendarSpan::WorkWeek,
+        CalendarSpan::Week,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CalendarSpan::Day => "Day",
+            CalendarSpan::WorkWeek => "Work week",
+            CalendarSpan::Week => "Week",
+        }
+    }
+
+    pub fn days(self) -> i64 {
+        match self {
+            CalendarSpan::Day => 1,
+            CalendarSpan::WorkWeek => WORK_WEEK_DAYS,
+            CalendarSpan::Week => 7,
+        }
+    }
+
+    pub fn start_for(self, date: NaiveDate) -> NaiveDate {
+        match self {
+            CalendarSpan::Day => date,
+            CalendarSpan::WorkWeek => work_week_for(date),
+            CalendarSpan::Week => week_start(date),
+        }
+    }
+
+    pub fn step(self) -> Duration {
+        match self {
+            CalendarSpan::Day => Duration::days(1),
+            CalendarSpan::WorkWeek | CalendarSpan::Week => Duration::weeks(1),
+        }
+    }
+}
+
 /// On a weekend the work week view shows the coming week, as Outlook does.
 pub fn work_week_for(today: NaiveDate) -> NaiveDate {
     match today.weekday() {
@@ -235,6 +282,19 @@ mod tests {
             (days[1].blocks[0].start_minute, days[1].blocks[0].end_minute),
             (0, 30)
         );
+    }
+
+    #[test]
+    fn spans_start_and_step_like_teams() {
+        let wednesday = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
+        assert_eq!(CalendarSpan::Day.start_for(wednesday), wednesday);
+        assert_eq!(CalendarSpan::WorkWeek.start_for(wednesday), monday);
+        assert_eq!(CalendarSpan::Week.start_for(wednesday), monday);
+        let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        assert_eq!(CalendarSpan::Week.start_for(sunday), monday);
+        assert_eq!(CalendarSpan::Day.step(), Duration::days(1));
+        assert_eq!(CalendarSpan::Week.days(), 7);
     }
 
     #[test]

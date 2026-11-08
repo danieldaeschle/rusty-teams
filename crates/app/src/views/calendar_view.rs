@@ -3,7 +3,7 @@ use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -14,7 +14,7 @@ use super::new_meeting_dialog::open_new_meeting;
 use crate::app_state::AppState;
 use crate::call::join_available;
 use crate::call::week_grid::{
-    WORK_WEEK_DAYS, WeekBlock, WeekDay, hour_label, range_label, week_days,
+    CalendarSpan, WeekBlock, WeekDay, hour_label, range_label, week_days,
 };
 use crate::theme;
 
@@ -47,7 +47,8 @@ impl CalendarView {
         }
     }
 
-    fn header(&self, start: NaiveDate, compact: bool) -> impl IntoElement {
+    fn header(&self, start: NaiveDate, span: CalendarSpan, compact: bool) -> impl IntoElement {
+        let span_state = self.state.clone();
         let label = |text: &'static str| (!compact).then_some(text);
         let (today, back, forward) = (self.state.clone(), self.state.clone(), self.state.clone());
         let (join_state, meet_state, new_state) =
@@ -82,7 +83,11 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronLeft)
-                    .tooltip("Go to previous week")
+                    .tooltip(if span == CalendarSpan::Day {
+                        "Go to previous day"
+                    } else {
+                        "Go to previous week"
+                    })
                     .on_click(move |_, _, cx| {
                         back.update(cx, |state, cx| state.shift_calendar_week(-1, cx))
                     }),
@@ -92,7 +97,11 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronRight)
-                    .tooltip("Go to next week")
+                    .tooltip(if span == CalendarSpan::Day {
+                        "Go to next day"
+                    } else {
+                        "Go to next week"
+                    })
                     .on_click(move |_, _, cx| {
                         forward.update(cx, |state, cx| state.shift_calendar_week(1, cx))
                     }),
@@ -104,7 +113,28 @@ impl CalendarView {
                     .truncate()
                     .text_size(px(14.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(range_label(start, WORK_WEEK_DAYS)),
+                    .child(range_label(start, span.days())),
+            )
+            .child(
+                Button::new("calendar-span")
+                    .small()
+                    .ghost()
+                    .label(span.label())
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        CalendarSpan::ALL.iter().fold(menu, |menu, &choice| {
+                            let state = span_state.clone();
+                            menu.item(
+                                PopupMenuItem::new(choice.label())
+                                    .checked(choice == span)
+                                    .on_click(move |_, _, cx| {
+                                        state.update(cx, |state, cx| {
+                                            state.set_calendar_span(choice, cx)
+                                        })
+                                    }),
+                            )
+                        })
+                    }),
             )
             .child(
                 Button::new("calendar-join-id")
@@ -474,7 +504,8 @@ impl Render for CalendarView {
         let events = state.calendar_week.events.clone();
         let send_response = state.rsvp_send_response;
         let offset = Local::now().offset().fix();
-        let days = week_days(&events, start, WORK_WEEK_DAYS, offset);
+        let span = state.calendar_week.span;
+        let days = week_days(&events, start, span.days(), offset);
         let today = Local::now().date_naive();
         let now = Utc::now();
         v_flex()
@@ -486,7 +517,7 @@ impl Render for CalendarView {
             .rounded(px(10.))
             .bg(theme::surface())
             .overflow_hidden()
-            .child(self.header(start, compact))
+            .child(self.header(start, span, compact))
             .child(self.day_headers(&days, today))
             .children(self.all_day_row(&days, &events))
             .child(self.grid(&days, &events, today, now, send_response))
