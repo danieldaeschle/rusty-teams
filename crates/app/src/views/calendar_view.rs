@@ -466,7 +466,7 @@ impl CalendarView {
                                         div()
                                             .absolute()
                                             .top(px(now_top - NOW_DOT_SIZE / 2.))
-                                            .left(px(-NOW_DOT_SIZE / 2.))
+                                            .left_0()
                                             .size(px(NOW_DOT_SIZE))
                                             .rounded_full()
                                             .bg(theme::accent()),
@@ -534,9 +534,11 @@ fn status_bar(look: EventLook) -> Option<Div> {
     match look {
         EventLook::Busy => Some(bar.bg(theme::accent())),
         EventLook::Tentative => Some(
-            bar.border_1()
-                .border_color(theme::accent())
-                .bg(pattern_slash(theme::accent(), HATCH_STRIPE, HATCH_GAP)),
+            bar.bg(theme::accent().opacity(BUSY_FILL_OPACITY)).child(
+                div()
+                    .size_full()
+                    .bg(pattern_slash(theme::accent(), HATCH_STRIPE, HATCH_GAP)),
+            ),
         ),
         EventLook::Free => None,
     }

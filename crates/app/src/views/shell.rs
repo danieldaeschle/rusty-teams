@@ -886,7 +886,7 @@ impl AppShell {
             .flex_1()
             .min_h_0()
             .w_full()
-            .gap(px(ISLAND_GAP))
+            .when(show_sidebar, |islands| islands.gap(px(ISLAND_GAP)))
             .pr(px(ISLAND_GAP))
             .pb(px(ISLAND_GAP))
             .child(
@@ -997,8 +997,8 @@ impl Render for AppShell {
                 && sidebar_hidden_in_call(window_width, panel_open));
         let island_width = window_width
             - RAIL_WIDTH
-            - if show_sidebar { SIDEBAR_WIDTH } else { 0. }
-            - 2. * ISLAND_GAP;
+            - if show_sidebar { SIDEBAR_WIDTH + ISLAND_GAP } else { 0. }
+            - ISLAND_GAP;
         let call_view = render_call_view(&self.state, state, chat_panel, call_fullscreen, island_width)
             .filter(|_| state.viewing_call())
             .or_else(|| render_call_end(&self.state, state));

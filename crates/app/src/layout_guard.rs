@@ -1004,6 +1004,21 @@ mod frames {
                     _ => {}
                 }
                 let mut found = violations(&tags, window, &expected);
+                let bounds_of = |wanted: &str| {
+                    tags.iter()
+                        .find(|(path, _)| *path == wanted)
+                        .map(|(_, bounds)| *bounds)
+                };
+                let first_island = bounds_of("shell/islands/sidebar").or_else(|| bounds_of(CALENDAR));
+                if let (Some(rail), Some(island)) = (bounds_of("shell/islands/rail"), first_island) {
+                    let gap = f32::from(island.origin.x) - f32::from(rail.origin.x + rail.size.width);
+                    if gap.abs() > 0.5 {
+                        found.push((
+                            "shell/islands/rail:gap".to_owned(),
+                            format!("first island starts {gap} px after the rail, expected 0"),
+                        ));
+                    }
+                }
                 if status_menu {
                     let menu = tags
                         .iter()
