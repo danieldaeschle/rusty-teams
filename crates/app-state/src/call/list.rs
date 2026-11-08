@@ -1,23 +1,14 @@
 use std::ops::Range;
 
-use chatsvc::CalendarEvent;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use store::ChatRecord;
 use teams_core::{CallDirection, CallLogEntry};
 
-use super::agenda::{AgendaRow, group_by_day};
 use super::history::{CallRow, call_rows};
 
-pub const SECTION_HEIGHT: f32 = 34.;
-pub const DAY_HEIGHT: f32 = 26.;
-pub const AGENDA_ROW_HEIGHT: f32 = 58.;
 pub const CALL_ROW_HEIGHT: f32 = 54.;
 pub const EMPTY_HEIGHT: f32 = 56.;
-pub const FILTERS_HEIGHT: f32 = 36.;
 const MAX_AGE_SECONDS: i64 = 60;
-const UPCOMING_TITLE: &str = "Upcoming";
-const RECENT_TITLE: &str = "Recent";
-const NO_MEETINGS_TEXT: &str = "No meetings in the next 7 days";
 const NO_CALLS_TEXT: &str = "No calls yet";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -67,10 +58,6 @@ impl HistoryFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListEntry {
-    Section(&'static str),
-    Filters(HistoryFilter),
-    Day(String),
-    Agenda(AgendaRow),
     Call(CallRow),
     Empty(&'static str),
 }
@@ -78,10 +65,6 @@ pub enum ListEntry {
 impl ListEntry {
     pub fn height(&self) -> f32 {
         match self {
-            ListEntry::Section(_) => SECTION_HEIGHT,
-            ListEntry::Filters(_) => FILTERS_HEIGHT,
-            ListEntry::Day(_) => DAY_HEIGHT,
-            ListEntry::Agenda(_) => AGENDA_ROW_HEIGHT,
             ListEntry::Call(_) => CALL_ROW_HEIGHT,
             ListEntry::Empty(_) => EMPTY_HEIGHT,
         }
@@ -144,21 +127,10 @@ impl CallsList {
         &mut self,
         history: &[CallLogEntry],
         chats: &[ChatRecord],
-        events: &[CalendarEvent],
         now: DateTime<Utc>,
         offset: FixedOffset,
     ) {
-        let mut entries = vec![ListEntry::Section(UPCOMING_TITLE)];
-        let days = group_by_day(events, now, offset);
-        if days.is_empty() {
-            entries.push(ListEntry::Empty(NO_MEETINGS_TEXT));
-        }
-        for day in days {
-            entries.push(ListEntry::Day(day.label));
-            entries.extend(day.rows.into_iter().map(ListEntry::Agenda));
-        }
-        entries.push(ListEntry::Section(RECENT_TITLE));
-        entries.push(ListEntry::Filters(self.filter));
+        let mut entries = Vec::new();
         let filter = self.filter;
         let admitted = history.iter().filter(|entry| filter.admits(entry));
         let calls = call_rows(admitted, chats, now, offset);
@@ -210,7 +182,6 @@ impl CallsList {
 
 #[cfg(test)]
 mod tests {
-    use chatsvc::ResponseType;
     use chrono::TimeZone;
     use teams_core::{CallDirection, CallOutcome};
 
@@ -238,49 +209,17 @@ mod tests {
         }
     }
 
-    fn event(id: &str, minutes_from_now: i64) -> CalendarEvent {
-        CalendarEvent {
-            object_id: id.into(),
-            subject: id.into(),
-            start: now() + Duration::minutes(minutes_from_now),
-            end: now() + Duration::minutes(minutes_from_now + 30),
-            all_day: false,
-            cancelled: false,
-            online: true,
-            join_url: None,
-            thread_id: None,
-            organizer_name: None,
-            organizer_address: None,
-            ical_uid: None,
-            show_as: Default::default(),
-            response: ResponseType::Accepted,
-        }
-    }
-
-    fn built(calls: usize, events: usize) -> CallsList {
+    fn built(calls: usize) -> CallsList {
         let history: Vec<CallLogEntry> =
             (0..calls).map(|index| call(&format!("c{index}"))).collect();
-        let agenda: Vec<CalendarEvent> = (0..events)
-            .map(|index| event(&format!("e{index}"), 30 + index as i64 * 60))
-            .collect();
         let mut list = CallsList::default();
-        list.rebuild(&history, &[], &agenda, now(), zero());
+        list.rebuild(&history, &[], now(), zero());
         list
     }
 
     #[test]
-    fn empty_sections_show_their_empty_text() {
-        let list = built(0, 0);
-        assert_eq!(
-            list.entries(),
-            [
-                ListEntry::Section("Upcoming"),
-                ListEntry::Empty("No meetings in the next 7 days"),
-                ListEntry::Section("Recent"),
-                ListEntry::Filters(HistoryFilter::All),
-                ListEntry::Empty("No calls yet"),
-            ]
-        );
+    fn an_empty_history_shows_its_empty_text() {
+        assert_eq!(built(0).entries(), [ListEntry::Empty("No calls yet")]);
     }
 
     #[test]
@@ -298,15 +237,13 @@ mod tests {
         let keys = |filter: HistoryFilter| -> Vec<String> {
             let mut list = CallsList::default();
             list.set_filter(filter);
-            list.rebuild(&history, &[], &[], now(), zero());
+            list.rebuild(&history, &[], now(), zero());
             list.entries()
                 .iter()
                 .filter_map(|entry| match entry {
                     ListEntry::Call(row) => Some(row.key.clone()),
                     ListEntry::Empty(text) => Some((*text).to_owned()),
-                    _ => None,
                 })
-                .skip(1)
                 .collect()
         };
         assert_eq!(keys(HistoryFilter::All), ["missed", "incoming", "outgoing"]);
@@ -315,54 +252,31 @@ mod tests {
         assert_eq!(keys(HistoryFilter::Outgoing), ["outgoing"]);
         let mut list = CallsList::default();
         list.set_filter(HistoryFilter::Missed);
-        list.rebuild(&[call("outgoing")], &[], &[], now(), zero());
+        list.rebuild(&[call("outgoing")], &[], now(), zero());
         assert_eq!(list.entries().last(), Some(&ListEntry::Empty("No missed calls")));
-    }
-
-    #[test]
-    fn upcoming_comes_before_recent_with_day_headers() {
-        let list = built(2, 2);
-        let kinds: Vec<&str> = list
-            .entries()
-            .iter()
-            .map(|entry| match entry {
-                ListEntry::Section(_) => "section",
-                ListEntry::Filters(_) => "filters",
-                ListEntry::Day(_) => "day",
-                ListEntry::Agenda(_) => "agenda",
-                ListEntry::Call(_) => "call",
-                ListEntry::Empty(_) => "empty",
-            })
-            .collect();
-        assert_eq!(
-            kinds,
-            [
-                "section", "day", "agenda", "agenda", "section", "filters", "call", "call"
-            ]
-        );
     }
 
     #[test]
     fn a_fresh_list_needs_a_rebuild_until_built() {
         let mut list = CallsList::default();
         assert!(list.needs_rebuild(now(), zero()));
-        list.rebuild(&[], &[], &[], now(), zero());
+        list.rebuild(&[], &[], now(), zero());
         assert!(!list.needs_rebuild(now() + Duration::seconds(30), zero()));
     }
 
     #[test]
     fn invalidation_age_and_a_new_day_force_a_rebuild() {
-        let mut list = built(0, 0);
+        let mut list = built(0);
         list.invalidate();
         assert!(list.needs_rebuild(now(), zero()));
-        list.rebuild(&[], &[], &[], now(), zero());
+        list.rebuild(&[], &[], now(), zero());
         assert!(list.needs_rebuild(now() + Duration::seconds(61), zero()));
         assert!(list.needs_rebuild(now() + Duration::hours(17), zero()));
     }
 
     #[test]
     fn the_window_keeps_only_rows_on_screen_and_spacers_for_the_rest() {
-        let list = built(100, 0);
+        let list = built(100);
         let total = list.total_height();
         let window = list.window(1000., 1200.);
         assert!(window.range.len() < 12);
@@ -377,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_window_clamps_at_both_ends() {
-        let list = built(100, 0);
+        let list = built(100);
         let top = list.window(-300., 100.);
         assert_eq!(top.range.start, 0);
         assert_eq!(top.before, 0.);

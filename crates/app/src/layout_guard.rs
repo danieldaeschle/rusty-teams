@@ -274,9 +274,8 @@ mod frames {
         FIND_RESULTS_TAG,
     ];
     const CALLS_TAGS: &[&str] = &[
-        "shell/islands/sidebar/calls-actions",
-        "shell/islands/sidebar/calls-actions/meet-now",
-        "shell/islands/sidebar/calls-actions/new-meeting",
+        "shell/islands/main/calls-dial",
+        "shell/islands/main/calls-history",
     ];
     const PREJOIN_TAGS: &[&str] = &[
         "shell/islands/main/prejoin",
@@ -993,7 +992,10 @@ mod frames {
                         expected.extend(CHAT_FILTER_OPEN_TAGS);
                     }
                     "find" => expected.extend(FIND_TAGS),
-                    "calls" => expected.extend(CALLS_TAGS),
+                    "calls" => {
+                        expected.retain(|path| *path != "shell/islands/sidebar");
+                        expected.extend(CALLS_TAGS);
+                    }
                     "agents" => expected.push(AGENTS_LIST),
                     "calendar" => {
                         expected.retain(|path| {

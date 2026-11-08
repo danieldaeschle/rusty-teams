@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use chrono::{Local, Offset, Utc};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -19,7 +18,6 @@ use teams_core::team_avatar_key;
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, team_avatar, with_presence};
-use super::calls_tab::calls_body;
 use super::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::channel_admin_dialogs::{confirm_delete_channel, open_edit_channel_dialog};
@@ -74,7 +72,6 @@ const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
 const LOADING_OLDER_LABEL: &str = "Loading older chats";
 const FALLBACK_VIEWPORT: f32 = 900.;
-const CALLS_REFRESH: Duration = Duration::from_secs(30);
 const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
 const PINNED_LABEL: &str = "Pinned";
@@ -353,7 +350,6 @@ pub struct SidebarView {
     older_chats_seen: Cell<(bool, bool)>,
     section_ids: RefCell<Vec<String>>,
     channels_scroll: ScrollHandle,
-    calls_scroll: ScrollHandle,
     chat_filter: ChatFilter,
     filter_box_open: bool,
     more_filters_open: bool,
@@ -462,20 +458,6 @@ impl SidebarView {
                 cx.notify();
             }
         });
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(CALLS_REFRESH).await;
-                let alive = this.update(cx, |view, cx| {
-                    if view.tab == SidebarTab::Calls {
-                        cx.notify();
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
         SidebarView {
             state,
             tab,
@@ -489,7 +471,6 @@ impl SidebarView {
             older_chats_seen: Cell::new((false, false)),
             section_ids: RefCell::new(Vec::new()),
             channels_scroll: ScrollHandle::new(),
-            calls_scroll: ScrollHandle::new(),
             chat_filter: ChatFilter::default(),
             filter_box_open: false,
             more_filters_open: false,
@@ -2098,12 +2079,11 @@ impl Render for SidebarView {
             SidebarTab::Activity => self.activity_panel.clone().into_any_element(),
             SidebarTab::Chats => self.chats_body(window_height, cx),
             SidebarTab::Channels => self.channels_body(cx),
-            SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, window_height, cx),
             SidebarTab::Agents => match &self.agents_panel {
                 Some(panel) => panel.clone().into_any_element(),
                 None => div().into_any_element(),
             },
-            SidebarTab::Calendar => div().into_any_element(),
+            SidebarTab::Calls | SidebarTab::Calendar => div().into_any_element(),
         };
         let header = match self.tab {
             SidebarTab::Chats => Some(
@@ -2120,8 +2100,8 @@ impl Render for SidebarView {
             SidebarTab::Channels => {
                 Some(page_header(self.tab.title()).child(self.channel_list_menu_button(cx)))
             }
-            SidebarTab::Calls | SidebarTab::Agents => Some(page_header(self.tab.title())),
-            SidebarTab::Activity | SidebarTab::Calendar => None,
+            SidebarTab::Agents => Some(page_header(self.tab.title())),
+            SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Calendar => None,
         };
         v_flex()
             .debug_selector(|| "shell/islands/sidebar".into())

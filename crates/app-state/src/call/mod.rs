@@ -45,10 +45,7 @@ pub use features::TransferCandidate;
 pub use health::{HealthBanner, level_text, media_text, network_rows, transport_text};
 pub use history::CallRow;
 pub use launcher::CallLauncher;
-pub use list::{
-    AGENDA_ROW_HEIGHT, CALL_ROW_HEIGHT, CallsList, DAY_HEIGHT, EMPTY_HEIGHT, FILTERS_HEIGHT,
-    HistoryFilter, ListEntry, SECTION_HEIGHT,
-};
+pub use list::{CALL_ROW_HEIGHT, CallsList, EMPTY_HEIGHT, HistoryFilter, ListEntry};
 pub use media::CallMedia;
 pub use model::{
     ActiveCall, CAPTION_SHOWN, CallKind, CallModel, Focus, REACTION_SHOWN, Tile, TileSize,

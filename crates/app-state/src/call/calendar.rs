@@ -42,7 +42,6 @@ impl AppState {
         self.calls_list.rebuild(
             &self.call_history,
             &self.sidebar.chats,
-            &self.calendar_events,
             now,
             offset,
         );

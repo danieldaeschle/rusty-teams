@@ -26,7 +26,8 @@ pub mod call_transcript;
 pub mod call_view;
 pub mod call_view_menu;
 pub mod calendar_view;
-pub mod calls_tab;
+pub mod calls_page;
+mod rsvp_menu;
 pub mod card_carousel;
 #[cfg(test)]
 mod card_input_tests;

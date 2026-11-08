@@ -21,6 +21,7 @@ use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
 use crate::chat_filter::ChatFilterPill;
+use super::calls_page::CallsPage;
 use super::quick_view_pane::{QuickViewEvent, QuickViewPane};
 use super::shortcuts::{
     ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
@@ -155,6 +156,7 @@ pub struct AppShell {
     sidebar: Entity<SidebarView>,
     calendar: Entity<CalendarView>,
     quick_pane: Entity<QuickViewPane>,
+    calls_page: Entity<CallsPage>,
     shown_quick_view: Option<QuickView>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
@@ -267,6 +269,7 @@ impl AppShell {
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let quick_pane = cx.new(|cx| QuickViewPane::new(state.clone(), activity.clone(), cx));
+        let calls_page = cx.new(|cx| CallsPage::new(state.clone(), window, cx));
         let agents_panel = crate::agents::runs_handle(cx)
             .map(|runs| cx.new(|cx| crate::agents::AgentsPanel::new(runs, cx)));
         let agents_subscription = agents_panel.as_ref().map(|panel| {
@@ -404,6 +407,7 @@ impl AppShell {
             sidebar,
             calendar,
             quick_pane,
+            calls_page,
             shown_quick_view: None,
             conversation,
             call_chat: None,
@@ -901,6 +905,7 @@ impl AppShell {
         show_sidebar: bool,
         calendar_open: bool,
         quick_view_open: bool,
+        calls_open: bool,
     ) -> impl IntoElement {
         h_flex()
             .debug_selector(|| "shell/islands".into())
@@ -929,6 +934,11 @@ impl AppShell {
             .child(match (call_view, self.prejoin.clone()) {
                 (Some(call_view), _) => call_view,
                 (None, Some(prejoin)) => prejoin
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                    .into_any_element(),
+                (None, None) if calls_open => self
+                    .calls_page
+                    .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
                 (None, None) if quick_view_open => self
@@ -1009,6 +1019,7 @@ impl Render for AppShell {
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
         let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
+        let calls_tab = self.sidebar.read(cx).tab() == SidebarTab::Calls;
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);
@@ -1018,7 +1029,9 @@ impl Render for AppShell {
             .is_some_and(|call| call.chat_open || call.people_open || call.transcript_open);
         let calendar_open = calendar_tab && !state.viewing_call();
         let quick_view_open = chats_tab && state.quick_view.is_some();
+        let calls_open = calls_tab && !state.viewing_call();
         let show_sidebar = !calendar_open
+            && !calls_open
             && !(state.viewing_call()
                 && !call_fullscreen
                 && sidebar_hidden_in_call(window_width, panel_open));
@@ -1259,7 +1272,7 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(self.islands(call_view, show_sidebar, calendar_open, quick_view_open)),
+                    .child(self.islands(call_view, show_sidebar, calendar_open, quick_view_open, calls_open)),
             )
             .children(call_mini)
             .children(call_overlay)

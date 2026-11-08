@@ -11,7 +11,6 @@ use super::prejoin::{DemoMeeting, MeetingJoin};
 use crate::app_state::{AppState, selection_for, selection_title};
 use crate::runtime;
 
-const NO_LINK_NOTICE: &str = "No Teams meeting link in the clipboard";
 const NOT_FOUND_NOTICE: &str = "Could not find that meeting";
 const BAD_ID_MESSAGE: &str = "Enter the meeting ID from the invitation.";
 const DEMO_GUEST_COUNT: usize = 4;
@@ -165,23 +164,16 @@ impl AppState {
         .detach();
     }
 
-    pub fn join_meeting_from_clipboard(&mut self, cx: &mut Context<Self>) {
-        let link = cx
-            .read_from_clipboard()
-            .and_then(|item| item.text())
-            .and_then(|text| find_meeting_link(&text));
-        match link {
-            Some((url, _)) => self.join_meeting_link(&url, cx),
-            None => self.raise_notice(NO_LINK_NOTICE.to_owned(), None, cx),
-        }
-    }
-
     pub fn join_meeting_by_id(
         &mut self,
         meeting_id: &str,
         passcode: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        if let Some((url, _)) = find_meeting_link(meeting_id) {
+            self.join_meeting_link(&url, cx);
+            return Ok(());
+        }
         let code =
             meeting_code_from_id(meeting_id, passcode).ok_or_else(|| BAD_ID_MESSAGE.to_owned())?;
         self.join_meeting_code(code, JoinMode::Prejoin, cx);

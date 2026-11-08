@@ -9,7 +9,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::calls_tab::rsvp_menu;
+use super::rsvp_menu::rsvp_menu;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
 use crate::app_state::AppState;
