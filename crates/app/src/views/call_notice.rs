@@ -51,9 +51,9 @@ fn notice_icon(icon: CallIcon) -> (&'static str, Hsla) {
         CallIcon::RecordStop => ("fluent_record_stop", theme::text_muted()),
         CallIcon::Saved => ("fluent_cloud_arrow_up", theme::text_muted()),
         CallIcon::Roster => ("group", theme::text_muted()),
-        CallIcon::Video | CallIcon::Call | CallIcon::Missed => {
-            ("fluent_video", theme::text_muted())
-        }
+        CallIcon::Missed => ("call_missed", theme::red_soft()),
+        CallIcon::Call => ("call", theme::text_muted()),
+        CallIcon::Video => ("fluent_video", theme::text_muted()),
     }
 }
 
@@ -318,7 +318,6 @@ fn card_shadow() -> Vec<BoxShadow> {
 
 pub(super) fn notice_line(
     call: &CallCard,
-    notice: &CallNotice,
     index: usize,
     directory: &Directory,
     actions: RecapActions,
@@ -347,7 +346,7 @@ pub(super) fn notice_line(
                         .text_size(px(TEXT_SIZE))
                         .line_height(px(LINE_HEIGHT))
                         .text_color(theme::text_muted())
-                        .child(notice_text(notice)),
+                        .child(notice_text(&call.notice)),
                 )
                 .children(
                     call.recap
@@ -360,7 +359,6 @@ pub(super) fn notice_line(
 pub(super) fn notice_row(
     row: &MessageRow,
     call: &CallCard,
-    notice: &CallNotice,
     index: usize,
     directory: &Directory,
     actions: RecapActions,
@@ -374,7 +372,7 @@ pub(super) fn notice_row(
             div()
                 .id(ElementId::Name(format!("row-{index}").into()))
                 .w_full()
-                .child(notice_line(call, notice, index, directory, actions)),
+                .child(notice_line(call, index, directory, actions)),
         )
         .into_any_element()
 }

@@ -245,9 +245,7 @@ fn message_block(
         .into_any_element(),
         (None, sender_id) => person_avatar(directory, sender_id, &row.author, size),
     };
-    if let (Role::Reply, Some(call)) = (role, &row.call)
-        && let Some(notice) = &call.notice
-    {
+    if let (Role::Reply, Some(call)) = (role, &row.call) {
         let recap = std::mem::replace(&mut actions.call, CallActions::none()).recap;
         return div()
             .id(ElementId::Name(format!("post-message-{index}").into()))
@@ -255,7 +253,7 @@ fn message_block(
             .px(px(CARD_PADDING))
             .pb(px(CARD_PADDING))
             .bg(theme::reply_surface())
-            .child(notice_line(call, notice, index, directory, recap));
+            .child(notice_line(call, index, directory, recap));
     }
     let profile_user = row.sender_id.as_deref().filter(|_| actions.bot.is_none());
     let content = match &row.call {

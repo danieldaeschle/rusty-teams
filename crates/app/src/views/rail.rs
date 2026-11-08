@@ -57,14 +57,14 @@ fn rail_items(
         },
         RailItem {
             tab: SidebarTab::Chats,
-            label: "Chats",
+            label: "Chat",
             shortcut_label: "Show Chats",
             icon: IconName::MessageSquare,
             badge: count_badge_for(unread_chats),
         },
         RailItem {
             tab: SidebarTab::Channels,
-            label: "Channels",
+            label: "Teams",
             shortcut_label: "Show Channels",
             icon: IconName::Users,
             badge: if channel_dot {

@@ -14,6 +14,7 @@ const AUTO_STOP_SECONDS: i64 = 5;
 const WEEKDAY_STAMP_DAYS: i64 = 6;
 const OWN_NAME: &str = "You";
 const UNKNOWN_USER: &str = "Unknown User";
+const MISSED_CALL_NOTICE: &str = "Call missed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallIcon {
@@ -67,7 +68,7 @@ pub struct CallCard {
     pub started: bool,
     pub participants: Vec<CallParticipant>,
     pub extra_participants: usize,
-    pub notice: Option<CallNotice>,
+    pub notice: CallNotice,
     pub recap: Option<RecapCard>,
 }
 
@@ -123,11 +124,11 @@ pub fn roster_card(
         started: false,
         participants: Vec::new(),
         extra_participants: 0,
-        notice: Some(CallNotice {
+        notice: CallNotice {
             stamp: notice_stamp(created_at, clock),
             text: event.text(|user_id, given| names.roster_name(user_id, given)),
             emphasis: None,
-        }),
+        },
         recap: None,
     }
 }
@@ -397,6 +398,7 @@ fn day_count(days: i64) -> String {
 struct NoticeSource<'a> {
     event: &'a CallEvent,
     message_id: &'a str,
+    missed: bool,
     stopped_by_meeting_end: bool,
 }
 
@@ -404,6 +406,7 @@ fn notice_text(source: NoticeSource, names: &CallNames, meeting: &MeetingInfo) -
     let NoticeSource {
         event,
         message_id,
+        missed,
         stopped_by_meeting_end,
     } = source;
     let initiator = || {
@@ -412,17 +415,19 @@ fn notice_text(source: NoticeSource, names: &CallNames, meeting: &MeetingInfo) -
             event.initiator_name.as_deref(),
         )
     };
-    match event.phase {
-        CallPhase::Ended => format!("{}:", event.title(false)),
-        CallPhase::RecordingStarted => match initiator() {
+    match (event.phase, event.call_type) {
+        _ if missed => MISSED_CALL_NOTICE.to_owned(),
+        (CallPhase::Ended, CallType::Meeting) => format!("{}:", event.title(false)),
+        (CallPhase::Ended, CallType::Call) => event.title(false).to_owned(),
+        (CallPhase::RecordingStarted, _) => match initiator() {
             Some(name) => format!("{name} started recording."),
             None => event.title(false).to_owned(),
         },
-        CallPhase::RecordingStopped => match initiator().filter(|_| !stopped_by_meeting_end) {
+        (CallPhase::RecordingStopped, _) => match initiator().filter(|_| !stopped_by_meeting_end) {
             Some(name) => format!("{name} stopped recording."),
             None => format!("{}.", event.title(false)),
         },
-        CallPhase::RecordingSaved => {
+        (CallPhase::RecordingSaved, _) => {
             let saved = saved_to(event, names);
             match meeting.expiry_days.get(message_id) {
                 Some(days) => format!("{saved} and will expire in {}.", day_count(*days)),
@@ -463,11 +468,6 @@ fn title(event: &CallEvent, missed: bool, names: &CallNames) -> String {
     }
 }
 
-/// Teams draws meeting and recording events as one-line notices; 1:1 and group calls keep the card.
-pub fn is_notice(event: &CallEvent) -> bool {
-    event.call_type == CallType::Meeting || event.is_recording()
-}
-
 pub struct CallSource<'a> {
     pub event: &'a CallEvent,
     pub message_id: &'a str,
@@ -501,12 +501,13 @@ pub fn call_card(
     };
     let extra_participants = people.len().saturating_sub(MAX_AVATARS);
     people.truncate(MAX_AVATARS);
-    let notice = is_notice(event).then(|| CallNotice {
+    let notice = CallNotice {
         stamp: notice_stamp(created_at, clock),
         text: notice_text(
             NoticeSource {
                 event,
                 message_id,
+                missed,
                 stopped_by_meeting_end: timeline.stopped_by_meeting_end(event, created_at),
             },
             names,
@@ -514,9 +515,9 @@ pub fn call_card(
         ),
         emphasis: event
             .duration_seconds
-            .filter(|_| event.phase == CallPhase::Ended)
+            .filter(|_| event.phase == CallPhase::Ended && !missed)
             .map(format_duration),
-    });
+    };
     CallCard {
         title: title(event, missed, names),
         detail,
@@ -627,7 +628,7 @@ mod tests {
     }
 
     fn notice_line(card: &CallCard) -> String {
-        let notice = card.notice.as_ref().unwrap();
+        let notice = &card.notice;
         match &notice.emphasis {
             Some(emphasis) => format!("{} {emphasis}", notice.text),
             None => notice.text.clone(),
@@ -805,29 +806,39 @@ mod tests {
     }
 
     #[test]
-    fn calls_keep_their_card_and_my_recording_is_in_my_onedrive() {
-        assert!(!is_notice(&event(CallPhase::Ended, CallType::Call, "c")));
+    fn calls_read_like_teams_and_my_recording_is_in_my_onedrive() {
+        let names = HashMap::new();
+        let lookup = CallNames {
+            my_user_id: Some("me"),
+            names: &names,
+        };
+        let line = |event: &CallEvent, missed: bool| {
+            notice_text(
+                NoticeSource {
+                    event,
+                    message_id: "m",
+                    missed,
+                    stopped_by_meeting_end: false,
+                },
+                &lookup,
+                &MeetingInfo::default(),
+            )
+        };
+        let ended = event(CallPhase::Ended, CallType::Call, "c");
+        assert_eq!(line(&ended, false), "Call ended");
+        assert_eq!(line(&ended, true), "Call missed");
+        assert_eq!(
+            line(&event(CallPhase::Ended, CallType::Meeting, "c"), false),
+            "Meeting ended:"
+        );
         let mut saved = event(CallPhase::RecordingSaved, CallType::Call, "c");
         saved.recording = Some(Recording {
             name: None,
             url: Some("https://contoso.example/rec.mp4".to_owned()),
             organizer_id: Some("me".to_owned()),
         });
-        let names = HashMap::new();
-        let lookup = CallNames {
-            my_user_id: Some("me"),
-            names: &names,
-        };
         assert_eq!(
-            notice_text(
-                NoticeSource {
-                    event: &saved,
-                    message_id: "m",
-                    stopped_by_meeting_end: false,
-                },
-                &lookup,
-                &MeetingInfo::default()
-            ),
+            line(&saved, false),
             "Recording has been saved to your OneDrive."
         );
     }

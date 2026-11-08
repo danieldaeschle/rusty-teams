@@ -2309,7 +2309,7 @@ mod tests {
         let saved = post.replies[0].call.as_ref().unwrap();
         assert_eq!(saved.icon, CallIcon::Saved);
         assert_eq!(
-            saved.notice.as_ref().unwrap().text,
+            saved.notice.text,
             "Recording has been saved to OneDrive."
         );
         let thread = thread_rows(&records, &root_id, &call_context());

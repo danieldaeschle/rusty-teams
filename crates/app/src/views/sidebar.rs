@@ -107,8 +107,8 @@ impl SidebarTab {
     fn title(self) -> &'static str {
         match self {
             SidebarTab::Activity => "Activity",
-            SidebarTab::Chats => "Chats",
-            SidebarTab::Channels => "Channels",
+            SidebarTab::Chats => "Chat",
+            SidebarTab::Channels => "Teams",
             SidebarTab::Calendar => "Calendar",
             SidebarTab::Calls => "Calls",
             SidebarTab::Saved => "Saved",

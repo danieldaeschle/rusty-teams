@@ -383,12 +383,6 @@ impl RenderEnv {
         };
         let app = self.app.clone();
         let conversation_id = message.conversation_id.clone();
-        let call_back = call.missed.then(|| {
-            let (app, conversation_id) = (app.clone(), conversation_id.clone());
-            boxed(move |cx| {
-                app.update(cx, |state, cx| state.start_chat_call(&conversation_id, cx));
-            })
-        });
         let joinable = call.started && app.read(cx).running_meeting(&conversation_id).is_some();
         let join = joinable.then(|| {
             boxed(move |cx| {
@@ -417,7 +411,6 @@ impl RenderEnv {
                 boxed(move |cx| cx.write_to_clipboard(ClipboardItem::new_string(url.clone())))
             });
         CallActions {
-            call_back,
             join,
             recap: RecapActions {
                 view_recap: recording.map(open),
