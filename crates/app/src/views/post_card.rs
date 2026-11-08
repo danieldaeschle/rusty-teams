@@ -27,7 +27,8 @@ use crate::rows::{Delivery, MessageRow, PostRow};
 use crate::theme;
 
 const ROOT_AVATAR: f32 = 32.;
-const REPLY_AVATAR: f32 = 24.;
+const REPLY_AVATAR: f32 = 20.;
+const REPLY_AVATAR_GAP: f32 = 8.;
 const AVATAR_GAP: f32 = 10.;
 const CARD_PADDING: f32 = 12.;
 const CARD_RADIUS: f32 = 10.;
@@ -327,7 +328,7 @@ fn message_block(
                     .child(message_header(row, index, author, profile_user, saved, pinned)),
             )
             .child(details.debug_selector(|| POST_BODY_TAG.into())),
-        Role::Reply => h_flex().items_start().gap(px(8.)).child(avatar).child(
+        Role::Reply => h_flex().items_start().gap(px(REPLY_AVATAR_GAP)).child(avatar).child(
             v_flex()
                 .flex_1()
                 .min_w_0()
@@ -348,11 +349,7 @@ fn message_block(
         .relative()
         .w_full()
         .p(px(CARD_PADDING))
-        .when(role == Role::Reply, |block| {
-            block
-                .pl(px(CARD_PADDING + ROOT_AVATAR + AVATAR_GAP))
-                .bg(theme::reply_surface())
-        })
+        .when(role == Role::Reply, |block| block.bg(theme::reply_surface()))
         .when(highlighted, |block| block.bg(theme::accent().opacity(0.2)))
         .when_some(hovered, |block, hovered| {
             block.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
@@ -380,7 +377,7 @@ fn message_block(
 fn replies_link(label: String, post_index: usize, open: Option<PostAction>) -> Stateful<Div> {
     div()
         .id(ElementId::Name(format!("post-replies-{post_index}").into()))
-        .pl(px(CARD_PADDING + ROOT_AVATAR + AVATAR_GAP))
+        .pl(px(CARD_PADDING + REPLY_AVATAR + REPLY_AVATAR_GAP))
         .pr(px(CARD_PADDING))
         .pb(px(8.))
         .text_size(px(13.))
