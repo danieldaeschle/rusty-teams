@@ -338,7 +338,11 @@ async function scenario(name, report, tab, workDir, act, check) {
 
 async function guestClick(tab, labels) {
   for (const label of labels) {
-    if (await tab.click(label)) return label;
+    const clicked = await tab.click(label.startsWith('=') ? label : '=' + label);
+    if (clicked) {
+      log(`guest clicked "${clicked}"`);
+      return clicked;
+    }
   }
   throw new Error(`guest found none of ${labels.join(', ')}`);
 }
@@ -368,11 +372,11 @@ async function runScenarios(report, tab, workDir) {
   await scenario('app-stop-share', report, tab, workDir, () => runTeams('--call', 'stop-share'),
     (m) => !m.app.localShare && m.appShareOut < 20);
   await scenario('guest-share', report, tab, workDir, async () => {
-    await guestClick(tab, ['=Share', 'Share content', 'Share']);
+    await guestClick(tab, ['Share', 'Share content']);
     await delay(2_000);
-    await guestClick(tab, ['=Screen', 'Share screen', 'Screen', 'Entire screen']).catch(() => null);
+    await guestClick(tab, ['Screen', 'Share screen', 'Entire screen']).catch(() => null);
   }, (m) => m.app.screenSharer && m.appShareIn > 50);
-  await scenario('guest-stop-share', report, tab, workDir, () => guestClick(tab, ['=Stop sharing', 'Stop sharing', 'Stop presenting']),
+  await scenario('guest-stop-share', report, tab, workDir, () => guestClick(tab, ['Stop sharing', 'Stop presenting']),
     (m) => !m.app.screenSharer && m.appShareIn < 20);
   await scenario('app-mute', report, tab, workDir, () => runTeams('--call', 'mute'), (m) => m.app.muted);
   const muted = await sampleWeb(tab, 6);
