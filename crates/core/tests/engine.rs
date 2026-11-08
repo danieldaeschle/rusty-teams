@@ -3426,6 +3426,39 @@ impl FolderSource for FakeFolders {
             Ok(())
         })
     }
+
+    fn update_channel<'a>(
+        &'a self,
+        channel: chatsvc::ExistingChannel<'a>,
+        edit: chatsvc::ChannelEdit<'a>,
+        _mailbox: chatsvc::Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!(
+                "edit {} {} {:?} '{}' {:?}",
+                channel.team_thread_id,
+                channel.channel_id,
+                channel.substrate_group_id,
+                edit.name,
+                edit.description
+            ));
+            Ok(())
+        })
+    }
+
+    fn delete_channel<'a>(
+        &'a self,
+        channel: chatsvc::ExistingChannel<'a>,
+        _mailbox: chatsvc::Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!(
+                "delete {} {}",
+                channel.team_thread_id, channel.channel_id
+            ));
+            Ok(())
+        })
+    }
 }
 
 fn store_alpha_team(engine: &SyncEngine<Handle>) {
@@ -5894,4 +5927,52 @@ async fn create_channel_sends_the_team_thread_and_own_mailbox_then_refreshes() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn edit_channel_sends_the_trimmed_name_and_keeps_an_unloaded_description() {
+    let fake = Arc::new(Fake::default());
+    let source = FakeFolders::new();
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    store_alpha_team(&engine);
+    engine.store().set_meta("me_tenant_id", "tenant-1").unwrap();
+
+    engine
+        .edit_channel("19:secret@thread.tacv2", " Renamed ", None)
+        .await
+        .unwrap();
+    let calls = source.calls.lock().unwrap().clone();
+    assert_eq!(
+        calls[0],
+        "edit 19:general@thread.tacv2 19:secret@thread.tacv2 None 'Renamed' None"
+    );
+    let renamed = engine.store().channel("19:secret@thread.tacv2").unwrap().unwrap();
+    assert_eq!(renamed.name, "Renamed");
+    assert!(
+        engine
+            .edit_channel("19:secret@thread.tacv2", "  ", None)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn a_deleted_channel_stays_gone_while_graph_still_lists_it() {
+    let fake = Arc::new(Fake::default());
+    *fake.teams.lock().unwrap() =
+        vec![serde_json::from_value(json!({"id": "team-1", "displayName": "Squad"})).unwrap()];
+    let source = FakeFolders::new();
+    let engine = engine_with(&fake, SyncConfig::default()).with_folder_source(source.clone());
+    engine.store().set_meta("me_tenant_id", "tenant-1").unwrap();
+    engine.refresh_sidebar_full().await.unwrap();
+    assert!(engine.store().channel(CHANNEL).unwrap().is_some());
+
+    engine.delete_channel(CHANNEL).await.unwrap();
+    assert_eq!(
+        source.calls.lock().unwrap().last().unwrap(),
+        &format!("delete {CHANNEL} {CHANNEL}")
+    );
+    assert!(engine.store().channel(CHANNEL).unwrap().is_none());
+    engine.refresh_sidebar_full().await.unwrap();
+    assert!(engine.store().channel(CHANNEL).unwrap().is_none());
 }

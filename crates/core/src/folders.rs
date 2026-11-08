@@ -7,9 +7,9 @@ use chatsvc::settings::{
     parse_chat_sections, parse_default_reactions, parse_skin_tone, parse_teams_order,
 };
 use chatsvc::{
-    ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
-    ChannelVisibility, ChatSection, ChatSectionSettings, Mailbox, NewChannel, Pins, TeamAdmin,
-    UserSettings,
+    ChannelEdit, ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
+    ChannelVisibility, ChatSection, ChatSectionSettings, ExistingChannel, Mailbox, NewChannel,
+    Pins, TeamAdmin, UserSettings,
     pins::SessionTransport,
 };
 use chrono::Utc;
@@ -132,6 +132,21 @@ pub trait FolderSource: Send + Sync {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Err(Error::Unsupported("channel creation without chatsvc")) })
     }
+    fn update_channel<'a>(
+        &'a self,
+        _channel: ExistingChannel<'a>,
+        _edit: ChannelEdit<'a>,
+        _mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("channel edits without chatsvc")) })
+    }
+    fn delete_channel<'a>(
+        &'a self,
+        _channel: ExistingChannel<'a>,
+        _mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Err(Error::Unsupported("channel deletion without chatsvc")) })
+    }
 }
 
 pub struct ChatsvcFolderSource {
@@ -220,6 +235,28 @@ impl FolderSource for ChatsvcFolderSource {
         mailbox: Mailbox<'a>,
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(self.team_admin.create_channel(&channel, mailbox).await?) })
+    }
+
+    fn update_channel<'a>(
+        &'a self,
+        channel: ExistingChannel<'a>,
+        edit: ChannelEdit<'a>,
+        mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            Ok(self
+                .team_admin
+                .update_channel(channel, edit, mailbox)
+                .await?)
+        })
+    }
+
+    fn delete_channel<'a>(
+        &'a self,
+        channel: ExistingChannel<'a>,
+        mailbox: Mailbox<'a>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move { Ok(self.team_admin.delete_channel(channel, mailbox).await?) })
     }
 
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {

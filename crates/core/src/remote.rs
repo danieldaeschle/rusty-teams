@@ -194,6 +194,10 @@ pub trait Remote {
         Err(Error::Unsupported("team tags"))
     }
 
+    async fn channel_description(&self, _team_id: &str, _channel_id: &str) -> Result<String> {
+        Err(Error::Unsupported("channel description"))
+    }
+
     async fn reply_with_quote(
         &self,
         _chat_id: &str,
@@ -982,6 +986,10 @@ impl Remote for Graph {
 
     async fn team_tags(&self, team_id: &str) -> Result<Vec<Tag>> {
         Ok(Graph::team_tags(self, team_id).await?)
+    }
+
+    async fn channel_description(&self, team_id: &str, channel_id: &str) -> Result<String> {
+        Ok(Graph::channel_description(self, team_id, channel_id).await?)
     }
 
     async fn reply_with_quote(

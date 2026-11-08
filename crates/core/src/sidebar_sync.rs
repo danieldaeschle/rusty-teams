@@ -389,11 +389,13 @@ impl<R: Remote> SyncEngine<R> {
         self.store.remove_teams_except(&team_ids)?;
         refresh.teams = records.len();
         let listings = self.remote.channels_for_teams(&team_ids).await?;
+        let deleted = self.deleted_channel_ids();
         for (team_id, listing) in team_ids.iter().zip(listings) {
             match listing {
                 Ok(channels) => {
                     let channel_records: Vec<_> = channels
                         .iter()
+                        .filter(|channel| !deleted.contains_key(&channel.id))
                         .map(|channel| channel_record(team_id, channel))
                         .collect();
                     self.store.upsert_channels(&channel_records)?;

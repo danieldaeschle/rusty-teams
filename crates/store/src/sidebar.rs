@@ -222,6 +222,30 @@ impl Store {
         Ok(())
     }
 
+    pub fn channel_substrate_group_id(&self, channel_id: &str) -> Result<Option<String>> {
+        let connection = self.lock()?;
+        Ok(connection
+            .prepare_cached("SELECT substrate_group_id FROM channel_layout WHERE channel_id = ?1")?
+            .query_map([channel_id], |row| row.get::<_, Option<String>>(0))?
+            .next()
+            .transpose()?
+            .flatten())
+    }
+
+    pub fn rename_channel(&self, channel_id: &str, name: &str) -> Result<()> {
+        self.lock()?.execute(
+            "UPDATE channels SET name = ?2 WHERE id = ?1",
+            params![channel_id, name],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_channel(&self, channel_id: &str) -> Result<()> {
+        self.lock()?
+            .execute("DELETE FROM channels WHERE id = ?1", [channel_id])?;
+        Ok(())
+    }
+
     /// The team's own thread id, which Teams' CSA routes take: the id of its General channel.
     pub fn team_thread_id(&self, team_id: &str) -> Result<Option<String>> {
         let connection = self.lock()?;

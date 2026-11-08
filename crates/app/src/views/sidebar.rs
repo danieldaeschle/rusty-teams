@@ -23,6 +23,7 @@ use super::calls_tab::calls_body;
 use super::chat_pop_out;
 use super::saved_panel::SavedPanel;
 use super::scroll_edge::{scroll_offset, with_top_edge};
+use super::channel_admin_dialogs::{confirm_delete_channel, open_edit_channel_dialog};
 use super::create_channel_dialog::open_create_channel_dialog;
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
@@ -1999,7 +2000,18 @@ fn channel_menu(
             PopupMenuItem::new(item.label())
                 .icon(menu_icon(channel_menu_icon(item)))
                 .disabled(menu_state.disables(item))
-                .on_click(move |_, _, cx| {
+                .on_click(move |_, window, cx| {
+                    match item {
+                        ChannelMenuItem::EditChannel => {
+                            open_edit_channel_dialog(action_state.clone(), &action_id, window, cx);
+                            return;
+                        }
+                        ChannelMenuItem::DeleteChannel => {
+                            confirm_delete_channel(action_state.clone(), &action_id, window, cx);
+                            return;
+                        }
+                        _ => {}
+                    }
                     action_state.update(cx, |state, cx| match item {
                         ChannelMenuItem::Pin => state.set_channel_pinned(&action_id, true, cx),
                         ChannelMenuItem::Unpin => state.set_channel_pinned(&action_id, false, cx),
@@ -2009,7 +2021,9 @@ fn channel_menu(
                             state.manage_channel_in_browser(&action_id, cx)
                         }
                         ChannelMenuItem::CopyLink => state.copy_channel_link(&action_id, cx),
-                        ChannelMenuItem::Notifications => {}
+                        ChannelMenuItem::Notifications
+                        | ChannelMenuItem::EditChannel
+                        | ChannelMenuItem::DeleteChannel => {}
                     });
                 }),
         );
@@ -2024,8 +2038,10 @@ fn channel_menu_icon(item: ChannelMenuItem) -> IconName {
         ChannelMenuItem::Unpin => IconName::PinOff,
         ChannelMenuItem::Show => IconName::Eye,
         ChannelMenuItem::Hide => IconName::EyeOff,
+        ChannelMenuItem::EditChannel => IconName::Pencil,
         ChannelMenuItem::ManageChannel => IconName::Settings,
         ChannelMenuItem::CopyLink => IconName::Link,
+        ChannelMenuItem::DeleteChannel => IconName::Trash,
     }
 }
 

@@ -75,7 +75,7 @@ pub use language_settings::{
 };
 pub use links::{LinkImage, LinkInfo, MessageLinks, is_link_image_url};
 pub use mask::mask_conversation_id;
-pub use team_admin::{ChannelPrivacy, Mailbox, NewChannel, TeamAdmin};
+pub use team_admin::{ChannelEdit, ChannelPrivacy, ExistingChannel, Mailbox, NewChannel, TeamAdmin};
 pub use members::{
     HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
     TopicProblem, topic_problem,

@@ -291,6 +291,14 @@ pub fn channels(team_id: &str) -> String {
     )
 }
 
+pub fn channel_description(team_id: &str, channel_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/channels/{}?$select=description",
+        segment(team_id),
+        segment(channel_id)
+    )
+}
+
 pub fn channel_messages(team_id: &str, channel_id: &str, top: usize) -> String {
     format!(
         "{GRAPH}/v1.0/teams/{}/channels/{}/messages?$top={top}&$expand=replies",

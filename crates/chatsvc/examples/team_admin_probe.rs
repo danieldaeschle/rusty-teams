@@ -34,6 +34,27 @@ async fn main() {
         println!("{outcome:?}");
         return;
     }
+    let channel_arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    if let [action @ ("lib-edit" | "lib-delete"), team_thread_id, group_id, channel_id, substrate, name, object_id, tenant_id] =
+        channel_arguments.as_slice()
+    {
+        let channel = chatsvc::ExistingChannel {
+            team_thread_id,
+            group_id,
+            channel_id,
+            substrate_group_id: (*substrate != "-").then_some(*substrate),
+        };
+        let mailbox = chatsvc::Mailbox { object_id, tenant_id };
+        let admin = chatsvc::TeamAdmin::new(&session);
+        let outcome = if *action == "lib-edit" {
+            let edit = chatsvc::ChannelEdit { name, description: None };
+            admin.update_channel(channel, edit, mailbox).await
+        } else {
+            admin.delete_channel(channel, mailbox).await
+        };
+        println!("{outcome:?}");
+        return;
+    }
     let (method, path, body) = match arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["create-team", name] => (
             Method::Post,

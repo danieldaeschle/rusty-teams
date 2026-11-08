@@ -4,6 +4,7 @@ use gpui_kit::*;
 
 use crate::app_state::AppState;
 use crate::sidebar_model::channel_shown;
+use crate::team_admin::ChannelAdmin;
 
 pub const COPIED_TO_CLIPBOARD: &str = "Copied to clipboard";
 pub const PINNED_CHANNEL_CANNOT_HIDE: &str = "Pinned channels can't be hidden.";
@@ -15,8 +16,10 @@ pub enum ChannelMenuItem {
     Unpin,
     Show,
     Hide,
+    EditChannel,
     ManageChannel,
     CopyLink,
+    DeleteChannel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +45,10 @@ impl ChannelMenuItem {
             ChannelMenuItem::Unpin => "Unpin",
             ChannelMenuItem::Show => "Show",
             ChannelMenuItem::Hide => "Hide",
+            ChannelMenuItem::EditChannel => "Edit channel",
             ChannelMenuItem::ManageChannel => "Manage channel",
             ChannelMenuItem::CopyLink => "Copy link",
+            ChannelMenuItem::DeleteChannel => "Delete channel",
         }
     }
 }
@@ -75,10 +80,11 @@ impl LinkUse {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ChannelMenuState {
     pub pinned: bool,
     pub shown: bool,
+    pub admin: ChannelAdmin,
 }
 
 impl ChannelMenuState {
@@ -88,7 +94,7 @@ impl ChannelMenuState {
 }
 
 pub fn channel_menu_entries(state: ChannelMenuState) -> Vec<MenuEntry<ChannelMenuItem>> {
-    vec![
+    let mut entries = vec![
         MenuEntry::Item(ChannelMenuItem::Notifications),
         MenuEntry::Item(if state.pinned {
             ChannelMenuItem::Unpin
@@ -101,9 +107,21 @@ pub fn channel_menu_entries(state: ChannelMenuState) -> Vec<MenuEntry<ChannelMen
             ChannelMenuItem::Show
         }),
         MenuEntry::Separator,
+    ];
+    if state.admin.can_edit {
+        entries.push(MenuEntry::Item(ChannelMenuItem::EditChannel));
+    }
+    entries.extend([
         MenuEntry::Item(ChannelMenuItem::ManageChannel),
         MenuEntry::Item(ChannelMenuItem::CopyLink),
-    ]
+    ]);
+    if state.admin.can_delete {
+        entries.extend([
+            MenuEntry::Separator,
+            MenuEntry::Item(ChannelMenuItem::DeleteChannel),
+        ]);
+    }
+    entries
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -199,6 +217,7 @@ impl AppState {
                 .iter()
                 .find(|team| team.channels.iter().any(|channel| channel.id == channel_id))
                 .is_none_or(|team| channel_shown(team, channel_id)),
+            admin: self.channel_admin(channel_id),
         }
     }
 
@@ -344,7 +363,7 @@ impl AppState {
         self.link_from(async move { engine.team_link(&owned_id).await }, link_use, cx);
     }
 
-    fn channel_team_id(&self, channel_id: &str) -> Option<String> {
+    pub fn channel_team_id(&self, channel_id: &str) -> Option<String> {
         self.sidebar.teams.iter().find_map(|team| {
             team.channels
                 .iter()
@@ -421,6 +440,8 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    use crate::team_admin::ChannelAdmin;
+
     use super::{
         ChannelMenuItem, ChannelMenuState, MenuEntry, TeamMenuItem, TeamMenuState,
         channel_menu_entries, channel_visibility_failure, pin_failure, post_pin_dialog,
@@ -445,6 +466,7 @@ mod tests {
         let shown = channel_menu_entries(ChannelMenuState {
             pinned: false,
             shown: true,
+            ..ChannelMenuState::default()
         });
         assert_eq!(
             labels(&shown, ChannelMenuItem::label),
@@ -453,6 +475,7 @@ mod tests {
         let hidden_pinned = channel_menu_entries(ChannelMenuState {
             pinned: true,
             shown: false,
+            ..ChannelMenuState::default()
         });
         assert_eq!(
             labels(&hidden_pinned, ChannelMenuItem::label),
@@ -465,14 +488,42 @@ mod tests {
         let pinned = ChannelMenuState {
             pinned: true,
             shown: true,
+            ..ChannelMenuState::default()
         };
         assert!(pinned.disables(ChannelMenuItem::Hide));
         assert!(!pinned.disables(ChannelMenuItem::Unpin));
         let unpinned = ChannelMenuState {
             pinned: false,
             shown: true,
+            ..ChannelMenuState::default()
         };
         assert!(!unpinned.disables(ChannelMenuItem::Hide));
+    }
+
+    #[test]
+    fn edit_and_delete_appear_only_with_the_rights() {
+        let admin = ChannelMenuState {
+            pinned: false,
+            shown: true,
+            admin: ChannelAdmin {
+                can_edit: true,
+                can_delete: true,
+            },
+        };
+        assert_eq!(
+            labels(&channel_menu_entries(admin), ChannelMenuItem::label),
+            [
+                "Notifications",
+                "Pin",
+                "Hide",
+                "-",
+                "Edit channel",
+                "Manage channel",
+                "Copy link",
+                "-",
+                "Delete channel"
+            ]
+        );
     }
 
     #[test]

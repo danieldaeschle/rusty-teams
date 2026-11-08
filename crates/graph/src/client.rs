@@ -128,6 +128,20 @@ impl Graph {
         .await
     }
 
+    pub async fn channel_description(&self, team_id: &str, channel_id: &str) -> Result<String> {
+        let body = self
+            .get(
+                &urls::channel_description(team_id, channel_id),
+                &Scope::graph("Channel.ReadBasic.All"),
+            )
+            .await?;
+        Ok(body
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned())
+    }
+
     pub async fn channels_for_teams(
         &self,
         team_ids: &[String],
