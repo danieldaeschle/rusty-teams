@@ -49,7 +49,7 @@ impl AppState {
 
     /// Opens the call in Teams on the web when that setting is on; false leaves it to the own engine.
     pub(super) fn try_web_call(&mut self, url: String, cx: &mut Context<Self>) -> bool {
-        if !self.web_calls || self.mode.demo {
+        if self.own_engine_next_call || !self.web_calls || self.mode.demo {
             return false;
         }
         open_web_call(url, cx)

@@ -25,6 +25,7 @@ use gpui_kit::*;
 use store::Store;
 
 use crate::app_state::{AppState, Mode};
+use crate::call::remote_command::{HANG_UP_FLAG, JOIN_FLAG, RemoteCommand};
 use views::shell::{AppShell, OpenTarget, Startup, bind_keys};
 
 const LINUX_APP_ID: &str = "rusty-teams";
@@ -55,6 +56,7 @@ struct Arguments {
     channels_tab: bool,
     autostart: bool,
     demo_sync: Option<Duration>,
+    remote_command: Option<RemoteCommand>,
 }
 
 fn parse_arguments() -> Arguments {
@@ -78,6 +80,8 @@ fn parse_arguments() -> Arguments {
                     .and_then(|value| value.parse().ok())
                     .map(Duration::from_secs_f32)
             }
+            JOIN_FLAG => arguments.remote_command = input.next().map(RemoteCommand::Join),
+            HANG_UP_FLAG => arguments.remote_command = Some(RemoteCommand::HangUp),
             "--database" => arguments.database = input.next().map(PathBuf::from),
             "--endpoint" => arguments.endpoint = input.next(),
             "--open" => {
@@ -162,7 +166,12 @@ fn main() {
             updater::wait_for_previous_exit(value);
         }
         let relaunched = relaunch_value.is_some();
-        if single_instance::claim(SINGLE_INSTANCE_NAME, relaunched)
+        let command = arguments
+            .remote_command
+            .as_ref()
+            .map(RemoteCommand::encode)
+            .unwrap_or_default();
+        if single_instance::claim(SINGLE_INSTANCE_NAME, relaunched, &command)
             == single_instance::Claim::Forwarded
         {
             return;

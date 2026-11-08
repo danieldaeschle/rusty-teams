@@ -8,7 +8,8 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
     AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
     ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
-    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, PROCESS_LOOPBACK_MODE, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
     VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
@@ -60,13 +61,13 @@ fn audio_error(what: &str, error: impl std::fmt::Display) -> Error {
     Error::Audio(format!("{what}: {error}"))
 }
 
-fn activate_excluding(process_id: u32) -> Result<IAudioClient> {
+fn activate(process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Result<IAudioClient> {
     let mut parameters = AUDIOCLIENT_ACTIVATION_PARAMS {
         ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
         Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
             ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
                 TargetProcessId: process_id,
-                ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+                ProcessLoopbackMode: mode,
             },
         },
     };
@@ -140,12 +141,21 @@ fn drain(capture: &IAudioCaptureClient, queue: &SampleQueue) -> windows::core::R
 }
 
 pub fn start_process_loopback(queue: SampleQueue, own_process_id: u32) -> Result<Capture> {
+    start(queue, own_process_id, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE)
+}
+
+/// Only the audio of `process_id` and its children, for checking what an app plays out.
+pub fn start_process_capture(queue: SampleQueue, process_id: u32) -> Result<Capture> {
+    start(queue, process_id, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE)
+}
+
+fn start(queue: SampleQueue, process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Result<Capture> {
     let (ready_sender, ready) = mpsc::channel::<Result<()>>();
     let capture = Capture::spawn_thread("process-loopback", move |stop| {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let started = activate_excluding(own_process_id).and_then(|client| initialise(&client).map(|(capture, event)| (client, capture, event)));
+        let started = activate(process_id, mode).and_then(|client| initialise(&client).map(|(capture, event)| (client, capture, event)));
         match started {
             Ok((client, capture, event)) => {
                 let _ = ready_sender.send(Ok(()));

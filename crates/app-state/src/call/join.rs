@@ -30,7 +30,7 @@ pub fn meeting_target(meeting: &ThreadMeeting) -> MeetingTarget {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum JoinMode {
+pub(crate) enum JoinMode {
     Prejoin,
     Direct,
 }
@@ -111,7 +111,7 @@ impl AppState {
         self.join_link(text, JoinMode::Prejoin, cx);
     }
 
-    fn join_link(&mut self, text: &str, mode: JoinMode, cx: &mut Context<Self>) {
+    pub(crate) fn join_link(&mut self, text: &str, mode: JoinMode, cx: &mut Context<Self>) {
         match parse_meeting_link(text) {
             Some(MeetingLink::Thread(meeting)) => {
                 self.join_resolved_meeting(meeting_target(&meeting), mode, cx)

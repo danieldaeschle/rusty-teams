@@ -34,6 +34,8 @@ mod loopback_windows;
 #[cfg(windows)]
 mod mic_windows;
 #[cfg(windows)]
+pub use loopback_windows::start_process_capture;
+#[cfg(windows)]
 pub use mic_windows::probe_effects;
 pub mod meeting;
 pub mod meeting_options;

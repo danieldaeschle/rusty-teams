@@ -12,6 +12,7 @@ pub mod overlay_layout;
 pub mod people_actions;
 pub mod prejoin;
 pub mod record_load;
+pub mod remote_command;
 pub mod reminder;
 pub mod share_actions;
 pub mod share_overlay;

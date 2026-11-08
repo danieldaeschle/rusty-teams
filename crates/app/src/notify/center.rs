@@ -1076,6 +1076,10 @@ impl NotificationCenter {
         if single_instance::take_activation() {
             self.raise_main_window(cx);
         }
+        for command in single_instance::take_commands() {
+            self.app
+                .update(cx, |state, cx| state.run_remote_command(&command, cx));
+        }
     }
 
     fn repeat_urgent(&mut self, cx: &mut Context<Self>) {

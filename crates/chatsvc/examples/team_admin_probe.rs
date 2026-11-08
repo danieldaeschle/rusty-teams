@@ -13,6 +13,27 @@ async fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let endpoint = std::env::var("CDP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
     let session = Session::connect(&endpoint).await.expect("browser");
+    if let ["lib-create", team_thread_id, group_id, name, privacy, object_id, tenant_id] =
+        arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice()
+    {
+        let channel = chatsvc::NewChannel {
+            team_thread_id,
+            group_id,
+            name,
+            description: "",
+            privacy: if *privacy == "private" {
+                chatsvc::ChannelPrivacy::Private
+            } else {
+                chatsvc::ChannelPrivacy::Standard
+            },
+        };
+        let mailbox = chatsvc::Mailbox { object_id, tenant_id };
+        let outcome = chatsvc::TeamAdmin::new(&session)
+            .create_channel(&channel, mailbox)
+            .await;
+        println!("{outcome:?}");
+        return;
+    }
     let (method, path, body) = match arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["create-team", name] => (
             Method::Post,
