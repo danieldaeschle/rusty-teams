@@ -2,7 +2,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::blocks::{Block, Inline, StyleFlags};
+use super::blocks::{Block, Inline, StyleFlags, TableCell};
 use super::flow_text::{FlowSegment, FlowText};
 use super::hooks::jump_to_quoted;
 use super::selectable::{Pill, SelectableRichText};
@@ -101,7 +101,7 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             items,
         } => render_list(*ordered, *start, items, &id, own, depth, cx),
         Block::Image { .. } => div().into_any_element(),
-        Block::Table { header, rows } => render_table(*header, rows, &id, own, cx),
+        Block::Table { header, rows } => render_table(*header, rows, &id, own, cx, &|_| None),
         Block::Rule => div()
             .w_full()
             .h(px(1.))
@@ -312,7 +312,15 @@ fn render_list_item(blocks: &[Block], id: &str, own: bool, depth: usize, cx: &Ap
         .into_any_element()
 }
 
-fn render_table(header: bool, rows: &[Vec<Inline>], id: &str, own: bool, cx: &App) -> AnyElement {
+/// `image` draws an image of a cell; cells without a drawn image show only their text.
+pub fn render_table(
+    header: bool,
+    rows: &[Vec<TableCell>],
+    id: &str,
+    own: bool,
+    cx: &App,
+    image: &dyn Fn(&str) -> Option<AnyElement>,
+) -> AnyElement {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     v_flex()
         .w_full()
@@ -340,12 +348,19 @@ fn render_table(header: bool, rows: &[Vec<Inline>], id: &str, own: bool, cx: &Ap
                         .border_b_1()
                         .border_color(theme::border_strong());
                     match row.get(column) {
-                        Some(inline) => cell.child(render_inline(
-                            inline,
-                            format!("{id}-{row_index}-{column}"),
-                            own,
-                            cx,
-                        )),
+                        Some(content) => cell
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.))
+                            .children(content.images.iter().filter_map(|url| image(url)))
+                            .when(!content.inline.is_blank(), |cell| {
+                                cell.child(render_inline(
+                                    &content.inline,
+                                    format!("{id}-{row_index}-{column}"),
+                                    own,
+                                    cx,
+                                ))
+                            }),
                         None => cell,
                     }
                 }))

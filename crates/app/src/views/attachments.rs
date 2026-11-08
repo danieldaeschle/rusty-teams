@@ -13,7 +13,7 @@ use crate::downloads::{self, DownloadState};
 use crate::format;
 use crate::inline_video;
 use crate::remote_image;
-use crate::render::{Block, render_blocks};
+use crate::render::{Block, render_blocks, render_table, table_images};
 use crate::rows::LocalImage;
 use crate::theme;
 
@@ -393,11 +393,16 @@ fn placement(url: &str, images: &[ImageRef], local_count: usize) -> Option<Place
 fn placements(blocks: &[Block], images: &[ImageRef], local_count: usize) -> Vec<Placement> {
     blocks
         .iter()
-        .filter_map(|block| match block {
-            Block::Image { url } => placement(url, images, local_count),
-            _ => None,
+        .flat_map(|block| match block {
+            Block::Image { url } => vec![url.as_str()],
+            table => table_images(table),
         })
+        .filter_map(|url| placement(url, images, local_count))
         .collect()
+}
+
+fn draws_images(block: &Block) -> bool {
+    matches!(block, Block::Image { .. }) || !table_images(block).is_empty()
 }
 
 pub fn message_body(
@@ -410,10 +415,7 @@ pub fn message_body(
     open_image: Option<&ImageActions>,
     cx: &App,
 ) -> Vec<AnyElement> {
-    if !blocks
-        .iter()
-        .any(|block| matches!(block, Block::Image { .. }))
-    {
+    if !blocks.iter().any(draws_images) {
         return vec![render_blocks(blocks, id, own, cx)];
     }
     let mut elements = Vec::new();
@@ -424,24 +426,35 @@ pub fn message_body(
             elements.push(render_blocks(&blocks[start..end], &part_id, own, cx));
         }
     };
-    for (index, block) in blocks.iter().enumerate() {
-        let Block::Image { url } = block else {
-            continue;
-        };
-        render_run(run_start, index, &mut elements);
-        run_start = index + 1;
-        match placement(url, images, local_images.len()) {
-            Some(Placement::Remote(position)) => elements.push(image_view(
+    let placed_view = |url: &str, key: &str| -> Option<AnyElement> {
+        match placement(url, images, local_images.len())? {
+            Placement::Remote(position) => Some(image_view(
                 &images[position],
-                format!("{id}-image-{position}"),
+                format!("{key}-image-{position}"),
                 directory,
                 open_image,
             )),
-            Some(Placement::Local(position)) => elements.push(local_image_view(
+            Placement::Local(position) => Some(local_image_view(
                 &local_images[position],
-                format!("{id}-local-image-{position}"),
+                format!("{key}-local-image-{position}"),
             )),
-            None => {}
+        }
+    };
+    for (index, block) in blocks.iter().enumerate() {
+        if !draws_images(block) {
+            continue;
+        }
+        render_run(run_start, index, &mut elements);
+        run_start = index + 1;
+        match block {
+            Block::Image { url } => elements.extend(placed_view(url, id)),
+            Block::Table { header, rows } => {
+                let table_id = format!("{id}-table-{index}");
+                elements.push(render_table(*header, rows, &table_id, own, cx, &|url| {
+                    placed_view(url, &table_id)
+                }));
+            }
+            _ => {}
         }
     }
     render_run(run_start, blocks.len(), &mut elements);
@@ -502,7 +515,7 @@ mod tests {
         IMAGE_FALLBACK, Placement, file_subtitle, fit_image, fit_image_within, local_image_index,
         placement, placements,
     };
-    use crate::render::Block;
+    use crate::render::{Block, TableCell};
     use teams_core::{FileCard, FileKind, ImageRef};
 
     fn image_ref(url: &str) -> ImageRef {
@@ -540,6 +553,19 @@ mod tests {
             vec![Placement::Remote(1), Placement::Local(1)]
         );
         assert_eq!(placement("a", &images, 0), Some(Placement::Remote(0)));
+    }
+
+    #[test]
+    fn an_image_in_a_table_cell_counts_as_placed() {
+        let images = [image_ref("a"), image_ref("b")];
+        let table = Block::Table {
+            header: false,
+            rows: vec![vec![TableCell {
+                inline: Default::default(),
+                images: vec!["b".into()],
+            }]],
+        };
+        assert_eq!(placements(&[table], &images, 0), vec![Placement::Remote(1)]);
     }
 
     #[test]

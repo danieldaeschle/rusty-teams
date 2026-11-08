@@ -235,12 +235,66 @@ pub enum Block {
     },
     Table {
         header: bool,
-        rows: Vec<Vec<Inline>>,
+        rows: Vec<Vec<TableCell>>,
     },
     Rule,
     Image {
         url: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableCell {
+    pub inline: Inline,
+    /// Images inside the cell, drawn in the cell by a renderer that knows them.
+    pub images: Vec<String>,
+}
+
+impl TableCell {
+    fn of(spans: &[Span]) -> TableCell {
+        let mut images = Vec::new();
+        collect_images(spans, &mut images);
+        let inline = inline_of(spans);
+        let inline = if images.is_empty() {
+            inline
+        } else {
+            inline.without(IMAGE_PLACEHOLDER)
+        };
+        TableCell { inline, images }
+    }
+}
+
+fn collect_images(spans: &[Span], images: &mut Vec<String>) {
+    for span in spans {
+        match span {
+            Span::Image { hosted_content_url } => images.push(hosted_content_url.clone()),
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
+            | Span::Underline(children)
+            | Span::BlockQuote(children)
+            | Span::Link { children, .. }
+            | Span::Colored { children, .. }
+            | Span::Heading { children, .. }
+            | Span::Indent { children, .. } => collect_images(children, images),
+            _ => {}
+        }
+    }
+}
+
+/// Image urls that a table draws inside its cells.
+pub fn table_images(block: &Block) -> Vec<&str> {
+    match block {
+        Block::Table { rows, .. } => rows
+            .iter()
+            .flatten()
+            .flat_map(|cell| cell.images.iter().map(String::as_str))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 impl Block {
@@ -275,7 +329,7 @@ impl Block {
                 rows.iter()
                     .map(|row| {
                         row.iter()
-                            .map(Inline::plain_text)
+                            .map(|cell| cell.inline.plain_text())
                             .collect::<Vec<_>>()
                             .join(" | ")
                     })
@@ -292,7 +346,7 @@ impl Block {
             Block::Paragraph(inline) | Block::Heading { inline, .. } => Some(inline.plain_text()),
             Block::Code { code, .. } | Block::CodeLine { code } => Some(code.clone()),
             Block::List { items, .. } => items.first()?.iter().find_map(Block::first_line),
-            Block::Table { rows, .. } => Some(rows.first()?.first()?.plain_text()),
+            Block::Table { rows, .. } => Some(rows.first()?.first()?.inline.plain_text()),
             Block::Quote(children) | Block::Indent { children, .. } => {
                 children.iter().find_map(Block::first_line)
             }
@@ -387,7 +441,7 @@ pub fn emoji_urls(blocks: &[Block]) -> Vec<String> {
     while let Some(block) = pending.pop() {
         match block {
             Block::Paragraph(inline) | Block::Heading { inline, .. } => add(inline),
-            Block::Table { rows, .. } => rows.iter().flatten().for_each(&mut add),
+            Block::Table { rows, .. } => rows.iter().flatten().for_each(|cell| add(&cell.inline)),
             Block::Reply { children, .. } | Block::Quote(children) | Block::Indent { children, .. } => {
                 pending.extend(children)
             }
@@ -473,9 +527,9 @@ fn layout_blocks_with(spans: &[Span], split_images: bool, frame_code: bool) -> V
             }
             Span::Table { header, rows } => {
                 flush(&mut current, &mut blocks, frame_code);
-                let rows: Vec<Vec<Inline>> = rows
+                let rows: Vec<Vec<TableCell>> = rows
                     .iter()
-                    .map(|row| row.iter().map(|cell| inline_of(cell)).collect())
+                    .map(|row| row.iter().map(|cell| TableCell::of(cell)).collect())
                     .collect();
                 if !rows.is_empty() {
                     blocks.push(Block::Table {
@@ -1066,6 +1120,31 @@ mod tests {
         );
     }
 
+    fn cell(text: &str) -> TableCell {
+        TableCell {
+            inline: Inline::plain(text),
+            images: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_image_in_a_cell_stays_in_the_cell() {
+        let image = Span::Image {
+            hosted_content_url: "https://img/1".into(),
+        };
+        let blocks = layout_blocks(&[Span::Table {
+            header: false,
+            rows: vec![vec![vec![image], vec![text("words")]]],
+        }]);
+        let [Block::Table { rows, .. }] = blocks.as_slice() else {
+            panic!("one table: {blocks:?}");
+        };
+        assert_eq!(rows[0][0].images, ["https://img/1"]);
+        assert!(rows[0][0].inline.is_blank());
+        assert_eq!(rows[0][1], cell("words"));
+        assert_eq!(table_images(&blocks[0]), ["https://img/1"]);
+    }
+
     #[test]
     fn heading_rule_and_table_are_blocks() {
         let blocks = layout_blocks(&[
@@ -1089,7 +1168,7 @@ mod tests {
                 Block::Rule,
                 Block::Table {
                     header: true,
-                    rows: vec![vec![Inline::plain("a"), Inline::plain("b")]],
+                    rows: vec![vec![cell("a"), cell("b")]],
                 },
             ]
         );
