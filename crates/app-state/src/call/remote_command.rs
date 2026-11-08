@@ -22,6 +22,9 @@ const SHARE_COMMAND: &str = "share";
 const STOP_SHARE_COMMAND: &str = "stop-share";
 const STATS_COMMAND: &str = "stats ";
 const INPUT_COMMAND: &str = "input ";
+const ECHO_COMMAND: &str = "echo";
+const HOLD_COMMAND: &str = "hold";
+const RESUME_COMMAND: &str = "resume";
 const DEFAULT_DEVICE: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +40,8 @@ pub enum RemoteCommand {
     StopShare,
     Stats(String),
     Input(String),
+    EchoCall,
+    Hold(bool),
 }
 
 impl RemoteCommand {
@@ -54,6 +59,9 @@ impl RemoteCommand {
             RemoteCommand::StopShare => STOP_SHARE_COMMAND.to_owned(),
             RemoteCommand::Stats(path) => format!("{STATS_COMMAND}{path}"),
             RemoteCommand::Input(name) => format!("{INPUT_COMMAND}{name}"),
+            RemoteCommand::EchoCall => ECHO_COMMAND.to_owned(),
+            RemoteCommand::Hold(true) => HOLD_COMMAND.to_owned(),
+            RemoteCommand::Hold(false) => RESUME_COMMAND.to_owned(),
         }
     }
 
@@ -68,6 +76,9 @@ impl RemoteCommand {
             SHARE_SOURCES_COMMAND => return Some(RemoteCommand::RefreshShareSources),
             SHARE_COMMAND => return Some(RemoteCommand::ShareScreen),
             STOP_SHARE_COMMAND => return Some(RemoteCommand::StopShare),
+            ECHO_COMMAND => return Some(RemoteCommand::EchoCall),
+            HOLD_COMMAND => return Some(RemoteCommand::Hold(true)),
+            RESUME_COMMAND => return Some(RemoteCommand::Hold(false)),
             _ => {}
         }
         if let Some(name) = text.strip_prefix(INPUT_COMMAND).map(str::trim) {
@@ -99,6 +110,8 @@ impl AppState {
             Some(RemoteCommand::ShareScreen) => self.share_first_screen(),
             Some(RemoteCommand::StopShare) => self.send_call_command(CallCommand::StopShare),
             Some(RemoteCommand::Input(name)) => self.switch_input_for_test(&name),
+            Some(RemoteCommand::EchoCall) => self.start_test_call(cx),
+            Some(RemoteCommand::Hold(hold)) => self.send_call_command(CallCommand::Hold(hold)),
             Some(RemoteCommand::Stats(path)) => {
                 let _ = std::fs::write(path, self.call_stats().to_string());
             }
@@ -150,6 +163,7 @@ impl AppState {
             "state": format!("{:?}", model.state),
             "muted": model.muted,
             "input": format!("{:?}", model.input),
+            "hold": format!("{:?}", model.hold),
             "cameraOn": model.camera_on,
             "localShare": model.local_share,
             "screenSharer": model.screen_sharer,
@@ -192,6 +206,9 @@ mod tests {
             RemoteCommand::StopShare,
             RemoteCommand::Stats("C:\\temp\\stats.json".to_owned()),
             RemoteCommand::Input("cable output".to_owned()),
+            RemoteCommand::EchoCall,
+            RemoteCommand::Hold(true),
+            RemoteCommand::Hold(false),
         ] {
             assert_eq!(RemoteCommand::decode(&command.encode()), Some(command));
         }
