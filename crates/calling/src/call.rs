@@ -21,7 +21,7 @@ use crate::audio::{SAMPLE_RATE, rms, tone_ratio, write_wav};
 use crate::audio_io::{AudioMode, AudioSetup};
 use crate::background::{BackgroundChoice, BackgroundPicture};
 use crate::breakout::{self, RoomWatcher};
-use crate::callee_gate::{CalleeGate, roster_has_callee};
+use crate::callee_gate::{CalleeGate, EchoWatch, roster_has_callee};
 use crate::camera::{CameraDevice, list_cameras};
 use crate::captions::{
     BotAction, CAPTIONS_DATA_ID, CaptionEntry, CaptionFlow, CaptionState, CaptionStep,
@@ -800,6 +800,7 @@ async fn drive(
     let mut outgoing_limit = OUTGOING_TIMEOUT;
     let is_meeting = spec.as_ref().is_some_and(CallSpec::is_meeting);
     let is_echo = matches!(spec, Some(CallSpec::Echo));
+    let mut echo_watch = EchoWatch::default();
     let mut callee_gate = CalleeGate::new(spec.as_ref().map_or(0, CallSpec::callee_count));
     let meeting_target = match &spec {
         Some(CallSpec::Meeting(target)) => Some(target.clone()),
@@ -1391,6 +1392,11 @@ async fn drive(
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
                             control.send(CallUpdate::Roster(entries));
+                            if is_echo && echo_watch.bot_left(roster.members().iter().map(|member| member.mri.as_str())) {
+                                timeline.record("echo bot left", "test call ends like in Teams");
+                                advance(state, CallSignal::RemoteEnd(EndKind::Normal), control);
+                                break;
+                            }
                             if callee_gate.is_waiting() && roster_has_callee(roster.members().iter().map(|member| member.mri.as_str()), &own_mri) {
                                 outgoing_deadline = None;
                                 if callee_gate.callee_joined() {

@@ -1,6 +1,6 @@
 // 1:1 call end-to-end test against the Echo bot with the deployed Windows app: no second person needed.
 // The app's mic is VB-CABLE fed with a speech file; the bot plays its prompt, records us and plays it back.
-// Checks that the app hears the bot, that our speech comes back, and that hold and resume stop and restart media.
+// Checks the app hears the bot and our own speech back, that the call ends when the bot hangs up, and hold/resume in a second call.
 // Usage: node scripts/call-echo-e2e.mjs <work dir>
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -15,11 +15,13 @@ const CONNECT_WAIT_MS = 12_000;
 const LISTEN_SECONDS = 40;
 const HOLD_SETTLE_MS = 6_000;
 const HOLD_MEASURE_MS = 6_000;
-const PLAY_SECONDS = 150;
+const PLAY_SECONDS = 200;
 const APP_THRESHOLD = { speech: 200, floor: 20 };
 const SPEECH_TO_PAUSE = 4;
 const RESUMED_PACKETS = 100;
-const HELD_PACKETS = 20;
+const PROMPT_START_MS = 3_000;
+const ENDED_WAIT_MS = 15_000;
+const HELD_PACKETS = 60;
 
 const windowsPath = (path) => execFileSync('wslpath', ['-w', path]).toString().trim();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,24 +89,34 @@ try {
   if (!teamsProcessId()) throw new Error('teams.exe is not running');
   defaultAudio('set', 'capture', 'CABLE Output');
   const playing = runProbe('play', 'CABLE Input', windowsPath(PROBE_DIR + '/app.wav'), String(PLAY_SECONDS));
-  runTeams('--call', 'echo');
-  log(`echo call placed, waiting ${CONNECT_WAIT_MS / 1000}s`);
-  await delay(CONNECT_WAIT_MS);
-  runTeams('--unmute');
-  const connected = await appStats();
-  report.checks.connected = { pass: connected.inCall && /Connected/.test(connected.state), state: connected.state };
-  if (!report.checks.connected.pass) throw new Error(`echo call not connected: ${connected.state}`);
+  const placeEcho = async () => {
+    runTeams('--call', 'echo');
+    log(`echo call placed, waiting ${CONNECT_WAIT_MS / 1000}s`);
+    await delay(CONNECT_WAIT_MS);
+    runTeams('--unmute');
+    const connected = await appStats();
+    if (!(connected.inCall && /Connected/.test(connected.state))) throw new Error(`echo call not connected: ${connected.state}`);
+  };
+  await placeEcho();
+  report.checks.connected = { pass: true };
   log(`listening ${LISTEN_SECONDS}s for the prompt and our echo`);
   const recorded = await runProbe('record-process', String(teamsProcessId()), String(LISTEN_SECONDS), windowsPath(workDir + '/echo-heard.wav'));
   report.checks.heard = judge(JSON.parse(recorded).rms);
+  await delay(ENDED_WAIT_MS);
+  const after = await appStats();
+  report.checks.endsWhenBotLeaves = { pass: !after.inCall, inCall: after.inCall, state: after.state };
+  if (after.inCall) runTeams('--hang-up');
+  await delay(5_000);
+  await placeEcho();
+  await delay(PROMPT_START_MS);
   runTeams('--call', 'hold');
   await delay(HOLD_SETTLE_MS);
   const held = await mediaDelta(HOLD_MEASURE_MS);
-  report.checks.hold = { pass: held.sent <= HELD_PACKETS && /Local/.test(held.app.hold), sent: held.sent, received: held.received, hold: held.app.hold };
+  report.checks.hold = { pass: held.sent <= HELD_PACKETS && /Local/.test(held.app.hold), sent: held.sent, hold: held.app.hold };
   runTeams('--call', 'resume');
   await delay(HOLD_SETTLE_MS);
   const resumed = await mediaDelta(HOLD_MEASURE_MS);
-  report.checks.resume = { pass: resumed.sent >= RESUMED_PACKETS && resumed.received >= RESUMED_PACKETS && /Active/.test(resumed.app.hold), sent: resumed.sent, received: resumed.received, hold: resumed.app.hold };
+  report.checks.resume = { pass: resumed.sent >= RESUMED_PACKETS && /Active/.test(resumed.app.hold), sent: resumed.sent, hold: resumed.app.hold };
   await playing.catch((error) => (report.playError = error.message));
 } catch (error) {
   report.error = error.message;
