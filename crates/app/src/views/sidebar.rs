@@ -21,7 +21,6 @@ use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, team_avatar, with_presence};
 use super::calls_tab::calls_body;
 use super::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
-use super::saved_panel::SavedPanel;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::channel_admin_dialogs::{confirm_delete_channel, open_edit_channel_dialog};
 use super::create_channel_dialog::open_create_channel_dialog;
@@ -29,7 +28,7 @@ use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
 use super::last_views::LastViews;
-use crate::app_state::{AppEvent, AppState, Selection};
+use crate::app_state::{AppEvent, AppState, QuickView, Selection};
 use crate::channel_menu::{
     ChannelMenuItem, MenuEntry, TeamMenuItem, TeamMenuState, channel_menu_entries,
     team_menu_entries,
@@ -62,6 +61,15 @@ const PROPOSAL_DOT_SIZE: f32 = 8.;
 const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
+const QUICK_VIEWS_SECTION_ID: &str = "quick-views";
+const QUICK_VIEWS_TITLE: &str = "Quick views";
+const QUICK_ROW_HEIGHT: f32 = 32.;
+const QUICK_ICON_SIZE: f32 = 18.;
+const QUICK_VIEWS: [(QuickView, &str); 3] = [
+    (QuickView::Mentions, "fluent_mention"),
+    (QuickView::Drafts, "fluent_drafts"),
+    (QuickView::Saved, "fluent_bookmark"),
+];
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
 const LOADING_OLDER_LABEL: &str = "Loading older chats";
@@ -97,7 +105,6 @@ pub enum SidebarTab {
     Channels,
     Calendar,
     Calls,
-    Saved,
     Agents,
 }
 
@@ -109,7 +116,6 @@ impl SidebarTab {
             SidebarTab::Channels => "Teams",
             SidebarTab::Calendar => "Calendar",
             SidebarTab::Calls => "Calls",
-            SidebarTab::Saved => "Saved",
             SidebarTab::Agents => "Agents",
         }
     }
@@ -338,7 +344,6 @@ pub struct SidebarView {
     state: Entity<AppState>,
     tab: SidebarTab,
     activity_panel: Entity<ActivityPanel>,
-    saved_panel: Entity<SavedPanel>,
     agents_panel: Option<Entity<AgentsPanel>>,
     collapsed_teams: HashSet<String>,
     revealed_channel_teams: HashSet<String>,
@@ -407,7 +412,6 @@ impl SidebarView {
     pub fn new(
         state: Entity<AppState>,
         activity_panel: Entity<ActivityPanel>,
-        saved_panel: Entity<SavedPanel>,
         agents_panel: Option<Entity<AgentsPanel>>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -476,7 +480,6 @@ impl SidebarView {
             state,
             tab,
             activity_panel,
-            saved_panel,
             agents_panel,
             collapsed_teams,
             revealed_channel_teams: HashSet::new(),
@@ -525,8 +528,10 @@ impl SidebarView {
         self.open_tab(SidebarTab::Calendar, cx);
     }
 
-    pub fn show_saved(&mut self, cx: &mut Context<Self>) {
-        self.open_tab(SidebarTab::Saved, cx);
+    pub fn open_quick_view(&mut self, view: QuickView, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Chats, cx);
+        self.state
+            .update(cx, |state, cx| state.open_quick_view(view, cx));
     }
 
     pub fn show_agents(&mut self, cx: &mut Context<Self>) {
@@ -548,7 +553,6 @@ impl SidebarView {
                 state.refresh_call_history(cx);
                 state.refresh_calendar(cx);
             }),
-            SidebarTab::Saved => self.state.update(cx, |state, cx| state.refresh_saved(cx)),
             SidebarTab::Calendar => self.state.update(cx, |state, cx| state.open_calendar(cx)),
             SidebarTab::Activity => {
                 let activity = self.activity_panel.read(cx).activity();
@@ -591,7 +595,6 @@ impl SidebarView {
             SidebarTab::Activity
             | SidebarTab::Calendar
             | SidebarTab::Calls
-            | SidebarTab::Saved
             | SidebarTab::Agents => None,
         };
         if let Some(selection) = selection {
@@ -844,6 +847,92 @@ impl SidebarView {
                     .update(cx, |state, cx| state.toggle_collapsed(&id, cx));
             }))
             .context_menu(move |popup, _, _| section_menu(popup, &menu_state, &menu))
+    }
+
+    fn quick_views_section(&self, cx: &mut Context<Self>) -> (Div, f32) {
+        let (collapsed, open_view) = {
+            let state = self.state.read(cx);
+            (
+                state.collapsed.contains(QUICK_VIEWS_SECTION_ID),
+                state.quick_view,
+            )
+        };
+        let header = h_flex()
+            .id(QUICK_VIEWS_SECTION_ID)
+            .h(px(SECTION_HEIGHT))
+            .flex_none()
+            .mt(px(SECTION_GAP))
+            .mx(px(6.))
+            .px(px(10.))
+            .gap(px(6.))
+            .items_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(|header| header.bg(theme::row_hover()))
+            .child(icon(
+                if collapsed {
+                    IconName::ChevronRight
+                } else {
+                    IconName::ChevronDown
+                },
+                12.,
+                theme::text_muted(),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text_soft())
+                    .child(QUICK_VIEWS_TITLE),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.state.update(cx, |state, cx| {
+                    state.toggle_collapsed(QUICK_VIEWS_SECTION_ID, cx)
+                });
+            }));
+        let mut section = v_flex().w_full().child(header);
+        let mut height = SECTION_GAP + SECTION_HEIGHT;
+        if !collapsed {
+            for (view, glyph) in QUICK_VIEWS {
+                section = section.child(self.quick_view_row(view, glyph, open_view == Some(view), cx));
+                height += QUICK_ROW_HEIGHT;
+            }
+        }
+        (section, height)
+    }
+
+    fn quick_view_row(
+        &self,
+        view: QuickView,
+        glyph: &'static str,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        h_flex()
+            .id(SharedString::from(format!("quick-view-{}", view.title())))
+            .debug_selector(move || format!("quick-view/{}", view.title()))
+            .h(px(QUICK_ROW_HEIGHT))
+            .flex_none()
+            .mx(px(6.))
+            .px(px(10.))
+            .gap(px(10.))
+            .items_center()
+            .rounded(px(8.))
+            .cursor_pointer()
+            .when(selected, |row| row.bg(theme::surface_raised()))
+            .when(!selected, |row| row.hover(|row| row.bg(theme::row_hover())))
+            .child(symbol(glyph, QUICK_ICON_SIZE, theme::text_soft()))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(theme::text())
+                    .child(view.title()),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.state
+                    .update(cx, |state, cx| state.open_quick_view(view, cx));
+            }))
     }
 
     fn see_more_row(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1111,7 +1200,10 @@ impl SidebarView {
         let (selected, drafting) = {
             let state = self.state.read(cx);
             (
-                state.selection.clone().filter(|_| !state.new_chat),
+                state
+                    .selection
+                    .clone()
+                    .filter(|_| !state.new_chat && state.quick_view.is_none()),
                 state.new_chat,
             )
         };
@@ -1125,6 +1217,11 @@ impl SidebarView {
         if drafting {
             list = list.child(self.draft_row());
             y += ROW_HEIGHT;
+        }
+        if !self.chat_filter.is_active() {
+            let (quick_views, quick_height) = self.quick_views_section(cx);
+            list = list.child(quick_views);
+            y += quick_height;
         }
         for (section, section_menu) in sections.iter().zip(section_menus) {
             list = with_spacer(list, &mut skipped_height);
@@ -2002,7 +2099,6 @@ impl Render for SidebarView {
             SidebarTab::Chats => self.chats_body(window_height, cx),
             SidebarTab::Channels => self.channels_body(cx),
             SidebarTab::Calls => calls_body(&self.state, &self.calls_scroll, window_height, cx),
-            SidebarTab::Saved => self.saved_panel.clone().into_any_element(),
             SidebarTab::Agents => match &self.agents_panel {
                 Some(panel) => panel.clone().into_any_element(),
                 None => div().into_any_element(),
@@ -2025,7 +2121,7 @@ impl Render for SidebarView {
                 Some(page_header(self.tab.title()).child(self.channel_list_menu_button(cx)))
             }
             SidebarTab::Calls | SidebarTab::Agents => Some(page_header(self.tab.title())),
-            SidebarTab::Activity | SidebarTab::Saved | SidebarTab::Calendar => None,
+            SidebarTab::Activity | SidebarTab::Calendar => None,
         };
         v_flex()
             .debug_selector(|| "shell/islands/sidebar".into())

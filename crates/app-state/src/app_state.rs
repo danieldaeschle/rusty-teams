@@ -29,6 +29,31 @@ use calling::meeting::LiveMeeting;
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
 const RECENT_MESSAGES_FOR_TYPING: usize = 5;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuickView {
+    Mentions,
+    Drafts,
+    Saved,
+}
+
+impl QuickView {
+    pub fn title(self) -> &'static str {
+        match self {
+            QuickView::Mentions => "Mentions",
+            QuickView::Drafts => "Drafts",
+            QuickView::Saved => "Saved",
+        }
+    }
+
+    pub fn empty_text(self) -> &'static str {
+        match self {
+            QuickView::Mentions => "No mentions yet. When someone @mentions you, it shows up here.",
+            QuickView::Drafts => "No drafts. Messages you start and do not send show up here.",
+            QuickView::Saved => "No saved messages. Use Save message in the ... menu of a message.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     Chat(String),
@@ -124,6 +149,7 @@ pub struct AppState {
     pub typing: TypingState,
     typing_timer_running: bool,
     pub local_previews: HashMap<String, LocalPreview>,
+    pub quick_view: Option<QuickView>,
     pub scheduled: Vec<ScheduledDraft>,
     pub scheduled_polling: bool,
     pub saved: SavedSet,
@@ -279,6 +305,7 @@ impl AppState {
             typing: TypingState::default(),
             typing_timer_running: false,
             local_previews: HashMap::new(),
+            quick_view: None,
             scheduled: Vec::new(),
             scheduled_polling: false,
             saved: SavedSet::default(),
@@ -912,7 +939,27 @@ impl AppState {
         );
     }
 
+    pub fn open_quick_view(&mut self, view: QuickView, cx: &mut Context<Self>) {
+        self.show_call(false, cx);
+        self.cancel_prejoin(cx);
+        self.new_chat = false;
+        self.quick_view = Some(view);
+        if view == QuickView::Saved {
+            self.refresh_saved(cx);
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub fn close_quick_view(&mut self, cx: &mut Context<Self>) {
+        if self.quick_view.take().is_some() {
+            cx.emit(AppEvent::Sidebar);
+            cx.notify();
+        }
+    }
+
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
+        self.quick_view = None;
         self.new_chat = true;
         self.show_call(false, cx);
         cx.emit(AppEvent::Selection);
@@ -933,7 +980,12 @@ impl AppState {
         self.cancel_prejoin(cx);
         self.call_end = None;
         let was_drafting = std::mem::take(&mut self.new_chat);
+        let left_quick_view = self.quick_view.take().is_some();
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
+            if left_quick_view {
+                cx.emit(AppEvent::Sidebar);
+                cx.notify();
+            }
             return;
         }
         let conversation_id = selection.conversation_id().to_owned();

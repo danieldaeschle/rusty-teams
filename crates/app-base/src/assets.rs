@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 82] = symbols![
+const SYMBOLS: [(&str, &[u8]); 85] = symbols![
     "campaign",
     "lock",
     "bot",
@@ -64,6 +64,9 @@ const SYMBOLS: [(&str, &[u8]); 82] = symbols![
     "call_missed",
     "videocam",
     "fluent_video",
+    "fluent_mention",
+    "fluent_drafts",
+    "fluent_bookmark",
     "fluent_record",
     "fluent_record_stop",
     "fluent_cloud_arrow_up",

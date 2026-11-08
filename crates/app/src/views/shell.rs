@@ -21,7 +21,7 @@ use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
 use crate::chat_filter::ChatFilterPill;
-use super::saved_panel::{SavedPanel, SavedPanelEvent};
+use super::quick_view_pane::{QuickViewEvent, QuickViewPane};
 use super::shortcuts::{
     ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
     FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
@@ -45,7 +45,7 @@ use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::{mode_label, render_title_bar, update_button};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
-use crate::app_state::{AppEvent, AppState, Selection, selection_for};
+use crate::app_state::{AppEvent, AppState, QuickView, Selection, selection_for};
 use crate::call::{CallMedia, CallWindows, ZoomStep};
 use crate::notice::NoticeAction;
 use crate::notify::NotificationCenter;
@@ -154,6 +154,8 @@ pub struct AppShell {
     rail: Entity<RailView>,
     sidebar: Entity<SidebarView>,
     calendar: Entity<CalendarView>,
+    quick_pane: Entity<QuickViewPane>,
+    shown_quick_view: Option<QuickView>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
     prejoin: Option<Entity<PrejoinView>>,
@@ -211,6 +213,15 @@ impl AppShell {
         }
     }
 
+    fn focus_opened_quick_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let quick_view = self.state.read(cx).quick_view;
+        if std::mem::replace(&mut self.shown_quick_view, quick_view) != quick_view
+            && quick_view.is_some()
+        {
+            self.restore_focus(window, cx);
+        }
+    }
+
     fn leave_calendar_on_selection(&mut self, cx: &mut Context<Self>) {
         if self.sidebar.read(cx).tab() != SidebarTab::Calendar {
             return;
@@ -255,7 +266,7 @@ impl AppShell {
         });
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
-        let saved_panel = cx.new(|cx| SavedPanel::new(state.clone(), cx));
+        let quick_pane = cx.new(|cx| QuickViewPane::new(state.clone(), activity.clone(), cx));
         let agents_panel = crate::agents::runs_handle(cx)
             .map(|runs| cx.new(|cx| crate::agents::AgentsPanel::new(runs, cx)));
         let agents_subscription = agents_panel.as_ref().map(|panel| {
@@ -290,12 +301,14 @@ impl AppShell {
                     }
                 },
             ),
-            cx.subscribe(&saved_panel, |this, _, event: &SavedPanelEvent, cx| {
-                let SavedPanelEvent::Open {
+            cx.subscribe(&quick_pane, |this, _, event: &QuickViewEvent, cx| {
+                let QuickViewEvent::Open {
                     conversation_id,
                     message_id,
                 } = event;
-                this.open_message(conversation_id, message_id, cx);
+                this.state
+                    .update(cx, |state, cx| state.close_quick_view(cx));
+                this.open_message(conversation_id, message_id.as_deref().unwrap_or_default(), cx);
             }),
         ];
         let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
@@ -313,7 +326,7 @@ impl AppShell {
                 },
             )
         });
-        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, agents_panel, cx));
+        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, agents_panel, cx));
         let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, window, cx| {
             match event {
                 SidebarEvent::RestoreFocus => this.restore_focus(window, cx),
@@ -334,6 +347,9 @@ impl AppShell {
             cx.subscribe_in(&state, window, |this, _, event: &AppEvent, window, cx| {
                 if matches!(event, AppEvent::Sidebar | AppEvent::Status) {
                     this.apply_open_target(cx);
+                }
+                if matches!(event, AppEvent::Sidebar) {
+                    this.focus_opened_quick_view(window, cx);
                 }
                 if matches!(event, AppEvent::Selection) {
                     this.leave_calendar_on_selection(cx);
@@ -387,6 +403,8 @@ impl AppShell {
             rail,
             sidebar,
             calendar,
+            quick_pane,
+            shown_quick_view: None,
             conversation,
             call_chat: None,
             prejoin: None,
@@ -882,6 +900,7 @@ impl AppShell {
         call_view: Option<AnyElement>,
         show_sidebar: bool,
         calendar_open: bool,
+        quick_view_open: bool,
     ) -> impl IntoElement {
         h_flex()
             .debug_selector(|| "shell/islands".into())
@@ -910,6 +929,11 @@ impl AppShell {
             .child(match (call_view, self.prejoin.clone()) {
                 (Some(call_view), _) => call_view,
                 (None, Some(prejoin)) => prejoin
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                    .into_any_element(),
+                (None, None) if quick_view_open => self
+                    .quick_pane
+                    .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
                 (None, None) if calendar_open => self
@@ -984,6 +1008,7 @@ impl Render for AppShell {
         self.toasts.update_failed(update_failure.as_deref(), window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
+        let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);
@@ -992,6 +1017,7 @@ impl Render for AppShell {
             .as_ref()
             .is_some_and(|call| call.chat_open || call.people_open || call.transcript_open);
         let calendar_open = calendar_tab && !state.viewing_call();
+        let quick_view_open = chats_tab && state.quick_view.is_some();
         let show_sidebar = !calendar_open
             && !(state.viewing_call()
                 && !call_fullscreen
@@ -1082,7 +1108,7 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.show_saved(cx));
+                    .update(cx, |sidebar, cx| sidebar.open_quick_view(QuickView::Saved, cx));
             }))
             .on_action(cx.listener(|this, _: &OpenCalendar, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -1101,6 +1127,8 @@ impl Render for AppShell {
             }))
             .on_action(cx.listener(|this, _: &FindInChat, window, cx| {
                 this.close_image_viewer(window, cx);
+                this.state
+                    .update(cx, |state, cx| state.close_quick_view(cx));
                 this.conversation
                     .update(cx, |conversation, cx| conversation.open_find(window, cx));
             }))
@@ -1231,7 +1259,7 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(self.islands(call_view, show_sidebar, calendar_open)),
+                    .child(self.islands(call_view, show_sidebar, calendar_open, quick_view_open)),
             )
             .children(call_mini)
             .children(call_overlay)
