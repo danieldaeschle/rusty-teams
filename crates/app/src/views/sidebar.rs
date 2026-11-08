@@ -92,6 +92,7 @@ pub enum SidebarTab {
     Activity,
     Chats,
     Channels,
+    Calendar,
     Calls,
     Saved,
     Agents,
@@ -103,6 +104,7 @@ impl SidebarTab {
             SidebarTab::Activity => "Activity",
             SidebarTab::Chats => "Chats",
             SidebarTab::Channels => "Channels",
+            SidebarTab::Calendar => "Calendar",
             SidebarTab::Calls => "Calls",
             SidebarTab::Saved => "Saved",
             SidebarTab::Agents => "Agents",
@@ -651,6 +653,7 @@ pub(crate) fn confirm_leave(
 
 pub enum SidebarEvent {
     RestoreFocus,
+    TabChanged,
 }
 
 impl EventEmitter<SidebarEvent> for SidebarView {}
@@ -835,6 +838,10 @@ impl SidebarView {
         self.open_tab(SidebarTab::Calls, cx);
     }
 
+    pub fn show_calendar(&mut self, cx: &mut Context<Self>) {
+        self.open_tab(SidebarTab::Calendar, cx);
+    }
+
     pub fn show_saved(&mut self, cx: &mut Context<Self>) {
         self.open_tab(SidebarTab::Saved, cx);
     }
@@ -847,13 +854,18 @@ impl SidebarView {
         if tab == SidebarTab::Agents && !crate::agents::agents_enabled(cx) {
             return;
         }
+        let changed = self.tab != tab;
         self.tab = tab;
+        if changed {
+            cx.emit(SidebarEvent::TabChanged);
+        }
         match tab {
             SidebarTab::Calls => self.state.update(cx, |state, cx| {
                 state.refresh_call_history(cx);
                 state.refresh_calendar(cx);
             }),
             SidebarTab::Saved => self.state.update(cx, |state, cx| state.refresh_saved(cx)),
+            SidebarTab::Calendar => self.state.update(cx, |state, cx| state.open_calendar(cx)),
             SidebarTab::Activity => {
                 let activity = self.activity_panel.read(cx).activity();
                 activity.update(cx, |activity, cx| activity.mark_seen(cx));
@@ -871,9 +883,11 @@ impl SidebarView {
                 .adjacent_chat_id(step)
                 .map(Selection::Chat),
             SidebarTab::Channels => self.adjacent_channel_id(step, cx).map(Selection::Channel),
-            SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Saved | SidebarTab::Agents => {
-                None
-            }
+            SidebarTab::Activity
+            | SidebarTab::Calendar
+            | SidebarTab::Calls
+            | SidebarTab::Saved
+            | SidebarTab::Agents => None,
         };
         if let Some(selection) = selection {
             self.state
@@ -2229,6 +2243,7 @@ impl Render for SidebarView {
                 Some(panel) => panel.clone().into_any_element(),
                 None => div().into_any_element(),
             },
+            SidebarTab::Calendar => div().into_any_element(),
         };
         let header = match self.tab {
             SidebarTab::Chats => Some(
@@ -2246,7 +2261,7 @@ impl Render for SidebarView {
                 Some(page_header(self.tab.title()).child(self.channel_list_menu_button(cx)))
             }
             SidebarTab::Calls | SidebarTab::Agents => Some(page_header(self.tab.title())),
-            SidebarTab::Activity | SidebarTab::Saved => None,
+            SidebarTab::Activity | SidebarTab::Saved | SidebarTab::Calendar => None,
         };
         v_flex()
             .debug_selector(|| "shell/islands/sidebar".into())

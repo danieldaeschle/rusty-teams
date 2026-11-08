@@ -11,6 +11,7 @@ use super::call_stage::{render_call_overlay, render_stage_overlay};
 use super::call_end_view::render_call_end;
 use super::call_view::{CHAT_PANEL_WIDTH, OVERLAY_BELOW as CALL_COLUMN_MIN, render_call_view};
 use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
+use super::calendar_view::CalendarView;
 use super::conversation::ConversationView;
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
@@ -24,7 +25,7 @@ use super::saved_panel::{SavedPanel, SavedPanelEvent};
 use super::shortcuts::{
     ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
     FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, PopOutSelectedChat, OpenLobbyList, OpenSaved, PreviousConversation, PushToTalk,
+    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, PopOutSelectedChat, OpenLobbyList, OpenSaved, OpenCalendar, PreviousConversation, PushToTalk,
     Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera, ToggleCallFullscreen,
     ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
     ZoomShareReset,
@@ -33,7 +34,7 @@ use super::window_zoom::{WindowZoom, change_zoom};
 use super::call_pop_out::zoom_listener;
 use super::chat_pop_out;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
-use super::sidebar::{SidebarEvent, SidebarView};
+use super::sidebar::{SidebarEvent, SidebarTab, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, RAIL_WIDTH, SIDEBAR_WIDTH};
 use super::connection_banner::render_connection_banner;
@@ -152,6 +153,8 @@ pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
     sidebar: Entity<SidebarView>,
+    calendar: Entity<CalendarView>,
+    shown_selection: Option<Selection>,
     conversation: Entity<ConversationView>,
     call_chat: Option<(String, Entity<ConversationView>)>,
     prejoin: Option<Entity<PrejoinView>>,
@@ -207,6 +210,25 @@ impl AppShell {
             }
             (None, _) => self.call_chat = None,
         }
+    }
+
+    fn leave_calendar_on_selection(&mut self, cx: &mut Context<Self>) {
+        let selection = self.state.read(cx).selection.clone();
+        if selection == self.shown_selection {
+            return;
+        }
+        self.shown_selection = selection.clone();
+        if self.sidebar.read(cx).tab() != SidebarTab::Calendar {
+            return;
+        }
+        let sidebar = self.sidebar.clone();
+        cx.defer(move |cx| {
+            sidebar.update(cx, |sidebar, cx| match selection {
+                Some(Selection::Channel(_)) => sidebar.show_channels(cx),
+                Some(Selection::Chat(_)) => sidebar.show_chats(cx),
+                None => {}
+            })
+        });
     }
 
     fn sync_prejoin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -297,9 +319,18 @@ impl AppShell {
             )
         });
         let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, saved_panel, agents_panel, cx));
-        let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, _: &SidebarEvent, window, cx| {
-            this.restore_focus(window, cx);
+        let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, window, cx| {
+            match event {
+                SidebarEvent::RestoreFocus => this.restore_focus(window, cx),
+                SidebarEvent::TabChanged => {
+                    if this.sidebar.read(cx).tab() == SidebarTab::Calendar {
+                        this.restore_focus(window, cx);
+                    }
+                    cx.notify();
+                }
+            }
         });
+        let calendar = cx.new(|cx| CalendarView::new(state.clone(), cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
         let timeline = conversation.read(cx).timeline_bounds();
@@ -357,6 +388,8 @@ impl AppShell {
             state,
             rail,
             sidebar,
+            calendar,
+            shown_selection: None,
             conversation,
             call_chat: None,
             prejoin: None,
@@ -842,7 +875,12 @@ impl AppShell {
 }
 
 impl AppShell {
-    fn islands(&self, call_view: Option<AnyElement>, show_sidebar: bool) -> impl IntoElement {
+    fn islands(
+        &self,
+        call_view: Option<AnyElement>,
+        show_sidebar: bool,
+        calendar_open: bool,
+    ) -> impl IntoElement {
         h_flex()
             .debug_selector(|| "shell/islands".into())
             .flex_1()
@@ -870,6 +908,11 @@ impl AppShell {
             .child(match (call_view, self.prejoin.clone()) {
                 (Some(call_view), _) => call_view,
                 (None, Some(prejoin)) => prejoin
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                    .into_any_element(),
+                (None, None) if calendar_open => self
+                    .calendar
+                    .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
                 (None, None) => self
@@ -930,6 +973,7 @@ impl Render for AppShell {
         let chat_thread = self.state.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
         self.sync_prejoin(window, cx);
+        self.leave_calendar_on_selection(cx);
         let notice = self.state.read(cx).notice.clone();
         self.toasts.sync(&self.state, notice.as_ref(), window, cx);
         let update_failure = match &self.update {
@@ -938,6 +982,7 @@ impl Render for AppShell {
         };
         self.toasts.update_failed(update_failure.as_deref(), window, cx);
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
+        let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
         let state = self.state.read(cx);
         let call_fullscreen = state.call_fullscreen();
         let window_width = f32::from(window.viewport_size().width);
@@ -945,9 +990,11 @@ impl Render for AppShell {
             .call
             .as_ref()
             .is_some_and(|call| call.chat_open || call.people_open || call.transcript_open);
-        let show_sidebar = !(state.viewing_call()
-            && !call_fullscreen
-            && sidebar_hidden_in_call(window_width, panel_open));
+        let calendar_open = calendar_tab && !state.viewing_call();
+        let show_sidebar = !calendar_open
+            && !(state.viewing_call()
+                && !call_fullscreen
+                && sidebar_hidden_in_call(window_width, panel_open));
         let island_width = window_width
             - RAIL_WIDTH
             - if show_sidebar { SIDEBAR_WIDTH } else { 0. }
@@ -1035,6 +1082,11 @@ impl Render for AppShell {
                 this.close_image_viewer(window, cx);
                 this.sidebar
                     .update(cx, |sidebar, cx| sidebar.show_saved(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenCalendar, window, cx| {
+                this.close_image_viewer(window, cx);
+                this.sidebar
+                    .update(cx, |sidebar, cx| sidebar.show_calendar(cx));
             }))
             .on_action(cx.listener(|this, _: &OpenAgents, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -1178,7 +1230,7 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(self.islands(call_view, show_sidebar)),
+                    .child(self.islands(call_view, show_sidebar, calendar_open)),
             )
             .children(call_mini)
             .children(call_overlay)

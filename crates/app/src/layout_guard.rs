@@ -217,7 +217,7 @@ mod frames {
     };
     use crate::views::shortcuts::{
         ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCallsTab,
-        OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
+        OpenCalendar, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
     use crate::views::sidebar::chat_row_selector;
@@ -263,6 +263,7 @@ mod frames {
         "shell/islands/main/call-controls/leave",
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
+    const CALENDAR: &str = "shell/islands/calendar";
     const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
     const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
     const FIND_TAGS: &[&str] = &[
@@ -622,6 +623,7 @@ mod frames {
             .chain([
                 &ACTIVITY_PROPOSALS_TAG,
                 &AGENTS_LIST,
+                &CALENDAR,
                 &CALL_TRANSCRIPT,
                 &MENU,
                 &RECAP_TAB,
@@ -857,6 +859,10 @@ mod frames {
                     Some(|visual| visual.dispatch_action(OpenChannelsTab)),
                 ),
                 Screen::Tab("saved", Some(|visual| visual.dispatch_action(OpenSaved))),
+                Screen::Tab(
+                    "calendar",
+                    Some(|visual| visual.dispatch_action(OpenCalendar)),
+                ),
                 Screen::Tab("calls", Some(|visual| visual.dispatch_action(OpenCallsTab))),
                 Screen::Tab("agents", Some(|visual| visual.dispatch_action(OpenAgents))),
                 Screen::Prejoin,
@@ -988,6 +994,12 @@ mod frames {
                     "find" => expected.extend(FIND_TAGS),
                     "calls" => expected.extend(CALLS_TAGS),
                     "agents" => expected.push(AGENTS_LIST),
+                    "calendar" => {
+                        expected.retain(|path| {
+                            !matches!(*path, "shell/islands/sidebar" | "shell/islands/main")
+                        });
+                        expected.push(CALENDAR);
+                    }
                     "prejoin" => expected.extend(PREJOIN_TAGS),
                     _ => {}
                 }

@@ -225,6 +225,22 @@ impl CallLauncher {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn calendar_view(
+        &self,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<chatsvc::CalendarEvent>, String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .calendar_view(start, end)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn reminder_view(
         &self,
         start: chrono::DateTime<chrono::Utc>,

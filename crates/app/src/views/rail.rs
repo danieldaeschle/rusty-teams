@@ -74,6 +74,13 @@ fn rail_items(
             },
         },
         RailItem {
+            tab: SidebarTab::Calendar,
+            label: "Calendar",
+            shortcut_label: "Open Calendar",
+            icon: IconName::Calendar,
+            badge: RailBadge::None,
+        },
+        RailItem {
             tab: SidebarTab::Calls,
             label: "Calls",
             shortcut_label: "Show Calls",
@@ -267,6 +274,7 @@ mod tests {
                 SidebarTab::Activity,
                 SidebarTab::Chats,
                 SidebarTab::Channels,
+                SidebarTab::Calendar,
                 SidebarTab::Calls,
                 SidebarTab::Saved
             ]
@@ -275,13 +283,13 @@ mod tests {
 
     #[test]
     fn agents_comes_last_and_only_when_actions_exist() {
-        assert_eq!(rail_items(0, 0, false, None).len(), 5);
+        assert_eq!(rail_items(0, 0, false, None).len(), 6);
         let with_agents = rail_items(0, 0, false, Some(2));
-        assert_eq!(with_agents.len(), 6);
-        assert_eq!(with_agents[5].tab, SidebarTab::Agents);
-        assert_eq!(with_agents[5].label, "Agents");
-        assert_eq!(with_agents[5].badge, RailBadge::Count(2));
-        assert_eq!(rail_items(0, 0, false, Some(0))[5].badge, RailBadge::None);
+        assert_eq!(with_agents.len(), 7);
+        assert_eq!(with_agents[6].tab, SidebarTab::Agents);
+        assert_eq!(with_agents[6].label, "Agents");
+        assert_eq!(with_agents[6].badge, RailBadge::Count(2));
+        assert_eq!(rail_items(0, 0, false, Some(0))[6].badge, RailBadge::None);
     }
 
     #[test]
@@ -292,6 +300,7 @@ mod tests {
         assert_eq!(items[2].badge, RailBadge::Dot);
         assert_eq!(items[3].badge, RailBadge::None);
         assert_eq!(items[4].badge, RailBadge::None);
+        assert_eq!(items[5].badge, RailBadge::None);
         let quiet = rail_items(0, 0, false, None);
         assert!(quiet.iter().all(|item| item.badge == RailBadge::None));
         assert_eq!(count_badge_for(usize::MAX), RailBadge::Count(u32::MAX));

@@ -179,6 +179,7 @@ pub struct AppState {
     pub rsvp_send_response: bool,
     pub meeting_toasts: crate::call::MeetingToasts,
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
+    pub calendar_week: crate::call::week::CalendarWeek,
     pub call_backgrounds: crate::call::BackgroundLibrary,
     pub transfer_picker: Option<AnyView>,
     pub transcript_panel: Option<AnyView>,
@@ -349,6 +350,7 @@ impl AppState {
             rsvp_send_response: true,
             meeting_toasts: crate::call::MeetingToasts::default(),
             demo_meetings: Vec::new(),
+            calendar_week: crate::call::week::CalendarWeek::default(),
             call_backgrounds: if mode.demo {
                 crate::call::demo_library()
             } else {

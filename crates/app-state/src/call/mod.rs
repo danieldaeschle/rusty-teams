@@ -20,11 +20,13 @@ pub mod schedule;
 pub mod target;
 pub mod view_actions;
 pub mod web_call;
+pub mod week;
 
 pub use app_call_model::{
     agenda, background, bubbles, caption_style, demo, end_screen, fullscreen, health, media, mic,
     model, options_dialog, people, preview, record_rights,
     recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
+    week_grid,
 };
 
 pub use actions::{

@@ -11,6 +11,10 @@ use crate::app_state::{AppEvent, AppState, Selection, selection_for};
 const NO_MEETING_CHAT_NOTICE: &str = "This meeting chat is not available";
 static DEMO_ANCHOR: OnceLock<DateTime<Utc>> = OnceLock::new();
 
+pub(crate) fn demo_anchor() -> DateTime<Utc> {
+    *DEMO_ANCHOR.get_or_init(Utc::now)
+}
+
 impl AppState {
     pub fn apply_calendar(&mut self, events: Vec<CalendarEvent>, cx: &mut Context<Self>) {
         self.calendar_events = events;
@@ -21,7 +25,7 @@ impl AppState {
 
     pub fn refresh_calendar(&mut self, cx: &mut Context<Self>) {
         if self.mode.demo {
-            let mut events = demo_events(*DEMO_ANCHOR.get_or_init(Utc::now));
+            let mut events = demo_events(demo_anchor());
             events.extend(self.demo_meetings.iter().cloned());
             events.sort_by_key(|event| (event.start, event.end));
             self.apply_calendar(events, cx);
@@ -52,16 +56,29 @@ impl AppState {
     }
 
     pub fn join_agenda_row(&mut self, row: &AgendaRow, cx: &mut Context<Self>) {
-        if let Some(url) = &row.join_url {
+        self.join_calendar_meeting(row.join_url.as_deref(), &row.subject, cx);
+    }
+
+    pub fn join_calendar_meeting(
+        &mut self,
+        join_url: Option<&str>,
+        subject: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(url) = join_url {
             self.join_meeting_link(url, cx);
             if let Some(pending) = self.prejoin.as_mut() {
-                pending.join.title = row.subject.clone();
+                pending.join.title = subject.to_owned();
             }
         }
     }
 
     pub fn open_agenda_chat(&mut self, row: &AgendaRow, cx: &mut Context<Self>) {
-        let Some(thread_id) = &row.thread_id else {
+        self.open_meeting_chat(row.thread_id.as_deref(), cx);
+    }
+
+    pub fn open_meeting_chat(&mut self, thread_id: Option<&str>, cx: &mut Context<Self>) {
+        let Some(thread_id) = thread_id else {
             return;
         };
         match selection_for(&self.sidebar, thread_id) {

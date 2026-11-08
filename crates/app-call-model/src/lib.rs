@@ -24,3 +24,4 @@ pub mod stage_layout;
 pub mod stage_split;
 pub mod transcript;
 pub mod view_settings;
+pub mod week_grid;
