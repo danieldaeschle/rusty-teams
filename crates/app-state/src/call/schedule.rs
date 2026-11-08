@@ -126,6 +126,7 @@ fn demo_event(draft: &MeetingDraft, serial: u64) -> CalendarEvent {
         organizer_name: Some("You".to_owned()),
         organizer_address: None,
         ical_uid: None,
+        show_as: Default::default(),
         response: ResponseType::Organizer,
     }
 }

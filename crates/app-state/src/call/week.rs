@@ -1,4 +1,4 @@
-use chatsvc::{CalendarEvent, ResponseType};
+use chatsvc::{CalendarEvent, ResponseType, ShowAs};
 use chrono::{Duration, FixedOffset, Local, NaiveDate, Offset};
 use gpui_kit::Context;
 
@@ -92,8 +92,16 @@ impl AppState {
     }
 }
 
+fn demo_show_as(subject: &str, response: ResponseType) -> ShowAs {
+    match response {
+        _ if subject.starts_with("Following: ") => ShowAs::Free,
+        ResponseType::Tentative | ResponseType::NotResponded => ShowAs::Tentative,
+        _ => ShowAs::Busy,
+    }
+}
+
 fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
-    let slots: [(&str, &str, i64, i64, i64, ResponseType); 7] = [
+    let slots: [(&str, &str, i64, i64, i64, ResponseType); 8] = [
         (
             "Team standup",
             "Mara Lindqvist",
@@ -143,6 +151,14 @@ fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
             ResponseType::Accepted,
         ),
         (
+            "Following: Design office hours",
+            "Lena Brandt",
+            3,
+            13 * 60,
+            60,
+            ResponseType::Tentative,
+        ),
+        (
             "Sprint retro",
             "Mara Lindqvist",
             4,
@@ -172,6 +188,7 @@ fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
                 organizer_name: Some((*organizer).to_owned()),
                 organizer_address: None,
                 ical_uid: None,
+                show_as: demo_show_as(subject, *response),
                 response: *response,
             }
         })

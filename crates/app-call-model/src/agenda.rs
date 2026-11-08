@@ -167,6 +167,7 @@ pub fn demo_events(now: DateTime<Utc>) -> Vec<CalendarEvent> {
         organizer_name: Some(organizer.to_owned()),
         organizer_address: None,
         ical_uid: None,
+        show_as: Default::default(),
         response,
     };
     vec![
@@ -242,6 +243,7 @@ mod tests {
             organizer_name: Some("Mara".into()),
             organizer_address: None,
             ical_uid: None,
+            show_as: Default::default(),
             response: ResponseType::Accepted,
         }
     }

@@ -1,4 +1,4 @@
-use chatsvc::{CalendarEvent, ResponseType};
+use chatsvc::{CalendarEvent, ResponseType, ShowAs};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc, Weekday};
 
 pub const WORK_WEEK_DAYS: i64 = 5;
@@ -186,7 +186,25 @@ pub fn range_label(start: NaiveDate, days: i64) -> String {
     }
 }
 
-pub fn hour_label(hour: u32) -> String {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventLook {
+    Busy,
+    Free,
+    Tentative,
+}
+
+pub fn event_look(event: &CalendarEvent) -> EventLook {
+    match event.show_as {
+        ShowAs::Free => EventLook::Free,
+        ShowAs::Tentative => EventLook::Tentative,
+        ShowAs::Busy | ShowAs::OutOfOffice | ShowAs::WorkingElsewhere => EventLook::Busy,
+    }
+}
+
+pub fn hour_label(hour: u32, twelve_hour: bool) -> String {
+    if !twelve_hour {
+        return hour.to_string();
+    }
     match hour {
         0 => "12 AM".to_owned(),
         12 => "12 PM".to_owned(),
@@ -218,6 +236,7 @@ mod tests {
             organizer_name: None,
             organizer_address: None,
             ical_uid: None,
+            show_as: Default::default(),
             response: ResponseType::Accepted,
         }
     }
@@ -305,7 +324,23 @@ mod tests {
             range_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), 5),
             "November 2026"
         );
-        assert_eq!(hour_label(0), "12 AM");
-        assert_eq!(hour_label(13), "1 PM");
+        assert_eq!(hour_label(0, true), "12 AM");
+        assert_eq!(hour_label(13, true), "1 PM");
+        assert_eq!(hour_label(13, false), "13");
+    }
+
+    #[test]
+    fn free_and_tentative_meetings_look_like_teams() {
+        let mut following = event(9, 0, 30);
+        following.show_as = ShowAs::Free;
+        following.response = ResponseType::Tentative;
+        let mut tentative = event(9, 0, 30);
+        tentative.show_as = ShowAs::Tentative;
+        let mut away = event(9, 0, 30);
+        away.show_as = ShowAs::OutOfOffice;
+        assert_eq!(event_look(&following), EventLook::Free);
+        assert_eq!(event_look(&tentative), EventLook::Tentative);
+        assert_eq!(event_look(&away), EventLook::Busy);
+        assert_eq!(event_look(&event(9, 0, 30)), EventLook::Busy);
     }
 }

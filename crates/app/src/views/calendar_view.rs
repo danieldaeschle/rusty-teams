@@ -1,3 +1,4 @@
+use app_base::format::clock_format;
 use chatsvc::{CalendarEvent, ResponseType};
 use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
@@ -14,12 +15,14 @@ use super::new_meeting_dialog::open_new_meeting;
 use crate::app_state::AppState;
 use crate::call::join_available;
 use crate::call::week_grid::{
-    CalendarSpan, WeekBlock, WeekDay, hour_label, range_label, week_days,
+    CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, range_label, week_days,
 };
 use crate::theme;
 
-const HOUR_HEIGHT: f32 = 48.;
-const GUTTER_WIDTH: f32 = 64.;
+const HOUR_HEIGHT: f32 = 120.;
+const QUARTERS_PER_HOUR: usize = 4;
+const QUARTER_LINE_OPACITY: f32 = 0.45;
+const GUTTER_WIDTH: f32 = 50.;
 const HEADER_HEIGHT: f32 = 52.;
 const DAY_HEADER_HEIGHT: f32 = 56.;
 const ALL_DAY_HEIGHT: f32 = 26.;
@@ -27,7 +30,14 @@ const BLOCK_GAP: f32 = 2.;
 const FIRST_VISIBLE_HOUR: f32 = 8.;
 const CANCELED_PREFIX: &str = "Canceled: ";
 const COMPACT_HEADER_WIDTH: f32 = 960.;
-const EVENT_FILL_OPACITY: f32 = 0.28;
+const BUSY_FILL_OPACITY: f32 = 0.28;
+const FREE_FILL_OPACITY: f32 = 0.12;
+const STATUS_BAR_WIDTH: f32 = 4.;
+const HATCH_STRIPE: f32 = 1.5;
+const HATCH_GAP: f32 = 2.5;
+const SMALL_TITLE_HEIGHT: f32 = 20.;
+const TODAY_MARK_HEIGHT: f32 = 3.;
+const NOW_DOT_SIZE: f32 = 8.;
 
 pub struct CalendarView {
     state: Entity<AppState>,
@@ -184,17 +194,29 @@ impl CalendarView {
                     theme::text_soft()
                 };
                 v_flex()
+                    .relative()
                     .flex_1()
                     .min_w_0()
                     .h_full()
                     .justify_center()
-                    .px(px(8.))
+                    .px(px(12.))
                     .border_l_1()
                     .border_color(theme::border())
+                    .when(is_today, |header| {
+                        header.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .h(px(TODAY_MARK_HEIGHT))
+                                .bg(theme::accent()),
+                        )
+                    })
                     .child(
                         div()
                             .text_size(px(20.))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .line_height(px(24.))
                             .text_color(color)
                             .child(day.date.format("%d").to_string()),
                     )
@@ -202,7 +224,7 @@ impl CalendarView {
                         div()
                             .text_size(px(12.))
                             .text_color(color)
-                            .child(day.date.format("%A").to_string()),
+                            .child(day.date.format("%a").to_string()),
                     )
             }))
     }
@@ -232,7 +254,7 @@ impl CalendarView {
                                 .flex()
                                 .items_center()
                                 .rounded(px(4.))
-                                .bg(event_fill(events[index].response))
+                                .bg(event_fill(event_look(&events[index])))
                                 .text_size(px(12.))
                                 .truncate()
                                 .child(event_title(&events[index]))
@@ -254,15 +276,12 @@ impl CalendarView {
             .max(14.);
         let width = 1. / block.lanes as f32;
         let compact = height < 36.;
+        let small = height < SMALL_TITLE_HEIGHT;
+        let look = event_look(event);
         let can_join = event.online
             && !event.cancelled
             && event.join_url.is_some()
             && join_available(event.start, event.end, now);
-        let time = format!(
-            "{} - {}",
-            event.start.with_timezone(&Local).format("%-I:%M %p"),
-            event.end.with_timezone(&Local).format("%-I:%M %p")
-        );
         let (open_state, thread_id) = (self.state.clone(), event.thread_id.clone());
         let (menu_state, menu_event) = (self.state.clone(), event.clone());
         let (join_state, join_url, subject) = (
@@ -270,6 +289,10 @@ impl CalendarView {
             event.join_url.clone(),
             event.subject.clone(),
         );
+        let (title_color, detail_color) = match look {
+            EventLook::Busy => (theme::text(), theme::text_soft()),
+            EventLook::Free | EventLook::Tentative => (theme::text_soft(), theme::text_muted()),
+        };
         div()
             .id(SharedString::from(format!(
                 "calendar-event-{}",
@@ -280,41 +303,45 @@ impl CalendarView {
             .h(px(height))
             .left(relative(width * block.lane as f32))
             .w(relative(width))
-            .pr(px(BLOCK_GAP))
+            .px(px(BLOCK_GAP))
             .child(
                 h_flex()
                     .size_full()
+                    .items_start()
                     .overflow_hidden()
                     .rounded(px(4.))
-                    .bg(event_fill(event.response))
-                    .border_l_2()
-                    .border_color(theme::accent())
+                    .bg(event_fill(look))
                     .when(event.cancelled, |block| block.opacity(0.6))
                     .cursor_pointer()
+                    .children(status_bar(look))
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .px(px(6.))
+                            .pl(px(5.))
+                            .pr(px(4.))
+                            .h_full()
                             .py(px(if compact { 1. } else { 4. }))
+                            .when(compact, |body| body.justify_center())
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(px(if small { 10. } else { 12. }))
+                                    .line_height(px(if small { 13. } else { 16. }))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .truncate()
+                                    .text_color(title_color)
+                                    .when(compact, |title| title.truncate())
+                                    .when(!compact, |title| title.line_clamp(2))
                                     .child(event_title(event)),
                             )
                             .when(!compact, |body| {
-                                body.child(
+                                body.children(event.organizer_name.clone().map(|organizer| {
                                     div()
-                                        .text_size(px(11.))
-                                        .text_color(theme::text_soft())
+                                        .text_size(px(12.))
+                                        .line_height(px(16.))
+                                        .text_color(detail_color)
                                         .truncate()
-                                        .child(match &event.organizer_name {
-                                            Some(organizer) => format!("{time}  {organizer}"),
-                                            None => time,
-                                        }),
-                                )
+                                        .child(organizer)
+                                }))
                             }),
                     )
                     .when(can_join, |block| {
@@ -360,6 +387,7 @@ impl CalendarView {
         send_response: bool,
     ) -> impl IntoElement {
         let total_height = 24. * HOUR_HEIGHT;
+        let twelve_hour = clock_format().contains("%p") || clock_format().contains("%P");
         let now_minute = {
             let local = now.with_timezone(&Local);
             local.hour() * 60 + local.minute()
@@ -381,12 +409,14 @@ impl CalendarView {
                             .children((0..24).map(|hour| {
                                 div()
                                     .h(px(HOUR_HEIGHT))
-                                    .pr(px(8.))
+                                    .pt(px(4.))
                                     .flex()
-                                    .justify_end()
-                                    .text_size(px(11.))
-                                    .text_color(theme::text_muted())
-                                    .when(hour > 0, |label| label.child(hour_label(hour)))
+                                    .justify_center()
+                                    .text_size(px(12.))
+                                    .text_color(theme::text_soft())
+                                    .when(hour > 0, |label| {
+                                        label.child(hour_label(hour, twelve_hour))
+                                    })
                             })),
                     )
                     .children(days.iter().map(|day| {
@@ -397,14 +427,20 @@ impl CalendarView {
                             .h_full()
                             .border_l_1()
                             .border_color(theme::border())
-                            .children((1..24).map(|hour| {
-                                div()
+                            .children((1..24 * QUARTERS_PER_HOUR).map(|quarter| {
+                                let line = div()
                                     .absolute()
-                                    .top(px(hour as f32 * HOUR_HEIGHT))
+                                    .top(
+                                        px(quarter as f32 * HOUR_HEIGHT / QUARTERS_PER_HOUR as f32),
+                                    )
                                     .left_0()
-                                    .right_0()
-                                    .h(px(1.))
-                                    .bg(theme::border())
+                                    .right_0();
+                                if quarter % QUARTERS_PER_HOUR == 0 {
+                                    line.h(px(1.)).bg(theme::border())
+                                } else {
+                                    line.h(px(1.))
+                                        .bg(theme::border().opacity(QUARTER_LINE_OPACITY))
+                                }
                             }))
                             .children(day.blocks.iter().map(|block| {
                                 self.event_block(
@@ -415,15 +451,26 @@ impl CalendarView {
                                 )
                             }))
                             .when(day.date == today, |column| {
-                                column.child(
-                                    div()
-                                        .absolute()
-                                        .top(px(now_minute as f32 / 60. * HOUR_HEIGHT))
-                                        .left_0()
-                                        .right_0()
-                                        .h(px(2.))
-                                        .bg(theme::red()),
-                                )
+                                let now_top = now_minute as f32 / 60. * HOUR_HEIGHT;
+                                column
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top(px(now_top - 1.))
+                                            .left_0()
+                                            .right_0()
+                                            .h(px(2.))
+                                            .bg(theme::accent()),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top(px(now_top - NOW_DOT_SIZE / 2.))
+                                            .left(px(-NOW_DOT_SIZE / 2.))
+                                            .size(px(NOW_DOT_SIZE))
+                                            .rounded_full()
+                                            .bg(theme::accent()),
+                                    )
                             })
                     })),
             )
@@ -475,11 +522,23 @@ fn event_menu(
     )
 }
 
-fn event_fill(response: ResponseType) -> Hsla {
-    match response {
-        ResponseType::NotResponded => theme::surface_raised(),
-        ResponseType::Tentative => theme::accent().opacity(EVENT_FILL_OPACITY / 2.),
-        _ => theme::accent().opacity(EVENT_FILL_OPACITY),
+fn event_fill(look: EventLook) -> Hsla {
+    match look {
+        EventLook::Busy => theme::accent().opacity(BUSY_FILL_OPACITY),
+        EventLook::Free | EventLook::Tentative => theme::accent().opacity(FREE_FILL_OPACITY),
+    }
+}
+
+fn status_bar(look: EventLook) -> Option<Div> {
+    let bar = div().flex_none().w(px(STATUS_BAR_WIDTH)).h_full();
+    match look {
+        EventLook::Busy => Some(bar.bg(theme::accent())),
+        EventLook::Tentative => Some(
+            bar.border_1()
+                .border_color(theme::accent())
+                .bg(pattern_slash(theme::accent(), HATCH_STRIPE, HATCH_GAP)),
+        ),
+        EventLook::Free => None,
     }
 }
 

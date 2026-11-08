@@ -49,7 +49,7 @@ pub use activity_mentions::{MentionActivity, MentionKind, mentions_of};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, Calendar, CalendarEvent, CreatedEvent, NewEvent, Reminder, Repeat, Reply,
-    ResponseType, meet_now_join_url, new_event_body, parse_calendar_events, parse_created_event,
+    ResponseType, ShowAs, meet_now_join_url, new_event_body, parse_calendar_events, parse_created_event,
 };
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{

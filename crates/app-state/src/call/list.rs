@@ -252,6 +252,7 @@ mod tests {
             organizer_name: None,
             organizer_address: None,
             ical_uid: None,
+            show_as: Default::default(),
             response: ResponseType::Accepted,
         }
     }

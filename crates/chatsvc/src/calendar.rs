@@ -26,6 +26,16 @@ pub enum ResponseType {
     NotResponded,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShowAs {
+    Free,
+    Tentative,
+    #[default]
+    Busy,
+    OutOfOffice,
+    WorkingElsewhere,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalendarEvent {
     pub object_id: String,
@@ -41,6 +51,7 @@ pub struct CalendarEvent {
     pub organizer_address: Option<String>,
     pub ical_uid: Option<String>,
     pub response: ResponseType,
+    pub show_as: ShowAs,
 }
 
 pub struct Calendar<T: CardTransport = SessionCardTransport> {
@@ -201,6 +212,16 @@ fn response_type(entry: &Value) -> ResponseType {
     }
 }
 
+fn show_as(entry: &Value) -> ShowAs {
+    match text(entry, "showAs").as_deref() {
+        Some("Free") => ShowAs::Free,
+        Some("Tentative") => ShowAs::Tentative,
+        Some("Oof") => ShowAs::OutOfOffice,
+        Some("WorkingElsewhere") => ShowAs::WorkingElsewhere,
+        _ => ShowAs::Busy,
+    }
+}
+
 fn parse_event(entry: &Value) -> Option<CalendarEvent> {
     let join_url = text(entry, "skypeTeamsMeetingUrl").or_else(|| text(entry, "joinUrl"));
     Some(CalendarEvent {
@@ -217,6 +238,7 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         organizer_address: text(entry, "organizerAddress"),
         ical_uid: text(entry, "iCalUid").or_else(|| text(entry, "iCalUId")),
         response: response_type(entry),
+        show_as: show_as(entry),
     })
 }
 
@@ -320,6 +342,27 @@ mod tests {
         let events = parse_calendar_events(&body);
         assert_eq!(events[0].response, ResponseType::Organizer);
         assert_eq!(events[0].ical_uid.as_deref(), Some("uid-a"));
+    }
+
+    #[test]
+    fn the_free_busy_status_is_read_and_defaults_to_busy() {
+        let entry = |show_as: &str| {
+            serde_json::json!({
+                "objectId": show_as,
+                "startTime": "2026-10-12T08:30:00Z",
+                "endTime": "2026-10-12T09:00:00Z",
+                "showAs": show_as
+            })
+        };
+        let body = serde_json::json!({"value": [entry("Free"), entry("Tentative"), entry("Oof"), entry("Unknown")]});
+        let statuses: Vec<ShowAs> = parse_calendar_events(&body)
+            .iter()
+            .map(|event| event.show_as)
+            .collect();
+        assert_eq!(
+            statuses,
+            [ShowAs::Free, ShowAs::Tentative, ShowAs::OutOfOffice, ShowAs::Busy]
+        );
     }
 
     #[test]

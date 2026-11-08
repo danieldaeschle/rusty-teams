@@ -343,6 +343,7 @@ mod tests {
             organizer_name: Some("Mara".into()),
             organizer_address: None,
             ical_uid: None,
+            show_as: Default::default(),
             response: ResponseType::Accepted,
         }
     }
