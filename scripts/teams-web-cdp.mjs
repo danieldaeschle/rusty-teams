@@ -47,6 +47,10 @@ export const FAKE_MEDIA = (speechUrl) => `(() => {
     return new MediaStream(tracks);
   };
   navigator.mediaDevices.getDisplayMedia = async () => new MediaStream([canvasTrack('screen', 1280, 720)]);
+  const query = navigator.permissions.query.bind(navigator.permissions);
+  navigator.permissions.query = (descriptor) => ['microphone', 'camera'].includes(descriptor && descriptor.name)
+    ? Promise.resolve({ state: 'granted', name: descriptor.name, onchange: null, addEventListener() {}, removeEventListener() {} })
+    : query(descriptor);
   navigator.mediaDevices.__matrix = true;
 })();`;
 

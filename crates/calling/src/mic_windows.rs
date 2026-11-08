@@ -7,7 +7,7 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDCLNT_STREAMOPTIONS_NONE, AudioCategory_Communications, AudioClientProperties,
-    AUDIO_EFFECT, AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON, IAudioCaptureClient, IAudioClient, IAudioClient2,
+    AUDIO_EFFECT, AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON, DEVICE_STATE_ACTIVE, IAudioCaptureClient, IAudioClient, IAudioClient2,
     IAudioEffectsManager, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture, eCommunications,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PropVariantClear};
@@ -36,13 +36,18 @@ fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| audio_error("device enumerator", error))?;
-        match choice {
-            DeviceChoice::SystemDefault => enumerator
-                .GetDefaultAudioEndpoint(eCapture, eCommunications)
-                .map_err(|error| audio_error("default communications microphone", error)),
+        let chosen = match choice {
+            DeviceChoice::SystemDefault => None,
             DeviceChoice::Device(key) => enumerator
                 .GetDevice(&HSTRING::from(key.as_str()))
-                .map_err(|error| audio_error("microphone endpoint", error)),
+                .ok()
+                .filter(|device| device.GetState().is_ok_and(|state| state == DEVICE_STATE_ACTIVE)),
+        };
+        match chosen {
+            Some(device) => Ok(device),
+            None => enumerator
+                .GetDefaultAudioEndpoint(eCapture, eCommunications)
+                .map_err(|error| audio_error("default communications microphone", error)),
         }
     }
 }
