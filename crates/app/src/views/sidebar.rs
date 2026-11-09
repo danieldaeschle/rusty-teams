@@ -48,6 +48,7 @@ use crate::theme;
 use app_ui_kit::layout::SIDEBAR_WIDTH;
 use gpui_kit::component::input::InputState;
 
+pub(crate) mod channel_filter_bar;
 pub(crate) mod chat_filter_bar;
 
 pub const SIDEBAR_SCROLL_DIVIDER: &str = "shell/islands/sidebar/divider-scroll";
@@ -352,6 +353,10 @@ pub struct SidebarView {
     channels_scroll: ScrollHandle,
     chat_filter: ChatFilter,
     filter_box_open: bool,
+    channel_filter: crate::channel_filter::ChannelFilter,
+    channel_filter_open: bool,
+    channel_filter_input: Option<Entity<InputState>>,
+    channel_filter_subscription: Option<Subscription>,
     more_filters_open: bool,
     filter_input: Option<Entity<InputState>>,
     filter_subscription: Option<Subscription>,
@@ -473,6 +478,10 @@ impl SidebarView {
             channels_scroll: ScrollHandle::new(),
             chat_filter: ChatFilter::default(),
             filter_box_open: false,
+            channel_filter: Default::default(),
+            channel_filter_open: false,
+            channel_filter_input: None,
+            channel_filter_subscription: None,
             more_filters_open: false,
             filter_input: None,
             filter_subscription: None,
@@ -696,6 +705,15 @@ impl SidebarView {
     fn channel_list_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
         let read_only = self.state.read(cx).mode.read_only;
+        let view = cx.entity().downgrade();
+        let team_ids: Vec<String> = self
+            .state
+            .read(cx)
+            .sidebar
+            .teams
+            .iter()
+            .map(|entry| entry.team.id.clone())
+            .collect();
         Button::new("channel-list-more")
             .icon(IconName::Ellipsis)
             .ghost()
@@ -703,13 +721,22 @@ impl SidebarView {
             .rounded(px(8.))
             .tooltip("More options")
             .dropdown_menu(move |menu, _, _| {
-                let state = state.clone();
+                let (state, view, team_ids) = (state.clone(), view.clone(), team_ids.clone());
                 menu.item(
                     PopupMenuItem::new(MARK_ALL_READ_LABEL)
                         .icon(menu_icon(IconName::CheckCheck))
                         .disabled(read_only)
                         .on_click(move |_, _, cx| {
                             state.update(cx, |state, cx| state.mark_all_channels_read(cx));
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(COLLAPSE_ALL_LABEL)
+                        .icon(menu_icon(IconName::ChevronsDownUp))
+                        .on_click(move |_, _, cx| {
+                            let team_ids = team_ids.clone();
+                            view.update(cx, |this, cx| this.collapse_all_teams(team_ids, cx))
+                                .ok();
                         }),
                 )
             })
@@ -1444,7 +1471,8 @@ impl SidebarView {
         cx: &mut Context<Self>,
     ) -> Div {
         let team_id = entry.team.id.clone();
-        let expanded = team_expanded(&team_id, &self.collapsed_teams);
+        let expanded =
+            self.channel_filter.is_active() || team_expanded(&team_id, &self.collapsed_teams);
         let name_style = team_name_style(entry, expanded);
         let badge = team_badge(entry, expanded);
         let toggle_id = team_id.clone();
@@ -1687,6 +1715,12 @@ impl SidebarView {
             })
     }
 
+    fn collapse_all_teams(&mut self, team_ids: Vec<String>, cx: &mut Context<Self>) {
+        self.collapsed_teams.extend(team_ids);
+        save_collapsed_teams(&self.state.read(cx).store, &self.collapsed_teams);
+        cx.notify();
+    }
+
     fn channels_body(&self, cx: &mut Context<Self>) -> AnyElement {
         let (sidebar, pinned_ids, selected, team_photos) = {
             let state = self.state.read(cx);
@@ -1705,6 +1739,14 @@ impl SidebarView {
                 state.selection.clone().filter(|_| !state.new_chat),
                 team_photos,
             )
+        };
+        let filtering = self.channel_filter.is_active();
+        let mut sidebar = sidebar;
+        let pinned_ids = if filtering {
+            sidebar.teams = self.channel_filter.apply(&sidebar.teams);
+            Vec::new()
+        } else {
+            pinned_ids
         };
         let team_keys = sidebar
             .teams
@@ -2097,9 +2139,17 @@ impl Render for SidebarView {
                     )
                     .child(self.filter_bar(cx)),
             ),
-            SidebarTab::Channels => {
-                Some(page_header(self.tab.title()).child(self.channel_list_menu_button(cx)))
-            }
+            SidebarTab::Channels => Some(
+                v_flex()
+                    .flex_none()
+                    .child(
+                        page_header(self.tab.title())
+                            .child(self.channel_list_menu_button(cx))
+                            .child(self.channel_filter_button(cx))
+                            .child(self.new_channel_items_button(cx)),
+                    )
+                    .child(self.channel_filter_bar(cx)),
+            ),
             SidebarTab::Agents => Some(page_header(self.tab.title())),
             SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Calendar => None,
         };
