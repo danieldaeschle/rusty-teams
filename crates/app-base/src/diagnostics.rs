@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 pub const DIAGNOSTICS_FILE: &str = "diagnostics.log";
 const MAX_BYTES: u64 = 1024 * 1024;
+const SLOW_UI_HANDLER: std::time::Duration = std::time::Duration::from_millis(30);
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -62,6 +63,12 @@ fn is_endpoint_dump(text: &str) -> bool {
 
 pub fn directory() -> Option<PathBuf> {
     PATH.get().and_then(|path| path.parent()).map(PathBuf::from)
+}
+
+pub fn record_if_slow(label: &str, elapsed: std::time::Duration) {
+    if elapsed >= SLOW_UI_HANDLER {
+        record(format!("slow ui handler: {label} took {} ms", elapsed.as_millis()));
+    }
 }
 
 pub fn record(message: impl AsRef<str>) {

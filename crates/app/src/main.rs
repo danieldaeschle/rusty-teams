@@ -248,7 +248,10 @@ fn main() {
             let state = state.clone();
             cx.spawn(async move |cx| {
                 while let Some(event) = receiver.recv().await {
+                    let kind = event.kind();
+                    let started = std::time::Instant::now();
                     state.update(cx, |state, cx| state.apply(event, cx));
+                    app_base::diagnostics::record_if_slow(&kind, started.elapsed());
                 }
             })
             .detach();

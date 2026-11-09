@@ -1662,6 +1662,12 @@ impl ConversationView {
     }
 
     fn rebuild(&mut self, reset: bool, cx: &mut Context<Self>) {
+        let started = std::time::Instant::now();
+        self.rebuild_rows(reset, cx);
+        app_base::diagnostics::record_if_slow("conversation rebuild", started.elapsed());
+    }
+
+    fn rebuild_rows(&mut self, reset: bool, cx: &mut Context<Self>) {
         let Some(current) = self.current.as_ref() else {
             let mut rows: Vec<Row> = self
                 .pending

@@ -72,6 +72,30 @@ pub enum BackendEvent {
     LiveRetry(Arc<Notify>),
 }
 
+impl BackendEvent {
+    pub fn kind(&self) -> String {
+        match self {
+            BackendEvent::Connection(_) => "Connection".into(),
+            BackendEvent::Engine(_) => "Engine".into(),
+            BackendEvent::Calls(_) => "Calls".into(),
+            BackendEvent::Calendar(_) => "Calendar".into(),
+            BackendEvent::CalendarNudge(_) => "CalendarNudge".into(),
+            BackendEvent::Ring(_) => "Ring".into(),
+            BackendEvent::ThreadChanged(_) => "ThreadChanged".into(),
+            BackendEvent::Core(event) => {
+                let debug = format!("{event:?}");
+                let name = debug.split(['{', '(', ' ']).next().unwrap_or_default();
+                format!("Core::{name}")
+            }
+            BackendEvent::Live(_) => "Live".into(),
+            BackendEvent::Typing(_) => "Typing".into(),
+            BackendEvent::Favorites(_) => "Favorites".into(),
+            BackendEvent::Synced(_) => "Synced".into(),
+            BackendEvent::LiveRetry(_) => "LiveRetry".into(),
+        }
+    }
+}
+
 type EventSender = mpsc::UnboundedSender<BackendEvent>;
 
 pub fn classify_session_error(error: &session::Error) -> ConnectionState {
