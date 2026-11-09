@@ -3743,7 +3743,7 @@ impl ConversationView {
         let call_controls = if self.pinned && !self.popped_out {
             Vec::new()
         } else {
-            header_call_controls(&self.app, app, &current.selection)
+            header_call_controls(&self.app, app, &current.selection, self.header_overflows())
         };
         let sync = &current.sync;
         let loading_window = current.window_request.is_some();

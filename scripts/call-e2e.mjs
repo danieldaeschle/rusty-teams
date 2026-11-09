@@ -482,6 +482,11 @@ try {
   restoreCapture();
   log('default mic restored');
   browser.socket.close();
+  try {
+    log(execFileSync('python3', ['-I', REPO_DIR + 'scripts/cleanup-test-chats.py']).toString().trim());
+  } catch (error) {
+    log('test chat cleanup failed: ' + error.message);
+  }
 }
 const scenariosPass = Object.values(report.scenarios ?? {}).every((entry) => entry.pass);
 report.pass = Boolean(report.appToWeb?.pass && report.webToApp?.pass && scenariosPass);
