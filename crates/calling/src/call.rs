@@ -711,7 +711,18 @@ async fn setup_step<T, E>(control: &mut CallControl, step: impl std::future::Fut
 where
     Error: From<E>,
 {
-    match control.until_hangup(timeout(SETUP_STEP_TIMEOUT, step)).await? {
+    setup_step_within(control, SETUP_STEP_TIMEOUT, step).await
+}
+
+async fn setup_step_within<T, E>(
+    control: &mut CallControl,
+    limit: Duration,
+    step: impl std::future::Future<Output = std::result::Result<T, E>>,
+) -> Result<T>
+where
+    Error: From<E>,
+{
+    match control.until_hangup(timeout(limit, step)).await? {
         Ok(result) => Ok(result?),
         Err(_) => Err(Error::Signaling("Teams did not answer in time".into())),
     }
@@ -3579,13 +3590,14 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn a_hanging_setup_step_ends_on_cancel_or_after_the_step_timeout() {
         let (handle, mut control) = crate::control::call_channel();
         handle.commands.send(CallCommand::Hangup).unwrap();
-        let cancelled = setup_step(&mut control, std::future::pending::<std::result::Result<(), Error>>()).await;
+        let limit = Duration::from_millis(20);
+        let cancelled = setup_step_within(&mut control, limit, std::future::pending::<std::result::Result<(), Error>>()).await;
         assert!(matches!(cancelled, Err(Error::Cancelled)));
-        let timed_out = setup_step(&mut control, std::future::pending::<std::result::Result<(), Error>>()).await;
+        let timed_out = setup_step_within(&mut control, limit, std::future::pending::<std::result::Result<(), Error>>()).await;
         assert!(matches!(timed_out, Err(Error::Signaling(_))));
     }
 
