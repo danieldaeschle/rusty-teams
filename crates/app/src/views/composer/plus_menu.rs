@@ -54,8 +54,8 @@ impl PlusAction {
     fn symbol(self) -> &'static str {
         match self {
             PlusAction::ScheduleMessage => "schedule_send",
-            PlusAction::DeliveryOptions => "fluent_important",
-            PlusAction::ScheduleMeeting => "fluent_calendar_add",
+            PlusAction::DeliveryOptions => "priority_high",
+            PlusAction::ScheduleMeeting => "calendar_add_on",
         }
     }
 }
@@ -82,7 +82,7 @@ impl Composer {
                 .hover(|button| button.bg(theme::popup_hover()))
                 .popup_trigger_tooltip_text(open, PLUS_TITLE)
                 .child(symbol(
-                    "fluent_add",
+                    "add",
                     COMPOSER_ICON_SIZE,
                     if marked {
                         theme::red()

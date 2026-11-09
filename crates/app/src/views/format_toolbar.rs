@@ -187,9 +187,9 @@ pub fn toggle_tooltip(open: bool) -> String {
 
 pub fn toggle_symbol(open: bool) -> &'static str {
     if open {
-        "fluent_text_edit_style_filled"
+        "text_format_fill"
     } else {
-        "fluent_text_edit_style"
+        "text_format"
     }
 }
 
@@ -304,13 +304,13 @@ impl FormatButton {
             FormatButton::Quote => symbol("format_quote", 18., color).into_any_element(),
             FormatButton::Table => symbol("table", 18., color).into_any_element(),
             FormatButton::TableInsertLine => {
-                symbol("fluent_table_add", 20., color).into_any_element()
+                symbol("table_chart", 20., color).into_any_element()
             }
             FormatButton::TableRemoveLine => {
-                symbol("fluent_table_dismiss", 20., color).into_any_element()
+                symbol("grid_off", 20., color).into_any_element()
             }
-            FormatButton::Highlight => symbol("fluent_highlight", 20., color).into_any_element(),
-            FormatButton::FontColor => symbol("fluent_text_color", 20., color).into_any_element(),
+            FormatButton::Highlight => symbol("format_ink_highlighter", 20., color).into_any_element(),
+            FormatButton::FontColor => symbol("format_color_text", 20., color).into_any_element(),
             FormatButton::ParagraphStyle => h_flex()
                 .w_full()
                 .px(px(6.))
@@ -323,18 +323,18 @@ impl FormatButton {
                 .child(icon(IconName::ChevronDown, 12., color))
                 .into_any_element(),
             FormatButton::ClearFormatting => {
-                symbol("fluent_text_clear_formatting", 20., color).into_any_element()
+                symbol("format_clear", 20., color).into_any_element()
             }
             FormatButton::Outdent => {
-                symbol("fluent_text_indent_decrease", 20., color).into_any_element()
+                symbol("format_indent_decrease", 20., color).into_any_element()
             }
             FormatButton::Indent => {
-                symbol("fluent_text_indent_increase", 20., color).into_any_element()
+                symbol("format_indent_increase", 20., color).into_any_element()
             }
-            FormatButton::CodeBlock => symbol("fluent_code_block", 20., color).into_any_element(),
-            FormatButton::Rule => symbol("fluent_line_horizontal_1", 20., color).into_any_element(),
+            FormatButton::CodeBlock => symbol("code_blocks", 20., color).into_any_element(),
+            FormatButton::Rule => symbol("horizontal_rule", 20., color).into_any_element(),
             FormatButton::FontSize => {
-                symbol("fluent_text_font_size", 20., color).into_any_element()
+                symbol("format_size", 20., color).into_any_element()
             }
             FormatButton::More => icon(IconName::Ellipsis, 18., color).into_any_element(),
         }
@@ -601,7 +601,7 @@ fn menu_row(
         theme::text_soft()
     };
     let content = match format {
-        FormatButton::ParagraphStyle => symbol("fluent_text_header_1", 20., color).into_any_element(),
+        FormatButton::ParagraphStyle => symbol("format_h1", 20., color).into_any_element(),
         _ => format.content(color, None),
     };
     div()

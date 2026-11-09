@@ -213,7 +213,7 @@ impl Composer {
                 .text_size(px(12.))
                 .text_color(theme::red_tint())
                 .child(symbol(
-                    "fluent_alert_urgent",
+                    "notification_important",
                     BANNER_ICON_SIZE,
                     theme::red_tint(),
                 ))

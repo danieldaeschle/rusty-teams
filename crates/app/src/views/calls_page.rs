@@ -476,7 +476,7 @@ impl CallsPage {
                                 gpui_kit::component::tooltip::Tooltip::new(SPEED_DIAL_ADD_TITLE)
                                     .build(window, cx)
                             })
-                            .child(symbol("fluent_person_add", 18., theme::text_soft()))
+                            .child(symbol("person_add", 18., theme::text_soft()))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_speed_dial_add(window, cx)
                             })),

@@ -2661,11 +2661,6 @@ const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
         "state signal (pulsing ring around the caller while it rings), not a resting outline",
     ),
     (
-        "notify/meeting_view.rs",
-        "theme::border_strong()",
-        "outlined button, not a surface",
-    ),
-    (
         "settings/mcp.rs",
         "theme::border_strong()",
         "outlined button, not a surface",

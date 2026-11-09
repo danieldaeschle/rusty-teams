@@ -65,9 +65,9 @@ const QUICK_VIEWS_TITLE: &str = "Quick views";
 const QUICK_ROW_HEIGHT: f32 = 32.;
 const QUICK_ICON_SIZE: f32 = 18.;
 const QUICK_VIEWS: [(QuickView, &str); 3] = [
-    (QuickView::Mentions, "fluent_mention"),
-    (QuickView::Drafts, "fluent_drafts"),
-    (QuickView::Saved, "fluent_bookmark"),
+    (QuickView::Mentions, "alternate_email"),
+    (QuickView::Drafts, "edit_note"),
+    (QuickView::Saved, "bookmark"),
 ];
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
@@ -1845,8 +1845,8 @@ fn name_color(style: NameStyle) -> Hsla {
 fn importance_marker(importance: MessageImportance) -> Option<Icon> {
     let name = match importance {
         MessageImportance::Normal => return None,
-        MessageImportance::High => "fluent_important_filled",
-        MessageImportance::Urgent => "fluent_alert_urgent_filled",
+        MessageImportance::High => "priority_high",
+        MessageImportance::Urgent => "notification_important_fill",
     };
     Some(symbol(name, IMPORTANCE_MARKER_SIZE, theme::red()))
 }

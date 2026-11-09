@@ -24,7 +24,7 @@ pub const STANDARD: DeliveryOption = DeliveryOption {
     importance: MessageImportance::Normal,
     header: "Standard",
     content: "Message will be sent as usual",
-    symbol: "fluent_chat",
+    symbol: "chat_bubble",
     tag: "standard-delivery-option",
 };
 
@@ -32,7 +32,7 @@ pub const IMPORTANT: DeliveryOption = DeliveryOption {
     importance: MessageImportance::High,
     header: "Important",
     content: "Message will be marked as important",
-    symbol: "fluent_important",
+    symbol: "priority_high",
     tag: "important-delivery-option",
 };
 
@@ -40,7 +40,7 @@ pub const URGENT: DeliveryOption = DeliveryOption {
     importance: MessageImportance::Urgent,
     header: "Urgent",
     content: "Recipient(s) notified every 2 min for 20 min",
-    symbol: "fluent_alert_urgent",
+    symbol: "notification_important",
     tag: "urgent-delivery-option",
 };
 

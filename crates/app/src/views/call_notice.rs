@@ -47,13 +47,13 @@ pub struct RecapActions {
 
 fn notice_icon(icon: CallIcon) -> (&'static str, Hsla) {
     match icon {
-        CallIcon::Record => ("fluent_record", theme::accent_text()),
-        CallIcon::RecordStop => ("fluent_record_stop", theme::text_muted()),
-        CallIcon::Saved => ("fluent_cloud_arrow_up", theme::text_muted()),
+        CallIcon::Record => ("radio_button_checked", theme::accent_text()),
+        CallIcon::RecordStop => ("stop_circle", theme::text_muted()),
+        CallIcon::Saved => ("cloud_upload", theme::text_muted()),
         CallIcon::Roster => ("group", theme::text_muted()),
         CallIcon::Missed => ("call_missed", theme::red_soft()),
         CallIcon::Call => ("call", theme::text_muted()),
-        CallIcon::Video => ("fluent_video", theme::text_muted()),
+        CallIcon::Video => ("videocam", theme::text_muted()),
     }
 }
 
@@ -123,7 +123,7 @@ fn recap_header(recap: &RecapCard, index: usize, open: RowAction, share: RowActi
                     plain_button(format!("recap-share-{index}"), share)
                         .w(px(BUTTON_HEIGHT))
                         .hover(|button| button.bg(theme::popup_hover()))
-                        .child(symbol("fluent_share", ICON_SIZE, theme::text_soft())),
+                        .child(symbol("ios_share", ICON_SIZE, theme::text_soft())),
                 )
                 .child(
                     plain_button(format!("recap-view-{index}"), open)
@@ -158,7 +158,7 @@ fn transcript_chip(index: usize, transcript: RowAction) -> Stateful<Div> {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text())
         .child(symbol(
-            "fluent_document_text",
+            "description",
             ICON_SIZE,
             theme::accent_text(),
         ))
@@ -181,7 +181,7 @@ fn thumbnail_image(recording: &RecordingCard, directory: &Directory) -> AnyEleme
             .justify_center()
             .bg(theme::code_surface())
             .when(recording.duration.is_none(), |tile| {
-                tile.child(symbol("fluent_video", ICON_SIZE, theme::text()))
+                tile.child(symbol("videocam", ICON_SIZE, theme::text()))
             })
             .into_any_element(),
     }
@@ -231,7 +231,7 @@ fn recording_thumbnail(
                 .gap(px(EXPIRY_ICON_GAP))
                 .text_size(px(EXPIRY_SIZE))
                 .text_color(theme::text_muted())
-                .child(symbol("fluent_clock", EXPIRY_SIZE, theme::text_muted()))
+                .child(symbol("schedule", EXPIRY_SIZE, theme::text_muted()))
                 .child(if days == 1 {
                     "Expires in 1 day".to_owned()
                 } else {

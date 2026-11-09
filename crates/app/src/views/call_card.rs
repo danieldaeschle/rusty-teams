@@ -46,10 +46,10 @@ fn icon_circle(call: &CallCard) -> Div {
         CallIcon::Video => (theme::popup(), "videocam", theme::text()),
         CallIcon::Record | CallIcon::Saved => (
             theme::popup(),
-            "fluent_record",
+            "radio_button_checked",
             theme::accent_text(),
         ),
-        CallIcon::RecordStop => (theme::popup(), "fluent_record_stop", theme::text()),
+        CallIcon::RecordStop => (theme::popup(), "stop_circle", theme::text()),
         CallIcon::Roster => (theme::popup(), "group", theme::text()),
     };
     h_flex()

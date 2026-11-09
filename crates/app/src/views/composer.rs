@@ -2890,7 +2890,7 @@ impl Render for Composer {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .child(symbol("fluent_send", COMPOSER_ICON_SIZE, theme::text()))
+            .child(symbol("send", COMPOSER_ICON_SIZE, theme::text()))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, cx| this.open_schedule_menu(cx)),
