@@ -141,16 +141,41 @@ impl<R: Remote> SyncEngine<R> {
             .filter(|state| state.hidden == Some(true))
             .map(|state| state.id.as_str())
             .collect();
+        let hidden_by_time: Vec<&str> = states
+            .unwrap_or_default()
+            .iter()
+            .filter(|state| self.cached_chat_hidden_by_time(state))
+            .map(|state| state.id.as_str())
+            .collect();
         let now = Utc::now();
         let hidden: Vec<String> = self.with_locally_hidden(|locally| {
-            reported
+            let mut hidden: Vec<String> = reported
                 .iter()
                 .filter(|chat_id| locally.reported_hidden(chat_id, now))
                 .map(|chat_id| (*chat_id).to_owned())
-                .collect()
+                .collect();
+            hidden.extend(
+                hidden_by_time
+                    .iter()
+                    .filter(|chat_id| !locally.unhide_override_active(chat_id, now))
+                    .map(|chat_id| (*chat_id).to_owned()),
+            );
+            hidden
         })?;
         self.store.remove_chats(&hidden)?;
         Ok(())
+    }
+
+    fn cached_chat_hidden_by_time(&self, state: &ConversationState) -> bool {
+        let Some(hidden_at_ms) = state.hidden_at_ms else {
+            return false;
+        };
+        match self.store.chat(&state.id) {
+            Ok(Some(chat)) => chat
+                .last_message_at
+                .is_none_or(|last| last.timestamp_millis() <= hidden_at_ms),
+            _ => false,
+        }
     }
 
     async fn refresh_app_channel_horizon(&self) -> i64 {

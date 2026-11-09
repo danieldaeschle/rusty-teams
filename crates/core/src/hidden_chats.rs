@@ -83,7 +83,7 @@ impl LocallyHidden {
         self.unhidden_at.insert(chat_id.to_owned(), now);
     }
 
-    fn unhide_override_active(&self, chat_id: &str, now: DateTime<Utc>) -> bool {
+    pub(crate) fn unhide_override_active(&self, chat_id: &str, now: DateTime<Utc>) -> bool {
         self.unhidden_at
             .get(chat_id)
             .is_some_and(|at| now - *at < unhide_override_window())
