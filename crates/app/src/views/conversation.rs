@@ -231,6 +231,7 @@ pub struct ConversationView {
     rows: Rc<RefCell<Vec<Row>>>,
     current: Option<Current>,
     pending: Vec<MessageRow>,
+    saving_edits: HashSet<String>,
     pending_counter: usize,
     pending_outgoing: HashMap<String, Outgoing>,
     pending_reactions: PendingReactions,
@@ -582,6 +583,7 @@ impl ConversationView {
             rows: Rc::new(RefCell::new(Vec::new())),
             current: None,
             pending: Vec::new(),
+            saving_edits: HashSet::new(),
             pending_counter: 0,
             pending_outgoing: HashMap::new(),
             pending_reactions: HashMap::new(),
@@ -1827,7 +1829,15 @@ impl ConversationView {
         }
     }
 
-    fn apply_rows(&mut self, new_rows: Vec<Row>, reset: bool, cx: &mut Context<Self>) {
+    fn apply_rows(&mut self, mut new_rows: Vec<Row>, reset: bool, cx: &mut Context<Self>) {
+        for row in &mut new_rows {
+            if let Row::Message(message) = row
+                && message.delivery == Delivery::Delivered
+                && self.saving_edits.contains(&message.key)
+            {
+                message.delivery = Delivery::Sending;
+            }
+        }
         let old_rows = std::mem::replace(&mut *self.rows.borrow_mut(), new_rows);
         self.drop_stale_reaction_details();
         let new_len = self.rows.borrow().len();
@@ -3095,6 +3105,15 @@ impl ConversationView {
             cx.notify();
             return;
         };
+        let original = self.own_record(&edit.message_id, cx);
+        if let Some(mut record) = original.clone() {
+            record.body_html = outgoing.html();
+            record.edited_at = Some(Utc::now());
+            let _ = store.upsert_messages(std::slice::from_ref(&record));
+        }
+        let message_id = edit.message_id.clone();
+        self.saving_edits.insert(message_id.clone());
+        self.rebuild(false, cx);
         let sent = outgoing.clone();
         let receiver = runtime::spawn(async move {
             engine
@@ -3109,6 +3128,11 @@ impl ConversationView {
         cx.spawn_in(window, async move |this, cx| {
             let failed = !matches!(receiver.await, Ok(Ok(())));
             this.update_in(cx, |this, window, cx| {
+                this.saving_edits.remove(&message_id);
+                if failed && let Some(record) = &original {
+                    let _ = store.upsert_messages(std::slice::from_ref(record));
+                }
+                this.rebuild(false, cx);
                 if failed {
                     this.show_main_composer(cx);
                     if this.composer.read(cx).is_empty(cx) {
