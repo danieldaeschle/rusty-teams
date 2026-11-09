@@ -38,6 +38,7 @@ const SERVER_DEBOUNCE: Duration = Duration::from_millis(200);
 const MESSAGE_GROUP: &str = "Messages";
 const PEOPLE_GROUP: &str = "People";
 const CARD_WIDTH: f32 = 520.;
+const CARD_TOP: f32 = 6.;
 
 pub enum SwitcherEvent {
     Pick(Selection),
@@ -563,8 +564,8 @@ impl Render for Switcher {
                     (
                         range.clone(),
                         HighlightStyle {
-                            color: Some(theme::accent_text()),
-                            font_weight: Some(FontWeight::SEMIBOLD),
+                            color: Some(theme::text()),
+                            font_weight: Some(FontWeight::BOLD),
                             ..Default::default()
                         },
                     )
@@ -653,11 +654,10 @@ impl Render for Switcher {
             .size_full()
             .top_0()
             .left_0()
-            .bg(theme::background().opacity(0.6))
             .flex()
             .justify_center()
             .items_start()
-            .pt(px(72.))
+            .pt(px(CARD_TOP))
             .on_click(cx.listener(|_, _, _, cx| cx.emit(SwitcherEvent::Close)))
             .child(
                 v_flex()
@@ -670,9 +670,18 @@ impl Render for Switcher {
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .on_key_down(cx.listener(Self::on_key_down))
                     .child(
-                        div()
+                        h_flex()
                             .p(px(8.))
-                            .child(Input::new(&self.input).appearance(false).bordered(false)),
+                            .pl(px(12.))
+                            .gap(px(8.))
+                            .items_center()
+                            .child(icon(IconName::Search, 14., theme::text_muted()))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(Input::new(&self.input).appearance(false).bordered(false)),
+                            ),
                     )
                     .child(
                         v_flex()
