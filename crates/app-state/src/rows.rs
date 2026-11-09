@@ -1087,11 +1087,22 @@ fn post_row(
 /// Channel feed: Teams shows a Meet now meeting as its own post and keeps the other call notices
 /// inside the thread; a saved recording stays visible as a reply.
 fn shows_in_feed(record: &MessageRecord, event: Option<&CallEvent>) -> bool {
+    if roster_event(record).is_some() || is_blank_system_record(record) {
+        return false;
+    }
     match event {
         None => true,
         Some(event) if record.reply_to_id.is_none() => event.phase == CallPhase::Started,
         Some(event) => event.phase == CallPhase::RecordingSaved,
     }
+}
+
+fn is_blank_system_record(record: &MessageRecord) -> bool {
+    record.sender_id.is_none()
+        && record.call_event_json.is_none()
+        && record.body_html.trim().is_empty()
+        && record.subject.as_deref().is_none_or(|subject| subject.trim().is_empty())
+        && record.attachments_json.trim() == "[]"
 }
 
 pub fn thread_list_rows(
@@ -1634,6 +1645,20 @@ mod tests {
         ];
         let rows = thread_list_rows(&records, &context(), false);
         assert_eq!(keys(&rows), vec!["r1", "r3", "r2"]);
+    }
+
+    #[test]
+    fn member_events_and_blank_system_posts_stay_out_of_the_channel_feed() {
+        let mut joined = record("j1", None, 9, 6);
+        joined.sender_id = None;
+        joined.body_html = String::new();
+        joined.call_event_json = Some(r#"{"roster":{"change":"Added","initiator_id":"a","initiator_name":null,"member_ids":["b"],"member_names":[null],"history":"All","topic":null}}"#.into());
+        let mut blank = record("b1", None, 10, 6);
+        blank.sender_id = None;
+        blank.body_html = String::new();
+        let records = vec![record("r1", None, 8, 6), joined, blank];
+        let rows = thread_list_rows(&records, &context(), false);
+        assert_eq!(keys(&rows), vec!["r1"]);
     }
 
     #[test]
