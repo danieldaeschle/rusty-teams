@@ -157,6 +157,10 @@ fn kind_style(kind: FileKind) -> KindStyle {
     }
 }
 
+pub fn kind_description(kind: FileKind) -> &'static str {
+    kind_style(kind).description
+}
+
 pub fn file_subtitle(card: &FileCard) -> String {
     let description = kind_style(card.kind).description;
     match card.size {

@@ -49,6 +49,14 @@ pub(super) struct RewritePanel {
     _custom_events: Option<Subscription>,
 }
 
+impl RewritePanel {
+    pub(super) fn input_focused(&self, window: &Window, cx: &App) -> bool {
+        self.custom_input
+            .as_ref()
+            .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+}
+
 struct RewriteResult {
     action: ComposeAction,
     answer: RewriteAnswer,

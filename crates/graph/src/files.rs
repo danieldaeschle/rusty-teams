@@ -443,7 +443,7 @@ impl Graph {
     }
 }
 
-fn finished_item(body: Value) -> Result<UploadedFile> {
+pub(crate) fn finished_item(body: Value) -> Result<UploadedFile> {
     let item: DriveItem = serde_json::from_value(body)?;
     let drive_id = item
         .drive_id()

@@ -20,6 +20,7 @@ mod channel_sync;
 mod chat_settings_sync;
 mod channel_visibility;
 mod chat_paging;
+mod cloud_files;
 mod default_reactions;
 mod download;
 mod draft;
@@ -156,7 +157,7 @@ pub use forwarded::{
     ForwardInfo, ForwardState, forwarded_texts, forwards, is_forwarded,
 };
 pub use graph::{
-    DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
+    CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
     MessageExtras, SharedFile, UploadedFile,
 };
 pub use images::StoredImage;

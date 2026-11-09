@@ -31,6 +31,7 @@ use teams_core::{
 };
 
 pub(crate) mod delivery;
+mod attach_menu;
 mod drafts;
 mod format_menus;
 pub(crate) mod plus_menu;
@@ -260,6 +261,7 @@ pub struct Composer {
     caret_text: String,
     importance: store::MessageImportance,
     rewrite: rewrite::RewritePanel,
+    attach_menu: attach_menu::AttachMenu,
     delivery_menu: bool,
     plus_menu: bool,
     _subscriptions: [Subscription; 4],
@@ -533,6 +535,7 @@ impl Composer {
             caret_text: String::new(),
             importance: store::MessageImportance::Normal,
             rewrite: rewrite::RewritePanel::default(),
+            attach_menu: attach_menu::AttachMenu::default(),
             delivery_menu: false,
             plus_menu: false,
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
@@ -1424,6 +1427,10 @@ impl Composer {
         true
     }
 
+    fn side_input_focused(&self, window: &Window, cx: &App) -> bool {
+        self.rewrite.input_focused(window, cx) || self.attach_menu.input_focused(window, cx)
+    }
+
     fn cell_has_focus(&self, window: &Window, cx: &App) -> bool {
         self.focused_cell(window, cx).is_some()
     }
@@ -1778,6 +1785,7 @@ impl Composer {
             let carry = self.carry_images_into.take().as_deref() == Some(conversation_id);
             self.conversation_id = Some(conversation_id.to_owned());
             self.close_rewrite();
+            self.close_attach_menu(window, cx);
             self.cancel_uploads();
             let dropped = if carry {
                 self.tray.keep_images_only()
@@ -2937,25 +2945,7 @@ impl Render for Composer {
                     picker.clone()
                 })
         });
-        let attach = can_attach.then(|| {
-            div()
-                .id("composer-attach")
-                .size(px(COMPOSER_BUTTON_SIZE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                .cursor_pointer()
-                .hover(|button| button.bg(theme::popup_hover()))
-                .tooltip(|window, cx| Tooltip::new("Attach file").build(window, cx))
-                .child(symbol(
-                    "attach_file",
-                    COMPOSER_ICON_SIZE,
-                    theme::text_muted(),
-                ))
-                .on_click(cx.listener(|this, _, window, cx| this.open_picker(window, cx)))
-        });
+        let attach = can_attach.then(|| self.render_attach_button(cx));
         let markdown_mode = self.app.read(cx).markdown_mode;
         let post_layout = self.post_layout();
         let format_open = (self.format_bar_open() || post_layout) && !markdown_mode;
@@ -3210,18 +3200,27 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none() {
                     this.step_history(true, window, cx);
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Redo, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none() {
                     this.step_history(false, window, cx);
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &Copy, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none()
                     && !this.cell_has_focus(window, cx)
                     && this.copy_selection(cx)
@@ -3230,6 +3229,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Cut, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none()
                     && !this.cell_has_focus(window, cx)
                     && this.copy_selection(cx)
@@ -3240,6 +3242,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if let Some(menu) = this.table_menu.as_mut() {
                     menu.step(-1);
                     cx.notify();
@@ -3265,6 +3270,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if let Some(menu) = this.table_menu.as_mut() {
                     menu.step(1);
                     cx.notify();
@@ -3285,6 +3293,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &MoveRight, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none()
                     && !this.cell_has_focus(window, cx)
                     && this.leave_quote(window, cx)
@@ -3293,6 +3304,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, action: &Enter, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.table_menu.is_some() {
                     this.accept_table_menu(None, window, cx);
                     cx.stop_propagation();
@@ -3327,6 +3341,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.table_key(TableKey::Next, window, cx) {
                     cx.stop_propagation();
                 } else if this.link_editor.is_some() {
@@ -3338,6 +3355,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.table_key(TableKey::Previous, window, cx)
                     || (this.link_editor.is_none() && this.indent(true, window, cx))
                 {
@@ -3345,6 +3365,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Backspace, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none()
                     && !this.cell_has_focus(window, cx)
                     && (this.undo_conversion(window, cx)
@@ -3355,6 +3378,9 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Delete, window, cx| {
+                if this.side_input_focused(window, cx) {
+                    return;
+                }
                 if this.link_editor.is_none()
                     && !this.cell_has_focus(window, cx)
                     && (this.enter_table_beside(false, window, cx)
@@ -3376,6 +3402,10 @@ impl Render for Composer {
                 }
                 if this.link_editor.is_some() {
                     this.close_link_editor(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.close_attach_menu(window, cx) {
                     cx.stop_propagation();
                     return;
                 }
@@ -3423,6 +3453,7 @@ impl Render for Composer {
                     .children(self.render_schedule(cx))
                     .children(self.render_delivery_menu(cx))
                     .children(self.render_plus_menu(cx))
+                    .children(self.render_attach_menu(cx))
                     .children(self.render_rewrite_panel(cx))
                     .child(
                         v_flex()

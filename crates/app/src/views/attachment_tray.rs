@@ -9,7 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{FileKind, FileReference, UploadedFile};
 
-use super::attachments::file_badge;
+use super::attachments::{file_badge, kind_description};
 use super::widgets::icon;
 use crate::format;
 use crate::inline_image::{InlineFormat, image_dimensions, sniff_inline_format};
@@ -258,6 +258,28 @@ impl AttachmentTray {
             kind,
         });
         self.next_id
+    }
+
+    /// A file already in the cloud goes out by reference; it was never uploaded, so removing it deletes nothing.
+    pub fn add_cloud_file(&mut self, name: String, size: u64, reference: FileReference) -> Option<u64> {
+        self.notice = None;
+        if self.items.len() >= MAX_ATTACHMENTS {
+            self.notice = Some(limit_notice(1));
+            return None;
+        }
+        let kind = ItemKind::File {
+            bytes: Arc::new(Vec::new()),
+            upload: UploadState::Done(DoneFile {
+                reference,
+                uploaded: None,
+            }),
+            sent_as_file: false,
+        };
+        Some(self.push(name, size, kind))
+    }
+
+    pub fn set_notice(&mut self, notice: String) {
+        self.notice = Some(notice);
     }
 
     /// Items beyond the limit are dropped; the ids returned belong to the first names.
@@ -652,7 +674,11 @@ pub struct ChipState {
 }
 
 pub fn chip_state(item: &TrayItem) -> ChipState {
-    let size = format::file_size_label(item.size);
+    let size = if item.size == 0 {
+        kind_description(FileKind::from_name(&item.name)).to_owned()
+    } else {
+        format::file_size_label(item.size)
+    };
     let muted = |subtitle: String| ChipState {
         subtitle,
         tone: Tone::Muted,
@@ -1062,6 +1088,16 @@ mod tests {
         );
         tray.remove(ids[0]);
         assert!(matches!(tray.items()[2].kind, ItemKind::File { .. }));
+    }
+
+    #[test]
+    fn a_cloud_file_is_ready_at_once_and_removing_it_deletes_nothing() {
+        let mut tray = AttachmentTray::default();
+        let id = tray.add_cloud_file("plan.pdf".into(), 12, reference("plan.pdf")).unwrap();
+        assert!(!tray.blocks_send());
+        assert_eq!(tray.outgoing_files()[0].reference, reference("plan.pdf"));
+        assert!(tray.retry(id).is_none());
+        assert_eq!(tray.remove(id), None);
     }
 
     #[test]

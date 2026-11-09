@@ -231,6 +231,10 @@ pub fn drive_item(drive_id: &str, item_id: &str) -> String {
     )
 }
 
+pub fn recent_drive_items(top: usize) -> String {
+    format!("{GRAPH}/v1.0/me/drive/recent?$top={top}")
+}
+
 pub fn shared_drive_item(share_id: &str) -> String {
     format!("{GRAPH}/v1.0/shares/{}/driveItem", segment(share_id))
 }

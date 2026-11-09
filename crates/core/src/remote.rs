@@ -23,6 +23,7 @@ use chatsvc::{
 };
 use chrono::{DateTime, Utc};
 use graph::{
+    CloudFile,
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
     OutgoingMention, Photo, Presence, SharedFile, Tag, Team, UploadDestination, UploadedFile, User,
 };
@@ -264,6 +265,14 @@ pub trait Remote {
 
     async fn share_file(&self, _file: &UploadedFile, _user_ids: &[String]) -> Result<()> {
         Err(Error::Unsupported("sharing a file"))
+    }
+
+    async fn recent_files(&self, _top: usize) -> Result<Vec<CloudFile>> {
+        Err(Error::Unsupported("recent files"))
+    }
+
+    async fn cloud_file_reference(&self, _file: &CloudFile) -> Result<UploadedFile> {
+        Err(Error::Unsupported("cloud files"))
     }
 
     async fn delete_file(&self, _file: &UploadedFile) -> Result<()> {
@@ -1091,6 +1100,14 @@ impl Remote for Graph {
 
     async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
         Ok(Graph::share_item(self, file, user_ids).await?)
+    }
+
+    async fn recent_files(&self, top: usize) -> Result<Vec<CloudFile>> {
+        Ok(Graph::recent_files(self, top).await?)
+    }
+
+    async fn cloud_file_reference(&self, file: &CloudFile) -> Result<UploadedFile> {
+        Ok(Graph::cloud_file_reference(self, file).await?)
     }
 
     async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
