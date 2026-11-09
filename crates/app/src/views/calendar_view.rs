@@ -1,6 +1,6 @@
 use app_base::format::{self, clock_format};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
-use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};

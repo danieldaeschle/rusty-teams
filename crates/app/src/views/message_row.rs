@@ -481,16 +481,11 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
             |meta| {
                 let check = match row.receipt {
                     Receipt::Hidden => return meta,
-                    Receipt::Sent => on_baseline(symbol("done", META_CHECK_SIZE, tint)).into_any_element(),
-                    Receipt::Read => on_baseline(symbol(
-                        "done_all",
-                        META_CHECK_SIZE,
-                        theme::own_read(),
-                    ))
-                    .into_any_element(),
+                    Receipt::Sent => symbol("done", META_CHECK_SIZE, tint).into_any_element(),
+                    Receipt::Read => symbol("done_all", META_CHECK_SIZE, theme::own_read()).into_any_element(),
                     Receipt::ReadLive => receipt_fade_in(
                         &row.key,
-                        on_baseline(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
+                        div().child(symbol("done_all", META_CHECK_SIZE, theme::own_read())),
                     )
                     .into_any_element(),
                 };
@@ -503,10 +498,6 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
                 })
             },
         )
-}
-
-fn on_baseline(check: Icon) -> Div {
-    div().relative().top(px(1.)).child(check)
 }
 
 fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, element: E) -> AnimationElement<E> {
