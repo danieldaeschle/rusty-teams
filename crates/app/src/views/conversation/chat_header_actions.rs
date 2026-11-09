@@ -13,12 +13,14 @@ use crate::data::Directory;
 use crate::find_in_chat::FIND_IN_CHAT;
 use crate::theme;
 use crate::views::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
+use crate::views::sidebar::channel_menu;
 use crate::views::composer::plus_menu::chat_invitees;
 use crate::views::new_meeting_dialog::open_new_meeting_with;
 use crate::views::avatar::status_glyph;
 use crate::views::widgets::{icon, menu_icon, symbol};
 
 pub const CHAT_HEADER_MORE_TAG: &str = "chat-header-more";
+pub const CHANNEL_HEADER_MORE_TAG: &str = "channel-header-more";
 const SCHEDULE_MEETING_LABEL: &str = "Schedule meeting";
 const BUTTON_SIZE: f32 = 32.;
 const HEADER_COMPACT_WIDTH: f32 = 480.;
@@ -42,6 +44,37 @@ impl ConversationView {
                 .rounded(px(8.))
                 .tooltip(FIND_IN_CHAT)
                 .on_click(cx.listener(|this, _, window, cx| this.open_find(window, cx)))
+                .into_any_element(),
+        )
+    }
+
+    pub(super) fn channel_more_button(&self, cx: &App) -> Option<AnyElement> {
+        let Selection::Channel(channel_id) = &self.current.as_ref()?.selection else {
+            return None;
+        };
+        if self.pinned || self.popped_out {
+            return None;
+        }
+        let notifications = self
+            .app
+            .read(cx)
+            .sidebar
+            .teams
+            .iter()
+            .find(|entry| entry.channels.iter().any(|channel| &channel.id == channel_id))?
+            .channel_notifications(channel_id);
+        let (state, channel_id) = (self.app.clone(), channel_id.clone());
+        Some(
+            Button::new(CHANNEL_HEADER_MORE_TAG)
+                .icon(IconName::Ellipsis)
+                .ghost()
+                .size(px(BUTTON_SIZE))
+                .rounded(px(8.))
+                .tooltip("More channel options")
+                .debug_selector(|| CHANNEL_HEADER_MORE_TAG.into())
+                .dropdown_menu(move |popup, window, cx| {
+                    channel_menu(popup, window, cx, state.clone(), &channel_id, notifications)
+                })
                 .into_any_element(),
         )
     }

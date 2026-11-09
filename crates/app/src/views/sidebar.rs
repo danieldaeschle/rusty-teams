@@ -1829,7 +1829,7 @@ fn notification_badge(level: ChannelNotificationLevel) -> Option<impl IntoElemen
     Some(icon(name, NOTIFICATION_ICON_SIZE, theme::text_muted()))
 }
 
-fn channel_menu(
+pub(crate) fn channel_menu(
     popup: PopupMenu,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,

@@ -46,6 +46,8 @@ const NEW_BADGE_HEIGHT: f32 = 20.;
 const NEW_LABEL: &str = "New";
 const POST_IN_CHANNEL: &str = "Post in channel";
 const POST_LABEL: &str = "Post";
+const ANNOUNCEMENT_LABEL: &str = "Announcement";
+pub const POST_IN_CHANNEL_ANNOUNCE_TAG: &str = "post-in-channel/announcement";
 pub const POST_CARD_TAG: &str = "post-card";
 pub const POST_AVATAR_TAG: &str = "post-card/avatar";
 pub const POST_BODY_TAG: &str = "post-card/body";
@@ -453,7 +455,27 @@ fn reply_footer(
     )
 }
 
-pub fn post_in_channel_card(directory: &Directory, open: PostAction) -> AnyElement {
+fn card_action(label: &'static str, glyph: IconName, primary: bool) -> Div {
+    let color = if primary {
+        theme::accent_text()
+    } else {
+        theme::text()
+    };
+    h_flex()
+        .h(px(32.))
+        .px(px(12.))
+        .gap(px(6.))
+        .items_center()
+        .rounded(px(6.))
+        .when(primary, |action| action.bg(theme::reply_surface()))
+        .text_size(px(13.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(color)
+        .child(icon(glyph, 14., color))
+        .child(label)
+}
+
+pub fn post_in_channel_card(directory: &Directory, open: PostAction, announce: PostAction) -> AnyElement {
     let own_avatar = directory.me.as_ref().map(|me| {
         div().flex_none().child(person_avatar(
             directory,
@@ -486,20 +508,19 @@ pub fn post_in_channel_card(directory: &Directory, open: PostAction) -> AnyEleme
                 ),
         )
         .child(
-            h_flex().child(
-                h_flex()
-                    .h(px(32.))
-                    .px(px(12.))
-                    .gap(px(6.))
-                    .items_center()
-                    .rounded(px(6.))
-                    .bg(theme::reply_surface())
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::accent_text())
-                    .child(icon(IconName::MessageSquare, 14., theme::accent_text()))
-                    .child(POST_LABEL),
-            ),
+            h_flex()
+                .gap(px(4.))
+                .child(card_action(POST_LABEL, IconName::MessageSquare, true))
+                .child(
+                    card_action(ANNOUNCEMENT_LABEL, IconName::Megaphone, false)
+                        .id(POST_IN_CHANNEL_ANNOUNCE_TAG)
+                        .debug_selector(|| POST_IN_CHANNEL_ANNOUNCE_TAG.into())
+                        .hover(|action| action.bg(theme::reply_surface()))
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            announce(window, cx);
+                        }),
+                ),
         )
         .into_any_element()
 }

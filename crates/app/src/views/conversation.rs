@@ -3628,6 +3628,7 @@ impl ConversationView {
         let mut stack: Option<AnyElement> = None;
         let mut rename: Option<AnyElement> = None;
         let mut names_title: Option<Div> = None;
+        let mut header_title = current.title.clone();
         match &current.selection {
             Selection::Chat(chat_id) => {
                 if let Some(chat) = app.sidebar.chats.iter().find(|chat| &chat.id == chat_id) {
@@ -3702,6 +3703,11 @@ impl ConversationView {
                         .avatar(&teams_core::team_avatar_key(&entry.team.id))
                 });
                 lead = Some(team_avatar(photo, name, key, 36., 9.));
+                if let Some(channel) = team
+                    .and_then(|entry| entry.channels.iter().find(|channel| &channel.id == channel_id))
+                {
+                    header_title = channel.name.clone();
+                }
             }
         }
         let mut header = h_flex()
@@ -3796,7 +3802,7 @@ impl ConversationView {
                                     .text_color(theme::text())
                                     .map(|title| match names_title {
                                         Some(names) => title.child(names),
-                                        None => title.child(current.title.clone()),
+                                        None => title.child(header_title),
                                     }),
                             )
                             .children(rename),
@@ -3821,6 +3827,7 @@ impl ConversationView {
             })
             .children(self.channel_find_button(cx))
             .when(!overflow, |header| header.children(self.channel_details_button(cx)))
+            .children(self.channel_more_button(cx))
             .children(self.chat_more_button(overflow, cx))
             .children(self.pop_in_button(current))
     }

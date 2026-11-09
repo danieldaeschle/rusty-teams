@@ -40,7 +40,7 @@ pub enum MenuEntry<Item> {
 impl ChannelMenuItem {
     pub fn label(self) -> &'static str {
         match self {
-            ChannelMenuItem::Notifications => "Notifications",
+            ChannelMenuItem::Notifications => "Channel notifications",
             ChannelMenuItem::Pin => "Pin",
             ChannelMenuItem::Unpin => "Unpin",
             ChannelMenuItem::Show => "Show",
@@ -470,7 +470,7 @@ mod tests {
         });
         assert_eq!(
             labels(&shown, ChannelMenuItem::label),
-            ["Notifications", "Pin", "Hide", "-", "Manage channel", "Copy link"]
+            ["Channel notifications", "Pin", "Hide", "-", "Manage channel", "Copy link"]
         );
         let hidden_pinned = channel_menu_entries(ChannelMenuState {
             pinned: true,
@@ -479,7 +479,7 @@ mod tests {
         });
         assert_eq!(
             labels(&hidden_pinned, ChannelMenuItem::label),
-            ["Notifications", "Unpin", "Show", "-", "Manage channel", "Copy link"]
+            ["Channel notifications", "Unpin", "Show", "-", "Manage channel", "Copy link"]
         );
     }
 
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(
             labels(&channel_menu_entries(admin), ChannelMenuItem::label),
             [
-                "Notifications",
+                "Channel notifications",
                 "Pin",
                 "Hide",
                 "-",

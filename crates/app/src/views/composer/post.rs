@@ -144,6 +144,12 @@ impl Composer {
         }
     }
 
+    pub fn begin_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.announcement.is_none() {
+            self.toggle_announcement(window, cx);
+        }
+    }
+
     pub(super) fn toggle_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.announcement.is_some() {
             self.close_announcement(window, cx);

@@ -48,6 +48,12 @@ impl ConversationView {
             .update(cx, |composer, cx| composer.focus(window, cx));
     }
 
+    pub(super) fn open_new_announcement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.mark_new_post_open(cx);
+        self.composer
+            .update(cx, |composer, cx| composer.begin_announcement(window, cx));
+    }
+
     fn mark_new_post_open(&mut self, cx: &mut Context<Self>) {
         self.new_post_open = true;
         let subject = self.subject.clone();
@@ -270,8 +276,14 @@ impl ConversationView {
         let proposal_card = self.render_proposal_card(cx);
         if !self.new_post_open {
             let view = cx.entity().downgrade();
+            let announce_view = view.clone();
             let open: PostAction = Box::new(move |window, cx| {
                 view.update(cx, |this, cx| this.open_new_post(window, cx)).ok();
+            });
+            let announce: PostAction = Box::new(move |window, cx| {
+                announce_view
+                    .update(cx, |this, cx| this.open_new_announcement(window, cx))
+                    .ok();
             });
             return Some(
                 v_flex()
@@ -284,7 +296,7 @@ impl ConversationView {
                             .flex_none()
                             .px(px(20.))
                             .py(px(12.))
-                            .child(post_in_channel_card(&self.app.read(cx).directory, open)),
+                            .child(post_in_channel_card(&self.app.read(cx).directory, open, announce)),
                     )
                     .into_any_element(),
             );
