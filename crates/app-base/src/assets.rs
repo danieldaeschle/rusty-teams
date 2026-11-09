@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 206] = symbols![
+const SYMBOLS: [(&str, &[u8]); 208] = symbols![
     "account_circle",
     "add",
     "alarm",
@@ -22,6 +22,7 @@ const SYMBOLS: [(&str, &[u8]); 206] = symbols![
     "asterisk",
     "attach_file",
     "attach_money",
+    "auto_fix_high",
     "back_hand",
     "backspace",
     "bar_chart",
@@ -174,6 +175,7 @@ const SYMBOLS: [(&str, &[u8]); 206] = symbols![
     "shield",
     "smart_toy",
     "smart_toy_fill",
+    "spellcheck",
     "spinner_arc",
     "spinner_track",
     "star",

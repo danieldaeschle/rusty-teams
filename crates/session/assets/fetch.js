@@ -151,8 +151,55 @@
     socket.onerror = () => finish(0);
     socket.onclose = () => finish(received.length ? 200 : 0);
   });
+  const converse = (request) => new Promise((resolve) => {
+    const {stages, placeholder, doneMarker, timeoutMs, keepaliveMs} = request.augloop;
+    const received = [];
+    let socket = null, settled = false, stage = 0, keepalive = null;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(keepalive);
+      try { socket && socket.close(); } catch (error) {}
+      resolve({status, body: received});
+    };
+    const timer = setTimeout(() => finish(504), timeoutMs);
+    const sendStage = () => {
+      for (const message of stages[stage].send) socket.send(message.split(placeholder).join(token));
+    };
+    try {
+      socket = new WebSocket(request.url);
+    } catch (error) {
+      clearTimeout(timer);
+      resolve({status: 0, body: String(error)});
+      return;
+    }
+    socket.onopen = () => {
+      socket.send('~');
+      keepalive = setInterval(() => socket.send('~'), keepaliveMs);
+      sendStage();
+    };
+    socket.onmessage = (event) => {
+      const text = String(event.data);
+      if (text === '~') return;
+      let message;
+      try { message = JSON.parse(text); } catch (error) { return; }
+      const messageId = String(message.messageId || '');
+      if (messageId.startsWith('s')) socket.send(JSON.stringify({H_: {T_: 'AugLoop_Session_Protocol_Response', B_: []}, messageId}));
+      received.push(message);
+      if (message.error) { finish(502); return; }
+      if (text.includes(doneMarker)) { finish(200); return; }
+      if (stage + 1 < stages.length && messageId === stages[stage].awaitMessageId) {
+        stage++;
+        sendStage();
+      }
+    };
+    socket.onerror = () => finish(0);
+    socket.onclose = () => finish(received.length ? 200 : 0);
+  });
   const run = async (request) => {
     if (request.signalr) return exchange(request);
+    if (request.augloop) return converse(request);
     try {
       let requestBody = request.body;
       for (const extra of request.bodyTokens || []) {

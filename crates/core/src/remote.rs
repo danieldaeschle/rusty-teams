@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chatsvc::compose_copilot::{ComposeCopilot, ComposeRewrite};
 use chatsvc::copilot::{Copilot, CopilotAsk};
 use chatsvc::sound_settings::{SoundSettings, SoundSettingsClient};
 use chatsvc::substrate_search::{
@@ -512,6 +513,10 @@ pub trait Remote {
     }
 
     async fn ask_copilot(&self, _ask: &CopilotAsk) -> Result<String> {
+        Err(Error::Unsupported("Copilot"))
+    }
+
+    async fn rewrite_draft(&self, _rewrite: &ComposeRewrite) -> Result<String> {
         Err(Error::Unsupported("Copilot"))
     }
 
@@ -1411,6 +1416,10 @@ impl Remote for Graph {
 
     async fn ask_copilot(&self, ask: &CopilotAsk) -> Result<String> {
         Ok(Copilot::new(self.session()).ask(ask).await?)
+    }
+
+    async fn rewrite_draft(&self, rewrite: &ComposeRewrite) -> Result<String> {
+        Ok(ComposeCopilot::new(self.session()).rewrite(rewrite).await?)
     }
 
     async fn translate_chat_messages(

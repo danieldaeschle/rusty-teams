@@ -113,6 +113,7 @@ pub use card_widgets::{
 };
 pub use card_width::{TargetWidth, WidthClass};
 pub use chatsvc::substrate_search;
+pub use chatsvc::compose_copilot::{Adjustment as ComposeAdjustment, ComposeAction};
 pub use chatsvc::{
     CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
     ForwardResult, Gif, PinnedMessage, PostFollowState, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,

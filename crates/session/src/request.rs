@@ -41,6 +41,28 @@ pub struct SignalrExchange {
     pub timeout_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AugloopStage {
+    pub send: Vec<String>,
+    #[serde(rename = "awaitMessageId")]
+    pub await_message_id: Option<String>,
+}
+
+/// An AugLoop conversation over a WebSocket opened in the page. Each stage is sent once the previous stage's
+/// awaited answer arrives; `placeholder` in a message becomes the token. The answer body is every received message,
+/// up to the first one containing `done_marker`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AugloopExchange {
+    pub stages: Vec<AugloopStage>,
+    pub placeholder: String,
+    #[serde(rename = "doneMarker")]
+    pub done_marker: String,
+    #[serde(rename = "timeoutMs")]
+    pub timeout_ms: u64,
+    #[serde(rename = "keepaliveMs")]
+    pub keepalive_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
@@ -52,9 +74,17 @@ pub struct Request {
     pub body_base64: Option<String>,
     pub body_tokens: Vec<BodyToken>,
     pub signalr: Option<SignalrExchange>,
+    pub augloop: Option<AugloopExchange>,
 }
 
 impl Request {
+    pub fn augloop(url: impl Into<String>, exchange: AugloopExchange) -> Self {
+        Request {
+            augloop: Some(exchange),
+            ..Request::get(url)
+        }
+    }
+
     pub fn signalr(url: impl Into<String>, exchange: SignalrExchange) -> Self {
         Request {
             signalr: Some(exchange),
@@ -81,6 +111,7 @@ impl Request {
             body_base64: None,
             body_tokens: Vec::new(),
             signalr: None,
+            augloop: None,
         }
     }
 
@@ -132,6 +163,7 @@ impl Request {
             body_base64: None,
             body_tokens: Vec::new(),
             signalr: None,
+            augloop: None,
         }
     }
 }
@@ -162,6 +194,7 @@ pub(crate) struct WireRequest<'a> {
     #[serde(rename = "bodyTokens")]
     pub body_tokens: &'a [BodyToken],
     pub signalr: Option<&'a SignalrExchange>,
+    pub augloop: Option<&'a AugloopExchange>,
 }
 
 impl<'a> From<&'a Request> for WireRequest<'a> {
@@ -184,6 +217,7 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             anonymous: request.anonymous,
             body_tokens: &request.body_tokens,
             signalr: request.signalr.as_ref(),
+            augloop: request.augloop.as_ref(),
         }
     }
 }

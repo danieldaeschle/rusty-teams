@@ -35,6 +35,7 @@ mod drafts;
 mod format_menus;
 pub(crate) mod plus_menu;
 mod post;
+mod rewrite;
 pub use post::{
     POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG,
     POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG, POST_CARD_SUBJECT_TAG,
@@ -258,6 +259,7 @@ pub struct Composer {
     caret_before_table: usize,
     caret_text: String,
     importance: store::MessageImportance,
+    rewrite: rewrite::RewritePanel,
     delivery_menu: bool,
     plus_menu: bool,
     _subscriptions: [Subscription; 4],
@@ -530,6 +532,7 @@ impl Composer {
             caret_before_table: 0,
             caret_text: String::new(),
             importance: store::MessageImportance::Normal,
+            rewrite: rewrite::RewritePanel::default(),
             delivery_menu: false,
             plus_menu: false,
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
@@ -1774,6 +1777,7 @@ impl Composer {
             self.saved_images = None;
             let carry = self.carry_images_into.take().as_deref() == Some(conversation_id);
             self.conversation_id = Some(conversation_id.to_owned());
+            self.close_rewrite();
             self.cancel_uploads();
             let dropped = if carry {
                 self.tray.keep_images_only()
@@ -2994,6 +2998,7 @@ impl Render for Composer {
             .children(format_toggle)
             .children(fun)
             .children(attach)
+            .children(self.render_rewrite_button(cx))
             .children(self.render_plus_button(cx));
         let (row_actions, post_footer) = if post_layout {
             (None, Some(self.render_post_footer(actions, can_send, cx)))
@@ -3374,6 +3379,11 @@ impl Render for Composer {
                     cx.stop_propagation();
                     return;
                 }
+                if this.close_rewrite() {
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.toolbar_requested(cx) && !this.format_bar_open() {
                     this.toolbar_dismissed = Some(this.selection(cx));
                     cx.notify();
@@ -3413,6 +3423,7 @@ impl Render for Composer {
                     .children(self.render_schedule(cx))
                     .children(self.render_delivery_menu(cx))
                     .children(self.render_plus_menu(cx))
+                    .children(self.render_rewrite_panel(cx))
                     .child(
                         v_flex()
                             .debug_selector(|| COMPOSER_BOX_TAG.into())
