@@ -211,16 +211,7 @@ fn close_cluster(blocks: &mut [WeekBlock], lanes: usize) {
 }
 
 pub fn range_label(start: NaiveDate, days: i64) -> String {
-    let end = start + Duration::days(days - 1);
-    if start == end {
-        start.format("%B %-d, %Y").to_string()
-    } else if start.month() == end.month() {
-        format!("{} {}-{}, {}", start.format("%B"), start.day(), end.day(), end.year())
-    } else if start.year() == end.year() {
-        format!("{} - {}", start.format("%B %-d"), end.format("%B %-d, %Y"))
-    } else {
-        format!("{} - {}", start.format("%B %-d, %Y"), end.format("%B %-d, %Y"))
-    }
+    app_base::format::calendar_range_label(start, start + Duration::days(days - 1))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,4 +1,4 @@
-use app_base::format::clock_format;
+use app_base::format::{self, clock_format};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
 use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
@@ -225,7 +225,7 @@ impl CalendarView {
                             .text_size(px(20.))
                             .line_height(px(24.))
                             .text_color(color)
-                            .child(day.date.day().to_string()),
+                            .child(format::calendar_day_number(day.date)),
                     )
                     .child(
                         div()

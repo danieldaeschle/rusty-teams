@@ -33,6 +33,50 @@ pub fn clock_format() -> &'static str {
     current_date_style().map_or("%H:%M", |style| style.clock)
 }
 
+impl DateStyle {
+    fn month_first(&self) -> bool {
+        self.day_month.starts_with("%-m")
+    }
+
+    fn day_number(&self) -> &'static str {
+        if self.day_month.starts_with("%d") { "%d" } else { "%-d" }
+    }
+}
+
+pub fn calendar_day_number(date: NaiveDate) -> String {
+    date.format(current_date_style().map_or("%-d", |style| style.day_number()))
+        .to_string()
+}
+
+pub fn calendar_range_label(start: NaiveDate, end: NaiveDate) -> String {
+    let style = current_date_style();
+    let day = style.map_or("%-d", |style| style.day_number());
+    if style.is_none_or(|style| style.month_first()) {
+        let from = start.format(&format!("%B {day}")).to_string();
+        let to = end.format(&format!("%B {day}, %Y")).to_string();
+        return if start == end {
+            to
+        } else if start.year() != end.year() {
+            format!("{} - {to}", start.format(&format!("%B {day}, %Y")))
+        } else if start.month() != end.month() {
+            format!("{from} - {to}")
+        } else {
+            format!("{from}-{}, {}", end.format(day), end.year())
+        };
+    }
+    let from = start.format(&format!("{day} %B")).to_string();
+    let to = end.format(&format!("{day} %B, %Y")).to_string();
+    if start == end {
+        to
+    } else if start.year() != end.year() {
+        format!("{} - {to}", start.format(&format!("{day} %B, %Y")))
+    } else if start.month() != end.month() {
+        format!("{from} - {to}")
+    } else {
+        format!("{}-{to}", start.format(day))
+    }
+}
+
 /// Numeric day and month in the order of the account's display language, as `Intl.DateTimeFormat` does in Teams.
 pub fn date_style(locale: &str) -> DateStyle {
     let locale = locale.to_ascii_lowercase();
@@ -235,6 +279,21 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn calendar_range_follows_the_account_locale() {
+        let date = |month, day| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        set_date_locale(Some("en-GB"));
+        assert_eq!(calendar_range_label(date(11, 9), date(11, 15)), "09-15 November, 2026");
+        assert_eq!(calendar_range_label(date(11, 30), date(12, 4)), "30 November - 04 December, 2026");
+        assert_eq!(calendar_day_number(date(11, 9)), "09");
+        set_date_locale(Some("en-US"));
+        assert_eq!(calendar_range_label(date(11, 9), date(11, 13)), "November 9-13, 2026");
+        assert_eq!(calendar_day_number(date(11, 9)), "9");
+        set_date_locale(Some("de-DE"));
+        assert_eq!(calendar_range_label(date(11, 9), date(11, 9)), "9 November, 2026");
+        set_date_locale(None);
+    }
 
     #[test]
     fn team_tiles_letter_first_and_last_word_like_teams() {
