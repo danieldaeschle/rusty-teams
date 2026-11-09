@@ -1,6 +1,6 @@
 use app_base::format::clock_format;
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
-use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -225,7 +225,7 @@ impl CalendarView {
                             .text_size(px(20.))
                             .line_height(px(24.))
                             .text_color(color)
-                            .child(day.date.format("%d").to_string()),
+                            .child(day.date.day().to_string()),
                     )
                     .child(
                         div()

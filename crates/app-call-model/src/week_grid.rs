@@ -212,12 +212,14 @@ fn close_cluster(blocks: &mut [WeekBlock], lanes: usize) {
 
 pub fn range_label(start: NaiveDate, days: i64) -> String {
     let end = start + Duration::days(days - 1);
-    if start.month() == end.month() {
-        start.format("%B %Y").to_string()
+    if start == end {
+        start.format("%B %-d, %Y").to_string()
+    } else if start.month() == end.month() {
+        format!("{} {}-{}, {}", start.format("%B"), start.day(), end.day(), end.year())
     } else if start.year() == end.year() {
-        format!("{} - {}", start.format("%B"), end.format("%B %Y"))
+        format!("{} - {}", start.format("%B %-d"), end.format("%B %-d, %Y"))
     } else {
-        format!("{} - {}", start.format("%B %Y"), end.format("%B %Y"))
+        format!("{} - {}", start.format("%B %-d, %Y"), end.format("%B %-d, %Y"))
     }
 }
 
@@ -369,10 +371,18 @@ mod tests {
     #[test]
     fn labels_read_like_teams() {
         let monday = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
-        assert_eq!(range_label(monday, 5), "November - December 2026");
+        assert_eq!(range_label(monday, 5), "November 30 - December 4, 2026");
         assert_eq!(
             range_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), 5),
-            "November 2026"
+            "November 9-13, 2026"
+        );
+        assert_eq!(
+            range_label(NaiveDate::from_ymd_opt(2026, 12, 28).unwrap(), 7),
+            "December 28, 2026 - January 3, 2027"
+        );
+        assert_eq!(
+            range_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), 1),
+            "November 9, 2026"
         );
         assert_eq!(hour_label(0, true), "12 AM");
         assert_eq!(hour_label(13, true), "1 PM");
