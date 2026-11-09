@@ -745,7 +745,7 @@ impl Element for FlowText {
             if let Some(url) = url
                 && !open_profile_link(&url, event.position, cx)
             {
-                cx.open_url(&url);
+                super::hooks::open_link(&url, cx);
             }
         });
     }

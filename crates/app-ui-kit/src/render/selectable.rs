@@ -9,7 +9,7 @@ use gpui_kit::base::{
 use gpui_kit::*;
 
 use super::blocks::{CODE_PADDING, EMOJI_PLACEHOLDER};
-use super::hooks::open_profile_link;
+use super::hooks::{open_link, open_profile_link};
 
 pub(super) const TIME_ROOM: char = '\u{2007}';
 pub(super) const HIT_SLOP: f32 = 12.;
@@ -402,7 +402,7 @@ impl Element for SelectableRichText {
             if let Some(url) = link_at(&layout, &links, event.position)
                 && !open_profile_link(&url, event.position, cx)
             {
-                cx.open_url(&url);
+                open_link(&url, cx);
             }
         });
     }

@@ -158,7 +158,7 @@ pub fn link_preview_card(
                 ),
         )
         .children(close_button)
-        .on_click(move |_, _, cx| cx.open_url(&url))
+        .on_click(move |_, _, cx| app_ui_kit::render::hooks::open_link(&url, cx))
         .into_any_element()
 }
 

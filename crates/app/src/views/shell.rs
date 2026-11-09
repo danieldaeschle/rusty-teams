@@ -103,7 +103,30 @@ pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx:
         open_profile_link: super::profile_card::open_profile_link,
         jump_to_quoted,
         inline_image,
+        open_link,
     });
+}
+
+fn open_link(url: &str, cx: &mut App) {
+    if let Some(handle) = cx.try_global::<crate::app_state::AppHandle>() {
+        let text = opening_link_text(url);
+        handle.0.clone().update(cx, |state, cx| state.raise_notice(text, None, cx));
+    }
+    cx.open_url(url);
+}
+
+fn opening_link_text(url: &str) -> String {
+    let host = url
+        .split_once("://")
+        .map_or(url, |(_, rest)| rest)
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    if host.is_empty() {
+        "Opening link...".to_owned()
+    } else {
+        format!("Opening {host}...")
+    }
 }
 
 fn inline_image(url: &str, cx: &App) -> Option<std::path::PathBuf> {
@@ -1291,5 +1314,17 @@ impl Render for AppShell {
             .children(self.settings_dialog.clone())
             .children(self.profile_card.clone())
             .child(crate::frame_log::probe("last"))
+    }
+}
+
+#[cfg(test)]
+mod opening_link_tests {
+    use super::opening_link_text;
+
+    #[test]
+    fn the_notice_names_the_host() {
+        assert_eq!(opening_link_text("https://example.com/a?b#c"), "Opening example.com...");
+        assert_eq!(opening_link_text("mailto:"), "Opening mailto:...");
+        assert_eq!(opening_link_text(""), "Opening link...");
     }
 }
