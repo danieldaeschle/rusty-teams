@@ -39,6 +39,7 @@ pub mod sounds;
 pub mod substrate_search;
 pub mod team_admin;
 pub mod teams_cdn;
+pub mod thread_activity;
 pub mod transcripts;
 pub mod translate;
 pub mod window;
@@ -122,4 +123,5 @@ pub use translate::{
     Language, MAX_TRANSLATE_BATCH, MessageLanguage, TranslateRequest, Translation,
     TranslationStatus, TranslationTrigger, Translator, language_code,
 };
+pub use thread_activity::{ThreadActivity, ThreadActivityKind};
 pub use window::{MessageWindow, WindowDirection};

@@ -1614,6 +1614,15 @@ impl ConversationView {
         let current = self.current.as_ref()?;
         let app = self.app.read(cx);
         let (user_id, member_name, notes) = match &current.selection {
+            Selection::Chat(chat_id)
+                if app
+                    .sidebar
+                    .chats
+                    .iter()
+                    .any(|chat| &chat.id == chat_id && chat.kind.eq_ignore_ascii_case("meeting")) =>
+            {
+                return None;
+            }
             Selection::Chat(chat_id) => {
                 let member = app
                     .sidebar

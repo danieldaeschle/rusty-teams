@@ -19,9 +19,11 @@ use crate::presence::Presence;
 use crate::preview::OwnedPreview;
 use crate::receipts::ReceiptCache;
 use crate::remote::{Remote, RemotePage};
+use crate::roster_event::thread_activity_record;
 use crate::scheduled::NOTES_CHAT_ID;
 
 const EVENT_CAPACITY: usize = 64;
+pub(crate) const MEETING_CHAT_KIND: &str = "meeting";
 pub(crate) const META_USER_ID: &str = "me_user_id";
 const META_TENANT_ID: &str = "me_tenant_id";
 const META_DISPLAY_NAME: &str = "me_display_name";
@@ -487,6 +489,8 @@ impl<R: Remote> SyncEngine<R> {
         let mut collected = collected;
         self.apply_chat_emotions(conversation_id, &mut collected)
             .await;
+        let covered_from = oldest_fetched.filter(|_| has_next);
+        collected.extend(self.meeting_activities(conversation_id, covered_from).await);
         let delta = self.ingest(conversation_id, collected)?;
         self.store.set_sync_state(conversation_id, &state)?;
         Ok(delta)
@@ -510,6 +514,13 @@ impl<R: Remote> SyncEngine<R> {
             .collect();
         self.apply_chat_emotions(conversation_id, &mut records)
             .await;
+        let covered_from = page_oldest.filter(|_| has_more);
+        records.extend(
+            self.meeting_activities(conversation_id, covered_from)
+                .await
+                .into_iter()
+                .filter(|record| state.oldest_loaded.is_none_or(|oldest| record.created_at < oldest)),
+        );
         self.ingest(conversation_id, records.clone())?;
         self.store.set_sync_state(
             conversation_id,
@@ -520,6 +531,31 @@ impl<R: Remote> SyncEngine<R> {
             },
         )?;
         Ok(sorted(records))
+    }
+
+    /// Graph leaves meeting chat system events out; chatsvc has them.
+    async fn meeting_activities(
+        &self,
+        conversation_id: &str,
+        covered_from: Option<DateTime<Utc>>,
+    ) -> Vec<MessageRecord> {
+        let is_meeting = self
+            .store
+            .chat(conversation_id)
+            .ok()
+            .flatten()
+            .is_some_and(|chat| chat.kind == MEETING_CHAT_KIND);
+        if !is_meeting {
+            return Vec::new();
+        }
+        let Ok(activities) = self.remote.chat_thread_activities(conversation_id).await else {
+            return Vec::new();
+        };
+        activities
+            .iter()
+            .filter(|activity| covered_from.is_none_or(|from| activity.created_at >= from))
+            .map(|activity| thread_activity_record(conversation_id, activity))
+            .collect()
     }
 
     pub(crate) fn ingest(

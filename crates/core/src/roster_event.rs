@@ -1,3 +1,4 @@
+use chatsvc::{ThreadActivity, ThreadActivityKind};
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +20,8 @@ pub enum RosterChange {
     Left,
     Renamed,
     AppAdded,
+    Invited,
+    MeetingNamed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -112,6 +115,27 @@ impl RosterEvent {
         })
     }
 
+    pub fn from_thread_activity(activity: &ThreadActivity) -> RosterEvent {
+        let (change, member_ids, topic) = match &activity.kind {
+            ThreadActivityKind::MembersJoined { member_ids } => {
+                (RosterChange::Invited, member_ids.clone(), None)
+            }
+            ThreadActivityKind::TopicUpdated { topic } => {
+                (RosterChange::MeetingNamed, Vec::new(), Some(topic.clone()))
+            }
+        };
+        RosterEvent {
+            change,
+            initiator_id: activity.initiator_id.clone(),
+            initiator_name: None,
+            member_names: vec![None; member_ids.len()],
+            member_ids,
+            history: SharedHistory::None,
+            topic,
+            app_name: None,
+        }
+    }
+
     pub fn from_json(json: &str) -> Option<RosterEvent> {
         serde_json::from_str::<StoredRoster>(json)
             .ok()
@@ -142,6 +166,13 @@ impl RosterEvent {
                 None => format!("{initiator} removed the group name for this conversation."),
             },
             RosterChange::Removed => format!("{initiator} removed {targets} from the chat."),
+            RosterChange::Invited if self.member_ids.len() == 1 => {
+                format!("{targets} was invited to the meeting.")
+            }
+            RosterChange::Invited => format!("{targets} were invited to the meeting."),
+            RosterChange::MeetingNamed => {
+                format!("{initiator} named the meeting {}.", self.topic.as_deref().unwrap_or_default())
+            }
             RosterChange::AppAdded => {
                 let app = self.app_name.as_deref().unwrap_or(UNNAMED_APP);
                 format!("{initiator} added {app} to the chat.")
@@ -159,6 +190,20 @@ impl RosterEvent {
                 ),
             },
         }
+    }
+}
+
+pub fn thread_activity_record(conversation_id: &str, activity: &ThreadActivity) -> MessageRecord {
+    MessageRecord {
+        conversation_id: conversation_id.to_owned(),
+        message_id: activity.message_id.clone(),
+        created_at: activity.created_at,
+        attachments_json: "[]".to_owned(),
+        reactions_json: "[]".to_owned(),
+        mentions_json: "[]".to_owned(),
+        links_json: "[]".to_owned(),
+        call_event_json: Some(RosterEvent::from_thread_activity(activity).to_json()),
+        ..MessageRecord::default()
     }
 }
 
@@ -239,6 +284,33 @@ mod tests {
 
     fn plain_names(user_id: Option<&str>, name: Option<&str>) -> String {
         name.or(user_id).unwrap_or("Unknown").to_owned()
+    }
+
+    #[test]
+    fn meeting_chat_activities_read_like_teams() {
+        let activity = |kind| ThreadActivity {
+            message_id: "1".into(),
+            created_at: Utc::now(),
+            initiator_id: Some("boss".into()),
+            kind,
+        };
+        let invited = |ids: &[&str]| {
+            RosterEvent::from_thread_activity(&activity(ThreadActivityKind::MembersJoined {
+                member_ids: ids.iter().map(|id| (*id).to_owned()).collect(),
+            }))
+            .text(plain_names)
+        };
+        assert_eq!(invited(&["ann"]), "ann was invited to the meeting.");
+        assert_eq!(invited(&["ann", "bob"]), "ann and bob were invited to the meeting.");
+        assert_eq!(invited(&["ann", "bob", "cy"]), "ann and 2 others were invited to the meeting.");
+        let named = RosterEvent::from_thread_activity(&activity(ThreadActivityKind::TopicUpdated {
+            topic: "Tree service".into(),
+        }));
+        assert_eq!(named.text(plain_names), "boss named the meeting Tree service.");
+        let record = thread_activity_record("19:meeting_x@thread.v2", &activity(ThreadActivityKind::TopicUpdated {
+            topic: "Tree service".into(),
+        }));
+        assert_eq!(roster_event(&record), Some(named));
     }
 
     #[test]

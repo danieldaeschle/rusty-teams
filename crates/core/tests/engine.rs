@@ -115,6 +115,7 @@ struct Fake {
     directory_users: Mutex<Vec<User>>,
     horizons: Mutex<Vec<chatsvc::MemberHorizon>>,
     horizon_calls: Mutex<usize>,
+    thread_activities: Mutex<Vec<chatsvc::ThreadActivity>>,
     apps: Mutex<Vec<chatsvc::ChatApp>>,
     app_calls: Mutex<usize>,
     invokes: Mutex<Vec<chatsvc::InvokeRequest>>,
@@ -904,6 +905,10 @@ impl Remote for Handle {
                 }))
             })
             .collect())
+    }
+
+    async fn chat_thread_activities(&self, _chat_id: &str) -> Result<Vec<chatsvc::ThreadActivity>> {
+        Ok(self.thread_activities.lock().unwrap().clone())
     }
 
     async fn consumption_horizons(
@@ -4613,6 +4618,41 @@ async fn group_partial_read_lists_who_and_total() {
         names(engine.receipt_state(CHAT, "m0003")),
         (vec!["Cy Example".to_owned()], 3)
     );
+}
+
+fn meeting_chat() -> Chat {
+    let mut chat = one_on_one();
+    chat.chat_type = "meeting".into();
+    chat
+}
+
+#[tokio::test]
+async fn meeting_chats_without_horizons_mark_own_messages_sent() {
+    let fake = Arc::new(Fake::default());
+    let engine = receipt_engine(&fake, vec![meeting_chat()]).await;
+    engine.refresh_receipts(CHAT).await.unwrap();
+    assert_eq!(engine.receipt_state(CHAT, "m0001"), teams_core::ReceiptState::Sent);
+    assert_eq!(engine.receipt_state(CHAT, "m0002"), teams_core::ReceiptState::Unknown);
+}
+
+#[tokio::test]
+async fn meeting_chats_take_their_system_events_from_chatsvc() {
+    let fake = Arc::new(Fake::default());
+    *fake.thread_activities.lock().unwrap() = vec![chatsvc::ThreadActivity {
+        message_id: "activity-1".into(),
+        created_at: base(),
+        initiator_id: Some(ME.into()),
+        kind: chatsvc::ThreadActivityKind::TopicUpdated { topic: "Tree service".into() },
+    }];
+    let engine = receipt_engine(&fake, vec![meeting_chat()]).await;
+    let records = engine.open_conversation(CHAT).unwrap();
+    let event = records
+        .iter()
+        .find(|record| record.message_id == "activity-1")
+        .and_then(teams_core::roster_event::roster_event)
+        .expect("meeting event stored");
+    assert_eq!(event.change, teams_core::roster_event::RosterChange::MeetingNamed);
+    assert_eq!(records.len(), 4);
 }
 
 #[tokio::test]

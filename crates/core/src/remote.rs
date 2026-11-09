@@ -17,7 +17,7 @@ use chatsvc::{
     MemberHorizon, MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages,
     PinnedMessage, Pins, PostFollowState, PresenceLookup, PresenceService, PresenceStatus, Receipts,
     RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, ThreadMembers,
-    TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
+    ThreadActivity, TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
     WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
@@ -401,6 +401,10 @@ pub trait Remote {
         _page_size: usize,
     ) -> Result<MessageWindow> {
         Err(Error::Unsupported("message windows"))
+    }
+
+    async fn chat_thread_activities(&self, _chat_id: &str) -> Result<Vec<ThreadActivity>> {
+        Ok(Vec::new())
     }
 
     async fn chat_messages_by_id(
@@ -1268,6 +1272,10 @@ impl Remote for Graph {
         Ok(Messages::new(self.session())
             .message_window(chat_id, anchor_id, direction, page_size)
             .await?)
+    }
+
+    async fn chat_thread_activities(&self, chat_id: &str) -> Result<Vec<ThreadActivity>> {
+        Ok(Messages::new(self.session()).thread_activities(chat_id).await?)
     }
 
     async fn chat_messages_by_id(
