@@ -339,6 +339,9 @@ impl AppShell {
                     }
                     cx.notify();
                 }
+                SidebarEvent::NewChannelPost => this
+                    .conversation
+                    .update(cx, |conversation, cx| conversation.start_channel_post(window, cx)),
             }
         });
         let calendar = cx.new(|cx| CalendarView::new(state.clone(), cx));

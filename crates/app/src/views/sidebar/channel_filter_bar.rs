@@ -16,6 +16,7 @@ use crate::views::widgets::{icon, menu_icon};
 
 pub const CHANNEL_FILTER_TAG: &str = "shell/islands/sidebar/channel-filter";
 const NEW_CHANNEL_LABEL: &str = "New channel";
+const NEW_MESSAGE_LABEL: &str = "New message";
 const INPUT_HEIGHT: f32 = 32.;
 const PILL_HEIGHT: f32 = 24.;
 const SIDE_INSET: f32 = 16.;
@@ -83,7 +84,9 @@ impl SidebarView {
 
     pub(super) fn new_channel_items_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.clone();
+        let sidebar = cx.entity().downgrade();
         let app = self.state.read(cx);
+        let channel_selected = matches!(app.selection, Some(Selection::Channel(_)));
         let team_id = match &app.selection {
             Some(Selection::Channel(channel_id)) => app
                 .sidebar
@@ -101,8 +104,18 @@ impl SidebarView {
             .rounded(px(8.))
             .tooltip("New items")
             .dropdown_menu(move |menu, _, _| {
-                let (state, team_id) = (state.clone(), team_id.clone());
+                let (state, team_id, sidebar) = (state.clone(), team_id.clone(), sidebar.clone());
                 menu.item(
+                    PopupMenuItem::new(NEW_MESSAGE_LABEL)
+                        .icon(menu_icon(IconName::MessageSquare))
+                        .disabled(!channel_selected)
+                        .on_click(move |_, _, cx| {
+                            sidebar
+                                .update(cx, |_, cx| cx.emit(SidebarEvent::NewChannelPost))
+                                .ok();
+                        }),
+                )
+                .item(
                     PopupMenuItem::new(NEW_CHANNEL_LABEL)
                         .icon(menu_icon(IconName::Hash))
                         .disabled(team_id.is_none())

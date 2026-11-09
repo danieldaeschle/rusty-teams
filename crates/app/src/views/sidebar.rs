@@ -334,6 +334,7 @@ fn confirm_delete_section(
 pub enum SidebarEvent {
     RestoreFocus,
     TabChanged,
+    NewChannelPost,
 }
 
 impl EventEmitter<SidebarEvent> for SidebarView {}

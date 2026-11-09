@@ -42,6 +42,12 @@ impl ConversationView {
                 .is_some_and(|current| current.mode == ViewMode::ThreadList)
     }
 
+    pub fn start_channel_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_feed() {
+            self.open_new_post(window, cx);
+        }
+    }
+
     pub(super) fn open_new_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.mark_new_post_open(cx);
         self.composer
