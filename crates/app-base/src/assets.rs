@@ -211,7 +211,7 @@ const SYMBOLS: [(&str, &[u8]); 200] = symbols![
     "zoom_out",
 ];
 
-const LUCIDE_AS_MATERIAL: [(&str, &str); 163] = [
+const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/alarm-clock.svg", "symbols/alarm.svg"),
     ("icons/app-window.svg", "symbols/web_asset.svg"),
     ("icons/arrow-down.svg", "symbols/arrow_downward.svg"),
@@ -368,23 +368,32 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 163] = [
     ("icons/video-off.svg", "symbols/videocam_off.svg"),
     ("icons/volume-2.svg", "symbols/volume_up.svg"),
     ("icons/volume-off.svg", "symbols/volume_off.svg"),
-    ("icons/window-close.svg", "symbols/close.svg"),
-    ("icons/window-maximize.svg", "symbols/crop_square.svg"),
-    ("icons/window-minimize.svg", "symbols/minimize.svg"),
-    ("icons/window-restore.svg", "symbols/filter_none.svg"),
     ("icons/wrench.svg", "symbols/build.svg"),
     ("icons/x.svg", "symbols/close.svg"),
     ("icons/zap.svg", "symbols/bolt.svg"),
 ];
 
+const MATERIAL_VIEW_BOX: &[u8] = b"viewBox=\"0 -960 960 960\"";
+const LUCIDE_SIZED_VIEW_BOX: &[u8] = b"viewBox=\"80 -880 800 800\"";
+
+fn symbol_bytes(path: &str) -> Option<&'static [u8]> {
+    SYMBOLS.iter().find(|(name, _)| *name == path).map(|(_, bytes)| *bytes)
+}
+
+fn at_lucide_size(svg: &[u8]) -> Vec<u8> {
+    match svg.windows(MATERIAL_VIEW_BOX.len()).position(|window| window == MATERIAL_VIEW_BOX) {
+        Some(start) => [&svg[..start], LUCIDE_SIZED_VIEW_BOX, &svg[start + MATERIAL_VIEW_BOX.len()..]].concat(),
+        None => svg.to_vec(),
+    }
+}
+
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        let path = LUCIDE_AS_MATERIAL
-            .iter()
-            .find(|(lucide, _)| *lucide == path)
-            .map_or(path, |(_, material)| *material);
+        if let Some((_, material)) = LUCIDE_AS_MATERIAL.iter().find(|(lucide, _)| *lucide == path) {
+            return Ok(symbol_bytes(material).map(|bytes| Cow::Owned(at_lucide_size(bytes))));
+        }
         if let Some((_, bytes)) = SYMBOLS.iter().find(|(name, _)| *name == path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
@@ -413,6 +422,7 @@ mod tests {
             assert!(SYMBOLS.iter().any(|(name, _)| *name == material), "{lucide} -> {material}");
             let bytes = AppAssets.load(lucide).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"), "{lucide}");
+            assert!(bytes.windows(LUCIDE_SIZED_VIEW_BOX.len()).any(|window| window == LUCIDE_SIZED_VIEW_BOX), "{lucide}");
         }
     }
 }
