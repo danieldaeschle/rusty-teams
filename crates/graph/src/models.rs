@@ -166,6 +166,14 @@ pub struct Chat {
     pub members: Vec<Member>,
     pub last_message_preview: Option<Message>,
     pub viewpoint: Option<ChatViewpoint>,
+    #[serde(default)]
+    pub online_meeting_info: Option<OnlineMeetingInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineMeetingInfo {
+    pub join_web_url: Option<String>,
 }
 
 impl Chat {

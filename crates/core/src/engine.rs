@@ -394,6 +394,14 @@ impl<R: Remote> SyncEngine<R> {
         self.my_tenant_id_from(&any_chat_id).await
     }
 
+    pub async fn meeting_join_url(&self, chat_id: &str) -> Result<Option<String>> {
+        let chat = self.remote.chat(chat_id).await?;
+        Ok(chat
+            .online_meeting_info
+            .and_then(|info| info.join_web_url)
+            .filter(|url| !url.is_empty()))
+    }
+
     pub(crate) async fn resolve(&self, conversation_id: &str) -> Result<Conversation> {
         match self.resolve_stored(conversation_id) {
             Err(Error::UnknownConversation(_)) => self.fetch_unknown_chat(conversation_id).await,

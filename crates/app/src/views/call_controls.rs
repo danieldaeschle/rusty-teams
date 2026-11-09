@@ -25,6 +25,7 @@ const AUDIO_CALL_LABEL: &str = "Audio call";
 const CALL_OPTIONS_LABEL: &str = "Call options";
 const MEET_NOW_LABEL: &str = "Meet now";
 const GROUP_KIND: &str = "group";
+const MEETING_KIND: &str = "meeting";
 
 pub fn header_call_controls(
     app: &Entity<AppState>,
@@ -34,9 +35,20 @@ pub fn header_call_controls(
 ) -> Vec<AnyElement> {
     let conversation_id = selection.conversation_id().to_owned();
     let mut controls = Vec::new();
-    if state.running_meeting(&conversation_id).is_some() {
+    let chat = match selection {
+        Selection::Chat(chat_id) => state.sidebar.chats.iter().find(|chat| &chat.id == chat_id),
+        Selection::Channel(_) => None,
+    };
+    let running = state.running_meeting(&conversation_id).is_some();
+    let meeting_chat = chat.is_some_and(|chat| chat.kind.eq_ignore_ascii_case(MEETING_KIND));
+    if running || meeting_chat {
         let join_app = app.clone();
         let join_id = conversation_id.clone();
+        let (background, foreground) = if running {
+            (theme::green(), theme::white())
+        } else {
+            (theme::accent(), theme::on_accent())
+        };
         controls.push(
             h_flex()
                 .id("header-join")
@@ -46,24 +58,20 @@ pub fn header_call_controls(
                 .flex_none()
                 .items_center()
                 .rounded_full()
-                .bg(theme::green())
-                .text_color(theme::white())
+                .bg(background)
+                .text_color(foreground)
                 .text_size(px(13.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|button| button.opacity(0.85))
-                .child(icon(IconName::Phone, 14., theme::white()))
+                .when(running, |button| button.child(icon(IconName::Phone, 14., foreground)))
                 .child("Join")
                 .on_click(move |_, _, cx| {
-                    join_app.update(cx, |state, cx| state.join_meeting_call(&join_id, cx));
+                    join_app.update(cx, |state, cx| state.join_chat_meeting(&join_id, cx));
                 })
                 .into_any_element(),
         );
     }
-    let chat = match selection {
-        Selection::Chat(chat_id) => state.sidebar.chats.iter().find(|chat| &chat.id == chat_id),
-        Selection::Channel(_) => None,
-    };
     let callable = chat.is_some_and(|chat| {
         is_echo_chat(chat) || plan_for_chat(chat, state.directory.me.as_ref()).is_some()
     });

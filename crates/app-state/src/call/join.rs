@@ -106,6 +106,29 @@ impl AppState {
         .detach();
     }
 
+    /// Teams offers Join in every meeting chat; without a running call the meeting starts from its join link.
+    pub fn join_chat_meeting(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        if self.call.is_some() || self.running_meeting(chat_id).is_some() || self.mode.demo {
+            self.join_meeting_call(chat_id, cx);
+            return;
+        }
+        let Some(engine) = self.engine.clone() else {
+            self.raise_notice(NOT_CONNECTED_NOTICE.to_owned(), None, cx);
+            return;
+        };
+        let chat_id = chat_id.to_owned();
+        let receiver = runtime::spawn(async move { engine.meeting_join_url(&chat_id).await });
+        cx.spawn(async move |this, cx| {
+            let url = receiver.await.ok().and_then(Result::ok).flatten();
+            this.update(cx, |state, cx| match url {
+                Some(url) => state.join_link(&url, JoinMode::Prejoin, cx),
+                None => state.raise_notice(MEETING_UNAVAILABLE_NOTICE.to_owned(), None, cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn join_meeting_link(&mut self, text: &str, cx: &mut Context<Self>) {
         self.join_link(text, JoinMode::Prejoin, cx);
     }
