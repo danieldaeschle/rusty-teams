@@ -28,10 +28,10 @@ pub enum ChatFilterPill {
 impl ChatFilterPill {
     pub const PRIMARY: [ChatFilterPill; 3] = [
         ChatFilterPill::Unread,
-        ChatFilterPill::Mentions,
         ChatFilterPill::Chats,
+        ChatFilterPill::Meetings,
     ];
-    pub const OVERFLOW: [ChatFilterPill; 2] = [ChatFilterPill::Meetings, ChatFilterPill::Muted];
+    pub const OVERFLOW: [ChatFilterPill; 2] = [ChatFilterPill::Mentions, ChatFilterPill::Muted];
 
     pub fn label(self) -> &'static str {
         match self {

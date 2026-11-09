@@ -9,8 +9,8 @@ use gpui_kit::*;
 use super::{NEW_CHAT_BUTTON_SIZE, SidebarEvent, SidebarTab, SidebarView};
 use crate::app_state::Selection;
 use crate::chat_filter::{
-    CLEAR_FILTER_TEXT, CLEAR_FILTERS, CLOSE_FILTER_TEXT, ChatFilterPill, FEWER_FILTERS,
-    FILTER_PLACEHOLDER, MORE_FILTERS, NO_MATCHES, SHOW_FILTER_TEXT, mentioned_conversations,
+    CLEAR_FILTER_TEXT, CLEAR_FILTERS, CLOSE_FILTER_TEXT, ChatFilterPill,
+    FILTER_PLACEHOLDER, NO_MATCHES, SHOW_FILTER_TEXT, mentioned_conversations,
 };
 use crate::theme;
 use crate::views::widgets::icon;
@@ -198,24 +198,15 @@ impl SidebarView {
     }
 
     fn filter_pills(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let overflow_active = ChatFilterPill::OVERFLOW
-            .iter()
-            .any(|pill| self.chat_filter.has(*pill));
-        let show_overflow = self.more_filters_open || overflow_active;
-        let mut pills: Vec<AnyElement> = ChatFilterPill::PRIMARY
+        let pills: Vec<AnyElement> = ChatFilterPill::PRIMARY
             .into_iter()
-            .map(|pill| self.filter_pill(pill, cx).into_any_element())
-            .collect();
-        if show_overflow {
-            pills.extend(
+            .chain(
                 ChatFilterPill::OVERFLOW
                     .into_iter()
-                    .map(|pill| self.filter_pill(pill, cx).into_any_element()),
-            );
-        }
-        if !overflow_active {
-            pills.push(self.more_filters_button(cx).into_any_element());
-        }
+                    .filter(|pill| self.chat_filter.has(*pill)),
+            )
+            .map(|pill| self.filter_pill(pill, cx).into_any_element())
+            .collect();
         h_flex()
             .debug_selector(|| FILTER_PILLS_TAG.into())
             .px(px(SIDE_INSET))
@@ -255,36 +246,6 @@ impl SidebarView {
             .when(!disabled, |chip| {
                 chip.on_click(cx.listener(move |this, _, _, cx| this.toggle_pill(pill, cx)))
             })
-    }
-
-    fn more_filters_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let open = self.more_filters_open;
-        let label = if open { FEWER_FILTERS } else { MORE_FILTERS };
-        div()
-            .id("chat-filter-more")
-            .size(px(PILL_HEIGHT))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .cursor_pointer()
-            .bg(theme::surface_raised())
-            .hover(|chip| chip.bg(theme::border_strong()))
-            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
-            .child(icon(
-                if open {
-                    IconName::ChevronUp
-                } else {
-                    IconName::ChevronDown
-                },
-                14.,
-                theme::text_soft(),
-            ))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.more_filters_open = !this.more_filters_open;
-                cx.notify();
-            }))
     }
 
     pub(super) fn filter_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
