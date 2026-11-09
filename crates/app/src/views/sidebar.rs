@@ -844,12 +844,6 @@ impl SidebarView {
             .when(section.collapsed && section.unread_chats > 0, |header| {
                 header.child(count_badge(section.unread_chats, false))
             })
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(theme::text_faint())
-                    .child(section.count.to_string()),
-            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 let id = toggle_id.clone();
                 this.state
