@@ -52,6 +52,7 @@ pub(super) fn answer_button(
     label: &str,
     glyph: IconName,
     fill: Hsla,
+    ink: Hsla,
 ) -> Stateful<gpui_kit::Div> {
     h_flex()
         .id(id)
@@ -63,12 +64,12 @@ pub(super) fn answer_button(
         .justify_center()
         .rounded_full()
         .bg(fill)
-        .text_color(theme::white())
+        .text_color(ink)
         .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
-        .child(icon(glyph, 16., theme::white()))
+        .child(icon(glyph, 16., ink))
         .child(label.to_owned())
 }
 
@@ -100,7 +101,7 @@ impl Render for RingView {
         let ring_id = self.ring_id;
         let decline_app = self.app.clone();
         let accept_app = self.app.clone();
-        let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red())
+        let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red(), theme::white())
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 decline_app.update(cx, |state, cx| state.decline_ring(ring_id, cx));
@@ -110,6 +111,7 @@ impl Render for RingView {
             entry.accept_label(),
             IconName::Phone,
             theme::green(),
+            theme::white(),
         )
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
@@ -124,6 +126,7 @@ impl Render for RingView {
                 "Video",
                 IconName::Video,
                 theme::green(),
+                theme::white(),
             )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();

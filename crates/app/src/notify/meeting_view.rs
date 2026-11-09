@@ -57,11 +57,9 @@ impl Render for MeetingToastView {
             "meeting-snooze",
             "Snooze",
             IconName::AlarmClock,
-            theme::popup(),
+            theme::popup_hover(),
+            theme::text(),
         )
-        .border_1()
-        .border_color(theme::border_strong())
-        .text_color(theme::text())
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
             snooze_app.update(cx, |state, cx| state.snooze_meeting_toast(toast_id, cx));
@@ -83,8 +81,7 @@ impl Render for MeetingToastView {
                 cx.stop_propagation();
                 dismiss_app.update(cx, |state, cx| state.dismiss_meeting_toast(toast_id, cx));
             });
-        let join = answer_button("meeting-join", "Join", IconName::Video, theme::accent())
-            .text_color(theme::on_accent())
+        let join = answer_button("meeting-join", "Join", IconName::Video, theme::accent(), theme::on_accent())
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 join_center.update(cx, |center, cx| center.join_meeting_toast(toast_id, cx));
