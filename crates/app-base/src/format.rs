@@ -25,6 +25,16 @@ pub fn set_date_locale(locale: Option<&str>) {
     DATE_STYLE.with(|style| style.set(locale.map(date_style)));
 }
 
+/// Teams desktop formats dates and times with the OS regional format, not the account language.
+pub fn os_regional_locale() -> Option<String> {
+    sys_locale::get_locale().as_deref().and_then(normalize_locale)
+}
+
+fn normalize_locale(raw: &str) -> Option<String> {
+    let tag = raw.split(['.', '@']).next().unwrap_or_default().replace('_', "-");
+    (!tag.is_empty() && tag != "C" && tag != "POSIX").then_some(tag)
+}
+
 fn current_date_style() -> Option<DateStyle> {
     DATE_STYLE.with(Cell::get)
 }
@@ -303,6 +313,16 @@ mod tests {
         assert_eq!(team_initials("e_NLP / AI"), "eA");
         assert_eq!(team_initials("Platform"), "P");
         assert_eq!(team_initials(""), "?");
+    }
+
+    #[test]
+    fn os_locale_names_become_language_tags() {
+        assert_eq!(normalize_locale("en-GB").as_deref(), Some("en-GB"));
+        assert_eq!(normalize_locale("en_GB.UTF-8").as_deref(), Some("en-GB"));
+        assert_eq!(normalize_locale("de_DE@euro").as_deref(), Some("de-DE"));
+        assert_eq!(normalize_locale("C"), None);
+        assert_eq!(normalize_locale("POSIX"), None);
+        assert_eq!(normalize_locale(""), None);
     }
 
     #[test]

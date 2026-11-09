@@ -29,6 +29,7 @@ tokio.workspace = true
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 raw-window-handle = "0.6"
 sha2 = "0.10"
+sys-locale = "0.3"
 resvg = { version = "0.46", default-features = false, features = ["text"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

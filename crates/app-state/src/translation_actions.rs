@@ -28,12 +28,13 @@ type TranslationOutcome = Result<Vec<Translation>, String>;
 
 impl AppState {
     pub fn apply_date_locale(&self) {
-        crate::format::set_date_locale(
-            self.translation
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.display_locale.as_deref()),
-        );
+        let regional = crate::format::os_regional_locale();
+        let display = self
+            .translation
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.display_locale.as_deref());
+        crate::format::set_date_locale(regional.as_deref().or(display));
     }
 
     pub fn load_cached_translation_settings(&mut self) {
