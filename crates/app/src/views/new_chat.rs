@@ -28,6 +28,10 @@ const POPUP_ROW_HEIGHT: f32 = 44.;
 const CHIP_NAME_MAX_WIDTH: f32 = 180.;
 const FIELD_MIN_HEIGHT: f32 = 36.;
 const FIELD_PADDING: f32 = 8.;
+const EMPTY_ICON_SIZE: f32 = 72.;
+const NEW_CONVERSATION_TITLE: &str = "You're starting a new conversation";
+const NEW_CONVERSATION_HINT: &str = "Type your first message below.";
+const TO_PLACEHOLDER: &str = "Enter name or email";
 const DEFAULT_PLACEHOLDER: &str = "Type a message";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,7 +185,7 @@ impl EventEmitter<NewChatEvent> for NewChatDraft {}
 
 impl NewChatDraft {
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let query = cx.new(|cx| InputState::new(window, cx).placeholder("Name or email"));
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder(TO_PLACEHOLDER));
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Group name (optional)"));
         let subscriptions = vec![
             cx.subscribe_in(&query, window, Self::on_query_event),
@@ -693,7 +697,32 @@ impl NewChatDraft {
             .justify_center()
             .gap(px(8.));
         match self.chips.as_slice() {
-            [] => column.into_any_element(),
+            [] => column
+                .child(
+                    div()
+                        .size(px(EMPTY_ICON_SIZE))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(theme::surface_raised())
+                        .child(icon(IconName::MessageSquare, 32., theme::accent_text())),
+                )
+                .child(
+                    div()
+                        .pt(px(8.))
+                        .text_size(px(15.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text())
+                        .child(NEW_CONVERSATION_TITLE),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(theme::text_muted())
+                        .child(NEW_CONVERSATION_HINT),
+                )
+                .into_any_element(),
             [chip] => column
                 .child(person_avatar(
                     directory,
