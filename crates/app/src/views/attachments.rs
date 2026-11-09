@@ -28,6 +28,7 @@ const SAVE_BUTTON_SIZE: f32 = 28.;
 const SAVE_BUTTON_RADIUS: f32 = 6.;
 const SAVE_PROGRESS_HEIGHT: f32 = 2.;
 const FILE_PREVIEW_HEIGHT: f32 = FILE_CARD_WIDTH * 9. / 16.;
+const PORTRAIT_PAGE_RATIO: f32 = 1.414;
 const PLAY_BUTTON_SIZE: f32 = 40.;
 const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
 const LOCAL_IMAGE_SUFFIX: &str = "/$value";
@@ -259,8 +260,11 @@ fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stat
         .overflow_hidden()
         .bg(theme::code_surface());
     let frame = match image {
+        Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => frame
+            .bg(theme::white())
+            .child(img(path).w_full().h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO)).object_fit(ObjectFit::Cover)),
         Some(path) => frame.child(img(path).size_full().object_fit(match card.kind {
-            FileKind::Video => ObjectFit::Cover,
+            FileKind::Video | FileKind::PowerPoint => ObjectFit::Cover,
             _ => ObjectFit::Contain,
         })),
         None => frame,
@@ -350,8 +354,13 @@ fn file_view(
         .bg(theme::surface())
         .cursor_pointer()
         .hover(|card| card.bg(theme::row_hover()))
-        .children(preview)
-        .child(row)
+        .map(|card_view| {
+            if card.kind.is_document() {
+                card_view.child(row).children(preview)
+            } else {
+                card_view.children(preview).child(row)
+            }
+        })
         .when_some(progress, |card, fraction| {
             card.child(
                 div()

@@ -55,6 +55,10 @@ pub enum FileKind {
 }
 
 impl FileKind {
+    pub fn is_document(self) -> bool {
+        matches!(self, FileKind::Word | FileKind::Excel | FileKind::PowerPoint | FileKind::Pdf)
+    }
+
     pub fn from_name(name: &str) -> FileKind {
         let Some((_, extension)) = name.rsplit_once('.') else {
             return FileKind::Other;
@@ -421,7 +425,7 @@ pub struct FileCard {
 
 impl FileCard {
     pub fn preview(&self) -> Option<ImageRef> {
-        if !matches!(self.kind, FileKind::Image | FileKind::Video) {
+        if !(matches!(self.kind, FileKind::Image | FileKind::Video) || self.kind.is_document()) {
             return None;
         }
         Some(ImageRef {
@@ -1139,7 +1143,9 @@ mod tests {
         assert!(preview.url.starts_with("https://graph.microsoft.com/v1.0/shares/u!"));
         assert!(preview.url.ends_with("/driveItem/thumbnails/0/large/content"));
         assert!(card("shot.PNG", sharepoint).preview().is_some());
-        assert_eq!(card("plan.docx", sharepoint).preview(), None);
+        assert!(card("plan.docx", sharepoint).preview().is_some());
+        assert!(card("report.pdf", sharepoint).preview().is_some());
+        assert_eq!(card("bundle.zip", sharepoint).preview(), None);
         assert_eq!(card("clip.mov", "https://example.com/clip.mov").preview(), None);
     }
 
