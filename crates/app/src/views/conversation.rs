@@ -4113,7 +4113,7 @@ impl Render for ConversationView {
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .children(new_post)
+            .children(new_post.map(|post| runway(post, comfy)))
             .child(
                 div()
                     .debug_selector(|| TIMELINE_TAG.into())
