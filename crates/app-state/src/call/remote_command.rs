@@ -97,9 +97,7 @@ impl AppState {
     pub fn run_remote_command(&mut self, text: &str, cx: &mut Context<Self>) {
         match RemoteCommand::decode(text) {
             Some(RemoteCommand::Join(link)) => {
-                self.own_engine_next_call = true;
                 self.join_link(&link, JoinMode::Direct, cx);
-                self.own_engine_next_call = false;
             }
             Some(RemoteCommand::HangUp) => self.leave_call(cx),
             Some(RemoteCommand::AdmitAll) => self.admit_all_call_guests(cx),

@@ -1,19 +1,12 @@
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
-use super::rows::{Choice, caption, control_row, select, text_button, toggle_row};
-use crate::app_state::AppState;
-use crate::theme;
+use super::rows::{Choice, caption, control_row, select, text_button};
 use crate::notify::NotificationCenter;
 use crate::notify::sounds::{Ringtone, RingtoneCallType};
 
-const WEB_CALLS_LABEL: &str = "Use Teams on the web for calls and meetings";
-const WEB_CALLS_DETAIL: &str =
-    "Joins meetings and opens chat calls in a Teams on the web window instead of the built-in call engine.";
 
-pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &App) -> Div {
-    let web_calls = app.read(cx).web_calls;
-    let toggle_app = app.clone();
+pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
     let ringtones = center.read(cx).settings().sounds.ringtones;
     let rows = RingtoneCallType::ALL
         .into_iter()
@@ -23,19 +16,6 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         .map(|call_type| ringtone_row(center, call_type, ringtones.get(call_type)));
     v_flex()
         .w_full()
-        .child(caption("CALL ENGINE"))
-        .child(
-            toggle_row(
-                "settings-web-calls",
-                WEB_CALLS_LABEL,
-                WEB_CALLS_DETAIL,
-                theme::text_muted(),
-                web_calls,
-            )
-            .on_click(move |_, _, cx| {
-                toggle_app.update(cx, |state, cx| state.set_web_calls(!web_calls, cx))
-            }),
-        )
         .child(caption("RINGTONES"))
         .children(rows)
 }

@@ -20,7 +20,6 @@ pub mod speed_dial;
 pub mod schedule;
 pub mod target;
 pub mod view_actions;
-pub mod web_call;
 pub mod week;
 
 pub use app_call_model::{

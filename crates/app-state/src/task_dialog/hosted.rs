@@ -1,10 +1,9 @@
 use std::sync::{Arc, OnceLock};
 
-use app_call_model::report::{WebShadow, report_directory, save_report};
 use gpui_kit::*;
 use serde_json::json;
 use teams_core::DialogIdentity;
-use webview::{DialogEvent, DialogHandle, DialogMode, DialogSpec, NEW_WINDOW_KIND, WebViewTransport};
+use webview::{DialogEvent, DialogHandle, DialogMode, DialogSpec, WebViewTransport};
 
 use super::sdk::{self, Effect, HostContext, HostPage};
 use super::{UrlDialog, UrlDialogNext};
@@ -13,8 +12,6 @@ use crate::backend::Engine;
 use crate::{notify, runtime, theme};
 
 static HOST: OnceLock<Arc<WebViewTransport>> = OnceLock::new();
-const CALL_WINDOW_WIDTH: u32 = 1100;
-const CALL_WINDOW_HEIGHT: u32 = 760;
 
 pub fn install_host(transport: Arc<WebViewTransport>) {
     let _ = HOST.set(transport);
@@ -36,51 +33,6 @@ pub fn open(dialog: UrlDialog, engine: Option<Arc<Engine>>, cx: &mut App) {
         .flatten();
     cx.spawn(async move |cx| run(host, dialog, state, engine, owner, cx).await)
         .detach();
-}
-
-/// Teams on the web in its own window, signed in through the shared WebView2 profile.
-pub fn open_call_window(url: String, title: String, cx: &mut App) -> bool {
-    let Some(host) = HOST.get().cloned() else {
-        return false;
-    };
-    let (_handle, mut events) = host.open_dialog(DialogSpec {
-        mode: DialogMode::Call,
-        title,
-        width: CALL_WINDOW_WIDTH,
-        height: CALL_WINDOW_HEIGHT,
-        background: theme::background_hex(),
-        owner: None,
-        page_url: url,
-        page_html: String::new(),
-    });
-    cx.spawn(async move |cx| {
-        let mut shadow = WebShadow::new(chrono::Utc::now());
-        while let Some(DialogEvent::Message(raw)) = events.recv().await {
-            if shadow.observe(&raw) {
-                continue;
-            }
-            let link = serde_json::from_str::<serde_json::Value>(&raw)
-                .ok()
-                .filter(|message| message.get("kind").and_then(serde_json::Value::as_str) == Some(NEW_WINDOW_KIND))
-                .and_then(|message| message.get("url")?.as_str().map(str::to_owned));
-            if let Some(link) = link {
-                cx.update(|cx| cx.open_url(&link));
-            }
-        }
-        if shadow.is_empty() {
-            return;
-        }
-        let document = shadow.document();
-        let saved = cx
-            .background_executor()
-            .spawn(async move { save_report(&report_directory(), &document) })
-            .await;
-        if let Err(error) = saved {
-            log::warn!("web call report not saved: {error}");
-        }
-    })
-    .detach();
-    true
 }
 
 async fn run(

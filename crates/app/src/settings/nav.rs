@@ -59,7 +59,7 @@ fn search_terms(section: SettingsSection) -> &'static [&'static str] {
             "When writing a message, press Enter to",
             "Format messages using mark-down",
         ],
-        SettingsSection::Calls => &["Use Teams on the web for calls and meetings", "Ringtones"],
+        SettingsSection::Calls => &["Ringtones"],
         SettingsSection::Devices => &[
             "Speaker",
             "Microphone",
