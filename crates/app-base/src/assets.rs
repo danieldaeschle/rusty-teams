@@ -8,7 +8,7 @@ macro_rules! symbols {
     };
 }
 
-const SYMBOLS: [(&str, &[u8]); 200] = symbols![
+const SYMBOLS: [(&str, &[u8]); 206] = symbols![
     "account_circle",
     "add",
     "alarm",
@@ -35,13 +35,16 @@ const SYMBOLS: [(&str, &[u8]); 200] = symbols![
     "calendar_add_on",
     "calendar_clock",
     "calendar_month",
+    "calendar_month_fill",
     "call",
     "call_end",
+    "call_fill",
     "call_missed",
     "campaign",
     "cancel",
     "cancel_presentation",
     "chat_bubble",
+    "chat_bubble_fill",
     "check",
     "check_circle",
     "chevron_left",
@@ -96,6 +99,7 @@ const SYMBOLS: [(&str, &[u8]); 200] = symbols![
     "grid_off",
     "grid_view",
     "group",
+    "group_fill",
     "headphones",
     "help",
     "home",
@@ -135,6 +139,7 @@ const SYMBOLS: [(&str, &[u8]); 200] = symbols![
     "notification_important_fill",
     "notifications",
     "notifications_active",
+    "notifications_fill",
     "notifications_off",
     "open_in_full",
     "open_in_new",
@@ -168,6 +173,7 @@ const SYMBOLS: [(&str, &[u8]); 200] = symbols![
     "share",
     "shield",
     "smart_toy",
+    "smart_toy_fill",
     "spinner_arc",
     "spinner_track",
     "star",
@@ -387,10 +393,18 @@ fn at_lucide_size(svg: &[u8]) -> Vec<u8> {
     }
 }
 
+pub const FILLED_PREFIX: &str = "filled/";
+
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some(stem) = path.strip_prefix(FILLED_PREFIX)
+            && let Some((_, material)) = LUCIDE_AS_MATERIAL.iter().find(|(lucide, _)| lucide.strip_prefix("icons/") == Some(stem))
+        {
+            let filled = material.replace(".svg", "_fill.svg");
+            return Ok(symbol_bytes(&filled).or_else(|| symbol_bytes(material)).map(|bytes| Cow::Owned(at_lucide_size(bytes))));
+        }
         if let Some((_, material)) = LUCIDE_AS_MATERIAL.iter().find(|(lucide, _)| *lucide == path) {
             return Ok(symbol_bytes(material).map(|bytes| Cow::Owned(at_lucide_size(bytes))));
         }
@@ -415,6 +429,14 @@ impl AssetSource for AppAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filled_icons_use_the_fill_variant_and_fall_back_to_the_outline() {
+        let filled = AppAssets.load("filled/bell.svg").unwrap().unwrap();
+        let outline = AppAssets.load("icons/bell.svg").unwrap().unwrap();
+        assert_ne!(filled, outline);
+        assert_eq!(AppAssets.load("filled/search.svg").unwrap().unwrap(), AppAssets.load("icons/search.svg").unwrap().unwrap());
+    }
 
     #[test]
     fn every_lucide_icon_we_replace_loads_a_bundled_material_symbol() {

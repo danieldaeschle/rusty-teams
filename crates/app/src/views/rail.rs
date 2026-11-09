@@ -5,7 +5,7 @@ use gpui_kit::*;
 
 use super::shortcuts::keys_for_label;
 use super::sidebar::{SidebarTab, SidebarView};
-use super::widgets::{RAIL_BADGE, badge_pill, icon};
+use super::widgets::{RAIL_BADGE, badge_pill, filled_icon, icon};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRuns, runs_handle};
 use crate::app_state::AppState;
@@ -140,7 +140,7 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .when(!active, |button| {
             button.hover(|button| button.bg(theme::row_hover()))
         })
-        .child(icon(item.icon, ICON_SIZE, color))
+        .child(if active { filled_icon(item.icon, ICON_SIZE, color) } else { icon(item.icon, ICON_SIZE, color) })
         .child(
             div()
                 .max_w(px(RAIL_ITEM_WIDTH - 2. * LABEL_INSET))

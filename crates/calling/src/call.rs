@@ -75,6 +75,7 @@ const STATS_PERIOD: Duration = Duration::from_millis(200);
 const TICKS_PER_SECOND: u32 = 5;
 const RECONNECT_WINDOW: Duration = Duration::from_secs(30);
 const OUTGOING_TIMEOUT: Duration = Duration::from_secs(90);
+const SETUP_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 const DIRECT_OUTGOING_TIMEOUT: Duration = Duration::from_secs(185);
 const FAR_FUTURE: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 const DEFAULT_KEEP_ALIVE_SECONDS: u64 = 2700;
@@ -440,7 +441,19 @@ pub async fn run_test_call(
 impl CallEngine {
     pub(crate) async fn run(&self, plan: Plan, options: CallOptions, mut control: CallControl) -> Result<CallReport> {
         let inner = self.inner.as_ref();
-        let _one_call_at_a_time = if options.concurrent { None } else { Some(inner.gate.lock().await) };
+        let _one_call_at_a_time = if options.concurrent {
+            None
+        } else {
+            match control.until_hangup(inner.gate.lock()).await {
+                Ok(guard) => Some(guard),
+                Err(_) => {
+                    let mut state = CallState::Idle;
+                    advance(&mut state, CallSignal::Dial, &control);
+                    advance(&mut state, CallSignal::LocalLeave, &control);
+                    return Ok(CallReport::default());
+                }
+            }
+        };
         let _trouter_tab_stays = inner.session.hold_tab(session::App::Teams);
         let timeline = Timeline::new(options.trace);
         let mut report = CallReport::default();
@@ -694,6 +707,16 @@ fn new_media_leg_id() -> String {
     uuid::Uuid::new_v4().simple().to_string().to_uppercase()
 }
 
+async fn setup_step<T, E>(control: &mut CallControl, step: impl std::future::Future<Output = std::result::Result<T, E>>) -> Result<T>
+where
+    Error: From<E>,
+{
+    match control.until_hangup(timeout(SETUP_STEP_TIMEOUT, step)).await? {
+        Ok(result) => Ok(result?),
+        Err(_) => Err(Error::Signaling("Teams did not answer in time".into())),
+    }
+}
+
 async fn next_peer_event(next: &mut Option<NextPeer>) -> Option<PeerEvent> {
     match next {
         Some(next) => next.session.events.recv().await,
@@ -864,9 +887,9 @@ async fn drive(
                     let subscribed = control
                         .until_hangup(signaling.subscribe_meeting(&participant, &links, meeting))
                         .await??;
-                    signaling.join_meeting(&subscribed, &invitation).await?
+                    setup_step(control, signaling.join_meeting(&subscribed, &invitation)).await?
                 }
-                _ => signaling.create_conversation(&invitation).await?,
+                _ => setup_step(control, signaling.create_conversation(&invitation)).await?,
             };
             if spec.is_people() {
                 control.send(CallUpdate::Progress(Progress::Calling));
@@ -970,8 +993,10 @@ async fn drive(
     if muted {
         control.send(CallUpdate::Muted(true));
     }
-    if let Err(error) = signaling.update_endpoint_state(&conversation, &participant, initial.endpoint_is_muted).await {
-        timeline.record("updateEndpointState failed", error.to_string());
+    match setup_step(control, signaling.update_endpoint_state(&conversation, &participant, initial.endpoint_is_muted)).await {
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(error) => timeline.record("updateEndpointState failed", error.to_string()),
+        Ok(()) => {}
     }
 
     let mut stats_tick = interval(STATS_PERIOD);
@@ -3554,6 +3579,16 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_setup_step_ends_on_cancel_or_after_the_step_timeout() {
+        let (handle, mut control) = crate::control::call_channel();
+        handle.commands.send(CallCommand::Hangup).unwrap();
+        let cancelled = setup_step(&mut control, std::future::pending::<std::result::Result<(), Error>>()).await;
+        assert!(matches!(cancelled, Err(Error::Cancelled)));
+        let timed_out = setup_step(&mut control, std::future::pending::<std::result::Result<(), Error>>()).await;
+        assert!(matches!(timed_out, Err(Error::Signaling(_))));
+    }
+
     use super::*;
 
     #[test]
