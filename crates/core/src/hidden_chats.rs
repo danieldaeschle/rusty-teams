@@ -115,7 +115,8 @@ pub(crate) fn resolve_hidden(
     let cleared_until_ms = states
         .get(&chat.id)
         .and_then(|state| state.history_cleared_ms);
-    if history_cleared(chat, cleared_until_ms) {
+    let hidden_at_ms = states.get(&chat.id).and_then(|state| state.hidden_at_ms);
+    if history_cleared(chat, cleared_until_ms) || history_cleared(chat, hidden_at_ms) {
         return true;
     }
     if reported == Some(true) {
@@ -230,6 +231,25 @@ mod tests {
         assert!(!resolve_hidden(
             &chat(Some("2026-10-02T08:00:00Z"), false),
             &cleared,
+            &mut locally,
+            now()
+        ));
+    }
+
+    #[test]
+    fn a_hidden_time_hides_the_chat_although_chatsvc_says_visible() {
+        let mut locally = LocallyHidden::default();
+        let mut hidden = states(Some(false));
+        hidden.get_mut("19:a").unwrap().hidden_at_ms = Some(at("2026-10-01T10:00:00Z").timestamp_millis());
+        assert!(resolve_hidden(
+            &chat(Some("2026-10-01T09:00:00Z"), true),
+            &hidden,
+            &mut locally,
+            now()
+        ));
+        assert!(!resolve_hidden(
+            &chat(Some("2026-10-02T08:00:00Z"), true),
+            &hidden,
             &mut locally,
             now()
         ));
