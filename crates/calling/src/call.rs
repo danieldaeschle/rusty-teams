@@ -456,6 +456,8 @@ impl CallEngine {
         };
         let _trouter_tab_stays = inner.session.hold_tab(session::App::Teams);
         let timeline = Timeline::new(options.trace);
+        let stay_awake = crate::awake::StayAwake::new();
+        timeline.record("stay awake", if stay_awake.holding() { "system and display kept awake" } else { "not available" });
         let mut report = CallReport::default();
         let mut state = CallState::Idle;
         advance(&mut state, CallSignal::Dial, &control);
@@ -3340,8 +3342,11 @@ fn sync_software_audio(
 }
 
 async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &mut CallReport, cancelled: bool) {
-    if let Some(audio) = &live.audio {
-        audio.track.set_enabled(false);
+    for peer in &live.peers {
+        peer.close();
+    }
+    if let Some(audio) = live.audio.take() {
+        audio.stop().await;
     }
     live.broker_running.store(false, Ordering::SeqCst);
     if !live.skip_leave
@@ -3368,12 +3373,6 @@ async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &
         })
         .await;
         report.end = waited.ok().flatten();
-    }
-    for peer in &live.peers {
-        peer.close();
-    }
-    if let Some(audio) = live.audio.take() {
-        audio.stop().await;
     }
     if let Some(broker) = live.broker.take() {
         broker.abort();

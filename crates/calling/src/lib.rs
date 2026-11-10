@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod audio_io;
+pub mod awake;
 pub mod background;
 pub mod call;
 pub mod candidates;
