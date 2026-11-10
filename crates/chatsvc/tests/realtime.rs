@@ -83,6 +83,7 @@ async fn serve(mut stream: TcpStream, port: u16, calls: Calls) {
 fn quiet_config() -> RealtimeConfig {
     RealtimeConfig {
         ensure_interval: Duration::from_secs(3600),
+        native: false,
         ..RealtimeConfig::default()
     }
 }

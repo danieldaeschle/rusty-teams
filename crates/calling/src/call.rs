@@ -454,7 +454,6 @@ impl CallEngine {
                 }
             }
         };
-        let _trouter_tab_stays = inner.session.hold_tab(session::App::Teams);
         let timeline = Timeline::new(options.trace);
         let stay_awake = crate::awake::StayAwake::new();
         timeline.record("stay awake", if stay_awake.holding() { "system and display kept awake" } else { "not available" });

@@ -15,8 +15,9 @@ serde_json.workspace = true
 session.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
-tokio-tungstenite.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

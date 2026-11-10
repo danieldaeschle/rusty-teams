@@ -1,6 +1,7 @@
 mod callback;
 mod event;
 mod host;
+mod native;
 mod runner;
 
 use std::pin::Pin;
@@ -21,6 +22,7 @@ pub use event::{
 pub use host::{DEFAULT_TROUTER_HOST, is_trouter_host};
 
 use crate::error::Result;
+use native::NativeTrouter;
 use runner::{Runner, attach};
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -37,6 +39,7 @@ pub struct RealtimeConfig {
     pub forward_callbacks: bool,
     pub ringable: bool,
     pub initially_active: bool,
+    pub native: bool,
 }
 
 /// Page globals of one Trouter client; a second client in the same tab needs its own names.
@@ -70,6 +73,7 @@ impl Default for RealtimeConfig {
             forward_callbacks: false,
             ringable: false,
             initially_active: false,
+            native: std::env::var_os("TEAMS_PAGE_TROUTER").is_none(),
         }
     }
 }
@@ -94,32 +98,47 @@ impl Realtime {
     pub async fn start_with(session: &Session, config: RealtimeConfig) -> Result<Realtime> {
         let session = session.clone();
         let host = host::resolve(&session, &config).await;
-        let script = runner::PageScript::new(&config);
-        let attached = attach(&session, &script).await?;
         let (output, events) = mpsc::unbounded_channel();
         let (callback_output, callbacks) = mpsc::unbounded_channel();
         let (reply_sender, replies) = mpsc::unbounded_channel();
         let (activity, activity_receiver) = watch::channel(config.initially_active);
         let resend = Arc::new(Notify::new());
         let (stop, stop_receiver) = oneshot::channel();
-        let mut runner = Runner::new(
-            session,
-            config,
-            script,
-            host.clone(),
-            output,
-            runner::CallbackPipes {
-                output: callback_output,
-                replies,
-            },
-            activity_receiver,
-            resend.clone(),
-        );
-        if let Err(error) = runner.ensure().await {
-            attached.shutdown().await;
-            return Err(error.into());
-        }
-        let task = tokio::spawn(runner.run(attached, stop_receiver));
+        let pipes = runner::CallbackPipes {
+            output: callback_output,
+            replies,
+        };
+        let task = if config.native {
+            let mut trouter = NativeTrouter::new(
+                session,
+                config,
+                host.clone(),
+                output,
+                pipes,
+                activity_receiver,
+                resend.clone(),
+            );
+            trouter.token().await?;
+            tokio::spawn(trouter.run(stop_receiver))
+        } else {
+            let script = runner::PageScript::new(&config);
+            let attached = attach(&session, &script).await?;
+            let mut runner = Runner::new(
+                session,
+                config,
+                script,
+                host.clone(),
+                output,
+                pipes,
+                activity_receiver,
+                resend.clone(),
+            );
+            if let Err(error) = runner.ensure().await {
+                attached.shutdown().await;
+                return Err(error.into());
+            }
+            tokio::spawn(runner.run(attached, stop_receiver))
+        };
         Ok(Realtime {
             host,
             events,
@@ -159,7 +178,7 @@ impl Realtime {
         self.resend.notify_one();
     }
 
-    /// Deletes the registration and closes the page-side socket.
+    /// Deletes the registration and closes the socket.
     pub async fn stop(mut self) {
         if let Some(stop) = self.stop.take() {
             let (done, finished) = oneshot::channel();
