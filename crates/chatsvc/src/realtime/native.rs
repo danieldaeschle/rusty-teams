@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, client_async_tls_with_config};
 
 use super::RealtimeConfig;
 use super::callback::{CallbackReply, decode_callback};
@@ -25,6 +25,7 @@ const PING_EVERY: Duration = Duration::from_secs(30);
 const SILENCE_LIMIT: Duration = Duration::from_secs(100);
 const REREGISTER_AFTER: Duration = Duration::from_secs(40 * 60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const ADDRESS_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const ACTIVITY_DEBOUNCE: Duration = Duration::from_secs(1);
 const ACTIVITY_ACK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -353,8 +354,8 @@ impl NativeTrouter {
         };
         session::ensure_crypto_provider();
         let url = socket_url(&self.host, &self.endpoint_id, &uuid::Uuid::new_v4().to_string(), now_ms() as u128);
-        let socket = match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
-            Ok(Ok((socket, _))) => socket,
+        let socket = match timeout(CONNECT_TIMEOUT, open_socket(&self.host, &url)).await {
+            Ok(Ok(socket)) => socket,
             Ok(Err(error)) => {
                 self.forward(&status_payload("disconnected", &format!("connect_failed: {}", short(&error.to_string()))));
                 return Err(None);
@@ -600,6 +601,24 @@ impl NativeTrouter {
             let _ = self.output.send(event);
         }
     }
+}
+
+/// IPv4 first: on some networks the IPv6 address of the Trouter host takes longer than the whole connect budget to fail.
+async fn open_socket(host: &str, url: &str) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+    let mut addresses: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, 443)).await?.collect();
+    addresses.sort_by_key(|address| address.is_ipv6());
+    let mut last_error = std::io::Error::new(std::io::ErrorKind::NotFound, "no address");
+    for address in addresses {
+        match timeout(ADDRESS_TIMEOUT, TcpStream::connect(address)).await {
+            Ok(Ok(stream)) => {
+                let (socket, _) = client_async_tls_with_config(url, stream, None, None).await?;
+                return Ok(socket);
+            }
+            Ok(Err(error)) => last_error = error,
+            Err(_) => last_error = std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{} timed out", if address.is_ipv6() { "IPv6" } else { "IPv4" })),
+        }
+    }
+    Err(last_error.into())
 }
 
 async fn send(connection: &mut Connection, text: String) {
