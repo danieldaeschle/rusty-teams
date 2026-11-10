@@ -236,10 +236,13 @@ impl CallEngine {
             .take_callbacks()
             .ok_or_else(|| Error::Callback("callback stream already taken".into()))?;
         let replier = realtime.callback_replier();
+        let mut last_status = None;
         let endpoint = timeout(ENDPOINT_WAIT, async {
             while let Some(event) = realtime.recv().await {
-                if let RealtimeEvent::Endpoint(endpoint) = event {
-                    return Some(endpoint);
+                match event {
+                    RealtimeEvent::Endpoint(endpoint) => return Some(endpoint),
+                    RealtimeEvent::Status(status) => last_status = Some(format!("{:?} {}", status.kind, status.detail)),
+                    _ => {}
                 }
             }
             None
@@ -249,7 +252,8 @@ impl CallEngine {
         .flatten();
         let Some(endpoint) = endpoint else {
             realtime.stop().await;
-            return Err(Error::Callback("Trouter socket never announced its endpoint".into()));
+            let seen = last_status.map_or_else(|| "no status".to_owned(), |status| format!("last status: {status}"));
+            return Err(Error::Callback(format!("Trouter socket never announced its endpoint ({seen})")));
         };
         let identity = match fetch_self(&session).await {
             Ok(identity) => identity,
