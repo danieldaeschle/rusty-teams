@@ -161,6 +161,7 @@ pub struct LocalVideo {
     blur: Arc<BlurSettings>,
     motion: bool,
     share_fps: Arc<AtomicU32>,
+    camera_preview: bool,
 }
 
 impl LocalVideo {
@@ -175,6 +176,7 @@ impl LocalVideo {
             blur: Arc::new(BlurSettings::default()),
             motion: false,
             share_fps: Arc::new(AtomicU32::new(SCREEN_SHARE_FPS)),
+            camera_preview: false,
         }
     }
 
@@ -343,7 +345,11 @@ impl LocalVideo {
     }
 
     pub fn camera_on(&self) -> bool {
-        self.camera.capture.is_some()
+        self.camera.capture.is_some() && !self.camera_preview
+    }
+
+    pub fn camera_previewing(&self) -> bool {
+        self.camera.capture.is_some() && self.camera_preview
     }
 
     pub fn sharing(&self) -> bool {
@@ -391,23 +397,41 @@ impl LocalVideo {
         }
     }
 
+    pub fn preview_camera(&mut self, choice: &DeviceChoice) -> Result<()> {
+        if !self.is_available() {
+            return Err(Error::Webrtc("video is switched off".into()));
+        }
+        self.camera.capture = None;
+        self.camera.capture = Some(self.capture_camera(choice)?);
+        self.camera_preview = true;
+        Ok(())
+    }
+
     pub fn start_camera(&mut self, choice: &DeviceChoice) -> Result<()> {
         let lines = self.lines.as_ref().ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
-        self.camera.capture = None;
-        let mut sink = self.camera_sink();
-        let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(self.blur.clone()))),
-            _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
-        };
-        Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
-        self.camera.capture = Some(capture);
+        let sender = lines.camera.sender();
+        if !self.camera_previewing() {
+            self.camera.capture = None;
+            self.camera.capture = Some(self.capture_camera(choice)?);
+        }
+        Self::begin_sending(&sender, &self.camera.track)?;
+        self.camera_preview = false;
         Ok(())
     }
 
+    fn capture_camera(&self, choice: &DeviceChoice) -> Result<Capture> {
+        let mut sink = self.camera_sink();
+        Ok(match self.mode {
+            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(self.blur.clone()))),
+            _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
+        })
+    }
+
     pub fn stop_camera(&mut self) {
+        self.camera_preview = false;
         self.camera.capture = None;
         self.blur.set_cutout(None);
         if let Some(lines) = &self.lines {
@@ -452,6 +476,19 @@ impl LocalVideo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_camera_preview_runs_without_a_line_and_stops_cleanly() {
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let factory = crate::devices::shared_factory();
+        let mut video = LocalVideo::new(&factory, VideoMode::Pattern, VideoHub::new(sender.clone()), sender);
+        video.preview_camera(&DeviceChoice::SystemDefault).unwrap();
+        assert!(video.camera_previewing() && !video.camera_on());
+        assert!(video.start_camera(&DeviceChoice::SystemDefault).is_err(), "sending needs a negotiated line");
+        assert!(video.camera_previewing());
+        video.stop_camera();
+        assert!(!video.camera_previewing() && !video.camera_on());
+    }
 
     #[test]
     fn frame_sizes_survive_packing() {

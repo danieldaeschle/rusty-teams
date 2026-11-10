@@ -813,6 +813,12 @@ async fn drive(
     live.audio = Some(audio);
     let mut local_video = LocalVideo::new(&factory, options.video, control.video.clone(), control.updates());
     let mut camera_choice = options.camera.clone();
+    if options.start_camera {
+        match local_video.preview_camera(&camera_choice) {
+            Ok(()) => control.send(CallUpdate::Camera(true)),
+            Err(error) => timeline.record("camera preview failed", error.to_string()),
+        }
+    }
     let mut media_description_request = 1u32;
     refresh_cameras(control.updates(), options.video, timeline.clone());
     refresh_share_sources(control.updates(), options.video);
@@ -1821,6 +1827,11 @@ async fn drive(
                     device_lists = devices::list_devices(&factory);
                     control.send(CallUpdate::Devices(device_lists.clone()));
                 }
+                Some(CallCommand::SetCamera(false)) if local_video.camera_previewing() => {
+                    start_camera_pending = false;
+                    local_video.stop_camera();
+                    control.send(CallUpdate::Camera(false));
+                }
                 Some(CallCommand::SetCamera(on)) => {
                     let direct = layout == Layout::OneToOne && negotiator.path() != MediaPath::Mixer;
                     if !remote_set || (on && !video_possible(remote_set, layout, negotiator.path())) {
@@ -1883,7 +1894,11 @@ async fn drive(
                 }
                 Some(CallCommand::SelectCamera(choice)) => {
                     camera_choice = choice;
-                    if local_video.camera_on()
+                    if local_video.camera_previewing()
+                        && let Err(error) = local_video.preview_camera(&camera_choice)
+                    {
+                        control.send(CallUpdate::Notice(format!("Camera could not start: {error}")));
+                    } else if local_video.camera_on()
                         && let Err(error) = local_video.start_camera(&camera_choice)
                     {
                         control.send(CallUpdate::Notice(format!("Camera could not start: {error}")));
@@ -2427,6 +2442,10 @@ async fn drive(
                     pending.session.peer.close();
                     negotiator.escalation_failed();
                     start_camera_pending = false;
+                    if local_video.camera_previewing() {
+                        local_video.stop_camera();
+                        control.send(CallUpdate::Camera(false));
+                    }
                     share_pending = None;
                     settle_failed_escalation(pending.offered.is_none(), layout, &mut negotiator, &mut deferred_changes, &mut local_video, control);
                     timeline.record("escalation failed", "no answer for the new peer connection in time");
