@@ -132,6 +132,7 @@ fn transport(
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
             window_title: format!("{APP_NAME} - Sign in"),
+            log: |line| app_base::diagnostics::record(line),
         });
         task_dialog::install_host(transport.clone());
         return transport;

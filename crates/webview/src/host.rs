@@ -25,7 +25,7 @@ use crate::cdp_failure::{CallContext, failure_reason, tab_state};
 use crate::fanout::Subscribers;
 use crate::host_dialog::{self, Dialog};
 use crate::park::{ParkDecision, ParkGate};
-use crate::sleep::{Activity, Sleep};
+use crate::sleep::{Activity, Sleep, blocker};
 use crate::transport::{HostState, UiRequest, WebViewTransport};
 use crate::{BROWSER_ARGUMENTS, FORWARDED_EVENTS};
 
@@ -46,6 +46,7 @@ const WINDOW_HEIGHT: i32 = 800;
 pub struct HostConfig {
     pub user_data_folder: PathBuf,
     pub window_title: String,
+    pub log: fn(&str),
 }
 
 struct View {
@@ -66,6 +67,7 @@ pub(crate) struct Shared {
     restarting: Cell<bool>,
     last_login_prompt: Cell<Option<Instant>>,
     sleep: RefCell<Sleep<TabCommand>>,
+    sleep_blocker: Cell<Option<&'static str>>,
 }
 
 thread_local! {
@@ -128,6 +130,7 @@ fn run(
         restarting: Cell::new(false),
         last_login_prompt: Cell::new(None),
         sleep: RefCell::new(Sleep::default()),
+        sleep_blocker: Cell::new(None),
     });
     SHARED.with(|slot| *slot.borrow_mut() = Some(shared.clone()));
     load(&shared);
@@ -623,10 +626,20 @@ fn maybe_sleep(shared: &Rc<Shared>) {
         dialogs_open: !shared.dialogs.borrow().is_empty(),
         subscribed: shared.subscribers.borrow_mut().has_live(),
     };
-    if !shared.sleep.borrow().should_sleep(activity, Instant::now()) {
+    if !shared.sleep.borrow().quiet(Instant::now()) {
+        return;
+    }
+    let blocked = blocker(activity);
+    if blocked != shared.sleep_blocker.replace(blocked)
+        && let Some(reason) = blocked
+    {
+        (shared.config.log)(&format!("webview: stays awake, {reason}"));
+    }
+    if blocked.is_some() {
         return;
     }
     shared.sleep.borrow_mut().fall_asleep();
+    (shared.config.log)("webview: asleep");
     let views: Vec<View> = shared.views.borrow_mut().drain().map(|(_, view)| view).collect();
     for view in views {
         unsafe {
@@ -641,6 +654,10 @@ fn wake_views(shared: &Rc<Shared>, full: Option<App>) {
     if !shared.sleep.borrow_mut().wake() {
         return;
     }
+    (shared.config.log)(&match full {
+        Some(app) => format!("webview: awake, {app} reloads"),
+        None => "webview: awake".to_owned(),
+    });
     let outcome = create_views(shared, |app| if Some(app) == full { app.start_url() } else { app.park_url() });
     if let Err(reason) = outcome {
         let stranded = shared.sleep.borrow_mut().reset();

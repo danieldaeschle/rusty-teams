@@ -17,6 +17,20 @@ pub(crate) struct Activity {
     pub subscribed: bool,
 }
 
+pub(crate) fn blocker(activity: Activity) -> Option<&'static str> {
+    [
+        (activity.restarting, "restarting"),
+        (!activity.all_parked, "an app is not parked"),
+        (activity.login_pending, "sign-in pending"),
+        (activity.held, "an app is held"),
+        (activity.in_flight, "a protocol call is running"),
+        (activity.dialogs_open, "a dialog is open"),
+        (activity.subscribed, "a tab subscriber is attached"),
+    ]
+    .into_iter()
+    .find_map(|(blocked, reason)| blocked.then_some(reason))
+}
+
 /// The web views close once both apps are parked and idle, and come back on the next protocol call, at the park page.
 #[derive(Debug)]
 pub(crate) struct Sleep<C> {
@@ -42,16 +56,12 @@ impl<C> Sleep<C> {
     }
 
     pub(crate) fn should_sleep(&self, activity: Activity, now: Instant) -> bool {
-        !self.asleep
-            && self.loading.is_empty()
-            && now.duration_since(self.last_use) >= SLEEP_AFTER
-            && activity.all_parked
-            && !(activity.restarting
-                || activity.login_pending
-                || activity.held
-                || activity.in_flight
-                || activity.dialogs_open
-                || activity.subscribed)
+        self.quiet(now) && blocker(activity).is_none()
+    }
+
+    /// Answers whether the views have been idle long enough to close.
+    pub(crate) fn quiet(&self, now: Instant) -> bool {
+        !self.asleep && self.loading.is_empty() && now.duration_since(self.last_use) >= SLEEP_AFTER
     }
 
     pub(crate) fn fall_asleep(&mut self) {
@@ -121,6 +131,12 @@ mod tests {
         ] {
             assert!(!sleep.should_sleep(blocked, later), "{blocked:?}");
         }
+    }
+
+    #[test]
+    fn the_first_blocker_is_named() {
+        assert_eq!(blocker(idle()), None);
+        assert_eq!(blocker(Activity { held: true, dialogs_open: true, ..idle() }), Some("an app is held"));
     }
 
     #[test]
