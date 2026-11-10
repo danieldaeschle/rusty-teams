@@ -98,6 +98,8 @@ const COMPOSER_BUTTON_SIZE: f32 = 32.;
 const COMPOSER_BUTTON_INSET: f32 = 6.;
 pub const COMPOSER_BOX_TAG: &str = "composer";
 pub const COMPOSER_ACTIONS_TAG: &str = "composer/actions";
+pub const COMPOSER_STACKED_ACTIONS_TAG: &str = "composer/stacked-actions";
+const STACKED_ACTIONS_WIDTH: f32 = 400.;
 pub const COMPOSER_INPUT_TAG: &str = "composer/input";
 pub const COMPOSER_SEND_TAG: &str = "composer/send";
 pub const COMPOSER_FORMAT_TAG: &str = "composer/actions/format";
@@ -2990,10 +2992,18 @@ impl Render for Composer {
             .children(attach)
             .children(self.render_rewrite_button(cx))
             .children(self.render_plus_button(cx));
-        let (row_actions, post_footer) = if post_layout {
-            (None, Some(self.render_post_footer(actions, can_send, cx)))
+        let stacked = !post_layout
+            && self
+                .composer_bounds
+                .get()
+                .is_some_and(|bounds| f32::from(bounds.size.width) < STACKED_ACTIONS_WIDTH);
+        let mut send = Some(send);
+        let (row_actions, stacked_actions, post_footer) = if post_layout {
+            (None, None, Some(self.render_post_footer(actions, can_send, cx)))
+        } else if stacked {
+            (None, Some((actions, send.take())), None)
         } else {
-            (Some(actions.ml(px(COMPOSER_BUTTON_INSET))), None)
+            (Some(actions.ml(px(COMPOSER_BUTTON_INSET))), None, None)
         };
         let post_header = self.render_post_header(cx);
         let composer = cx.weak_entity();
@@ -3527,7 +3537,7 @@ impl Render for Composer {
                                             .child(input),
                                     )
                                     .children(row_actions)
-                                    .when(!post_layout, |row| {
+                                    .when_some(send.filter(|_| !post_layout), |row, send| {
                                         row.child(
                                             div()
                                                 .flex_none()
@@ -3539,6 +3549,17 @@ impl Render for Composer {
                                         .child(send)
                                     }),
                             )
+                            .children(stacked_actions.map(|(actions, send)| {
+                                h_flex()
+                                    .debug_selector(|| COMPOSER_STACKED_ACTIONS_TAG.into())
+                                    .w_full()
+                                    .items_center()
+                                    .px(px(COMPOSER_BUTTON_INSET))
+                                    .pb(px(COMPOSER_BUTTON_INSET))
+                                    .child(actions)
+                                    .child(div().flex_1())
+                                    .children(send)
+                            }))
                             .children(post_footer),
                     ),
             )

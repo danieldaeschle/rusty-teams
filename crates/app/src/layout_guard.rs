@@ -185,7 +185,7 @@ mod frames {
     use crate::views::composer::plus_menu::{COMPOSER_PLUS_TAG, PlusAction};
     use crate::views::composer::{
         COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
-        COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
+        COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG, COMPOSER_STACKED_ACTIONS_TAG,
         POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
         POST_CARD_SUBJECT_TAG,
     };
@@ -1130,6 +1130,29 @@ mod frames {
             describe(disc),
             describe(bar)
         );
+    }
+
+    #[gpui_kit::test]
+    fn a_narrow_composer_puts_its_actions_below_a_full_width_input(cx: &mut TestAppContext) {
+        let (handle, _) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(760.), px(700.)));
+        collect(&mut visual, Some(COMPOSER_STACKED_ACTIONS_TAG));
+        let bounds_of = |visual: &mut VisualTestContext, path: &'static str| {
+            visual.debug_bounds(path).unwrap_or_else(|| panic!("{path} missing"))
+        };
+        let card = bounds_of(&mut visual, COMPOSER_BOX_TAG);
+        let input = bounds_of(&mut visual, COMPOSER_INPUT_TAG);
+        let stacked = bounds_of(&mut visual, COMPOSER_STACKED_ACTIONS_TAG);
+        let send = bounds_of(&mut visual, COMPOSER_SEND_TAG);
+        assert!(input.bottom() <= stacked.top(), "actions {} not below input {}", describe(stacked), describe(input));
+        assert!(contains(card, stacked) && contains(stacked, send), "send {} outside {}", describe(send), describe(stacked));
+        let side = f32::from(card.right() - send.right());
+        let bottom = f32::from(card.bottom() - send.bottom());
+        assert!((side - bottom).abs() < TOLERANCE, "send insets: side {side}, bottom {bottom}");
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        collect(&mut visual, Some(COMPOSER_SEND_TAG));
+        assert!(visual.debug_bounds(COMPOSER_STACKED_ACTIONS_TAG).is_none(), "wide composer stacked");
     }
 
     const TITLE_SEARCH: &str = "shell/title-bar/search";
