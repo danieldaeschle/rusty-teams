@@ -25,7 +25,7 @@ use crate::cdp_failure::{CallContext, failure_reason, tab_state};
 use crate::fanout::Subscribers;
 use crate::host_dialog::{self, Dialog};
 use crate::park::{ParkDecision, ParkGate};
-use crate::sleep::{Activity, Sleep, blocker};
+use crate::sleep::{Activity, CallTally, Sleep, blocker, call_label};
 use crate::transport::{HostState, UiRequest, WebViewTransport};
 use crate::{BROWSER_ARGUMENTS, FORWARDED_EVENTS};
 
@@ -38,6 +38,7 @@ const PARK_TIMER: usize = 2;
 const PARK_DELAY_MS: u32 = 60_000;
 const SLEEP_TIMER: usize = 3;
 const SLEEP_CHECK_MS: u32 = 60_000;
+const BUSY_REPORT_EVERY: u32 = 10;
 const LOGIN_PROMPT_INTERVAL: Duration = Duration::from_secs(600);
 const WINDOW_WIDTH: i32 = 1100;
 const WINDOW_HEIGHT: i32 = 800;
@@ -68,6 +69,8 @@ pub(crate) struct Shared {
     last_login_prompt: Cell<Option<Instant>>,
     sleep: RefCell<Sleep<TabCommand>>,
     sleep_blocker: Cell<Option<&'static str>>,
+    calls: RefCell<CallTally>,
+    busy_checks: Cell<u32>,
 }
 
 thread_local! {
@@ -131,6 +134,8 @@ fn run(
         last_login_prompt: Cell::new(None),
         sleep: RefCell::new(Sleep::default()),
         sleep_blocker: Cell::new(None),
+        calls: RefCell::new(CallTally::default()),
+        busy_checks: Cell::new(0),
     });
     SHARED.with(|slot| *slot.borrow_mut() = Some(shared.clone()));
     load(&shared);
@@ -483,6 +488,7 @@ fn drain(shared: &Rc<Shared>) {
 
 fn call(shared: &Rc<Shared>, app: App, command: TabCommand) {
     shared.sleep.borrow_mut().touch(Instant::now());
+    shared.calls.borrow_mut().note(format!("{app} {}", call_label(&command.method, &command.params)));
     wake_views(shared, None);
     let Some(command) = shared.sleep.borrow_mut().admit(app, command) else {
         return;
@@ -627,8 +633,15 @@ fn maybe_sleep(shared: &Rc<Shared>) {
         subscribed: shared.subscribers.borrow_mut().has_live(),
     };
     if !shared.sleep.borrow().quiet(Instant::now()) {
+        let checks = shared.busy_checks.get() + 1;
+        shared.busy_checks.set(checks % BUSY_REPORT_EVERY);
+        if checks == BUSY_REPORT_EVERY && !shared.sleep.borrow().asleep() {
+            let summary = shared.calls.borrow_mut().summary();
+            (shared.config.log)(&format!("webview: busy, calls in the last {BUSY_REPORT_EVERY} min: {summary}"));
+        }
         return;
     }
+    shared.busy_checks.set(0);
     let blocked = blocker(activity);
     if blocked != shared.sleep_blocker.replace(blocked)
         && let Some(reason) = blocked

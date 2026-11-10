@@ -17,6 +17,40 @@ pub(crate) struct Activity {
     pub subscribed: bool,
 }
 
+/// Names a protocol call without its content: the method, or for a script the host and first path segments it fetches.
+pub(crate) fn call_label(method: &str, params: &serde_json::Value) -> String {
+    if method != "Runtime.evaluate" {
+        return method.to_owned();
+    }
+    let expression = params.get("expression").and_then(serde_json::Value::as_str).unwrap_or_default();
+    if let Some(start) = expression.find("\"url\":\"https://") {
+        let rest = &expression[start + "\"url\":\"https://".len()..];
+        let end = rest.find(['"', '?', '\\']).unwrap_or(rest.len());
+        return rest[..end].split('/').take(3).collect::<Vec<_>>().join("/");
+    }
+    if expression.contains("return token;") {
+        return "token lookup".to_owned();
+    }
+    "script".to_owned()
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CallTally {
+    counts: HashMap<String, u32>,
+}
+
+impl CallTally {
+    pub(crate) fn note(&mut self, label: String) {
+        *self.counts.entry(label).or_default() += 1;
+    }
+
+    pub(crate) fn summary(&mut self) -> String {
+        let mut counts: Vec<(String, u32)> = self.counts.drain().collect();
+        counts.sort_by(|first, second| second.1.cmp(&first.1).then_with(|| first.0.cmp(&second.0)));
+        counts.iter().take(6).map(|(label, count)| format!("{label} x{count}")).collect::<Vec<_>>().join(", ")
+    }
+}
+
 pub(crate) fn blocker(activity: Activity) -> Option<&'static str> {
     [
         (activity.restarting, "restarting"),
@@ -131,6 +165,21 @@ mod tests {
         ] {
             assert!(!sleep.should_sleep(blocked, later), "{blocked:?}");
         }
+    }
+
+    #[test]
+    fn calls_are_named_by_what_they_fetch() {
+        let fetch = serde_json::json!({"expression": "(async () => {})({\"requests\":[{\"method\":\"GET\",\"url\":\"https://teams.cloud.microsoft/api/csa/emea/api/v1/x?y=1\"}]})"});
+        assert_eq!(call_label("Runtime.evaluate", &fetch), "teams.cloud.microsoft/api/csa");
+        let token = serde_json::json!({"expression": "x; return token;"});
+        assert_eq!(call_label("Runtime.evaluate", &token), "token lookup");
+        assert_eq!(call_label("Page.reload", &serde_json::Value::Null), "Page.reload");
+        let mut tally = CallTally::default();
+        tally.note("b".into());
+        tally.note("a".into());
+        tally.note("a".into());
+        assert_eq!(tally.summary(), "a x2, b x1");
+        assert_eq!(tally.summary(), "");
     }
 
     #[test]
