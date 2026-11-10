@@ -2352,6 +2352,7 @@ impl ConversationView {
         current.loading_older = false;
         match result {
             Ok(Ok(records)) if !records.is_empty() => {
+                app_base::diagnostics::record(&format!("chat: older page, {} messages", records.len()));
                 current.loaded_limit = current.loaded_count + records.len();
                 self.older_anchor = self
                     .rows
@@ -2360,8 +2361,12 @@ impl ConversationView {
                     .find(|row| matches!(row, Row::Message(_) | Row::Post(_)))
                     .map(|row| row.key().to_owned());
             }
-            Ok(Ok(_)) => current.older_blocked = true,
+            Ok(Ok(_)) => {
+                app_base::diagnostics::record("chat: no older messages");
+                current.older_blocked = true;
+            }
             Ok(Err(error)) => {
+                app_base::diagnostics::record(&format!("chat: older page failed: {}", short_error(&error)));
                 current.older_blocked = true;
                 self.notice = Some(format!(
                     "Could not load older messages: {}",

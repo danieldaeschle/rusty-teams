@@ -10,11 +10,11 @@ use gpui_kit::{
 use image::imageops::FilterType;
 use image::{Frame, ImageFormat, ImageReader};
 
-const BUDGET_BYTES: u64 = 64 * MEGABYTE;
+const BUDGET_BYTES: u64 = 48 * MEGABYTE;
 const KEEP_RECENT: Duration = Duration::from_secs(10);
 const REPORT_EVERY: Duration = Duration::from_secs(60);
 const MEGABYTE: u64 = 1024 * 1024;
-const PREVIEW_EDGE: u32 = 1024;
+const PREVIEW_EDGE: u32 = 720;
 
 /// An image source whose decoded pixels are freed again once the image has been off screen for a while and the budget is full.
 pub fn bounded(source: impl Into<ImageSource>) -> ImageSource {
@@ -219,7 +219,7 @@ mod tests {
             (2, now - Duration::from_secs(200), 30 * MEGABYTE),
             (3, now - Duration::from_secs(100), 20 * MEGABYTE),
         ];
-        assert_eq!(evictions(sizes, now), vec![1]);
+        assert_eq!(evictions(sizes, now), vec![1, 2]);
     }
 
     #[test]
@@ -241,7 +241,7 @@ mod tests {
         let photo = directory.path().join("photo");
         image::RgbaImage::new(3000, 2000).save_with_format(&photo, ImageFormat::Png).unwrap();
         let decoded = decode_preview(&photo).unwrap();
-        assert_eq!((decoded.size(0).width.0, decoded.size(0).height.0), (1024, 683));
+        assert_eq!((decoded.size(0).width.0, decoded.size(0).height.0), (720, 480));
         let animation = directory.path().join("animation");
         image::RgbaImage::new(10, 10).save_with_format(&animation, ImageFormat::Gif).unwrap();
         assert!(decode_preview(&animation).is_none());
