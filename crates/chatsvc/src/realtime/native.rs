@@ -353,9 +353,16 @@ impl NativeTrouter {
         };
         session::ensure_crypto_provider();
         let url = socket_url(&self.host, &self.endpoint_id, &uuid::Uuid::new_v4().to_string(), now_ms() as u128);
-        let Ok(Ok((socket, _))) = timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await else {
-            self.forward(&status_payload("disconnected", "connect_failed"));
-            return Err(None);
+        let socket = match timeout(CONNECT_TIMEOUT, connect_async(url.as_str())).await {
+            Ok(Ok((socket, _))) => socket,
+            Ok(Err(error)) => {
+                self.forward(&status_payload("disconnected", &format!("connect_failed: {}", short(&error.to_string()))));
+                return Err(None);
+            }
+            Err(_) => {
+                self.forward(&status_payload("disconnected", "connect_failed: timed out"));
+                return Err(None);
+            }
         };
         Ok(Connection {
             socket,
