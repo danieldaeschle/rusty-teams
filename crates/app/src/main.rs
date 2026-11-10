@@ -157,6 +157,7 @@ fn open_store(path: &std::path::Path) -> Store {
 }
 
 fn main() {
+    session::ensure_crypto_provider();
     app_base::version::set_build_version(VERSION_MARKER.trim_start_matches("teams-build:"));
     if let Some(tag) = option_env!("TEAMS_RELEASE_TAG") {
         app_base::version::set_release_tag(tag);

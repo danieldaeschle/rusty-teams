@@ -47,6 +47,7 @@ pub(crate) struct NativeHttp {
 
 impl NativeHttp {
     pub(crate) fn new(timeout: Duration, max_bytes: u64) -> Option<Self> {
+        ensure_crypto_provider();
         let client = reqwest::Client::builder().timeout(timeout).build().ok()?;
         Some(NativeHttp { client, tokens: Mutex::new(HashMap::new()), max_bytes })
     }
@@ -148,6 +149,13 @@ impl NativeHttp {
 }
 
 const TEAMS_BEARER_PATHS: [&str; 2] = ["/api/", "/registrar/"];
+
+/// Both rustls providers end up compiled in through dependencies, and then rustls refuses to pick one on its own.
+pub fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
 
 /// Page-only: websocket exchanges, tokens spliced into bodies, and app-origin calls that may rely on its cookies.
 fn eligible(request: &Request) -> bool {
