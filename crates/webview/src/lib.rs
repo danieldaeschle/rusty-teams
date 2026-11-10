@@ -15,6 +15,8 @@ mod host_dialog;
 mod main_embed;
 #[cfg(any(windows, test))]
 mod park;
+#[cfg(any(windows, test))]
+mod sleep;
 #[cfg(windows)]
 mod transport;
 

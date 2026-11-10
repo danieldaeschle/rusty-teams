@@ -19,6 +19,13 @@ impl Subscribers {
         }
     }
 
+    pub(crate) fn has_live(&mut self) -> bool {
+        for sinks in self.sinks.values_mut() {
+            sinks.retain(|sink| !sink.is_closed());
+        }
+        self.sinks.values().any(|sinks| !sinks.is_empty())
+    }
+
     /// Ends every event stream, so subscribers attach again to the new webviews.
     pub(crate) fn clear(&mut self) {
         self.sinks.clear();
