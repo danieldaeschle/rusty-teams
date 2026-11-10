@@ -1,4 +1,4 @@
-use crate::views::image_memory::bounded;
+use crate::views::image_memory::{bounded, preview};
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
@@ -117,7 +117,7 @@ fn image_view(
     let frame = frame
         .cursor_pointer()
         .child(
-            img(bounded(entry.path.clone()))
+            img(preview(entry.path.clone()))
                 .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))

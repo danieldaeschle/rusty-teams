@@ -1,4 +1,4 @@
-use crate::views::image_memory::bounded;
+use crate::views::image_memory::preview as scaled_preview;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
@@ -68,7 +68,7 @@ fn thumbnail(
     Some(match entry {
         Some(entry) => frame
             .child(
-                img(bounded(entry.path.clone()))
+                img(scaled_preview(entry.path.clone()))
                     .size_full()
                     .object_fit(ObjectFit::Cover),
             )

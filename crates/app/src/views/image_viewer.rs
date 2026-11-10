@@ -1,4 +1,4 @@
-use crate::views::image_memory::bounded;
+use crate::views::image_memory::{bounded, preview};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -875,7 +875,7 @@ impl ImageViewer {
                     .when(!current, |frame| frame.opacity(0.7))
                     .map(|frame| match path {
                         Some(path) => {
-                            frame.child(img(bounded(path)).size_full().object_fit(ObjectFit::Cover))
+                            frame.child(img(preview(path)).size_full().object_fit(ObjectFit::Cover))
                         }
                         None => frame.child(symbol("image", 18., white().opacity(0.5))),
                     }),
