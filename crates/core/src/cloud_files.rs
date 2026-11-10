@@ -1,5 +1,5 @@
 use chatsvc::substrate_search::{QueryRequest, QueryScope, SearchFile, SearchSession};
-use graph::{CloudFile, FileReference};
+use graph::{CloudFile, DriveEntry, DriveFolder, FileReference, QuickSite};
 
 use crate::engine::SyncEngine;
 use crate::error::{Error, Result};
@@ -33,6 +33,39 @@ impl<R: Remote> SyncEngine<R> {
     /// The documents Teams lists under "Recent cloud files", newest first.
     pub async fn recent_cloud_files(&self) -> Result<Vec<CloudFile>> {
         Ok(recent_documents(self.remote.recent_files(RECENT_FETCH).await?))
+    }
+
+    /// The picker's Home list: every recently opened file with its owner, newest first.
+    pub async fn picker_recent(&self) -> Result<Vec<(CloudFile, Option<String>)>> {
+        let (files, owners) = self.remote.recent_files_with_owners(RECENT_FETCH).await?;
+        Ok(files
+            .into_iter()
+            .map(|file| {
+                let owner = owners.iter().find(|(id, _)| file.item_id.as_deref() == Some(id)).map(|(_, owner)| owner.clone());
+                (file, owner)
+            })
+            .collect())
+    }
+
+    pub async fn picker_shared(&self) -> Result<Vec<DriveEntry>> {
+        self.remote.shared_with_me().await
+    }
+
+    pub async fn picker_sites(&self) -> Result<Vec<QuickSite>> {
+        self.remote.quick_access_sites().await
+    }
+
+    /// The root of the user's OneDrive, or of a site's document library, as a folder to list.
+    pub async fn picker_root(&self, site_id: Option<&str>) -> Result<DriveFolder> {
+        self.remote.drive_root(site_id).await
+    }
+
+    pub async fn picker_folder(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
+        let mut entries = self.remote.list_children(folder).await?;
+        entries.sort_by(|first, second| {
+            second.is_folder().cmp(&first.is_folder()).then_with(|| first.name.to_lowercase().cmp(&second.name.to_lowercase()))
+        });
+        Ok(entries)
     }
 
     pub async fn search_cloud_files(&self, search_session: &SearchSession, text: &str) -> Result<Vec<CloudFile>> {

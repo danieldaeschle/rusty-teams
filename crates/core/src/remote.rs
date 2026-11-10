@@ -23,7 +23,7 @@ use chatsvc::{
 };
 use chrono::{DateTime, Utc};
 use graph::{
-    CloudFile,
+    CloudFile, QuickSite,
     Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
     OutgoingMention, Photo, Presence, SharedFile, Tag, Team, UploadDestination, UploadedFile, User,
 };
@@ -269,6 +269,22 @@ pub trait Remote {
 
     async fn recent_files(&self, _top: usize) -> Result<Vec<CloudFile>> {
         Err(Error::Unsupported("recent files"))
+    }
+
+    async fn recent_files_with_owners(&self, _top: usize) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
+        Err(Error::Unsupported("recent files"))
+    }
+
+    async fn shared_with_me(&self) -> Result<Vec<DriveEntry>> {
+        Err(Error::Unsupported("shared files"))
+    }
+
+    async fn quick_access_sites(&self) -> Result<Vec<QuickSite>> {
+        Err(Error::Unsupported("sites"))
+    }
+
+    async fn drive_root(&self, _site_id: Option<&str>) -> Result<DriveFolder> {
+        Err(Error::Unsupported("drive root"))
     }
 
     async fn cloud_file_reference(&self, _file: &CloudFile) -> Result<UploadedFile> {
@@ -1104,6 +1120,22 @@ impl Remote for Graph {
 
     async fn recent_files(&self, top: usize) -> Result<Vec<CloudFile>> {
         Ok(Graph::recent_files(self, top).await?)
+    }
+
+    async fn recent_files_with_owners(&self, top: usize) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
+        Ok(Graph::recent_files_with_owners(self, top).await?)
+    }
+
+    async fn shared_with_me(&self) -> Result<Vec<DriveEntry>> {
+        Ok(Graph::shared_with_me(self).await?)
+    }
+
+    async fn quick_access_sites(&self) -> Result<Vec<QuickSite>> {
+        Ok(Graph::quick_access_sites(self).await?)
+    }
+
+    async fn drive_root(&self, site_id: Option<&str>) -> Result<DriveFolder> {
+        Ok(Graph::drive_root(self, site_id).await?)
     }
 
     async fn cloud_file_reference(&self, file: &CloudFile) -> Result<UploadedFile> {

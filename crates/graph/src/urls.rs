@@ -235,6 +235,22 @@ pub fn recent_drive_items(top: usize) -> String {
     format!("{GRAPH}/v1.0/me/drive/recent?$top={top}")
 }
 
+pub fn my_drive() -> String {
+    format!("{GRAPH}/v1.0/me/drive?$select=id")
+}
+
+pub fn site_drive(site_id: &str) -> String {
+    format!("{GRAPH}/v1.0/sites/{}/drive?$select=id", segment(site_id))
+}
+
+pub fn shared_with_me() -> String {
+    format!("{GRAPH}/v1.0/me/drive/sharedWithMe?$top=100")
+}
+
+pub fn site(site_id: &str) -> String {
+    format!("{GRAPH}/v1.0/sites/{}?$select=id,displayName,webUrl", segment(site_id))
+}
+
 pub fn shared_drive_item(share_id: &str) -> String {
     format!("{GRAPH}/v1.0/shares/{}/driveItem", segment(share_id))
 }

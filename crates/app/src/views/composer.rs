@@ -32,6 +32,7 @@ use teams_core::{
 
 pub(crate) mod delivery;
 mod attach_menu;
+mod cloud_picker;
 mod drafts;
 mod format_menus;
 pub(crate) mod plus_menu;
@@ -264,6 +265,7 @@ pub struct Composer {
     importance: store::MessageImportance,
     rewrite: rewrite::RewritePanel,
     attach_menu: attach_menu::AttachMenu,
+    cloud_picker: Option<(Entity<cloud_picker::CloudPicker>, Subscription)>,
     delivery_menu: bool,
     plus_menu: bool,
     _subscriptions: [Subscription; 4],
@@ -538,6 +540,7 @@ impl Composer {
             importance: store::MessageImportance::Normal,
             rewrite: rewrite::RewritePanel::default(),
             attach_menu: attach_menu::AttachMenu::default(),
+            cloud_picker: None,
             delivery_menu: false,
             plus_menu: false,
             _subscriptions: [subscription, observer, image_observer, picker_subscription],
@@ -3464,6 +3467,7 @@ impl Render for Composer {
                     .children(self.render_delivery_menu(cx))
                     .children(self.render_plus_menu(cx))
                     .children(self.render_attach_menu(cx))
+                    .children(self.cloud_picker.as_ref().map(|(picker, _)| picker.clone()))
                     .children(self.render_rewrite_panel(cx))
                     .child(
                         v_flex()

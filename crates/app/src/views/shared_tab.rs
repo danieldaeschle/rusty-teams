@@ -240,7 +240,7 @@ fn column_header() -> Div {
         .child(column(Some(SIZE_WIDTH)).child("Size"))
 }
 
-fn entry_badge(entry: &DriveEntry) -> Div {
+pub(crate) fn entry_badge(entry: &DriveEntry) -> Div {
     if entry.is_folder() {
         return div()
             .size(px(BADGE_SIZE))
@@ -253,7 +253,7 @@ fn entry_badge(entry: &DriveEntry) -> Div {
     file_badge(FileKind::from_name(&entry.name), BADGE_SIZE)
 }
 
-fn modified_text(entry: &DriveEntry) -> String {
+pub(crate) fn modified_text(entry: &DriveEntry) -> String {
     entry.modified_at.map_or_else(String::new, |time| {
         let now = Local::now();
         format::list_time_label(time, now.date_naive(), now.offset().fix())

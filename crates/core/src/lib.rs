@@ -157,7 +157,7 @@ pub use forwarded::{
     ForwardInfo, ForwardState, forwarded_texts, forwards, is_forwarded,
 };
 pub use graph::{
-    CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
+    CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget, QuickSite,
     MessageExtras, SharedFile, UploadedFile,
 };
 pub use images::StoredImage;

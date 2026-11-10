@@ -13,6 +13,7 @@ use gpui_kit::*;
 use teams_core::substrate_search::SearchSession;
 use teams_core::{CloudFile, FileKind, FileReference};
 
+use super::cloud_picker::{ATTACH_CLOUD_LABEL, CloudPicker, CloudPickerEvent};
 use super::{COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer};
 use crate::runtime;
 use crate::theme::{self, ElevatedSurface as _};
@@ -286,6 +287,27 @@ impl Composer {
         .detach();
     }
 
+    fn open_cloud_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_attach_menu(window, cx);
+        let app = self.app.clone();
+        let picker = cx.new(|cx| CloudPicker::new(app, cx));
+        let subscription = cx.subscribe_in(&picker, window, |this, _, event: &CloudPickerEvent, window, cx| {
+            let files = match event {
+                CloudPickerEvent::Attach(files) => files.clone(),
+                CloudPickerEvent::Close => Vec::new(),
+            };
+            this.cloud_picker = None;
+            for file in files {
+                this.attach_cloud_file(file, window, cx);
+            }
+            this.focus(window, cx);
+            cx.notify();
+        });
+        picker.read(cx).focus_handle(cx).focus(window, cx);
+        self.cloud_picker = Some((picker, subscription));
+        cx.notify();
+    }
+
     pub(super) fn render_attach_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.attach_menu.open {
             return None;
@@ -320,6 +342,19 @@ impl Composer {
                 .map(|(index, file)| self.cloud_file_row(index, file, now, cx).into_any_element())
                 .collect(),
         };
+        let browse = h_flex()
+            .id("composer-attach-cloud")
+            .w_full()
+            .h(MENU_ITEM_HEIGHT)
+            .px(MENU_ITEM_PADDING_X)
+            .gap(MENU_ICON_LABEL_GAP)
+            .items_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(|row| row.bg(theme::popup_hover()))
+            .child(symbol("cloud", 16., theme::text_soft()))
+            .child(div().text_size(px(13.)).text_color(theme::text()).child(ATTACH_CLOUD_LABEL))
+            .on_click(cx.listener(|this, _, window, cx| this.open_cloud_picker(window, cx)));
         let upload = h_flex()
             .id("composer-attach-upload")
             .w_full()
@@ -373,7 +408,7 @@ impl Composer {
                         .children(body),
                 )
                 .child(div().w_full().h(px(1.)).bg(theme::border()))
-                .child(div().px(MENU_LIST_PADDING).child(upload))
+                .child(div().px(MENU_LIST_PADDING).child(browse).child(upload))
                 .into_any_element(),
         )
     }

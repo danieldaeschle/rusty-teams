@@ -14,7 +14,7 @@ mod target;
 mod urls;
 mod writes;
 
-pub use cloud_files::CloudFile;
+pub use cloud_files::{CloudFile, QuickSite};
 pub use client::{BATCH_SIZE, CHAT_PAGE_SIZE, Graph, MESSAGE_PAGE_SIZE};
 pub use error::{Error, Result};
 pub use files::{
