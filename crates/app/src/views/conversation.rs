@@ -224,6 +224,7 @@ pub struct ConversationView {
     feed_stash: Option<FeedStash>,
     feed_rows_seen: Rc<Cell<usize>>,
     feed_at_top: bool,
+    older_anchor: Option<String>,
     draft: Entity<NewChatDraft>,
     draft_active: bool,
     draft_created: Option<(Vec<String>, String)>,
@@ -578,6 +579,7 @@ impl ConversationView {
             feed_stash: None,
             feed_rows_seen: Rc::new(Cell::new(usize::MAX)),
             feed_at_top: true,
+            older_anchor: None,
             draft,
             draft_active: false,
             draft_created: None,
@@ -1859,6 +1861,11 @@ impl ConversationView {
         self.drop_stale_reaction_details();
         let new_len = self.rows.borrow().len();
         let in_feed = self.in_feed();
+        let older_anchor = self.older_anchor.take().and_then(|key| {
+            let top_was_loader = matches!(old_rows.first(), Some(Row::LoadOlder));
+            let index = self.rows.borrow().iter().position(|row| row.key() == key)?;
+            (top_was_loader && !in_feed).then_some(index)
+        });
         if reset {
             let marker_index = self
                 .rows
@@ -1904,6 +1911,8 @@ impl ConversationView {
             }
             if keep_top {
                 scroller.scroll_to_item(0, cx);
+            } else if let Some(index) = older_anchor {
+                scroller.scroll_to_item(index, cx);
             }
             for index in changed {
                 scroller.remeasure_items(index..index + 1, cx);
@@ -2344,6 +2353,12 @@ impl ConversationView {
         match result {
             Ok(Ok(records)) if !records.is_empty() => {
                 current.loaded_limit = current.loaded_count + records.len();
+                self.older_anchor = self
+                    .rows
+                    .borrow()
+                    .iter()
+                    .find(|row| matches!(row, Row::Message(_) | Row::Post(_)))
+                    .map(|row| row.key().to_owned());
             }
             Ok(Ok(_)) => current.older_blocked = true,
             Ok(Err(error)) => {
