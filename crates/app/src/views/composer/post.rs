@@ -46,6 +46,7 @@ const SUBJECT_SIZE: f32 = 18.;
 const INPUT_TEXT_SCALE: f32 = 0.875;
 const SUBJECT_INSET: f32 = 8.;
 const TEXT_INSET: f32 = 16.;
+const SUBHEADING_GAP: f32 = 8.;
 
 pub(super) struct AnnouncementDraft {
     pub(super) headline: Entity<InputState>,
@@ -460,6 +461,8 @@ impl Composer {
             .tooltip(|window, cx| Tooltip::new(CLOSE_TOOLTIP).build(window, cx))
             .child(symbol("close", 18., theme::text_muted()))
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposerEvent::ClosePost)));
+        let announcement = self.render_announcement(cx);
+        let has_banner = announcement.is_some();
         Some(
             v_flex()
                 .w_full()
@@ -475,11 +478,12 @@ impl Composer {
                         .child(div().flex_1())
                         .child(close),
                 )
-                .children(self.render_announcement(cx))
+                .children(announcement)
                 .child(
                     div()
                         .debug_selector(|| POST_CARD_SUBJECT_TAG.into())
                         .w_full()
+                        .when(has_banner, |subject| subject.mt(px(SUBHEADING_GAP)))
                         .px(px(SUBJECT_INSET))
                         .py(px(6.))
                         .font_weight(FontWeight::SEMIBOLD)

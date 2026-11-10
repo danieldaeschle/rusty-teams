@@ -2188,6 +2188,8 @@ mod frames {
         let banner = bounds_of(POST_ANNOUNCEMENT_TAG);
         let subject = bounds_of(POST_CARD_SUBJECT_TAG);
         assert!(header.bottom() <= banner.top() && banner.bottom() <= subject.top());
+        let gap = f32::from(subject.top() - banner.bottom());
+        assert!(gap >= 6., "subheading {gap} px under the banner");
         let audience = bounds_of(POST_AUDIENCE_TAG);
         assert!(audience.bottom() <= card.top(), "audience hint not above the card");
         let left = f32::from(banner.left() - card.left());
