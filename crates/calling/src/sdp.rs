@@ -768,17 +768,7 @@ fn browser_rtp_line(
     if carries_candidates {
         attributes.extend(teams_line.values("candidate").chain(teams_line.values("x-candidate-ipv6")).map(|value| Attribute::new("candidate", browser_candidate(value))));
     }
-    let (primary, retransmission) = stream_ssrcs(teams_line, stream_index);
-    if let Some(primary) = primary {
-        let stream = format!("{}-{primary}", role.stream_prefix());
-        for ssrc in [Some(primary), retransmission].into_iter().flatten() {
-            attributes.push(Attribute::new("ssrc", format!("{ssrc} cname:{}", stream_cname(primary))));
-            attributes.push(Attribute::new("ssrc", format!("{ssrc} msid:{stream} {stream}")));
-        }
-        if let Some(retransmission) = retransmission {
-            attributes.push(Attribute::new("ssrc-group", format!("FID {primary} {retransmission}")));
-        }
-    }
+    attributes.extend(stream_ssrc_attributes(teams_line, stream_index, role));
     attributes.push(Attribute::flag("rtcp-mux"));
     if teams_line.has("rtcp-rsize") {
         attributes.push(Attribute::flag("rtcp-rsize"));
@@ -797,6 +787,22 @@ fn browser_rtp_line(
         bandwidths: teams_line.bandwidths.clone(),
         attributes,
     }
+}
+
+fn stream_ssrc_attributes(teams_line: &Media, stream_index: u32, role: LineRole) -> Vec<Attribute> {
+    let (Some(primary), retransmission) = stream_ssrcs(teams_line, stream_index) else {
+        return Vec::new();
+    };
+    let stream = format!("{}-{primary}", role.stream_prefix());
+    let mut attributes = Vec::new();
+    for ssrc in [Some(primary), retransmission].into_iter().flatten() {
+        attributes.push(Attribute::new("ssrc", format!("{ssrc} cname:{}", stream_cname(primary))));
+        attributes.push(Attribute::new("ssrc", format!("{ssrc} msid:{stream} {stream}")));
+    }
+    if let Some(retransmission) = retransmission {
+        attributes.push(Attribute::new("ssrc-group", format!("FID {primary} {retransmission}")));
+    }
+    attributes
 }
 
 fn stream_cname(primary: u32) -> String {
@@ -939,7 +945,7 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
             let converted = if role == LineRole::Data {
                 browser_data_from_teams(source, mid, &teams.session)
             } else {
-                browser_rtp_from_teams(source, mid, folded.is_some(), index == 0 && lines.is_empty(), &teams.session)
+                browser_rtp_from_teams(source, mid, role, folded.is_some(), index == 0 && lines.is_empty(), &teams.session)
             };
             media.push(converted);
         }
@@ -989,11 +995,13 @@ fn browser_data_from_teams(source: &Media, mid: &str, session: &Session) -> Medi
     }
 }
 
-fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candidate: bool, session: &Session) -> Media {
+fn browser_rtp_from_teams(source: &Media, mid: &str, role: LineRole, folded: bool, carries_candidate: bool, session: &Session) -> Media {
     let rtpmap = source.rtpmap();
     let is_rtx = |payload: &str| rtpmap.get(payload).is_some_and(|encoding| encoding.starts_with("rtx/"));
     let mut attributes = Vec::new();
     let mut expanded_feedback: Vec<Attribute> = Vec::new();
+    let mut signals_ssrc = false;
+    let mut ssrc_groups = Vec::new();
     for attribute in &source.attributes {
         let value = attribute.value.as_deref().unwrap_or_default();
         match attribute.name.as_str() {
@@ -1014,12 +1022,13 @@ fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candi
             "ssrc" => {
                 let placeholder = value.contains("fake_attribute") || value.starts_with("1 ");
                 if !folded && !placeholder {
+                    signals_ssrc = true;
                     attributes.push(attribute.clone());
                 }
             }
             "ssrc-group" => {
                 if !folded {
-                    attributes.push(attribute.clone());
+                    ssrc_groups.push(attribute.clone());
                 }
             }
             "rtcp" => attributes.push(Attribute::new("rtcp", BROWSER_RTCP)),
@@ -1041,6 +1050,11 @@ fn browser_rtp_from_teams(source: &Media, mid: &str, folded: bool, carries_candi
     attributes.extend(expanded_feedback);
     attributes.extend(transport_from_teams(source, session));
     attributes.push(Attribute::new("mid", mid));
+    if signals_ssrc {
+        attributes.extend(ssrc_groups);
+    } else if !folded {
+        attributes.extend(stream_ssrc_attributes(source, 0, role));
+    }
     attributes.push(Attribute::flag("rtcp-mux"));
     Media {
         kind: source.kind.clone(),
@@ -1171,6 +1185,18 @@ mod tests {
         let text = remote.browser_sdp.replace("\r\n", "\n");
         assert!(text.contains("a=rtcp-fb:102 nack\n") && text.contains("a=rtcp-fb:102 nack pli\n"));
         assert!(!text.contains("a=rtcp-fb:103") && !text.contains("a=rtcp-fb:*"));
+    }
+
+    #[test]
+    fn a_peer_offer_with_only_ssrc_ranges_signals_the_streams_it_sends() {
+        let teams = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 1234 RTP/SAVP 111\r\nc=IN IP4 10.10.10.10\r\na=x-ssrc-range:40475-40475\r\na=rtpmap:111 opus/48000/2\r\na=mid:0\r\na=sendrecv\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=label:main-audio\r\nm=video 1234 RTP/SAVP 103 104\r\nc=IN IP4 10.10.10.10\r\na=x-ssrc-range:40476-40575\r\na=rtpmap:103 H264/90000\r\na=rtpmap:104 rtx/90000\r\na=fmtp:104 apt=103\r\na=ssrc-group:FID 40476 40526\r\na=mid:1\r\na=sendrecv\r\na=label:main-video\r\n";
+        let remote = from_teams_offer(teams).unwrap();
+        let parsed = parse(&remote.browser_sdp).unwrap();
+        let audio: Vec<&str> = parsed.media[0].values("ssrc").collect();
+        assert!(audio.iter().any(|value| value.starts_with("40475 cname:")), "{audio:?}");
+        assert_eq!(parsed.media[1].values("ssrc-group").collect::<Vec<_>>(), vec!["FID 40476 40526"]);
+        let video: Vec<&str> = parsed.media[1].values("ssrc").collect();
+        assert!(video.iter().any(|value| value.starts_with("40476 cname:")) && video.iter().any(|value| value.starts_with("40526 cname:")), "{video:?}");
     }
 
     #[test]
