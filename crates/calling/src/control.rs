@@ -25,7 +25,7 @@ use crate::signaling::{Callee, MeetingTarget};
 use crate::transfer::Replacement;
 use crate::state::CallState;
 use crate::video_layout::VideoWant;
-use crate::video_frame::{VideoHub, VideoPicture};
+use crate::video_frame::{VideoHub, VideoKey, VideoPicture};
 use crate::whiteboard::ContentShare;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +102,7 @@ pub enum CallUpdate {
     Lobby(bool),
     OwnIdentity { mri: String },
     VideoReady,
+    VideoStopped(VideoKey),
     ScreenShare(Option<String>),
     Camera(bool),
     Cameras(Vec<CameraDevice>),

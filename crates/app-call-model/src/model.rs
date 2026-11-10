@@ -495,7 +495,7 @@ impl CallModel {
             CallUpdate::Lobby(lobby) => self.lobby = lobby,
             CallUpdate::OwnIdentity { mri } => self.own_mri = Some(mri),
             CallUpdate::ScreenShare(sharer) => self.screen_sharer = sharer,
-            CallUpdate::VideoReady | CallUpdate::Notice(_) => {}
+            CallUpdate::VideoReady | CallUpdate::VideoStopped(_) | CallUpdate::Notice(_) => {}
             CallUpdate::Camera(on) => self.camera_on = on,
             CallUpdate::Cameras(cameras) => self.cameras = cameras,
             CallUpdate::LocalShare(label) => {

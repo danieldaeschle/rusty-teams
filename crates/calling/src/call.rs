@@ -36,7 +36,7 @@ use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
 use crate::health::{CallHealth, HealthCounters, HealthSampler, QualityTracker, TransportDetails, health_from_stats};
-use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, direction_of, offer_modalities, is_hold, keep_media_running, rewrite_directions, stop_sending_on};
+use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, direction_of, offer_modalities, is_hold, keep_media_running, offer_sends_video, rewrite_directions, stop_sending_on};
 use crate::mic_processing::MicSettings;
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
@@ -1400,6 +1400,13 @@ async fn drive(
                                             }
                                             remote_direct_share = answered.receiving_share_mid.clone();
                                             control.send(CallUpdate::ScreenShare(remote_direct_share.as_ref().and(peer_mri.clone())));
+                                        }
+                                        if layout == Layout::OneToOne
+                                            && !offer_sends_video(&renegotiation.sdp)
+                                            && let Some(key) = main_video_mid(&answered.remote).and_then(|mid| video.router().key_for(&mid))
+                                        {
+                                            control.video.forget(&key);
+                                            control.send(CallUpdate::VideoStopped(key));
                                         }
                                         let held = is_hold(&renegotiation.sdp).unwrap_or(false);
                                         if held != remote_hold {
