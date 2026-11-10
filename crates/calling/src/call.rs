@@ -652,9 +652,10 @@ async fn answer_offer(
 ) -> Result<AnsweredMedia> {
     let remote = from_teams_offer(teams_offer)?;
     let description = parse_sdp(&remote.browser_sdp, SdpType::Offer)?;
-    peer.set_remote_description(description)
-        .await
-        .map_err(|error| Error::Webrtc(error.to_string()))?;
+    peer.set_remote_description(description).await.map_err(|error| {
+        let lines: Vec<String> = remote.lines.iter().map(|line| format!("{:?}{:?}", line.role, line.browser_mids)).collect();
+        Error::Webrtc(format!("{error} (offer lines: {})", lines.join(" ")))
+    })?;
     let camera_mid = main_video_mid(&remote).filter(|_| !matches!(video, AnswerVideo::Reject));
     let kept_share_mids = if matches!(video, AnswerVideo::Reject) { Vec::new() } else { share_mids(&remote) };
     for transceiver in peer.transceivers() {
@@ -821,7 +822,7 @@ async fn drive(
     }
     let mut media_description_request = 1u32;
     refresh_cameras(control.updates(), options.video, timeline.clone());
-    refresh_share_sources(control.updates(), options.video);
+    refresh_share_sources(control.updates(), options.video, false);
 
     let wants_data_channel = options.data_channel && spec.as_ref().is_some_and(CallSpec::is_meeting);
     let mut current = open_peer(&factory, &grant, &options.relay_host, wants_data_channel)?;
@@ -1991,7 +1992,7 @@ async fn drive(
                     share_sound_wanted = on;
                     sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, control, timeline);
                 }
-                Some(CallCommand::RefreshShareSources) => refresh_share_sources(control.updates(), options.video),
+                Some(CallCommand::RefreshShareSources) => refresh_share_sources(control.updates(), options.video, true),
                 Some(CallCommand::SetHand(true)) => match remote.signaling.raise_hand(&remote.conversation, &remote.participant).await {
                     Ok(receipt) => {
                         own_hand = receipt.state_id;
@@ -2680,7 +2681,7 @@ const SHARE_THUMBNAIL_WINDOWS: usize = 12;
 const SHARE_THUMBNAIL_WIDTH: u32 = 320;
 const SHARE_THUMBNAIL_HEIGHT: u32 = 180;
 
-fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode) {
+fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode, with_thumbnails: bool) {
     tokio::spawn(async move {
         let sources = match mode {
             VideoMode::Pattern => vec![
@@ -2691,6 +2692,9 @@ fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: Video
             VideoMode::Platform => tokio::task::spawn_blocking(list_share_sources).await.unwrap_or_default(),
         };
         let _ = updates.send(CallUpdate::ShareSources(sources.clone()));
+        if !with_thumbnails {
+            return;
+        }
         let wanted: Vec<ShareSource> = sources
             .iter()
             .filter(|source| source.kind == ShareKind::Screen)

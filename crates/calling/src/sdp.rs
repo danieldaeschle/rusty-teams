@@ -916,11 +916,15 @@ fn role_of_teams_line(line: &Media) -> LineRole {
     }
 }
 
-/// Folded gallery lines get the mids just below the carrier line's own mid.
-fn folded_mids(carrier: &str, count: usize) -> Vec<String> {
-    match carrier.parse::<usize>() {
-        Ok(last) if last + 1 >= count => (last + 1 - count..=last).map(|mid| mid.to_string()).collect(),
-        _ => (0..count)
+/// Folded gallery lines get the mids just below the carrier line's own mid, unless another line already uses one of them.
+fn folded_mids(carrier: &str, count: usize, taken: &[String]) -> Vec<String> {
+    let below = match carrier.parse::<usize>() {
+        Ok(last) if last + 1 >= count => Some((last + 1 - count..=last).map(|mid| mid.to_string()).collect::<Vec<_>>()),
+        _ => None,
+    };
+    match below.filter(|mids| mids.iter().all(|mid| mid == carrier || !taken.contains(mid))) {
+        Some(mids) => mids,
+        None => (0..count)
             .map(|index| if index + 1 == count { carrier.to_owned() } else { format!("{carrier}-{index}") })
             .collect(),
     }
@@ -930,6 +934,7 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
     let teams = parse(teams_sdp)?;
     let mut media = Vec::new();
     let mut lines = Vec::new();
+    let mut taken: Vec<String> = teams.media.iter().filter_map(|line| line.mid().map(str::to_owned)).collect();
     for source in &teams.media {
         let role = role_of_teams_line(source);
         let carrier = source.mid().unwrap_or_default().to_owned();
@@ -938,9 +943,10 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
             .and_then(|value| value.split(' ').next()?.parse::<usize>().ok())
             .filter(|count| *count > 1);
         let mids = match folded {
-            Some(count) => folded_mids(&carrier, count),
+            Some(count) => folded_mids(&carrier, count, &taken),
             None => vec![carrier.clone()],
         };
+        taken.extend(mids.iter().cloned());
         for (index, mid) in mids.iter().enumerate() {
             let converted = if role == LineRole::Data {
                 browser_data_from_teams(source, mid, &teams.session)
@@ -1221,6 +1227,19 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_line_never_reuses_the_mid_of_another_line() {
+        let folded = "m=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:3\r\na=sendrecv\r\na=x-multi-stream:2 1 1 1\r\n";
+        let teams = format!("{}{folded}", ONE_TO_ONE_VIDEO_OFFER.replace("BUNDLE 0 1 2", "BUNDLE 0 1 2 3"));
+        let remote = from_teams_offer(&teams).unwrap();
+        let mids: Vec<String> = parse(&remote.browser_sdp).unwrap().media.iter().filter_map(|line| line.mid().map(str::to_owned)).collect();
+        let mut unique = mids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), mids.len(), "{mids:?}");
+        assert_eq!(remote.lines.last().unwrap().browser_mids, vec!["3-0".to_owned(), "3".to_owned()]);
+    }
+
+    #[test]
     fn a_one_to_one_offer_keeps_a_camera_line_and_a_sharing_line() {
         let remote = from_teams_offer(ONE_TO_ONE_VIDEO_OFFER).unwrap();
         let roles: Vec<LineRole> = remote.lines.iter().map(|line| line.role).collect();
@@ -1246,9 +1265,11 @@ mod tests {
     }
 
     #[test]
-    fn folded_gallery_lines_expand_below_their_carrier_mid() {
-        assert_eq!(folded_mids("17", 8), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());
-        assert_eq!(folded_mids("x", 2), vec!["x-0".to_owned(), "x".to_owned()]);
+    fn folded_gallery_lines_expand_below_their_carrier_mid_unless_those_are_taken() {
+        let taken = ["0".to_owned(), "1".to_owned(), "17".to_owned()];
+        assert_eq!(folded_mids("17", 8, &taken), (10..=17).map(|mid| mid.to_string()).collect::<Vec<_>>());
+        assert_eq!(folded_mids("x", 2, &taken), vec!["x-0".to_owned(), "x".to_owned()]);
+        assert_eq!(folded_mids("2", 2, &taken), vec!["2-0".to_owned(), "2".to_owned()]);
     }
 
     #[test]
