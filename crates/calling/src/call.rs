@@ -2382,11 +2382,11 @@ async fn drive(
                     timeline.record(
                         "stats",
                         format!(
-                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms) out bytes={} sources={:?}{}",
+                            "in packets={} bytes={} level={:.3} rms={decoded_rms:.3} tone={ratio:.2} out packets={} mic={:.3} erle={:.1} dtls={} video in packets={} decoded={} {}x{} out packets={} encoded={} {}x{} mixer reports {} (rtt {:.0} ms) out bytes={} sources={:?} video senders={:?}{}",
                             snapshot.inbound_packets, snapshot.inbound_bytes, snapshot.audio_level, snapshot.outbound_packets, snapshot.local_level, snapshot.echo_return_loss_enhancement, snapshot.dtls_state,
                             snapshot.video.inbound_packets, snapshot.video.inbound_frames_decoded, snapshot.video.inbound_width, snapshot.video.inbound_height,
                             snapshot.video.outbound_packets, snapshot.video.outbound_frames_encoded, snapshot.video.outbound_width, snapshot.video.outbound_height,
-                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms, snapshot.outbound_bytes, snapshot.source_levels,
+                            snapshot.video.remote_reports, snapshot.video.remote_round_trip_ms, snapshot.outbound_bytes, snapshot.source_levels, snapshot.video_senders,
                             snapshot.share_receive.as_ref().filter(|_| snapshot.share_inbound_packets > 0).map(ShareReceive::summary).unwrap_or_default()
                         ),
                     );
@@ -3453,6 +3453,7 @@ struct StatsSnapshot {
     outbound_packets: u64,
     outbound_bytes: u64,
     source_levels: Vec<String>,
+    video_senders: Vec<String>,
     audio_level: f64,
     local_level: f64,
     echo_return_loss_enhancement: f64,
@@ -3542,6 +3543,18 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
                     snapshot.share_outbound_packets += outbound.sent.packets_sent;
                 }
                 snapshot.video.outbound_frames_encoded += u64::from(outbound.outbound.frames_encoded);
+                snapshot.video_senders.push(format!(
+                    "mid {} packets={} key={} pli={} fir={} nack={} target={:.0}kbps limit={:?} active={}",
+                    outbound.outbound.mid,
+                    outbound.sent.packets_sent,
+                    outbound.outbound.key_frames_encoded,
+                    outbound.outbound.pli_count,
+                    outbound.outbound.fir_count,
+                    outbound.outbound.nack_count,
+                    outbound.outbound.target_bitrate / 1000.0,
+                    outbound.outbound.quality_limitation_reason,
+                    outbound.outbound.active
+                ));
                 snapshot.video.outbound_width = snapshot.video.outbound_width.max(outbound.outbound.frame_width);
                 snapshot.video.outbound_height = snapshot.video.outbound_height.max(outbound.outbound.frame_height);
             }

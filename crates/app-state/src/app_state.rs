@@ -1122,6 +1122,9 @@ impl AppState {
     pub fn apply(&mut self, event: BackendEvent, cx: &mut Context<Self>) {
         match event {
             BackendEvent::Connection(connection) => {
+                if connection != self.connection {
+                    app_base::diagnostics::record(format!("connection: {connection:?}"));
+                }
                 self.connection = connection;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
