@@ -298,6 +298,7 @@ pub struct CallModel {
     pub camera: DeviceChoice,
     pub local_share: Option<String>,
     pub share_sources: Vec<ShareSource>,
+    pub share_thumbnails: Vec<(ShareSource, Arc<gpui_kit::RenderImage>)>,
     pub last_sample: Option<StatsSample>,
     pub share_sound: bool,
     pub own_hand: Option<u64>,
@@ -366,6 +367,7 @@ impl CallModel {
             camera: DeviceChoice::SystemDefault,
             local_share: None,
             share_sources: Vec::new(),
+            share_thumbnails: Vec::new(),
             last_sample: None,
             share_sound: false,
             own_hand: None,
@@ -502,7 +504,16 @@ impl CallModel {
                 }
                 self.local_share = label;
             }
-            CallUpdate::ShareSources(sources) => self.share_sources = sources,
+            CallUpdate::ShareSources(sources) => {
+                self.share_thumbnails.retain(|(source, _)| sources.contains(source));
+                self.share_sources = sources;
+            }
+            CallUpdate::ShareThumbnail { source, picture } => {
+                if let Some(image) = crate::pictures::render_image((*picture).clone()) {
+                    self.share_thumbnails.retain(|(known, _)| *known != source);
+                    self.share_thumbnails.push((source, image));
+                }
+            }
             CallUpdate::ShareSound(active) => self.share_sound = active,
             CallUpdate::OwnHand(rank) => self.own_hand = rank,
             CallUpdate::Reaction { mri, reaction } => {
@@ -1191,6 +1202,13 @@ impl CallModel {
             .iter()
             .filter(|source| source.kind == ShareKind::Screen)
             .collect()
+    }
+
+    pub fn share_thumbnail(&self, source: &ShareSource) -> Option<Arc<gpui_kit::RenderImage>> {
+        self.share_thumbnails
+            .iter()
+            .find(|(known, _)| known == source)
+            .map(|(_, image)| image.clone())
     }
 
     pub fn windows(&self) -> Vec<&ShareSource> {

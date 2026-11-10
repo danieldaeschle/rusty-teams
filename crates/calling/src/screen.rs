@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -7,6 +7,7 @@ use libwebrtc::native::yuv_helper::argb_to_i420;
 use libwebrtc::video_frame::I420Buffer;
 
 use crate::capture::Capture;
+use crate::video_frame::VideoPicture;
 use crate::error::{Error, Result};
 
 
@@ -73,6 +74,51 @@ pub fn list_share_sources() -> Vec<ShareSource> {
         .collect()
 }
 
+const THUMBNAIL_ATTEMPTS: u32 = 5;
+const THUMBNAIL_RETRY: Duration = Duration::from_millis(40);
+
+pub fn share_thumbnail(wanted: &ShareSource, max_width: u32, max_height: u32) -> Option<VideoPicture> {
+    let source = sources_of(wanted.kind).into_iter().find(|(source, _)| source.id == wanted.id).map(|(_, raw)| raw)?;
+    let mut capturer = capturer(wanted.kind)?;
+    let captured: Arc<Mutex<Option<VideoPicture>>> = Arc::default();
+    let sink = captured.clone();
+    capturer.start_capture(Some(source), move |result| {
+        let Ok(frame) = result else { return };
+        let (width, height) = (frame.width().max(0) as u32, frame.height().max(0) as u32);
+        if let Some(picture) = scaled_bgra(frame.data(), width, height, frame.stride(), max_width, max_height)
+            && let Ok(mut slot) = sink.lock()
+        {
+            *slot = Some(picture);
+        }
+    });
+    for _ in 0..THUMBNAIL_ATTEMPTS {
+        capturer.capture_frame();
+        if let Some(picture) = captured.lock().ok().and_then(|mut slot| slot.take()) {
+            return Some(picture);
+        }
+        std::thread::sleep(THUMBNAIL_RETRY);
+    }
+    None
+}
+
+fn scaled_bgra(bytes: &[u8], width: u32, height: u32, stride: u32, max_width: u32, max_height: u32) -> Option<VideoPicture> {
+    if width == 0 || height == 0 || (stride as usize) < width as usize * 4 || bytes.len() < stride as usize * height as usize {
+        return None;
+    }
+    let scale = (max_width as f32 / width as f32).min(max_height as f32 / height as f32).min(1.);
+    let (target_width, target_height) = (((width as f32 * scale) as u32).max(1), ((height as f32 * scale) as u32).max(1));
+    let mut bgra = Vec::with_capacity(target_width as usize * target_height as usize * 4);
+    for row in 0..target_height {
+        let source_row = (row as u64 * height as u64 / target_height as u64) as usize;
+        for column in 0..target_width {
+            let source_column = (column as u64 * width as u64 / target_width as u64) as usize;
+            let offset = source_row * stride as usize + source_column * 4;
+            bgra.extend_from_slice(&[bytes[offset], bytes[offset + 1], bytes[offset + 2], u8::MAX]);
+        }
+    }
+    Some(VideoPicture { width: target_width, height: target_height, bgra })
+}
+
 fn i420_from_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> I420Buffer {
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
@@ -119,5 +165,27 @@ mod tests {
         assert_eq!(screen.label(), "Entire screen");
         let window = ShareSource { id: 2, kind: ShareKind::Window, title: " Notes ".into() };
         assert_eq!(window.label(), "Notes");
+    }
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::scaled_bgra;
+
+    #[test]
+    fn a_thumbnail_keeps_the_aspect_and_drops_the_row_padding() {
+        let (width, height, stride) = (8u32, 4u32, 40u32);
+        let mut bytes = vec![0u8; (stride * height) as usize];
+        for row in 0..height as usize {
+            for column in 0..width as usize {
+                let offset = row * stride as usize + column * 4;
+                bytes[offset..offset + 4].copy_from_slice(&[column as u8, row as u8, 7, 0]);
+            }
+        }
+        let picture = scaled_bgra(&bytes, width, height, stride, 4, 4).unwrap();
+        assert_eq!((picture.width, picture.height), (4, 2));
+        assert_eq!(picture.bgra.len(), 4 * 2 * 4);
+        assert_eq!(&picture.bgra[4..8], &[2, 0, 7, 255]);
+        assert!(scaled_bgra(&bytes, width, height, 8, 4, 4).is_none());
     }
 }

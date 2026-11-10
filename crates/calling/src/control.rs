@@ -25,7 +25,7 @@ use crate::signaling::{Callee, MeetingTarget};
 use crate::transfer::Replacement;
 use crate::state::CallState;
 use crate::video_layout::VideoWant;
-use crate::video_frame::VideoHub;
+use crate::video_frame::{VideoHub, VideoPicture};
 use crate::whiteboard::ContentShare;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +107,7 @@ pub enum CallUpdate {
     Cameras(Vec<CameraDevice>),
     LocalShare(Option<String>),
     ShareSources(Vec<ShareSource>),
+    ShareThumbnail { source: ShareSource, picture: Arc<VideoPicture> },
     ShareSound(bool),
     OwnHand(Option<u64>),
     Reaction { mri: String, reaction: Reaction },

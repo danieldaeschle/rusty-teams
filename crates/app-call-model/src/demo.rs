@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::CameraDevice;
@@ -9,7 +10,7 @@ use calling::{
     DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
     MeetingCapability, MeetingOptions, MeetingRole, MeetingTarget, Modality, NetworkLevel, Progress,
     PublishedState, RaisedHand, Reaction, RecordingKind, Replacement, RosterEntry, ShareKind, ShareSource, StopScope,
-    TransportDetails, VideoKey, call_channel,
+    TransportDetails, VideoKey, VideoPicture, call_channel,
 };
 use calling::call::VideoReport;
 use calling::timeline::TimelineEntry;
@@ -36,6 +37,7 @@ const SPEAKING_LEVEL: f32 = 0.3;
 const SPEAKER_TICKS: u32 = 10;
 const VIDEO_PERIOD: Duration = Duration::from_millis(125);
 const DEMO_CAMERAS: usize = 4;
+const DEMO_THUMBNAILS: usize = 3;
 const GALLERY_CAMERAS: usize = 7;
 const GALLERY_SPEAKER_TICKS: u32 = 15;
 const SCREEN_EVERY_TICKS: u32 = 4;
@@ -281,6 +283,31 @@ fn demo_share_sources() -> Vec<ShareSource> {
     ]
 }
 
+fn send_demo_share_sources(control: &CallControl) {
+    let sources = demo_share_sources();
+    control.send(CallUpdate::ShareSources(sources.clone()));
+    for (index, source) in sources.into_iter().take(DEMO_THUMBNAILS).enumerate() {
+        control.send(CallUpdate::ShareThumbnail { source, picture: Arc::new(demo_thumbnail(index as u8)) });
+    }
+}
+
+fn demo_thumbnail(seed: u8) -> VideoPicture {
+    let (width, height) = (160u32, 90u32);
+    let mut bgra = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        for column in 0..width {
+            let shade = (column * 255 / width) as u8;
+            let header = row < height / 6;
+            bgra.extend_from_slice(&if header {
+                [70, 50, 40, 255]
+            } else {
+                [shade / 2 + 60, seed.wrapping_mul(60).wrapping_add((row * 120 / height) as u8), 90, 255]
+            });
+        }
+    }
+    VideoPicture { width, height, bgra }
+}
+
 fn demo_devices() -> DeviceLists {
     DeviceLists {
         inputs: vec![
@@ -338,7 +365,7 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
     control.send(CallUpdate::ListenOnly(false));
     control.send(CallUpdate::Devices(demo_devices()));
     control.send(CallUpdate::Cameras(demo_cameras()));
-    control.send(CallUpdate::ShareSources(demo_share_sources()));
+    send_demo_share_sources(&control);
     control.send(CallUpdate::Selected {
         input: DeviceChoice::SystemDefault,
         output: DeviceChoice::SystemDefault,
@@ -741,7 +768,7 @@ async fn speak_until_hangup(
                     return;
                 }
                 Some(CallCommand::OpenWhiteboard { .. }) => control.send(CallUpdate::WhiteboardUrl(DEMO_BOARD_URL.to_owned())),
-                Some(CallCommand::RefreshShareSources) => control.send(CallUpdate::ShareSources(demo_share_sources())),
+                Some(CallCommand::RefreshShareSources) => send_demo_share_sources(&control),
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);
                     return;

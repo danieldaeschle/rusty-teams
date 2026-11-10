@@ -57,13 +57,13 @@ use crate::software_audio::{SoftwareAudio, SoftwareAudioPlan};
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
 use crate::transfer::{Replacement, TransferEvent, TransferTarget};
-use crate::video_frame::VideoKey;
+use crate::video_frame::{VideoKey, VideoPicture};
 use crate::video_layout::{
     CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SCREEN_STREAM, SendCapabilityReporter, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_share_line, add_video_lines, offer_plan, one_to_one_plan,
 };
 use crate::send_control::{RequestFilter, parse_request};
 use crate::video_send::{LocalVideo, SendSource, VideoMode};
-use crate::screen::{ShareKind, ShareSource, list_share_sources};
+use crate::screen::{ShareKind, ShareSource, list_share_sources, share_thumbnail};
 use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
     CallEnd, CallEvent, CallbackLinks, ProgressStatus, callback_tag, classify, decode_body,
@@ -2676,6 +2676,10 @@ fn refresh_cameras(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode, 
     });
 }
 
+const SHARE_THUMBNAIL_WINDOWS: usize = 12;
+const SHARE_THUMBNAIL_WIDTH: u32 = 320;
+const SHARE_THUMBNAIL_HEIGHT: u32 = 180;
+
 fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode) {
     tokio::spawn(async move {
         let sources = match mode {
@@ -2686,7 +2690,28 @@ fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: Video
             VideoMode::Off => Vec::new(),
             VideoMode::Platform => tokio::task::spawn_blocking(list_share_sources).await.unwrap_or_default(),
         };
-        let _ = updates.send(CallUpdate::ShareSources(sources));
+        let _ = updates.send(CallUpdate::ShareSources(sources.clone()));
+        let wanted: Vec<ShareSource> = sources
+            .iter()
+            .filter(|source| source.kind == ShareKind::Screen)
+            .chain(sources.iter().filter(|source| source.kind == ShareKind::Window).take(SHARE_THUMBNAIL_WINDOWS))
+            .cloned()
+            .collect();
+        for source in wanted {
+            let picture = match mode {
+                VideoMode::Platform => {
+                    let wanted = source.clone();
+                    tokio::task::spawn_blocking(move || share_thumbnail(&wanted, SHARE_THUMBNAIL_WIDTH, SHARE_THUMBNAIL_HEIGHT)).await.ok().flatten()
+                }
+                VideoMode::Pattern => Some(VideoPicture::solid(SHARE_THUMBNAIL_WIDTH, SHARE_THUMBNAIL_HEIGHT, 120, 80, 40)),
+                VideoMode::Off => None,
+            };
+            if let Some(picture) = picture
+                && updates.send(CallUpdate::ShareThumbnail { source, picture: Arc::new(picture) }).is_err()
+            {
+                return;
+            }
+        }
     });
 }
 

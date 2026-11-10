@@ -18,7 +18,7 @@ pub struct CallPictures {
     shown: HashMap<VideoKey, Shown>,
 }
 
-fn render_image(picture: VideoPicture) -> Option<Arc<RenderImage>> {
+pub(crate) fn render_image(picture: VideoPicture) -> Option<Arc<RenderImage>> {
     let bytes = RgbaImage::from_raw(picture.width, picture.height, picture.bgra)?;
     Some(Arc::new(RenderImage::new(vec![Frame::new(bytes)])))
 }

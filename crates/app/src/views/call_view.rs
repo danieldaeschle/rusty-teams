@@ -48,6 +48,7 @@ const RING_GAP: f32 = 4.;
 pub(super) const CONTROL_SIZE: f32 = 44.;
 const CONTROL_ICON: f32 = 20.;
 pub(super) const MENU_WIDTH: f32 = 280.;
+const SHARE_MENU_WIDTH: f32 = 360.;
 const PULSE_PERIOD: Duration = Duration::from_millis(1400);
 const BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const BLINK_DIMMED_OPACITY: f32 = 0.45;
@@ -62,6 +63,11 @@ pub const NO_SHARE_HINT: &str = "Sharing starts once the call is connected";
 pub const NO_WINDOWS_HINT: &str = "No windows found";
 pub(super) const BANNER_HEIGHT: f32 = 40.;
 const MAX_WINDOW_ITEMS: usize = 12;
+pub const SHARE_THUMBNAIL_TAG: &str = "call/share-menu/thumbnail";
+const SCREEN_THUMBNAIL: (f32, f32) = (128., 72.);
+const WINDOW_THUMBNAIL: (f32, f32) = (96., 54.);
+const THUMBNAIL_RADIUS: f32 = 6.;
+const THUMBNAIL_ICON: f32 = 22.;
 pub const LOBBY_TEXT: &str = "Waiting in the lobby...";
 pub(super) const CHAT_PANEL_WIDTH: f32 = 320.;
 pub(super) const OVERLAY_BELOW: f32 = 720.;
@@ -574,7 +580,7 @@ fn share_items(
     let screens = model.screens();
     let single_screen = screens.len() == 1;
     let mut popup = popup
-        .min_w(px(MENU_WIDTH))
+        .min_w(px(SHARE_MENU_WIDTH))
         .item(sound_switch_item(app, options.sound))
         .item(motion_switch_item(app, options.motion))
         .item(standout_switch_item(app, options.standout, model.camera_on))
@@ -585,11 +591,14 @@ fn share_items(
         } else {
             format!("Share screen {}", index + 1)
         };
+        let thumbnail = model.share_thumbnail(source);
         let source = source.clone();
         let app = app.clone();
-        popup = popup.item(PopupMenuItem::new(label).icon(IconName::Monitor).on_click(
-            move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx)),
-        ));
+        popup = popup.item(
+            share_source_item(label, thumbnail, IconName::Monitor, SCREEN_THUMBNAIL).on_click(
+                move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx)),
+            ),
+        );
     }
     popup = popup
         .separator()
@@ -600,17 +609,56 @@ fn share_items(
     }
     for source in windows.into_iter().take(MAX_WINDOW_ITEMS) {
         let label = source.label();
+        let thumbnail = model.share_thumbnail(source);
         let source = source.clone();
         let app = app.clone();
         popup = popup.item(
-            PopupMenuItem::new(label)
-                .icon(IconName::AppWindow)
-                .on_click(move |_, _, cx| {
-                    app.update(cx, |state, cx| state.start_call_share(source.clone(), cx))
-                }),
+            share_source_item(label, thumbnail, IconName::AppWindow, WINDOW_THUMBNAIL).on_click(
+                move |_, _, cx| app.update(cx, |state, cx| state.start_call_share(source.clone(), cx)),
+            ),
         );
     }
     popup
+}
+
+fn share_source_item(
+    label: String,
+    thumbnail: Option<Arc<RenderImage>>,
+    fallback: IconName,
+    (width, height): (f32, f32),
+) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| {
+        let preview = div()
+            .debug_selector(|| SHARE_THUMBNAIL_TAG.into())
+            .flex_none()
+            .w(px(width))
+            .h(px(height))
+            .rounded(px(THUMBNAIL_RADIUS))
+            .bg(theme::popup_hover())
+            .flex()
+            .items_center()
+            .justify_center();
+        let preview = match &thumbnail {
+            Some(image) => preview.child(
+                img(ImageSource::Render(image.clone()))
+                    .size_full()
+                    .object_fit(ObjectFit::Contain)
+                    .rounded(px(THUMBNAIL_RADIUS)),
+            ),
+            None => preview.child(
+                gpui_kit::component::Icon::new(fallback.clone())
+                    .size(px(THUMBNAIL_ICON))
+                    .text_color(theme::text_muted()),
+            ),
+        };
+        h_flex()
+            .w_full()
+            .py(px(4.))
+            .gap(px(12.))
+            .items_center()
+            .child(preview)
+            .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+    })
 }
 
 fn share_button(
