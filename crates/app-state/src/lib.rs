@@ -12,6 +12,7 @@ pub mod card_refresh;
 pub mod card_state;
 pub mod channel_menu;
 pub mod chat_actions;
+mod sidebar_load;
 pub mod channel_filter;
 pub mod chat_filter;
 pub mod find_in_chat;

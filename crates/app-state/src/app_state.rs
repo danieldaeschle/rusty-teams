@@ -148,6 +148,7 @@ pub struct AppState {
     pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
     pub typing: TypingState,
     typing_timer_running: bool,
+    pub(crate) sidebar_load: crate::sidebar_load::SidebarLoad,
     pub local_previews: HashMap<String, LocalPreview>,
     pub quick_view: Option<QuickView>,
     pub scheduled: Vec<ScheduledDraft>,
@@ -305,6 +306,7 @@ impl AppState {
             restorable_deletes: Default::default(),
             typing: TypingState::default(),
             typing_timer_running: false,
+            sidebar_load: Default::default(),
             local_previews: HashMap::new(),
             quick_view: None,
             scheduled: Vec::new(),
@@ -585,7 +587,7 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn reload_directory(&mut self) {
+    fn reload_directory_without_unread(&mut self) {
         self.directory.me = data::me(&self.store);
         self.own_email = self
             .store
@@ -614,14 +616,13 @@ impl AppState {
         }
         self.resolve_pending_avatars();
         self.sync_presence();
-        self.directory.unread_counts = match &self.engine {
-            Some(engine) => data::unread_counts(engine, &self.sidebar.chats),
-            None => Default::default(),
-        };
-        self.directory.unread_importance = match &self.engine {
-            Some(engine) => data::unread_importance(engine, &self.sidebar.chats),
-            None => Default::default(),
-        };
+    }
+
+    pub fn reload_directory(&mut self) {
+        self.reload_directory_without_unread();
+        let unread = crate::sidebar_load::unread_of(self.engine.as_deref(), &self.sidebar.chats);
+        self.directory.unread_counts = unread.counts;
+        self.directory.unread_importance = unread.importance;
     }
 
     pub fn request_avatars(&mut self, user_ids: Vec<String>, cx: &mut Context<Self>) {
@@ -1086,6 +1087,7 @@ impl AppState {
     }
 
     pub fn reload_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_load.local_change();
         if let Ok(sidebar) = self.store.sidebar() {
             self.sidebar = sidebar;
             self.apply_bot_titles();
@@ -1093,6 +1095,24 @@ impl AppState {
         self.calls_list.invalidate();
         if !self.mode.demo {
             self.reload_directory();
+            self.load_own_time_zone(cx);
+        }
+        cx.emit(AppEvent::Sidebar);
+        cx.notify();
+    }
+
+    pub(crate) fn adopt_loaded_sidebar(
+        &mut self,
+        loaded: crate::sidebar_load::LoadedSidebar,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar = loaded.sidebar;
+        self.apply_bot_titles();
+        self.calls_list.invalidate();
+        if !self.mode.demo {
+            self.reload_directory_without_unread();
+            self.directory.unread_counts = loaded.unread.counts;
+            self.directory.unread_importance = loaded.unread.importance;
             self.load_own_time_zone(cx);
         }
         cx.emit(AppEvent::Sidebar);

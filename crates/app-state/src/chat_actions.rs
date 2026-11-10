@@ -429,7 +429,7 @@ impl AppState {
         }
     }
 
-    fn leave_removed_selection(&mut self, next: Option<String>, cx: &mut Context<Self>) {
+    pub(crate) fn leave_removed_selection(&mut self, next: Option<String>, cx: &mut Context<Self>) {
         match next {
             Some(next_id) => self.select(Selection::Chat(next_id), cx),
             None => {
@@ -441,37 +441,13 @@ impl AppState {
         }
     }
 
-    pub fn reload_sidebar_after_sync(&mut self, cx: &mut Context<Self>) {
-        let selected = match &self.selection {
-            Some(Selection::Chat(chat_id)) => Some(chat_id.clone()),
-            _ => None,
-        };
-        let is_listed =
-            |state: &Self, chat_id: &str| state.sidebar.chats.iter().any(|chat| chat.id == chat_id);
-        let was_listed = selected
-            .as_deref()
-            .is_some_and(|chat_id| is_listed(self, chat_id));
-        let next = selected
-            .as_deref()
-            .filter(|_| was_listed)
-            .and_then(|chat_id| self.next_chat_after(chat_id));
-        self.reload_sidebar(cx);
-        let removed = was_listed
-            && selected
-                .as_deref()
-                .is_some_and(|chat_id| !is_listed(self, chat_id));
-        if removed {
-            self.leave_removed_selection(next, cx);
-        }
-    }
-
     fn restore_chat_locally(&mut self, chat: &ChatRecord, cx: &mut Context<Self>) {
         let _ = self.store.upsert_chats(std::slice::from_ref(chat));
         let _ = self.store.set_chat_muted(&chat.id, chat.muted);
         self.reload_sidebar(cx);
     }
 
-    fn next_chat_after(&self, chat_id: &str) -> Option<String> {
+    pub(crate) fn next_chat_after(&self, chat_id: &str) -> Option<String> {
         next_chat_id(&self.chat_sections(), chat_id)
     }
 
