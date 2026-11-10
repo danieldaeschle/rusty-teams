@@ -291,6 +291,10 @@ fn watch_loads(webview: &ICoreWebView2, app: App) -> windows::core::Result<()> {
         let url = current_url(&shared, app);
         if is_running_app(app, &url) {
             unsafe { SetTimer(Some(shared.windows[&app]), PARK_TIMER, PARK_DELAY_MS, None) };
+            if shared.park_gate.borrow().held(app) {
+                set_memory_level(&sender, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
+                release_memory(&sender);
+            }
         } else if app.is_park_url(&url) {
             release_memory(&sender);
         }
@@ -311,6 +315,18 @@ fn park(shared: &Shared, app: App) {
         unsafe {
             let _ = webview.Navigate(&HSTRING::from(app.park_url()));
         }
+    }
+}
+
+/// A held tab stays loaded for the whole call, so its renderer is told to shrink instead of being parked.
+fn hold(shared: &Shared, app: App, held: bool) {
+    shared.park_gate.borrow_mut().hold(app, held);
+    if held
+        && let Some(webview) = webview_of(shared, app)
+        && is_running_app(app, &current_url(shared, app))
+    {
+        set_memory_level(&webview, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
+        release_memory(&webview);
     }
 }
 
@@ -430,7 +446,7 @@ fn drain(shared: &Rc<Shared>) {
             UiRequest::Call { app, command } => call(shared, app, command),
             UiRequest::Subscribe { app, sink } => shared.subscribers.borrow_mut().add(app, sink),
             UiRequest::Wake { app } => wake(shared, app),
-            UiRequest::Hold { app, held } => shared.park_gate.borrow_mut().hold(app, held),
+            UiRequest::Hold { app, held } => hold(shared, app, held),
             UiRequest::Retry => {
                 if !shared.state.borrow().ready && !shared.restarting.replace(true) {
                     restart(shared);

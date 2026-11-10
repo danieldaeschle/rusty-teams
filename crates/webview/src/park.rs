@@ -24,6 +24,10 @@ impl ParkGate {
         adjust(&mut self.holds, app, held);
     }
 
+    pub(crate) fn held(&self, app: App) -> bool {
+        self.holds.get(&app).copied().unwrap_or(0) > 0
+    }
+
     pub(crate) fn command_started(&mut self, app: App) {
         adjust(&mut self.in_flight, app, true);
     }
@@ -42,7 +46,7 @@ impl ParkGate {
 
     /// A protocol call whose page promise never settles stays in flight; after a few waits it no longer blocks the park.
     pub(crate) fn decide(&mut self, app: App) -> ParkDecision {
-        if self.holds.get(&app).copied().unwrap_or(0) > 0 {
+        if self.held(app) {
             return ParkDecision::Wait;
         }
         let waits = self.command_waits.entry(app).or_default();
