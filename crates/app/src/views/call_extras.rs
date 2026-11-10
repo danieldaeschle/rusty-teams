@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::path::PathBuf;
 
 use calling::{CameraEffects, HoldState};
@@ -369,7 +370,7 @@ fn thumbnail(
         .cursor_pointer()
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .child(match path {
-            Some(path) => img(path)
+            Some(path) => img(bounded(path))
                 .size_full()
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),

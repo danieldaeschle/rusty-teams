@@ -54,6 +54,7 @@ pub mod forward_dialog;
 pub mod find_panel;
 pub mod fun_picker;
 pub mod group_name;
+pub mod image_memory;
 pub mod image_menu;
 pub mod image_viewer;
 pub mod join_dialog;

@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -130,7 +131,7 @@ pub fn bot_avatar(identity: &BotIdentity, size: f32) -> AnyElement {
             .rounded_full()
             .overflow_hidden()
             .child(
-                img(url.clone())
+                img(bounded(url.clone()))
                     .size_full()
                     .rounded_full()
                     .object_fit(ObjectFit::Cover)

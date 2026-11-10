@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -76,7 +77,7 @@ pub fn media_view(media: &CardMedia, id: &str) -> AnyElement {
 }
 
 fn poster_image(url: String) -> Img {
-    img(url)
+    img(bounded(url))
         .size_full()
         .rounded(px(MEDIA_RADIUS))
         .object_fit(ObjectFit::Cover)

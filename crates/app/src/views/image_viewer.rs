@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -820,7 +821,7 @@ impl ImageViewer {
             .top(px(origin.1))
             .w(px(display.0))
             .h(px(display.1))
-            .child(img(source).size_full().object_fit(ObjectFit::Fill))
+            .child(img(bounded(source)).size_full().object_fit(ObjectFit::Fill))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -874,7 +875,7 @@ impl ImageViewer {
                     .when(!current, |frame| frame.opacity(0.7))
                     .map(|frame| match path {
                         Some(path) => {
-                            frame.child(img(path).size_full().object_fit(ObjectFit::Cover))
+                            frame.child(img(bounded(path)).size_full().object_fit(ObjectFit::Cover))
                         }
                         None => frame.child(symbol("image", 18., white().opacity(0.5))),
                     }),

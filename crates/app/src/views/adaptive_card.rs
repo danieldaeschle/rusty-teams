@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -228,7 +229,7 @@ fn background_layer(url: &str, radius: f32) -> AnyElement {
         .rounded(px(radius))
         .overflow_hidden()
         .child(
-            img(url.to_owned())
+            img(bounded(url.to_owned()))
                 .size_full()
                 .object_fit(ObjectFit::Cover)
                 .with_loading(|| div().into_any_element())
@@ -699,7 +700,7 @@ fn image_view(image: &CardImage, id: &str) -> AnyElement {
             frame.tooltip(move |window, cx| Tooltip::new(alt_text.clone()).build(window, cx))
         })
         .child(
-            img(image.url.clone())
+            img(bounded(image.url.clone()))
                 .size_full()
                 .rounded(radius)
                 .object_fit(ObjectFit::Cover)

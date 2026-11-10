@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::*;
 use teams_core::{AnnouncementBanner, BannerBackground};
 
@@ -52,7 +53,7 @@ pub fn banner_frame(background: &BannerBackground, directory: &Directory) -> Div
         BannerBackground::LocalImage(path) => frame
             .bg(banner_fill(""))
             .child(
-                img(std::path::PathBuf::from(path))
+                img(bounded(std::path::PathBuf::from(path)))
                     .absolute()
                     .inset_0()
                     .size_full()
@@ -64,7 +65,7 @@ pub fn banner_frame(background: &BannerBackground, directory: &Directory) -> Div
             match directory.image(url) {
                 Some(entry) => frame
                     .child(
-                        img(entry.path.clone())
+                        img(bounded(entry.path.clone()))
                             .absolute()
                             .inset_0()
                             .size_full()

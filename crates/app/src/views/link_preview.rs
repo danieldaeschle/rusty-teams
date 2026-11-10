@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
@@ -67,7 +68,7 @@ fn thumbnail(
     Some(match entry {
         Some(entry) => frame
             .child(
-                img(entry.path.clone())
+                img(bounded(entry.path.clone()))
                     .size_full()
                     .object_fit(ObjectFit::Cover),
             )

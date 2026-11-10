@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::DatePicker;
@@ -151,7 +152,7 @@ fn inline_action_view(
         (Some(ActionPhase::Done), _) => {
             symbol("done", INLINE_ICON_SIZE, theme::green()).into_any_element()
         }
-        (_, Some(url)) if url.starts_with("https://") => img(url.clone())
+        (_, Some(url)) if url.starts_with("https://") => img(bounded(url.clone()))
             .size(px(INLINE_ICON_SIZE))
             .into_any_element(),
         _ => {

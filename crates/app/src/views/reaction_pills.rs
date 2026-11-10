@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::rc::Rc;
 
 use chrono::Local;
@@ -81,7 +82,7 @@ fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) ->
             .into_any_element();
     };
     match directory.image(&image.url) {
-        Some(entry) => img(entry.path.clone())
+        Some(entry) => img(bounded(entry.path.clone()))
             .size(px(size))
             .object_fit(ObjectFit::Contain)
             .flex_none()

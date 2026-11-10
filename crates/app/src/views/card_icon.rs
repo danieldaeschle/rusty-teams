@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use teams_core::{CardActionIcon, CardIcon, IconSize};
@@ -147,7 +148,7 @@ pub fn icon_view(card_icon: &CardIcon) -> AnyElement {
 pub fn action_icon_view(action_icon: &CardActionIcon) -> AnyElement {
     match action_icon {
         CardActionIcon::Named(name) => glyph_view(name, ACTION_ICON_SIZE, theme::accent_text()),
-        CardActionIcon::Url(url) => img(url.clone())
+        CardActionIcon::Url(url) => img(bounded(url.clone()))
             .size(px(ACTION_ICON_SIZE))
             .flex_none()
             .object_fit(ObjectFit::Contain)

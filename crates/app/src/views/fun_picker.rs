@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -519,7 +520,7 @@ impl FunPicker {
             .cursor_pointer()
             .hover(|tile| tile.opacity(0.85))
             .child(
-                img(image_source(&gif.preview_url))
+                img(bounded(image_source(&gif.preview_url)))
                     .id(("fun-picker-gif-image", index))
                     .size_full()
                     .object_fit(ObjectFit::Cover),
@@ -639,7 +640,7 @@ impl FunPicker {
                     .cursor_pointer()
                     .hover(|tile| tile.bg(theme::border_strong()))
                     .child(
-                        img(image_source(&sticker.url()))
+                        img(bounded(image_source(&sticker.url())))
                             .size_full()
                             .object_fit(ObjectFit::Contain),
                     )

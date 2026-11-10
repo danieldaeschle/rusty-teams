@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -171,7 +172,7 @@ fn thumbnail_image(recording: &RecordingCard, directory: &Directory) -> AnyEleme
         .as_ref()
         .and_then(|thumbnail| directory.image(&thumbnail.url));
     match image {
-        Some(entry) => img(entry.path.clone())
+        Some(entry) => img(bounded(entry.path.clone()))
             .size_full()
             .object_fit(ObjectFit::Cover)
             .into_any_element(),

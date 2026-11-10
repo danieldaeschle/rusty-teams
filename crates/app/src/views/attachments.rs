@@ -1,3 +1,4 @@
+use crate::views::image_memory::bounded;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
@@ -116,7 +117,7 @@ fn image_view(
     let frame = frame
         .cursor_pointer()
         .child(
-            img(entry.path.clone())
+            img(bounded(entry.path.clone()))
                 .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
@@ -200,7 +201,7 @@ fn local_image_view(image: &LocalImage, id: String) -> AnyElement {
         .rounded(px(IMAGE_RADIUS))
         .overflow_hidden()
         .child(
-            img(image.image.clone())
+            img(bounded(image.image.clone()))
                 .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
@@ -266,8 +267,8 @@ fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stat
     let frame = match image {
         Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => frame
             .bg(theme::white())
-            .child(img(path).w_full().h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO)).object_fit(ObjectFit::Cover)),
-        Some(path) => frame.child(img(path).size_full().object_fit(match card.kind {
+            .child(img(bounded(path)).w_full().h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO)).object_fit(ObjectFit::Cover)),
+        Some(path) => frame.child(img(bounded(path)).size_full().object_fit(match card.kind {
             FileKind::Video | FileKind::PowerPoint => ObjectFit::Cover,
             _ => ObjectFit::Contain,
         })),
