@@ -311,6 +311,10 @@ impl LocalVideo {
         (self.camera_on() && self.blur.active()).then(|| self.blur.average_ms())
     }
 
+    pub fn blur_model(&self) -> Option<&'static str> {
+        (self.camera_on() && self.blur.active()).then(|| self.blur.model()).filter(|model| !model.is_empty())
+    }
+
     pub fn has_lines(&self) -> bool {
         self.lines.is_some()
     }

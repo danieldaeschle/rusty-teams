@@ -193,6 +193,9 @@ impl EffectsStage {
         self.average_ms = if self.processed == 0 { elapsed } else { self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT };
         self.processed += 1;
         self.settings.set_average_ms(self.average_ms);
+        if let Some(masks) = &self.masks {
+            self.settings.set_model(masks.model());
+        }
     }
 }
 

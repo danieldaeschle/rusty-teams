@@ -1034,6 +1034,7 @@ async fn drive(
     let mut capability = MeetingCapability::default();
     let mut previous_packets = 0u64;
     let mut ticks = 0u32;
+    let mut segmentation_model: Option<&'static str> = None;
     let mut health_sampler = HealthSampler::default();
     let mut quality_tracker = QualityTracker::default();
     let mut second = 0u32;
@@ -2328,6 +2329,10 @@ async fn drive(
                     && let Some(average_ms) = local_video.blur_average_ms()
                 {
                     control.send(CallUpdate::BlurTiming(average_ms));
+                    if let Some(model) = local_video.blur_model().filter(|model| Some(*model) != segmentation_model) {
+                        timeline.record("segmentation model", format!("{model}, effects {average_ms:.1} ms per frame"));
+                        segmentation_model = Some(model);
+                    }
                 }
                 if ticks.is_multiple_of(HEALTH_EVERY_TICKS) {
                     control.send(CallUpdate::Sample(StatsSample {

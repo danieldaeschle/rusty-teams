@@ -160,6 +160,10 @@ impl MaskInference for LadderSegmenter {
         self.rungs[self.active].device == Device::Gpu
     }
 
+    fn model(&self) -> &'static str {
+        self.active().name
+    }
+
     fn infer(&mut self, mut frame: I420Buffer) -> Result<Mask> {
         self.adopt_probe();
         self.start_probe(&mut frame);

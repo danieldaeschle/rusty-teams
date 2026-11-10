@@ -55,6 +55,7 @@ pub struct BlurSettings {
     picture: Mutex<Option<Arc<BackgroundPicture>>>,
     effects: Mutex<CameraEffects>,
     cutout: Mutex<Option<Arc<Cutout>>>,
+    model: Mutex<&'static str>,
 }
 
 impl BlurSettings {
@@ -109,6 +110,14 @@ impl BlurSettings {
         self.average_micros.load(Ordering::Relaxed) as f32 / 1000.
     }
 
+    pub fn set_model(&self, model: &'static str) {
+        *self.model.lock().expect("model lock") = model;
+    }
+
+    pub fn model(&self) -> &'static str {
+        *self.model.lock().expect("model lock")
+    }
+
     pub fn set_average_ms(&self, average_ms: f64) {
         self.average_micros.store((average_ms * 1000.) as u32, Ordering::Relaxed);
     }
@@ -156,6 +165,10 @@ pub trait MaskInference: Send + 'static {
     fn accelerated(&self) -> bool {
         false
     }
+
+    fn model(&self) -> &'static str {
+        "custom"
+    }
 }
 
 type Frame = I420Buffer;
@@ -172,6 +185,7 @@ struct WorkerShared {
     inbox: Latest<(u64, Frame)>,
     outbox: Mutex<Outbox>,
     stride: AtomicU64,
+    model: Mutex<&'static str>,
 }
 
 fn stride_for(inference: Duration) -> u64 {
@@ -205,6 +219,7 @@ fn run_worker(shared: &WorkerShared, inference: &mut dyn MaskInference) {
         let Ok(fresh) = inference.infer(frame) else { continue };
         let stride = if inference.accelerated() { 1 } else { stride_for(started.elapsed()) };
         shared.stride.store(stride, Ordering::Relaxed);
+        *shared.model.lock().expect("model lock") = inference.model();
         smoothed = propagate(&smoothed, &smoothed_reference, &reference);
         smooth_into(&mut smoothed, fresh);
         smoothed_reference.clone_from(&reference);
@@ -238,7 +253,7 @@ impl MaskSource {
     }
 
     fn spawn<Inference: MaskInference>(create: impl FnOnce() -> Option<Inference> + Send + 'static) -> Self {
-        let shared = Arc::new(WorkerShared { inbox: Latest::default(), outbox: Mutex::default(), stride: AtomicU64::new(1) });
+        let shared = Arc::new(WorkerShared { inbox: Latest::default(), outbox: Mutex::default(), stride: AtomicU64::new(1), model: Mutex::new("") });
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("segmentation".to_owned())
@@ -257,6 +272,11 @@ impl MaskSource {
 
     pub fn mask(&self) -> &Mask {
         &self.mask
+    }
+
+    /// The model that made the newest mask, empty until the first one.
+    pub fn model(&self) -> &'static str {
+        *self.shared.model.lock().expect("model lock")
     }
 
     /// The luma grid of the frame the mask was made from.
