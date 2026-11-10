@@ -57,7 +57,7 @@ use super::chat_members::members_popover;
 use super::chat_pop_out;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
-use super::group_name::group_name_button;
+use super::group_name::{GroupNameSlot, group_name_button};
 use super::message_actions::{Action, DelegateEntry, MessageMenu};
 use super::message_row::{
     AVATAR_GAP, AVATAR_SIZE, JUMP_HIGHLIGHT_PERIOD, render_message_row, render_skeleton_row,
@@ -278,6 +278,7 @@ pub struct ConversationView {
     receipt_fade: receipt_fade::ReceiptFade,
     find_panel: Option<Entity<FindPanel>>,
     find_subscription: Option<Subscription>,
+    group_name: GroupNameSlot,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -564,6 +565,7 @@ impl ConversationView {
             subscriptions.push(cx.observe(&api, |this, _, cx| this.sync_reaction_pills(cx)));
         }
         let mut view = ConversationView {
+            group_name: GroupNameSlot::default(),
             app,
             pinned: pinned.is_some(),
             popped_out: false,
@@ -3710,7 +3712,7 @@ impl ConversationView {
                                     .any(|member| member.user_id.as_deref() == Some(&me.user_id))
                             })
                         {
-                            rename = Some(group_name_button(&self.app, chat_id, &chat.title));
+                            rename = Some(group_name_button(&self.app, &self.group_name, chat_id, &chat.title));
                         }
                         if chat.title.trim().is_empty() {
                             names_title = Some(chat_header_actions::group_title(directory, &faces));

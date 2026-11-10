@@ -15,6 +15,8 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::theme;
 
+pub const GROUP_NAME_FORM: &str = "shell/islands/main/group-name-form";
+pub const GROUP_NAME_BUTTON: &str = "shell/islands/main/group-name-button";
 const BUTTON_TOOLTIP: &str = "Name group chat";
 const FIELD_LABEL: &str = "Group name";
 const PLACEHOLDER: &str = "Type a group name";
@@ -108,6 +110,7 @@ impl Render for GroupNameForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let problem = self.problem(cx);
         v_flex()
+            .debug_selector(|| GROUP_NAME_FORM.into())
             .w(px(FORM_WIDTH))
             .p(px(FORM_PADDING))
             .gap(px(FORM_GAP))
@@ -146,9 +149,12 @@ impl Render for GroupNameForm {
     }
 }
 
-pub fn group_name_button(app: &Entity<AppState>, chat_id: &str, title: &str) -> AnyElement {
+#[derive(Clone, Default)]
+pub struct GroupNameSlot(Rc<RefCell<Option<Entity<GroupNameForm>>>>);
+
+pub fn group_name_button(app: &Entity<AppState>, slot: &GroupNameSlot, chat_id: &str, title: &str) -> AnyElement {
     let (app, chat_id, title) = (app.clone(), chat_id.to_owned(), title.to_owned());
-    let form: Rc<RefCell<Option<Entity<GroupNameForm>>>> = Rc::default();
+    let form = slot.0.clone();
     let reset = form.clone();
     Popover::new("group-name")
         .anchor(Anchor::TopLeft)
@@ -158,6 +164,7 @@ pub fn group_name_button(app: &Entity<AppState>, chat_id: &str, title: &str) -> 
                 .ghost()
                 .compact()
                 .tooltip(BUTTON_TOOLTIP)
+                .debug_selector(|| GROUP_NAME_BUTTON.into())
                 .child(icon(IconName::Pencil, ICON_SIZE, theme::text_soft())),
         )
         .on_open_change(move |open, _, _| {
@@ -166,7 +173,8 @@ pub fn group_name_button(app: &Entity<AppState>, chat_id: &str, title: &str) -> 
             }
         })
         .content(move |_, window, cx| {
-            if let Some(existing) = form.borrow().clone() {
+            let existing = form.borrow().clone();
+            if let Some(existing) = existing.filter(|existing| existing.read(cx).chat_id == chat_id) {
                 return existing;
             }
             let popover = cx.entity().downgrade();

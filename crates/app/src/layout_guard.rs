@@ -198,6 +198,7 @@ mod frames {
         FEED_EDGE_TAG, FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG,
         FORWARD_FOOTER_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG,
     };
+    use crate::views::group_name::{GROUP_NAME_BUTTON, GROUP_NAME_FORM};
     use crate::views::post_card::{
         POST_AVATAR_TAG, POST_BODY_TAG, POST_CARD_TAG, POST_FOOTER_AVATAR_TAG,
     };
@@ -1581,6 +1582,36 @@ mod frames {
             visual.run_until_parked();
             assert!(found.is_empty(), "{}", found.join("\n"));
         }
+    }
+
+    #[gpui_kit::test]
+    fn the_group_name_field_keeps_typed_text_across_frames(cx: &mut TestAppContext) {
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                state.select(Selection::Chat(MEMBERS_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(GROUP_NAME_BUTTON));
+        let button = visual
+            .debug_bounds(GROUP_NAME_BUTTON)
+            .expect("group name button rendered");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some(GROUP_NAME_FORM));
+        assert!(visual.debug_bounds(GROUP_NAME_FORM).is_some(), "group name form open");
+        visual.simulate_keystrokes("backspace x space y enter");
+        visual.run_until_parked();
+        let title = visual.update(|_, cx| {
+            state
+                .read(cx)
+                .sidebar
+                .chats
+                .iter()
+                .find(|chat| chat.id == MEMBERS_CHAT)
+                .map(|chat| chat.title.clone())
+        });
+        assert_eq!(title.as_deref(), Some("Release planninx y"));
     }
 
     const FORWARD_CHAT: &str = "demo-chat-release";

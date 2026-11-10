@@ -328,6 +328,10 @@ impl RenderOnce for Popover {
             .on_action({
                 let state = state.clone();
                 move |_: &Confirm, window, cx| {
+                    if state.read(cx).focus_handle.contains_focused(window, cx) {
+                        cx.propagate();
+                        return;
+                    }
                     state.update(cx, |state, cx| state.toggle_open(window, cx));
                     cx.notify(parent_view_id);
                 }
