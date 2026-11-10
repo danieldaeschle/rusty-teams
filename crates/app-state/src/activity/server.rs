@@ -144,7 +144,7 @@ fn preview_of(item: &ActivityItem) -> String {
         "forwardedMessage" => "Forwarded message",
         "isMeeting" => "Teams Meeting",
         "replyWithQuote" if item.preview.is_empty() => "Replied with quote",
-        _ => return item.preview.clone(),
+        _ => return item.preview.split_whitespace().collect::<Vec<_>>().join(" "),
     };
     fixed.to_owned()
 }
@@ -174,6 +174,12 @@ mod tests {
             version_ms: 1791368000000,
             ..ActivityItem::default()
         }
+    }
+
+    #[test]
+    fn a_preview_with_line_breaks_becomes_one_line() {
+        let multiline = ActivityItem { preview: "Menu 09.11.-13.11. -\nPlease order\r\n until 9:30".into(), ..item("mention", "person") };
+        assert_eq!(preview_of(&multiline), "Menu 09.11.-13.11. - Please order until 9:30");
     }
 
     #[test]
