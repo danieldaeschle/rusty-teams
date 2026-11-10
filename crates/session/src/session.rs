@@ -10,6 +10,7 @@ use tokio::time::{Instant, sleep};
 use crate::app::App;
 use crate::error::{Error, Result};
 use crate::events::TabControl;
+use crate::native::NativeHttp;
 use crate::request::{ApiResponse, Method, Outcome, Request, WireRequest, WireResult};
 use crate::scope::Scope;
 use crate::transport::{CdpTransport, Transport};
@@ -30,6 +31,7 @@ pub struct SessionConfig {
     pub max_retry_wait: Duration,
     pub default_retry_wait: Duration,
     pub unauthorized_reload_wait: Duration,
+    pub native_http: bool,
 }
 
 impl Default for SessionConfig {
@@ -43,6 +45,17 @@ impl Default for SessionConfig {
             max_retry_wait: Duration::from_secs(30),
             default_retry_wait: Duration::from_secs(2),
             unauthorized_reload_wait: Duration::from_secs(5),
+            native_http: false,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// The app's settings: requests go out from Rust unless TEAMS_PAGE_FETCH is set.
+    pub fn for_app() -> Self {
+        SessionConfig {
+            native_http: std::env::var_os("TEAMS_PAGE_FETCH").is_none(),
+            ..SessionConfig::default()
         }
     }
 }
@@ -60,6 +73,7 @@ pub struct Session {
     pub(crate) config: SessionConfig,
     tabs: Arc<HashMap<App, Mutex<Option<TabControl>>>>,
     force_refresh: Arc<AtomicBool>,
+    native: Option<Arc<NativeHttp>>,
 }
 
 impl Session {
@@ -73,7 +87,13 @@ impl Session {
 
     pub async fn with_transport(transport: Arc<dyn Transport>, config: SessionConfig) -> Result<Self> {
         transport.check().await?;
+        let native = config
+            .native_http
+            .then(|| NativeHttp::new(config.evaluate_timeout, MAX_DOWNLOAD_BYTES))
+            .flatten()
+            .map(Arc::new);
         Ok(Session {
+            native,
             transport,
             config,
             tabs: Arc::new(App::ALL.into_iter().map(|app| (app, Mutex::new(None))).collect()),
@@ -153,6 +173,11 @@ impl Session {
     }
 
     async fn run_with_fresh_token(&self, requests: &[&Request], scope: &Scope) -> Result<Vec<ApiResponse>> {
+        if let Some(native) = &self.native
+            && let Some(results) = native.run(self, requests, scope, self.force_refresh.load(Ordering::SeqCst)).await
+        {
+            return Ok(results);
+        }
         let mut search = TokenSearch::default();
         if let Some(results) = self.run_in_any_tab(requests, scope, &mut search).await? {
             return Ok(results);

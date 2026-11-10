@@ -138,7 +138,8 @@ It signs you in through a real Teams web page and lets that page make the API ca
 1. A hidden browser page loads Teams web with its own profile. On Windows this is WebView2, so single sign-on with the Windows account usually just works.
 2. If Teams asks for a login, the login window shows itself. After that the page stays parked in the background.
 3. Every API call is sent to that page over CDP. A small script (`crates/session/assets/fetch.js`) picks the matching token from the page's MSAL cache, refreshes it when needed, and runs the `fetch`.
-4. Only the response goes back to Rust. The one exception is the Trouter socket: Rust opens it itself and asks the page for the chat service token to sign in, held in memory only, never stored or logged. That lets the page park even during a call.
+4. The page only hands out access tokens. Rust sends the requests itself and keeps each token in memory until shortly before it expires, never stored or logged. Websocket exchanges and calls that need the app's cookies still run inside the page. `TEAMS_PAGE_FETCH=1` sends everything through the page again.
+5. The Trouter socket is opened from Rust too, so the page can park even during a call.
 
 </details>
 

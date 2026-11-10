@@ -162,7 +162,7 @@ async fn supervise(
 ) {
     let _ = events.send(BackendEvent::Connection(ConnectionState::Connecting));
     let session = loop {
-        match Session::with_transport(transport.clone(), SessionConfig::default()).await {
+        match Session::with_transport(transport.clone(), SessionConfig::for_app()).await {
             Ok(session) => break session,
             Err(error) => {
                 let _ = events.send(BackendEvent::Connection(classify_session_error(&error)));

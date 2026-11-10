@@ -2,6 +2,7 @@ mod app;
 mod error;
 mod events;
 mod http;
+mod native;
 mod page_script;
 mod request;
 mod scope;

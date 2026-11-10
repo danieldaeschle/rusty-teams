@@ -322,8 +322,8 @@ async fn start_engine(
     CallEngine,
     tokio::sync::mpsc::UnboundedReceiver<EngineEvent>,
 )> {
-    let session = Session::with_transport(transport.clone(), SessionConfig::default()).await?;
-    let poll_session = Session::with_transport(transport, SessionConfig::default()).await?;
+    let session = Session::with_transport(transport.clone(), SessionConfig::for_app()).await?;
+    let poll_session = Session::with_transport(transport, SessionConfig::for_app()).await?;
     let config = EngineConfig {
         ringable,
         dump_dir: crate::diagnostics::directory().map(|directory| directory.join(CALL_DUMPS_DIR)),
