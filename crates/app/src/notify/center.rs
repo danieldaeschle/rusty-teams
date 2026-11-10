@@ -1144,6 +1144,11 @@ impl NotificationCenter {
         }
     }
 
+    pub fn accept_ring(&mut self, ring_id: u64, mode: calling::AcceptMode, cx: &mut Context<Self>) {
+        self.raise_main_window(cx);
+        self.app.update(cx, |state, cx| state.accept_ring(ring_id, mode, cx));
+    }
+
     fn raise_main_window(&mut self, cx: &mut Context<Self>) {
         if let Some(native) = self.main_native {
             platform::restore_and_raise(native);

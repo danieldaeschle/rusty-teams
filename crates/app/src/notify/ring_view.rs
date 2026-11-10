@@ -31,6 +31,7 @@ fn card_radius(window_transparent: bool) -> f32 {
 
 pub struct RingView {
     app: Entity<AppState>,
+    center: Entity<NotificationCenter>,
     ring_id: u64,
     _subscription: Subscription,
 }
@@ -41,6 +42,7 @@ impl RingView {
         let subscription = cx.observe(&app, |_, _, cx| cx.notify());
         RingView {
             app,
+            center,
             ring_id,
             _subscription: subscription,
         }
@@ -100,7 +102,7 @@ impl Render for RingView {
         let avatar = caller_avatar(state, &entry);
         let ring_id = self.ring_id;
         let decline_app = self.app.clone();
-        let accept_app = self.app.clone();
+        let accept_center = self.center.clone();
         let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red(), theme::white())
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -115,11 +117,9 @@ impl Render for RingView {
         )
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            accept_app.update(cx, |state, cx| {
-                state.accept_ring(ring_id, AcceptMode::Audio, cx)
-            });
+            accept_center.update(cx, |center, cx| center.accept_ring(ring_id, AcceptMode::Audio, cx));
         });
-        let video_app = self.app.clone();
+        let video_center = self.center.clone();
         let accept_video = entry.ring.video.then(|| {
             answer_button(
                 "ring-accept-video",
@@ -130,9 +130,7 @@ impl Render for RingView {
             )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                video_app.update(cx, |state, cx| {
-                    state.accept_ring(ring_id, AcceptMode::Video, cx)
-                });
+                video_center.update(cx, |center, cx| center.accept_ring(ring_id, AcceptMode::Video, cx));
             })
         });
         div()
