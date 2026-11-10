@@ -55,6 +55,7 @@ const BLINK_DIMMED_OPACITY: f32 = 0.45;
 pub(super) const DISABLED_OPACITY: f32 = 0.4;
 const TILE_RADIUS: f32 = 12.;
 const NAME_PLATE_BACKGROUND: f32 = 0.6;
+const COMPACT_PLATE_BELOW: f32 = 200.;
 pub const CHAT_PANEL_TAG: &str = "shell/islands/main/call-chat-panel";
 pub const NO_MICROPHONE_HINT: &str = "No microphone found";
 const AUDIO_OFF_HINT: &str = "Audio is off for this meeting";
@@ -237,6 +238,41 @@ fn mute_badge() -> Div {
         .child(icon(IconName::MicOff, 13., theme::white()))
 }
 
+struct NamePlate {
+    inset: f32,
+    padding_x: f32,
+    padding_y: f32,
+    radius: f32,
+    text_size: f32,
+    max_width_share: f32,
+}
+
+fn name_plate_metrics(size: TileSize) -> NamePlate {
+    if size.height < COMPACT_PLATE_BELOW {
+        NamePlate { inset: 4., padding_x: 6., padding_y: 2., radius: 4., text_size: 11., max_width_share: 0.6 }
+    } else {
+        NamePlate { inset: 8., padding_x: 8., padding_y: 4., radius: 6., text_size: 12., max_width_share: 1. }
+    }
+}
+
+fn name_plate(size: TileSize, name: &str) -> Div {
+    let plate = name_plate_metrics(size);
+    div()
+        .absolute()
+        .left(px(plate.inset))
+        .bottom(px(plate.inset))
+        .max_w(px(((size.width - 3. * plate.inset) * plate.max_width_share).max(0.)))
+        .truncate()
+        .px(px(plate.padding_x))
+        .py(px(plate.padding_y))
+        .rounded(px(plate.radius))
+        .bg(hsla(0., 0., 0., NAME_PLATE_BACKGROUND))
+        .text_size(px(plate.text_size))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::white())
+        .child(name.to_owned())
+}
+
 fn video_tile(
     size: TileSize,
     image: Arc<RenderImage>,
@@ -269,22 +305,7 @@ fn video_tile(
                 })
                 .rounded(px(TILE_RADIUS)),
         )
-        .child(
-            div()
-                .absolute()
-                .left(px(8.))
-                .bottom(px(8.))
-                .max_w(px(size.width - 24.))
-                .truncate()
-                .px(px(8.))
-                .py(px(4.))
-                .rounded(px(6.))
-                .bg(hsla(0., 0., 0., NAME_PLATE_BACKGROUND))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::white())
-                .child(name.to_owned()),
-        )
+        .child(name_plate(size, name))
         .when(muted, |tile| tile.child(mute_badge()))
         .children(tile_overlays(extras))
 }
@@ -1482,4 +1503,18 @@ pub fn side_panel(
                 ),
         )
         .child(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TileSize, name_plate_metrics};
+
+    #[test]
+    fn small_strip_tiles_get_a_compact_name_plate() {
+        let strip = name_plate_metrics(TileSize { width: 216., height: 121.5, avatar: 48. });
+        assert_eq!((strip.text_size, strip.inset, strip.padding_y), (11., 4., 2.));
+        assert!(strip.max_width_share < 1.);
+        let stage = name_plate_metrics(TileSize { width: 640., height: 360., avatar: 96. });
+        assert_eq!((stage.text_size, stage.inset), (12., 8.));
+    }
 }
