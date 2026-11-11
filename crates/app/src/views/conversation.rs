@@ -503,10 +503,6 @@ impl ConversationView {
         Self::build(app, None, window, cx)
     }
 
-    pub fn timeline_bounds(&self) -> TimelineBounds {
-        self.timeline_bounds.clone()
-    }
-
     pub fn pinned_to(
         app: Entity<AppState>,
         selection: Selection,
@@ -2269,9 +2265,6 @@ impl ConversationView {
             return;
         }
         let state = self.app.read(cx);
-        if state.viewing_call() && !self.pinned {
-            return;
-        }
         let Some(selection) = self.current.as_ref().map(|c| c.selection.clone()) else {
             return;
         };

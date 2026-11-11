@@ -189,6 +189,7 @@ mod frames {
         POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
         POST_CARD_SUBJECT_TAG,
     };
+    use crate::views::call_window::CALL_WINDOW_TAG;
     use crate::views::conversation::{
         CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
         CHANNEL_DETAILS_TAG,
@@ -215,7 +216,7 @@ mod frames {
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
     use crate::views::shell::{
-        AppShell, Startup, bind_keys, install_globals, sidebar_hidden_in_call,
+        AppShell, Startup, bind_keys, install_globals,
     };
     use crate::views::shortcuts::{
         ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCallsTab,
@@ -695,6 +696,29 @@ mod frames {
         (consult, held)
     }
 
+    /// The meeting window the call controller opens once a call is set.
+    fn call_window_context(visual: &mut VisualTestContext) -> VisualTestContext {
+        for _ in 0..SETTLE_LIMIT {
+            let main = visual.update(|window, _| window.window_handle());
+            let candidates = visual.update(|_, cx| cx.windows());
+            for handle in candidates.into_iter().filter(|handle| *handle != main) {
+                let alive = visual.update(|_, cx| handle.update(cx, |_, _, _| ()).is_ok());
+                if !alive {
+                    continue;
+                }
+                let mut candidate = VisualTestContext::from_window(handle, visual);
+                candidate.update(|window, cx| window.render_frame(cx));
+                if candidate.debug_bounds(CALL_WINDOW_TAG).is_some() {
+                    return candidate;
+                }
+            }
+            visual.executor().advance_clock(SETTLE_STEP);
+            std::thread::sleep(SETTLE_STEP);
+            visual.run_until_parked();
+        }
+        panic!("the call window never opened");
+    }
+
     fn mount(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<AppState>) {
         mount_with(cx, false)
     }
@@ -964,14 +988,17 @@ mod frames {
                     screen_name,
                     "call" | "call-people" | "call-transcript" | "call-share" | "call-consult"
                 );
-                let tags = collect(&mut visual, status_menu.then_some(MENU));
+                let tags = if is_call {
+                    let mut call_visual = call_window_context(&mut visual);
+                    call_visual.simulate_resize(size(px(width), px(height)));
+                    collect(&mut call_visual, None)
+                } else {
+                    collect(&mut visual, status_menu.then_some(MENU))
+                };
                 let mut expected = GUARDED.to_vec();
                 if is_call {
+                    expected = vec!["shell/islands/main"];
                     expected.extend(CALL_GUARDED);
-                    let panel_open = matches!(screen_name, "call-people" | "call-transcript");
-                    if sidebar_hidden_in_call(width, panel_open) {
-                        expected.retain(|path| *path != "shell/islands/sidebar");
-                    }
                 }
                 if screen_name == "call-transcript" {
                     expected.push(CALL_TRANSCRIPT);
@@ -1241,14 +1268,16 @@ mod frames {
                     cx.notify();
                 })
             });
-            collect(&mut visual, Some(CHAT_PANEL_TAG));
-            let panel = visual
+            let mut call_visual = call_window_context(&mut visual);
+            call_visual.simulate_resize(size(px(width), px(height)));
+            collect(&mut call_visual, Some(CHAT_PANEL_TAG));
+            let panel = call_visual
                 .debug_bounds(CHAT_PANEL_TAG)
                 .expect("chat panel rendered");
             let bubbles: Vec<(usize, Bounds<Pixels>)> = BUBBLE_TAGS
                 .iter()
                 .enumerate()
-                .filter_map(|(index, tag)| visual.debug_bounds(tag).map(|bounds| (index, bounds)))
+                .filter_map(|(index, tag)| call_visual.debug_bounds(tag).map(|bounds| (index, bounds)))
                 .collect();
             assert!(!bubbles.is_empty(), "no bubbles rendered in the call chat");
             let found: Vec<String> = bubbles
@@ -2815,11 +2844,6 @@ const OUTLINE_ALLOWLIST: &[(&str, &str, &str)] = &[
         "views/composer/schedule.rs",
         "theme::accent()",
         "input field",
-    ),
-    (
-        "views/call_mini.rs",
-        "border)",
-        "state signal (speaking, sharing, drag, drop, failed), not a resting outline",
     ),
     (
         "views/sidebar.rs",

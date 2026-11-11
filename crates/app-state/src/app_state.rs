@@ -942,7 +942,6 @@ impl AppState {
     }
 
     pub fn open_quick_view(&mut self, view: QuickView, cx: &mut Context<Self>) {
-        self.show_call(false, cx);
         self.cancel_prejoin(cx);
         self.new_chat = false;
         self.quick_view = Some(view);
@@ -963,7 +962,6 @@ impl AppState {
     pub fn start_new_chat(&mut self, cx: &mut Context<Self>) {
         self.quick_view = None;
         self.new_chat = true;
-        self.show_call(false, cx);
         cx.emit(AppEvent::Selection);
         cx.notify();
     }
@@ -978,7 +976,6 @@ impl AppState {
     }
 
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
-        self.show_call(false, cx);
         self.cancel_prejoin(cx);
         self.call_end = None;
         let was_drafting = std::mem::take(&mut self.new_chat);
