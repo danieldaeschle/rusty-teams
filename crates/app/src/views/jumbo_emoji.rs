@@ -51,10 +51,16 @@ impl RenderOnce for JumboEmoticon {
             loops: APPEAR_LOOPS,
         });
         let now = Instant::now();
+        let active = window.is_window_active();
         let (started, loops) = playback.update(cx, |playback, _| {
-            (*playback.started.get_or_insert(now), playback.loops)
+            if !active {
+                playback.started = None;
+            }
+            let started = active.then(|| *playback.started.get_or_insert(now));
+            (started, playback.loops)
         });
-        let playing = now.duration_since(started) < resolved.loop_duration() * loops;
+        let playing = started
+            .is_some_and(|started| now.duration_since(started) < resolved.loop_duration() * loops);
         let image = if playing {
             images.animated.clone()
         } else {
