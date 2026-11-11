@@ -1303,6 +1303,87 @@ mod frames {
         }
     }
 
+    #[gpui_kit::test]
+    fn a_new_message_never_opens_a_gap_between_the_rows_above(cx: &mut TestAppContext) {
+        const GAP_CHAT: &str = "demo-chat-priya";
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                state.select(Selection::Chat(GAP_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(TIMELINE_TAG));
+        collect(&mut visual, None);
+        let bubble_positions = |visual: &mut VisualTestContext| -> Vec<(usize, f32, f32)> {
+            BUBBLE_TAGS
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tag)| {
+                    visual
+                        .debug_bounds(tag)
+                        .map(|bounds| (index, f32::from(bounds.top()), f32::from(bounds.bottom())))
+                })
+                .collect()
+        };
+        let before = bubble_positions(&mut visual);
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                let record = store::MessageRecord {
+                    conversation_id: GAP_CHAT.to_owned(),
+                    message_id: "guard-new".to_owned(),
+                    sender_id: Some(demo::PRIYA_ID.to_owned()),
+                    sender_name: Some("Priya Nair".to_owned()),
+                    created_at: chrono::Utc::now(),
+                    body_html: "<p>Fresh message</p>".to_owned(),
+                    links_json: "[]".to_owned(),
+                    attachments_json: "[]".to_owned(),
+                    reactions_json: "[]".to_owned(),
+                    mentions_json: "[]".to_owned(),
+                    ..Default::default()
+                };
+                state.store.upsert_messages(&[record]).expect("store message");
+                state.apply(
+                    crate::backend::BackendEvent::Core(teams_core::CoreEvent::MessagesChanged {
+                        conversation_id: GAP_CHAT.to_owned(),
+                    }),
+                    cx,
+                );
+            })
+        });
+        let mut frames = Vec::new();
+        for _ in 0..12 {
+            visual.executor().advance_clock(Duration::from_millis(16));
+            visual.run_until_parked();
+            visual.update(|window, cx| window.render_frame(cx));
+            frames.push(bubble_positions(&mut visual));
+        }
+        let spacing = |positions: &[(usize, f32, f32)]| -> Vec<(usize, f32)> {
+            positions
+                .windows(2)
+                .map(|pair| (pair[1].0, pair[1].1 - pair[0].2))
+                .collect()
+        };
+        let resting = spacing(&before);
+        let found: Vec<String> = frames
+            .iter()
+            .enumerate()
+            .flat_map(|(frame, positions)| {
+                let resting = resting.clone();
+                spacing(positions)
+                    .into_iter()
+                    .filter_map(move |(index, gap)| {
+                        let expected = resting.iter().find(|(known, _)| *known == index)?.1;
+                        ((gap - expected).abs() > TOLERANCE).then(|| {
+                            format!("frame {frame}: gap above bubble {index} is {gap}, was {expected}")
+                        })
+                    })
+            })
+            .collect();
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
     fn inside_horizontally(outer: Bounds<Pixels>, inner: Bounds<Pixels>) -> bool {
         let tolerance = px(TOLERANCE);
         inner.left() >= outer.left() - tolerance && inner.right() <= outer.right() + tolerance
