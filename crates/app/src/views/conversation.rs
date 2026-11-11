@@ -239,7 +239,7 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
-    toolbar_opened: Option<String>,
+    context_menu: Option<(String, Point<Pixels>)>,
     timeline_bounds: TimelineBounds,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
@@ -552,6 +552,7 @@ impl ConversationView {
             cx.observe_keystrokes(|this, event, _, cx| {
                 if event.keystroke.key == "escape" {
                     this.close_reaction_details(cx);
+                    this.close_context_menu(false, cx);
                 }
             }),
         ];
@@ -590,7 +591,7 @@ impl ConversationView {
             downloads: Downloads::default(),
             hovered_message: None,
             toolbar_hovered: None,
-            toolbar_opened: None,
+            context_menu: None,
             timeline_bounds: TimelineBounds::default(),
             header_width: Rc::default(),
             toolbar_pinned: None,
@@ -932,6 +933,7 @@ impl ConversationView {
         crate::inline_video::stop(cx);
         self.toolbar_pinned = None;
         self.toolbar_suppressed = None;
+        self.context_menu = None;
         self.agent_layouts.clear();
         self.agent_runs.borrow_mut().clear();
         self.reaction_proposals.borrow_mut().clear();
@@ -2812,9 +2814,6 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
-        if !hovered && matches!(slot, HoverSlot::Row) && self.toolbar_opened.as_deref() == Some(key) {
-            self.toolbar_opened = None;
-        }
         if hovered
             && matches!(slot, HoverSlot::Row)
             && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
@@ -2848,11 +2847,9 @@ impl ConversationView {
     }
 
     fn toolbar_visible(&self, key: &str, cx: &App) -> bool {
-        let row_trigger = if self.app.read(cx).actions_on_right_click {
-            self.toolbar_opened.as_deref()
-        } else {
-            self.hovered_message.as_deref()
-        };
+        let row_trigger = (!self.app.read(cx).actions_on_right_click)
+            .then_some(self.hovered_message.as_deref())
+            .flatten();
         self.toolbar_suppressed.as_deref() != Some(key)
             && self
                 .toolbar_pinned
@@ -2862,9 +2859,26 @@ impl ConversationView {
                 == Some(key)
     }
 
-    fn open_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
-        self.toolbar_opened = Some(key.to_owned());
-        self.toolbar_suppressed = None;
+    pub(crate) fn context_menu_at(&self, key: &str) -> Option<Point<Pixels>> {
+        self.context_menu
+            .as_ref()
+            .filter(|(open, _)| open == key)
+            .map(|(_, position)| *position)
+    }
+
+    fn open_context_menu(&mut self, key: &str, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.context_menu = Some((key.to_owned(), position));
+        cx.notify();
+    }
+
+    fn close_context_menu(&mut self, from_outside: bool, cx: &mut Context<Self>) {
+        let Some((key, _)) = &self.context_menu else {
+            return;
+        };
+        if from_outside && self.toolbar_pinned.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        self.context_menu = None;
         cx.notify();
     }
 

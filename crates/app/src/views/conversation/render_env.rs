@@ -20,6 +20,7 @@ use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
 use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
+use crate::views::message_context_menu::message_context_menu;
 use crate::views::message_row::{DeliveryActions, RowActions, RowSelect, SharedRowAction};
 use crate::views::post_card::{PostAction, PostActions};
 use crate::views::reaction_proposal_pill::ReactionPill;
@@ -241,14 +242,43 @@ impl RenderEnv {
             })
             .unwrap_or((None, None, None, None));
         let right_click_opens_actions = self.app.read(cx).actions_on_right_click;
-        let reply = (is_real && !message.deleted).then(|| {
+        let open_context = (right_click_opens_actions && actionable).then(|| {
+            let (view, key) = (view.clone(), message.key.clone());
+            Rc::new(move |position: Point<Pixels>, cx: &mut App| {
+                view.update(cx, |this, cx| this.open_context_menu(&key, position, cx))
+                    .ok();
+            }) as Rc<dyn Fn(Point<Pixels>, &mut App)>
+        });
+        let context_menu = view
+            .upgrade()
+            .filter(|_| actionable)
+            .and_then(|entity| {
+                let this = entity.read(cx);
+                let position = this.context_menu_at(&message.key)?;
+                let mine = message
+                    .reactions
+                    .iter()
+                    .filter(|chip| chip.mine)
+                    .map(|chip| chip.glyph())
+                    .collect();
+                let menu = this.message_menu(message, mine, None, view.clone(), cx);
+                let (closing, outside) = (view.clone(), view.clone());
+                Some(message_context_menu(
+                    menu,
+                    position,
+                    Rc::new(move |_, cx| {
+                        closing.update(cx, |this, cx| this.close_context_menu(false, cx)).ok();
+                    }),
+                    Rc::new(move |_, cx| {
+                        outside.update(cx, |this, cx| this.close_context_menu(true, cx)).ok();
+                    }),
+                    cx,
+                ))
+            });
+        let reply = (is_real && !message.deleted && !right_click_opens_actions).then(|| {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
             boxed(move |cx| {
                 let (view, key) = (view.clone(), key.clone());
-                if right_click_opens_actions {
-                    view.update(cx, |this, cx| this.open_toolbar(&key, cx)).ok();
-                    return;
-                }
                 handle
                     .update(cx, move |_, window, cx| {
                         view.update(cx, |this, cx| this.begin_reply(&key, window, cx))
@@ -316,6 +346,8 @@ impl RenderEnv {
             bot,
             delivery,
             reply: reply.filter(|_| !selecting),
+            open_context: open_context.filter(|_| !selecting),
+            context_menu: context_menu.filter(|_| !selecting),
             hovered: hovered.filter(|_| !selecting),
             menu: menu.filter(|_| !selecting),
             scheduled_menu,

@@ -94,7 +94,7 @@ pub(super) fn bar_button(id: ElementId) -> Stateful<Div> {
         .hover(|button| button.bg(theme::popup_hover()))
 }
 
-fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement {
+pub(super) fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement {
     let (react, done, picked) = (menu.react.clone(), menu.done.clone(), glyph.to_owned());
     let selected = menu.mine.contains(&reaction_glyph(glyph));
     bar_button(element_id(&format!("quick-reaction-{index}"), &menu.key))
@@ -161,7 +161,7 @@ fn picker_popover(adder: ReactionAdder, prefix: &str, trigger: Button, anchor: A
         .into_any_element()
 }
 
-fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
+pub(super) fn picker_button(menu: &MessageMenu, cx: &App) -> AnyElement {
     let trigger = Button::new(element_id("add-reaction", &menu.key))
         .child(icon(IconName::Plus, BAR_ICON, theme::text_soft()))
         .custom(bar_variant(cx))

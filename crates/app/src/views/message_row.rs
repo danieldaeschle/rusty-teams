@@ -3,6 +3,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::Duration;
+use std::rc::Rc;
 
 use super::adaptive_card::cards_view;
 use super::attachments::{FileActions, ImageActions, attachments_view, message_body};
@@ -105,6 +106,8 @@ pub struct RowActions {
     pub bot: Option<BotIdentity>,
     pub delivery: DeliveryActions,
     pub reply: RowAction,
+    pub open_context: Option<Rc<dyn Fn(Point<Pixels>, &mut App)>>,
+    pub context_menu: Option<AnyElement>,
     pub hovered: Option<HoverChange>,
     pub menu: Option<MessageMenu>,
     pub scheduled_menu: Option<ScheduledMenu>,
@@ -788,6 +791,8 @@ pub fn render_message_row(
         bot,
         delivery,
         reply,
+        open_context,
+        context_menu,
         hovered,
         menu,
         scheduled_menu,
@@ -849,9 +854,15 @@ pub fn render_message_row(
                 .id(ElementId::Name(format!("row-{index}").into()))
                 .w_full()
                 .pt(spacing)
-                .when_some(reply, |element, reply| {
-                    element.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))
+                .map(|element| match (open_context, reply) {
+                    (Some(open_context), _) => element.on_mouse_down(MouseButton::Right, move |event, _, cx| {
+                        cx.stop_propagation();
+                        open_context(event.position, cx)
+                    }),
+                    (None, Some(reply)) => element.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx)),
+                    (None, None) => element,
                 })
+                .children(context_menu)
                 .child(
                     div()
                         .w_full()
