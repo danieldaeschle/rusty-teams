@@ -367,7 +367,7 @@ impl ToastView {
             .items_center()
             .justify_center()
             .rounded(px(8.))
-            .child(symbol("keyboard_return", 20., theme::text()))
+            .child(symbol("send", 20., theme::text()))
             .when(empty, |button| button.opacity(0.4))
             .when(!empty, |button| {
                 button
