@@ -5,6 +5,7 @@ use std::time::Duration;
 use gpui_kit::base::{GlobalState, POPUP_PRIORITY};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::h_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::message_actions::{MenuActions, MessageMenu, picker_button, reaction_button};
@@ -32,6 +33,7 @@ pub struct OpenContextMenu {
     pub serial: u64,
     popup: Rc<RefCell<Option<(Entity<PopupMenu>, Subscription)>>>,
     bar_pressed: Rc<Cell<bool>>,
+    list_height: Rc<Cell<Option<f32>>>,
 }
 
 impl OpenContextMenu {
@@ -42,6 +44,7 @@ impl OpenContextMenu {
             serial,
             popup: Rc::default(),
             bar_pressed: Rc::default(),
+            list_height: Rc::default(),
         }
     }
 
@@ -65,6 +68,15 @@ impl OpenContextMenu {
     }
 }
 
+fn measure_height(height: Rc<Cell<Option<f32>>>) -> impl IntoElement {
+    canvas(
+        move |bounds, _, _| height.set(Some(f32::from(bounds.size.height))),
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .size_full()
+}
+
 fn animated_reaction(button: AnyElement, index: usize, serial: u64) -> AnyElement {
     let delay = REACTION_STAGGER * index as u32;
     let total = delay + REACTION_OPEN;
@@ -83,7 +95,7 @@ fn animated_reaction(button: AnyElement, index: usize, serial: u64) -> AnyElemen
         .into_any_element()
 }
 
-/// Telegram's behaviour in our look: the menu opens at the cursor (flipped above it near the bottom edge), quick reactions sit on top of it.
+/// Telegram's behaviour in our look: reactions above the cursor, the menu below; near the bottom edge it turns upside down.
 pub fn message_context_menu(
     mut menu: MessageMenu,
     open: &OpenContextMenu,
@@ -107,13 +119,24 @@ pub fn message_context_menu(
         .map(|(index, glyph)| animated_reaction(reaction_button(&menu, glyph, index), index, serial))
         .collect();
     reactions.push(animated_reaction(picker_button(&menu, cx), menu.quick.len(), serial));
+    let viewport_height = f32::from(window.viewport_size().height);
+    let cursor_y = f32::from(open.position.y);
+    let upside_down = open
+        .list_height
+        .get()
+        .is_some_and(|height| cursor_y + height + WINDOW_MARGIN > viewport_height);
     let bar_pressed = open.bar_pressed.clone();
     let bar = h_flex()
         .debug_selector(|| format!("{CONTEXT_MENU_TAG}/reactions").into())
         .absolute()
         .left_0()
-        .bottom_full()
-        .mb(px(PANEL_GAP))
+        .map(|bar| {
+            if upside_down {
+                bar.top_full().mt(px(PANEL_GAP))
+            } else {
+                bar.bottom_full().mb(px(PANEL_GAP))
+            }
+        })
         .occlude()
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .h(px(TOOLBAR_HEIGHT))
@@ -127,21 +150,28 @@ pub fn message_context_menu(
             GlobalState::suppress_text_selection(cx);
         })
         .children(reactions);
+    let slide = if upside_down { LIST_SLIDE } else { -LIST_SLIDE };
     let list = div()
         .relative()
         .debug_selector(|| format!("{CONTEXT_MENU_TAG}/list").into())
         .child(popup)
+        .child(measure_height(open.list_height.clone()))
         .with_animation(
-            ElementId::Name(format!("context-list-{serial}").into()),
+            ElementId::Name(format!("context-list-{serial}-{upside_down}").into()),
             Animation::new(LIST_OPEN).with_easing(ease_out_quint()),
-            |element, delta| element.opacity(delta).top(px((delta - 1.) * LIST_SLIDE)),
+            move |element, delta| element.opacity(delta).top(px((1. - delta) * slide)),
         );
-    let anchor_at = point(
-        open.position.x,
-        open.position.y.max(px(BAR_LIFT + WINDOW_MARGIN)),
-    );
+    let (anchor_at, corner) = if upside_down {
+        let lowest = viewport_height - WINDOW_MARGIN - BAR_LIFT;
+        (point(open.position.x, px(cursor_y.min(lowest))), Anchor::BottomLeft)
+    } else {
+        (
+            point(open.position.x, open.position.y.max(px(BAR_LIFT + WINDOW_MARGIN))),
+            Anchor::TopLeft,
+        )
+    };
     deferred(
-        anchored().position(anchor_at).child(
+        anchored().position(anchor_at).anchor(corner).child(
             div()
                 .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{}", open.key).into()))
                 .debug_selector(|| CONTEXT_MENU_TAG.into())
