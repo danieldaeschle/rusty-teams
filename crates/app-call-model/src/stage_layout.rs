@@ -9,6 +9,7 @@ pub const SWAP_INTERVAL: Duration = Duration::from_secs(5);
 pub const SPEAKER_HOLD: Duration = Duration::from_millis(1500);
 pub const SPEAKER_SWITCH_AFTER: Duration = Duration::from_millis(800);
 pub const RECENT_SPEAKER: Duration = Duration::from_secs(3);
+const KEEP_RECENT_ON_TOP: Duration = Duration::from_secs(20);
 const TILE_ASPECT: f32 = 16. / 9.;
 pub const STRIP_MIN_TILE_HEIGHT: f32 = 90.;
 const FIT_TOLERANCE: f32 = 0.001;
@@ -179,12 +180,17 @@ impl VisibleRotation {
                 *index,
             )
         });
-        self.order
-            .extend(arrivals.into_iter().map(|(_, mri)| mri.clone()));
+        let (spoken, silent): (Vec<_>, Vec<_>) = arrivals
+            .into_iter()
+            .map(|(_, mri)| mri.clone())
+            .partition(|mri| !priority.contains(mri) && self.last_spoke.contains_key(mri));
+        let front = self.front_slot(priority);
+        self.order.splice(front..front, spoken);
+        self.order.extend(silent);
         if capacity > 0 && capacity < self.order.len() {
             self.pull_in_priority(priority, capacity);
-            self.pull_in_speaker(now, priority, capacity);
         }
+        self.promote_speaker(now, priority, capacity);
         self.order != before
     }
 
@@ -201,36 +207,73 @@ impl VisibleRotation {
             if let Some(index) = self.order.iter().position(|other| other == mri)
                 && index >= capacity
             {
-                self.swap_in(index, priority, capacity);
+                let front = self.front_slot(priority);
+                let pinned = self.order.remove(index);
+                self.order.insert(front, pinned);
+                self.drop_least_recent(front, priority, capacity);
             }
         }
     }
 
-    fn pull_in_speaker(&mut self, now: Instant, priority: &[String], capacity: usize) {
+    fn front_slot(&self, priority: &[String]) -> usize {
+        self.order
+            .iter()
+            .position(|mri| !priority.contains(mri))
+            .unwrap_or(self.order.len())
+    }
+
+    /// Like Teams, a steady speaker moves up ahead of everyone who spoke less recently, so recent speakers stay on top.
+    fn promote_speaker(&mut self, now: Instant, priority: &[String], capacity: usize) {
         let rested = self
             .last_swap
             .is_none_or(|swapped| now.saturating_duration_since(swapped) >= SWAP_INTERVAL);
         if !rested {
             return;
         }
-        let candidate = self.order[capacity..]
+        let front = self.front_slot(priority);
+        let mut candidates: Vec<(usize, Instant)> = self
+            .order
             .iter()
             .enumerate()
-            .filter_map(|(offset, mri)| Some((capacity + offset, *self.speaking_since.get(mri)?)))
+            .skip(front)
+            .filter(|(_, mri)| !priority.contains(mri))
+            .filter_map(|(index, mri)| Some((index, *self.speaking_since.get(mri)?)))
             .filter(|(_, since)| now.saturating_duration_since(*since) >= SWAP_AFTER_SPEAKING)
-            .min_by_key(|(_, since)| *since);
-        if let Some((index, _)) = candidate
-            && self.swap_in(index, priority, capacity)
-        {
-            self.last_swap = Some(now);
+            .collect();
+        candidates.sort_by_key(|(index, since)| (*since, *index));
+        let Some((index, target)) = candidates
+            .into_iter()
+            .find_map(|(index, since)| Some((index, self.promotion_target(front, index, since, priority)?)))
+        else {
+            return;
+        };
+        let speaker = self.order.remove(index);
+        self.order.insert(target, speaker);
+        if capacity > 0 && index >= capacity {
+            self.drop_least_recent(target, priority, capacity);
         }
+        self.last_swap = Some(now);
     }
 
-    fn swap_in(&mut self, index: usize, priority: &[String], capacity: usize) -> bool {
-        let victim = self.order[..capacity]
+    fn promotion_target(&self, front: usize, index: usize, since: Instant, priority: &[String]) -> Option<usize> {
+        self.order[front..index]
+            .iter()
+            .position(|mri| {
+                !priority.contains(mri)
+                    && !self.speaking_since.contains_key(mri)
+                    && self
+                        .last_spoke
+                        .get(mri)
+                        .is_none_or(|spoke| since.saturating_duration_since(*spoke) >= KEEP_RECENT_ON_TOP)
+            })
+            .map(|offset| front + offset)
+    }
+
+    fn drop_least_recent(&mut self, newcomer: usize, priority: &[String], capacity: usize) {
+        let victim = self.order[..=capacity]
             .iter()
             .enumerate()
-            .filter(|(_, mri)| !priority.contains(mri))
+            .filter(|(position, mri)| *position != newcomer && !priority.contains(mri))
             .min_by_key(|(position, mri)| {
                 (
                     self.last_spoke.get(*mri).copied(),
@@ -238,11 +281,10 @@ impl VisibleRotation {
                 )
             })
             .map(|(position, _)| position);
-        let Some(victim) = victim else {
-            return false;
-        };
-        self.order.swap(victim, index);
-        true
+        if let Some(victim) = victim {
+            let dropped = self.order.remove(victim);
+            self.order.insert(capacity, dropped);
+        }
     }
 }
 
@@ -469,31 +511,55 @@ mod tests {
     }
 
     #[test]
-    fn the_least_recently_speaking_visible_tile_is_replaced_and_the_others_keep_their_slots() {
+    fn a_new_speaker_moves_up_and_the_least_recent_speaker_drops_out() {
         let mut rotation = VisibleRotation::default();
         let start = Instant::now();
         let members = names(6);
         rotation.update(start, &members, &[], &[], 4);
         rotation.update(start, &members, &[], &speak(&["p0", "p1", "p3"]), 4);
-        let before = visible(&rotation, 4);
-        rotation.update(start, &members, &[], &speak(&["p5", "p0", "p1", "p3"]), 4);
-        rotation.update(
-            start + SWAP_AFTER_SPEAKING,
-            &members,
-            &[],
-            &speak(&["p5", "p0", "p1", "p3"]),
-            4,
-        );
-        let after = visible(&rotation, 4);
-        let slot = before.iter().position(|mri| mri == "p2").unwrap();
-        assert_eq!(after[slot], "p5");
-        for (index, mri) in before
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != slot)
-        {
-            assert_eq!(&after[index], mri);
+        let talking = speak(&["p5", "p0", "p1", "p3"]);
+        rotation.update(start, &members, &[], &talking, 4);
+        rotation.update(start + SWAP_AFTER_SPEAKING, &members, &[], &talking, 4);
+        assert_eq!(visible(&rotation, 4), speak(&["p0", "p1", "p3", "p2"]));
+        rotation.update(start + SWAP_AFTER_SPEAKING + SWAP_INTERVAL, &members, &[], &talking, 4);
+        assert_eq!(visible(&rotation, 4), speak(&["p0", "p1", "p3", "p5"]));
+    }
+
+    #[test]
+    fn recent_speakers_stay_on_top_after_they_fall_silent() {
+        let mut rotation = VisibleRotation::default();
+        let start = Instant::now();
+        let members = names(6);
+        rotation.update(start, &members, &[], &[], 4);
+        rotation.update(start, &members, &[], &speak(&["p3"]), 4);
+        let promoted = start + SWAP_AFTER_SPEAKING;
+        rotation.update(promoted, &members, &[], &speak(&["p3"]), 4);
+        assert_eq!(rotation.order()[0], "p3");
+        let quiet = promoted + Duration::from_secs(1);
+        rotation.update(quiet, &members, &[], &[], 4);
+        rotation.update(quiet + Duration::from_secs(30), &members, &[], &[], 4);
+        assert_eq!(rotation.order()[0], "p3");
+    }
+
+    #[test]
+    fn two_people_taking_turns_keep_their_places() {
+        let mut rotation = VisibleRotation::default();
+        let start = Instant::now();
+        let members = names(4);
+        rotation.update(start, &members, &[], &speak(&["p2"]), 4);
+        rotation.update(start + SWAP_AFTER_SPEAKING, &members, &[], &speak(&["p2"]), 4);
+        let mut now = start + SWAP_AFTER_SPEAKING;
+        for _ in 0..2 {
+            now += Duration::from_secs(1);
+            rotation.update(now, &members, &[], &speak(&["p3"]), 4);
+            now += SWAP_INTERVAL;
+            rotation.update(now, &members, &[], &speak(&["p3"]), 4);
+            now += Duration::from_secs(1);
+            rotation.update(now, &members, &[], &speak(&["p2"]), 4);
+            now += SWAP_INTERVAL;
+            rotation.update(now, &members, &[], &speak(&["p2"]), 4);
         }
+        assert_eq!(rotation.order(), speak(&["p2", "p3", "p0", "p1"]).as_slice());
     }
 
     #[test]
