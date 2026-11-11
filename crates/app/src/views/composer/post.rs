@@ -43,6 +43,7 @@ const CLOSE_TOOLTIP: &str = "Close";
 const AUTHOR_AVATAR: f32 = 24.;
 const CARD_INSET: f32 = 12.;
 const SUBJECT_SIZE: f32 = 18.;
+const SUBJECT_LINE: f32 = 1.4;
 const INPUT_TEXT_SCALE: f32 = 0.875;
 const SUBJECT_INSET: f32 = 8.;
 const TEXT_INSET: f32 = 16.;
@@ -491,6 +492,8 @@ impl Composer {
                             Input::new(&subject)
                                 .appearance(false)
                                 .bordered(false)
+                                .h(px(SUBJECT_SIZE * SUBJECT_LINE))
+                                .line_height(px(SUBJECT_SIZE * SUBJECT_LINE))
                                 .with_size(Size::Size(px(SUBJECT_SIZE / INPUT_TEXT_SCALE))),
                         ),
                 )
