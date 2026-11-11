@@ -18,6 +18,7 @@ use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::post_card::{PostAction, post_in_channel_card};
 
+const FEED_CARD_TOP: f32 = 12.;
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
 
 pub(super) struct FeedStash {
@@ -279,7 +280,9 @@ impl ConversationView {
         if !self.in_feed() || self.pane != ChannelPane::Posts {
             return None;
         }
-        let proposal_card = self.render_proposal_card(cx);
+        let proposal_card = self
+            .render_proposal_card(cx)
+            .map(|card| div().w_full().pt(px(FEED_CARD_TOP)).child(card));
         if !self.new_post_open {
             let view = cx.entity().downgrade();
             let announce_view = view.clone();

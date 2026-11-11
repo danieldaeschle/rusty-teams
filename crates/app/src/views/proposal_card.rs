@@ -25,7 +25,7 @@ const CARD_GAP: f32 = 8.;
 const BUTTON_HEIGHT: f32 = 28.;
 const BUTTON_RADIUS: f32 = 7.;
 const BODY_LINE_HEIGHT: f32 = 20.;
-const BODY_MAX_LINES: f32 = 4.;
+const BODY_MAX_LINES: f32 = 12.;
 const QUOTE_BAR_WIDTH: f32 = 2.;
 const THUMBNAIL_HEIGHT: f32 = 48.;
 const THUMBNAIL_MAX_WIDTH: f32 = 120.;
@@ -275,7 +275,7 @@ pub fn render(
         .id("proposal-text")
         .w_full()
         .max_h(px(BODY_LINE_HEIGHT * BODY_MAX_LINES))
-        .overflow_hidden()
+        .overflow_y_scroll()
         .text_size(px(14.))
         .line_height(px(BODY_LINE_HEIGHT))
         .when(stale, |body| body.opacity(0.6))
