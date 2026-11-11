@@ -2022,7 +2022,7 @@ impl ConversationView {
         let Some(sync) = self.sync_of(generation) else {
             return false;
         };
-        if !sync.running() {
+        if !sync.running() || !sync.empty_cache {
             return false;
         }
         match stage {
@@ -3819,14 +3819,7 @@ impl ConversationView {
         } else if loading_window {
             subline = "Loading message ...".to_owned();
         } else if sync.shown_at.is_some() {
-            subline = if sync.slow {
-                "Taking longer than usual ..."
-            } else if sync.empty_cache {
-                "Loading messages ..."
-            } else {
-                "Updating ..."
-            }
-            .to_owned();
+            subline = if sync.slow { "Taking longer than usual ..." } else { "Loading messages ..." }.to_owned();
         }
         let inline_tabs = tabs.map(|tabs| h_flex().h_full().flex_1().child(tabs));
         let overflow = self.header_overflows();
