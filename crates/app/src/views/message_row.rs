@@ -65,6 +65,7 @@ const BUBBLE_PADDING_Y: f32 = 8.;
 const META_BOTTOM_INSET: f32 = 4.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
+const TICK_BASELINE_DROP: f32 = 0.75;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
 const IMPORTANCE_LABEL_SIZE: f32 = 12.;
@@ -492,7 +493,12 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
                     )
                     .into_any_element(),
                 };
-                let holder = div().id(ElementId::Name(format!("{}-receipt", row.key).into())).child(check);
+                // The tick glyph ends under a pixel above the time baseline; measured on Windows at 125 % and Linux at 100 %.
+                let holder = div()
+                    .id(ElementId::Name(format!("{}-receipt", row.key).into()))
+                    .relative()
+                    .top(px(TICK_BASELINE_DROP))
+                    .child(check);
                 meta.child(match row.receipt_label.clone() {
                     Some(label) => holder.tooltip(move |window, cx| {
                         gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
