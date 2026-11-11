@@ -9,6 +9,7 @@ use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::Sidebar;
+use app_ui_kit::layout::SIDEBAR_WIDTH;
 
 use super::avatar::person_avatar;
 use super::scroll_edge::{scroll_offset, with_top_edge};
@@ -819,7 +820,13 @@ impl Render for ActivityPanel {
             .read(cx)
             .feed()
             .sections(self.filter, today, offset);
-        let text_width = f32::from(self.scroll.bounds().size.width) - ROW_CHROME_WIDTH;
+        let measured_width = f32::from(self.scroll.bounds().size.width);
+        let list_width = if measured_width > 1. {
+            measured_width
+        } else {
+            SIDEBAR_WIDTH
+        };
+        let text_width = list_width - ROW_CHROME_WIDTH;
         let mut slots: Vec<Slot> = Vec::new();
         let proposals: Vec<PendingProposal> = agent_api::pending_proposals(cx)
             .into_iter()
