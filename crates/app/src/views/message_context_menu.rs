@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui_kit::base::{GlobalState, POPUP_PRIORITY};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::h_flex;
 use gpui_kit::*;
 
 use super::message_actions::{MenuActions, MessageMenu, picker_button, reaction_button};
@@ -15,6 +15,7 @@ pub const CONTEXT_MENU_TAG: &str = "message-context-menu";
 const PANEL_GAP: f32 = 6.;
 const BAR_PADDING: f32 = 3.;
 const WINDOW_MARGIN: f32 = 8.;
+const BAR_LIFT: f32 = TOOLBAR_HEIGHT + PANEL_GAP;
 const LIST_OPEN: Duration = Duration::from_millis(160);
 const REACTION_OPEN: Duration = Duration::from_millis(140);
 const REACTION_STAGGER: Duration = Duration::from_millis(35);
@@ -82,7 +83,7 @@ fn animated_reaction(button: AnyElement, index: usize, serial: u64) -> AnyElemen
         .into_any_element()
 }
 
-/// Telegram's behaviour in our look: quick reactions right above the cursor, the message menu right below it.
+/// Telegram's behaviour in our look: the menu opens at the cursor (flipped above it near the bottom edge), quick reactions sit on top of it.
 pub fn message_context_menu(
     mut menu: MessageMenu,
     open: &OpenContextMenu,
@@ -109,6 +110,12 @@ pub fn message_context_menu(
     let bar_pressed = open.bar_pressed.clone();
     let bar = h_flex()
         .debug_selector(|| format!("{CONTEXT_MENU_TAG}/reactions").into())
+        .absolute()
+        .left_0()
+        .bottom_full()
+        .mb(px(PANEL_GAP))
+        .occlude()
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .h(px(TOOLBAR_HEIGHT))
         .px(px(BAR_PADDING))
         .gap(px(1.))
@@ -129,22 +136,21 @@ pub fn message_context_menu(
             Animation::new(LIST_OPEN).with_easing(ease_out_quint()),
             |element, delta| element.opacity(delta).top(px((delta - 1.) * LIST_SLIDE)),
         );
-    let lifted = open.position - point(px(0.), px(TOOLBAR_HEIGHT + PANEL_GAP));
+    let anchor_at = point(
+        open.position.x,
+        open.position.y.max(px(BAR_LIFT + WINDOW_MARGIN)),
+    );
     deferred(
-        anchored()
-            .position(lifted)
-            .snap_to_window_with_margin(px(WINDOW_MARGIN))
-            .child(
-                v_flex()
-                    .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{}", open.key).into()))
-                    .debug_selector(|| CONTEXT_MENU_TAG.into())
-                    .items_start()
-                    .gap(px(PANEL_GAP))
-                    .occlude()
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                    .child(bar)
-                    .child(list),
-            ),
+        anchored().position(anchor_at).child(
+            div()
+                .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{}", open.key).into()))
+                .debug_selector(|| CONTEXT_MENU_TAG.into())
+                .relative()
+                .occlude()
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .child(list)
+                .child(bar),
+        ),
     )
     .with_priority(POPUP_PRIORITY)
     .into_any_element()
