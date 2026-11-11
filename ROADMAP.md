@@ -34,7 +34,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Start from the local cache, no spinner | Done |  |
 | Self-update | Done |  |
 | Tray icon, close to tray | Done |  |
-| Sign in on Linux without starting Chrome by hand | Partial | Works with a Chrome on a debug port |
+| Sign in on Linux without starting Chrome by hand | Done | The app starts Chrome or Chromium headless with its own profile, shows the window for the login and hides it again afterwards; a watchdog restarts a dead or hung Chrome |
 | Single instance, second start brings the window to front | Done |  |
 
 ## Chat list

@@ -45,3 +45,6 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 
 [target.'cfg(windows)'.dependencies]
 webview.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+browser.workspace = true
