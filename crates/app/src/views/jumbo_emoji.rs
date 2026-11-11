@@ -31,6 +31,7 @@ fn glyph(emoji: &JumboEmoji) -> AnyElement {
         .flex()
         .items_center()
         .text_size(px(GLYPH_SIZE))
+        .font_family(theme::EMOJI_FONT_FAMILY)
         .text_color(theme::text())
         .child(emoji.glyph.clone())
         .into_any_element()

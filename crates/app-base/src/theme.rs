@@ -21,6 +21,16 @@ const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Bold.ttf"),
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
+#[cfg(target_os = "linux")]
+const EMOJI_FONT: &[u8] = include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf");
+
+/// Family used for emoji glyphs. On Linux this is the bundled CBDT face.
+#[cfg(target_os = "windows")]
+pub const EMOJI_FONT_FAMILY: &str = "Segoe UI Emoji";
+#[cfg(target_os = "macos")]
+pub const EMOJI_FONT_FAMILY: &str = "Apple Color Emoji";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub const EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
 
 const WHITE: u32 = 0xffffff;
 const CLOSE_BUTTON_ICON: u32 = 0xffffff;
@@ -34,10 +44,10 @@ fn color_with_alpha(hex: u32) -> Hsla {
 }
 
 pub fn load_fonts(cx: &mut App) {
-    let fonts = FONT_FILES
-        .iter()
-        .map(|bytes| Cow::Borrowed(*bytes))
-        .collect();
+    let mut fonts: Vec<Cow<'static, [u8]>> =
+        FONT_FILES.iter().copied().map(Cow::Borrowed).collect();
+    #[cfg(target_os = "linux")]
+    fonts.push(Cow::Borrowed(EMOJI_FONT));
     let _ = cx.text_system().add_fonts(fonts);
 }
 
@@ -419,6 +429,24 @@ mod tests {
         }
         set_thread_scheme(None);
         set_thread_shade(None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bundled_emoji_font_is_cbdt_noto() {
+        let bytes = include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf");
+        assert!(bytes.windows(4).any(|window| window == b"CBDT"));
+        assert!(bytes.windows(4).any(|window| window == b"CBLC"));
+        assert!(!bytes.windows(4).any(|window| window == b"COLR"));
+        let postscript: Vec<u8> = "NotoColorEmoji"
+            .encode_utf16()
+            .flat_map(|unit| unit.to_be_bytes())
+            .collect();
+        assert!(
+            bytes
+                .windows(postscript.len())
+                .any(|window| window == postscript)
+        );
     }
 
     #[test]

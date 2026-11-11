@@ -466,6 +466,7 @@ impl FunPicker {
                 .justify_center()
                 .rounded(px(6.))
                 .text_size(px(20.))
+                .font_family(theme::EMOJI_FONT_FAMILY)
                 .cursor_pointer()
                 .hover(|cell| cell.bg(theme::popup_hover()))
                 .child(shown)

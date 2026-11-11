@@ -78,6 +78,7 @@ fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) ->
     let Some(image) = custom_emoji_image(glyph) else {
         return div()
             .text_size(px(size))
+            .font_family(theme::EMOJI_FONT_FAMILY)
             .child(label.to_owned())
             .into_any_element();
     };

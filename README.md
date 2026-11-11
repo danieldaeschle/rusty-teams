@@ -84,7 +84,7 @@
 | Platform | State |
 |---|---|
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
-| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222` and signed in to Teams on the web. The app opens an Outlook on the web tab next to it when missing (some tenants grant chat scopes only to Outlook). Built-in login is planned |
+| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222` and signed in to Teams on the web. The app opens an Outlook on the web tab next to it when missing (some tenants grant chat scopes only to Outlook). Color emoji use a bundled bitmap Noto Color Emoji font; a system COLRv1 face of the same name is left out of the font list. The window id is `rusty-teams`. Copy `crates/app/assets/linux/rusty-teams.desktop` to `~/.local/share/applications/` and `crates/app/assets/icon/teams-fast-256.png` to `~/.local/share/icons/hicolor/256x256/apps/rusty-teams.png` so the dock can match it. Built-in login is planned |
 | 🍎 macOS | Experimental. Universal arm64 + x86_64 binary, connects to a Chrome like Linux |
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
