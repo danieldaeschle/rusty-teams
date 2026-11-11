@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chatsvc::{CalendarEvent, ResponseType};
 use chrono::{DateTime, Duration, FixedOffset, Utc};
@@ -93,7 +93,7 @@ pub struct MeetingToasts {
     entries: Vec<MeetingToast>,
     fired: HashSet<(String, ReminderPhase)>,
     snoozed: HashSet<String>,
-    dismissed: HashSet<String>,
+    dismissed: HashMap<String, ReminderPhase>,
     chimed: HashSet<String>,
     next_id: u64,
     last_check: Option<DateTime<Utc>>,
@@ -122,11 +122,24 @@ impl MeetingToasts {
         &mut self.outlook
     }
 
+    /// Closing a reminder keeps the meeting quiet until someone joins it, then the live toast still comes, like Teams.
     pub fn dismiss(&mut self, id: u64) -> Option<MeetingToast> {
         let index = self.entries.iter().position(|toast| toast.id == id)?;
         let toast = self.entries.remove(index);
-        self.dismissed.insert(toast.event_key.clone());
+        self.dismissed.insert(toast.event_key.clone(), toast.phase);
         Some(toast)
+    }
+
+    pub fn dismiss_for_good(&mut self, id: u64) -> Option<MeetingToast> {
+        let toast = self.dismiss(id)?;
+        self.dismissed.insert(toast.event_key.clone(), ReminderPhase::Live);
+        Some(toast)
+    }
+
+    fn blocked(&self, key: &str, phase: ReminderPhase) -> bool {
+        self.dismissed
+            .get(key)
+            .is_some_and(|dismissed_at| *dismissed_at == ReminderPhase::Live || phase != ReminderPhase::Live)
     }
 
     pub fn snooze(&mut self, id: u64) -> Option<MeetingToast> {
@@ -157,7 +170,7 @@ impl MeetingToasts {
         let candidates: Vec<String> = events
             .iter()
             .filter(|event| {
-                phase_at(event, now, false).is_some() && !self.dismissed.contains(&event_key(event))
+                phase_at(event, now, false).is_some() && !self.blocked(&event_key(event), ReminderPhase::Live)
             })
             .filter_map(|event| event.thread_id.clone())
             .collect();
@@ -179,15 +192,16 @@ impl MeetingToasts {
         let outlook = &self.outlook;
         self.entries.retain(|toast| {
             events.iter().any(|event| {
+                let phase = phase_at(event, now, is_live(event, live_threads));
                 event_key(event) == toast.event_key
-                    && outlook.allows(event, now)
-                    && phase_at(event, now, is_live(event, live_threads)).is_some()
+                    && phase.is_some()
+                    && (phase == Some(ReminderPhase::Live) || outlook.allows(event, now))
             })
         });
         let keys: HashSet<String> = events.iter().map(event_key).collect();
         self.fired.retain(|(key, _)| keys.contains(key));
         self.snoozed.retain(|key| keys.contains(key));
-        self.dismissed.retain(|key| keys.contains(key));
+        self.dismissed.retain(|key, _| keys.contains(key));
         self.chimed.retain(|key| keys.contains(key));
         let mut chime = false;
         for event in events {
@@ -195,10 +209,10 @@ impl MeetingToasts {
                 continue;
             };
             let key = event_key(event);
-            if self.dismissed.contains(&key) {
+            if self.blocked(&key, phase) {
                 continue;
             }
-            if !self.outlook.allows(event, now) {
+            if phase != ReminderPhase::Live && !self.outlook.allows(event, now) {
                 self.fired.retain(|(fired_key, _)| *fired_key != key);
                 continue;
             }
@@ -285,7 +299,7 @@ impl AppState {
     }
 
     pub fn join_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(toast) = self.meeting_toasts.dismiss(id) else {
+        let Some(toast) = self.meeting_toasts.dismiss_for_good(id) else {
             return;
         };
         cx.emit(AppEvent::MeetingReminder);
@@ -513,18 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn a_toast_closed_with_the_corner_x_stays_gone_when_the_meeting_goes_live() {
-        let events = [live_event("a")];
-        let mut toasts = MeetingToasts::default();
-        tick(&mut toasts, &events, at(8, 55, 0), true);
-        let id = toasts.entries()[0].id;
-        toasts.dismiss(id);
-        let update = tick_live(&mut toasts, &events, at(8, 57, 0));
-        assert!(!update.changed && !update.chime);
-        assert!(toasts.is_empty());
-    }
-
-    #[test]
     fn started_then_live_chimes_once() {
         let events = [live_event("a")];
         let mut toasts = MeetingToasts::default();
@@ -594,7 +596,7 @@ mod tests {
         tick(&mut toasts, &events, at(8, 56, 0), true);
         let id = toasts.entries()[0].id;
         toasts.dismiss(id);
-        assert!(toasts.live_candidates(&events, at(8, 57, 0)).is_empty());
+        assert_eq!(toasts.live_candidates(&events, at(8, 57, 0)).len(), 1);
     }
 
     #[test]
@@ -734,6 +736,38 @@ mod tests {
         );
         let dismissed = toasts.dismiss(toasts.entries()[0].id).unwrap();
         assert_eq!(dismissed.event_id, "b");
+    }
+
+    #[test]
+    fn a_closed_reminder_still_pops_up_once_someone_joins() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        toasts.dismiss(toasts.entries()[0].id);
+        assert!(!tick(&mut toasts, &events, at(9, 0, 0), true).changed);
+        assert!(tick_live(&mut toasts, &events, at(9, 2, 0)).changed);
+        assert_eq!(toasts.entries()[0].phase, ReminderPhase::Live);
+        toasts.dismiss(toasts.entries()[0].id);
+        assert!(!tick_live(&mut toasts, &events, at(9, 3, 0)).changed);
+    }
+
+    #[test]
+    fn a_reminder_dismissed_in_outlook_does_not_mute_the_live_toast() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        outlook_state(&mut toasts, at(8, 54, 0), &[]);
+        assert!(!tick(&mut toasts, &events, at(8, 56, 0), true).changed);
+        assert!(tick_live(&mut toasts, &events, at(8, 57, 0)).changed);
+    }
+
+    #[test]
+    fn joining_from_the_reminder_mutes_the_live_toast() {
+        let events = [live_event("a")];
+        let mut toasts = MeetingToasts::default();
+        tick(&mut toasts, &events, at(8, 55, 0), true);
+        toasts.dismiss_for_good(toasts.entries()[0].id);
+        assert!(!tick_live(&mut toasts, &events, at(9, 2, 0)).changed);
+        assert!(toasts.live_candidates(&events, at(9, 2, 0)).is_empty());
     }
 
     #[test]
