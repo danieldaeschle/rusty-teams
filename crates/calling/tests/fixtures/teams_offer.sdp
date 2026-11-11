@@ -19,7 +19,7 @@ a=rtpmap:8 PCMA/8000
 a=rtpmap:13 CN/8000
 a=rtpmap:110 telephone-event/48000
 a=rtpmap:126 telephone-event/8000
-a=fmtp:111 minptime=10;useinbandfec=1
+a=fmtp:111 minptime=10;useinbandfec=1;maxplaybackrate=48000;sprop-maxcapturerate=48000
 a=fmtp:97 111/111
 a=rtcp:1234
 a=rtcp-fb:111 transport-cc

@@ -10,6 +10,7 @@ use libwebrtc::prelude::*;
 use tokio::task::JoinHandle;
 
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
+use crate::band_meter::HighBandMeter;
 use crate::audio_io::AudioMode;
 use crate::capture::Capture;
 use crate::devices::DeviceChoice;
@@ -24,6 +25,7 @@ use crate::wav_dump::StageDumps;
 const SOURCE_QUEUE_MS: u32 = 100;
 const FRAME_PERIOD: Duration = Duration::from_millis(10);
 const MAX_LAG: Duration = Duration::from_millis(100);
+const BAND_REPORT_PERIOD: Duration = Duration::from_secs(10);
 const SYSTEM_TONE_HZ: f32 = 660.0;
 const SYNTHETIC_AMPLITUDE: f32 = 0.3;
 
@@ -239,8 +241,17 @@ impl Drop for SoftwareAudio {
 
 async fn feed_far_end(remote: RtcAudioTrack, queue: SampleQueue) {
     let mut stream = NativeAudioStream::new(remote, SAMPLE_RATE as i32, 1);
+    let mut band_meter = HighBandMeter::default();
+    let mut next_report = Instant::now() + BAND_REPORT_PERIOD;
     while let Some(frame) = stream.next().await {
         queue.push(&frame.data);
+        band_meter.add(&frame.data);
+        if Instant::now() >= next_report {
+            next_report += BAND_REPORT_PERIOD;
+            if let Some(share) = band_meter.take_share() {
+                eprintln!("calls: far-end audio energy above 8 kHz: {:.2}%", share * 100.);
+            }
+        }
     }
 }
 
