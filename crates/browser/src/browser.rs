@@ -60,10 +60,10 @@ impl Default for Timeouts {
             start: Duration::from_secs(20),
             stop: Duration::from_secs(15),
             probe: Duration::from_secs(5),
-            poll: Duration::from_millis(500),
+            poll: Duration::from_millis(250),
             profile_release: Duration::from_secs(2),
-            jitter_min: Duration::from_millis(500),
-            jitter_max: Duration::from_secs(2),
+            jitter_min: Duration::ZERO,
+            jitter_max: Duration::ZERO,
         }
     }
 }
@@ -188,12 +188,46 @@ impl Browser {
         self.ensure_tabs_locked().await
     }
 
+    pub fn is_visible_managed(&self) -> bool {
+        self.inner.config.mode_file.exists() && self.mode() == Mode::Visible
+    }
+
+    pub async fn teams_has_msal_cache(&self) -> bool {
+        let Ok(tabs) = self.tabs().await else { return false };
+        let Some(tab) = targets::app_tab(&tabs, App::Teams) else { return false };
+        if tab.parked {
+            return false;
+        }
+        let url = format!("ws://127.0.0.1:{}/devtools/page/{}", self.inner.config.port, tab.id);
+        let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i) || ''; if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
+        let params = json!({ "expression": expression, "returnByValue": true });
+        cdp_call(&url, "Runtime.evaluate", params, self.inner.timeouts.probe)
+            .await
+            .ok()
+            .and_then(|value| value.pointer("/result/value")?.as_bool())
+            .unwrap_or(false)
+    }
+
     pub async fn login_window(&self) -> Result<(), BrowserError> {
-        self.relaunch(false).await
+        let _guard = self.inner.operation.lock().await;
+        if self.is_visible_managed() && self.is_running().await {
+            return Ok(());
+        }
+        // Always open Teams alone for login: opening Outlook alongside Teams sends Outlook to
+        // login.microsoftonline.com?prompt=select_account before Teams has an SSO cookie, leaving
+        // that second tab stuck on login even after Teams finishes signing in. Headless mode and
+        // CdpTransport open Outlook silently once Teams is signed in.
+        self.inner.wanted.store(true, Ordering::SeqCst);
+        self.stop_locked(false).await?;
+        self.launch_with_urls_locked(false, start_urls_for(true)).await
     }
 
     pub async fn headless(&self) -> Result<(), BrowserError> {
-        self.relaunch(true).await
+        let _guard = self.inner.operation.lock().await;
+        if self.inner.config.mode_file.exists() && self.mode() == Mode::Headless && self.is_running().await {
+            return Ok(());
+        }
+        self.relaunch_locked(true).await
     }
 
     pub async fn stop(&self) -> Result<(), BrowserError> {
@@ -210,12 +244,11 @@ impl Browser {
         self.inner.wanted.store(wanted, Ordering::SeqCst);
     }
 
-    pub(crate) fn is_busy(&self) -> bool {
+    pub fn is_busy(&self) -> bool {
         self.inner.operation.try_lock().is_err()
     }
 
-    async fn relaunch(&self, headless: bool) -> Result<(), BrowserError> {
-        let _guard = self.inner.operation.lock().await;
+    async fn relaunch_locked(&self, headless: bool) -> Result<(), BrowserError> {
         self.inner.wanted.store(true, Ordering::SeqCst);
         self.stop_locked(false).await?;
         self.launch_locked(headless).await
@@ -276,12 +309,16 @@ impl Browser {
     }
 
     async fn launch_locked(&self, headless: bool) -> Result<(), BrowserError> {
+        self.launch_with_urls_locked(headless, start_urls_for(headless)).await
+    }
+
+    async fn launch_with_urls_locked(&self, headless: bool, start_urls: Vec<String>) -> Result<(), BrowserError> {
         let config = &self.inner.config;
         tokio::time::sleep(self.jitter()).await;
         if self.is_running().await {
             return Err(BrowserError::PortBusy(config.port));
         }
-        let request = LaunchRequest { headless, start_urls: start_urls_for(headless) };
+        let request = LaunchRequest { headless, start_urls };
         self.inner.launcher.spawn(&request)?;
         let mode = if headless { Mode::Headless } else { Mode::Visible };
         if let Some(parent) = config.mode_file.parent() {

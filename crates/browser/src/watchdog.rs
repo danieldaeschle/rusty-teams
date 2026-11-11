@@ -23,17 +23,19 @@ pub struct WatchdogConfig {
     pub died_wait: Duration,
     pub probe_interval: Duration,
     pub probe_failures: u32,
+    pub login_grace: Duration,
 }
 
 impl Default for WatchdogConfig {
     fn default() -> Self {
         WatchdogConfig {
-            poll_interval: Duration::from_secs(5),
-            initial_backoff: Duration::from_secs(2),
-            max_backoff: Duration::from_secs(60),
-            died_wait: Duration::from_secs(2),
+            poll_interval: Duration::from_millis(500),
+            initial_backoff: Duration::from_millis(500),
+            max_backoff: Duration::from_secs(10),
+            died_wait: Duration::from_millis(1000),
             probe_interval: Duration::from_secs(30),
             probe_failures: 2,
+            login_grace: Duration::from_secs(4),
         }
     }
 }
@@ -71,6 +73,7 @@ async fn run(browser: Browser, config: WatchdogConfig, sender: mpsc::Sender<Brow
     let mut alive = false;
     let mut died = false;
     let mut login_announced = false;
+    let mut login_since: Option<tokio::time::Instant> = None;
     let mut probe_failures = 0;
     let mut last_probe = tokio::time::Instant::now();
     loop {
@@ -91,10 +94,18 @@ async fn run(browser: Browser, config: WatchdogConfig, sender: mpsc::Sender<Brow
                 .status()
                 .await
                 .is_ok_and(|status| status.login_state == LoginState::Required);
-            if required && !login_announced && sender.send(BrowserEvent::LoginRequired).await.is_err() {
-                return;
+            if required {
+                let first_seen = *login_since.get_or_insert_with(tokio::time::Instant::now);
+                if first_seen.elapsed() >= config.login_grace && !login_announced {
+                    login_announced = true;
+                    if sender.send(BrowserEvent::LoginRequired).await.is_err() {
+                        return;
+                    }
+                }
+            } else {
+                login_since = None;
+                login_announced = false;
             }
-            login_announced = required;
             if last_probe.elapsed() >= config.probe_interval {
                 match browser.probe_renderer().await {
                     RendererState::Hung => probe_failures += 1,
@@ -120,6 +131,7 @@ async fn run(browser: Browser, config: WatchdogConfig, sender: mpsc::Sender<Brow
         if alive {
             alive = false;
             login_announced = false;
+            login_since = None;
             if browser.is_wanted() {
                 died = true;
                 if sender.send(BrowserEvent::Died).await.is_err() {
