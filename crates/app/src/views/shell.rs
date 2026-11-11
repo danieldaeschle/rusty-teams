@@ -35,6 +35,7 @@ use super::sidebar::{SidebarEvent, SidebarTab, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, SIDEBAR_WIDTH};
 use super::connection_banner::render_connection_banner;
+use super::splash::{self, Phase, Splash, StartupFacts};
 use super::notice_toast::NoticeToasts;
 use super::status_menu::{own_status_button, settings_more_button};
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
@@ -184,6 +185,7 @@ pub struct AppShell {
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
     update: UpdateStatus,
+    splash: Splash,
     toasts: NoticeToasts,
     user_input: Arc<UserInput>,
     _subscription: Subscription,
@@ -408,6 +410,7 @@ impl AppShell {
             focus_handle,
             open_target,
             update: UpdateStatus::UpToDate,
+            splash: Splash::default(),
             toasts: NoticeToasts::default(),
             user_input,
             _subscription: subscription,
@@ -865,13 +868,52 @@ impl AppShell {
 }
 
 impl AppShell {
+    fn render_splash(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let phase = if self.splash.is_up() {
+            let opening = self.conversation.read(cx).opening_title();
+            let state = self.state.read(cx);
+            let phase = splash::phase(&StartupFacts {
+                elapsed: self.splash.elapsed(),
+                connection: &state.connection,
+                has_chats: !state.sidebar.chats.is_empty() || !state.sidebar.teams.is_empty(),
+                synced: state.last_sync.is_some(),
+                demo: state.mode.demo,
+                opening,
+            });
+            if phase != Phase::Ready && cx.reduce_motion() && !self.splash.recheck_scheduled {
+                self.splash.recheck_scheduled = true;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(splash::STILL_RECHECK).await;
+                    this.update(cx, |this, cx| {
+                        this.splash.recheck_scheduled = false;
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            if phase == Phase::Ready {
+                self.splash.hide();
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(splash::CONTENT_RISE).await;
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                })
+                .detach();
+            }
+            phase
+        } else {
+            Phase::Ready
+        };
+        self.splash.render(&phase, cx)
+    }
+
     fn islands(
         &self,
         show_sidebar: bool,
         calendar_open: bool,
         quick_view_open: bool,
         calls_open: bool,
-    ) -> impl IntoElement {
+    ) -> Div {
         h_flex()
             .debug_selector(|| "shell/islands".into())
             .flex_1()
@@ -972,12 +1014,13 @@ impl Render for AppShell {
         let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
         let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
         let calls_tab = self.sidebar.read(cx).tab() == SidebarTab::Calls;
+        let splash = self.render_splash(cx);
         let state = self.state.read(cx);
         let calendar_open = calendar_tab;
         let quick_view_open = chats_tab && state.quick_view.is_some();
         let calls_open = calls_tab;
         let show_sidebar = !calendar_open && !calls_open;
-        let banner = state.connection_banner_text().map(|banner| {
+        let banner = state.connection_banner_text().filter(|_| !self.splash.is_up()).map(|banner| {
             render_connection_banner(
                 banner,
                 cx.listener(|this, _, _, cx| {
@@ -1189,8 +1232,9 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(self.islands(show_sidebar, calendar_open, quick_view_open, calls_open)),
+                    .child(rising_in(self.islands(show_sidebar, calendar_open, quick_view_open, calls_open), &self.splash, cx)),
             )
+            .children(splash)
             .children(self.image_viewer.clone())
             .children(self.switcher.clone())
             .children(render_task_dialog(self.state.read(cx), cx))
@@ -1204,6 +1248,18 @@ impl Render for AppShell {
     }
 }
 
+fn rising_in(islands: Div, splash: &Splash, cx: &App) -> AnyElement {
+    if splash.content_rising().is_none() || cx.reduce_motion() {
+        return islands.into_any_element();
+    }
+    islands
+        .relative()
+        .with_animation("startup-content-rise", Animation::new(splash::CONTENT_RISE).with_easing(ease_out_quint()), |islands, delta| {
+            islands.top(px(splash::CONTENT_RISE_OFFSET * (1. - delta))).opacity(delta)
+        })
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod opening_link_tests {
     use super::opening_link_text;
@@ -1215,3 +1271,4 @@ mod opening_link_tests {
         assert_eq!(opening_link_text(""), "Opening link...");
     }
 }
+

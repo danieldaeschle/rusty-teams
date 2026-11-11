@@ -660,6 +660,11 @@ impl ConversationView {
     }
 
     #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn opening_title(&self) -> Option<String> {
+        let loading = self.rows.borrow().iter().any(|row| matches!(row, Row::Skeleton(_)));
+        self.current.as_ref().filter(|_| loading).map(|current| current.title.clone())
+    }
+
     pub fn send_in_flight(&self) -> bool {
         self.pending
             .iter()

@@ -91,6 +91,7 @@ pub mod shortcuts_dialog;
 mod chat_menu;
 mod last_views;
 pub mod sidebar;
+pub mod splash;
 pub mod status_menu;
 pub mod status_message_dialog;
 pub mod switcher;

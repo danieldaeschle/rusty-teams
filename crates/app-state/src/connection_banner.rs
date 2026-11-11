@@ -7,6 +7,7 @@ use crate::app_state::AppState;
 use crate::backend::{ConnectionState, LiveState};
 
 pub const SHOW_AFTER: Duration = Duration::from_secs(4);
+pub const CONNECTING_SHOW_AFTER: Duration = Duration::from_secs(15);
 pub const MIN_VISIBLE: Duration = Duration::from_secs(3);
 const OFFLINE_TEXT: &str =
     "Something went wrong while connecting to Teams. Reconnect to keep the conversation going.";
@@ -91,11 +92,12 @@ impl BannerTiming {
                     return None;
                 }
                 let waited = now.duration_since(bad_since);
-                if waited >= SHOW_AFTER {
+                let show_after = show_after(kind);
+                if waited >= show_after {
                     self.shown = Some((kind, now));
                     return None;
                 }
-                Some(SHOW_AFTER - waited)
+                Some(show_after - waited)
             }
             None => {
                 self.bad_since = None;
@@ -108,6 +110,13 @@ impl BannerTiming {
                 Some(MIN_VISIBLE - visible_for)
             }
         }
+    }
+}
+
+fn show_after(kind: BannerKind) -> Duration {
+    match kind {
+        BannerKind::Connecting => CONNECTING_SHOW_AFTER,
+        _ => SHOW_AFTER,
     }
 }
 
@@ -158,7 +167,7 @@ mod tests {
 
     use chrono::Utc;
 
-    use super::{BannerKind, BannerTiming, MIN_VISIBLE, SHOW_AFTER, banner_kind, banner_text};
+    use super::{BannerKind, BannerTiming, CONNECTING_SHOW_AFTER, MIN_VISIBLE, SHOW_AFTER, banner_kind, banner_text};
     use crate::backend::{ConnectionState, LiveState};
 
     #[test]
@@ -171,6 +180,16 @@ mod tests {
         );
         assert_eq!(timing.update(None, start + Duration::from_secs(2)), None);
         assert_eq!(timing.visible(), None);
+    }
+
+    #[test]
+    fn connecting_waits_longer_than_a_lost_connection() {
+        let mut timing = BannerTiming::default();
+        let start = Instant::now();
+        timing.update(Some(BannerKind::Connecting), start);
+        assert!(timing.update(Some(BannerKind::Connecting), start + SHOW_AFTER).is_some());
+        assert_eq!(timing.update(Some(BannerKind::Connecting), start + CONNECTING_SHOW_AFTER), None);
+        assert_eq!(timing.visible(), Some(BannerKind::Connecting));
     }
 
     #[test]
