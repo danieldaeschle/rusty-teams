@@ -11,6 +11,7 @@ use super::avatar::{bot_avatar, person_avatar};
 use super::call_card::{CallActions, call_card_row};
 use super::jumbo_emoji::jumbo_row;
 use super::link_preview::{link_preview_card, meeting_join_chip};
+use super::message_appear::{AppearKind, appear};
 use super::message_actions::{MessageMenu, ReactionAdder, message_toolbar};
 use super::profile_card::opens_profile;
 use super::reaction_picker::PickHandler;
@@ -127,6 +128,7 @@ pub struct RowActions {
     pub reaction_proposal: Option<ReactionPill>,
     pub undo_delete: SharedRowAction,
     pub compact: bool,
+    pub appear: Option<AppearKind>,
 }
 
 pub fn row_spacing(has_previous: bool, compact: bool) -> f32 {
@@ -816,6 +818,7 @@ pub fn render_message_row(
         reaction_proposal,
         undo_delete,
         compact,
+        appear: appear_kind,
     } = actions;
     let extras = BubbleExtras {
         hover: hovered,
@@ -848,10 +851,14 @@ pub fn render_message_row(
     } else {
         others_row(row, index, directory, bot.as_ref(), delivery, extras, cx)
     };
+    let body = match appear_kind.filter(|_| !cx.reduce_motion()) {
+        Some(kind) => appear(body, &row.key, kind).into_any_element(),
+        None => body.into_any_element(),
+    };
     let checked = select.as_ref().is_some_and(|select| select.checked);
     let body = match select {
         Some(select) => selectable_body(select, index, body).into_any_element(),
-        None => body.into_any_element(),
+        None => body,
     };
     container
         .child(

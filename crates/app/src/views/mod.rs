@@ -62,6 +62,7 @@ pub mod join_dialog;
 pub mod jumbo_emoji;
 pub mod link_preview;
 pub mod message_actions;
+pub mod message_appear;
 pub mod message_context_menu;
 pub mod message_row;
 pub mod new_chat;

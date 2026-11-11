@@ -36,6 +36,7 @@ mod forward_select;
 pub use forward_select::{
     FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG, FORWARD_FOOTER_TAG,
 };
+mod appear_tracker;
 mod jump;
 mod notes_space;
 mod pins;
@@ -285,6 +286,7 @@ pub struct ConversationView {
     agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     receipt_fade: receipt_fade::ReceiptFade,
+    appear_tracker: appear_tracker::AppearTracker,
     find_panel: Option<Entity<FindPanel>>,
     find_subscription: Option<Subscription>,
     group_name: GroupNameSlot,
@@ -638,6 +640,7 @@ impl ConversationView {
             agent_runs: Rc::new(RefCell::new(HashMap::new())),
             reaction_proposals: Rc::new(RefCell::new(HashMap::new())),
             receipt_fade: receipt_fade::ReceiptFade::default(),
+            appear_tracker: appear_tracker::AppearTracker::default(),
             find_panel: None,
             find_subscription: None,
             _subscriptions: subscriptions,
@@ -1781,6 +1784,8 @@ impl ConversationView {
         let placeholders = records.is_empty()
             && (loading_post || current.sync.messages && thread_root.is_none());
         let in_feed = current.mode == ViewMode::ThreadList;
+        let appear_scope = format!("{conversation_id}/{:?}", current.mode);
+        let appear_live = !placeholders && !in_feed && window.is_none() && !current.sync.messages;
         let mut rows = match &current.mode {
             _ if placeholders => {
                 current.has_older = false;
@@ -1856,6 +1861,7 @@ impl ConversationView {
             }
         }
         assign_series(&mut rows);
+        self.track_appearing(&rows, &appear_scope, appear_live, reset);
         self.apply_rows(rows, reset, cx);
         if self.is_detached() {
             self.scroller
@@ -2243,6 +2249,29 @@ impl ConversationView {
         let conversation_id = current.selection.conversation_id().to_owned();
         self.receipt_fade
             .apply(&conversation_id, settled, receipts, Instant::now())
+    }
+
+    fn track_appearing(&mut self, rows: &[Row], scope: &str, live: bool, reset: bool) {
+        let sending: HashSet<&str> = self.pending.iter().map(|row| row.key.as_str()).collect();
+        let candidates: Vec<appear_tracker::Candidate> = rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Message(message) => Some(appear_tracker::Candidate {
+                    key: &message.key,
+                    own: message.own,
+                    origin: if sending.contains(message.key.as_str()) {
+                        appear_tracker::Origin::Sending
+                    } else if message.key.starts_with(SCHEDULED_KEY_PREFIX) {
+                        appear_tracker::Origin::Scheduled
+                    } else {
+                        appear_tracker::Origin::Server
+                    },
+                }),
+                _ => None,
+            })
+            .collect();
+        self.appear_tracker
+            .apply(scope, live, reset, &candidates, Instant::now());
     }
 
     fn schedule_fade_end(&mut self, cx: &mut Context<Self>) {
@@ -3988,6 +4017,7 @@ impl Render for ConversationView {
             agent_runs: self.agent_runs.clone(),
             reaction_proposals: self.reaction_proposals.clone(),
             forward_selection: forward_selection.clone(),
+            appearing: self.appear_tracker.entering(Instant::now()),
         };
         let pin_banner = self
             .render_pin_banner(cx)

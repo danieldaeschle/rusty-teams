@@ -21,6 +21,7 @@ use crate::views::call_card::CallActions;
 use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
 use crate::views::message_context_menu::message_context_menu;
+use crate::views::message_appear::AppearKind;
 use crate::views::message_row::{DeliveryActions, RowActions, RowSelect, SharedRowAction};
 use crate::views::post_card::{PostAction, PostActions};
 use crate::views::reaction_proposal_pill::ReactionPill;
@@ -37,6 +38,7 @@ pub(super) struct RenderEnv {
     pub agent_runs: Rc<RefCell<HashMap<String, AgentRun>>>,
     pub reaction_proposals: Rc<RefCell<HashMap<String, ReactionProposal>>>,
     pub forward_selection: Option<SelectionSnapshot>,
+    pub appearing: HashMap<String, AppearKind>,
 }
 
 fn boxed(action: impl Fn(&mut App) + 'static) -> Box<dyn Fn(&mut App)> {
@@ -377,6 +379,7 @@ impl RenderEnv {
             undo_delete: self.undo_delete_action(message, is_real, view, cx),
             compact: self.app.read(cx).account_chat_settings().message_density
                 == teams_core::MessageDensity::Compact,
+            appear: self.appearing.get(&message.key).copied(),
         }
     }
 
