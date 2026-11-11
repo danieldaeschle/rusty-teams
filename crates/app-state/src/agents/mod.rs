@@ -12,7 +12,7 @@ pub mod store;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use agents::{AgentAction, Environment};
+use agents::{AgentAction, AgentProfile, Environment};
 pub use app_base::agents::{lanes, settings_problems};
 pub use app_ui_kit::{settings_controls, spinner};
 use directories::ProjectDirs;
@@ -42,6 +42,15 @@ fn mcp_config_directory() -> Option<PathBuf> {
 pub fn runs_handle(cx: &App) -> Option<Entity<AgentRuns>> {
     cx.try_global::<AgentRunsHandle>()
         .map(|handle| handle.0.clone())
+}
+
+/// Chat profile for «Write with», or `None` when Microsoft Copilot is selected.
+pub fn local_writer(cx: &App) -> Option<AgentProfile> {
+    runs_handle(cx)?
+        .read(cx)
+        .settings()
+        .write_with_profile()
+        .cloned()
 }
 
 pub fn agents_enabled(cx: &App) -> bool {

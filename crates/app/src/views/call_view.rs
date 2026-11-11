@@ -88,8 +88,13 @@ const PUSH_TO_TALK_TOP: f32 = 12.;
 
 pub fn reaction_glyph(reaction: &Reaction) -> String {
     match reaction {
+        Reaction::Like => "\u{1F44D}".to_owned(),
+        // Keep VS16 so the heart stays emoji-style, not a text outline.
+        Reaction::Heart => "\u{2764}\u{FE0F}".to_owned(),
         Reaction::Applause => "\u{1F44F}".to_owned(),
-        other => chat_reaction_glyph(other.name()),
+        Reaction::Laugh => "\u{1F606}".to_owned(),
+        Reaction::Surprised => "\u{1F62E}".to_owned(),
+        Reaction::Other(name) => chat_reaction_glyph(name),
     }
 }
 
@@ -141,6 +146,7 @@ fn reaction_chip(reaction: Reaction, serial: u64) -> AnyElement {
         .rounded_full()
         .bg(theme::popup())
         .text_size(px(if emoji { 20. } else { 13. }))
+        .when(emoji, |chip| chip.font_family(theme::EMOJI_FONT_FAMILY))
         .child(glyph)
         .with_animation(
             ("call-reaction", serial as usize),
@@ -914,6 +920,7 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
                         .justify_center()
                         .rounded(px(8.))
                         .text_size(px(24.))
+                        .font_family(theme::EMOJI_FONT_FAMILY)
                         .cursor_pointer()
                         .hover(|cell| cell.bg(theme::border_strong()))
                         .child(reaction_glyph(&reaction))

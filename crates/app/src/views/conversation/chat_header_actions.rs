@@ -110,7 +110,7 @@ impl ConversationView {
         } else {
             open_details
         };
-        let copilot_label = self.copilot_label();
+        let copilot_label = self.copilot_label(cx);
         Some(
             Button::new(CHAT_HEADER_MORE_TAG)
                 .icon(IconName::Ellipsis)
@@ -121,7 +121,7 @@ impl ConversationView {
                 .debug_selector(|| CHAT_HEADER_MORE_TAG.into())
                 .dropdown_menu(move |popup, window, cx| {
                     let popup = if overflow {
-                        overflow_items(popup, view.clone(), copilot_label, details_label)
+                        overflow_items(popup, view.clone(), copilot_label.clone(), details_label)
                     } else {
                         popup
                     };
@@ -140,7 +140,7 @@ impl ConversationView {
 fn overflow_items(
     popup: PopupMenu,
     view: WeakEntity<ConversationView>,
-    copilot_label: &'static str,
+    copilot_label: String,
     details_label: &'static str,
 ) -> PopupMenu {
     let (find_view, details_view) = (view.clone(), view.clone());
