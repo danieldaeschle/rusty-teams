@@ -113,6 +113,7 @@ dependencies = [
 name = "agents"
 version = "0.2.0"
 dependencies = [
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tempfile",
@@ -5192,8 +5193,6 @@ dependencies = [
 [[package]]
 name = "libwebrtc"
 version = "0.3.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f9145a63a8439508a9b5b51dffa4b1c12f812f49fcc4310ebae3d467f639ab"
 dependencies = [
  "cxx",
  "glib 0.21.5",

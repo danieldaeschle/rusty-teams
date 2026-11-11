@@ -1,8 +1,8 @@
 use gpui_kit::assets::IconName;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 use teams_core::{ChatNotificationMode, DesktopNotifications, chat_link, is_notes_chat};
 
@@ -165,7 +165,10 @@ pub(crate) fn chat_menu(
         .flatten();
     if let Some(partner) = partner {
         let follow_state = context.state.clone();
-        let follow = !context.state.read(cx).is_presence_followed(&partner.user_id);
+        let follow = !context
+            .state
+            .read(cx)
+            .is_presence_followed(&partner.user_id);
         popup = popup.item(
             PopupMenuItem::new(if follow {
                 NOTIFY_WHEN_AVAILABLE

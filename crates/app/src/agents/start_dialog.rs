@@ -58,6 +58,7 @@ pub struct StartDialog {
     working_dir: String,
     recent_working_dirs: Vec<String>,
     offers_sessions: bool,
+    asks_for_directory: bool,
     scans_external: bool,
     run_sessions: Vec<SessionOption>,
     external_sessions: Vec<SessionOption>,
@@ -108,6 +109,7 @@ impl StartDialog {
             })
             .unwrap_or_default();
         let offers_sessions = profile.as_ref().is_some_and(agents::supports_resume);
+        let asks_for_directory = profile.as_ref().is_none_or(|profile| profile.is_command());
         let run_sessions = match runs {
             Some(runs) if offers_sessions => {
                 run_options(&runs.for_agent(&action.agent_id), app.read(cx), Utc::now())
@@ -131,6 +133,7 @@ impl StartDialog {
             working_dir: action.working_dir.clone(),
             recent_working_dirs,
             offers_sessions,
+            asks_for_directory,
             scans_external: profile
                 .is_some_and(|profile| profile.output == agents::OutputFormat::ClaudeStreamJson)
                 && offers_sessions,
@@ -361,7 +364,8 @@ impl StartDialog {
             .text_size(px(12.))
             .line_height(relative(1.4))
             .text_color(theme::text_soft())
-            .line_clamp(QUOTE_LINES).text_ellipsis()
+            .line_clamp(QUOTE_LINES)
+            .text_ellipsis()
             .child(StyledText::new(text).with_highlights([(sender_range, sender_style)]))
     }
 
@@ -486,7 +490,9 @@ impl StartDialog {
             .w_full()
             .gap(px(8.))
             .children(session_row)
-            .child(picker_row("Working dir", working_dir_control))
+            .when(self.asks_for_directory, |rows| {
+                rows.child(picker_row("Working dir", working_dir_control))
+            })
     }
 
     fn field(&self, window: &Window, cx: &App) -> Div {

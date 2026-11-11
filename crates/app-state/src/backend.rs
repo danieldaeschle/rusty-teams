@@ -305,9 +305,12 @@ async fn realtime_loop(
                             let receipt_engine = engine.clone();
                             let receipt_event = message.clone();
                             engine.handle_pin_event(&message);
-                            if message.conversation_id.as_deref() == Some(chatsvc::ACTIVITY_FEED_ID) {
+                            if message.conversation_id.as_deref() == Some(chatsvc::ACTIVITY_FEED_ID)
+                            {
                                 let activity_engine = engine.clone();
-                                tokio::spawn(async move { activity_engine.refresh_activity().await });
+                                tokio::spawn(
+                                    async move { activity_engine.refresh_activity().await },
+                                );
                             }
                             tokio::spawn(async move {
                                 receipt_engine.handle_receipt_event(&receipt_event).await

@@ -8,20 +8,20 @@ use chatsvc::{
     days_until_expiry,
 };
 use chrono::Utc;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use super::ConversationView;
 use crate::app_state::{AppState, Selection};
-use crate::rows::{MeetingInfo, MeetingSlot};
 use crate::channel_files::SharedContent;
 use crate::demo_recap;
 use crate::downloads::{self, DownloadState};
 use crate::notice::short_error;
 use crate::recap::{DELETE_QUESTION, Load, save_name};
+use crate::rows::{MeetingInfo, MeetingSlot};
 use crate::runtime;
 use crate::views::channel_tabs::{ChannelPane, render_chat_bar};
 use crate::views::recap_tab::{RecapCommand, RecapDownload, RecapRun, RecapView, render_recap};
@@ -73,7 +73,8 @@ enum SaveEvent {
 
 impl ConversationView {
     fn is_meeting_chat(&self, cx: &App) -> bool {
-        let Some(Selection::Chat(chat_id)) = self.current.as_ref().map(|current| &current.selection)
+        let Some(Selection::Chat(chat_id)) =
+            self.current.as_ref().map(|current| &current.selection)
         else {
             return false;
         };
@@ -445,7 +446,13 @@ impl ConversationView {
     }
 
     fn can_delete_recording(&self, cx: &App) -> bool {
-        let my_user_id = self.app.read(cx).directory.me.as_ref().map(|me| me.user_id.as_str());
+        let my_user_id = self
+            .app
+            .read(cx)
+            .directory
+            .me
+            .as_ref()
+            .map(|me| me.user_id.as_str());
         match (self.selected_occurrence(), my_user_id) {
             (Some(occurrence), Some(my_user_id)) => {
                 occurrence.organizer_id.as_deref() == Some(my_user_id)
@@ -567,8 +574,10 @@ impl ConversationView {
         let receiver = cx.prompt_for_new_path(&downloads::downloads_directory(), Some(&name));
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(target))) = receiver.await {
-                this.update(cx, |this, cx| this.save_to(download, occurrence, target, cx))
-                    .ok();
+                this.update(cx, |this, cx| {
+                    this.save_to(download, occurrence, target, cx)
+                })
+                .ok();
             }
         })
         .detach();
@@ -594,7 +603,9 @@ impl ConversationView {
             let outcome = std::fs::write(&target, demo_recap::DEMO_FILE_BYTES)
                 .map(|_| target)
                 .map_err(|error| short_error(&error));
-            self.recap.downloads.insert(download, finished_state(outcome));
+            self.recap
+                .downloads
+                .insert(download, finished_state(outcome));
             return;
         }
         let (Some(engine), Some(details)) = (engine, details) else {
@@ -604,8 +615,8 @@ impl ConversationView {
             return;
         };
         drop(runtime::spawn(async move {
-            let outcome = save_download(&engine, download, &occurrence, &details, target, &sender)
-                .await;
+            let outcome =
+                save_download(&engine, download, &occurrence, &details, target, &sender).await;
             let _ = sender.send(SaveEvent::Finished(outcome));
         }));
         cx.spawn(async move |this, cx| {
@@ -619,7 +630,9 @@ impl ConversationView {
                                     .insert(download, DownloadState::Saving(percent));
                             }
                             SaveEvent::Finished(outcome) => {
-                                this.recap.downloads.insert(download, finished_state(outcome));
+                                this.recap
+                                    .downloads
+                                    .insert(download, finished_state(outcome));
                             }
                         }
                     }

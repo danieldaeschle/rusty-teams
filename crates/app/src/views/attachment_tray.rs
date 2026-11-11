@@ -261,7 +261,12 @@ impl AttachmentTray {
     }
 
     /// A file already in the cloud goes out by reference; it was never uploaded, so removing it deletes nothing.
-    pub fn add_cloud_file(&mut self, name: String, size: u64, reference: FileReference) -> Option<u64> {
+    pub fn add_cloud_file(
+        &mut self,
+        name: String,
+        size: u64,
+        reference: FileReference,
+    ) -> Option<u64> {
         self.notice = None;
         if self.items.len() >= MAX_ATTACHMENTS {
             self.notice = Some(limit_notice(1));
@@ -1093,7 +1098,9 @@ mod tests {
     #[test]
     fn a_cloud_file_is_ready_at_once_and_removing_it_deletes_nothing() {
         let mut tray = AttachmentTray::default();
-        let id = tray.add_cloud_file("plan.pdf".into(), 12, reference("plan.pdf")).unwrap();
+        let id = tray
+            .add_cloud_file("plan.pdf".into(), 12, reference("plan.pdf"))
+            .unwrap();
         assert!(!tray.blocks_send());
         assert_eq!(tray.outgoing_files()[0].reference, reference("plan.pdf"));
         assert!(tray.retry(id).is_none());

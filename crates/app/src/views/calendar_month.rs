@@ -53,13 +53,14 @@ fn event_chip(event: &CalendarEvent, offset: FixedOffset) -> Div {
         .bg(theme::accent().opacity(if event.all_day { 0.28 } else { 0.14 }))
         .text_size(px(11.5))
         .text_color(theme::text())
-        .children(time.map(|time| {
+        .children(time.map(|time| div().flex_none().text_color(theme::text_soft()).child(time)))
+        .child(
             div()
-                .flex_none()
-                .text_color(theme::text_soft())
-                .child(time)
-        }))
-        .child(div().flex_1().min_w_0().truncate().child(event.subject.clone()))
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(event.subject.clone()),
+        )
 }
 
 fn day_cell(

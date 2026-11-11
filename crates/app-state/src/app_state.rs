@@ -102,10 +102,7 @@ pub enum AppEvent {
     CallTone(chatsvc::sounds::CallTone),
     SoundSettings,
     ChatSettings,
-    FollowedStatus {
-        user_id: String,
-        text: &'static str,
-    },
+    FollowedStatus { user_id: String, text: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -389,8 +386,10 @@ impl AppState {
         state.followed_presence = crate::presence_follow::load_followed(&state.store);
         state.collapsed = state.load_collapsed();
         state.call_share_sound = crate::call::load_share_sound(&state.store);
-        state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
-        state.call_share_standout = crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
+        state.call_share_motion =
+            crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
+        state.call_share_standout =
+            crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
         state.call_report_enabled = crate::call::load_report_enabled(&state.store);
         state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
@@ -689,7 +688,12 @@ impl AppState {
                             Err(_) => Some("cancelled".to_owned()),
                         };
                         if let Some(failure) = failure {
-                            let host = image.url.split("://").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or_default();
+                            let host = image
+                                .url
+                                .split("://")
+                                .nth(1)
+                                .and_then(|rest| rest.split('/').next())
+                                .unwrap_or_default();
                             log::warn!("image from {host} not loaded: {failure}");
                             this.update(cx, |state, cx| {
                                 state.directory.mark_image_failed(&image.url);

@@ -274,9 +274,11 @@ fn save_button(
 }
 
 fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stateful<Div>> {
-    let image = card
-        .preview()
-        .and_then(|preview| directory.image(&preview.url).map(|entry| entry.path.clone()));
+    let image = card.preview().and_then(|preview| {
+        directory
+            .image(&preview.url)
+            .map(|entry| entry.path.clone())
+    });
     if image.is_none() && card.kind != FileKind::Video {
         return None;
     }
@@ -288,9 +290,14 @@ fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stat
         .overflow_hidden()
         .bg(theme::code_surface());
     let frame = match image {
-        Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => frame
-            .bg(theme::white())
-            .child(img(bounded(path)).w_full().h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO)).object_fit(ObjectFit::Cover)),
+        Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => {
+            frame.bg(theme::white()).child(
+                img(bounded(path))
+                    .w_full()
+                    .h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO))
+                    .object_fit(ObjectFit::Cover),
+            )
+        }
         Some(path) => frame.child(img(bounded(path)).size_full().object_fit(match card.kind {
             FileKind::Video | FileKind::PowerPoint => ObjectFit::Cover,
             _ => ObjectFit::Contain,

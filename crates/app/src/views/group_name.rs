@@ -152,7 +152,12 @@ impl Render for GroupNameForm {
 #[derive(Clone, Default)]
 pub struct GroupNameSlot(Rc<RefCell<Option<Entity<GroupNameForm>>>>);
 
-pub fn group_name_button(app: &Entity<AppState>, slot: &GroupNameSlot, chat_id: &str, title: &str) -> AnyElement {
+pub fn group_name_button(
+    app: &Entity<AppState>,
+    slot: &GroupNameSlot,
+    chat_id: &str,
+    title: &str,
+) -> AnyElement {
     let (app, chat_id, title) = (app.clone(), chat_id.to_owned(), title.to_owned());
     let form = slot.0.clone();
     let reset = form.clone();
@@ -174,7 +179,8 @@ pub fn group_name_button(app: &Entity<AppState>, slot: &GroupNameSlot, chat_id: 
         })
         .content(move |_, window, cx| {
             let existing = form.borrow().clone();
-            if let Some(existing) = existing.filter(|existing| existing.read(cx).chat_id == chat_id) {
+            if let Some(existing) = existing.filter(|existing| existing.read(cx).chat_id == chat_id)
+            {
                 return existing;
             }
             let popover = cx.entity().downgrade();

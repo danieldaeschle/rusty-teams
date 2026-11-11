@@ -5,7 +5,6 @@ use super::rows::{Choice, caption, control_row, select, text_button};
 use crate::notify::NotificationCenter;
 use crate::notify::sounds::{Ringtone, RingtoneCallType};
 
-
 pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
     let ringtones = center.read(cx).settings().sounds.ringtones;
     let rows = RingtoneCallType::ALL
@@ -14,10 +13,7 @@ pub fn render(center: &Entity<NotificationCenter>, cx: &App) -> Div {
             *call_type == RingtoneCallType::Regular || ringtones.get(*call_type) != Ringtone::Ring
         })
         .map(|call_type| ringtone_row(center, call_type, ringtones.get(call_type)));
-    v_flex()
-        .w_full()
-        .child(caption("RINGTONES"))
-        .children(rows)
+    v_flex().w_full().child(caption("RINGTONES")).children(rows)
 }
 
 fn ringtone_row(

@@ -308,8 +308,10 @@ impl ConversationView {
     }
 
     pub(super) fn request_post_follow(&mut self, message_id: &str, cx: &mut Context<Self>) {
-        if let Some(Selection::Channel(channel_id)) =
-            self.current.as_ref().map(|current| current.selection.clone())
+        if let Some(Selection::Channel(channel_id)) = self
+            .current
+            .as_ref()
+            .map(|current| current.selection.clone())
             && self.post_follow(message_id, cx).is_some()
         {
             self.app.update(cx, |state, cx| {

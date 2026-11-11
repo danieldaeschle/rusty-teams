@@ -71,7 +71,11 @@ impl ConversationView {
     }
 
     pub(super) fn copilot_label(&self) -> &'static str {
-        if self.copilot.open { CLOSE_LABEL } else { OPEN_LABEL }
+        if self.copilot.open {
+            CLOSE_LABEL
+        } else {
+            OPEN_LABEL
+        }
     }
 
     pub(super) fn copilot_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -94,15 +98,19 @@ impl ConversationView {
         self.copilot.open = !self.copilot.open;
         if self.copilot.open && self.copilot.input.is_none() {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
-            let subscription = cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    let prompt = input.read(cx).value().trim().to_owned();
-                    if !prompt.is_empty() {
-                        input.update(cx, |input, cx| input.set_value("", window, cx));
-                        this.ask_copilot(prompt, cx);
+            let subscription = cx.subscribe_in(
+                &input,
+                window,
+                |this, input, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        let prompt = input.read(cx).value().trim().to_owned();
+                        if !prompt.is_empty() {
+                            input.update(cx, |input, cx| input.set_value("", window, cx));
+                            this.ask_copilot(prompt, cx);
+                        }
                     }
-                }
-            });
+                },
+            );
             self.copilot.input = Some(input);
             self.copilot._input_events = Some(subscription);
         }
@@ -155,8 +163,10 @@ impl ConversationView {
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
-            this.update(cx, |this, cx| this.settle_copilot(generation, index, answer, cx))
-                .ok();
+            this.update(cx, |this, cx| {
+                this.settle_copilot(generation, index, answer, cx)
+            })
+            .ok();
         })
         .detach();
     }
@@ -206,26 +216,28 @@ impl ConversationView {
                 .child(Input::new(input).appearance(false).bordered(false))
         });
         let content = if self.copilot.turns.is_empty() {
-            let suggestions = v_flex().w_full().gap(px(8.)).children(
-                SUGGESTIONS.iter().enumerate().map(|(index, prompt)| {
-                    div()
-                        .id(("copilot-suggestion", index))
-                        .w_full()
-                        .px(px(12.))
-                        .py(px(10.))
-                        .rounded(px(CHIP_RADIUS))
-                        .bg(theme::surface_raised())
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text())
-                        .cursor_pointer()
-                        .hover(|chip| chip.bg(theme::row_hover()))
-                        .child(*prompt)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.ask_copilot((*prompt).to_owned(), cx)
-                        }))
-                }),
-            );
+            let suggestions =
+                v_flex()
+                    .w_full()
+                    .gap(px(8.))
+                    .children(SUGGESTIONS.iter().enumerate().map(|(index, prompt)| {
+                        div()
+                            .id(("copilot-suggestion", index))
+                            .w_full()
+                            .px(px(12.))
+                            .py(px(10.))
+                            .rounded(px(CHIP_RADIUS))
+                            .bg(theme::surface_raised())
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::text())
+                            .cursor_pointer()
+                            .hover(|chip| chip.bg(theme::row_hover()))
+                            .child(*prompt)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ask_copilot((*prompt).to_owned(), cx)
+                            }))
+                    }));
             v_flex()
                 .flex_1()
                 .min_h_0()
@@ -250,9 +262,11 @@ impl ConversationView {
                 .pb(px(PANE_PADDING))
                 .gap(px(12.));
             for (index, turn) in self.copilot.turns.iter().enumerate() {
-                body = body
-                    .child(prompt_bubble(&turn.prompt))
-                    .child(answer_view(index, &turn.answer, cx));
+                body = body.child(prompt_bubble(&turn.prompt)).child(answer_view(
+                    index,
+                    &turn.answer,
+                    cx,
+                ));
             }
             v_flex()
                 .flex_1()

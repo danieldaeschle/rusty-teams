@@ -64,7 +64,9 @@ pub fn header_call_controls(
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|button| button.opacity(0.85))
-                .when(running, |button| button.child(icon(IconName::Phone, 14., foreground)))
+                .when(running, |button| {
+                    button.child(icon(IconName::Phone, 14., foreground))
+                })
                 .child("Join")
                 .on_click(move |_, _, cx| {
                     join_app.update(cx, |state, cx| state.join_chat_meeting(&join_id, cx));
@@ -105,8 +107,18 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
             Button::new(HEADER_VIDEO_CALL_TAG)
                 .ghost()
                 .h(px(BUTTON_SIZE))
-                .map(|button| if labelled { button.px(px(8.)) } else { button.p_0().w(px(BUTTON_SIZE)) })
-                .tooltip(if meet_now { MEET_NOW_LABEL } else { VIDEO_CALL_LABEL })
+                .map(|button| {
+                    if labelled {
+                        button.px(px(8.))
+                    } else {
+                        button.p_0().w(px(BUTTON_SIZE))
+                    }
+                })
+                .tooltip(if meet_now {
+                    MEET_NOW_LABEL
+                } else {
+                    VIDEO_CALL_LABEL
+                })
                 .debug_selector(|| HEADER_VIDEO_CALL_TAG.into())
                 .child(
                     h_flex()
@@ -133,7 +145,11 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                 .h(px(BUTTON_SIZE))
                 .tooltip(CALL_OPTIONS_LABEL)
                 .debug_selector(|| HEADER_CALL_OPTIONS_TAG.into())
-                .child(icon(IconName::ChevronDown, CHEVRON_GLYPH, theme::text_soft()))
+                .child(icon(
+                    IconName::ChevronDown,
+                    CHEVRON_GLYPH,
+                    theme::text_soft(),
+                ))
                 .dropdown_menu(move |popup, _, _| {
                     let (video, audio) = (menu_app.clone(), menu_app.clone());
                     let popup = if meet_now {

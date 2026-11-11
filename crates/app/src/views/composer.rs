@@ -31,9 +31,9 @@ use teams_core::{
     reverse_edits,
 };
 
-pub(crate) mod delivery;
 mod attach_menu;
 mod cloud_picker;
+pub(crate) mod delivery;
 mod drafts;
 mod format_menus;
 pub(crate) mod plus_menu;
@@ -52,8 +52,8 @@ mod table;
 use super::actions::{
     COMPOSER_KEY_CONTEXT, DeleteTable, DeleteTableColumn, DeleteTableRow, EditLastMessage,
     EditLink, InsertTableColumnLeft, InsertTableColumnRight, InsertTableLine, InsertTableRowAbove,
-    InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend,
-    SetHeading1, SetHeading2, SetHeading3, SetParagraph, ToggleBold, ToggleCode, ToggleCodeBlock,
+    InsertTableRowBelow, OpenSwitcher, PastePlainText, RemoveTableLine, ScheduleSend, SetHeading1,
+    SetHeading2, SetHeading3, SetParagraph, ToggleBold, ToggleCode, ToggleCodeBlock,
     ToggleFormatBar, ToggleItalic, ToggleQuote, ToggleStrike, ToggleSubscript, ToggleSuperscript,
     ToggleUnderline,
 };
@@ -2718,7 +2718,11 @@ impl Composer {
     }
 
     fn format_bar_fit(&self) -> format_toolbar::BarFit {
-        let toggle_width = if self.post_layout() { COMPOSER_BUTTON_SIZE } else { 0. };
+        let toggle_width = if self.post_layout() {
+            COMPOSER_BUTTON_SIZE
+        } else {
+            0.
+        };
         let available = self.composer_bounds.get().map_or(f32::INFINITY, |bounds| {
             f32::from(bounds.size.width) - 2. * (COMPOSER_BUTTON_INSET + 1.) - toggle_width
         });
@@ -3034,7 +3038,11 @@ impl Render for Composer {
                 .is_some_and(|bounds| f32::from(bounds.size.width) < STACKED_ACTIONS_WIDTH);
         let mut send = Some(send);
         let (row_actions, stacked_actions, post_footer) = if post_layout {
-            (None, None, Some(self.render_post_footer(actions, can_send, cx)))
+            (
+                None,
+                None,
+                Some(self.render_post_footer(actions, can_send, cx)),
+            )
         } else if stacked {
             (None, Some((actions, send.take())), None)
         } else {
@@ -3215,9 +3223,9 @@ impl Render for Composer {
             .on_action(cx.listener(|this, _: &ToggleFormatBar, window, cx| {
                 this.toggle_format_bar(window, cx)
             }))
-            .on_action(cx.listener(|_, _: &EditLastMessage, _, cx| {
-                cx.emit(ComposerEvent::EditLast)
-            }))
+            .on_action(
+                cx.listener(|_, _: &EditLastMessage, _, cx| cx.emit(ComposerEvent::EditLast)),
+            )
             .on_action(cx.listener(|this, _: &InsertTableLine, window, cx| {
                 this.open_table_menu(TableLineMenu::Insert, window, cx);
             }))
@@ -3471,7 +3479,8 @@ impl Render for Composer {
                 if this.slash_popup.is_some() {
                     this.slash_dismissed = true;
                 }
-                if this.popup.is_some() || this.emoji_popup.is_some() || this.slash_popup.is_some() {
+                if this.popup.is_some() || this.emoji_popup.is_some() || this.slash_popup.is_some()
+                {
                     this.close_popup();
                     cx.notify();
                     cx.stop_propagation();
@@ -4705,7 +4714,10 @@ mod tests {
             typist.press("enter");
             typist.type_text("b");
             typist.press("up end delete");
-            assert_eq!(typist.outgoing().html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>ab</code></pre>");
+            assert_eq!(
+                typist.outgoing().html(),
+                "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>ab</code></pre>"
+            );
         }
 
         #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
@@ -4869,7 +4881,10 @@ mod tests {
                     .update(|cx| composer.read(cx).paste_hint.is_none())
             );
             let outgoing = typist.outgoing();
-            assert_eq!(outgoing.html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>:) **x**</code></pre>");
+            assert_eq!(
+                outgoing.html(),
+                "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>:) **x**</code></pre>"
+            );
         }
 
         #[gpui_kit::test]

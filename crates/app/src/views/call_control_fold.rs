@@ -4,14 +4,15 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
-use super::call_toolbar::{GROUP_DIVIDER_WIDTH, GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH};
-use super::call_view::reaction_glyph;
+use super::call_organizer::CAMERA_MENU_WIDTH;
+use super::call_view::{CONTROL_SIZE, reaction_glyph};
 use super::call_view_menu::view_items;
 use crate::app_state::AppState;
 use crate::call::CallModel;
 
-pub(super) const TITLE_RESERVE: f32 = 280.;
-const LEAVE_WIDTH: f32 = 96.;
+pub(super) const CONTROL_GAP: f32 = 12.;
+pub(super) const CONTROLS_PADDING: f32 = 16.;
+const LEAVE_WIDTH: f32 = 116.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Foldable {
@@ -37,40 +38,33 @@ impl FoldedControls {
     }
 }
 
-pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool, has_pop_out: bool) -> f32 {
-    let devices = [
-        TOOL_WIDTH + if has_camera_menu { SPLIT_CHEVRON_WIDTH } else { 0. },
-        TOOL_WIDTH + SPLIT_CHEVRON_WIDTH,
-        TOOL_WIDTH,
+pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool) -> f32 {
+    let mut widths = vec![
+        CONTROL_SIZE + CAMERA_MENU_WIDTH,
+        CONTROL_SIZE
+            + if has_camera_menu {
+                CAMERA_MENU_WIDTH
+            } else {
+                0.
+            },
+        CONTROL_SIZE,
+        LEAVE_WIDTH,
     ];
-    let devices_width = devices.iter().sum::<f32>() + TOOL_GAP * (devices.len() - 1) as f32;
-    let more_width = if has_more { TOOL_WIDTH } else { 0. } + if has_pop_out { TOOL_WIDTH + TOOL_GAP } else { 0. };
-    let leave_width = LEAVE_WIDTH
-        + if has_leave_menu {
-            SPLIT_CHEVRON_WIDTH + 4. + 1.
-        } else {
-            0.
-        };
-    devices_width + more_width + leave_width + 5. * GROUP_GAP + 2. * GROUP_DIVIDER_WIDTH
-}
-
-pub fn in_more_menu(folded: Vec<Foldable>) -> Vec<Foldable> {
-    let mut items = vec![Foldable::View];
-    for control in folded {
-        items.push(control);
-        if control == Foldable::Reactions {
-            items.push(Foldable::RaiseHand);
-        }
+    if has_more {
+        widths.push(CONTROL_SIZE);
     }
-    items
+    if has_leave_menu {
+        widths.push(CONTROL_SIZE);
+    }
+    widths.iter().sum::<f32>() + CONTROL_GAP * (widths.len() - 1) as f32
 }
 
 pub fn folded_for_width(available: f32, fixed: f32, present: &[Foldable]) -> Vec<Foldable> {
-    let room = available - TITLE_RESERVE - fixed;
+    let room = available - 2. * CONTROLS_PADDING - fixed;
     let fitting = if room <= 0. {
         0
     } else {
-        (room / (TOOL_WIDTH + TOOL_GAP)).floor() as usize
+        (room / (CONTROL_SIZE + CONTROL_GAP)).floor() as usize
     };
     let folded_count = present.len().saturating_sub(fitting);
     present[..folded_count].to_vec()
@@ -136,11 +130,17 @@ fn reactions_submenu(
             for reaction in Reaction::ALL {
                 let app = app.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(format!("{} {}", reaction_glyph(&reaction), reaction.name()))
-                        .disabled(!can_react)
-                        .on_click(move |_, _, cx| {
-                            app.update(cx, |state, cx| state.send_call_reaction(reaction.clone(), cx))
-                        }),
+                    PopupMenuItem::new(format!(
+                        "{} {}",
+                        reaction_glyph(&reaction),
+                        reaction.name()
+                    ))
+                    .disabled(!can_react)
+                    .on_click(move |_, _, cx| {
+                        app.update(cx, |state, cx| {
+                            state.send_call_reaction(reaction.clone(), cx)
+                        })
+                    }),
                 );
             }
             menu
@@ -162,9 +162,13 @@ fn hand_item(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> Pop
 fn people_item(popup: PopupMenu, app: &Entity<AppState>, open: bool) -> PopupMenu {
     let app = app.clone();
     popup.item(
-        PopupMenuItem::new(if open { "Close the people list" } else { "Show people" })
-            .icon(IconName::Users)
-            .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_people(cx))),
+        PopupMenuItem::new(if open {
+            "Close the people list"
+        } else {
+            "Show people"
+        })
+        .icon(IconName::Users)
+        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_people(cx))),
     )
 }
 
@@ -184,28 +188,37 @@ fn chat_item(popup: PopupMenu, app: &Entity<AppState>, folded: &FoldedControls) 
 
 #[cfg(test)]
 mod tests {
-    use super::{Foldable, TITLE_RESERVE, fixed_controls_width, folded_for_width, in_more_menu};
+    use super::{CONTROLS_PADDING, Foldable, fixed_controls_width, folded_for_width};
 
-    const ALL: [Foldable; 3] = [Foldable::Reactions, Foldable::People, Foldable::Chat];
-    const SLOT: f32 = 56. + 2.;
+    const ALL: [Foldable; 5] = [
+        Foldable::View,
+        Foldable::Reactions,
+        Foldable::RaiseHand,
+        Foldable::People,
+        Foldable::Chat,
+    ];
+    const SLOT: f32 = 44. + 12.;
     const FIXED: f32 = 400.;
 
     fn width_for(fitting: f32) -> f32 {
-        FIXED + TITLE_RESERVE + fitting * SLOT
+        FIXED + 2. * CONTROLS_PADDING + fitting * SLOT
     }
 
     #[test]
     fn nothing_folds_when_everything_fits() {
-        assert!(folded_for_width(width_for(3.), FIXED, &ALL).is_empty());
+        assert!(folded_for_width(width_for(5.), FIXED, &ALL).is_empty());
         assert!(folded_for_width(width_for(9.), FIXED, &ALL).is_empty());
     }
 
     #[test]
-    fn folds_reactions_first_then_people() {
-        assert_eq!(folded_for_width(width_for(2.), FIXED, &ALL), [Foldable::Reactions]);
+    fn folds_view_first_then_reactions() {
         assert_eq!(
-            folded_for_width(width_for(1.), FIXED, &ALL),
-            [Foldable::Reactions, Foldable::People]
+            folded_for_width(width_for(4.), FIXED, &ALL),
+            [Foldable::View]
+        );
+        assert_eq!(
+            folded_for_width(width_for(3.), FIXED, &ALL),
+            [Foldable::View, Foldable::Reactions]
         );
     }
 
@@ -216,20 +229,20 @@ mod tests {
     }
 
     #[test]
-    fn view_always_sits_in_more_and_the_hand_follows_the_reactions() {
-        assert_eq!(in_more_menu(Vec::new()), [Foldable::View]);
+    fn only_present_controls_are_counted() {
+        let present = [Foldable::View, Foldable::People];
+        assert!(folded_for_width(width_for(2.), FIXED, &present).is_empty());
         assert_eq!(
-            in_more_menu(vec![Foldable::Reactions, Foldable::Chat]),
-            [Foldable::View, Foldable::Reactions, Foldable::RaiseHand, Foldable::Chat]
+            folded_for_width(width_for(1.), FIXED, &present),
+            [Foldable::View]
         );
     }
 
     #[test]
     fn fixed_width_counts_optional_controls() {
-        let base = fixed_controls_width(false, false, false, false);
-        assert_eq!(fixed_controls_width(true, false, false, false), base + 20.);
-        assert_eq!(fixed_controls_width(false, true, false, false), base + 56.);
-        assert_eq!(fixed_controls_width(false, false, true, false), base + 25.);
-        assert_eq!(fixed_controls_width(false, false, false, true), base + 58.);
+        let base = fixed_controls_width(false, false, false);
+        assert_eq!(fixed_controls_width(true, false, false), base + 28.);
+        assert_eq!(fixed_controls_width(false, true, false), base + 44. + 12.);
+        assert_eq!(fixed_controls_width(false, false, true), base + 44. + 12.);
     }
 }

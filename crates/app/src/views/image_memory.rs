@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{
-    App, AppContext, Entity, EntityId, Global, ImageCacheError, ImageCacheItem, ImageSource, RenderImage, Resource,
-    Window, hash,
+    App, AppContext, Entity, EntityId, Global, ImageCacheError, ImageCacheItem, ImageSource,
+    RenderImage, Resource, Window, hash,
 };
 use image::imageops::FilterType;
 use image::{Frame, ImageFormat, ImageReader};
@@ -19,9 +19,9 @@ const PREVIEW_EDGE: u32 = 720;
 /// An image source whose decoded pixels are freed again once the image has been off screen for a while and the budget is full.
 pub fn bounded(source: impl Into<ImageSource>) -> ImageSource {
     match source.into() {
-        ImageSource::Resource(resource) => {
-            ImageSource::Custom(Arc::new(move |window, cx| load(Request::Full(&resource), window, cx)))
-        }
+        ImageSource::Resource(resource) => ImageSource::Custom(Arc::new(move |window, cx| {
+            load(Request::Full(&resource), window, cx)
+        })),
         other => other,
     }
 }
@@ -29,7 +29,9 @@ pub fn bounded(source: impl Into<ImageSource>) -> ImageSource {
 /// Like [`bounded`], but a still picture is decoded scaled down to at most [`PREVIEW_EDGE`] pixels, for thumbnails of full-size photos.
 pub fn preview(path: PathBuf) -> ImageSource {
     let path: Arc<Path> = path.into();
-    ImageSource::Custom(Arc::new(move |window, cx| load(Request::Preview(&path), window, cx)))
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        load(Request::Preview(&path), window, cx)
+    }))
 }
 
 #[derive(Clone, Copy)]
@@ -42,7 +44,11 @@ struct SharedImages(Entity<BoundedImages>);
 
 impl Global for SharedImages {}
 
-fn load(request: Request, window: &mut Window, cx: &mut App) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+fn load(
+    request: Request,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
     let images = match cx.try_global::<SharedImages>() {
         Some(shared) => shared.0.clone(),
         None => {
@@ -92,7 +98,9 @@ impl BoundedImages {
                 Request::Full(resource) => Pixels::Item(ImageCacheItem::new(resource, cx)),
                 Request::Preview(path) => {
                     start_preview(handle, key, path.clone(), cx);
-                    Pixels::Decoding { waiting: Vec::new() }
+                    Pixels::Decoding {
+                        waiting: Vec::new(),
+                    }
                 }
             },
             last_use: now,
@@ -119,7 +127,13 @@ impl BoundedImages {
         result
     }
 
-    fn finish_preview(&mut self, key: u64, path: Arc<Path>, decoded: Option<RenderImage>, cx: &mut App) {
+    fn finish_preview(
+        &mut self,
+        key: u64,
+        path: Arc<Path>,
+        decoded: Option<RenderImage>,
+        cx: &mut App,
+    ) {
         let Some(entry) = self.entries.get_mut(&key) else {
             return;
         };
@@ -135,14 +149,20 @@ impl BoundedImages {
     }
 
     fn trim(&mut self, now: Instant) {
-        let sizes: Vec<(u64, Instant, u64)> =
-            self.entries.iter().map(|(key, entry)| (*key, entry.last_use, entry.bytes)).collect();
+        let sizes: Vec<(u64, Instant, u64)> = self
+            .entries
+            .iter()
+            .map(|(key, entry)| (*key, entry.last_use, entry.bytes))
+            .collect();
         let mut freed_bytes = 0;
         for key in evictions(sizes, now) {
             freed_bytes += self.entries.remove(&key).map_or(0, |entry| entry.bytes);
         }
         self.freed_bytes += freed_bytes;
-        if self.last_report.is_none_or(|last| now.duration_since(last) >= REPORT_EVERY) {
+        if self
+            .last_report
+            .is_none_or(|last| now.duration_since(last) >= REPORT_EVERY)
+        {
             self.last_report = Some(now);
             let kept_bytes: u64 = self.entries.values().map(|entry| entry.bytes).sum();
             app_base::diagnostics::record(&format!(
@@ -159,15 +179,25 @@ fn start_preview(handle: &Entity<BoundedImages>, key: u64, path: Arc<Path>, cx: 
     let images = handle.downgrade();
     cx.spawn(async move |cx| {
         let source = path.clone();
-        let decoded = cx.background_executor().spawn(async move { decode_preview(&source) }).await;
-        images.update(cx, |images, cx| images.finish_preview(key, path, decoded, cx)).ok();
+        let decoded = cx
+            .background_executor()
+            .spawn(async move { decode_preview(&source) })
+            .await;
+        images
+            .update(cx, |images, cx| {
+                images.finish_preview(key, path, decoded, cx)
+            })
+            .ok();
     })
     .detach();
 }
 
 fn decode_preview(path: &Path) -> Option<RenderImage> {
     let reader = ImageReader::open(path).ok()?.with_guessed_format().ok()?;
-    if !matches!(reader.format()?, ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Bmp) {
+    if !matches!(
+        reader.format()?,
+        ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Bmp
+    ) {
         return None;
     }
     let decoded = reader.decode().ok()?;
@@ -225,7 +255,10 @@ mod tests {
     #[test]
     fn images_shown_just_now_stay_even_over_budget() {
         let now = Instant::now() + Duration::from_secs(600);
-        let sizes = vec![(1, now - Duration::from_secs(2), 50 * MEGABYTE), (2, now, 50 * MEGABYTE)];
+        let sizes = vec![
+            (1, now - Duration::from_secs(2), 50 * MEGABYTE),
+            (2, now, 50 * MEGABYTE),
+        ];
         assert!(evictions(sizes, now).is_empty());
     }
 
@@ -239,11 +272,18 @@ mod tests {
     fn a_large_photo_is_decoded_scaled_down_and_an_animation_is_left_to_gpui() {
         let directory = tempfile::tempdir().unwrap();
         let photo = directory.path().join("photo");
-        image::RgbaImage::new(3000, 2000).save_with_format(&photo, ImageFormat::Png).unwrap();
+        image::RgbaImage::new(3000, 2000)
+            .save_with_format(&photo, ImageFormat::Png)
+            .unwrap();
         let decoded = decode_preview(&photo).unwrap();
-        assert_eq!((decoded.size(0).width.0, decoded.size(0).height.0), (720, 480));
+        assert_eq!(
+            (decoded.size(0).width.0, decoded.size(0).height.0),
+            (720, 480)
+        );
         let animation = directory.path().join("animation");
-        image::RgbaImage::new(10, 10).save_with_format(&animation, ImageFormat::Gif).unwrap();
+        image::RgbaImage::new(10, 10)
+            .save_with_format(&animation, ImageFormat::Gif)
+            .unwrap();
         assert!(decode_preview(&animation).is_none());
     }
 }

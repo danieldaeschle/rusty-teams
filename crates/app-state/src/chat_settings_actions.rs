@@ -17,7 +17,12 @@ pub fn stored_markdown_mode(store: &Store) -> bool {
 }
 
 pub fn stored_actions_on_right_click(store: &Store) -> bool {
-    store.meta(META_ACTIONS_ON_RIGHT_CLICK).ok().flatten().as_deref() == Some("true")
+    store
+        .meta(META_ACTIONS_ON_RIGHT_CLICK)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
 }
 
 /// Teams shows no read state at all while the own read receipts setting is off.

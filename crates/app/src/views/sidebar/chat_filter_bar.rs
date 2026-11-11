@@ -9,8 +9,8 @@ use gpui_kit::*;
 use super::{NEW_CHAT_BUTTON_SIZE, SidebarEvent, SidebarTab, SidebarView};
 use crate::app_state::Selection;
 use crate::chat_filter::{
-    CLEAR_FILTER_TEXT, CLEAR_FILTERS, CLOSE_FILTER_TEXT, ChatFilterPill,
-    FILTER_PLACEHOLDER, NO_MATCHES, SHOW_FILTER_TEXT, mentioned_conversations,
+    CLEAR_FILTER_TEXT, CLEAR_FILTERS, CLOSE_FILTER_TEXT, ChatFilterPill, FILTER_PLACEHOLDER,
+    NO_MATCHES, SHOW_FILTER_TEXT, mentioned_conversations,
 };
 use crate::theme;
 use crate::views::widgets::icon;

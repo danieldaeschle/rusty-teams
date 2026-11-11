@@ -133,7 +133,14 @@ mod tests {
     }
 
     fn listed(app: &gpui_kit::Entity<AppState>, cx: &mut TestAppContext) -> Vec<String> {
-        cx.update(|cx| app.read(cx).sidebar.chats.iter().map(|chat| chat.id.clone()).collect())
+        cx.update(|cx| {
+            app.read(cx)
+                .sidebar
+                .chats
+                .iter()
+                .map(|chat| chat.id.clone())
+                .collect()
+        })
     }
 
     fn sidebar_changed(app: &gpui_kit::Entity<AppState>, cx: &mut TestAppContext) {
@@ -145,9 +152,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn a_synced_sidebar_loads_in_the_background_and_bursts_load_once_more(
-        cx: &mut TestAppContext,
-    ) {
+    fn a_synced_sidebar_loads_in_the_background_and_bursts_load_once_more(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let store = Arc::new(Store::open_in_memory().unwrap());
         let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));

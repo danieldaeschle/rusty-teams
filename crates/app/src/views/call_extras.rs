@@ -32,7 +32,11 @@ fn dark_text() -> Hsla {
 }
 
 pub fn recording_chip(model: &CallModel) -> Option<AnyElement> {
-    let chip = crate::call::recording_chip(model.recording, model.recording_audio_only, model.transcribing)?;
+    let chip = crate::call::recording_chip(
+        model.recording,
+        model.recording_audio_only,
+        model.transcribing,
+    )?;
     let color = match chip {
         RecordingChip::Transcribing => theme::accent_text(),
         RecordingChip::Recording | RecordingChip::RecordingAudio => theme::red(),
@@ -278,7 +282,12 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
     )
 }
 
-pub fn confirm_record_action(app: &Entity<AppState>, action: RecordAction, window: &mut Window, cx: &mut App) {
+pub fn confirm_record_action(
+    app: &Entity<AppState>,
+    action: RecordAction,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let Some(title) = action.confirm_title() else {
         app.update(cx, |state, cx| state.run_call_record_action(action, cx));
         return;
@@ -302,14 +311,18 @@ pub fn confirm_record_action(app: &Entity<AppState>, action: RecordAction, windo
 pub fn open_transfer_picker(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
     let candidates = app.read(cx).transfer_candidates();
     let picker_app = app.clone();
-    let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Transfer, window, cx));
-    app.update(cx, |state, cx| state.open_transfer_picker(picker.into(), cx));
+    let picker =
+        cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Transfer, window, cx));
+    app.update(cx, |state, cx| {
+        state.open_transfer_picker(picker.into(), cx)
+    });
 }
 
 pub fn open_invite_picker(app: &Entity<AppState>, window: &mut Window, cx: &mut App) {
     let candidates = app.read(cx).invite_candidates();
     let picker_app = app.clone();
-    let picker = cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Invite, window, cx));
+    let picker =
+        cx.new(|cx| TransferPicker::new(picker_app, candidates, PickerMode::Invite, window, cx));
     app.update(cx, |state, cx| state.open_invite_picker(picker.into(), cx));
 }
 

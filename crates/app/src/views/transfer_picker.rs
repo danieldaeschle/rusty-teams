@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -233,11 +233,26 @@ impl Render for TransferPicker {
             )
             .children(match self.mode {
                 PickerMode::Transfer => vec![
-                    self.action("transfer-consult", "Consult first", false, AppState::start_consult),
-                    self.action("transfer-now", "Transfer now", true, AppState::transfer_call_blind),
+                    self.action(
+                        "transfer-consult",
+                        "Consult first",
+                        false,
+                        AppState::start_consult,
+                    ),
+                    self.action(
+                        "transfer-now",
+                        "Transfer now",
+                        true,
+                        AppState::transfer_call_blind,
+                    ),
                 ],
                 PickerMode::Invite => {
-                    vec![self.action("transfer-invite", "Invite", true, AppState::invite_call_person)]
+                    vec![self.action(
+                        "transfer-invite",
+                        "Invite",
+                        true,
+                        AppState::invite_call_person,
+                    )]
                 }
             });
         div()

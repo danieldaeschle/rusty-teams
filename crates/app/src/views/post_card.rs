@@ -329,31 +329,44 @@ fn message_block(
                     .items_center()
                     .gap(px(AVATAR_GAP))
                     .child(avatar.debug_selector(|| POST_AVATAR_TAG.into()))
-                    .child(message_header(row, index, author, profile_user, saved, pinned)),
+                    .child(message_header(
+                        row,
+                        index,
+                        author,
+                        profile_user,
+                        saved,
+                        pinned,
+                    )),
             )
             .child(details.debug_selector(|| POST_BODY_TAG.into())),
-        Role::Reply => h_flex().items_start().gap(px(REPLY_AVATAR_GAP)).child(avatar).child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap(px(6.))
-                .child(message_header(
-                    row,
-                    index,
-                    author,
-                    profile_user,
-                    saved,
-                    pinned,
-                ))
-                .child(details),
-        ),
+        Role::Reply => h_flex()
+            .items_start()
+            .gap(px(REPLY_AVATAR_GAP))
+            .child(avatar)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(6.))
+                    .child(message_header(
+                        row,
+                        index,
+                        author,
+                        profile_user,
+                        saved,
+                        pinned,
+                    ))
+                    .child(details),
+            ),
     };
     div()
         .id(ElementId::Name(format!("post-message-{index}").into()))
         .relative()
         .w_full()
         .p(px(CARD_PADDING))
-        .when(role == Role::Reply, |block| block.bg(theme::reply_surface()))
+        .when(role == Role::Reply, |block| {
+            block.bg(theme::reply_surface())
+        })
         .when(highlighted, |block| block.bg(theme::accent().opacity(0.2)))
         .when_some(hovered, |block, hovered| {
             block.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
@@ -477,7 +490,11 @@ fn card_action(label: &'static str, glyph: IconName, primary: bool) -> Div {
         .child(label)
 }
 
-pub fn post_in_channel_card(directory: &Directory, open: PostAction, announce: PostAction) -> AnyElement {
+pub fn post_in_channel_card(
+    directory: &Directory,
+    open: PostAction,
+    announce: PostAction,
+) -> AnyElement {
     let own_avatar = directory.me.as_ref().map(|me| {
         div().flex_none().child(person_avatar(
             directory,

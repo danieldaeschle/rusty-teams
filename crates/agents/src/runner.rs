@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -40,15 +41,35 @@ pub struct RunOutcome {
 }
 
 fn command_for(invocation: &Invocation) -> Command {
-    let mut command = Command::new(&invocation.program);
+    let program = crate::catalog::resolve_program(&invocation.program)
+        .unwrap_or_else(|| PathBuf::from(&invocation.program));
+    let mut command = Command::new(program);
     command.args(&invocation.args);
     if let Some(cwd) = &invocation.cwd {
         command.current_dir(cwd);
     }
+    prepend_user_bin(&mut command);
     command.kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
     command
+}
+
+fn prepend_user_bin(command: &mut Command) {
+    let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
+        return;
+    };
+    let bin = PathBuf::from(home).join(".local").join("bin");
+    if !bin.is_dir() {
+        return;
+    }
+    let mut paths = vec![bin];
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path));
+    }
+    if let Ok(joined) = std::env::join_paths(paths) {
+        command.env("PATH", joined);
+    }
 }
 
 #[cfg(windows)]

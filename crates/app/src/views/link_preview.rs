@@ -137,7 +137,8 @@ pub fn link_preview_card(
                 .when(close_button.is_some(), |column| column.pr(px(CLOSE_SIZE)))
                 .child(
                     div()
-                        .line_clamp(2).text_ellipsis()
+                        .line_clamp(2)
+                        .text_ellipsis()
                         .text_size(px(13.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_strong())
@@ -145,7 +146,8 @@ pub fn link_preview_card(
                 )
                 .children(preview.description.clone().map(|description| {
                     div()
-                        .line_clamp(2).text_ellipsis()
+                        .line_clamp(2)
+                        .text_ellipsis()
                         .text_size(px(12.))
                         .text_color(theme::text_muted())
                         .child(description)

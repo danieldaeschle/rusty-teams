@@ -1,6 +1,4 @@
-use calling::{
-    CallCommand, CallSpec, Callee, EndKind, EndReason, HoldState,
-};
+use calling::{CallCommand, CallSpec, Callee, EndKind, EndReason, HoldState};
 use gpui_kit::*;
 
 use super::background::BackgroundPick;
@@ -57,11 +55,7 @@ impl AppState {
         self.send_call_command(command);
     }
 
-    pub fn open_call_transcript(
-        &mut self,
-        panel: AnyView,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_call_transcript(&mut self, panel: AnyView, cx: &mut Context<Self>) {
         self.transcript_panel = Some(panel);
         self.show_call_transcript(cx);
     }
@@ -212,11 +206,7 @@ impl AppState {
             && self.held_call.is_none()
     }
 
-    pub fn open_transfer_picker(
-        &mut self,
-        picker: AnyView,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_transfer_picker(&mut self, picker: AnyView, cx: &mut Context<Self>) {
         if self.can_transfer_call() {
             self.transfer_picker = Some(picker);
             cx.notify();

@@ -64,7 +64,8 @@ impl DatePicker {
 
     fn day_cell(&self, date: NaiveDate, today: NaiveDate, cx: &mut Context<Self>) -> Stateful<Div> {
         let in_month = date.month() == self.month.month();
-        let shown = self.shown_start <= date && date < self.shown_start + Duration::days(self.shown_days);
+        let shown =
+            self.shown_start <= date && date < self.shown_start + Duration::days(self.shown_days);
         let is_today = date == today;
         div()
             .id(SharedString::from(format!("date-picker-{date}")))
@@ -84,7 +85,9 @@ impl DatePicker {
             .when(is_today, |cell| {
                 cell.bg(theme::accent()).text_color(theme::on_accent())
             })
-            .when(!is_today, |cell| cell.hover(|cell| cell.bg(theme::border_strong())))
+            .when(!is_today, |cell| {
+                cell.hover(|cell| cell.bg(theme::border_strong()))
+            })
             .child(date.day().to_string())
             .on_click(cx.listener(move |this, _, window, cx| this.pick(date, window, cx)))
     }
@@ -132,7 +135,9 @@ impl Render for DatePicker {
                                     .ghost()
                                     .icon(IconName::ChevronLeft)
                                     .tooltip("Previous month")
-                                    .on_click(cx.listener(|this, _, _, cx| this.move_month(false, cx))),
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.move_month(false, cx)),
+                                    ),
                             )
                             .child(
                                 Button::new("date-picker-forward")
@@ -140,22 +145,22 @@ impl Render for DatePicker {
                                     .ghost()
                                     .icon(IconName::ChevronRight)
                                     .tooltip("Next month")
-                                    .on_click(cx.listener(|this, _, _, cx| this.move_month(true, cx))),
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.move_month(true, cx)),
+                                    ),
                             ),
                     ),
             )
-            .child(
-                h_flex().children(WEEKDAY_LETTERS.iter().map(|letter| {
-                    div()
-                        .size(px(CELL_SIZE))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(11.))
-                        .text_color(theme::text_muted())
-                        .child(*letter)
-                })),
-            )
+            .child(h_flex().children(WEEKDAY_LETTERS.iter().map(|letter| {
+                div()
+                    .size(px(CELL_SIZE))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(11.))
+                    .text_color(theme::text_muted())
+                    .child(*letter)
+            })))
             .children(weeks)
     }
 }
@@ -191,8 +196,7 @@ pub fn date_picker_button(
             }
             let popover = cx.entity().downgrade();
             let app = app.clone();
-            let created =
-                cx.new(|_| DatePicker::new(app, shown_start, shown_days, month, popover));
+            let created = cx.new(|_| DatePicker::new(app, shown_start, shown_days, month, popover));
             *picker.borrow_mut() = Some(created.clone());
             created
         })

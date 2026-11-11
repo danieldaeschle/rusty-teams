@@ -1,3 +1,4 @@
+mod chat_run;
 pub mod demo;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures;
@@ -11,14 +12,15 @@ pub mod store;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use agents::{AgentAction, Environment};
 pub use app_base::agents::{lanes, settings_problems};
 pub use app_ui_kit::{settings_controls, spinner};
-use agents::{AgentAction, Environment};
 use directories::ProjectDirs;
 use gpui_kit::*;
 
 pub use runs::{
-    AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions, StartRequest, needs_dialog,
+    AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions, StartRequest,
+    needs_dialog,
 };
 
 use crate::app_state::{AppHandle, AppState};
@@ -202,7 +204,13 @@ fn open_run_session(run: &AgentRun, cx: &mut App) {
 
 pub fn environment_label(environment: &Environment) -> String {
     match environment {
-        Environment::Host => "Windows".to_owned(),
+        Environment::Host => {
+            if cfg!(windows) {
+                "Windows".to_owned()
+            } else {
+                "This computer".to_owned()
+            }
+        }
         Environment::Wsl { distro: None } => "WSL".to_owned(),
         Environment::Wsl {
             distro: Some(distro),

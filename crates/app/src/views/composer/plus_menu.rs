@@ -161,9 +161,9 @@ impl Composer {
                     .text_color(theme::text())
                     .child(action.label()),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.run_plus_action(action, window, cx)
-            }))
+            .on_click(
+                cx.listener(move |this, _, window, cx| this.run_plus_action(action, window, cx)),
+            )
     }
 
     fn run_plus_action(&mut self, action: PlusAction, window: &mut Window, cx: &mut Context<Self>) {

@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -232,25 +232,29 @@ pub fn render_nav(
                             .child(NO_RESULTS),
                     )
                 })
-                .when(!rusty.is_empty(), |groups| groups.child(
-                    div()
-                        .debug_selector(|| "settings/nav/divider".into())
-                        .w_full()
-                        .h(px(1.))
-                        .flex_none()
-                        .mt(px(10.))
-                        .bg(theme::border_strong()),
-                )
-                .child(
-                    div()
-                        .px(px(2. * NAV_PADDING_X))
-                        .pt(px(12.))
-                        .pb(px(6.))
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::text_muted())
-                        .child("RUSTY TEAMS"),
-                ).child(group(rusty))),
+                .when(!rusty.is_empty(), |groups| {
+                    groups
+                        .child(
+                            div()
+                                .debug_selector(|| "settings/nav/divider".into())
+                                .w_full()
+                                .h(px(1.))
+                                .flex_none()
+                                .mt(px(10.))
+                                .bg(theme::border_strong()),
+                        )
+                        .child(
+                            div()
+                                .px(px(2. * NAV_PADDING_X))
+                                .pt(px(12.))
+                                .pb(px(6.))
+                                .text_size(px(12.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme::text_muted())
+                                .child("RUSTY TEAMS"),
+                        )
+                        .child(group(rusty))
+                }),
         )
         .when(about_shown, |nav| {
             nav.child(
@@ -326,7 +330,10 @@ mod tests {
     fn every_search_term_names_a_setting_on_its_page() {
         let pages = [
             (SettingsSection::General, include_str!("general.rs")),
-            (SettingsSection::Notifications, include_str!("notifications.rs")),
+            (
+                SettingsSection::Notifications,
+                include_str!("notifications.rs"),
+            ),
             (SettingsSection::Appearance, include_str!("appearance.rs")),
             (SettingsSection::Chats, include_str!("chats.rs")),
             (SettingsSection::Devices, include_str!("devices.rs")),

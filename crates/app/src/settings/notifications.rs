@@ -9,10 +9,12 @@ use super::account::{
 };
 use super::rows::{Choice, caption, control_row, select, text_button, toggle_row};
 use crate::app_state::AppState;
-use crate::presence_follow::{MANAGE_STATUS_NOTIFICATIONS, STATUS_NOTIFICATIONS_DESCRIPTION, TURN_OFF};
 use crate::notify::NotificationCenter;
 use crate::notify::rules::{Corner, Settings};
 use crate::notify::sounds::AlertSound;
+use crate::presence_follow::{
+    MANAGE_STATUS_NOTIFICATIONS, STATUS_NOTIFICATIONS_DESCRIPTION, TURN_OFF,
+};
 use crate::theme;
 
 type Accessor = fn(&mut Settings) -> &mut bool;

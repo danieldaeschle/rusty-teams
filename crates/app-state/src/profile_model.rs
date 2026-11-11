@@ -36,7 +36,11 @@ pub fn status_line(availability: &str, local_time: Option<&str>) -> String {
 
 pub fn local_time_label(profile: &PersonProfile, now: DateTime<Utc>) -> Option<String> {
     let zone = profile.time_zone.as_deref()?;
-    Some(local_time(zone, now)?.format(app_base::format::clock_format()).to_string())
+    Some(
+        local_time(zone, now)?
+            .format(app_base::format::clock_format())
+            .to_string(),
+    )
 }
 
 pub fn work_location_label(location: WorkLocation) -> &'static str {

@@ -336,7 +336,13 @@ pub fn square_avatar(name: &str, key: &str, size: f32, radius: f32) -> Div {
         .child(format::team_initials(name))
 }
 
-pub fn team_avatar(photo: Option<&AvatarState>, name: &str, key: &str, size: f32, radius: f32) -> AnyElement {
+pub fn team_avatar(
+    photo: Option<&AvatarState>,
+    name: &str,
+    key: &str,
+    size: f32,
+    radius: f32,
+) -> AnyElement {
     match photo {
         Some(AvatarState::Ready(photo)) => div()
             .size(px(size))

@@ -97,11 +97,7 @@ fn saved_entry(record: &MessageRecord, is_channel: bool) -> SavedMessage {
 }
 
 impl AppState {
-    pub fn message_record(
-        &self,
-        conversation_id: &str,
-        message_id: &str,
-    ) -> Option<MessageRecord> {
+    pub fn message_record(&self, conversation_id: &str, message_id: &str) -> Option<MessageRecord> {
         self.store
             .messages_by_id(conversation_id, &[message_id.to_owned()])
             .ok()?

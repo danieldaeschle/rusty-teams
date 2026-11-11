@@ -13,9 +13,7 @@ use gpui_kit::*;
 
 use super::avatar::person_avatar;
 use super::call_control_fold::{Foldable, FoldedControls, folded_items};
-use super::call_extras::{
-    CameraMenu, background_items, effect_items, open_transfer_picker,
-};
+use super::call_extras::{CameraMenu, background_items, effect_items, open_transfer_picker};
 use super::call_record::{record_items, transcript_and_settings_items};
 use super::call_toolbar::{split_chevron, tool_face, tool_trigger};
 use super::call_view::{BANNER_HEIGHT, MENU_WIDTH};
@@ -45,7 +43,11 @@ fn dark_text() -> Hsla {
     hsla(0., 0., 0.08, 1.)
 }
 
-pub(super) fn pill(id: impl Into<ElementId>, label: impl Into<SharedString>, filled: bool) -> Stateful<Div> {
+pub(super) fn pill(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    filled: bool,
+) -> Stateful<Div> {
     let (background, foreground) = if filled {
         (dark_text(), theme::white())
     } else {
@@ -259,7 +261,11 @@ pub fn tile_menu(
         let fitted = model.is_fitted(mri);
         popup = popup.item(
             PopupMenuItem::new(if fitted { "Fill frame" } else { "Fit to frame" })
-                .icon(if fitted { IconName::Expand } else { IconName::Shrink })
+                .icon(if fitted {
+                    IconName::Expand
+                } else {
+                    IconName::Shrink
+                })
                 .on_click(move |_, _, cx| {
                     fit_app.update(cx, |state, cx| state.toggle_call_fit(&fit_mri, cx))
                 }),
@@ -329,11 +335,13 @@ fn modality_item(
         (Modality::Camera, true) => ("Disable camera", IconName::VideoOff),
         (Modality::Camera, false) => ("Allow camera", IconName::Video),
     };
-    PopupMenuItem::new(label).icon(glyph).on_click(move |_, _, cx| {
-        app.update(cx, |state, cx| {
-            state.set_call_attendee_modality(mri.clone(), modality, !allowed, cx)
+    PopupMenuItem::new(label)
+        .icon(glyph)
+        .on_click(move |_, _, cx| {
+            app.update(cx, |state, cx| {
+                state.set_call_attendee_modality(mri.clone(), modality, !allowed, cx)
+            })
         })
-    })
 }
 
 fn restriction_items(
@@ -345,15 +353,35 @@ fn restriction_items(
     let presenter = model.tile_role(mri) == Some(MeetingRole::Presenter);
     let (role_app, role_mri) = (app.clone(), mri.to_owned());
     popup
-        .item(modality_item(app, mri, Modality::Mic, model.attendee_allowed(mri, Modality::Mic)))
-        .item(modality_item(app, mri, Modality::Camera, model.attendee_allowed(mri, Modality::Camera)))
+        .item(modality_item(
+            app,
+            mri,
+            Modality::Mic,
+            model.attendee_allowed(mri, Modality::Mic),
+        ))
+        .item(modality_item(
+            app,
+            mri,
+            Modality::Camera,
+            model.attendee_allowed(mri, Modality::Camera),
+        ))
         .item(
-            PopupMenuItem::new(if presenter { "Make attendee" } else { "Make presenter" })
-                .icon(IconName::Users)
-                .on_click(move |_, _, cx| {
-                    let role = if presenter { MeetingRole::Attendee } else { MeetingRole::Presenter };
-                    role_app.update(cx, |state, cx| state.set_call_role(role_mri.clone(), role, cx))
-                }),
+            PopupMenuItem::new(if presenter {
+                "Make attendee"
+            } else {
+                "Make presenter"
+            })
+            .icon(IconName::Users)
+            .on_click(move |_, _, cx| {
+                let role = if presenter {
+                    MeetingRole::Attendee
+                } else {
+                    MeetingRole::Presenter
+                };
+                role_app.update(cx, |state, cx| {
+                    state.set_call_role(role_mri.clone(), role, cx)
+                })
+            }),
         )
 }
 
@@ -439,7 +467,9 @@ pub fn more_button(
 ) -> Option<AnyElement> {
     if !matches!(
         model.kind,
-        crate::call::CallKind::Meeting | crate::call::CallKind::Direct | crate::call::CallKind::Group
+        crate::call::CallKind::Meeting
+            | crate::call::CallKind::Direct
+            | crate::call::CallKind::Group
     ) {
         return None;
     }
@@ -721,7 +751,8 @@ pub fn render_focus_stage(
     let (picture_size, picture) = match image {
         Some(image) => {
             let pixels = image.size(0);
-            let (width, height) = contain_size(size, (pixels.width.0 as f32, pixels.height.0 as f32));
+            let (width, height) =
+                contain_size(size, (pixels.width.0 as f32, pixels.height.0 as f32));
             let picture = img(ImageSource::Render(image))
                 .size_full()
                 .object_fit(ObjectFit::Fill)

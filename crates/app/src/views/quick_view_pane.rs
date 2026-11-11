@@ -383,7 +383,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn mentions_list_only_mentions_newest_first() {
         let entries = [
@@ -394,7 +393,10 @@ mod tests {
         let offset = FixedOffset::east_opt(0).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 11, 8).unwrap();
         let rows = mention_rows(&entries, &Sidebar::default(), today, offset);
-        let ids: Vec<_> = rows.iter().map(|row| row.message_id.clone().unwrap()).collect();
+        let ids: Vec<_> = rows
+            .iter()
+            .map(|row| row.message_id.clone().unwrap())
+            .collect();
         assert_eq!(ids, ["m-c", "m-a"]);
         assert_eq!(rows[0].author, "Ada");
     }

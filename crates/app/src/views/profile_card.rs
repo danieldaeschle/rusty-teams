@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::GlobalState;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -16,12 +16,12 @@ use super::widgets::icon;
 use crate::app_state::{AppHandle, AppState};
 use crate::data::{Presence, PresenceKind, presence_kind_of};
 use crate::people::resolve_names;
+use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 use crate::profile_model::{
     ContactKind, ContactRow, StatusBox, contact_rows, has_organization, local_time_label,
     mailto_url, status_box, status_line, work_location_label,
 };
 use crate::theme::{self, ElevatedSurface as _};
-use crate::presence_follow::{NOTIFY_WHEN_AVAILABLE, TURN_OFF_NOTIFICATIONS};
 
 const CARD_WIDTH: f32 = 340.;
 const CARD_RADIUS: f32 = 10.;

@@ -103,11 +103,17 @@ impl Render for RingView {
         let ring_id = self.ring_id;
         let decline_app = self.app.clone();
         let accept_center = self.center.clone();
-        let decline = answer_button("ring-decline", "Decline", IconName::PhoneOff, theme::red(), theme::white())
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                decline_app.update(cx, |state, cx| state.decline_ring(ring_id, cx));
-            });
+        let decline = answer_button(
+            "ring-decline",
+            "Decline",
+            IconName::PhoneOff,
+            theme::red(),
+            theme::white(),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            decline_app.update(cx, |state, cx| state.decline_ring(ring_id, cx));
+        });
         let accept = answer_button(
             "ring-accept",
             entry.accept_label(),
@@ -117,7 +123,9 @@ impl Render for RingView {
         )
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            accept_center.update(cx, |center, cx| center.accept_ring(ring_id, AcceptMode::Audio, cx));
+            accept_center.update(cx, |center, cx| {
+                center.accept_ring(ring_id, AcceptMode::Audio, cx)
+            });
         });
         let video_center = self.center.clone();
         let accept_video = entry.ring.video.then(|| {
@@ -130,7 +138,9 @@ impl Render for RingView {
             )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                video_center.update(cx, |center, cx| center.accept_ring(ring_id, AcceptMode::Video, cx));
+                video_center.update(cx, |center, cx| {
+                    center.accept_ring(ring_id, AcceptMode::Video, cx)
+                });
             })
         });
         div()

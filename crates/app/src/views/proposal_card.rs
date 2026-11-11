@@ -25,7 +25,7 @@ const CARD_GAP: f32 = 8.;
 const BUTTON_HEIGHT: f32 = 28.;
 const BUTTON_RADIUS: f32 = 7.;
 const BODY_LINE_HEIGHT: f32 = 20.;
-const BODY_MAX_LINES: f32 = 12.;
+const BODY_MAX_LINES: f32 = 4.;
 const QUOTE_BAR_WIDTH: f32 = 2.;
 const THUMBNAIL_HEIGHT: f32 = 48.;
 const THUMBNAIL_MAX_WIDTH: f32 = 120.;
@@ -36,104 +36,12 @@ pub const PROPOSAL_THUMBNAILS: &str = "shell/islands/main/proposal-card/thumbnai
 pub const PROPOSAL_BUTTONS: &str = "shell/islands/main/proposal-card/buttons";
 
 pub type CardAction = Rc<dyn Fn(&mut Window, &mut App)>;
-pub type AllowAction = Rc<dyn Fn(u32, &mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub struct CardActions {
     pub send: CardAction,
     pub edit: CardAction,
     pub discard: CardAction,
-    pub allow: AllowAction,
-}
-
-pub const FREE_WRITING_CHOICES: [u32; 3] = [15, 60, 240];
-pub const FREE_WRITING_BAR: &str = "shell/islands/main/free-writing-bar";
-
-pub fn free_writing_choices(asked: u32) -> Vec<u32> {
-    let mut choices: Vec<u32> = FREE_WRITING_CHOICES.to_vec();
-    if !choices.contains(&asked) {
-        choices.push(asked);
-        choices.sort_unstable();
-    }
-    choices
-}
-
-pub fn duration_label(minutes: u32) -> String {
-    match (minutes / 60, minutes % 60) {
-        (0, rest) => format!("{rest} min"),
-        (hours, 0) => format!("{hours} h"),
-        (hours, rest) => format!("{hours} h {rest} min"),
-    }
-}
-
-fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
-    let ask = entry.proposal.free_writing_ask.as_ref()?;
-    let agent = agent_label(entry.proposal.agent.as_deref());
-    let chips = free_writing_choices(ask.minutes).into_iter().map(|minutes| {
-        let allow = allow.clone();
-        div()
-            .id(ElementId::Name(format!("proposal-allow-{minutes}").into()))
-            .h(px(BUTTON_HEIGHT))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .rounded(px(BUTTON_RADIUS))
-            .cursor_pointer()
-            .text_size(px(12.))
-            .bg(theme::surface_raised())
-            .text_color(theme::text())
-            .hover(|chip| chip.opacity(0.85))
-            .child(duration_label(minutes))
-            .on_click(move |_, window, cx| allow(minutes, window, cx))
-    });
-    let reason = (!ask.reason.is_empty()).then(|| format!(": {}", ask.reason)).unwrap_or_default();
-    Some(
-        v_flex()
-            .w_full()
-            .gap(px(6.))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(theme::text_muted())
-                    .child(format!(
-                        "{agent} asks to keep writing here without review for {}{reason}",
-                        duration_label(ask.minutes)
-                    )),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(div().text_size(px(12.)).text_color(theme::text_soft()).child("Send and allow for"))
-                    .children(chips),
-            ),
-    )
-}
-
-pub fn free_writing_bar(agent: &str, until: DateTime<Utc>, stop: CardAction) -> Div {
-    let until = until.with_timezone(&chrono::Local).format(crate::format::clock_format());
-    h_flex()
-        .flex_none()
-        .mx(px(CARD_MARGIN_X))
-        .mb(px(CARD_MARGIN_BOTTOM))
-        .px(px(CARD_PADDING))
-        .h(px(BUTTON_HEIGHT + CARD_GAP))
-        .gap(px(CARD_GAP))
-        .items_center()
-        .rounded(px(CARD_RADIUS))
-        .bg(theme::row_hover())
-        .debug_selector(|| FREE_WRITING_BAR.into())
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.))
-                .text_color(theme::text_muted())
-                .child(format!("{agent} writes here without review until {until}")),
-        )
-        .child(card_button("free-writing-stop", "Stop", theme::surface_raised(), theme::text(), stop))
 }
 
 fn open_session_available(session_id: &str, cx: &App) -> bool {
@@ -256,7 +164,7 @@ pub fn age_label(created_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
-pub(super) fn card_button(
+fn card_button(
     id: &'static str,
     label: &'static str,
     background: Hsla,
@@ -367,7 +275,7 @@ pub fn render(
         .id("proposal-text")
         .w_full()
         .max_h(px(BODY_LINE_HEIGHT * BODY_MAX_LINES))
-        .overflow_y_scroll()
+        .overflow_hidden()
         .text_size(px(14.))
         .line_height(px(BODY_LINE_HEIGHT))
         .when(stale, |body| body.opacity(0.6))
@@ -378,9 +286,6 @@ pub fn render(
             })
         });
     let images = (!entry.images.is_empty()).then(|| thumbnails(&entry.images));
-    let free_writing = (!stale && !failed)
-        .then(|| free_writing_row(entry, actions.allow.clone()))
-        .flatten();
     let session = entry
         .proposal
         .session_id
@@ -438,7 +343,6 @@ pub fn render(
         .child(body)
         .children(images)
         .child(buttons)
-        .children(free_writing)
 }
 
 #[cfg(test)]
@@ -474,11 +378,9 @@ pub fn sample_entry(text: &str, mentions: &[(&str, &str)], images: &[Vec<u8>]) -
                 })
                 .collect(),
             images: Vec::new(),
-            free_writing_ask: None,
             agent: None,
             session_id: None,
             created_at: Utc::now(),
-            direct: false,
         },
         images: images
             .iter()
@@ -499,21 +401,12 @@ mod tests {
     use teams_core::MentionInput;
 
     use super::{
-        age_label, duration_label, free_writing_choices, needs_upload, outgoing_for, picture_files, sample_entry,
-        sample_png, thumbnail_size,
+        age_label, needs_upload, outgoing_for, picture_files, sample_entry, sample_png,
+        thumbnail_size,
     };
     use crate::views::attachment_tray::{AttachmentTray, INLINE_IMAGE_MAX_BYTES, OutgoingImage};
 
     const TWO_MEGABYTES: usize = 2 * 1024 * 1024;
-
-    #[test]
-    fn the_asked_window_joins_the_usual_choices() {
-        assert_eq!(free_writing_choices(60), [15, 60, 240]);
-        assert_eq!(free_writing_choices(30), [15, 30, 60, 240]);
-        assert_eq!(duration_label(15), "15 min");
-        assert_eq!(duration_label(240), "4 h");
-        assert_eq!(duration_label(90), "1 h 30 min");
-    }
 
     #[test]
     fn age_labels_follow_the_elapsed_time() {

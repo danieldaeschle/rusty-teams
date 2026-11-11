@@ -104,11 +104,7 @@ fn speaker_video(
         .flatten()
 }
 
-pub(super) fn speaker_name_chip(
-    state: &AppState,
-    model: &CallModel,
-    now: Instant,
-) -> Option<Div> {
+pub(super) fn speaker_name_chip(state: &AppState, model: &CallModel, now: Instant) -> Option<Div> {
     let tile = speaker_tile(model)?;
     speaker_video(state, model, tile, now)?;
     Some(chip(tile.name.clone()))
@@ -272,9 +268,10 @@ impl Render for MiniWindowView {
                             .left(px(8.))
                             .child(chip(status)),
                     )
-                    .children(speaker_name.map(|name| {
-                        div().absolute().bottom(px(6.)).left(px(8.)).child(name)
-                    }))
+                    .children(
+                        speaker_name
+                            .map(|name| div().absolute().bottom(px(6.)).left(px(8.)).child(name)),
+                    )
                     .children(self_view(state, model, now)),
             )
             .child(

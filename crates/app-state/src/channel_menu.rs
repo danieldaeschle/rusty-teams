@@ -335,7 +335,11 @@ impl AppState {
             return;
         };
         let owned_id = channel_id.to_owned();
-        self.link_from(async move { engine.channel_link(&owned_id).await }, link_use, cx);
+        self.link_from(
+            async move { engine.channel_link(&owned_id).await },
+            link_use,
+            cx,
+        );
     }
 
     pub fn copy_team_link(&mut self, team_id: &str, cx: &mut Context<Self>) {
@@ -360,7 +364,11 @@ impl AppState {
             return;
         };
         let owned_id = team_id.to_owned();
-        self.link_from(async move { engine.team_link(&owned_id).await }, link_use, cx);
+        self.link_from(
+            async move { engine.team_link(&owned_id).await },
+            link_use,
+            cx,
+        );
     }
 
     pub fn channel_team_id(&self, channel_id: &str) -> Option<String> {
@@ -470,7 +478,14 @@ mod tests {
         });
         assert_eq!(
             labels(&shown, ChannelMenuItem::label),
-            ["Channel notifications", "Pin", "Hide", "-", "Manage channel", "Copy link"]
+            [
+                "Channel notifications",
+                "Pin",
+                "Hide",
+                "-",
+                "Manage channel",
+                "Copy link"
+            ]
         );
         let hidden_pinned = channel_menu_entries(ChannelMenuState {
             pinned: true,
@@ -479,7 +494,14 @@ mod tests {
         });
         assert_eq!(
             labels(&hidden_pinned, ChannelMenuItem::label),
-            ["Channel notifications", "Unpin", "Show", "-", "Manage channel", "Copy link"]
+            [
+                "Channel notifications",
+                "Unpin",
+                "Show",
+                "-",
+                "Manage channel",
+                "Copy link"
+            ]
         );
     }
 

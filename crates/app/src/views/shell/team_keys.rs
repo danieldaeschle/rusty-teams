@@ -33,8 +33,9 @@ impl AppShell {
         shell
             .on_action(cx.listener(|this, _: &GoToComposeBox, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.conversation
-                    .update(cx, |conversation, cx| conversation.focus_composer(window, cx));
+                this.conversation.update(cx, |conversation, cx| {
+                    conversation.focus_composer(window, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &ReplyToLastMessage, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -42,16 +43,24 @@ impl AppShell {
                     conversation.reply_to_latest_from_others(window, cx)
                 });
             }))
-            .on_action(cx.listener(|this, _: &PreviousUnreadConversation, window, cx| {
-                this.close_image_viewer(window, cx);
-                this.select_unread(Step::Previous, cx);
-            }))
+            .on_action(
+                cx.listener(|this, _: &PreviousUnreadConversation, window, cx| {
+                    this.close_image_viewer(window, cx);
+                    this.select_unread(Step::Previous, cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &NextUnreadConversation, window, cx| {
                 this.close_image_viewer(window, cx);
                 this.select_unread(Step::Next, cx);
             }))
-            .on_action(presence_listener::<SetPresenceAvailable>(&self.state, ForcedKind::Available))
-            .on_action(presence_listener::<SetPresenceBusy>(&self.state, ForcedKind::Busy))
+            .on_action(presence_listener::<SetPresenceAvailable>(
+                &self.state,
+                ForcedKind::Available,
+            ))
+            .on_action(presence_listener::<SetPresenceBusy>(
+                &self.state,
+                ForcedKind::Busy,
+            ))
             .on_action(presence_listener::<SetPresenceDoNotDisturb>(
                 &self.state,
                 ForcedKind::DoNotDisturb,
@@ -60,14 +69,19 @@ impl AppShell {
                 &self.state,
                 ForcedKind::BeRightBack,
             ))
-            .on_action(presence_listener::<SetPresenceAway>(&self.state, ForcedKind::Away))
+            .on_action(presence_listener::<SetPresenceAway>(
+                &self.state,
+                ForcedKind::Away,
+            ))
             .on_action(cx.listener(|this, _: &AcceptCall, _, cx| {
-                this.state
-                    .update(cx, |state, cx| state.accept_ringing_call(AcceptMode::Video, cx));
+                this.state.update(cx, |state, cx| {
+                    state.accept_ringing_call(AcceptMode::Video, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &AcceptAudioCall, _, cx| {
-                this.state
-                    .update(cx, |state, cx| state.accept_ringing_call(AcceptMode::Audio, cx));
+                this.state.update(cx, |state, cx| {
+                    state.accept_ringing_call(AcceptMode::Audio, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &ToggleBackgroundBlur, _, cx| {
                 this.state
@@ -82,7 +96,8 @@ impl AppShell {
     fn select_unread(&mut self, step: Step, cx: &mut Context<Self>) {
         let target = self.state.read(cx).adjacent_unread_chat_id(step);
         if let Some(chat_id) = target {
-            self.sidebar.update(cx, |sidebar, cx| sidebar.show_chats(cx));
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.show_chats(cx));
             self.state.update(cx, |state, cx| {
                 state.select(crate::app_state::Selection::Chat(chat_id), cx)
             });
