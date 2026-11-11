@@ -146,7 +146,8 @@ const PROGRESS_BAR_WIDTH: f32 = 0.35;
 const TYPING_BUBBLE_HEIGHT: f32 = 28.;
 const TYPING_BUBBLE_PADDING: f32 = 12.;
 const TYPING_SIDE_INSET: f32 = 20.;
-const COMPOSER_TOP_GAP: f32 = 8.;
+const COMPOSER_TOP_GAP: f32 = 16.;
+const TYPING_TOP_GAP: f32 = 16.;
 const TYPING_BOTTOM_GAP: f32 = 8.;
 pub const TYPING_TAG: &str = "shell/islands/main/typing";
 const TYPING_DOT_SIZE: f32 = 5.;
@@ -4120,7 +4121,7 @@ impl Render for ConversationView {
             })
         })
         .with_list_style(StyleRefinement::default().pb(px(if typing_line.is_some() {
-            TYPING_BUBBLE_HEIGHT + 2. * TYPING_BOTTOM_GAP
+            TYPING_TOP_GAP + TYPING_BUBBLE_HEIGHT + TYPING_BOTTOM_GAP
         } else if in_feed {
             0.
         } else {
@@ -4318,7 +4319,7 @@ fn typing_bottom_offset(timeline: Option<Bounds<Pixels>>, last_row: Option<Bound
         return TYPING_BOTTOM_GAP;
     };
     let under_last_row = f32::from(timeline.bottom() - last_row.bottom())
-        - TYPING_BOTTOM_GAP
+        - TYPING_TOP_GAP
         - TYPING_BUBBLE_HEIGHT;
     under_last_row.max(TYPING_BOTTOM_GAP)
 }
@@ -4558,7 +4559,7 @@ mod tests {
         use gpui_kit::{Bounds, point, px, size};
         let timeline = Bounds::new(point(px(0.), px(100.)), size(px(800.), px(600.)));
         let row_ending_at = |bottom: f32| Some(Bounds::new(point(px(0.), px(bottom - 50.)), size(px(800.), px(50.))));
-        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(400.)), 264.);
+        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(400.)), 256.);
         assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(900.)), 8.);
         assert_eq!(typing_bottom_offset(Some(timeline), None), 8.);
     }
