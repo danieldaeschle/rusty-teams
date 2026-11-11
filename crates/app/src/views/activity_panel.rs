@@ -536,7 +536,9 @@ fn proposal_marker(pending: &PendingProposal, row_group: SharedString) -> Div {
         PendingKind::Reply { .. } => {
             marker.child(icon(IconName::MessageCircle, 10., theme::text_muted()))
         }
-        PendingKind::Reaction { glyph, .. } => marker.child(glyph.clone()),
+        PendingKind::Reaction { glyph, .. } => marker
+            .font_family(theme::EMOJI_FONT_FAMILY)
+            .child(glyph.clone()),
     }
 }
 
@@ -549,7 +551,9 @@ fn kind_marker(entry: &Entry, row_group: SharedString) -> Div {
             .font_weight(FontWeight::BOLD)
             .child("@"),
         Kind::Reaction => match entry.glyphs.first() {
-            Some(glyph) => marker.child(glyph.clone()),
+            Some(glyph) => marker
+                .font_family(theme::EMOJI_FONT_FAMILY)
+                .child(glyph.clone()),
             None => marker.child(muted_icon(IconName::Heart)),
         },
         Kind::MissedCall => marker.child(icon(IconName::PhoneOff, 10., theme::red())),

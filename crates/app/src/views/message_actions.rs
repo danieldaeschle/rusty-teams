@@ -99,6 +99,7 @@ fn reaction_button(menu: &MessageMenu, glyph: &str, index: usize) -> AnyElement 
     let selected = menu.mine.contains(&reaction_glyph(glyph));
     bar_button(element_id(&format!("quick-reaction-{index}"), &menu.key))
         .text_size(px(17.))
+        .font_family(theme::EMOJI_FONT_FAMILY)
         .when(selected, |button| button.bg(theme::reaction_on_own()))
         .child(glyph.to_owned())
         .on_click(move |_, window, cx| {
