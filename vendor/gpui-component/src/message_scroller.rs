@@ -78,6 +78,11 @@ impl MessageScrollerState {
         self.list_state.logical_scroll_top().item_ix
     }
 
+    /// Window bounds of a row from the last layout, `None` when it was not rendered.
+    pub fn item_bounds(&self, index: usize) -> Option<gpui::Bounds<gpui::Pixels>> {
+        self.list_state.bounds_for_item(index)
+    }
+
     /// Return whether the list is actively following its tail.
     pub fn is_following_tail(&self) -> bool {
         self.list_state.is_following_tail()

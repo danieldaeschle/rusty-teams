@@ -143,7 +143,11 @@ const SLOW_AFTER: Duration = Duration::from_secs(8);
 const PROGRESS_MIN_VISIBLE: Duration = Duration::from_millis(500);
 const PROGRESS_BAR_PERIOD: Duration = Duration::from_millis(1400);
 const PROGRESS_BAR_WIDTH: f32 = 0.35;
-const TYPING_LINE_HEIGHT: f32 = 22.;
+const TYPING_BUBBLE_HEIGHT: f32 = 28.;
+const TYPING_BUBBLE_PADDING: f32 = 12.;
+const TYPING_SIDE_INSET: f32 = 20.;
+const TYPING_BOTTOM_GAP: f32 = 8.;
+pub const TYPING_TAG: &str = "shell/islands/main/typing";
 const TYPING_DOT_SIZE: f32 = 5.;
 const TYPING_DOT_COUNT: usize = 3;
 const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
@@ -862,7 +866,10 @@ impl ConversationView {
         }
     }
 
-    fn render_typing_line(&self, cx: &App) -> impl IntoElement {
+    fn render_typing_line(&self, cx: &App) -> Option<AnyElement> {
+        if self.in_feed() {
+            return None;
+        }
         let app = self.app.read(cx);
         let faces = self
             .current
@@ -870,18 +877,17 @@ impl ConversationView {
             .filter(|_| !self.draft_active)
             .map(|current| app.typing.faces(current.selection.conversation_id()))
             .unwrap_or_default();
+        if faces.is_empty() {
+            return None;
+        }
         let tooltip_text = typing_tooltip(
             &faces
                 .iter()
                 .map(|face| face.name.clone())
                 .collect::<Vec<_>>(),
         );
-        let flat = matches!(
-            self.current.as_ref().map(|current| &current.mode),
-            Some(ViewMode::Flat)
-        );
         let faces_element = match faces.as_slice() {
-            [face] if flat => person_avatar(
+            [face] => person_avatar(
                 &app.directory,
                 face.user_id.as_deref(),
                 &face.name,
@@ -889,27 +895,33 @@ impl ConversationView {
             ),
             _ => member_stack(&app.directory, &faces, faces.len(), true).into_any_element(),
         };
-        h_flex()
-            .h(px(if flat {
-                AVATAR_SIZE + 4.
-            } else {
-                TYPING_LINE_HEIGHT
-            }))
-            .flex_none()
-            .px(px(20.))
-            .gap(px(if flat { AVATAR_GAP } else { 6. }))
-            .items_center()
-            .when(!faces.is_empty(), |line| {
-                line.child(
+        Some(
+            h_flex()
+                .debug_selector(|| TYPING_TAG.into())
+                .h(px(TYPING_BUBBLE_HEIGHT))
+                .px(px(TYPING_SIDE_INSET))
+                .gap(px(AVATAR_GAP))
+                .items_center()
+                .child(
                     div()
                         .id("typing-faces")
+                        .flex_none()
                         .tooltip(move |window, cx| {
                             Tooltip::new(tooltip_text.clone()).build(window, cx)
                         })
                         .child(faces_element),
                 )
-                .child(typing_dots())
-            })
+                .child(
+                    h_flex()
+                        .h_full()
+                        .px(px(TYPING_BUBBLE_PADDING))
+                        .items_center()
+                        .rounded_full()
+                        .bg(theme::surface_raised())
+                        .child(typing_dots()),
+                )
+                .into_any_element(),
+        )
     }
 
     fn open(&mut self, selection: Selection, window: &mut Window, cx: &mut Context<Self>) {
@@ -3981,6 +3993,15 @@ impl Render for ConversationView {
         let timeline_top_inset = pin_banner_inset(pin_banner.is_some());
         let comfy = self.app.read(cx).account_chat_settings().message_density
             != teams_core::MessageDensity::Compact;
+        let typing_line = self.render_typing_line(cx);
+        let typing_offset = {
+            let scroller = self.scroller.read(cx);
+            let last_row = scroller.item_count().checked_sub(1);
+            typing_bottom_offset(
+                self.timeline_bounds.get(),
+                last_row.and_then(|index| scroller.item_bounds(index)),
+            )
+        };
         let scroller = MessageScroller::new(
             "messages",
             self.scroller.clone(),
@@ -4097,7 +4118,11 @@ impl Render for ConversationView {
                 view.update(cx, |this, cx| this.leave_detached(cx)).ok();
             })
         })
-        .with_bottom_fade(background)
+        .when(typing_line.is_some(), |scroller| {
+            scroller.with_list_style(
+                StyleRefinement::default().pb(px(TYPING_BUBBLE_HEIGHT + 2. * TYPING_BOTTOM_GAP)),
+            )
+        })
         .with_top_inset(timeline_top_inset);
 
         root = match self.current.as_ref().filter(|_| !drafting) {
@@ -4195,6 +4220,14 @@ impl Render for ConversationView {
                     .child(record_bounds(&self.timeline_bounds, timeline_top_inset))
                     .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_reaction_details(cx)))
                     .child(body)
+                    .children(typing_line.map(|line| {
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom(px(typing_offset))
+                            .child(runway(line, comfy))
+                    }))
                     .when(feed_scrolled, |timeline| {
                         timeline.child(
                             edge_divider(FEED_EDGE_TAG)
@@ -4216,7 +4249,6 @@ impl Render for ConversationView {
                     None => column.child(runway(
                         v_flex()
                             .w_full()
-                            .child(self.render_typing_line(cx))
                             .children(self.render_proposal_card(cx))
                             .child(self.composer.clone()),
                         comfy,
@@ -4273,6 +4305,17 @@ impl Render for ConversationView {
             None => root.into_any_element(),
         }
     }
+}
+
+/// Right under the last row like one more message; once that row scrolls below the view it sticks above the composer.
+fn typing_bottom_offset(timeline: Option<Bounds<Pixels>>, last_row: Option<Bounds<Pixels>>) -> f32 {
+    let (Some(timeline), Some(last_row)) = (timeline, last_row) else {
+        return TYPING_BOTTOM_GAP;
+    };
+    let under_last_row = f32::from(timeline.bottom() - last_row.bottom())
+        - TYPING_BOTTOM_GAP
+        - TYPING_BUBBLE_HEIGHT;
+    under_last_row.max(TYPING_BOTTOM_GAP)
 }
 
 fn typing_dots() -> impl IntoElement {
@@ -4370,7 +4413,7 @@ fn runway(content: impl IntoElement, comfy: bool) -> AnyElement {
 mod tests {
     use std::sync::Arc;
 
-    use super::{DropTarget, drop_overlay_text};
+    use super::{DropTarget, drop_overlay_text, typing_bottom_offset};
 
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, TestAppContext, WindowOptions};
@@ -4503,5 +4546,15 @@ mod tests {
             assert!(!state.new_chat);
             assert_eq!(state.selection, Some(crate::demo::first_selection()));
         });
+    }
+
+    #[test]
+    fn the_typing_bubble_follows_the_last_row_and_sticks_above_the_composer() {
+        use gpui_kit::{Bounds, point, px, size};
+        let timeline = Bounds::new(point(px(0.), px(100.)), size(px(800.), px(600.)));
+        let row_ending_at = |bottom: f32| Some(Bounds::new(point(px(0.), px(bottom - 50.)), size(px(800.), px(50.))));
+        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(400.)), 264.);
+        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(900.)), 8.);
+        assert_eq!(typing_bottom_offset(Some(timeline), None), 8.);
     }
 }
